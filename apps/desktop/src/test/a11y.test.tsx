@@ -1,7 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import { axe } from 'vitest-axe';
-import 'vitest-axe/extend-expect';
 import { TaskItem } from '../components/TaskItem';
 import { Task } from '@focus-gtd/core';
 

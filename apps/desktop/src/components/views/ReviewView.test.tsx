@@ -1,14 +1,27 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ReviewView } from './ReviewView';
+import { LanguageProvider } from '../../contexts/language-context';
+
+const renderWithProviders = (ui: React.ReactElement) => {
+    return render(
+        <LanguageProvider>
+            {ui}
+        </LanguageProvider>
+    );
+};
 
 // Mock store
-vi.mock('../../store/store', () => ({
-    useTaskStore: () => ({
-        tasks: [],
-        projects: [],
-    }),
-}));
+vi.mock('@focus-gtd/core', async () => {
+    const actual = await vi.importActual('@focus-gtd/core');
+    return {
+        ...actual,
+        useTaskStore: () => ({
+            tasks: [],
+            projects: [],
+        }),
+    };
+});
 
 // Mock TaskItem to simplify testing
 vi.mock('../TaskItem', () => ({
@@ -17,13 +30,13 @@ vi.mock('../TaskItem', () => ({
 
 describe('ReviewView', () => {
     it('starts at the intro step', () => {
-        render(<ReviewView />);
+        renderWithProviders(<ReviewView />);
         expect(screen.getByText('Time for your Weekly Review')).toBeInTheDocument();
         expect(screen.getByText('Start Review')).toBeInTheDocument();
     });
 
     it('navigates through the wizard steps', () => {
-        render(<ReviewView />);
+        renderWithProviders(<ReviewView />);
 
         // Intro -> Inbox
         fireEvent.click(screen.getByText('Start Review'));
@@ -54,7 +67,7 @@ describe('ReviewView', () => {
     });
 
     it('can navigate back', () => {
-        render(<ReviewView />);
+        renderWithProviders(<ReviewView />);
 
         // Go to Inbox
         fireEvent.click(screen.getByText('Start Review'));

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, FileText, CheckCircle, X } from 'lucide-react';
+import { Search, FileText, CheckCircle } from 'lucide-react';
 import { useTaskStore, Task, Project } from '@focus-gtd/core';
 import { useLanguage } from '../contexts/language-context';
 import { cn } from '../lib/utils';

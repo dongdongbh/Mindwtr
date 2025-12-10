@@ -4,18 +4,24 @@ import { TaskItem } from '../components/TaskItem';
 import { Task } from '@focus-gtd/core';
 
 // Mock store
-const mockUpdateTask = vi.fn();
-const mockDeleteTask = vi.fn();
-const mockMoveTask = vi.fn();
-
-vi.mock('../store/store', () => ({
-    useTaskStore: () => ({
-        updateTask: mockUpdateTask,
-        deleteTask: mockDeleteTask,
-        moveTask: mockMoveTask,
-        projects: [],
-    }),
+const mocks = vi.hoisted(() => ({
+    updateTask: vi.fn(),
+    deleteTask: vi.fn(),
+    moveTask: vi.fn(),
 }));
+
+vi.mock('@focus-gtd/core', async () => {
+    const actual = await vi.importActual('@focus-gtd/core');
+    return {
+        ...actual,
+        useTaskStore: () => ({
+            updateTask: mocks.updateTask,
+            deleteTask: mocks.deleteTask,
+            moveTask: mocks.moveTask,
+            projects: [],
+        }),
+    };
+});
 
 const mockTask: Task = {
     id: '1',
@@ -43,6 +49,6 @@ describe('TaskItem', () => {
         render(<TaskItem task={mockTask} />);
         const checkbox = screen.getByRole('checkbox');
         fireEvent.click(checkbox);
-        expect(mockMoveTask).toHaveBeenCalledWith('1', 'done');
+        expect(mocks.moveTask).toHaveBeenCalledWith('1', 'done');
     });
 });

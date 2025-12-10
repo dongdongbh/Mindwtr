@@ -1,21 +1,35 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import App from './App';
+import { LanguageProvider } from './contexts/language-context';
 
-// Mock store
-vi.mock('../store/store', () => ({
-    useTaskStore: () => ({
-        tasks: [],
-        projects: [],
-        addProject: vi.fn(),
-        updateProject: vi.fn(),
-        deleteProject: vi.fn(),
-        addTask: vi.fn(),
-        updateTask: vi.fn(),
-        deleteTask: vi.fn(),
-        moveTask: vi.fn(),
-    }),
-}));
+const renderWithProviders = (ui: React.ReactElement) => {
+    return render(
+        <LanguageProvider>
+            {ui}
+        </LanguageProvider>
+    );
+};
+
+vi.mock('@focus-gtd/core', async () => {
+    const actual = await vi.importActual('@focus-gtd/core');
+    return {
+        ...actual,
+        useTaskStore: () => ({
+            tasks: [],
+            projects: [],
+            addProject: vi.fn(),
+            updateProject: vi.fn(),
+            deleteProject: vi.fn(),
+            addTask: vi.fn(),
+            updateTask: vi.fn(),
+            deleteTask: vi.fn(),
+            moveTask: vi.fn(),
+            fetchData: vi.fn(),
+        }),
+        flushPendingSave: vi.fn().mockResolvedValue(undefined),
+    };
+});
 
 // Mock Layout
 vi.mock('./components/Layout', () => ({
@@ -23,21 +37,23 @@ vi.mock('./components/Layout', () => ({
 }));
 
 // Mock electronAPI
-vi.stubGlobal('window', {
-    electronAPI: {
+// Mock electronAPI
+Object.defineProperty(window, 'electronAPI', {
+    value: {
         saveData: vi.fn(),
         getData: vi.fn().mockResolvedValue({ tasks: [], projects: [], settings: {} }),
     },
+    writable: true,
 });
 
-describe.skip('App', () => {
+describe('App', () => {
     it('renders Inbox by default', () => {
-        render(<App />);
+        renderWithProviders(<App />);
         expect(screen.getByText('Inbox')).toBeInTheDocument();
     });
 
     it('renders Sidebar navigation', () => {
-        render(<App />);
+        renderWithProviders(<App />);
         expect(screen.getByTestId('layout')).toBeInTheDocument();
     });
 });

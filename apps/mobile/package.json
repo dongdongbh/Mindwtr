@@ -1,7 +1,7 @@
 {
   "name": "mobile",
   "main": "index.js",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",

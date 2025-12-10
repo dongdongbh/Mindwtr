@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Focus GTD will be documented in this file.
+## [0.2.1] - 2025-12-10
+
+### Fixed
+- **Desktop**: Resolved build errors (unused variables in `ErrorBoundary` and `GlobalSearch`).
+- **Desktop Tests**: Fixed Vitest environment configuration (JSDOM, mocks, accessibility matchers) to achieve 100% pass rate.
+
 ## [0.2.0] - 2025-12-10
 
 ### Features
