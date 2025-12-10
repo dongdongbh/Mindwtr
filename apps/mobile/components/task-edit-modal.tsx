@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, Modal, StyleSheet, TouchableOpacity, ScrollView, Platform, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Task, TaskStatus, TimeEstimate, useTaskStore } from '@focus-gtd/core';
+import { Task, TaskStatus, TimeEstimate, useTaskStore, generateUUID } from '@focus-gtd/core';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 
 interface TaskEditModalProps {
@@ -187,7 +187,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                                 style={[styles.addChecklistBtn, { paddingVertical: 16 }]}
                                 onPress={() => {
                                     const newItem = {
-                                        id: Date.now().toString(),
+                                        id: generateUUID(),
                                         title: '',
                                         isCompleted: false
                                     };

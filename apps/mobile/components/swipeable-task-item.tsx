@@ -1,20 +1,7 @@
 import { View, Text, Pressable, StyleSheet, Modal } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
-import { Task, getTaskAgeLabel, getTaskStaleness } from '@focus-gtd/core';
+import { Task, getTaskAgeLabel, getTaskStaleness, getStatusColor } from '@focus-gtd/core';
 import { useRef, useState } from 'react';
-
-function getStatusColor(status: string): string {
-    const colors: Record<string, string> = {
-        inbox: '#6B7280',
-        next: '#3B82F6',
-        waiting: '#F59E0B',
-        someday: '#8B5CF6',
-        done: '#10B981',
-        'in-progress': '#F59E0B',
-        archived: '#9CA3AF',
-    };
-    return colors[status] || '#6B7280';
-}
 
 export interface SwipeableTaskItemProps {
     task: Task;
@@ -55,17 +42,17 @@ export function SwipeableTaskItem({
     // Status-aware left swipe action
     const getLeftAction = () => {
         if (task.status === 'done') {
-            return { label: '📦 Archive', color: '#6B7280', action: 'archived' };
+            return { label: '📦 Archive', color: getStatusColor('archived').text, action: 'archived' };
         } else if (task.status === 'next' || task.status === 'todo') {
-            return { label: '▶️ Start', color: '#F59E0B', action: 'in-progress' };
+            return { label: '▶️ Start', color: getStatusColor('in-progress').text, action: 'in-progress' };
         } else if (task.status === 'in-progress') {
-            return { label: '✓ Done', color: '#10B981', action: 'done' };
+            return { label: '✓ Done', color: getStatusColor('done').text, action: 'done' };
         } else if (task.status === 'waiting' || task.status === 'someday') {
-            return { label: '▶️ Next', color: '#3B82F6', action: 'next' };
+            return { label: '▶️ Next', color: getStatusColor('next').text, action: 'next' };
         } else if (task.status === 'inbox') {
-            return { label: '✓ Done', color: '#10B981', action: 'done' };
+            return { label: '✓ Done', color: getStatusColor('done').text, action: 'done' };
         } else {
-            return { label: '✓ Done', color: '#10B981', action: 'done' };
+            return { label: '✓ Done', color: getStatusColor('done').text, action: 'done' };
         }
     };
 
@@ -168,7 +155,7 @@ export function SwipeableTaskItem({
                         }}
                         style={[
                             styles.statusBadge,
-                            { backgroundColor: getStatusColor(task.status) }
+                            { backgroundColor: getStatusColor(task.status as any).text }
                         ]}
                     >
                         <Text style={[
@@ -191,23 +178,26 @@ export function SwipeableTaskItem({
                     <View style={[styles.menuContainer, { backgroundColor: tc.cardBg }]}>
                         <Text style={[styles.menuTitle, { color: tc.text }]}>Change Status</Text>
                         <View style={styles.menuGrid}>
-                            {quickStatusOptions.map(status => (
-                                <Pressable
-                                    key={status}
-                                    style={[
-                                        styles.menuItem,
-                                        task.status === status && { backgroundColor: getStatusColor(status) + '20' },
-                                        { borderColor: getStatusColor(status) }
-                                    ]}
-                                    onPress={() => {
-                                        onStatusChange(status);
-                                        setShowStatusMenu(false);
-                                    }}
-                                >
-                                    <View style={[styles.menuDot, { backgroundColor: getStatusColor(status) }]} />
-                                    <Text style={[styles.menuText, { color: tc.text }]}>{status}</Text>
-                                </Pressable>
-                            ))}
+                            {quickStatusOptions.map(status => {
+                                const colors = getStatusColor(status as any);
+                                return (
+                                    <Pressable
+                                        key={status}
+                                        style={[
+                                            styles.menuItem,
+                                            task.status === status && { backgroundColor: colors.bg },
+                                            { borderColor: colors.text }
+                                        ]}
+                                        onPress={() => {
+                                            onStatusChange(status);
+                                            setShowStatusMenu(false);
+                                        }}
+                                    >
+                                        <View style={[styles.menuDot, { backgroundColor: colors.text }]} />
+                                        <Text style={[styles.menuText, { color: tc.text }]}>{status}</Text>
+                                    </Pressable>
+                                );
+                            })}
                         </View>
                     </View>
                 </Pressable>

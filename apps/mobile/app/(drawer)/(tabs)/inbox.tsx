@@ -28,7 +28,7 @@ export default function InboxScreen() {
     border: isDark ? '#374151' : '#E5E7EB',
   };
 
-  const inboxTasks = tasks.filter(t => t.status === 'inbox');
+  const inboxTasks = tasks.filter(t => t.status === 'inbox' && !t.deletedAt);
   const processingQueue = inboxTasks.filter(t => !skippedIds.has(t.id));
   const currentTask = processingQueue[currentIndex] || null;
   const totalCount = inboxTasks.length;
