@@ -15,6 +15,11 @@ on:
         required: false
         type: boolean
         default: false
+      build_ios:
+        description: 'Build iOS App (uses EAS cloud minutes)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -143,9 +148,56 @@ jobs:
           path: apps/mobile/android-app.apk
           if-no-files-found: error
 
+          if-no-files-found: error
+
+  # Optional iOS build (only when manually triggered with build_ios=true)
+  ios:
+    runs-on: ubuntu-latest
+    name: iOS Build (EAS)
+    if: ${{ github.event.inputs.build_ios == 'true' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Setup EAS CLI
+        run: npm install -g eas-cli
+
+      - name: Build iOS App
+        run: |
+          cd apps/mobile
+          eas build --platform ios --profile preview --non-interactive
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Download Artifact from EAS
+        run: |
+          cd apps/mobile
+          eas build:list --platform ios --status finished --limit 1 --json > build_ios.json
+          BUILD_URL=$(cat build_ios.json | jq -r '.[0].artifacts.buildUrl')
+          # Extension depends on build type (tar.gz for simulator, ipa for device)
+          curl -L -o ios-app.tar.gz "$BUILD_URL"
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Upload iOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-app
+          path: apps/mobile/ios-app.tar.gz
+          if-no-files-found: error
+
   # Create GitHub Release with all artifacts
   release:
-    needs: [desktop, android]
+    needs: [desktop, android, ios]
     runs-on: ubuntu-latest
     name: Create Release
     if: always() && needs.desktop.result == 'success'
@@ -168,6 +220,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: android-apk
+          path: ./release-assets
+
+      - name: Download iOS artifact
+        if: ${{ needs.ios.result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-app
           path: ./release-assets
 
       - name: List release assets
