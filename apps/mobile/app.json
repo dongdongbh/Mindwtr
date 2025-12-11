@@ -10,7 +10,8 @@
     "jsEngine": "hermes",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "tech.dongdongbh.focusgtd"
     },
     "android": {
       "adaptiveIcon": {
