@@ -12,12 +12,27 @@ export interface Project {
     isSequential?: boolean; // If true, only first incomplete task shows in Next Actions
     isFocused?: boolean; // If true, this project is a priority focus (max 5 allowed)
     supportNotes?: string;
+    attachments?: Attachment[];
     reviewAt?: string; // Tickler/review date (ISO string). If set, project is due for review at/after this time.
     areaId?: string;
     areaTitle?: string;
     createdAt: string;
     updatedAt: string;
     deletedAt?: string; // Soft-delete: if set, this item is considered deleted
+}
+
+export type AttachmentKind = 'file' | 'link';
+
+export interface Attachment {
+    id: string;
+    kind: AttachmentKind;
+    title: string;
+    uri: string;
+    mimeType?: string;
+    size?: number;
+    createdAt: string;
+    updatedAt: string;
+    deletedAt?: string; // Soft-delete: if set, this attachment is considered deleted
 }
 
 export interface ChecklistItem {
@@ -37,6 +52,7 @@ export interface Task {
     contexts: string[]; // e.g., '@home', '@work'
     checklist?: ChecklistItem[]; // Subtasks/Shopping list items
     description?: string;
+    attachments?: Attachment[];
     location?: string;
     projectId?: string;
     isFocusedToday?: boolean; // Marked as today's priority (Top 3 focus)
@@ -69,6 +85,10 @@ export interface AppData {
         dateFormat?: string;
         keybindingStyle?: 'vim' | 'emacs';
         notificationsEnabled?: boolean;
+        dailyDigestMorningEnabled?: boolean;
+        dailyDigestMorningTime?: string; // HH:mm
+        dailyDigestEveningEnabled?: boolean;
+        dailyDigestEveningTime?: string; // HH:mm
         savedSearches?: SavedSearch[];
         sidebarCollapsed?: boolean;
         accentColor?: string;

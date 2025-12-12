@@ -1,5 +1,5 @@
 
-import { AppData } from './types';
+import type { AppData, Attachment, Project, Task } from './types';
 
 export interface EntityMergeStats {
     localTotal: number;
@@ -50,7 +50,8 @@ function createEmptyEntityStats(localTotal: number, incomingTotal: number): Enti
 
 function mergeEntitiesWithStats<T extends { id: string; updatedAt: string; deletedAt?: string }>(
     local: T[],
-    incoming: T[]
+    incoming: T[],
+    mergeConflict?: (localItem: T, incomingItem: T, winner: T) => T
 ): { merged: T[]; stats: EntityMergeStats } {
     const localMap = new Map<string, T>(local.map((item) => [item.id, item]));
     const incomingMap = new Map<string, T>(incoming.map((item) => [item.id, item]));
@@ -100,7 +101,7 @@ function mergeEntitiesWithStats<T extends { id: string; updatedAt: string; delet
             stats.deletionsWon += 1;
         }
 
-        merged.push(winner);
+        merged.push(mergeConflict ? mergeConflict(localItem, incomingItem, winner) : winner);
     }
 
     stats.mergedTotal = merged.length;
@@ -129,8 +130,27 @@ export function filterDeleted<T extends { deletedAt?: string }>(items: T[]): T[]
  * Preserves local settings (device-specific preferences).
  */
 export function mergeAppDataWithStats(local: AppData, incoming: AppData): MergeResult {
-    const tasksResult = mergeEntitiesWithStats(local.tasks, incoming.tasks);
-    const projectsResult = mergeEntitiesWithStats(local.projects, incoming.projects);
+    const mergeAttachments = (a?: Attachment[], b?: Attachment[]): Attachment[] | undefined => {
+        const aList = a || [];
+        const bList = b || [];
+        if (aList.length === 0 && bList.length === 0) return undefined;
+        const merged = mergeEntities(aList, bList);
+        return merged.length > 0 ? merged : undefined;
+    };
+
+    const tasksResult = mergeEntitiesWithStats(local.tasks, incoming.tasks, (localTask: Task, incomingTask: Task, winner: Task) => {
+        if (winner.deletedAt) return winner;
+        const loser = winner === incomingTask ? localTask : incomingTask;
+        const attachments = mergeAttachments(winner.attachments, loser.attachments);
+        return attachments ? { ...winner, attachments } : winner;
+    });
+
+    const projectsResult = mergeEntitiesWithStats(local.projects, incoming.projects, (localProject: Project, incomingProject: Project, winner: Project) => {
+        if (winner.deletedAt) return winner;
+        const loser = winner === incomingProject ? localProject : incomingProject;
+        const attachments = mergeAttachments(winner.attachments, loser.attachments);
+        return attachments ? { ...winner, attachments } : winner;
+    });
 
     return {
         data: {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { mergeAppData, mergeAppDataWithStats, filterDeleted } from './sync';
-import { AppData, Task, Project } from './types';
+import { AppData, Task, Project, Attachment } from './types';
 
 describe('Sync Logic', () => {
     const createMockTask = (id: string, updatedAt: string, deletedAt?: string): Task => ({
@@ -31,6 +31,73 @@ describe('Sync Logic', () => {
     });
 
     describe('mergeAppData', () => {
+        it('should merge attachments across devices', () => {
+            const localAttachment: Attachment = {
+                id: 'att-local',
+                kind: 'file',
+                title: 'local.txt',
+                uri: '/tmp/local.txt',
+                createdAt: '2023-01-01T00:00:00.000Z',
+                updatedAt: '2023-01-02T00:00:00.000Z',
+            };
+            const incomingAttachment: Attachment = {
+                id: 'att-incoming',
+                kind: 'link',
+                title: 'example',
+                uri: 'https://example.com',
+                createdAt: '2023-01-01T00:00:00.000Z',
+                updatedAt: '2023-01-02T00:00:00.000Z',
+            };
+
+            const localTask: Task = {
+                ...createMockTask('1', '2023-01-02'),
+                attachments: [localAttachment],
+            };
+            const incomingTask: Task = {
+                ...createMockTask('1', '2023-01-03'), // incoming wins task conflict
+                attachments: [incomingAttachment],
+            };
+
+            const merged = mergeAppData(mockAppData([localTask]), mockAppData([incomingTask]));
+
+            expect(merged.tasks).toHaveLength(1);
+            expect(merged.tasks[0].updatedAt).toBe('2023-01-03');
+            expect((merged.tasks[0].attachments || []).map(a => a.id).sort()).toEqual(['att-incoming', 'att-local']);
+        });
+
+        it('should preserve attachment deletions using attachment timestamps', () => {
+            const localAttachment: Attachment = {
+                id: 'att-1',
+                kind: 'file',
+                title: 'local.txt',
+                uri: '/tmp/local.txt',
+                createdAt: '2023-01-01T00:00:00.000Z',
+                updatedAt: '2023-01-04T00:00:00.000Z',
+                deletedAt: '2023-01-04T00:00:00.000Z',
+            };
+            const incomingAttachment: Attachment = {
+                id: 'att-1',
+                kind: 'file',
+                title: 'local.txt',
+                uri: '/tmp/local.txt',
+                createdAt: '2023-01-01T00:00:00.000Z',
+                updatedAt: '2023-01-02T00:00:00.000Z',
+            };
+
+            const localTask: Task = {
+                ...createMockTask('1', '2023-01-03'),
+                attachments: [localAttachment],
+            };
+            const incomingTask: Task = {
+                ...createMockTask('1', '2023-01-03'),
+                attachments: [incomingAttachment],
+            };
+
+            const merged = mergeAppData(mockAppData([localTask]), mockAppData([incomingTask]));
+            const attachment = merged.tasks[0].attachments?.find(a => a.id === 'att-1');
+            expect(attachment?.deletedAt).toBe('2023-01-04T00:00:00.000Z');
+        });
+
         it('should merge unique items from both sources', () => {
             const local = mockAppData([createMockTask('1', '2023-01-01')]);
             const incoming = mockAppData([createMockTask('2', '2023-01-01')]);
