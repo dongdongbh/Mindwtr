@@ -1,6 +1,6 @@
 import { View, Text, ScrollView, Pressable, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useTaskStore, sortTasks, type Task, type TaskStatus } from '@mindwtr/core';
+import { useTaskStore, sortTasksBy, type Task, type TaskStatus, type TaskSortBy } from '@mindwtr/core';
 import { useState } from 'react';
 import { useTheme } from '../../../contexts/theme-context';
 import { useLanguage } from '../../../contexts/language-context';
@@ -41,7 +41,7 @@ const getStatusLabels = (lang: 'en' | 'zh'): Record<TaskStatus, string> => {
 
 export default function ReviewScreen() {
   const router = useRouter();
-  const { tasks, updateTask, deleteTask } = useTaskStore();
+  const { tasks, updateTask, deleteTask, settings } = useTaskStore();
   const { isDark } = useTheme();
   const { language, t } = useLanguage();
   const [filterStatus, setFilterStatus] = useState<TaskStatus | 'all'>('all');
@@ -61,7 +61,8 @@ export default function ReviewScreen() {
     filterStatus === 'all' ? true : task.status === filterStatus
   );
 
-  const sortedTasks = sortTasks(filteredTasks);
+  const sortBy = (settings?.taskSortBy ?? 'default') as TaskSortBy;
+  const sortedTasks = sortTasksBy(filteredTasks, sortBy);
 
   return (
     <View style={[styles.container, { backgroundColor: tc.bg }]}>

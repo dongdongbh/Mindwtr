@@ -1,7 +1,7 @@
 import { useState, memo } from 'react';
 
 import { Calendar as CalendarIcon, Tag, Trash2, ArrowRight, Repeat, Check, Plus, Clock, Timer } from 'lucide-react';
-import { useTaskStore, Task, TaskStatus, TimeEstimate, getTaskAgeLabel, getTaskStaleness, getTaskUrgency, getStatusColor, Project, safeFormatDate, safeParseDate, getChecklistProgress, DeferPreset } from '@mindwtr/core';
+import { useTaskStore, Task, TaskStatus, TimeEstimate, getTaskAgeLabel, getTaskStaleness, getTaskUrgency, getStatusColor, Project, safeFormatDate, safeParseDate, getChecklistProgress, DeferPreset, getUnblocksCount } from '@mindwtr/core';
 import { cn } from '../lib/utils';
 import { useLanguage } from '../contexts/language-context';
 
@@ -18,9 +18,20 @@ interface TaskItemProps {
     project?: Project;
     isSelected?: boolean;
     onSelect?: () => void;
+    selectionMode?: boolean;
+    isMultiSelected?: boolean;
+    onToggleSelect?: () => void;
 }
 
-export const TaskItem = memo(function TaskItem({ task, project: propProject, isSelected, onSelect }: TaskItemProps) {
+export const TaskItem = memo(function TaskItem({
+    task,
+    project: propProject,
+    isSelected,
+    onSelect,
+    selectionMode = false,
+    isMultiSelected = false,
+    onToggleSelect,
+}: TaskItemProps) {
     const { updateTask, deleteTask, moveTask, deferTask, projects, tasks } = useTaskStore();
     const { t, language } = useLanguage();
     const [isEditing, setIsEditing] = useState(false);
@@ -37,9 +48,11 @@ export const TaskItem = memo(function TaskItem({ task, project: propProject, isS
     const [editRecurrence, setEditRecurrence] = useState(task.recurrence || '');
     const [editTimeEstimate, setEditTimeEstimate] = useState<TimeEstimate | ''>(task.timeEstimate || '');
     const [editReviewAt, setEditReviewAt] = useState(toDateTimeLocalValue(task.reviewAt));
+    const [editBlockedByTaskIds, setEditBlockedByTaskIds] = useState<string[]>(task.blockedByTaskIds || []);
 
     const ageLabel = getTaskAgeLabel(task.createdAt, language);
     const checklistProgress = getChecklistProgress(task);
+    const unblocksCount = getUnblocksCount(task.id, tasks ?? []);
 
     const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         moveTask(task.id, e.target.value as TaskStatus);
@@ -60,6 +73,7 @@ export const TaskItem = memo(function TaskItem({ task, project: propProject, isS
                 recurrence: editRecurrence || undefined,
                 timeEstimate: editTimeEstimate || undefined,
                 reviewAt: editReviewAt || undefined,
+                blockedByTaskIds: editBlockedByTaskIds.length > 0 ? editBlockedByTaskIds : undefined,
             });
             setIsEditing(false);
         }
@@ -198,14 +212,35 @@ export const TaskItem = memo(function TaskItem({ task, project: propProject, isS
 		                                        className="text-xs bg-muted/50 border border-border rounded px-2 py-1"
 		                                    >
 		                                        <option value="">{t('taskEdit.noProjectOption')}</option>
-		                                        {projects.map(p => (
-		                                            <option key={p.id} value={p.id}>{p.title}</option>
-		                                        ))}
-		                                    </select>
-		                                </div>
-		                                <div className="flex flex-col gap-1">
-		                                    <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.locationLabel')}</label>
-		                                    <input
+			                                        {projects.map(p => (
+			                                            <option key={p.id} value={p.id}>{p.title}</option>
+			                                        ))}
+			                                    </select>
+			                                </div>
+			                                <div className="flex flex-col gap-1 min-w-[180px]">
+			                                    <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.blockedByLabel')}</label>
+			                                    <select
+			                                        multiple
+			                                        value={editBlockedByTaskIds}
+			                                        aria-label="Blocked by"
+			                                        onChange={(e) => {
+			                                            const selected = Array.from(e.target.selectedOptions).map(o => o.value);
+			                                            setEditBlockedByTaskIds(selected);
+			                                        }}
+			                                        className="text-xs bg-muted/50 border border-border rounded px-2 py-1 h-20"
+			                                    >
+                                        {(tasks ?? [])
+                                            .filter(otherTask => otherTask.id !== task.id && !otherTask.deletedAt)
+                                            .map(otherTask => (
+                                                <option key={otherTask.id} value={otherTask.id}>
+                                                    {otherTask.title}
+			                                                </option>
+			                                            ))}
+			                                    </select>
+			                                </div>
+			                                <div className="flex flex-col gap-1">
+			                                    <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.locationLabel')}</label>
+			                                    <input
                                         type="text"
                                         aria-label="Location"
                                         value={editLocation}
@@ -453,10 +488,20 @@ export const TaskItem = memo(function TaskItem({ task, project: propProject, isS
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter' || e.key === ' ') {
                                     e.preventDefault();
+                                    if (selectionMode) {
+                                        onToggleSelect?.();
+                                    } else {
+                                        setIsEditing(true);
+                                    }
+                                }
+                            }}
+                            onClick={() => {
+                                if (selectionMode) {
+                                    onToggleSelect?.();
+                                } else {
                                     setIsEditing(true);
                                 }
                             }}
-                            onClick={() => setIsEditing(true)}
                             className="group/content cursor-pointer rounded -ml-2 pl-2 pr-1 py-1 hover:bg-muted/40 focus:bg-muted/40 focus:ring-2 focus:ring-primary focus:outline-none transition-colors"
                         >
                             <div
@@ -540,6 +585,11 @@ export const TaskItem = memo(function TaskItem({ task, project: propProject, isS
                                         </div>
                                     </button>
                                 )}
+                                {unblocksCount > 0 && (
+                                    <div className="text-muted-foreground text-xs">
+                                        {t('taskEdit.unblocksLabel')} {unblocksCount}
+                                    </div>
+                                )}
                                 {/* Task Age Indicator */}
                                 {task.status !== 'done' && task.status !== 'archived' && ageLabel && (
                                     <div className={cn(
@@ -604,6 +654,15 @@ export const TaskItem = memo(function TaskItem({ task, project: propProject, isS
                         className="relative flex items-center gap-2"
                         onPointerDown={(e) => e.stopPropagation()}
                     >
+                        {selectionMode && (
+                            <input
+                                type="checkbox"
+                                aria-label="Select task"
+                                checked={isMultiSelected}
+                                onChange={() => onToggleSelect?.()}
+                                className="h-4 w-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
+                            />
+                        )}
                         <button
                             onClick={() => setIsDeferOpen((v) => !v)}
                             aria-label={t('defer.title')}

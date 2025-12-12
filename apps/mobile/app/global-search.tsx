@@ -110,7 +110,7 @@ export default function SearchScreen() {
                 )}
                 {canSave && (
                     <TouchableOpacity onPress={openSaveModal} style={styles.saveButton}>
-                        <Text style={[styles.saveButtonText, { color: '#3B82F6' }]}>{t('search.saveSearch')}</Text>
+                        <Text style={[styles.saveButtonText, { color: tc.tint }]}>{t('search.saveSearch')}</Text>
                     </TouchableOpacity>
                 )}
             </View>
@@ -141,7 +141,7 @@ export default function SearchScreen() {
                         onPress={() => handleSelect(item)}
                     >
                         {item.type === 'project' ? (
-                            <Folder size={24} color="#3B82F6" />
+                            <Folder size={24} color={tc.tint} />
                         ) : (
                             <CheckCircle size={24} color={tc.secondaryText} />
                         )}

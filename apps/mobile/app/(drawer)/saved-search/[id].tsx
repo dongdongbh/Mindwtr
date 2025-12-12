@@ -1,27 +1,29 @@
 import React, { useMemo, useState, useCallback } from 'react';
-import { View, Text, FlatList, StyleSheet, RefreshControl } from 'react-native';
+import { View, Text, FlatList, StyleSheet, RefreshControl, TouchableOpacity, Alert } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
-import { useTaskStore, filterTasksBySearch, sortTasks, Task, TaskStatus } from '@mindwtr/core';
+import { useTaskStore, filterTasksBySearch, sortTasksBy, type Task, type TaskStatus, type TaskSortBy } from '@mindwtr/core';
 import { SwipeableTaskItem } from '@/components/swipeable-task-item';
 import { TaskEditModal } from '@/components/task-edit-modal';
 import { useLanguage } from '@/contexts/language-context';
 import { useTheme } from '@/contexts/theme-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { Trash2 } from 'lucide-react-native';
 
 export default function SavedSearchScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { tasks, projects, settings, updateTask, deleteTask, fetchData } = useTaskStore();
+  const { tasks, projects, settings, updateTask, deleteTask, fetchData, updateSettings } = useTaskStore();
   const { t } = useLanguage();
   const { isDark } = useTheme();
   const tc = useThemeColors();
 
   const savedSearch = settings?.savedSearches?.find(s => s.id === id);
   const query = savedSearch?.query || '';
+  const sortBy = (settings?.taskSortBy ?? 'default') as TaskSortBy;
 
   const filteredTasks = useMemo(() => {
     if (!query) return [];
-    return sortTasks(filterTasksBySearch(tasks, projects, query));
-  }, [tasks, projects, query]);
+    return sortTasksBy(filterTasksBySearch(tasks, projects, query), sortBy);
+  }, [tasks, projects, query, sortBy]);
 
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
@@ -32,6 +34,26 @@ export default function SavedSearchScreen() {
     await fetchData();
     setRefreshing(false);
   }, [fetchData]);
+
+  const handleDeleteSearch = useCallback(() => {
+    if (!savedSearch) return;
+    Alert.alert(
+      t('common.delete'),
+      t('search.deleteConfirm') || `Delete "${savedSearch.name}"?`,
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('common.delete'),
+          style: 'destructive',
+          onPress: async () => {
+            const updated = (settings?.savedSearches || []).filter(s => s.id !== id);
+            await updateSettings({ savedSearches: updated });
+            router.back();
+          },
+        },
+      ]
+    );
+  }, [savedSearch, id, settings?.savedSearches, updateSettings, t]);
 
   const renderTask = ({ item }: { item: Task }) => (
     <SwipeableTaskItem
@@ -50,14 +72,27 @@ export default function SavedSearchScreen() {
   return (
     <View style={[styles.container, { backgroundColor: tc.bg }]}>
       <View style={[styles.header, { borderBottomColor: tc.border }]}>
-        <Text style={[styles.title, { color: tc.text }]} accessibilityRole="header">
-          {savedSearch?.name || t('search.savedSearches')}
-        </Text>
-        {query ? (
-          <Text style={[styles.queryText, { color: tc.secondaryText }]} numberOfLines={1}>
-            {query}
-          </Text>
-        ) : null}
+        <View style={styles.headerContent}>
+          <View style={styles.headerText}>
+            <Text style={[styles.title, { color: tc.text }]} accessibilityRole="header">
+              {savedSearch?.name || t('search.savedSearches')}
+            </Text>
+            {query ? (
+              <Text style={[styles.queryText, { color: tc.secondaryText }]} numberOfLines={1}>
+                {query}
+              </Text>
+            ) : null}
+          </View>
+          {savedSearch && (
+            <TouchableOpacity
+              onPress={handleDeleteSearch}
+              style={styles.deleteButton}
+              accessibilityLabel={t('common.delete')}
+            >
+              <Trash2 size={20} color="#EF4444" />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       <FlatList
@@ -102,6 +137,14 @@ const styles = StyleSheet.create({
   header: {
     padding: 16,
     borderBottomWidth: 1,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  headerText: {
+    flex: 1,
     gap: 4,
   },
   title: {
@@ -110,6 +153,10 @@ const styles = StyleSheet.create({
   },
   queryText: {
     fontSize: 12,
+  },
+  deleteButton: {
+    padding: 8,
+    marginLeft: 8,
   },
   listContent: {
     padding: 16,
@@ -122,4 +169,3 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 });
-

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useTaskStore } from '@mindwtr/core';
+import { useTaskStore, matchesHierarchicalToken } from '@mindwtr/core';
 import { TaskItem } from '../TaskItem';
 import { Tag, Filter } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -18,8 +18,13 @@ export function ContextsView() {
         activeTasks.flatMap(t => [...(t.contexts || []), ...(t.tags || [])])
     )).sort();
 
+    const matchesSelected = (task: typeof activeTasks[number], context: string) => {
+        const tokens = [...(task.contexts || []), ...(task.tags || [])];
+        return tokens.some(token => matchesHierarchicalToken(context, token));
+    };
+
     const filteredTasks = selectedContext
-        ? activeTasks.filter(t => (t.contexts?.includes(selectedContext) || t.tags?.includes(selectedContext)) && t.status !== 'done' && t.status !== 'archived')
+        ? activeTasks.filter(t => matchesSelected(t, selectedContext) && t.status !== 'done' && t.status !== 'archived')
         : activeTasks.filter(t => ((t.contexts?.length || 0) > 0 || (t.tags?.length || 0) > 0) && t.status !== 'done' && t.status !== 'archived');
 
     return (
@@ -58,7 +63,7 @@ export function ContextsView() {
                             <span className="text-muted-foreground">@</span>
                             <span className="flex-1 truncate">{context.replace(/^@/, '')}</span>
                             <span className="text-xs text-muted-foreground">
-                                {activeTasks.filter(t => (t.contexts?.includes(context) || t.tags?.includes(context)) && t.status !== 'done' && t.status !== 'archived').length}
+                                {activeTasks.filter(t => matchesSelected(t, context) && t.status !== 'done' && t.status !== 'archived').length}
                             </span>
                         </div>
                     ))}

@@ -116,6 +116,8 @@ export const translations: Record<Language, Record<string, string>> = {
         'taskEdit.startDateLabel': 'Start Date',
         'taskEdit.dueDateLabel': 'Due Date',
         'taskEdit.reviewDateLabel': 'Review Date',
+        'taskEdit.blockedByLabel': 'Blocked by',
+        'taskEdit.unblocksLabel': 'Unblocks',
         'taskStatus.changeStatus': 'Change Status',
 
         // Recurrence Labels
@@ -208,6 +210,8 @@ export const translations: Record<Language, Record<string, string>> = {
         'project.notes': 'Project Notes',
         'projects.notesPlaceholder': 'Add context, plans, or reference notes for this project...',
         'projects.reviewAt': 'Review Date',
+        'projects.areaLabel': 'Area',
+        'projects.areaPlaceholder': 'e.g. Work',
         'projects.complete': 'Complete',
         'projects.archive': 'Archive',
         'projects.reactivate': 'Reactivate',
@@ -356,6 +360,8 @@ export const translations: Record<Language, Record<string, string>> = {
         'settings.lightDesc': 'Light mode',
         'settings.dark': 'Dark',
         'settings.darkDesc': 'Dark mode',
+        'settings.accentColor': 'Accent Color',
+        'settings.accentDesc': 'Customize highlight color',
         'settings.language': 'Language',
         'settings.about': 'About',
         'settings.version': 'Version',
@@ -393,6 +399,24 @@ export const translations: Record<Language, Record<string, string>> = {
         'common.done': 'Done',
         'common.skip': 'Skip',
         'common.clear': 'Clear',
+
+        // Bulk Actions
+        'bulk.select': 'Select',
+        'bulk.exitSelect': 'Done',
+        'bulk.selected': 'selected',
+        'bulk.moveTo': 'Move to',
+        'bulk.addTag': 'Add tag',
+        'bulk.delete': 'Delete selected',
+
+        // Sorting
+        'sort.label': 'Sort',
+        'sort.default': 'Default',
+        'sort.due': 'Due date',
+        'sort.start': 'Start date',
+        'sort.review': 'Review date',
+        'sort.title': 'Title',
+        'sort.created': 'Created (oldest)',
+        'sort.created-desc': 'Created (newest)',
 
         // Agenda
         'agenda.title': 'Agenda',
@@ -457,6 +481,7 @@ export const translations: Record<Language, Record<string, string>> = {
         'search.saveSearchPrompt': 'Name this search',
         'search.savedSearches': 'Saved Searches',
         'search.noSavedSearches': 'No saved searches yet.',
+        'search.deleteConfirm': 'Delete this saved search?',
         'search.helpOperators': 'Use operators like status:, context:, tag:, project:, due:<=7d.',
 
         // Archived
@@ -584,6 +609,8 @@ export const translations: Record<Language, Record<string, string>> = {
         'taskEdit.startDateLabel': '开始日期',
         'taskEdit.dueDateLabel': '截止日期',
         'taskEdit.reviewDateLabel': '回顾日期',
+        'taskEdit.blockedByLabel': '被以下任务阻塞',
+        'taskEdit.unblocksLabel': '解除阻塞',
         'taskStatus.changeStatus': '更改状态',
 
         // Recurrence Labels
@@ -676,6 +703,8 @@ export const translations: Record<Language, Record<string, string>> = {
         'project.notes': '项目备注',
         'projects.notesPlaceholder': '为此项目添加背景、计划或参考备注...',
         'projects.reviewAt': '回顾日期',
+        'projects.areaLabel': '领域',
+        'projects.areaPlaceholder': '例如：工作',
         'projects.complete': '完成',
         'projects.archive': '归档',
         'projects.reactivate': '重新激活',
@@ -824,6 +853,8 @@ export const translations: Record<Language, Record<string, string>> = {
         'settings.lightDesc': '浅色主题',
         'settings.dark': '深色',
         'settings.darkDesc': '深色主题',
+        'settings.accentColor': '强调色',
+        'settings.accentDesc': '自定义按钮和高亮颜色',
         'settings.language': '语言',
         'settings.about': '关于',
         'settings.version': '版本',
@@ -861,6 +892,24 @@ export const translations: Record<Language, Record<string, string>> = {
         'common.done': '完成',
         'common.skip': '跳过',
         'common.clear': '清除',
+
+        // Bulk Actions
+        'bulk.select': '选择',
+        'bulk.exitSelect': '完成',
+        'bulk.selected': '已选择',
+        'bulk.moveTo': '移动到',
+        'bulk.addTag': '添加标签',
+        'bulk.delete': '删除所选',
+
+        // Sorting
+        'sort.label': '排序',
+        'sort.default': '默认',
+        'sort.due': '按截止日期',
+        'sort.start': '按开始日期',
+        'sort.review': '按回顾日期',
+        'sort.title': '按标题',
+        'sort.created': '按创建时间（最早）',
+        'sort.created-desc': '按创建时间（最新）',
 
         // Agenda
         'agenda.title': '日程',
@@ -925,6 +974,7 @@ export const translations: Record<Language, Record<string, string>> = {
         'search.saveSearchPrompt': '为此搜索命名',
         'search.savedSearches': '已保存的搜索',
         'search.noSavedSearches': '暂无已保存的搜索。',
+        'search.deleteConfirm': '删除此已保存的搜索？',
         'search.helpOperators': '可用操作符：status:、context:、tag:、project:、due:<=7d 等。',
 
         // Archived

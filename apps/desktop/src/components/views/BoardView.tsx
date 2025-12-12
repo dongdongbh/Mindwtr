@@ -1,7 +1,8 @@
 import React from 'react';
 import { DndContext, DragOverlay, useDraggable, useDroppable, DragEndEvent, DragStartEvent, closestCorners } from '@dnd-kit/core';
 import { TaskItem } from '../TaskItem';
-import { useTaskStore, Task, TaskStatus, sortTasks } from '@mindwtr/core';
+import { useTaskStore, Task, TaskStatus, sortTasksBy } from '@mindwtr/core';
+import type { TaskSortBy } from '@mindwtr/core';
 import { useLanguage } from '../../contexts/language-context';
 
 const getColumns = (t: (key: string) => string): { id: TaskStatus; label: string }[] => [
@@ -61,8 +62,9 @@ function DraggableTask({ task }: { task: Task }) {
 }
 
 export function BoardView() {
-    const { tasks, moveTask } = useTaskStore();
+    const { tasks, moveTask, settings } = useTaskStore();
     const { t } = useLanguage();
+    const sortBy = (settings?.taskSortBy ?? 'default') as TaskSortBy;
 
     const [activeTask, setActiveTask] = React.useState<Task | null>(null);
     const COLUMNS = getColumns(t);
@@ -86,7 +88,7 @@ export function BoardView() {
     };
 
     // Sort tasks for consistency, filter out deleted
-    const sortedTasks = sortTasks(tasks.filter(t => !t.deletedAt));
+    const sortedTasks = sortTasksBy(tasks.filter(t => !t.deletedAt), sortBy);
 
     return (
         <div className="h-full overflow-x-auto">

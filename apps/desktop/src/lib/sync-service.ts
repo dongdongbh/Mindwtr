@@ -1,6 +1,6 @@
 
 import { invoke } from '@tauri-apps/api/core';
-import { mergeAppData, AppData, useTaskStore } from '@mindwtr/core';
+import { mergeAppDataWithStats, AppData, useTaskStore, MergeStats } from '@mindwtr/core';
 
 export class SyncService {
     /**
@@ -34,7 +34,7 @@ export class SyncService {
      * 3. Write merged data back to both Local & Remote
      * 4. Refresh Core Store
      */
-    static async performSync(): Promise<{ success: boolean; stats?: { localTasks: number; syncTasks: number; mergedTasks: number }; error?: string }> {
+    static async performSync(): Promise<{ success: boolean; stats?: MergeStats; error?: string }> {
         try {
             // 1. Read Local Data
             const localData = await invoke<AppData>('get_data');
@@ -47,26 +47,45 @@ export class SyncService {
             // Note: For web builds, `invoke` calls are shims that return mock data.
             // This means `localData` and `syncData` might be identical if the mock
             // data is static, leading to no actual merge changes.
-            const mergedData = mergeAppData(localData, syncData);
+            const mergeResult = mergeAppDataWithStats(localData, syncData);
+            const mergedData = mergeResult.data;
+            const stats = mergeResult.stats;
 
-            console.log('Sync Merge Stats:', {
-                localTasks: localData.tasks.length,
-                syncTasks: syncData.tasks.length,
-                mergedTasks: mergedData.tasks.length
-            });
+            const now = new Date().toISOString();
+            const finalData: AppData = {
+                ...mergedData,
+                settings: {
+                    ...mergedData.settings,
+                    lastSyncAt: now,
+                    lastSyncStatus: 'success',
+                    lastSyncError: undefined,
+                    lastSyncStats: stats,
+                },
+            };
 
             // 4. Write back to Local
-            await invoke('save_data', { data: mergedData });
+            await invoke('save_data', { data: finalData });
 
             // 5. Write back to Sync
-            await invoke('write_sync_file', { data: mergedData });
+            await invoke('write_sync_file', { data: finalData });
 
             // 6. Refresh UI Store
             await useTaskStore.getState().fetchData();
 
-            return { success: true };
+            return { success: true, stats };
         } catch (error) {
             console.error('Sync failed', error);
+            const now = new Date().toISOString();
+            try {
+                await useTaskStore.getState().fetchData();
+                await useTaskStore.getState().updateSettings({
+                    lastSyncAt: now,
+                    lastSyncStatus: 'error',
+                    lastSyncError: String(error),
+                });
+            } catch (e) {
+                console.error('Failed to persist sync error', e);
+            }
             return { success: false, error: String(error) };
         }
     }

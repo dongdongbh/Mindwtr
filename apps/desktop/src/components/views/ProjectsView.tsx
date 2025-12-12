@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useTaskStore, Task, safeFormatDate, safeParseDate, parseQuickAdd } from '@mindwtr/core';
 import { TaskItem } from '../TaskItem';
 import { Plus, Folder, Trash2, ListOrdered, ChevronRight, ChevronDown, CheckCircle, Archive as ArchiveIcon, RotateCcw } from 'lucide-react';
@@ -35,6 +35,26 @@ export function ProjectsView() {
             }
         }
     });
+
+    const groupedProjects = useMemo(() => {
+        const visibleProjects = projects.filter(p => !p.deletedAt);
+        const sorted = [...visibleProjects].sort((a, b) => {
+            if (a.isFocused && !b.isFocused) return -1;
+            if (!a.isFocused && b.isFocused) return 1;
+            return a.title.localeCompare(b.title);
+        });
+
+        const groups = new Map<string, typeof sorted>();
+        const noAreaLabel = t('common.none');
+
+        for (const project of sorted) {
+            const area = project.areaTitle?.trim() || noAreaLabel;
+            if (!groups.has(area)) groups.set(area, []);
+            groups.get(area)!.push(project);
+        }
+
+        return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    }, [projects, t]);
 
     const handleCreateProject = (e: React.FormEvent) => {
         e.preventDefault();
@@ -101,82 +121,80 @@ export function ProjectsView() {
                     </form>
                 )}
 
-                <div className="space-y-1 overflow-y-auto flex-1">
-                    {/* Sort: focused projects first, then by title */}
-                    {[...projects]
-                        .sort((a, b) => {
-                            if (a.isFocused && !b.isFocused) return -1;
-                            if (!a.isFocused && b.isFocused) return 1;
-                            return a.title.localeCompare(b.title);
-                        })
-                        .map(project => {
-                            const projTasks = tasksByProject[project.id] || [];
-                            // Optimize: Single pass to find todo (priority) or next (fallback)
-                            let nextAction = undefined;
-                            let nextCandidate = undefined;
-                            for (const t of projTasks) {
-                                if (t.status === 'todo') {
-                                    nextAction = t;
-                                    break;
+                <div className="space-y-3 overflow-y-auto flex-1">
+                    {groupedProjects.map(([area, areaProjects]) => (
+                        <div key={area} className="space-y-1">
+                            <div className="px-2 pt-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                                {area}
+                            </div>
+                            {areaProjects.map(project => {
+                                const projTasks = tasksByProject[project.id] || [];
+                                let nextAction = undefined;
+                                let nextCandidate = undefined;
+                                for (const t of projTasks) {
+                                    if (t.status === 'todo') {
+                                        nextAction = t;
+                                        break;
+                                    }
+                                    if (!nextCandidate && t.status === 'next') {
+                                        nextCandidate = t;
+                                    }
                                 }
-                                if (!nextCandidate && t.status === 'next') {
-                                    nextCandidate = t;
-                                }
-                            }
-                            nextAction = nextAction || nextCandidate;
-                            const focusedCount = projects.filter(p => p.isFocused).length;
+                                nextAction = nextAction || nextCandidate;
+                                const focusedCount = projects.filter(p => p.isFocused).length;
 
-                            return (
-                                <div
-                                    key={project.id}
-                                    className={cn(
-                                        "rounded-lg cursor-pointer transition-colors text-sm border",
-                                        selectedProjectId === project.id
-                                            ? "bg-accent text-accent-foreground border-accent"
-                                            : project.isFocused
-                                                ? "bg-amber-500/10 border-amber-500/30 hover:bg-amber-500/20"
-                                                : "border-transparent hover:bg-muted/50"
-                                    )}
-                                >
+                                return (
                                     <div
-                                        className="flex items-center gap-2 p-2"
-                                        onClick={() => setSelectedProjectId(project.id)}
+                                        key={project.id}
+                                        className={cn(
+                                            "rounded-lg cursor-pointer transition-colors text-sm border",
+                                            selectedProjectId === project.id
+                                                ? "bg-accent text-accent-foreground border-accent"
+                                                : project.isFocused
+                                                    ? "bg-amber-500/10 border-amber-500/30 hover:bg-amber-500/20"
+                                                    : "border-transparent hover:bg-muted/50"
+                                        )}
                                     >
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                toggleProjectFocus(project.id);
-                                            }}
-                                            className={cn(
-                                                "text-sm transition-colors",
-                                                project.isFocused ? "text-amber-500" : "text-muted-foreground hover:text-amber-500",
-                                                !project.isFocused && focusedCount >= 5 && "opacity-30 cursor-not-allowed"
-                                            )}
-                                            title={project.isFocused ? "Remove from focus" : focusedCount >= 5 ? "Max 5 focused projects" : "Add to focus"}
+                                        <div
+                                            className="flex items-center gap-2 p-2"
+                                            onClick={() => setSelectedProjectId(project.id)}
                                         >
-                                            {project.isFocused ? '⭐' : '☆'}
-                                        </button>
-                                        <Folder className="w-4 h-4" style={{ color: project.color }} />
-                                        <span className="flex-1 truncate">{project.title}</span>
-                                        <span className="text-xs text-muted-foreground">
-                                            {projTasks.length}
-                                        </span>
-                                    </div>
-                                    {/* Show project's next action */}
-                                    <div className="px-2 pb-2 pl-8">
-                                        {nextAction ? (
-                                            <span className="text-xs text-muted-foreground truncate block">
-                                                ↳ {nextAction.title}
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    toggleProjectFocus(project.id);
+                                                }}
+                                                className={cn(
+                                                    "text-sm transition-colors",
+                                                    project.isFocused ? "text-amber-500" : "text-muted-foreground hover:text-amber-500",
+                                                    !project.isFocused && focusedCount >= 5 && "opacity-30 cursor-not-allowed"
+                                                )}
+                                                title={project.isFocused ? "Remove from focus" : focusedCount >= 5 ? "Max 5 focused projects" : "Add to focus"}
+                                            >
+                                                {project.isFocused ? '⭐' : '☆'}
+                                            </button>
+                                            <Folder className="w-4 h-4" style={{ color: project.color }} />
+                                            <span className="flex-1 truncate">{project.title}</span>
+                                            <span className="text-xs text-muted-foreground">
+                                                {projTasks.length}
                                             </span>
-                                        ) : projTasks.length > 0 ? (
-                                            <span className="text-xs text-amber-600 dark:text-amber-400">
-                                                ⚠️ {t('projects.noNextAction')}
-                                            </span>
-                                        ) : null}
+                                        </div>
+                                        <div className="px-2 pb-2 pl-8">
+                                            {nextAction ? (
+                                                <span className="text-xs text-muted-foreground truncate block">
+                                                    ↳ {nextAction.title}
+                                                </span>
+                                            ) : projTasks.length > 0 ? (
+                                                <span className="text-xs text-amber-600 dark:text-amber-400">
+                                                    ⚠️ {t('projects.noNextAction')}
+                                                </span>
+                                            ) : null}
+                                        </div>
                                     </div>
-                                </div>
-                            );
-                        })}
+                                );
+                            })}
+                        </div>
+                    ))}
 
                     {projects.length === 0 && !isCreating && (
                         <div className="text-sm text-muted-foreground text-center py-8">
@@ -299,11 +317,25 @@ export function ProjectsView() {
 		                                    />
 		                                </div>
 		                            )}
-	                        </div>
+		                        </div>
 
-		                        <div className="mb-6 bg-card border border-border rounded-lg p-3 space-y-2">
-		                            <label className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
-		                                {t('projects.reviewAt')}
+			                        <div className="mb-6 bg-card border border-border rounded-lg p-3 space-y-2">
+			                            <label className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
+			                                {t('projects.areaLabel')}
+			                            </label>
+			                            <input
+			                                key={`${selectedProject.id}-area`}
+			                                type="text"
+			                                defaultValue={selectedProject.areaTitle || ''}
+			                                onBlur={(e) => updateProject(selectedProject.id, { areaTitle: e.target.value || undefined })}
+			                                placeholder={t('projects.areaPlaceholder')}
+			                                className="w-full text-sm bg-muted/50 border border-border rounded px-2 py-1"
+			                            />
+			                        </div>
+
+			                        <div className="mb-6 bg-card border border-border rounded-lg p-3 space-y-2">
+			                            <label className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
+			                                {t('projects.reviewAt')}
 		                            </label>
 	                            <input
 	                                key={selectedProject.id}

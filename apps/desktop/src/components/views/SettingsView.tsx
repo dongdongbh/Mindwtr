@@ -7,6 +7,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { getVersion } from '@tauri-apps/api/app';
 import { SyncService } from '../../lib/sync-service';
 import { checkForUpdates, UpdateInfo, GITHUB_RELEASES_URL } from '../../lib/update-service';
+import { useTaskStore, safeFormatDate } from '@mindwtr/core';
 
 type ThemeMode = 'system' | 'light' | 'dark';
 
@@ -21,6 +22,7 @@ export function SettingsView() {
     const [themeMode, setThemeMode] = useState<ThemeMode>('system');
     const { language, setLanguage } = useLanguage();
     const { style: keybindingStyle, setStyle: setKeybindingStyle, openHelp } = useKeybindings();
+    const { settings, updateSettings } = useTaskStore();
     const [saved, setSaved] = useState(false);
     const [appVersion, setAppVersion] = useState('0.1.0');
 
@@ -95,13 +97,13 @@ export function SettingsView() {
 
             if (result.success) {
                 showSaved();
-                alert('Sync completed successfully!');
+                alert(t.lastSyncSuccess);
             } else {
                 throw new Error(result.error || 'Unknown error');
             }
         } catch (error) {
             console.error('Sync failed', error);
-            alert('Sync failed: ' + String(error));
+            alert(`${t.lastSyncError}: ${String(error)}`);
         } finally {
             setIsSyncing(false);
         }
@@ -149,6 +151,8 @@ export function SettingsView() {
             followSystem: 'Follow system appearance',
             lightTheme: 'Light theme',
             darkTheme: 'Dark theme',
+            accentColor: 'Accent Color',
+            accentDesc: 'Customize highlight color',
             saved: 'Settings saved',
             keybindings: 'Keyboard Shortcuts',
             keybindingsDesc: 'Choose your preferred desktop keybinding style.',
@@ -169,6 +173,11 @@ export function SettingsView() {
             syncNow: 'Sync Now',
             syncing: 'Syncing...',
             pathHint: 'Type a path directly (e.g., ~/Sync/mindwtr) or use Browse if available',
+            lastSync: 'Last sync',
+            lastSyncNever: 'Never',
+            lastSyncSuccess: 'Sync completed',
+            lastSyncError: 'Sync failed',
+            lastSyncConflicts: 'Conflicts',
         },
         zh: {
             title: '设置',
@@ -195,6 +204,8 @@ export function SettingsView() {
             followSystem: '跟随系统外观',
             lightTheme: '浅色主题',
             darkTheme: '深色主题',
+            accentColor: '强调色',
+            accentDesc: '自定义按钮和高亮颜色',
             saved: '设置已保存',
             keybindings: '快捷键',
             keybindingsDesc: '选择桌面端偏好的快捷键风格。',
@@ -215,6 +226,11 @@ export function SettingsView() {
             syncNow: '立即同步',
             syncing: '同步中...',
             pathHint: '直接输入路径（如 ~/Sync/mindwtr）或点击浏览选择',
+            lastSync: '上次同步',
+            lastSyncNever: '从未同步',
+            lastSyncSuccess: '同步完成',
+            lastSyncError: '同步失败',
+            lastSyncConflicts: '冲突',
         },
     };
 
@@ -261,6 +277,14 @@ export function SettingsView() {
         setShowUpdateModal(false);
     };
 
+    const lastSyncAt = settings?.lastSyncAt;
+    const lastSyncStatus = settings?.lastSyncStatus;
+    const lastSyncStats = settings?.lastSyncStats;
+    const lastSyncDisplay = lastSyncAt
+        ? safeFormatDate(lastSyncAt, 'PPpp', lastSyncAt)
+        : t.lastSyncNever;
+    const conflictCount = (lastSyncStats?.tasks.conflicts || 0) + (lastSyncStats?.projects.conflicts || 0);
+
     return (
         <div className="h-full overflow-y-auto p-8 max-w-4xl mx-auto">
             <header className="mb-10">
@@ -276,8 +300,8 @@ export function SettingsView() {
                         {t.appearance}
                     </h2>
 
-                    <div className="bg-card border border-border rounded-lg p-1">
-                        <div className="grid grid-cols-3 gap-1">
+	                    <div className="bg-card border border-border rounded-lg p-1">
+	                        <div className="grid grid-cols-3 gap-1">
                             {/* System */}
                             <button
                                 onClick={() => saveThemePreference('system')}
@@ -325,9 +349,22 @@ export function SettingsView() {
                                 </div>
                                 <span className="text-sm font-medium">{t.dark}</span>
                             </button>
-                        </div>
-                    </div>
-                </section>
+	                        </div>
+	                    </div>
+
+	                    <div className="bg-card border border-border rounded-lg p-4 flex items-center justify-between">
+	                        <div>
+	                            <p className="text-sm font-medium">{t.accentColor}</p>
+	                            <p className="text-xs text-muted-foreground mt-1">{t.accentDesc}</p>
+	                        </div>
+	                        <input
+	                            type="color"
+	                            value={settings?.accentColor || '#3B82F6'}
+	                            onChange={(e) => updateSettings({ accentColor: e.target.value }).catch(console.error)}
+	                            className="w-10 h-8 rounded cursor-pointer border-0 p-0"
+	                        />
+	                    </div>
+	                </section>
 
                 <div className="border-t border-border"></div>
 
@@ -472,6 +509,24 @@ export function SettingsView() {
                                 </button>
                             </div>
                         )}
+
+                        <div className="pt-3 text-xs text-muted-foreground space-y-1">
+                            <div>
+                                {t.lastSync}: {lastSyncDisplay}
+                                {lastSyncStatus === 'success' && ` • ${t.lastSyncSuccess}`}
+                                {lastSyncStatus === 'error' && ` • ${t.lastSyncError}`}
+                            </div>
+                            {lastSyncStats && (
+                                <div>
+                                    {t.lastSyncConflicts}: {conflictCount} • Tasks {lastSyncStats.tasks.mergedTotal} / Projects {lastSyncStats.projects.mergedTotal}
+                                </div>
+                            )}
+                            {lastSyncStatus === 'error' && settings?.lastSyncError && (
+                                <div className="text-destructive">
+                                    {settings.lastSyncError}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </section>
 

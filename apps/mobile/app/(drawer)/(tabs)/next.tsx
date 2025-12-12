@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
-import { useTaskStore, PRESET_CONTEXTS, Task, Project, sortTasks } from '@mindwtr/core';
+import { useTaskStore, PRESET_CONTEXTS, sortTasksBy, matchesHierarchicalToken, type Task, type Project, type TaskSortBy } from '@mindwtr/core';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { TaskEditModal } from '@/components/task-edit-modal';
 
@@ -14,7 +14,7 @@ import { SwipeableTaskItem } from '@/components/swipeable-task-item';
 
 export default function NextActionsScreen() {
   const router = useRouter();
-  const { tasks, projects, updateTask, deleteTask } = useTaskStore();
+  const { tasks, projects, updateTask, deleteTask, settings } = useTaskStore();
   const { isDark } = useTheme();
   const { t } = useLanguage();
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -24,6 +24,7 @@ export default function NextActionsScreen() {
   // Theme colors
   // Theme colors
   const tc = useThemeColors();
+  const sortBy = (settings?.taskSortBy ?? 'default') as TaskSortBy;
 
   // Get all unique contexts from tasks (merge with presets)
   const allContexts = Array.from(new Set([
@@ -55,24 +56,29 @@ export default function NextActionsScreen() {
     return firstTaskIds;
   }, [tasks, projects]);
 
-  const nextTasks = sortTasks(tasks.filter(t => {
+  const matchesSelectedContext = (task: Task, context: string | null) => {
+    if (!context) return true;
+    return (task.contexts || []).some(ctx => matchesHierarchicalToken(context, ctx));
+  };
+
+  const nextTasks = sortTasksBy(tasks.filter(t => {
     if (t.deletedAt) return false;
     if (t.status !== 'next') return false;
-    if (selectedContext && !t.contexts?.includes(selectedContext)) return false;
+    if (!matchesSelectedContext(t, selectedContext)) return false;
     // Sequential project filter
     if (t.projectId) {
       const project = projectMap[t.projectId];
       if (project?.isSequential && !sequentialProjectFirstTasks.has(t.id)) return false;
     }
     return true;
-  }));
+  }), sortBy);
 
-  const todoTasks = sortTasks(tasks.filter(t => {
+  const todoTasks = sortTasksBy(tasks.filter(t => {
     if (t.deletedAt) return false;
     if (t.status !== 'todo') return false;
-    if (selectedContext && !t.contexts?.includes(selectedContext)) return false;
+    if (!matchesSelectedContext(t, selectedContext)) return false;
     return true;
-  }));
+  }), sortBy);
 
   const handlePromote = useCallback((taskId: string) => {
     updateTask(taskId, { status: 'next' });
@@ -114,7 +120,7 @@ export default function NextActionsScreen() {
       {allContexts.map(context => {
         const count = tasks.filter(t =>
           (t.status === 'next' || t.status === 'todo') &&
-          t.contexts?.includes(context)
+          matchesSelectedContext(t, context)
         ).length;
         return (
           <TouchableOpacity

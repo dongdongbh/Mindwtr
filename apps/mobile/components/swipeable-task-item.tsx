@@ -16,6 +16,10 @@ export interface SwipeableTaskItemProps {
     onDelete: () => void;
     /** Hide context tags (useful when viewing a specific context) */
     hideContexts?: boolean;
+    /** Multi-select mode for bulk actions */
+    selectionMode?: boolean;
+    isMultiSelected?: boolean;
+    onToggleSelect?: () => void;
 }
 
 /**
@@ -34,7 +38,10 @@ export function SwipeableTaskItem({
     onPress,
     onStatusChange,
     onDelete,
-    hideContexts = false
+    hideContexts = false,
+    selectionMode = false,
+    isMultiSelected = false,
+    onToggleSelect
 }: SwipeableTaskItemProps) {
     const swipeableRef = useRef<Swipeable>(null);
     const { t, language } = useLanguage();
@@ -119,6 +126,22 @@ export function SwipeableTaskItem({
         task.timeEstimate ? `Estimate: ${task.timeEstimate}` : null,
     ].filter(Boolean).join(', ');
 
+    const handlePress = () => {
+        if (selectionMode && onToggleSelect) {
+            onToggleSelect();
+            return;
+        }
+        onPress();
+    };
+
+    const handleLongPress = () => {
+        if (selectionMode && onToggleSelect) {
+            onToggleSelect();
+            return;
+        }
+        setShowDeferMenu(true);
+    };
+
     return (
         <>
             <Swipeable
@@ -127,15 +150,34 @@ export function SwipeableTaskItem({
                 renderRightActions={renderRightActions}
                 overshootLeft={false}
                 overshootRight={false}
+                enabled={!selectionMode}
             >
                 <Pressable
-                    style={[styles.taskItem, { backgroundColor: tc.cardBg }]}
-                    onPress={onPress}
-                    onLongPress={() => setShowDeferMenu(true)}
+                    style={[
+                        styles.taskItem,
+                        { backgroundColor: tc.cardBg },
+                        selectionMode && { borderWidth: 2, borderColor: isMultiSelected ? tc.tint : tc.border }
+                    ]}
+                    onPress={handlePress}
+                    onLongPress={handleLongPress}
                     accessibilityLabel={accessibilityLabel}
                     accessibilityHint="Double tap to edit task details. Swipe left to change status, right to delete."
                     accessibilityRole="button"
                 >
+                    {selectionMode && (
+                        <View
+                            style={[
+                                styles.selectionBadge,
+                                {
+                                    borderColor: tc.tint,
+                                    backgroundColor: isMultiSelected ? tc.tint : 'transparent'
+                                }
+                            ]}
+                            pointerEvents="none"
+                        >
+                            {isMultiSelected && <Text style={styles.selectionBadgeText}>✓</Text>}
+                        </View>
+                    )}
                     <View style={styles.taskContent}>
                         <Text style={[styles.taskTitle, { color: tc.text }]} numberOfLines={2}>
                             {task.title}
@@ -153,7 +195,7 @@ export function SwipeableTaskItem({
                         {!hideContexts && task.contexts && task.contexts.length > 0 && (
                             <View style={styles.contextsRow}>
                                 {task.contexts.map((ctx, idx) => (
-                                    <Text key={idx} style={styles.contextTag}>
+                                    <Text key={idx} style={[styles.contextTag, { color: tc.tint }]}>
                                         {ctx}
                                     </Text>
                                 ))}
@@ -173,7 +215,7 @@ export function SwipeableTaskItem({
                                     <View
                                         style={[
                                             styles.checklistBarFill,
-                                            { width: `${Math.round(checklistProgress.percent * 100)}%` }
+                                            { width: `${Math.round(checklistProgress.percent * 100)}%`, backgroundColor: tc.tint }
                                         ]}
                                     />
                                 </View>
@@ -330,11 +372,28 @@ const styles = StyleSheet.create({
         padding: 16,
         borderRadius: 12,
         marginBottom: 12,
+        position: 'relative',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.1,
         shadowRadius: 2,
         elevation: 2,
+    },
+    selectionBadge: {
+        position: 'absolute',
+        top: 8,
+        right: 8,
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        borderWidth: 1.5,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    selectionBadgeText: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '700',
     },
     taskContent: {
         flex: 1,

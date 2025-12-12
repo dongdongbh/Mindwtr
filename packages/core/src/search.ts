@@ -1,5 +1,6 @@
 import { addDays, addMonths, addWeeks, addYears, endOfDay, isAfter, isBefore, isEqual, parseISO, startOfDay } from 'date-fns';
 import { safeParseDate } from './date';
+import { matchesHierarchicalToken, normalizePrefixedToken } from './hierarchy-utils';
 import type { Project, Task, TaskStatus } from './types';
 
 export type SearchComparator = '<' | '<=' | '>' | '>=' | '=';
@@ -142,13 +143,11 @@ function matchesText(haystack: string | undefined, needle: string): boolean {
 }
 
 function normalizeTag(value: string): string {
-    if (value.startsWith('#')) return value;
-    return `#${value}`;
+    return normalizePrefixedToken(value, '#');
 }
 
 function normalizeContext(value: string): string {
-    if (value.startsWith('@')) return value;
-    return `@${value}`;
+    return normalizePrefixedToken(value, '@');
 }
 
 function matchDateField(dateStr: string | undefined, comparator: SearchComparator | null, value: string, now: Date): boolean {
@@ -185,10 +184,10 @@ export function matchesTask(term: SearchTerm, task: Task, projects: Project[], n
         result = STATUS_SET.has(value as TaskStatus) ? task.status === (value as TaskStatus) : false;
     } else if (field === 'context' || field === 'contexts') {
         const ctx = normalizeContext(value);
-        result = (task.contexts || []).includes(ctx);
+        result = (task.contexts || []).some((existing) => matchesHierarchicalToken(ctx, existing));
     } else if (field === 'tag' || field === 'tags') {
         const tag = normalizeTag(value);
-        result = (task.tags || []).includes(tag);
+        result = (task.tags || []).some((existing) => matchesHierarchicalToken(tag, existing));
     } else if (field === 'project') {
         if (!task.projectId) result = false;
         else {

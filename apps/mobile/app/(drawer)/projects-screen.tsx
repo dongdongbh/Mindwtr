@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, FlatList, StyleSheet, TouchableOpacity, Modal, Alert } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { View, Text, TextInput, SectionList, StyleSheet, TouchableOpacity, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useTaskStore , Project } from '@mindwtr/core';
@@ -39,6 +39,27 @@ export default function ProjectsScreen() {
 
   const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
   const [selectedColor, setSelectedColor] = useState(colors[0]);
+
+  const groupedProjects = useMemo(() => {
+    const visible = projects.filter(p => !p.deletedAt);
+    const sorted = [...visible].sort((a, b) => {
+      if (a.isFocused && !b.isFocused) return -1;
+      if (!a.isFocused && b.isFocused) return 1;
+      return a.title.localeCompare(b.title);
+    });
+
+    const noAreaLabel = t('common.none');
+    const groups = new Map<string, Project[]>();
+    for (const project of sorted) {
+      const area = project.areaTitle?.trim() || noAreaLabel;
+      if (!groups.has(area)) groups.set(area, []);
+      groups.get(area)!.push(project);
+    }
+
+    return Array.from(groups.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([title, data]) => ({ title, data }));
+  }, [projects, t]);
 
   const handleAddProject = () => {
     if (newProjectTitle.trim()) {
@@ -124,14 +145,15 @@ export default function ProjectsScreen() {
         </TouchableOpacity>
       </View>
 
-      <FlatList
-        data={[...projects].sort((a, b) => {
-          if (a.isFocused && !b.isFocused) return -1;
-          if (!a.isFocused && b.isFocused) return 1;
-          return a.title.localeCompare(b.title);
-        })}
+      <SectionList
+        sections={groupedProjects}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
+        renderSectionHeader={({ section }) => (
+          <Text style={[styles.sectionHeader, { color: tc.secondaryText }]}>
+            {section.title}
+          </Text>
+        )}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={[styles.emptyText, { color: tc.secondaryText }]}>{t('projects.empty')}</Text>
@@ -304,11 +326,29 @@ export default function ProjectsScreen() {
 	                      }}
 	                    />
 	                  )}
-	                </View>
+		                </View>
 
-	                {/* Project Review Date (Tickler) */}
-	                <View style={[styles.reviewContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
-	                  <Text style={[styles.reviewLabel, { color: tc.text }]}>
+		                {/* Project Area */}
+		                <View style={[styles.reviewContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
+		                  <Text style={[styles.reviewLabel, { color: tc.text }]}>
+		                    {t('projects.areaLabel')}
+		                  </Text>
+		                  <TextInput
+		                    style={[styles.reviewButton, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
+		                    placeholder={t('projects.areaPlaceholder')}
+		                    placeholderTextColor={tc.secondaryText}
+		                    defaultValue={selectedProject.areaTitle || ''}
+		                    onEndEditing={(e) => {
+		                      const value = e.nativeEvent.text.trim();
+		                      updateProject(selectedProject.id, { areaTitle: value || undefined });
+		                      setSelectedProject({ ...selectedProject, areaTitle: value || undefined });
+		                    }}
+		                  />
+		                </View>
+
+		                {/* Project Review Date (Tickler) */}
+		                <View style={[styles.reviewContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
+		                  <Text style={[styles.reviewLabel, { color: tc.text }]}>
 	                    {t('projects.reviewAt') || 'Review Date'}
 	                  </Text>
 		                  <TouchableOpacity
@@ -429,6 +469,13 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 16,
+  },
+  sectionHeader: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginBottom: 6,
+    marginTop: 10,
   },
   projectItem: {
     flexDirection: 'row',

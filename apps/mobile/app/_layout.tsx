@@ -13,6 +13,7 @@ import { LanguageProvider } from '../contexts/language-context';
 import { setStorageAdapter, useTaskStore, flushPendingSave } from '@mindwtr/core';
 import { mobileStorage } from '../lib/storage-adapter';
 import { startMobileNotifications, stopMobileNotifications } from '../lib/notification-service';
+import { performMobileSync } from '../lib/sync-service';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { verifyPolyfills } from '../utils/verify-polyfills';
 
@@ -29,10 +30,18 @@ function RootLayoutContent() {
   const { isDark } = useTheme();
   const [storageWarningShown, setStorageWarningShown] = useState(false);
   const appState = useRef(AppState.currentState);
+  const lastAutoSyncAt = useRef(0);
 
   // Flush pending saves when app goes to background
   useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
+      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+        const now = Date.now();
+        if (now - lastAutoSyncAt.current > 30_000) {
+          lastAutoSyncAt.current = now;
+          performMobileSync().catch(console.error);
+        }
+      }
       if (appState.current === 'active' && nextAppState.match(/inactive|background/)) {
         // App is going to background - flush any pending saves
         flushPendingSave().catch(console.error);

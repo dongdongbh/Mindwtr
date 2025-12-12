@@ -132,6 +132,13 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
         setEditedTask(prev => ({ ...prev, contexts: newContexts }));
     };
 
+    const toggleBlocker = (blockerId: string) => {
+        const current = editedTask.blockedByTaskIds || [];
+        const exists = current.includes(blockerId);
+        const next = exists ? current.filter(id => id !== blockerId) : [...current, blockerId];
+        setEditedTask(prev => ({ ...prev, blockedByTaskIds: next }));
+    };
+
     return (
         <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
             <SafeAreaView style={styles.container} edges={['top']}>
@@ -353,9 +360,47 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                                 </View>
                             </View>
 
-	                            <View style={styles.formGroup}>
-	                                <Text style={styles.label}>{t('taskEdit.timeEstimateLabel')}</Text>
-	                                <View style={styles.statusContainer}>
+                            <View style={styles.formGroup}>
+                                <Text style={styles.label}>{t('taskEdit.blockedByLabel')}</Text>
+                                <View style={styles.suggestionsContainer}>
+                                    <View style={styles.suggestionTags}>
+                                        {tasks
+                                            .filter(otherTask =>
+                                                otherTask.id !== task.id &&
+                                                !otherTask.deletedAt &&
+                                                otherTask.status !== 'done' &&
+                                                otherTask.status !== 'archived'
+                                            )
+                                            .map(otherTask => {
+                                                const isActive = editedTask.blockedByTaskIds?.includes(otherTask.id);
+                                                return (
+                                                    <TouchableOpacity
+                                                        key={otherTask.id}
+                                                        style={[
+                                                            styles.suggestionChip,
+                                                            isActive && styles.suggestionChipActive
+                                                        ]}
+                                                        onPress={() => toggleBlocker(otherTask.id)}
+                                                    >
+                                                        <Text
+                                                            style={[
+                                                                styles.suggestionText,
+                                                                isActive && styles.suggestionTextActive
+                                                            ]}
+                                                            numberOfLines={1}
+                                                        >
+                                                            {otherTask.title}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                );
+                                            })}
+                                    </View>
+                                </View>
+                            </View>
+
+		                            <View style={styles.formGroup}>
+		                                <Text style={styles.label}>{t('taskEdit.timeEstimateLabel')}</Text>
+		                                <View style={styles.statusContainer}>
 	                                    {timeEstimateOptions.map(opt => (
 	                                        <TouchableOpacity
 	                                            key={opt.value || 'none'}

@@ -44,11 +44,13 @@ function CustomDrawerContent(props: any) {
 export default function DrawerLayout() {
   const { isDark } = useTheme();
   const { t } = useLanguage();
+  const { settings } = useTaskStore();
+  const accentColor = settings?.accentColor || '#3B82F6';
 
   return (
     <Drawer
       screenOptions={{
-        drawerActiveTintColor: '#3B82F6',
+        drawerActiveTintColor: accentColor,
         drawerInactiveTintColor: '#6B7280',
         headerShown: true,
         drawerStyle: {
@@ -143,7 +145,8 @@ export default function DrawerLayout() {
       <Drawer.Screen
         name="saved-search/[id]"
         options={{
-          drawerItemStyle: { display: 'none' },
+          drawerLabel: () => null,
+          drawerItemStyle: { height: 0 },
           title: t('search.savedSearches'),
         }}
       />

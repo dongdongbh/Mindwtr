@@ -7,6 +7,35 @@ import { getDeferredTaskUpdates, DeferPreset } from './defer-utils';
 
 let storage: StorageAdapter = noopStorage;
 
+function applyTaskUpdates(oldTask: Task, updates: Partial<Task>, now: string): { updatedTask: Task; nextRecurringTask: Task | null } {
+    const incomingStatus = updates.status ?? oldTask.status;
+    const statusChanged = incomingStatus !== oldTask.status;
+
+    let finalUpdates: Partial<Task> = updates;
+    let nextRecurringTask: Task | null = null;
+
+    if (statusChanged && (incomingStatus === 'done' || incomingStatus === 'archived')) {
+        finalUpdates = {
+            ...updates,
+            status: incomingStatus,
+            completedAt: now,
+            isFocusedToday: false,
+        };
+        nextRecurringTask = createNextRecurringTask(oldTask, now, oldTask.status);
+    } else if (statusChanged && (oldTask.status === 'done' || oldTask.status === 'archived')) {
+        finalUpdates = {
+            ...updates,
+            status: incomingStatus,
+            completedAt: undefined,
+        };
+    }
+
+    return {
+        updatedTask: { ...oldTask, ...finalUpdates, updatedAt: now },
+        nextRecurringTask,
+    };
+}
+
 /**
  * Configure the storage adapter to use for persistence.
  * Must be called before using the store.
@@ -45,6 +74,12 @@ interface TaskStore {
     moveTask: (id: string, newStatus: TaskStatus) => Promise<void>;
     /** Defer task dates using a preset */
     deferTask: (id: string, preset: DeferPreset) => Promise<void>;
+    /** Batch update multiple tasks */
+    batchUpdateTasks: (updates: Array<{ id: string; updates: Partial<Task> }>) => Promise<void>;
+    /** Batch move tasks to a status */
+    batchMoveTasks: (ids: string[], newStatus: TaskStatus) => Promise<void>;
+    /** Batch soft-delete tasks */
+    batchDeleteTasks: (ids: string[]) => Promise<void>;
 
     // Project Actions
     /** Add a new project */
@@ -201,36 +236,13 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
             return;
         }
 
-        const incomingStatus = updates.status ?? oldTask.status;
-        const statusChanged = incomingStatus !== oldTask.status;
-
-        let finalUpdates: Partial<Task> = updates;
-        let nextRecurringTask: Task | null = null;
-
-        if (statusChanged && (incomingStatus === 'done' || incomingStatus === 'archived')) {
-            finalUpdates = {
-                ...updates,
-                status: incomingStatus,
-                completedAt: now,
-                isFocusedToday: false,
-            };
-            nextRecurringTask = createNextRecurringTask(oldTask, now, oldTask.status);
-        } else if (statusChanged && (oldTask.status === 'done' || oldTask.status === 'archived')) {
-            // If un-completing, clear completedAt
-            finalUpdates = {
-                ...updates,
-                status: incomingStatus,
-                completedAt: undefined,
-            };
-        }
+        const { updatedTask, nextRecurringTask } = applyTaskUpdates(oldTask, updates, now);
 
         const newAllTasks = get()._allTasks.map((task) =>
-            task.id === id ? { ...task, ...finalUpdates, updatedAt: now } : task
+            task.id === id ? updatedTask : task
         );
 
-        if (nextRecurringTask) {
-            newAllTasks.push(nextRecurringTask);
-        }
+        if (nextRecurringTask) newAllTasks.push(nextRecurringTask);
 
         const newVisibleTasks = newAllTasks.filter((t) => !t.deletedAt);
         set({ tasks: newVisibleTasks, _allTasks: newAllTasks });
@@ -279,6 +291,52 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         if (!task) return;
         const updates = getDeferredTaskUpdates(task, preset, new Date());
         await get().updateTask(id, updates);
+    },
+
+    /**
+     * Batch update tasks in a single save cycle.
+     */
+    batchUpdateTasks: async (updatesList: Array<{ id: string; updates: Partial<Task> }>) => {
+        if (updatesList.length === 0) return;
+        const now = new Date().toISOString();
+        const updatesById = new Map(updatesList.map((u) => [u.id, u.updates]));
+        const nextRecurringTasks: Task[] = [];
+
+        const newAllTasks = get()._allTasks.map((task) => {
+            const updates = updatesById.get(task.id);
+            if (!updates) return task;
+            const { updatedTask, nextRecurringTask } = applyTaskUpdates(task, updates, now);
+            if (nextRecurringTask) nextRecurringTasks.push(nextRecurringTask);
+            return updatedTask;
+        });
+
+        if (nextRecurringTasks.length > 0) newAllTasks.push(...nextRecurringTasks);
+
+        const newVisibleTasks = newAllTasks.filter((t) => !t.deletedAt);
+        set({ tasks: newVisibleTasks, _allTasks: newAllTasks });
+        debouncedSave(
+            { tasks: newAllTasks, projects: get()._allProjects, settings: get().settings },
+            (msg) => set({ error: msg })
+        );
+    },
+
+    batchMoveTasks: async (ids: string[], newStatus: TaskStatus) => {
+        await get().batchUpdateTasks(ids.map((id) => ({ id, updates: { status: newStatus } })));
+    },
+
+    batchDeleteTasks: async (ids: string[]) => {
+        if (ids.length === 0) return;
+        const now = new Date().toISOString();
+        const idSet = new Set(ids);
+        const newAllTasks = get()._allTasks.map((task) =>
+            idSet.has(task.id) ? { ...task, deletedAt: now, updatedAt: now } : task
+        );
+        const newVisibleTasks = newAllTasks.filter((t) => !t.deletedAt);
+        set({ tasks: newVisibleTasks, _allTasks: newAllTasks });
+        debouncedSave(
+            { tasks: newAllTasks, projects: get()._allProjects, settings: get().settings },
+            (msg) => set({ error: msg })
+        );
     },
 
     /**

@@ -19,9 +19,9 @@ import { useTheme } from '../../contexts/theme-context';
 import { useLanguage, Language } from '../../contexts/language-context';
 
 import { useThemeColors } from '@/hooks/use-theme-colors';
-import { useTaskStore, mergeAppData } from '@mindwtr/core';
-import { mobileStorage } from '../../lib/storage-adapter';
-import { pickAndParseSyncFile, exportData, readSyncFile, writeSyncFile } from '../../lib/storage-file';
+import { useTaskStore } from '@mindwtr/core';
+import { pickAndParseSyncFile, exportData } from '../../lib/storage-file';
+import { performMobileSync, SYNC_PATH_KEY } from '../../lib/sync-service';
 
 type SettingsScreen = 'main' | 'appearance' | 'language' | 'notifications' | 'sync' | 'about';
 
@@ -29,8 +29,6 @@ const LANGUAGES: { id: Language; native: string }[] = [
     { id: 'en', native: 'English' },
     { id: 'zh', native: '中文' },
 ];
-
-const SYNC_PATH_KEY = '@mindwtr_sync_path';
 
 export default function SettingsPage() {
     const { themeMode, setThemeMode, isDark } = useTheme();
@@ -183,24 +181,14 @@ export default function SettingsPage() {
 
         setIsSyncing(true);
         try {
-            // Read from sync file
-            const incomingData = await readSyncFile(syncPath);
-            if (incomingData) {
-                // Read current data from storage (not store) to preserve tombstones
-                const currentData = await mobileStorage.getData();
-                const merged = mergeAppData(currentData, incomingData);
-
-                // Save to local storage
-                await mobileStorage.saveData(merged);
-
-                // Write back to sync file
-                await writeSyncFile(syncPath, merged);
-
-                await fetchData();
+            const result = await performMobileSync(syncPath);
+            if (result.success) {
                 Alert.alert(
                     language === 'zh' ? '成功' : 'Success',
                     language === 'zh' ? '同步完成！' : 'Sync completed!'
                 );
+            } else {
+                throw new Error(result.error || 'Unknown error');
             }
         } catch (error) {
             console.error(error);
@@ -270,6 +258,26 @@ export default function SettingsPage() {
                                 />
                             </View>
                         )}
+
+                        <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                            <View style={styles.settingInfo}>
+                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.accentColor')}</Text>
+                                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.accentDesc')}</Text>
+                            </View>
+                            <View style={styles.colorPickerRow}>
+                                {['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'].map(color => (
+                                    <TouchableOpacity
+                                        key={color}
+                                        onPress={() => updateSettings({ accentColor: color })}
+                                        style={[
+                                            styles.colorDot,
+                                            { backgroundColor: color },
+                                            settings.accentColor === color && styles.colorDotSelected
+                                        ]}
+                                    />
+                                ))}
+                            </View>
+                        </View>
                     </View>
                 </ScrollView>
             </SafeAreaView>
@@ -383,6 +391,31 @@ export default function SettingsPage() {
                             </View>
                             {isSyncing && <ActivityIndicator size="small" color="#3B82F6" />}
                         </TouchableOpacity>
+
+                        {/* Last Sync Status */}
+                        <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                            <View style={styles.settingInfo}>
+                                <Text style={[styles.settingLabel, { color: tc.text }]}>
+                                    {language === 'zh' ? '上次同步' : 'Last Sync'}
+                                </Text>
+                                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
+                                    {settings.lastSyncAt
+                                        ? new Date(settings.lastSyncAt).toLocaleString()
+                                        : (language === 'zh' ? '从未同步' : 'Never')}
+                                    {settings.lastSyncStatus === 'error' && (language === 'zh' ? '（失败）' : ' (failed)')}
+                                </Text>
+                                {settings.lastSyncStats && (
+                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
+                                        {(language === 'zh' ? '冲突' : 'Conflicts')}: {(settings.lastSyncStats.tasks.conflicts || 0) + (settings.lastSyncStats.projects.conflicts || 0)}
+                                    </Text>
+                                )}
+                                {settings.lastSyncStatus === 'error' && settings.lastSyncError && (
+                                    <Text style={[styles.settingDescription, { color: '#EF4444' }]}>
+                                        {settings.lastSyncError}
+                                    </Text>
+                                )}
+                            </View>
+                        </View>
                     </View>
 
                     {/* Backup Section */}
@@ -498,6 +531,9 @@ const styles = StyleSheet.create({
     settingDescription: { fontSize: 13, marginTop: 2 },
     settingValue: { fontSize: 16 },
     linkText: { fontSize: 16, color: '#3B82F6' },
+    colorPickerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    colorDot: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: 'transparent' },
+    colorDotSelected: { borderColor: '#111827' },
     helpBox: { borderRadius: 12, padding: 16, marginBottom: 8, borderWidth: 1 },
     helpTitle: { fontSize: 15, fontWeight: '600', marginBottom: 8 },
     helpText: { fontSize: 13, lineHeight: 20 },

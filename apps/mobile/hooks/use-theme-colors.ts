@@ -1,5 +1,6 @@
 import { Colors } from '../constants/theme';
 import { useTheme } from '../contexts/theme-context';
+import { useTaskStore } from '@mindwtr/core';
 
 export interface ThemeColors {
     bg: string;
@@ -17,6 +18,8 @@ export interface ThemeColors {
 
 export function useThemeColors() {
     const { isDark } = useTheme();
+    const { settings } = useTaskStore();
+    const accentColor = settings?.accentColor;
 
     const tc: ThemeColors = {
         bg: isDark ? Colors.dark.background : Colors.light.background,
@@ -24,7 +27,7 @@ export function useThemeColors() {
         text: isDark ? Colors.dark.text : Colors.light.text,
         secondaryText: isDark ? '#9CA3AF' : '#6B7280',
         border: isDark ? '#374151' : '#E5E7EB',
-        tint: isDark ? Colors.dark.tint : Colors.light.tint,
+        tint: accentColor || (isDark ? Colors.dark.tint : Colors.light.tint),
         inputBg: isDark ? '#374151' : '#F3F4F6',
         danger: '#EF4444',
         success: '#10B981',

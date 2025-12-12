@@ -1,5 +1,5 @@
 import { View, Text, ScrollView, Pressable, StyleSheet, TextInput } from 'react-native';
-import { useTaskStore, PRESET_CONTEXTS, sortTasks } from '@mindwtr/core';
+import { useTaskStore, PRESET_CONTEXTS, sortTasksBy, matchesHierarchicalToken, type TaskSortBy } from '@mindwtr/core';
 import type { Task, TaskStatus } from '@mindwtr/core';
 import { useState } from 'react';
 import { useTheme } from '../../contexts/theme-context';
@@ -12,7 +12,7 @@ import { SwipeableTaskItem } from '../swipeable-task-item';
 
 
 export function ContextsView() {
-  const { tasks, updateTask, deleteTask } = useTaskStore();
+  const { tasks, updateTask, deleteTask, settings } = useTaskStore();
   const { isDark } = useTheme();
   const { t } = useLanguage();
   const [selectedContext, setSelectedContext] = useState<string | null>(null);
@@ -34,12 +34,16 @@ export function ContextsView() {
   // ...
 
   const activeTasks = tasks.filter((t) => t.status !== 'done' && t.status !== 'archived' && !t.deletedAt);
+  const matchesSelected = (task: Task, context: string) => {
+    const tokens = [...(task.contexts || []), ...(task.tags || [])];
+    return tokens.some(token => matchesHierarchicalToken(context, token));
+  };
   const filteredTasks = selectedContext
-    ? activeTasks.filter((t) => t.contexts?.includes(selectedContext) || t.tags?.includes(selectedContext))
+    ? activeTasks.filter((t) => matchesSelected(t, selectedContext))
     : activeTasks.filter((t) => (t.contexts?.length || 0) > 0 || (t.tags?.length || 0) > 0);
 
-  // Use standard sort
-  const sortedTasks = sortTasks(filteredTasks);
+  const sortBy = (settings?.taskSortBy ?? 'default') as TaskSortBy;
+  const sortedTasks = sortTasksBy(filteredTasks, sortBy);
 
   const handleStatusChange = (taskId: string, newStatus: TaskStatus) => {
     updateTask(taskId, { status: newStatus });
@@ -103,7 +107,7 @@ export function ContextsView() {
           </Pressable>
 
           {filteredContexts.map((context) => {
-            const count = activeTasks.filter((t) => t.contexts?.includes(context) || t.tags?.includes(context)).length;
+            const count = activeTasks.filter((t) => matchesSelected(t, context)).length;
             return (
               <Pressable
                 key={context}
@@ -315,4 +319,3 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
-

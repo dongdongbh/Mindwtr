@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Plus, Play, X, Trash2, Moon, User, CheckCircle } from 'lucide-react';
-import { useTaskStore, TaskStatus, Task, PRESET_CONTEXTS, sortTasks, Project, parseQuickAdd } from '@mindwtr/core';
+import { useTaskStore, TaskStatus, Task, PRESET_CONTEXTS, sortTasksBy, Project, parseQuickAdd, isTaskBlocked, matchesHierarchicalToken } from '@mindwtr/core';
+import type { TaskSortBy } from '@mindwtr/core';
 import { TaskItem } from '../TaskItem';
 import { cn } from '../../lib/utils';
 import { useLanguage } from '../../contexts/language-context';
@@ -15,14 +16,22 @@ interface ListViewProps {
 type ProcessingStep = 'actionable' | 'twomin' | 'decide' | 'context' | 'project' | 'waiting-note';
 
 export function ListView({ title, statusFilter }: ListViewProps) {
-    const { tasks, projects, addTask, updateTask, deleteTask, moveTask } = useTaskStore();
+    const { tasks, projects, settings, updateSettings, addTask, updateTask, deleteTask, moveTask, batchMoveTasks, batchDeleteTasks, batchUpdateTasks } = useTaskStore();
     const { t } = useLanguage();
     const { registerTaskListScope } = useKeybindings();
+    const sortBy = (settings?.taskSortBy ?? 'default') as TaskSortBy;
     const [newTaskTitle, setNewTaskTitle] = useState('');
     const [selectedContext, setSelectedContext] = useState<string | null>(null);
     const [customContext, setCustomContext] = useState('');
     const [selectedIndex, setSelectedIndex] = useState(0);
+    const [selectionMode, setSelectionMode] = useState(false);
+    const [multiSelectedIds, setMultiSelectedIds] = useState<Set<string>>(new Set());
     const addInputRef = useRef<HTMLInputElement>(null);
+
+    const exitSelectionMode = useCallback(() => {
+        setSelectionMode(false);
+        setMultiSelectedIds(new Set());
+    }, []);
 
     // Inbox processing state
     const [isProcessing, setIsProcessing] = useState(false);
@@ -42,6 +51,13 @@ export function ListView({ title, statusFilter }: ListViewProps) {
             return acc;
         }, {} as Record<string, Project>);
     }, [projects]);
+
+    const tasksById = useMemo(() => {
+        return tasks.reduce((acc, task) => {
+            acc[task.id] = task;
+            return acc;
+        }, {} as Record<string, Task>);
+    }, [tasks]);
 
     // For sequential projects, get only the first (oldest) task to show in Next view
     const sequentialProjectFirstTasks = useMemo(() => {
@@ -86,16 +102,21 @@ export function ListView({ title, statusFilter }: ListViewProps) {
                 }
             }
 
-            if (selectedContext && !t.contexts?.includes(selectedContext)) return false;
+            if (statusFilter === 'next' && isTaskBlocked(t, tasksById)) return false;
+
+            if (selectedContext && !(t.contexts || []).some(ctx => matchesHierarchicalToken(selectedContext, ctx))) return false;
             return true;
         });
 
-        return sortTasks(filtered);
-    }, [tasks, projects, statusFilter, selectedContext, sequentialProjectFirstTasks, projectMap]);
+        return sortTasksBy(filtered, sortBy);
+    }, [tasks, projects, statusFilter, selectedContext, sequentialProjectFirstTasks, projectMap, sortBy]);
 
     useEffect(() => {
         setSelectedIndex(0);
-    }, [statusFilter, selectedContext]);
+        if (selectionMode) {
+            exitSelectionMode();
+        }
+    }, [statusFilter, selectedContext, selectionMode, exitSelectionMode]);
 
     useEffect(() => {
         if (filteredTasks.length === 0) {
@@ -197,6 +218,43 @@ export function ListView({ title, statusFilter }: ListViewProps) {
         });
         return counts;
     }, [tasks, statusFilter]);
+
+    const toggleMultiSelect = useCallback((taskId: string) => {
+        setMultiSelectedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(taskId)) next.delete(taskId);
+            else next.add(taskId);
+            return next;
+        });
+    }, []);
+
+    const selectedIdsArray = useMemo(() => Array.from(multiSelectedIds), [multiSelectedIds]);
+
+    const handleBatchMove = useCallback(async (newStatus: TaskStatus) => {
+        if (selectedIdsArray.length === 0) return;
+        await batchMoveTasks(selectedIdsArray, newStatus);
+        exitSelectionMode();
+    }, [batchMoveTasks, selectedIdsArray, exitSelectionMode]);
+
+    const handleBatchDelete = useCallback(async () => {
+        if (selectedIdsArray.length === 0) return;
+        await batchDeleteTasks(selectedIdsArray);
+        exitSelectionMode();
+    }, [batchDeleteTasks, selectedIdsArray, exitSelectionMode]);
+
+    const handleBatchAddTag = useCallback(async () => {
+        if (selectedIdsArray.length === 0) return;
+        const input = window.prompt(t('bulk.addTag'));
+        if (!input) return;
+        const tag = input.startsWith('#') ? input : `#${input}`;
+        await batchUpdateTasks(selectedIdsArray.map((id) => {
+            const task = tasksById[id];
+            const existingTags = task?.tags || [];
+            const nextTags = Array.from(new Set([...existingTags, tag]));
+            return { id, updates: { tags: nextTags } };
+        }));
+        exitSelectionMode();
+    }, [batchUpdateTasks, selectedIdsArray, tasksById, t, exitSelectionMode]);
 
     const handleAddTask = (e: React.FormEvent) => {
         e.preventDefault();
@@ -326,11 +384,72 @@ export function ListView({ title, statusFilter }: ListViewProps) {
                     {title}
                     {isNextView && <span className="ml-2 text-lg font-normal text-muted-foreground">({nextCount})</span>}
                 </h2>
-                <span className="text-muted-foreground text-sm">
-                    {filteredTasks.length} {t('common.tasks')}
-                    {selectedContext && <span className="ml-1 text-primary">• {selectedContext}</span>}
-                </span>
+                <div className="flex items-center gap-3">
+                    <span className="text-muted-foreground text-sm">
+                        {filteredTasks.length} {t('common.tasks')}
+                        {selectedContext && <span className="ml-1 text-primary">• {selectedContext}</span>}
+                    </span>
+                    <select
+                        value={sortBy}
+                        onChange={(e) => updateSettings({ taskSortBy: e.target.value as TaskSortBy })}
+                        aria-label={t('sort.label')}
+                        className="text-xs bg-muted/50 border border-border rounded px-2 py-1"
+                    >
+                        <option value="default">{t('sort.default')}</option>
+                        <option value="due">{t('sort.due')}</option>
+                        <option value="start">{t('sort.start')}</option>
+                        <option value="review">{t('sort.review')}</option>
+                        <option value="title">{t('sort.title')}</option>
+                        <option value="created">{t('sort.created')}</option>
+                        <option value="created-desc">{t('sort.created-desc')}</option>
+                    </select>
+                    <button
+                        onClick={() => {
+                            if (selectionMode) exitSelectionMode();
+                            else setSelectionMode(true);
+                        }}
+                        className={cn(
+                            "text-xs px-3 py-1 rounded-md border transition-colors",
+                            selectionMode
+                                ? "bg-primary/10 text-primary border-primary"
+                                : "bg-muted/50 text-muted-foreground border-border hover:bg-muted hover:text-foreground"
+                        )}
+                    >
+                        {selectionMode ? t('bulk.exitSelect') : t('bulk.select')}
+                    </button>
+                </div>
             </header>
+
+            {selectionMode && selectedIdsArray.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 bg-card border border-border rounded-lg p-3">
+                    <span className="text-sm text-muted-foreground">
+                        {selectedIdsArray.length} {t('bulk.selected')}
+                    </span>
+                    <div className="flex items-center gap-2">
+                        {(['inbox', 'todo', 'next', 'in-progress', 'waiting', 'someday'] as TaskStatus[]).map((status) => (
+                            <button
+                                key={status}
+                                onClick={() => handleBatchMove(status)}
+                                className="text-xs px-2 py-1 rounded bg-muted/50 hover:bg-muted transition-colors"
+                            >
+                                {t(`status.${status}`)}
+                            </button>
+                        ))}
+                    </div>
+                    <button
+                        onClick={handleBatchAddTag}
+                        className="text-xs px-2 py-1 rounded bg-muted/50 hover:bg-muted transition-colors"
+                    >
+                        {t('bulk.addTag')}
+                    </button>
+                    <button
+                        onClick={handleBatchDelete}
+                        className="text-xs px-2 py-1 rounded bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+                    >
+                        {t('bulk.delete')}
+                    </button>
+                </div>
+            )}
 
             {/* Next Actions Warning */}
             {isNextView && nextCount > NEXT_WARNING_THRESHOLD && (
@@ -667,16 +786,21 @@ export function ListView({ title, statusFilter }: ListViewProps) {
                         </p>
                     </div>
                 ) : (
-                    filteredTasks.map((task, index) => (
-                        <TaskItem
-                            key={task.id}
-                            task={task}
-                            project={task.projectId ? projectMap[task.projectId] : undefined}
-                            isSelected={index === selectedIndex}
-                            onSelect={() => setSelectedIndex(index)}
-                        />
-                    ))
-                )}
+	                    filteredTasks.map((task, index) => (
+	                        <TaskItem
+	                            key={task.id}
+	                            task={task}
+	                            project={task.projectId ? projectMap[task.projectId] : undefined}
+	                            isSelected={index === selectedIndex}
+	                            onSelect={() => {
+	                                if (!selectionMode) setSelectedIndex(index);
+	                            }}
+	                            selectionMode={selectionMode}
+	                            isMultiSelected={multiSelectedIds.has(task.id)}
+	                            onToggleSelect={() => toggleMultiSelect(task.id)}
+	                        />
+	                    ))
+	                )}
             </div>
         </div>
     );

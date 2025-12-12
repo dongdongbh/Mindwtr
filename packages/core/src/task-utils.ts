@@ -2,7 +2,7 @@
  * Utility functions for task operations
  */
 
-import { Task, TaskStatus } from './types';
+import { Task, TaskStatus, TaskSortBy } from './types';
 import type { Language } from './i18n';
 
 /**
@@ -61,6 +61,60 @@ export function sortTasks(tasks: Task[]): Task[] {
         // 3. Created At (oldest first for FIFO)
         return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
     });
+}
+
+/**
+ * Sort tasks by a user-selected sort option.
+ * Falls back to default sortTasks when sortBy is 'default' or undefined.
+ */
+export function sortTasksBy(tasks: Task[], sortBy: TaskSortBy = 'default'): Task[] {
+    if (!sortBy || sortBy === 'default') {
+        return sortTasks(tasks);
+    }
+
+    const copy = [...tasks];
+
+    const timeOrInfinity = (value?: string) => {
+        if (!value) return Infinity;
+        const parsed = new Date(value).getTime();
+        return Number.isFinite(parsed) ? parsed : Infinity;
+    };
+
+    switch (sortBy) {
+        case 'title':
+            return copy.sort((a, b) => {
+                const cmp = a.title.localeCompare(b.title);
+                if (cmp !== 0) return cmp;
+                return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+            });
+        case 'due':
+            return copy.sort((a, b) => {
+                const aDue = timeOrInfinity(a.dueDate);
+                const bDue = timeOrInfinity(b.dueDate);
+                if (aDue !== bDue) return aDue - bDue;
+                return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+            });
+        case 'start':
+            return copy.sort((a, b) => {
+                const aStart = timeOrInfinity(a.startTime);
+                const bStart = timeOrInfinity(b.startTime);
+                if (aStart !== bStart) return aStart - bStart;
+                return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+            });
+        case 'review':
+            return copy.sort((a, b) => {
+                const aReview = timeOrInfinity(a.reviewAt);
+                const bReview = timeOrInfinity(b.reviewAt);
+                if (aReview !== bReview) return aReview - bReview;
+                return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+            });
+        case 'created':
+            return copy.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        case 'created-desc':
+            return copy.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        default:
+            return sortTasks(tasks);
+    }
 }
 
 /**

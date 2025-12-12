@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mergeAppData, filterDeleted } from './sync';
+import { mergeAppData, mergeAppDataWithStats, filterDeleted } from './sync';
 import { AppData, Task, Project } from './types';
 
 describe('Sync Logic', () => {
@@ -101,6 +101,27 @@ describe('Sync Logic', () => {
             const merged = mergeAppData(local, incoming);
 
             expect(merged.settings.theme).toBe('dark');
+        });
+    });
+
+    describe('mergeAppDataWithStats', () => {
+        it('should report conflicts and resolution counts', () => {
+            const local = mockAppData([
+                createMockTask('1', '2023-01-02'),
+                createMockTask('2', '2023-01-01'),
+            ]);
+            const incoming = mockAppData([
+                createMockTask('1', '2023-01-01'), // older -> local wins conflict
+                createMockTask('3', '2023-01-01'), // incoming only
+            ]);
+
+            const result = mergeAppDataWithStats(local, incoming);
+
+            expect(result.data.tasks).toHaveLength(3);
+            expect(result.stats.tasks.localOnly).toBe(1);
+            expect(result.stats.tasks.incomingOnly).toBe(1);
+            expect(result.stats.tasks.conflicts).toBe(1);
+            expect(result.stats.tasks.resolvedUsingLocal).toBeGreaterThan(0);
         });
     });
 

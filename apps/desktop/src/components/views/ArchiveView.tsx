@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react';
-import { useTaskStore, sortTasks, safeFormatDate } from '@mindwtr/core';
+import { useTaskStore, sortTasksBy, safeFormatDate } from '@mindwtr/core';
+import type { TaskSortBy } from '@mindwtr/core';
 
 import { Undo2, Trash2 } from 'lucide-react';
 import { useLanguage } from '../../contexts/language-context';
 
 export function ArchiveView() {
-    const { tasks, updateTask, deleteTask } = useTaskStore();
+    const { tasks, updateTask, deleteTask, settings } = useTaskStore();
     const { t } = useLanguage();
     const [searchQuery, setSearchQuery] = useState('');
+    const sortBy = (settings?.taskSortBy ?? 'default') as TaskSortBy;
 
     const archivedTasks = useMemo(() => {
         // Show tasks that are done or archived
@@ -16,14 +18,14 @@ export function ArchiveView() {
         );
 
         // Use standard sort
-        const sorted = sortTasks(filtered);
+        const sorted = sortTasksBy(filtered, sortBy);
 
         if (!searchQuery) return sorted;
 
         return sorted.filter(t =>
             t.title.toLowerCase().includes(searchQuery.toLowerCase())
         );
-    }, [tasks, searchQuery]);
+    }, [tasks, searchQuery, sortBy]);
 
     const handleRestore = (taskId: string) => {
         updateTask(taskId, { status: 'inbox' }); // Restore to inbox? Or previous status? Inbox is safest.
