@@ -185,7 +185,8 @@ export default function SettingsPage() {
             // Read from sync file
             const incomingData = await readSyncFile(syncPath);
             if (incomingData) {
-                const currentData = { tasks, projects, settings };
+                // Read current data from storage (not store) to preserve tombstones
+                const currentData = await mobileStorage.getData();
                 const merged = mergeAppData(currentData, incomingData);
 
                 // Save to local storage

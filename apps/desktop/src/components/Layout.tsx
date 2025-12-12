@@ -51,9 +51,11 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
             {/* Sidebar */}
             <aside className="w-64 border-r border-border bg-card p-4 flex flex-col">
                 <div className="flex items-center gap-2 px-2 mb-4">
-                    <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                        <CheckSquare className="w-5 h-5 text-primary-foreground" />
-                    </div>
+                    <img
+                        src="/logo.png"
+                        alt="Mindwtr"
+                        className="w-8 h-8 rounded-lg"
+                    />
                     <h1 className="text-xl font-bold">{t('app.name')}</h1>
                 </div>
 

@@ -38,13 +38,13 @@ export function SomedayView() {
       <View style={[styles.stats, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
         <View style={styles.statItem}>
           <Text style={styles.statValue}>{somedayTasks.length}</Text>
-          <Text style={styles.statLabel}>Ideas</Text>
+          <Text style={styles.statLabel}>{t('someday.ideas')}</Text>
         </View>
         <View style={styles.statItem}>
           <Text style={styles.statValue}>
             {somedayTasks.filter((t) => t.projectId).length}
           </Text>
-          <Text style={styles.statLabel}>In Projects</Text>
+          <Text style={styles.statLabel}>{t('someday.inProjects')}</Text>
         </View>
       </View>
 
@@ -64,10 +64,9 @@ export function SomedayView() {
         ) : (
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>💭</Text>
-            <Text style={styles.emptyTitle}>No someday/maybe items</Text>
+            <Text style={styles.emptyTitle}>{t('someday.empty')}</Text>
             <Text style={styles.emptyText}>
-              Use {`"Someday"`} status for ideas, goals, and projects you might want to do in
-              the future but aren{"'"}t ready to commit to now
+              {t('someday.emptyHint')}
             </Text>
           </View>
         )}

@@ -221,7 +221,7 @@ export function ListView({ title, statusFilter }: ListViewProps) {
                     {isNextView && <span className="ml-2 text-lg font-normal text-muted-foreground">({nextCount})</span>}
                 </h2>
                 <span className="text-muted-foreground text-sm">
-                    {filteredTasks.length} tasks
+                    {filteredTasks.length} {t('common.tasks')}
                     {selectedContext && <span className="ml-1 text-primary">• {selectedContext}</span>}
                 </span>
             </header>
@@ -503,7 +503,7 @@ export function ListView({ title, statusFilter }: ListViewProps) {
                                 : "bg-muted hover:bg-muted/80 text-muted-foreground"
                         )}
                     >
-                        All
+                        {t('common.all')}
                     </button>
                     {allContexts.map(context => (
                         <button
@@ -550,8 +550,8 @@ export function ListView({ title, statusFilter }: ListViewProps) {
                     <div className="text-center py-12 text-muted-foreground">
                         <p>
                             {selectedContext
-                                ? `No tasks with ${selectedContext} in ${title}.`
-                                : `No tasks found in ${title}.`}
+                                ? t('next.noContext') + ` ${selectedContext}`
+                                : t('list.noTasks') || `${t('contexts.noTasks')}`}
                         </p>
                     </div>
                 ) : (

@@ -1,5 +1,5 @@
 import { View, Text, ScrollView, Pressable, TextInput, StyleSheet } from 'react-native';
-import { useTaskStore } from '@mindwtr/core';
+import { useTaskStore, safeParseDate } from '@mindwtr/core';
 import type { Task } from '@mindwtr/core';
 import { useState } from 'react';
 import { useTheme } from '../../contexts/theme-context';
@@ -57,7 +57,8 @@ export function CalendarView() {
     const date = new Date(currentYear, currentMonth, day);
     return tasks.filter((task) => {
       if (!task.dueDate) return false;
-      return isSameDay(new Date(task.dueDate), date);
+      const dueDate = safeParseDate(task.dueDate);
+      return dueDate && isSameDay(dueDate, date);
     });
   };
 
@@ -206,10 +207,13 @@ export function CalendarView() {
                   </Text>
                   {task.startTime && (
                     <Text style={[styles.taskItemTime, { color: tc.secondaryText }]}>
-                      {new Date(task.startTime).toLocaleTimeString('en-US', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
+                      {(() => {
+                        const date = safeParseDate(task.startTime);
+                        return date ? date.toLocaleTimeString('en-US', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        }) : '';
+                      })()}
                     </Text>
                   )}
                 </View>

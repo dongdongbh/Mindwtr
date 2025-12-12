@@ -1,9 +1,10 @@
 import { useState, memo } from 'react';
-import { format } from 'date-fns';
+
 import { Calendar as CalendarIcon, Tag, Trash2, ArrowRight, Repeat, Check, Plus, Clock, Timer } from 'lucide-react';
-import { Task, TaskStatus, TimeEstimate, getTaskAgeLabel, getTaskStaleness, getTaskUrgency, getStatusColor, Project } from '@mindwtr/core';
+import { Task, TaskStatus, TimeEstimate, getTaskAgeLabel, getTaskStaleness, getTaskUrgency, getStatusColor, Project, safeFormatDate } from '@mindwtr/core';
 import { useTaskStore } from '@mindwtr/core';
 import { cn } from '../lib/utils';
+
 
 interface TaskItemProps {
     task: Task;
@@ -132,6 +133,7 @@ export const TaskItem = memo(function TaskItem({ task, project: propProject }: T
                                         <option value="waiting">Waiting</option>
                                         <option value="someday">Someday</option>
                                         <option value="done">Done</option>
+                                        <option value="archived">Archived</option>
                                     </select>
                                 </div>
                                 <div className="flex flex-col gap-1">
@@ -201,7 +203,7 @@ export const TaskItem = memo(function TaskItem({ task, project: propProject }: T
                                         className="text-xs bg-muted/50 border border-border rounded px-2 py-1 w-full"
                                     />
                                     <div className="flex flex-wrap gap-2 pt-1">
-                                        {['@home', '@work', '@errand', '@computer', '@phone'].map(tag => {
+                                        {['@home', '@work', '@errands', '@computer', '@phone'].map(tag => {
                                             const currentTags = editContexts.split(',').map(t => t.trim()).filter(Boolean);
                                             const isActive = currentTags.includes(tag);
                                             return (
@@ -297,8 +299,9 @@ export const TaskItem = memo(function TaskItem({ task, project: propProject }: T
                                                 <button
                                                     type="button"
                                                     onClick={() => {
-                                                        const newList = [...(task.checklist || [])];
-                                                        newList[index].isCompleted = !newList[index].isCompleted;
+                                                        const newList = (task.checklist || []).map((item, i) =>
+                                                            i === index ? { ...item, isCompleted: !item.isCompleted } : item
+                                                        );
                                                         updateTask(task.id, { checklist: newList });
                                                     }}
                                                     className={cn(
@@ -314,8 +317,9 @@ export const TaskItem = memo(function TaskItem({ task, project: propProject }: T
                                                     type="text"
                                                     value={item.title}
                                                     onChange={(e) => {
-                                                        const newList = [...(task.checklist || [])];
-                                                        newList[index].title = e.target.value;
+                                                        const newList = (task.checklist || []).map((item, i) =>
+                                                            i === index ? { ...item, title: e.target.value } : item
+                                                        );
                                                         updateTask(task.id, { checklist: newList });
                                                     }}
                                                     className={cn(
@@ -426,13 +430,13 @@ export const TaskItem = memo(function TaskItem({ task, project: propProject }: T
                                 {task.startTime && (
                                     <div className="flex items-center gap-1 text-blue-500/80" title="Start Time">
                                         <ArrowRight className="w-3 h-3" />
-                                        {format(new Date(task.startTime), 'MMM d, HH:mm')}
+                                        {safeFormatDate(task.startTime, 'MMM d, HH:mm')}
                                     </div>
                                 )}
                                 {task.dueDate && (
                                     <div className={cn("flex items-center gap-1", getUrgencyColor())} title="Deadline">
                                         <CalendarIcon className="w-3 h-3" />
-                                        {format(new Date(task.dueDate), 'MMM d, HH:mm')}
+                                        {safeFormatDate(task.dueDate, 'MMM d, HH:mm')}
                                     </div>
                                 )}
                                 {task.location && (
@@ -508,6 +512,7 @@ export const TaskItem = memo(function TaskItem({ task, project: propProject }: T
                             <option value="someday">Someday</option>
                             <option value="waiting">Waiting</option>
                             <option value="done">Done</option>
+                            <option value="archived">Archived</option>
                         </select>
 
                         <button

@@ -1,7 +1,7 @@
 import { View, Text, SectionList, Pressable, StyleSheet } from 'react-native';
 import { useMemo, useState, useCallback } from 'react';
 
-import { useTaskStore, Task } from '@mindwtr/core';
+import { useTaskStore, Task, safeFormatDate, safeParseDate } from '@mindwtr/core';
 
 import { useLanguage } from '../../../contexts/language-context';
 
@@ -35,9 +35,10 @@ function TaskCard({ task, onPress, onToggleFocus, tc, focusedCount }: {
     return labels[status] || status;
   };
 
-  const isOverdue = task.dueDate && new Date(task.dueDate) < new Date();
-  const isDueToday = task.dueDate &&
-    new Date(task.dueDate).toDateString() === new Date().toDateString();
+  const dueDate = safeParseDate(task.dueDate);
+  const now = new Date();
+  const isOverdue = dueDate && dueDate < now;
+  const isDueToday = dueDate && dueDate.toDateString() === now.toDateString();
 
   // Can focus if: already focused, or we have room for more
   const canFocus = task.isFocusedToday || (focusedCount !== undefined && focusedCount < 3);
@@ -81,7 +82,7 @@ function TaskCard({ task, onPress, onToggleFocus, tc, focusedCount }: {
               isDueToday && styles.dueToday,
             ]}>
               {isOverdue ? '🔴 Overdue' : isDueToday ? '🟡 Today' :
-                new Date(task.dueDate).toLocaleDateString()}
+                safeFormatDate(task.dueDate, 'P')}
             </Text>
           )}
         </View>
@@ -117,18 +118,26 @@ export default function AgendaScreen() {
     const focusedTasks = activeTasks.filter(t => t.isFocusedToday);
 
     const inProgressTasks = activeTasks.filter(t => t.status === 'in-progress' && !t.isFocusedToday);
-    const overdueTasks = activeTasks.filter(t =>
-      t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'in-progress' && !t.isFocusedToday
-    );
-    const todayTasks = activeTasks.filter(t =>
-      t.dueDate &&
-      new Date(t.dueDate).toDateString() === new Date().toDateString() &&
-      t.status !== 'in-progress' && !t.isFocusedToday
-    );
+    const overdueTasks = activeTasks.filter(t => {
+      const dd = safeParseDate(t.dueDate);
+      return dd && dd < new Date() && t.status !== 'in-progress' && !t.isFocusedToday;
+    });
+    const todayTasks = activeTasks.filter(t => {
+      const dd = safeParseDate(t.dueDate);
+      return dd && dd.toDateString() === new Date().toDateString() &&
+        t.status !== 'in-progress' && !t.isFocusedToday;
+    });
     const nextTasks = activeTasks.filter(t => t.status === 'next' && !t.isFocusedToday).slice(0, 5);
     const upcomingTasks = activeTasks
-      .filter(t => t.dueDate && new Date(t.dueDate) > new Date() && t.status !== 'in-progress' && !t.isFocusedToday)
-      .sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime())
+      .filter(t => {
+        const dd = safeParseDate(t.dueDate);
+        return dd && dd > new Date() && t.status !== 'in-progress' && !t.isFocusedToday;
+      })
+      .sort((a, b) => {
+        const da = safeParseDate(a.dueDate);
+        const db = safeParseDate(b.dueDate);
+        return (da ? da.getTime() : 0) - (db ? db.getTime() : 0);
+      })
       .slice(0, 5);
 
     const result = [];

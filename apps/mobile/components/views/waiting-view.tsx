@@ -43,13 +43,13 @@ export function WaitingView() {
       <View style={[styles.stats, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
         <View style={styles.statItem}>
           <Text style={styles.statValue}>{waitingTasks.length}</Text>
-          <Text style={styles.statLabel}>Waiting</Text>
+          <Text style={styles.statLabel}>{t('waiting.count')}</Text>
         </View>
         <View style={styles.statItem}>
           <Text style={styles.statValue}>
             {waitingTasks.filter((t) => t.dueDate).length}
           </Text>
-          <Text style={styles.statLabel}>With Deadline</Text>
+          <Text style={styles.statLabel}>{t('waiting.withDeadline')}</Text>
         </View>
       </View>
 
@@ -69,9 +69,9 @@ export function WaitingView() {
         ) : (
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>⏸️</Text>
-            <Text style={styles.emptyTitle}>No waiting tasks</Text>
+            <Text style={styles.emptyTitle}>{t('waiting.empty')}</Text>
             <Text style={styles.emptyText}>
-              Use {`"Waiting"`} status for tasks that depend on others or external events
+              {t('waiting.emptyHint')}
             </Text>
           </View>
         )}

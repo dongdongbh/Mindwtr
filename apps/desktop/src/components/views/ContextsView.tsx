@@ -3,9 +3,11 @@ import { useTaskStore } from '@mindwtr/core';
 import { TaskItem } from '../TaskItem';
 import { Tag, Filter } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { useLanguage } from '../../contexts/language-context';
 
 export function ContextsView() {
     const { tasks } = useTaskStore();
+    const { t } = useLanguage();
     const [selectedContext, setSelectedContext] = useState<string | null>(null);
 
     // Filter out deleted tasks first
@@ -25,7 +27,7 @@ export function ContextsView() {
             {/* Sidebar List of Contexts */}
             <div className="w-64 flex-shrink-0 flex flex-col gap-4 border-r border-border pr-6">
                 <div className="flex items-center justify-between">
-                    <h2 className="text-xl font-bold tracking-tight">Contexts</h2>
+                    <h2 className="text-xl font-bold tracking-tight">{t('contexts.title')}</h2>
                     <Filter className="w-5 h-5 text-muted-foreground" />
                 </div>
 
@@ -38,7 +40,7 @@ export function ContextsView() {
                         )}
                     >
                         <Tag className="w-4 h-4" />
-                        <span className="flex-1">All Contexts</span>
+                        <span className="flex-1">{t('contexts.all')}</span>
                         <span className="text-xs text-muted-foreground">
                             {activeTasks.filter(t => ((t.contexts?.length || 0) > 0 || (t.tags?.length || 0) > 0) && t.status !== 'done').length}
                         </span>
@@ -63,7 +65,7 @@ export function ContextsView() {
 
                     {allContexts.length === 0 && (
                         <div className="text-sm text-muted-foreground text-center py-8">
-                            No contexts found. Add contexts like "@home" to your tasks.
+                            {t('contexts.noContexts')}
                         </div>
                     )}
                 </div>
@@ -77,10 +79,10 @@ export function ContextsView() {
                     </div>
                     <div>
                         <h2 className="text-2xl font-bold">
-                            {selectedContext ? selectedContext : 'All Contexts'}
+                            {selectedContext ? selectedContext : t('contexts.all')}
                         </h2>
                         <p className="text-muted-foreground text-sm">
-                            {filteredTasks.length} active tasks
+                            {filteredTasks.length} {t('common.tasks')}
                         </p>
                     </div>
                 </header>
@@ -92,7 +94,7 @@ export function ContextsView() {
                         ))
                     ) : (
                         <div className="text-center text-muted-foreground py-12">
-                            No active tasks found for this context.
+                            {t('contexts.noTasks')}
                         </div>
                     )}
                 </div>

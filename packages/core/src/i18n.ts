@@ -37,6 +37,7 @@ export const translations: Record<Language, Record<string, string>> = {
         'list.someday': 'Someday/Maybe',
         'list.waiting': 'Waiting For',
         'list.done': 'Completed',
+        'list.noTasks': 'No tasks found',
 
         // Inbox (Mobile)
         'inbox.title': 'Inbox',
@@ -197,6 +198,7 @@ export const translations: Record<Language, Record<string, string>> = {
         'review.deadline': 'Deadline',
         'review.contexts': 'Contexts',
         'review.markDone': 'Mark Done',
+        'review.noTasks': 'No tasks to review',
 
         // Processing
         'process.title': 'Process Item',
@@ -351,6 +353,7 @@ export const translations: Record<Language, Record<string, string>> = {
         'list.someday': '将来/也许',
         'list.waiting': '等待中',
         'list.done': '已完成',
+        'list.noTasks': '未找到任务',
 
         // Inbox (Mobile)
         'inbox.title': '收集箱',
@@ -511,6 +514,7 @@ export const translations: Record<Language, Record<string, string>> = {
         'review.deadline': '截止时间',
         'review.contexts': '情境',
         'review.markDone': '标记完成',
+        'review.noTasks': '没有要回顾的任务',
 
         // Processing
         'process.title': '处理事项',

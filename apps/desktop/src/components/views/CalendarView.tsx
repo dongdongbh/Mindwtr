@@ -1,6 +1,6 @@
 import React from 'react';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, isToday } from 'date-fns';
-import { useTaskStore } from '@mindwtr/core';
+import { useTaskStore, safeParseDate } from '@mindwtr/core';
 import { cn } from '../../lib/utils';
 
 export function CalendarView() {
@@ -18,7 +18,8 @@ export function CalendarView() {
     const getTasksForDay = (date: Date) => {
         return tasks.filter(task => {
             if (!task.dueDate) return false;
-            return isSameDay(new Date(task.dueDate), date);
+            const dueDate = safeParseDate(task.dueDate);
+            return dueDate && isSameDay(dueDate, date);
         });
     };
 

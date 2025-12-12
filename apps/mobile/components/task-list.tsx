@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { View, TextInput, FlatList, StyleSheet, TouchableOpacity, Text, RefreshControl } from 'react-native';
 import { router } from 'expo-router';
-import { useTaskStore, Task, TaskStatus } from '@mindwtr/core';
+import { useTaskStore, Task, TaskStatus, sortTasks } from '@mindwtr/core';
 
 
 import { TaskEditModal } from './task-edit-modal';
@@ -31,15 +31,16 @@ export function TaskList({ statusFilter, title, allowAdd = true, projectId }: Ta
   // Dynamic colors based on theme
   const themeColors = useThemeColors();
 
-  // Memoize filtered tasks for performance
+  // Memoize filtered and sorted tasks for performance
   const filteredTasks = useMemo(() => {
-    return tasks.filter(t => {
+    const filtered = tasks.filter(t => {
       // Filter out soft-deleted tasks
       if (t.deletedAt) return false;
       const matchesStatus = statusFilter === 'all' ? true : t.status === statusFilter;
       const matchesProject = projectId ? t.projectId === projectId : true;
       return matchesStatus && matchesProject;
     });
+    return sortTasks(filtered);
   }, [tasks, statusFilter, projectId]);
 
   const onRefresh = useCallback(async () => {
@@ -123,7 +124,7 @@ export function TaskList({ statusFilter, title, allowAdd = true, projectId }: Ta
         <View style={[styles.inputContainer, { borderBottomColor: themeColors.border }]}>
           <TextInput
             style={[styles.input, { backgroundColor: themeColors.inputBg, borderColor: themeColors.border, color: themeColors.text }]}
-            placeholder={`Add task to ${title}... (/todo, /due:, /note:)`}
+            placeholder={t('inbox.addPlaceholder')}
             placeholderTextColor={themeColors.secondaryText}
             value={newTaskTitle}
             onChangeText={setNewTaskTitle}
@@ -154,15 +155,10 @@ export function TaskList({ statusFilter, title, allowAdd = true, projectId }: Ta
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
-        getItemLayout={(_, index) => ({
-          length: 72,
-          offset: 72 * index,
-          index,
-        })}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>
-              {`No tasks in ${title}`}
+              {t('list.noTasks')}
             </Text>
           </View>
         }

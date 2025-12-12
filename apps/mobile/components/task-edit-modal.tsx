@@ -166,8 +166,9 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                                 <View key={item.id || index} style={styles.checklistItem}>
                                     <TouchableOpacity
                                         onPress={() => {
-                                            const newChecklist = [...(editedTask.checklist || [])];
-                                            newChecklist[index].isCompleted = !newChecklist[index].isCompleted;
+                                            const newChecklist = (editedTask.checklist || []).map((item, i) =>
+                                                i === index ? { ...item, isCompleted: !item.isCompleted } : item
+                                            );
                                             setEditedTask(prev => ({ ...prev, checklist: newChecklist }));
                                         }}
                                         style={styles.checkboxTouch}
@@ -182,8 +183,9 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                                         style={[styles.checklistInput, { fontSize: 18, paddingVertical: 8 }, item.isCompleted && styles.completedText]}
                                         value={item.title}
                                         onChangeText={(text) => {
-                                            const newChecklist = [...(editedTask.checklist || [])];
-                                            newChecklist[index].title = text;
+                                            const newChecklist = (editedTask.checklist || []).map((item, i) =>
+                                                i === index ? { ...item, title: text } : item
+                                            );
                                             setEditedTask(prev => ({ ...prev, checklist: newChecklist }));
                                         }}
                                         placeholder="Item name"
@@ -379,8 +381,9 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                                         <View key={item.id || index} style={styles.checklistItem}>
                                             <TouchableOpacity
                                                 onPress={() => {
-                                                    const newChecklist = [...(editedTask.checklist || [])];
-                                                    newChecklist[index].isCompleted = !newChecklist[index].isCompleted;
+                                                    const newChecklist = (editedTask.checklist || []).map((item, i) =>
+                                                        i === index ? { ...item, isCompleted: !item.isCompleted } : item
+                                                    );
                                                     setEditedTask(prev => ({ ...prev, checklist: newChecklist }));
                                                 }}
                                                 style={styles.checkboxTouch}
@@ -393,8 +396,9 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                                                 style={[styles.checklistInput, item.isCompleted && styles.completedText]}
                                                 value={item.title}
                                                 onChangeText={(text) => {
-                                                    const newChecklist = [...(editedTask.checklist || [])];
-                                                    newChecklist[index].title = text;
+                                                    const newChecklist = (editedTask.checklist || []).map((item, i) =>
+                                                        i === index ? { ...item, title: text } : item
+                                                    );
                                                     setEditedTask(prev => ({ ...prev, checklist: newChecklist }));
                                                 }}
                                                 placeholder="Item name"

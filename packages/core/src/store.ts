@@ -15,6 +15,9 @@ export const setStorageAdapter = (adapter: StorageAdapter) => {
 
 /**
  * Core application state interface.
+ * 
+ * IMPORTANT: `tasks` and `projects` contain only VISIBLE (non-deleted) items for UI.
+ * The store internally tracks ALL items (including soft-deleted) for persistence.
  */
 interface TaskStore {
     tasks: Task[];
@@ -22,6 +25,10 @@ interface TaskStore {
     settings: AppData['settings'];
     isLoading: boolean;
     error: string | null;
+
+    // Internal: full data including tombstones (not exposed to UI)
+    _allTasks: Task[];
+    _allProjects: Project[];
 
     // Actions
     /** Load all data from storage */
@@ -58,7 +65,7 @@ let pendingOnError: ((msg: string) => void) | null = null;
 /**
  * Save data with a debounce delay.
  * Captures current state snapshot immediately to avoid race conditions.
- * @param data Snapshot of data to save
+ * @param data Snapshot of data to save (must include ALL items including tombstones)
  * @param onError Callback for save failures
  */
 const debouncedSave = (data: AppData, onError?: (msg: string) => void) => {
@@ -111,20 +118,32 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     settings: {},
     isLoading: false,
     error: null,
+    // Internal: full data including tombstones
+    _allTasks: [],
+    _allProjects: [],
 
     /**
      * Fetch all data from the configured storage adapter.
-     * hydration is handled here.
+     * Stores full data internally, filters for UI display.
      */
     fetchData: async () => {
         set({ isLoading: true, error: null });
         try {
             const data = await storage.getData();
+            // Store ALL data including tombstones for persistence
+            const allTasks = data.tasks || [];
+            const allProjects = data.projects || [];
             // Filter out soft-deleted items for UI display
-            const activeTasks = data.tasks.filter(t => !t.deletedAt);
-            const activeProjects = (data.projects || []).filter(p => !p.deletedAt);
-            // Preserve settings from storage
-            set({ tasks: activeTasks, projects: activeProjects, settings: data.settings || {}, isLoading: false });
+            const visibleTasks = allTasks.filter(t => !t.deletedAt);
+            const visibleProjects = allProjects.filter(p => !p.deletedAt);
+            set({
+                tasks: visibleTasks,
+                projects: visibleProjects,
+                settings: data.settings || {},
+                _allTasks: allTasks,
+                _allProjects: allProjects,
+                isLoading: false
+            });
         } catch (err) {
             set({ error: 'Failed to fetch data', isLoading: false });
         }
@@ -147,10 +166,11 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
             ...initialProps,
         };
 
-        const newTasks = [...get().tasks, newTask];
-        set({ tasks: newTasks });
+        const newAllTasks = [...get()._allTasks, newTask];
+        const newVisibleTasks = [...get().tasks, newTask];
+        set({ tasks: newVisibleTasks, _allTasks: newAllTasks });
         debouncedSave(
-            { tasks: newTasks, projects: get().projects, settings: get().settings },
+            { tasks: newAllTasks, projects: get()._allProjects, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -161,14 +181,18 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
      * @param updates Properties to update
      */
     updateTask: async (id: string, updates: Partial<Task>) => {
-        const newTasks = get().tasks.map((task) =>
-            task.id === id
-                ? { ...task, ...updates, updatedAt: new Date().toISOString() }
-                : task
+        const now = new Date().toISOString();
+        // Update in full data
+        const newAllTasks = get()._allTasks.map((task) =>
+            task.id === id ? { ...task, ...updates, updatedAt: now } : task
         );
-        set({ tasks: newTasks });
+        // Update visible tasks
+        const newVisibleTasks = get().tasks.map((task) =>
+            task.id === id ? { ...task, ...updates, updatedAt: now } : task
+        );
+        set({ tasks: newVisibleTasks, _allTasks: newAllTasks });
         debouncedSave(
-            { tasks: newTasks, projects: get().projects, settings: get().settings },
+            { tasks: newAllTasks, projects: get()._allProjects, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -178,19 +202,17 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
      * @param id Task ID
      */
     deleteTask: async (id: string) => {
-        // Soft-delete: set deletedAt instead of removing
         const now = new Date().toISOString();
-        const allTasks = get().tasks.map((task) =>
-            task.id === id
-                ? { ...task, deletedAt: now, updatedAt: now }
-                : task
+        // Update in full data (set tombstone)
+        const newAllTasks = get()._allTasks.map((task) =>
+            task.id === id ? { ...task, deletedAt: now, updatedAt: now } : task
         );
         // Filter for UI state (hide deleted)
-        const visibleTasks = allTasks.filter(t => !t.deletedAt);
-        set({ tasks: visibleTasks });
-        // Save with all data (including deleted for sync)
+        const newVisibleTasks = newAllTasks.filter(t => !t.deletedAt);
+        set({ tasks: newVisibleTasks, _allTasks: newAllTasks });
+        // Save with all data including tombstones
         debouncedSave(
-            { tasks: allTasks, projects: get().projects, settings: get().settings },
+            { tasks: newAllTasks, projects: get()._allProjects, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -201,14 +223,18 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
      * @param newStatus New status
      */
     moveTask: async (id: string, newStatus: TaskStatus) => {
-        const newTasks = get().tasks.map((task) =>
-            task.id === id
-                ? { ...task, status: newStatus, updatedAt: new Date().toISOString() }
-                : task
+        const now = new Date().toISOString();
+        // Update in full data
+        const newAllTasks = get()._allTasks.map((task) =>
+            task.id === id ? { ...task, status: newStatus, updatedAt: now } : task
         );
-        set({ tasks: newTasks });
+        // Update visible tasks
+        const newVisibleTasks = get().tasks.map((task) =>
+            task.id === id ? { ...task, status: newStatus, updatedAt: now } : task
+        );
+        set({ tasks: newVisibleTasks, _allTasks: newAllTasks });
         debouncedSave(
-            { tasks: newTasks, projects: get().projects, settings: get().settings },
+            { tasks: newAllTasks, projects: get()._allProjects, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -227,10 +253,11 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
         };
-        const newProjects = [...get().projects, newProject];
-        set({ projects: newProjects });
+        const newAllProjects = [...get()._allProjects, newProject];
+        const newVisibleProjects = [...get().projects, newProject];
+        set({ projects: newVisibleProjects, _allProjects: newAllProjects });
         debouncedSave(
-            { tasks: get().tasks, projects: newProjects, settings: get().settings },
+            { tasks: get()._allTasks, projects: newAllProjects, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -241,12 +268,16 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
      * @param updates Properties to update
      */
     updateProject: async (id: string, updates: Partial<Project>) => {
-        const newProjects = get().projects.map((project) =>
-            project.id === id ? { ...project, ...updates, updatedAt: new Date().toISOString() } : project
+        const now = new Date().toISOString();
+        const newAllProjects = get()._allProjects.map((project) =>
+            project.id === id ? { ...project, ...updates, updatedAt: now } : project
         );
-        set({ projects: newProjects });
+        const newVisibleProjects = get().projects.map((project) =>
+            project.id === id ? { ...project, ...updates, updatedAt: now } : project
+        );
+        set({ projects: newVisibleProjects, _allProjects: newAllProjects });
         debouncedSave(
-            { tasks: get().tasks, projects: newProjects, settings: get().settings },
+            { tasks: get()._allTasks, projects: newAllProjects, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -256,26 +287,29 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
      * @param id Project ID
      */
     deleteProject: async (id: string) => {
-        // Soft-delete: set deletedAt instead of removing
         const now = new Date().toISOString();
-        const allProjects = get().projects.map((project) =>
-            project.id === id
-                ? { ...project, deletedAt: now, updatedAt: now }
-                : project
+        // Soft-delete project
+        const newAllProjects = get()._allProjects.map((project) =>
+            project.id === id ? { ...project, deletedAt: now, updatedAt: now } : project
         );
         // Also soft-delete tasks that belonged to this project
-        const allTasks = get().tasks.map(task =>
+        const newAllTasks = get()._allTasks.map(task =>
             task.projectId === id && !task.deletedAt
                 ? { ...task, deletedAt: now, updatedAt: now }
                 : task
         );
-        // Filter for UI state (hide deleted)
-        const visibleProjects = allProjects.filter(p => !p.deletedAt);
-        const visibleTasks = allTasks.filter(t => !t.deletedAt);
-        set({ projects: visibleProjects, tasks: visibleTasks });
-        // Save with all data (including deleted for sync)
+        // Filter for UI state
+        const newVisibleProjects = newAllProjects.filter(p => !p.deletedAt);
+        const newVisibleTasks = newAllTasks.filter(t => !t.deletedAt);
+        set({
+            projects: newVisibleProjects,
+            tasks: newVisibleTasks,
+            _allProjects: newAllProjects,
+            _allTasks: newAllTasks
+        });
+        // Save with all data including tombstones
         debouncedSave(
-            { tasks: allTasks, projects: allProjects, settings: get().settings },
+            { tasks: newAllTasks, projects: newAllProjects, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -286,27 +320,27 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
      * @param id Project ID
      */
     toggleProjectFocus: async (id: string) => {
-        const projects = get().projects;
-        const project = projects.find(p => p.id === id);
+        const allProjects = get()._allProjects;
+        const project = allProjects.find(p => p.id === id);
         if (!project) return;
 
         // If turning on focus, check if we already have 5 focused
-        const focusedCount = projects.filter(p => p.isFocused && !p.deletedAt).length;
+        const focusedCount = allProjects.filter(p => p.isFocused && !p.deletedAt).length;
         const isCurrentlyFocused = project.isFocused;
 
         // Don't allow more than 5 focused projects
         if (!isCurrentlyFocused && focusedCount >= 5) {
-            return; // Already at max
+            return;
         }
 
-        const newProjects = projects.map(p =>
-            p.id === id
-                ? { ...p, isFocused: !p.isFocused, updatedAt: new Date().toISOString() }
-                : p
+        const now = new Date().toISOString();
+        const newAllProjects = allProjects.map(p =>
+            p.id === id ? { ...p, isFocused: !p.isFocused, updatedAt: now } : p
         );
-        set({ projects: newProjects });
+        const newVisibleProjects = newAllProjects.filter(p => !p.deletedAt);
+        set({ projects: newVisibleProjects, _allProjects: newAllProjects });
         debouncedSave(
-            { tasks: get().tasks, projects: newProjects, settings: get().settings },
+            { tasks: get()._allTasks, projects: newAllProjects, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -319,8 +353,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         const newSettings = { ...get().settings, ...updates };
         set({ settings: newSettings });
         debouncedSave(
-            { tasks: get().tasks, projects: get().projects, settings: newSettings },
+            { tasks: get()._allTasks, projects: get()._allProjects, settings: newSettings },
             (msg) => set({ error: msg })
         );
     },
 }));
+

@@ -45,6 +45,9 @@ export interface AppData {
     tasks: Task[];
     projects: Project[];
     settings: {
-        theme?: 'light' | 'dark';
+        theme?: 'light' | 'dark' | 'system';
+        language?: 'en' | 'zh' | 'system';
+        weekStart?: 'monday' | 'sunday';
+        dateFormat?: string;
     };
 }

@@ -1,6 +1,7 @@
 import { View, Text, Pressable, StyleSheet, Modal } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
-import { Task, getTaskAgeLabel, getTaskStaleness, getStatusColor, TaskStatus } from '@mindwtr/core';
+import { Task, Project, getTaskAgeLabel, getTaskStaleness, getTaskUrgency, getStatusColor, safeFormatDate, TaskStatus } from '@mindwtr/core';
+import { useLanguage } from '../contexts/language-context';
 import { useRef, useState } from 'react';
 import { ThemeColors } from '../hooks/use-theme-colors';
 
@@ -90,7 +91,7 @@ export function SwipeableTaskItem({
     const accessibilityLabel = [
         task.title,
         `Status: ${task.status}`,
-        task.dueDate ? `Due: ${new Date(task.dueDate).toLocaleDateString()}` : null,
+        task.dueDate ? `Due: ${safeFormatDate(task.dueDate, 'P')}` : null,
         task.contexts?.length ? `Contexts: ${task.contexts.join(', ')}` : null,
         task.timeEstimate ? `Estimate: ${task.timeEstimate}` : null,
     ].filter(Boolean).join(', ');
@@ -122,7 +123,7 @@ export function SwipeableTaskItem({
                         )}
                         {task.dueDate && (
                             <Text style={styles.taskDueDate}>
-                                Due: {new Date(task.dueDate).toLocaleDateString()}
+                                Due: {safeFormatDate(task.dueDate, 'P')}
                             </Text>
                         )}
                         {!hideContexts && task.contexts && task.contexts.length > 0 && (

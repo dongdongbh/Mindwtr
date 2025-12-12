@@ -29,10 +29,14 @@ function mergeEntities<T extends { id: string; updatedAt: string; deletedAt?: st
             map.set(item.id, item);
         } else {
             // Conflict: Compare timestamps (LWW)
-            const localTime = new Date(existing.updatedAt).getTime();
-            const incomingTime = new Date(item.updatedAt).getTime();
+            const localTime = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+            const incomingTime = item.updatedAt ? new Date(item.updatedAt).getTime() : 0;
 
-            if (incomingTime > localTime) {
+            // Handle invalid dates safe guard
+            const safeLocalTime = isNaN(localTime) ? 0 : localTime;
+            const safeIncomingTime = isNaN(incomingTime) ? 0 : incomingTime;
+
+            if (safeIncomingTime > safeLocalTime) {
                 // Incoming is newer, use it (including its deletedAt status)
                 map.set(item.id, item);
             }

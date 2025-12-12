@@ -68,13 +68,20 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
         if (result.type === 'project') {
             onNavigate('projects', result.item.id);
         } else {
-            // Logic to determine which view the task belongs to
+            // Map task status to appropriate view
             const task = result.item as Task;
-            if (task.status === 'inbox') onNavigate('inbox', task.id);
-            else if (task.status === 'next') onNavigate('next', task.id);
-            else if (task.status === 'done') onNavigate('done', task.id);
-            else if (task.projectId) onNavigate('projects', task.projectId); // If in a project but not inbox/next specific view
-            else onNavigate('next', task.id); // Default fallback
+            const statusViewMap: Record<string, string> = {
+                'inbox': 'inbox',
+                'next': 'next',
+                'todo': 'next', // todo tasks shown in next actions
+                'in-progress': 'next',
+                'waiting': 'waiting',
+                'someday': 'someday',
+                'done': 'done',
+                'archived': 'archived',
+            };
+            const targetView = statusViewMap[task.status] || 'next';
+            onNavigate(targetView, task.id);
         }
     };
 

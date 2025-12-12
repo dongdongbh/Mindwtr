@@ -14,12 +14,9 @@ struct AppConfig {
 }
 
 fn get_config_path(app: &tauri::AppHandle) -> PathBuf {
-    // Use ~/.config/{APP_NAME}/config.json for config
     app.path()
-        .home_dir()
-        .unwrap()
-        .join(".config")
-        .join(APP_NAME)
+        .app_config_dir()
+        .expect("failed to get app config dir")
         .join("config.json")
 }
 
@@ -32,12 +29,10 @@ fn get_data_path(app: &tauri::AppHandle) -> PathBuf {
             }
         }
     }
-    // Default data path: ~/.config/{APP_NAME}/data.json
+    // Default data path: app_data_dir/data.json
     app.path()
-        .home_dir()
-        .unwrap()
-        .join(".config")
-        .join(APP_NAME)
+        .app_data_dir()
+        .expect("failed to get app data dir")
         .join("data.json")
 }
 
@@ -79,23 +74,23 @@ fn get_data_path_cmd(app: tauri::AppHandle) -> String {
 }
 
 #[tauri::command]
-fn get_sync_path(app: tauri::AppHandle) -> String {
+fn get_sync_path(app: tauri::AppHandle) -> Result<String, String> {
     let config_path = get_config_path(&app);
     if let Ok(content) = fs::read_to_string(&config_path) {
         if let Ok(config) = serde_json::from_str::<AppConfig>(&content) {
             if let Some(path) = config.sync_path {
-                return path;
+                return Ok(path);
             }
         }
     }
     // Default sync path: ~/Sync/{APP_NAME}
-    app.path()
-        .home_dir()
-        .unwrap()
-        .join("Sync")
+    // We try to use a safe home dir, falling back to error if not found
+    let home = app.path().home_dir().map_err(|_| "Could not determine home directory for default sync path".to_string())?;
+    
+    Ok(home.join("Sync")
         .join(APP_NAME)
         .to_string_lossy()
-        .to_string()
+        .to_string())
 }
 
 #[tauri::command]
@@ -125,9 +120,10 @@ fn set_sync_path(app: tauri::AppHandle, sync_path: String) -> Result<serde_json:
     }))
 }
 
+
 #[tauri::command]
 fn read_sync_file(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
-    let sync_path_str = get_sync_path(app);
+    let sync_path_str = get_sync_path(app)?;
     let sync_file = PathBuf::from(&sync_path_str).join(format!("{}-sync.json", APP_NAME));
     
     if !sync_file.exists() {
@@ -143,9 +139,10 @@ fn read_sync_file(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     serde_json::from_str(&content).map_err(|e| e.to_string())
 }
 
+
 #[tauri::command]
 fn write_sync_file(app: tauri::AppHandle, data: Value) -> Result<bool, String> {
-    let sync_path_str = get_sync_path(app);
+    let sync_path_str = get_sync_path(app)?;
     let sync_file = PathBuf::from(&sync_path_str).join(format!("{}-sync.json", APP_NAME));
 
     if let Some(parent) = sync_file.parent() {

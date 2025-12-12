@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useTaskStore, Task, getTaskAgeLabel, getTaskStaleness, type TaskStatus } from '@mindwtr/core';
+import { useTaskStore, Task, getTaskAgeLabel, getTaskStaleness, type TaskStatus, safeFormatDate, safeParseDate } from '@mindwtr/core';
 import { useLanguage } from '../../contexts/language-context';
 import { cn } from '../../lib/utils';
 import { Clock, Star, Calendar, AlertCircle, PlayCircle, ArrowRight, type LucideIcon } from 'lucide-react';
@@ -28,13 +28,17 @@ export function AgendaView() {
         const todayStr = now.toDateString();
 
         const inProgress = activeTasks.filter(t => t.status === 'in-progress' && !t.isFocusedToday);
-        const overdue = activeTasks.filter(t =>
-            t.dueDate && new Date(t.dueDate) < now && t.status !== 'in-progress' && !t.isFocusedToday
-        );
-        const dueToday = activeTasks.filter(t =>
-            t.dueDate && new Date(t.dueDate).toDateString() === todayStr &&
-            t.status !== 'in-progress' && !t.isFocusedToday
-        );
+        const overdue = activeTasks.filter(t => {
+            if (!t.dueDate) return false;
+            const dueDate = safeParseDate(t.dueDate);
+            return dueDate && dueDate < now && t.status !== 'in-progress' && !t.isFocusedToday;
+        });
+        const dueToday = activeTasks.filter(t => {
+            if (!t.dueDate) return false;
+            const dueDate = safeParseDate(t.dueDate);
+            return dueDate && dueDate.toDateString() === todayStr &&
+                t.status !== 'in-progress' && !t.isFocusedToday;
+        });
         const nextActions = activeTasks.filter(t =>
             t.status === 'next' && !t.isFocusedToday
         ).slice(0, 5);
@@ -95,7 +99,7 @@ export function AgendaView() {
                             {task.dueDate && (
                                 <span className="flex items-center gap-1 text-muted-foreground">
                                     <Calendar className="w-3 h-3" />
-                                    {new Date(task.dueDate).toLocaleDateString()}
+                                    {safeFormatDate(task.dueDate, 'P')}
                                 </span>
                             )}
 

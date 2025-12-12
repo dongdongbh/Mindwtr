@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useTaskStore, sortTasks } from '@mindwtr/core';
+import { useTaskStore, sortTasks, safeFormatDate } from '@mindwtr/core';
 
 import { Undo2, Trash2 } from 'lucide-react';
 
@@ -9,11 +9,9 @@ export function ArchiveView() {
     const [searchQuery, setSearchQuery] = useState('');
 
     const archivedTasks = useMemo(() => {
+        // Show tasks that are done or archived
         const filtered = tasks.filter(t =>
-            (t.status === 'archived' || t.status === 'done' || t.deletedAt) && // Usually Archive contains Done/Archived or maybe just explicitly 'archived' status? 
-            // Mobile app has separate 'Archived' screen which shows 'archived' status.
-            // Let's assume 'archived' status + maybe 'done' if user considers Done as Archived?
-            t.status === 'archived'
+            t.status === 'archived' || t.status === 'done'
         );
 
         // Use standard sort
@@ -60,7 +58,7 @@ export function ArchiveView() {
                             <div>
                                 <h3 className="font-medium text-foreground line-through opacity-70">{task.title}</h3>
                                 <p className="text-xs text-muted-foreground mt-1">
-                                    {task.dueDate && `Due: ${new Date(task.dueDate).toLocaleDateString()} • `}
+                                    {task.dueDate && `Due: ${safeFormatDate(task.dueDate, 'P')} • `}
                                     {task.contexts?.join(', ')}
                                 </p>
                             </div>

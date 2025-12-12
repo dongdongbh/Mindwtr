@@ -12,7 +12,7 @@ describe('TaskStore', () => {
             saveData: vi.fn().mockResolvedValue(undefined),
         };
         setStorageAdapter(mockStorage);
-        useTaskStore.setState({ tasks: [], projects: [], settings: {} });
+        useTaskStore.setState({ tasks: [], projects: [], settings: {}, _allTasks: [], _allProjects: [] });
         vi.useFakeTimers();
     });
 

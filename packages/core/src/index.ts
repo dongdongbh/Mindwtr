@@ -6,3 +6,4 @@ export * from './task-utils';
 export * from './contexts';
 export * from './i18n';
 export { generateUUID } from './uuid';
+export * from './date';
