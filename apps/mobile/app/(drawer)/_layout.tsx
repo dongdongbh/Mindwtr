@@ -16,10 +16,25 @@ function CustomDrawerContent(props: any) {
 
   const savedSearches = settings?.savedSearches || [];
   const secondaryText = isDark ? '#9CA3AF' : '#6B7280';
+  const hiddenRouteName = 'saved-search/[id]';
+
+  const drawerState = (() => {
+    const routes = props.state?.routes?.filter((route: any) => route.name !== hiddenRouteName) ?? [];
+    const routeNames = props.state?.routeNames?.filter((name: string) => name !== hiddenRouteName) ?? [];
+    const currentName = props.state?.routes?.[props.state?.index]?.name;
+    const fallbackIndex = Math.max(0, routes.findIndex((route: any) => route.name === '(tabs)'));
+
+    const index =
+      currentName === hiddenRouteName
+        ? fallbackIndex
+        : Math.min(props.state?.index ?? 0, Math.max(0, routes.length - 1));
+
+    return { ...props.state, routes, routeNames, index };
+  })();
 
   return (
     <DrawerContentScrollView {...props} contentContainerStyle={{ flexGrow: 1 }}>
-      <DrawerItemList {...props} />
+      <DrawerItemList {...props} state={drawerState} />
       {savedSearches.length > 0 && (
         <View style={{ marginTop: 12, paddingHorizontal: 16 }}>
           <Text style={{ color: secondaryText, fontSize: 12, marginBottom: 8 }}>
@@ -145,8 +160,9 @@ export default function DrawerLayout() {
       <Drawer.Screen
         name="saved-search/[id]"
         options={{
+          href: null,
           drawerLabel: () => null,
-          drawerItemStyle: { height: 0 },
+          drawerItemStyle: { display: 'none' },
           title: t('search.savedSearches'),
         }}
       />

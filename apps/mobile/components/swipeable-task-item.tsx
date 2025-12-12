@@ -145,7 +145,7 @@ export function SwipeableTaskItem({
                     {selectionMode && (
                         <View
                             style={[
-                                styles.selectionBadge,
+                                styles.selectionIndicator,
                                 {
                                     borderColor: tc.tint,
                                     backgroundColor: isMultiSelected ? tc.tint : 'transparent'
@@ -153,7 +153,7 @@ export function SwipeableTaskItem({
                             ]}
                             pointerEvents="none"
                         >
-                            {isMultiSelected && <Text style={styles.selectionBadgeText}>✓</Text>}
+                            {isMultiSelected && <Text style={styles.selectionIndicatorText}>✓</Text>}
                         </View>
                     )}
                     <View style={styles.taskContent}>
@@ -332,18 +332,16 @@ const styles = StyleSheet.create({
         shadowRadius: 2,
         elevation: 2,
     },
-    selectionBadge: {
-        position: 'absolute',
-        top: 8,
-        right: 8,
-        width: 20,
-        height: 20,
-        borderRadius: 10,
+    selectionIndicator: {
+        width: 22,
+        height: 22,
+        borderRadius: 11,
         borderWidth: 1.5,
         alignItems: 'center',
         justifyContent: 'center',
+        marginRight: 12,
     },
-    selectionBadgeText: {
+    selectionIndicatorText: {
         color: '#FFFFFF',
         fontSize: 12,
         fontWeight: '700',
