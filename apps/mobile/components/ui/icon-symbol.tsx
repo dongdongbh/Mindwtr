@@ -15,6 +15,7 @@ const MAPPING = {
   'chevron.right': '›',
   'tray.fill': '📥',
   'arrow.right.circle.fill': '▶️',
+  'pause.circle.fill': '⏸️',
   'folder.fill': '📁',
   'square.grid.2x2.fill': '🗂️',
   'line.3.horizontal': '☰',

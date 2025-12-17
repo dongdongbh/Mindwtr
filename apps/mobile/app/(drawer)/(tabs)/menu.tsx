@@ -56,7 +56,7 @@ export default function MenuScreen() {
         <MenuRow label={t('nav.calendar')} icon="calendar" tc={tc} onPress={() => router.push('/calendar')} />
         <MenuRow label={t('nav.review')} icon="paperplane.fill" tc={tc} onPress={() => router.push('/review')} />
         <MenuRow label={t('nav.contexts')} icon="circle" tc={tc} onPress={() => router.push('/contexts')} />
-        <MenuRow label={t('nav.waiting')} icon="arrow.right.circle.fill" tc={tc} onPress={() => router.push('/waiting')} />
+        <MenuRow label={t('nav.waiting')} icon="pause.circle.fill" tc={tc} onPress={() => router.push('/waiting')} />
         <MenuRow label={t('nav.someday')} icon="arrow.up.circle.fill" tc={tc} onPress={() => router.push('/someday')} />
         <MenuRow label={t('nav.archived')} icon="checkmark.circle.fill" tc={tc} onPress={() => router.push('/archived')} />
         <MenuRow label={t('nav.settings')} icon="chevron.left.forwardslash.chevron.right" tc={tc} onPress={() => router.push('/settings')} isLast />
