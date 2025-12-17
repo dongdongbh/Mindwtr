@@ -76,11 +76,11 @@ export default function SearchScreen() {
         if (result.type === 'project') {
             // Navigate to Projects screen - communicating selection is tricky without Global State for UI
             // For now, just go to Projects screen
-            router.push('/projects-screen');
+            router.push('/projects');
         } else {
             const task = result.item as Task;
             if (task.projectId) {
-                router.push('/projects-screen');
+                router.push('/projects');
             } else {
                 // Map status to route
                 const status = task.status;

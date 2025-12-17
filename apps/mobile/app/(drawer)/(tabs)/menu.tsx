@@ -53,11 +53,11 @@ export default function MenuScreen() {
       <ListSectionHeader title={t('nav.main')} tc={tc} />
       <View style={[styles.card, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
         <MenuRow label={t('nav.board')} icon="square.grid.2x2.fill" tc={tc} onPress={() => router.push('/board')} />
+        <MenuRow label={t('nav.calendar')} icon="calendar" tc={tc} onPress={() => router.push('/calendar')} />
         <MenuRow label={t('nav.review')} icon="paperplane.fill" tc={tc} onPress={() => router.push('/review')} />
         <MenuRow label={t('nav.contexts')} icon="circle" tc={tc} onPress={() => router.push('/contexts')} />
         <MenuRow label={t('nav.waiting')} icon="arrow.right.circle.fill" tc={tc} onPress={() => router.push('/waiting')} />
         <MenuRow label={t('nav.someday')} icon="arrow.up.circle.fill" tc={tc} onPress={() => router.push('/someday')} />
-        <MenuRow label={t('nav.projects')} icon="folder.fill" tc={tc} onPress={() => router.push('/projects-screen')} />
         <MenuRow label={t('nav.archived')} icon="checkmark.circle.fill" tc={tc} onPress={() => router.push('/archived')} />
         <MenuRow label={t('nav.settings')} icon="chevron.left.forwardslash.chevron.right" tc={tc} onPress={() => router.push('/settings')} isLast />
       </View>
