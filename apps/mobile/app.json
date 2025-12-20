@@ -5,7 +5,7 @@
     "version": "0.3.6",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "mobile",
+    "scheme": "mindwtr",
     "userInterfaceStyle": "automatic",
     "jsEngine": "hermes",
     "newArchEnabled": true,
@@ -50,10 +50,10 @@
               "name": "TasksWidget",
               "label": "Mindwtr Focus",
               "description": "Today's focus and next actions",
-              "minWidth": "200dp",
-              "minHeight": "200dp",
-              "targetCellWidth": 3,
-              "targetCellHeight": 3,
+              "minWidth": "160dp",
+              "minHeight": "160dp",
+              "targetCellWidth": 2,
+              "targetCellHeight": 2,
               "resizeMode": "horizontal|vertical",
               "previewImage": "./assets/images/widget-preview.png"
             }

@@ -26,15 +26,28 @@ function sanitizeJsonText(raw: string): string {
 function parseAppData(text: string): AppData {
     const sanitized = sanitizeJsonText(text);
     if (!sanitized) throw new Error('Sync file is empty');
-    if (!sanitized.startsWith('{')) {
-        throw new Error(`Sync file is not JSON (starts with "${sanitized.slice(0, 20)}")`);
-    }
+    const tryParse = (value: string): AppData => {
+        const data = JSON.parse(value) as AppData;
+        if (!data.tasks || !data.projects) {
+            throw new Error('Invalid data format');
+        }
+        return data;
+    };
 
-    const data = JSON.parse(sanitized) as AppData;
-    if (!data.tasks || !data.projects) {
-        throw new Error('Invalid data format');
+    try {
+        return tryParse(sanitized);
+    } catch (error) {
+        const start = sanitized.indexOf('{');
+        const end = sanitized.lastIndexOf('}');
+        if (start !== -1 && end > start && (start > 0 || end < sanitized.length - 1)) {
+            const sliced = sanitized.slice(start, end + 1);
+            return tryParse(sliced);
+        }
+        if (!sanitized.startsWith('{')) {
+            throw new Error(`Sync file is not JSON (starts with "${sanitized.slice(0, 20)}")`);
+        }
+        throw error;
     }
-    return data;
 }
 
 async function readFileText(fileUri: string): Promise<string | null> {
@@ -122,7 +135,13 @@ export const writeSyncFile = async (fileUri: string, data: AppData): Promise<voi
             await StorageAccessFramework.writeAsStringAsync(fileUri, content);
             console.log('[Sync] Written via SAF to:', fileUri);
         } else {
-            await FileSystem.writeAsStringAsync(fileUri, content);
+            const tempUri = `${fileUri}.tmp`;
+            await FileSystem.writeAsStringAsync(tempUri, content);
+            const existing = await FileSystem.getInfoAsync(fileUri);
+            if (existing.exists) {
+                await FileSystem.deleteAsync(fileUri, { idempotent: true });
+            }
+            await FileSystem.moveAsync({ from: tempUri, to: fileUri });
             console.log('[Sync] Written to sync file:', fileUri);
         }
     } catch (error) {

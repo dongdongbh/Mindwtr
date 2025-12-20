@@ -54,7 +54,7 @@ export function buildTasksWidgetTree(payload: TasksWidgetPayload) {
                 marginTop: 12,
             },
             clickAction: 'OPEN_URI',
-            clickActionData: { uri: 'mindwtr://capture' },
+            clickActionData: { uri: 'mindwtr://inbox' },
         })
     );
 

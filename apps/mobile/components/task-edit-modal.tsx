@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { View, Text, TextInput, Modal, StyleSheet, TouchableOpacity, ScrollView, Platform, KeyboardAvoidingView, Share, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Attachment, Task, TaskEditorFieldId, TaskStatus, TimeEstimate, useTaskStore, generateUUID, PRESET_TAGS, RecurrenceRule, RECURRENCE_RULES } from '@mindwtr/core';
@@ -409,26 +409,24 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
         ...effectivePresets.map((value) => ({ value, label: formatTimeEstimateLabel(value) })),
     ];
 
-    const orderKey = (settings.gtd?.taskEditor?.order ?? []).join('|');
-    const hiddenKey = (settings.gtd?.taskEditor?.hidden ?? []).join('|');
+    const savedOrder = settings.gtd?.taskEditor?.order ?? [];
+    const savedHidden = settings.gtd?.taskEditor?.hidden ?? DEFAULT_TASK_EDITOR_HIDDEN;
 
     const taskEditorOrder = useMemo(() => {
-        const saved = settings.gtd?.taskEditor?.order ?? [];
         const known = new Set(DEFAULT_TASK_EDITOR_ORDER);
-        const normalized = saved.filter((id) => known.has(id));
+        const normalized = savedOrder.filter((id) => known.has(id));
         const missing = DEFAULT_TASK_EDITOR_ORDER.filter((id) => !normalized.includes(id));
         return [...normalized, ...missing];
-    }, [orderKey]);
+    }, [savedOrder]);
 
     const hiddenSet = useMemo(() => {
-        const saved = settings.gtd?.taskEditor?.hidden ?? DEFAULT_TASK_EDITOR_HIDDEN;
         const known = new Set(taskEditorOrder);
-        return new Set(saved.filter((id) => known.has(id)));
-    }, [hiddenKey, taskEditorOrder]);
+        return new Set(savedHidden.filter((id) => known.has(id)));
+    }, [savedHidden, taskEditorOrder]);
 
     useEffect(() => {
         setShowMoreOptions(false);
-    }, [orderKey, hiddenKey]);
+    }, [savedOrder, savedHidden]);
 
     const compactFieldIds = useMemo(() => {
         return taskEditorOrder.filter((fieldId) => !hiddenSet.has(fieldId));

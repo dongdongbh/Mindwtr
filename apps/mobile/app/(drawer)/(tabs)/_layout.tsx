@@ -74,20 +74,20 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="agenda"
-        options={{
-          title: t('tab.agenda'),
-          tabBarIcon: ({ color, focused }) => (
-            <IconSymbol size={focused ? 28 : 24} name="calendar.fill" color={color} style={{ opacity: focused ? 1 : 0.65 }} />
-          ),
-        }}
-      />
-      <Tabs.Screen
         name="next"
         options={{
           title: t('tab.next'),
           tabBarIcon: ({ color, focused }) => (
             <IconSymbol size={focused ? 28 : 24} name="arrow.right.circle.fill" color={color} style={{ opacity: focused ? 1 : 0.65 }} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="agenda"
+        options={{
+          title: t('tab.agenda'),
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol size={focused ? 28 : 24} name="calendar.fill" color={color} style={{ opacity: focused ? 1 : 0.65 }} />
           ),
         }}
       />

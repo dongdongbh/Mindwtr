@@ -143,7 +143,7 @@ export default function SettingsPage() {
     };
 
     const selectWeeklyReviewDay = () => {
-        const options = Array.from({ length: 7 }, (_, idx) => ({
+        const options: Alert.Button[] = Array.from({ length: 7 }, (_, idx) => ({
             text: getWeekdayLabel(idx),
             onPress: () => updateSettings({ weeklyReviewDay: idx }).catch(console.error),
         }));

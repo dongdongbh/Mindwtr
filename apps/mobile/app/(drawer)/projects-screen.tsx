@@ -253,6 +253,7 @@ export default function ProjectsScreen() {
           const projTasks = tasks.filter(t => t.projectId === item.id && t.status !== 'done' && !t.deletedAt);
           const nextAction = projTasks.find((task) => task.status === 'next');
           const focusedCount = projects.filter(p => p.isFocused).length;
+          const showFocusedWarning = item.isFocused && !nextAction && projTasks.length > 0;
 
           return (
             <View style={[
@@ -290,7 +291,7 @@ export default function ProjectsScreen() {
                     <Text style={[styles.projectMeta, { color: tc.secondaryText }]} numberOfLines={1}>
                       ↳ {nextAction.title}
                     </Text>
-                  ) : projTasks.length > 0 ? (
+                  ) : showFocusedWarning ? (
                     <Text style={[styles.projectMeta, { color: '#F59E0B' }]}>
                       ⚠️ No next action
                     </Text>
@@ -410,6 +411,28 @@ export default function ProjectsScreen() {
                       </Text>
                     </TouchableOpacity>
                   )}
+                </View>
+
+                <View style={[styles.reviewContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
+                  <Text style={[styles.reviewLabel, { color: tc.text }]}>
+                    {t('projects.color') || 'Color'}
+                  </Text>
+                  <View style={styles.colorPicker}>
+                    {colors.map((color) => (
+                      <TouchableOpacity
+                        key={color}
+                        style={[
+                          styles.colorOption,
+                          { backgroundColor: color, borderColor: color === selectedProject.color ? tc.text : 'transparent' },
+                        ]}
+                        onPress={() => {
+                          if (selectedProject.color === color) return;
+                          updateProject(selectedProject.id, { color });
+                          setSelectedProject({ ...selectedProject, color });
+                        }}
+                      />
+                    ))}
+                  </View>
                 </View>
 
                 {/* Project Notes Section */}

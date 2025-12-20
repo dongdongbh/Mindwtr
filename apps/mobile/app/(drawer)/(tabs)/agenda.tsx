@@ -9,13 +9,15 @@ import { useTheme } from '../../../contexts/theme-context';
 import { useThemeColors, ThemeColors } from '@/hooks/use-theme-colors';
 
 
-function TaskCard({ task, onPress, onToggleFocus, tc, isDark, focusedCount }: {
+function TaskCard({ task, onPress, onToggleFocus, tc, isDark, focusedCount, projectTitle, projectColor }: {
   task: Task;
   onPress: () => void;
   onToggleFocus?: () => void;
   tc: ThemeColors;
   isDark: boolean;
   focusedCount?: number;
+  projectTitle?: string;
+  projectColor?: string;
 }) {
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
@@ -43,6 +45,7 @@ function TaskCard({ task, onPress, onToggleFocus, tc, isDark, focusedCount }: {
   const now = new Date();
   const isOverdue = dueDate && dueDate < now;
   const isDueToday = dueDate && dueDate.toDateString() === now.toDateString();
+  const resolvedProjectColor = projectColor || tc.tint;
 
   // Can focus if: already focused, or we have room for more
   const canFocus = task.isFocusedToday || (focusedCount !== undefined && focusedCount < 3);
@@ -72,6 +75,14 @@ function TaskCard({ task, onPress, onToggleFocus, tc, isDark, focusedCount }: {
           <Text style={[styles.taskDescription, { color: tc.secondaryText }]} numberOfLines={1}>
             {task.description}
           </Text>
+        )}
+
+        {projectTitle && (
+          <View style={[styles.projectBadge, { backgroundColor: `${resolvedProjectColor}20`, borderColor: resolvedProjectColor }]}>
+            <Text style={[styles.projectBadgeText, { color: resolvedProjectColor }]} numberOfLines={1}>
+              📁 {projectTitle}
+            </Text>
+          </View>
         )}
 
         <View style={styles.taskMeta}>
@@ -112,7 +123,7 @@ function TaskCard({ task, onPress, onToggleFocus, tc, isDark, focusedCount }: {
 }
 
 export default function AgendaScreen() {
-  const { tasks, updateTask } = useTaskStore();
+  const { tasks, projects, updateTask } = useTaskStore();
 
   const { t } = useLanguage();
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -204,6 +215,13 @@ export default function AgendaScreen() {
     }
   };
 
+  const projectById = useMemo(() => {
+    return projects.reduce<Record<string, { title: string; color: string }>>((acc, project) => {
+      acc[project.id] = { title: project.title, color: project.color };
+      return acc;
+    }, {});
+  }, [projects]);
+
   const renderItem = useCallback(({ item }: { item: Task }) => (
     <TaskCard
       task={item}
@@ -212,8 +230,10 @@ export default function AgendaScreen() {
       focusedCount={focusedCount}
       isDark={isDark}
       tc={tc}
+      projectTitle={item.projectId ? projectById[item.projectId]?.title : undefined}
+      projectColor={item.projectId ? projectById[item.projectId]?.color : undefined}
     />
-  ), [handleTaskPress, handleToggleFocus, focusedCount, isDark, tc]);
+  ), [handleTaskPress, handleToggleFocus, focusedCount, isDark, tc, projectById]);
 
   const renderSectionHeader = useCallback(({ section: { title } }: { section: { title: string } }) => (
     <View style={[styles.sectionHeaderContainer, { backgroundColor: tc.bg }]}>
@@ -365,6 +385,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B7280',
     marginBottom: 8,
+  },
+  projectBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  projectBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
   },
   taskMeta: {
     flexDirection: 'row',

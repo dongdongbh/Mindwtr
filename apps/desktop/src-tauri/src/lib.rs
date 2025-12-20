@@ -17,6 +17,7 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 /// App name used for config directories and files
 const APP_NAME: &str = "mindwtr";
 const CONFIG_FILE_NAME: &str = "config.toml";
+const SECRETS_FILE_NAME: &str = "secrets.toml";
 const DATA_FILE_NAME: &str = "data.json";
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -25,7 +26,7 @@ struct LegacyAppConfigJson {
     sync_path: Option<String>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct AppConfigToml {
     sync_path: Option<String>,
     sync_backend: Option<String>,
@@ -66,6 +67,10 @@ fn get_data_dir(app: &tauri::AppHandle) -> PathBuf {
 
 fn get_config_path(app: &tauri::AppHandle) -> PathBuf {
     get_config_dir(app).join(CONFIG_FILE_NAME)
+}
+
+fn get_secrets_path(app: &tauri::AppHandle) -> PathBuf {
+    get_config_dir(app).join(SECRETS_FILE_NAME)
 }
 
 fn get_data_path(app: &tauri::AppHandle) -> PathBuf {
@@ -144,12 +149,20 @@ fn read_config_toml(path: &Path) -> AppConfigToml {
 }
 
 fn write_config_toml(path: &Path, config: &AppConfigToml) -> Result<(), String> {
+    write_config_toml_with_header(path, config, "# Mindwtr desktop config")
+}
+
+fn write_secrets_toml(path: &Path, config: &AppConfigToml) -> Result<(), String> {
+    write_config_toml_with_header(path, config, "# Mindwtr desktop secrets")
+}
+
+fn write_config_toml_with_header(path: &Path, config: &AppConfigToml, header: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
     let mut lines: Vec<String> = Vec::new();
-    lines.push("# Mindwtr desktop config".to_string());
+    lines.push(header.to_string());
     if let Some(sync_path) = &config.sync_path {
         lines.push(format!("sync_path = {}", serialize_toml_string_value(sync_path)));
     }
@@ -178,6 +191,87 @@ fn write_config_toml(path: &Path, config: &AppConfigToml) -> Result<(), String> 
     fs::write(path, content).map_err(|e| e.to_string())
 }
 
+fn merge_config(base: &mut AppConfigToml, overrides: AppConfigToml) {
+    if overrides.sync_path.is_some() {
+        base.sync_path = overrides.sync_path;
+    }
+    if overrides.sync_backend.is_some() {
+        base.sync_backend = overrides.sync_backend;
+    }
+    if overrides.webdav_url.is_some() {
+        base.webdav_url = overrides.webdav_url;
+    }
+    if overrides.webdav_username.is_some() {
+        base.webdav_username = overrides.webdav_username;
+    }
+    if overrides.webdav_password.is_some() {
+        base.webdav_password = overrides.webdav_password;
+    }
+    if overrides.cloud_url.is_some() {
+        base.cloud_url = overrides.cloud_url;
+    }
+    if overrides.cloud_token.is_some() {
+        base.cloud_token = overrides.cloud_token;
+    }
+    if overrides.external_calendars.is_some() {
+        base.external_calendars = overrides.external_calendars;
+    }
+}
+
+fn read_config(app: &tauri::AppHandle) -> AppConfigToml {
+    let mut config = read_config_toml(&get_config_path(app));
+    let secrets_path = get_secrets_path(app);
+    if secrets_path.exists() {
+        let secrets = read_config_toml(&secrets_path);
+        merge_config(&mut config, secrets);
+    }
+    config
+}
+
+fn split_config_for_secrets(config: &AppConfigToml) -> (AppConfigToml, AppConfigToml) {
+    let mut public_config = config.clone();
+    let mut secrets_config = AppConfigToml::default();
+
+    if let Some(value) = config.webdav_password.clone() {
+        secrets_config.webdav_password = Some(value);
+        public_config.webdav_password = None;
+    }
+    if let Some(value) = config.cloud_token.clone() {
+        secrets_config.cloud_token = Some(value);
+        public_config.cloud_token = None;
+    }
+    if let Some(value) = config.external_calendars.clone() {
+        secrets_config.external_calendars = Some(value);
+        public_config.external_calendars = None;
+    }
+
+    (public_config, secrets_config)
+}
+
+fn config_has_values(config: &AppConfigToml) -> bool {
+    config.sync_path.is_some()
+        || config.sync_backend.is_some()
+        || config.webdav_url.is_some()
+        || config.webdav_username.is_some()
+        || config.webdav_password.is_some()
+        || config.cloud_url.is_some()
+        || config.cloud_token.is_some()
+        || config.external_calendars.is_some()
+}
+
+fn write_config_files(config_path: &Path, secrets_path: &Path, config: &AppConfigToml) -> Result<(), String> {
+    let (public_config, secrets_config) = split_config_for_secrets(config);
+    write_config_toml(config_path, &public_config)?;
+
+    if config_has_values(&secrets_config) {
+        write_secrets_toml(secrets_path, &secrets_config)?;
+    } else if secrets_path.exists() {
+        fs::remove_file(secrets_path).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
 fn bootstrap_storage_layout(app: &tauri::AppHandle) -> Result<(), String> {
     let config_dir = get_config_dir(app);
     let data_dir = get_data_dir(app);
@@ -197,7 +291,7 @@ fn bootstrap_storage_layout(app: &tauri::AppHandle) -> Result<(), String> {
             sync_path: legacy_config.sync_path.clone(),
             ..AppConfigToml::default()
         };
-        write_config_toml(&config_path, &config)?;
+        write_config_files(&config_path, &get_secrets_path(app), &config)?;
     }
 
     let data_path = get_data_path(app);
@@ -294,7 +388,7 @@ fn get_config_path_cmd(app: tauri::AppHandle) -> String {
 
 #[tauri::command]
 fn get_sync_path(app: tauri::AppHandle) -> Result<String, String> {
-    let config = read_config_toml(&get_config_path(&app));
+    let config = read_config(&app);
     if let Some(path) = config.sync_path {
         return Ok(path);
     }
@@ -312,9 +406,9 @@ fn get_sync_path(app: tauri::AppHandle) -> Result<String, String> {
 fn set_sync_path(app: tauri::AppHandle, sync_path: String) -> Result<serde_json::Value, String> {
     let config_path = get_config_path(&app);
     
-    let mut config = read_config_toml(&config_path);
+    let mut config = read_config(&app);
     config.sync_path = Some(sync_path.clone());
-    write_config_toml(&config_path, &config)?;
+    write_config_files(&config_path, &get_secrets_path(&app), &config)?;
     
     Ok(serde_json::json!({
         "success": true,
@@ -331,7 +425,7 @@ fn normalize_backend(value: &str) -> Option<&str> {
 
 #[tauri::command]
 fn get_sync_backend(app: tauri::AppHandle) -> Result<String, String> {
-    let config = read_config_toml(&get_config_path(&app));
+    let config = read_config(&app);
     let raw = config.sync_backend.unwrap_or_else(|| "file".to_string());
     Ok(normalize_backend(raw.trim()).unwrap_or("file").to_string())
 }
@@ -342,15 +436,15 @@ fn set_sync_backend(app: tauri::AppHandle, backend: String) -> Result<bool, Stri
         return Err("Invalid sync backend".to_string());
     };
     let config_path = get_config_path(&app);
-    let mut config = read_config_toml(&config_path);
+    let mut config = read_config(&app);
     config.sync_backend = Some(normalized.to_string());
-    write_config_toml(&config_path, &config)?;
+    write_config_files(&config_path, &get_secrets_path(&app), &config)?;
     Ok(true)
 }
 
 #[tauri::command]
 fn get_webdav_config(app: tauri::AppHandle) -> Result<Value, String> {
-    let config = read_config_toml(&get_config_path(&app));
+    let config = read_config(&app);
     Ok(serde_json::json!({
         "url": config.webdav_url.unwrap_or_default(),
         "username": config.webdav_username.unwrap_or_default(),
@@ -362,7 +456,7 @@ fn get_webdav_config(app: tauri::AppHandle) -> Result<Value, String> {
 fn set_webdav_config(app: tauri::AppHandle, url: String, username: String, password: String) -> Result<bool, String> {
     let url = url.trim().to_string();
     let config_path = get_config_path(&app);
-    let mut config = read_config_toml(&config_path);
+    let mut config = read_config(&app);
 
     if url.is_empty() {
         config.webdav_url = None;
@@ -374,13 +468,13 @@ fn set_webdav_config(app: tauri::AppHandle, url: String, username: String, passw
         config.webdav_password = Some(password);
     }
 
-    write_config_toml(&config_path, &config)?;
+    write_config_files(&config_path, &get_secrets_path(&app), &config)?;
     Ok(true)
 }
 
 #[tauri::command]
 fn get_cloud_config(app: tauri::AppHandle) -> Result<Value, String> {
-    let config = read_config_toml(&get_config_path(&app));
+    let config = read_config(&app);
     Ok(serde_json::json!({
         "url": config.cloud_url.unwrap_or_default(),
         "token": config.cloud_token.unwrap_or_default()
@@ -391,7 +485,7 @@ fn get_cloud_config(app: tauri::AppHandle) -> Result<Value, String> {
 fn set_cloud_config(app: tauri::AppHandle, url: String, token: String) -> Result<bool, String> {
     let url = url.trim().to_string();
     let config_path = get_config_path(&app);
-    let mut config = read_config_toml(&config_path);
+    let mut config = read_config(&app);
 
     if url.is_empty() {
         config.cloud_url = None;
@@ -401,13 +495,13 @@ fn set_cloud_config(app: tauri::AppHandle, url: String, token: String) -> Result
         config.cloud_token = Some(token);
     }
 
-    write_config_toml(&config_path, &config)?;
+    write_config_files(&config_path, &get_secrets_path(&app), &config)?;
     Ok(true)
 }
 
 #[tauri::command]
 fn get_external_calendars(app: tauri::AppHandle) -> Result<Vec<ExternalCalendarSubscription>, String> {
-    let config = read_config_toml(&get_config_path(&app));
+    let config = read_config(&app);
     let raw = config.external_calendars.unwrap_or_else(|| "[]".to_string());
     let parsed: Vec<ExternalCalendarSubscription> = serde_json::from_str(&raw).unwrap_or_default();
     Ok(parsed
@@ -427,7 +521,7 @@ fn get_external_calendars(app: tauri::AppHandle) -> Result<Vec<ExternalCalendarS
 #[tauri::command]
 fn set_external_calendars(app: tauri::AppHandle, calendars: Vec<ExternalCalendarSubscription>) -> Result<bool, String> {
     let config_path = get_config_path(&app);
-    let mut config = read_config_toml(&config_path);
+    let mut config = read_config(&app);
     let sanitized: Vec<ExternalCalendarSubscription> = calendars
         .into_iter()
         .filter(|c| !c.url.trim().is_empty())
@@ -442,7 +536,7 @@ fn set_external_calendars(app: tauri::AppHandle, calendars: Vec<ExternalCalendar
         .collect();
 
     config.external_calendars = Some(serde_json::to_string(&sanitized).map_err(|e| e.to_string())?);
-    write_config_toml(&config_path, &config)?;
+    write_config_files(&config_path, &get_secrets_path(&app), &config)?;
     Ok(true)
 }
 
