@@ -1,7 +1,7 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { View, TextInput, FlatList, StyleSheet, TouchableOpacity, Text, RefreshControl, ScrollView, Modal, Pressable } from 'react-native';
 import { router } from 'expo-router';
-import { useTaskStore, Task, TaskStatus, sortTasksBy, parseQuickAdd, isTaskBlocked, safeParseDate } from '@mindwtr/core';
+import { useTaskStore, Task, TaskStatus, sortTasksBy, parseQuickAdd, isTaskBlocked, safeParseDate, PRESET_CONTEXTS, createAIProvider } from '@mindwtr/core';
 import type { TaskSortBy } from '@mindwtr/core';
 
 
@@ -11,6 +11,7 @@ import { useTheme } from '../contexts/theme-context';
 import { useLanguage } from '../contexts/language-context';
 
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { buildCopilotConfig, loadAIKey } from '../lib/ai-config';
 
 export interface TaskListProps {
   statusFilter: TaskStatus | 'all';
@@ -23,6 +24,7 @@ export interface TaskListProps {
   showQuickAddHelp?: boolean;
   emptyText?: string;
   headerAccessory?: React.ReactNode;
+  enableCopilot?: boolean;
 }
 
 // ... inside TaskList component
@@ -37,11 +39,17 @@ export function TaskList({
   showQuickAddHelp = true,
   emptyText,
   headerAccessory,
+  enableCopilot = true,
 }: TaskListProps) {
   const { isDark } = useTheme();
   const { t } = useLanguage();
   const { tasks, projects, addTask, updateTask, deleteTask, fetchData, batchMoveTasks, batchDeleteTasks, batchUpdateTasks, settings, updateSettings } = useTaskStore();
   const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [aiKey, setAiKey] = useState('');
+  const [copilotSuggestion, setCopilotSuggestion] = useState<{ context?: string; timeEstimate?: Task['timeEstimate'] } | null>(null);
+  const [copilotApplied, setCopilotApplied] = useState(false);
+  const [copilotContext, setCopilotContext] = useState<string | undefined>(undefined);
+  const [copilotEstimate, setCopilotEstimate] = useState<Task['timeEstimate'] | undefined>(undefined);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -62,6 +70,8 @@ export function TaskList({
   }, [tasks]);
 
   const sortBy = (settings?.taskSortBy ?? 'default') as TaskSortBy;
+  const aiEnabled = settings?.ai?.enabled === true;
+  const aiProvider = (settings?.ai?.provider ?? 'openai') as 'openai' | 'gemini';
 
   // Memoize filtered and sorted tasks for performance
   const filteredTasks = useMemo(() => {
@@ -80,6 +90,48 @@ export function TaskList({
     });
     return sortTasksBy(filtered, sortBy);
   }, [tasks, statusFilter, projectId, tasksById, sortBy]);
+
+  const contextOptions = useMemo(() => {
+    const taskContexts = tasks.flatMap((task) => task.contexts || []);
+    return Array.from(new Set([...PRESET_CONTEXTS, ...taskContexts])).filter(Boolean);
+  }, [tasks]);
+
+  useEffect(() => {
+    loadAIKey(aiProvider).then(setAiKey).catch(console.error);
+  }, [aiProvider]);
+
+  useEffect(() => {
+    if (!enableCopilot || !aiEnabled || !aiKey) {
+      setCopilotSuggestion(null);
+      return;
+    }
+    const title = newTaskTitle.trim();
+    if (title.length < 4) {
+      setCopilotSuggestion(null);
+      return;
+    }
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      try {
+        const provider = createAIProvider(buildCopilotConfig(settings, aiKey));
+        const suggestion = await provider.predictMetadata({ title, contexts: contextOptions });
+        if (cancelled) return;
+        if (!suggestion.context && !suggestion.timeEstimate) {
+          setCopilotSuggestion(null);
+        } else {
+          setCopilotSuggestion(suggestion);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setCopilotSuggestion(null);
+        }
+      }
+    }, 800);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [aiEnabled, aiKey, aiProvider, contextOptions, enableCopilot, newTaskTitle, settings, statusFilter]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -101,9 +153,20 @@ export function TaskList({
     const initialProps: Partial<Task> = { projectId, status: defaultStatus, ...props };
     if (!props.status) initialProps.status = defaultStatus;
     if (!props.projectId && projectId) initialProps.projectId = projectId;
+    if (copilotContext) {
+      const nextContexts = Array.from(new Set([...(initialProps.contexts ?? []), copilotContext]));
+      initialProps.contexts = nextContexts;
+    }
+    if (copilotEstimate && !props.timeEstimate) {
+      initialProps.timeEstimate = copilotEstimate;
+    }
 
     addTask(finalTitle, initialProps);
     setNewTaskTitle('');
+    setCopilotSuggestion(null);
+    setCopilotApplied(false);
+    setCopilotContext(undefined);
+    setCopilotEstimate(undefined);
   };
 
   const handleEditTask = (task: Task) => {
@@ -269,7 +332,12 @@ export function TaskList({
               placeholder={t('inbox.addPlaceholder')}
               placeholderTextColor={themeColors.secondaryText}
               value={newTaskTitle}
-              onChangeText={setNewTaskTitle}
+              onChangeText={(text) => {
+                setNewTaskTitle(text);
+                setCopilotApplied(false);
+                setCopilotContext(undefined);
+                setCopilotEstimate(undefined);
+              }}
               onSubmitEditing={handleAddTask}
               returnKeyType="done"
               accessibilityLabel={`Input new task for ${title}`}
@@ -290,6 +358,34 @@ export function TaskList({
               <Text style={styles.addButtonText}>+</Text>
             </TouchableOpacity>
           </View>
+          {enableCopilot && aiEnabled && copilotSuggestion && !copilotApplied && (
+            <TouchableOpacity
+              style={[styles.copilotPill, { borderColor: themeColors.border, backgroundColor: themeColors.inputBg }]}
+              onPress={() => {
+                setCopilotContext(copilotSuggestion.context);
+                setCopilotEstimate(copilotSuggestion.timeEstimate);
+                setCopilotApplied(true);
+              }}
+            >
+              <Text style={[styles.copilotText, { color: themeColors.text }]}>
+                ✨ {t('copilot.suggested')}{' '}
+                {copilotSuggestion.context ? `${copilotSuggestion.context} ` : ''}
+                {copilotSuggestion.timeEstimate ? `${copilotSuggestion.timeEstimate}` : ''}
+              </Text>
+              <Text style={[styles.copilotHint, { color: themeColors.secondaryText }]}>
+                {t('copilot.applyHint')}
+              </Text>
+            </TouchableOpacity>
+          )}
+          {enableCopilot && aiEnabled && copilotApplied && (
+            <View style={[styles.copilotPill, { borderColor: themeColors.border, backgroundColor: themeColors.inputBg }]}>
+              <Text style={[styles.copilotText, { color: themeColors.text }]}>
+                ✅ {t('copilot.applied')}{' '}
+                {copilotContext ? `${copilotContext} ` : ''}
+                {copilotEstimate ? `${copilotEstimate}` : ''}
+              </Text>
+            </View>
+          )}
           {showQuickAddHelp && (
             <Text style={[styles.quickAddHelp, { color: themeColors.secondaryText }]}>
               {t('quickAdd.help')}
@@ -570,6 +666,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontSize: 16,
+  },
+  copilotPill: {
+    marginTop: 8,
+    marginHorizontal: 16,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  copilotText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  copilotHint: {
+    fontSize: 11,
+    marginTop: 2,
   },
   addButton: {
     width: 44,

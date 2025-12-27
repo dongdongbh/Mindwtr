@@ -14,6 +14,8 @@ import {
     BackHandler,
     Platform,
     KeyboardAvoidingView,
+    Modal,
+    Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
@@ -89,6 +91,7 @@ export default function SettingsPage() {
     const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
     const [digestTimePicker, setDigestTimePicker] = useState<'morning' | 'evening' | null>(null);
     const [weeklyReviewTimePicker, setWeeklyReviewTimePicker] = useState(false);
+    const [modelPicker, setModelPicker] = useState<null | 'model' | 'copilot'>(null);
     const [externalCalendars, setExternalCalendars] = useState<ExternalCalendarSubscription[]>([]);
     const [newCalendarName, setNewCalendarName] = useState('');
     const [newCalendarUrl, setNewCalendarUrl] = useState('');
@@ -736,22 +739,15 @@ export default function SettingsPage() {
                                 </View>
                             </View>
                             <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                                <View style={styles.backendToggle}>
-                                    {aiModelOptions.map((option) => (
-                                        <TouchableOpacity
-                                            key={option}
-                                            style={[
-                                                styles.backendOption,
-                                                { borderColor: tc.border, backgroundColor: aiModel === option ? tc.filterBg : 'transparent' },
-                                            ]}
-                                            onPress={() => updateAISettings({ model: option })}
-                                        >
-                                            <Text style={[styles.backendOptionText, { color: aiModel === option ? tc.tint : tc.secondaryText }]}>
-                                                {option}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    ))}
-                                </View>
+                                <TouchableOpacity
+                                    style={[styles.dropdownButton, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
+                                    onPress={() => setModelPicker('model')}
+                                >
+                                    <Text style={[styles.dropdownValue, { color: tc.text }]} numberOfLines={1}>
+                                        {aiModel}
+                                    </Text>
+                                    <Text style={[styles.dropdownChevron, { color: tc.secondaryText }]}>▾</Text>
+                                </TouchableOpacity>
                             </View>
 
                             <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
@@ -763,22 +759,15 @@ export default function SettingsPage() {
                                 </View>
                             </View>
                             <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                                <View style={styles.backendToggle}>
-                                    {aiCopilotOptions.map((option) => (
-                                        <TouchableOpacity
-                                            key={option}
-                                            style={[
-                                                styles.backendOption,
-                                                { borderColor: tc.border, backgroundColor: aiCopilotModel === option ? tc.filterBg : 'transparent' },
-                                            ]}
-                                            onPress={() => updateAISettings({ copilotModel: option })}
-                                        >
-                                            <Text style={[styles.backendOptionText, { color: aiCopilotModel === option ? tc.tint : tc.secondaryText }]}>
-                                                {option}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    ))}
-                                </View>
+                                <TouchableOpacity
+                                    style={[styles.dropdownButton, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
+                                    onPress={() => setModelPicker('copilot')}
+                                >
+                                    <Text style={[styles.dropdownValue, { color: tc.text }]} numberOfLines={1}>
+                                        {aiCopilotModel}
+                                    </Text>
+                                    <Text style={[styles.dropdownChevron, { color: tc.secondaryText }]}>▾</Text>
+                                </TouchableOpacity>
                             </View>
 
                         {aiProvider === 'openai' && (
@@ -875,6 +864,50 @@ export default function SettingsPage() {
                             />
                         </View>
                         </View>
+                        <Modal
+                            transparent
+                            visible={modelPicker !== null}
+                            animationType="fade"
+                            onRequestClose={() => setModelPicker(null)}
+                        >
+                            <Pressable style={styles.pickerOverlay} onPress={() => setModelPicker(null)}>
+                                <View
+                                    style={[styles.pickerCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
+                                    onStartShouldSetResponder={() => true}
+                                >
+                                    <Text style={[styles.pickerTitle, { color: tc.text }]}>
+                                        {modelPicker === 'model' ? t('settings.aiModel') : t('settings.aiCopilotModel')}
+                                    </Text>
+                                    <ScrollView style={styles.pickerList} contentContainerStyle={styles.pickerListContent}>
+                                        {(modelPicker === 'model' ? aiModelOptions : aiCopilotOptions).map((option) => {
+                                            const selected = modelPicker === 'model' ? aiModel === option : aiCopilotModel === option;
+                                            return (
+                                                <TouchableOpacity
+                                                    key={option}
+                                                    style={[
+                                                        styles.pickerOption,
+                                                        { borderColor: tc.border, backgroundColor: selected ? tc.filterBg : 'transparent' },
+                                                    ]}
+                                                    onPress={() => {
+                                                        if (modelPicker === 'model') {
+                                                            updateAISettings({ model: option });
+                                                        } else {
+                                                            updateAISettings({ copilotModel: option });
+                                                        }
+                                                        setModelPicker(null);
+                                                    }}
+                                                >
+                                                    <Text style={[styles.pickerOptionText, { color: selected ? tc.tint : tc.text }]}>
+                                                        {option}
+                                                    </Text>
+                                                    {selected && <Text style={{ color: tc.tint, fontSize: 18 }}>✓</Text>}
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </ScrollView>
+                                </View>
+                            </Pressable>
+                        </Modal>
                     </ScrollView>
                 </KeyboardAvoidingView>
             </SafeAreaView>
@@ -1815,6 +1848,61 @@ const styles = StyleSheet.create({
     backendToggle: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     backendOption: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1 },
     backendOptionText: { fontSize: 13, fontWeight: '700' },
+    dropdownButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        borderWidth: 1,
+        borderRadius: 10,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        gap: 8,
+    },
+    dropdownValue: {
+        flex: 1,
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    dropdownChevron: {
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    pickerOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.4)',
+        justifyContent: 'center',
+        padding: 20,
+    },
+    pickerCard: {
+        borderRadius: 16,
+        borderWidth: 1,
+        padding: 16,
+        maxHeight: '70%',
+    },
+    pickerTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        marginBottom: 12,
+    },
+    pickerList: {
+        flexGrow: 0,
+    },
+    pickerListContent: {
+        gap: 8,
+    },
+    pickerOption: {
+        borderWidth: 1,
+        borderRadius: 10,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    pickerOptionText: {
+        fontSize: 13,
+        fontWeight: '600',
+    },
     inputGroup: { padding: 16 },
     textInput: { marginTop: 8, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 },
 });

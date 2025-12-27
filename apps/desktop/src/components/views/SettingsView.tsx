@@ -795,6 +795,7 @@ export function SettingsView() {
                                     onChange={(e) => updateAISettings({
                                         provider: e.target.value as AIProviderId,
                                         model: getDefaultAIConfig(e.target.value as AIProviderId).model,
+                                        copilotModel: getDefaultCopilotModel(e.target.value as AIProviderId),
                                     })}
                                     className="text-sm bg-muted/50 text-foreground border border-border rounded px-2 py-1 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40"
                                 >

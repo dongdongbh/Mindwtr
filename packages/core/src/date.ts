@@ -37,3 +37,13 @@ export function safeParseDate(dateStr: string | undefined | null): Date | null {
         return null;
     }
 }
+
+/**
+ * Returns true when the review date is set and due at or before the provided time.
+ */
+export function isDueForReview(reviewAt: string | Date | undefined | null, now: Date = new Date()): boolean {
+    if (!reviewAt) return false;
+    const date = typeof reviewAt === 'string' ? safeParseDate(reviewAt) : reviewAt;
+    if (!date || !isValid(date)) return false;
+    return date.getTime() <= now.getTime();
+}
