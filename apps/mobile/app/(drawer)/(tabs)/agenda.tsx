@@ -140,7 +140,16 @@ function TaskCard({ task, onPress, onToggleFocus, tc, isDark, focusedCount, proj
                   const nextList = (task.checklist || []).map((it, i) =>
                     i === index ? { ...it, isCompleted: !it.isCompleted } : it
                   );
-                  onUpdateTask(task.id, { checklist: nextList });
+                  const isListMode = task.taskMode === 'list';
+                  const allComplete = nextList.length > 0 && nextList.every((entry) => entry.isCompleted);
+                  const nextStatus = isListMode
+                    ? allComplete
+                      ? 'done'
+                      : task.status === 'done'
+                        ? 'next'
+                        : undefined
+                    : undefined;
+                  onUpdateTask(task.id, { checklist: nextList, ...(nextStatus ? { status: nextStatus } : {}) });
                 }}
                 style={styles.checklistItem}
                 accessibilityRole="button"

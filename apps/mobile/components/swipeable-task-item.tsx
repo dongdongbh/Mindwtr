@@ -288,7 +288,16 @@ export function SwipeableTaskItem({
                                             const newList = (task.checklist || []).map((it, i) =>
                                                 i === index ? { ...it, isCompleted: !it.isCompleted } : it
                                             );
-                                            updateTask(task.id, { checklist: newList });
+                                            const isListMode = task.taskMode === 'list';
+                                            const allComplete = newList.length > 0 && newList.every((entry) => entry.isCompleted);
+                                            const nextStatus = isListMode
+                                                ? allComplete
+                                                    ? 'done'
+                                                    : task.status === 'done'
+                                                        ? 'next'
+                                                        : undefined
+                                                : undefined;
+                                            updateTask(task.id, { checklist: newList, ...(nextStatus ? { status: nextStatus } : {}) });
                                         }}
                                         style={styles.checklistItem}
                                         accessibilityRole="button"

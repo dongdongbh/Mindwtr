@@ -32,7 +32,9 @@ async function loadWidgetContext() {
         const language = resolveWidgetLanguage(rawLanguage, data.settings?.language);
         return { data, language };
     } catch (error) {
-        console.warn('[RNWidget] Failed to load widget payload', error);
+        if (__DEV__) {
+            console.warn('[RNWidget] Failed to load widget payload', error);
+        }
         return { data: DEFAULT_DATA, language: 'en' as const };
     }
 }
@@ -43,7 +45,9 @@ const widgetTaskHandler: WidgetTaskHandler = async ({ renderWidget, widgetInfo }
     try {
         renderWidget(buildTasksWidgetTree(tasksPayload));
     } catch (error) {
-        console.warn('[RNWidget] Widget render failed', error);
+        if (__DEV__) {
+            console.warn('[RNWidget] Widget render failed', error);
+        }
         renderWidget(buildTasksWidgetTree(tasksPayload));
     }
 

@@ -4,6 +4,8 @@ export type TimeEstimate = '5min' | '10min' | '15min' | '30min' | '1hr' | '2hr' 
 
 export type TaskSortBy = 'default' | 'due' | 'start' | 'review' | 'title' | 'created' | 'created-desc';
 
+export type TaskMode = 'task' | 'list';
+
 export type TaskEditorFieldId =
     | 'status'
     | 'contexts'
@@ -59,6 +61,7 @@ export interface Task {
     id: string;
     title: string;
     status: TaskStatus;
+    taskMode?: TaskMode; // 'list' for checklist-first tasks
     startTime?: string; // ISO date string
     dueDate?: string; // ISO date string
     recurrence?: string; // e.g., 'daily', 'weekly', 'monthly'

@@ -118,8 +118,9 @@ export const readSyncFile = async (fileUri: string): Promise<AppData | null> => 
         if (fileUri.startsWith('content://') && /Invalid URI|IllegalArgumentException/i.test(message)) {
             throw new Error('Cannot access the selected sync file. Please re-select it in Settings → Data & Sync.');
         }
-        if (/JSON/i.test(message) || /Unexpected token|trailing characters/i.test(message)) {
-            throw new Error('Sync file is not valid JSON. It may be mid-write (e.g., Syncthing). Please try again in a few seconds.');
+        if (/JSON|Unexpected token|trailing characters|Invalid data format|Sync file is empty/i.test(message)) {
+            console.warn('[Sync] Invalid JSON in sync file. Using local data and repairing file.');
+            return null;
         }
         console.error('Failed to read sync file:', error);
         throw error;

@@ -21,8 +21,6 @@ export default function TabLayout() {
       screenOptions={({ route }) => ({
         tabBarActiveTintColor: activeTint,
         tabBarInactiveTintColor: inactiveTint,
-        tabBarActiveBackgroundColor: activeItemBg,
-        tabBarInactiveBackgroundColor: 'transparent',
         tabBarShowLabel: false,
         headerShown: true,
         headerTitleAlign: 'center',
@@ -44,19 +42,28 @@ export default function TabLayout() {
               </TouchableOpacity>
             </Link>
           ),
-        tabBarButton: HapticTab,
+        tabBarButton: (props) => (
+          <HapticTab
+            {...props}
+            activeBackgroundColor={activeItemBg}
+            inactiveBackgroundColor="transparent"
+          />
+        ),
         tabBarItemStyle: {
+          flex: 1,
           borderRadius: 0,
           marginHorizontal: 0,
           marginVertical: 0,
-          paddingVertical: 6,
+          paddingVertical: 0,
         },
         tabBarStyle: {
           backgroundColor: isDark ? '#1F2937' : '#FFFFFF',
           borderTopColor: isDark ? '#374151' : '#E5E7EB',
           paddingTop: 0,
+          paddingBottom: 0,
           height: 58,
           paddingHorizontal: 0,
+          alignItems: 'stretch',
           ...Platform.select({
             ios: {
               position: 'absolute',

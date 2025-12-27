@@ -13,6 +13,7 @@ export interface UpdateInfo {
     releaseNotes: string;
     downloadUrl: string | null;
     platform: string;
+    assets: Array<{ name: string; url: string }>;
 }
 
 interface GitHubAsset {
@@ -45,7 +46,7 @@ function getDownloadUrl(assets: GitHubAsset[], platform: string): string | null 
     const patterns: Record<string, RegExp[]> = {
         windows: [/\.msi$/i, /\.exe$/i],
         macos: [/\.dmg$/i, /\.app\.tar\.gz$/i],
-        linux: [/\.AppImage$/i, /\.deb$/i]
+        linux: [/\.AppImage$/i, /\.deb$/i, /\.rpm$/i]
     };
 
     const platformPatterns = patterns[platform] || [];
@@ -100,6 +101,10 @@ export async function checkForUpdates(currentVersion: string): Promise<UpdateInf
         const latestVersion = release.tag_name.replace(/^v/, '');
         const cleanCurrentVersion = currentVersion.replace(/^v/, '');
         const hasUpdate = compareVersions(latestVersion, cleanCurrentVersion) > 0;
+        const assets = (release.assets || []).map((asset) => ({
+            name: asset.name,
+            url: asset.browser_download_url,
+        }));
         const downloadUrl = getDownloadUrl(release.assets || [], platform);
 
         return {
@@ -109,7 +114,8 @@ export async function checkForUpdates(currentVersion: string): Promise<UpdateInf
             releaseUrl: release.html_url || GITHUB_RELEASES_URL,
             releaseNotes: release.body || '',
             downloadUrl,
-            platform
+            platform,
+            assets,
         };
     } catch (error) {
         console.error('[UpdateService] Failed to check for updates:', error);
@@ -128,4 +134,3 @@ export async function downloadUpdate(downloadUrl: string): Promise<void> {
 }
 
 export { GITHUB_RELEASES_URL };
-

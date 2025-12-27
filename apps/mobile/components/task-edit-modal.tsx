@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { View, Text, TextInput, Modal, StyleSheet, TouchableOpacity, ScrollView, Platform, KeyboardAvoidingView, Share, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Attachment, Task, TaskEditorFieldId, TaskStatus, TimeEstimate, useTaskStore, generateUUID, PRESET_TAGS, RecurrenceRule, RECURRENCE_RULES } from '@mindwtr/core';
+import { Attachment, Task, TaskEditorFieldId, TaskMode, TaskStatus, TimeEstimate, useTaskStore, generateUUID, PRESET_TAGS, RecurrenceRule, RECURRENCE_RULES } from '@mindwtr/core';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Linking from 'expo-linking';
@@ -45,7 +45,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
     const [showDatePicker, setShowDatePicker] = useState<'start' | 'start-time' | 'due' | 'due-time' | 'review' | null>(null);
     const [pendingStartDate, setPendingStartDate] = useState<Date | null>(null);
     const [pendingDueDate, setPendingDueDate] = useState<Date | null>(null);
-    const [focusMode, setFocusMode] = useState(false);
+    const [editTab, setEditTab] = useState<TaskMode>('task');
     const [showDescriptionPreview, setShowDescriptionPreview] = useState(false);
     const [showMoreOptions, setShowMoreOptions] = useState(false);
     const [linkModalVisible, setLinkModalVisible] = useState(false);
@@ -97,6 +97,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
             setEditedTask({ ...task });
             setShowMoreOptions(false);
             setShowDescriptionPreview(false);
+            setEditTab(task.taskMode === 'list' ? 'list' : 'task');
         }
     }, [task]);
 
@@ -434,9 +435,44 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
         }
     }, [visible]);
 
+    const mergedTask = useMemo(() => ({
+        ...(task ?? {}),
+        ...editedTask,
+    }), [task, editedTask]);
+
     const compactFieldIds = useMemo(() => {
-        return taskEditorOrder.filter((fieldId) => !hiddenSet.has(fieldId));
-    }, [taskEditorOrder, hiddenSet]);
+        const hasValue = (fieldId: TaskEditorFieldId) => {
+            switch (fieldId) {
+                case 'status':
+                    return true;
+                case 'contexts':
+                    return (mergedTask.contexts || []).length > 0;
+                case 'description':
+                    return Boolean(mergedTask.description && String(mergedTask.description).trim());
+                case 'tags':
+                    return (mergedTask.tags || []).length > 0;
+                case 'timeEstimate':
+                    return Boolean(mergedTask.timeEstimate);
+                case 'recurrence':
+                    return Boolean(mergedTask.recurrence);
+                case 'startTime':
+                    return Boolean(mergedTask.startTime);
+                case 'dueDate':
+                    return Boolean(mergedTask.dueDate);
+                case 'reviewAt':
+                    return Boolean(mergedTask.reviewAt);
+                case 'blockedBy':
+                    return (mergedTask.blockedByTaskIds || []).length > 0;
+                case 'attachments':
+                    return (mergedTask.attachments || []).some((attachment) => !attachment.deletedAt);
+                case 'checklist':
+                    return (mergedTask.checklist || []).length > 0;
+                default:
+                    return false;
+            }
+        };
+        return taskEditorOrder.filter((fieldId) => !hiddenSet.has(fieldId) || hasValue(fieldId));
+    }, [taskEditorOrder, hiddenSet, mergedTask]);
 
     const fieldIdsToRender = showMoreOptions ? taskEditorOrder : compactFieldIds;
     const hasHiddenFields = hiddenSet.size > 0;
@@ -470,11 +506,37 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
     };
 
     const handleDone = () => {
-        if (focusMode) {
-            setFocusMode(false);
-            return;
-        }
         handleSave();
+    };
+
+    const setModeTab = (mode: TaskMode) => {
+        setEditTab(mode);
+        setEditedTask(prev => ({
+            ...prev,
+            taskMode: mode,
+            ...(mode === 'list' && !prev.checklist ? { checklist: [] } : null),
+        }));
+    };
+
+    const applyChecklistUpdate = (nextChecklist: NonNullable<Task['checklist']>) => {
+        setEditedTask(prev => {
+            const currentStatus = (prev.status ?? task?.status ?? 'inbox') as TaskStatus;
+            let nextStatus = currentStatus;
+            const isListMode = (prev.taskMode ?? task?.taskMode) === 'list';
+            if (isListMode) {
+                const allComplete = nextChecklist.length > 0 && nextChecklist.every((item) => item.isCompleted);
+                if (allComplete) {
+                    nextStatus = 'done';
+                } else if (currentStatus === 'done') {
+                    nextStatus = 'next';
+                }
+            }
+            return {
+                ...prev,
+                checklist: nextChecklist,
+                status: nextStatus,
+            };
+        });
     };
 
     const renderField = (fieldId: TaskEditorFieldId) => {
@@ -887,36 +949,39 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
             <SafeAreaView style={styles.container} edges={['top']}>
                 <View style={styles.header}>
                     <TouchableOpacity onPress={handleDone}>
-                        <Text style={styles.headerBtn}>{focusMode ? t('common.back') : t('common.done')}</Text>
+                        <Text style={styles.headerBtn}>{t('common.done')}</Text>
                     </TouchableOpacity>
-                    <Text style={styles.headerTitle}>{focusMode ? editedTask.title || t('taskEdit.checklist') : t('taskEdit.editTask')}</Text>
+                    <Text style={styles.headerTitle}>{editTab === 'list' ? (editedTask.title || t('taskEdit.checklist')) : t('taskEdit.editTask')}</Text>
                     <View style={styles.headerRight}>
                         <TouchableOpacity onPress={handleShare}>
                             <Text style={styles.headerBtn}>{t('common.share')}</Text>
                         </TouchableOpacity>
-                        {!focusMode && (
-                            <TouchableOpacity onPress={onClose}>
-                                <Text style={[styles.headerBtn, styles.saveBtn]}>{t('common.cancel')}</Text>
-                            </TouchableOpacity>
-                        )}
+                        <TouchableOpacity onPress={onClose}>
+                            <Text style={[styles.headerBtn, styles.saveBtn]}>{t('common.cancel')}</Text>
+                        </TouchableOpacity>
                     </View>
                 </View>
 
-                {/* Focus Mode Banner - Conditional */}
-                {!focusMode && editedTask.checklist && editedTask.checklist.length > 0 && (
-                    <View style={{ padding: 16, backgroundColor: '#f0f9ff', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#e0f2fe' }}>
-                        <Text style={{ fontSize: 14, color: '#0369a1' }}>{t('taskEdit.shoppingListPrompt')}</Text>
-                        <TouchableOpacity
-                            style={{ backgroundColor: '#fff', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: '#0ea5e9' }}
-                            onPress={() => setFocusMode(true)}
-                        >
-                            <Text style={{ fontSize: 13, fontWeight: '600', color: '#0284c7' }}>{t('taskEdit.openChecklistMode')}</Text>
-                        </TouchableOpacity>
-                    </View>
-                )}
+                <View style={[styles.modeTabs, { borderBottomColor: tc.border }]}>
+                    <TouchableOpacity
+                        style={[styles.modeTab, editTab === 'task' && styles.modeTabActive]}
+                        onPress={() => setModeTab('task')}
+                    >
+                        <Text style={[styles.modeTabText, editTab === 'task' && styles.modeTabTextActive]}>
+                            {t('taskEdit.tab.task')}
+                        </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.modeTab, editTab === 'list' && styles.modeTabActive]}
+                        onPress={() => setModeTab('list')}
+                    >
+                        <Text style={[styles.modeTabText, editTab === 'list' && styles.modeTabTextActive]}>
+                            {t('taskEdit.tab.list')}
+                        </Text>
+                    </TouchableOpacity>
+                </View>
 
-                {/* FOCUS MODE VIEW */}
-                {focusMode ? (
+                {editTab === 'list' ? (
                     <ScrollView style={styles.content}>
                         <View style={styles.checklistContainer}>
                             {editedTask.checklist?.map((item, index) => (
@@ -926,7 +991,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                                             const newChecklist = (editedTask.checklist || []).map((item, i) =>
                                                 i === index ? { ...item, isCompleted: !item.isCompleted } : item
                                             );
-                                            setEditedTask(prev => ({ ...prev, checklist: newChecklist }));
+                                            applyChecklistUpdate(newChecklist);
                                         }}
                                         style={styles.checkboxTouch}
                                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -943,14 +1008,14 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                                             const newChecklist = (editedTask.checklist || []).map((item, i) =>
                                                 i === index ? { ...item, title: text } : item
                                             );
-                                            setEditedTask(prev => ({ ...prev, checklist: newChecklist }));
+                                            applyChecklistUpdate(newChecklist);
                                         }}
                                         placeholder={t('taskEdit.itemNamePlaceholder')}
                                     />
                                     <TouchableOpacity
                                         onPress={() => {
                                             const newChecklist = (editedTask.checklist || []).filter((_, i) => i !== index);
-                                            setEditedTask(prev => ({ ...prev, checklist: newChecklist }));
+                                            applyChecklistUpdate(newChecklist);
                                         }}
                                         style={styles.deleteBtn}
                                     >
@@ -966,10 +1031,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                                         title: '',
                                         isCompleted: false
                                     };
-                                    setEditedTask(prev => ({
-                                        ...prev,
-                                        checklist: [...(prev.checklist || []), newItem]
-                                    }));
+                                    applyChecklistUpdate([...(editedTask.checklist || []), newItem]);
                                 }}
                             >
                                 <Text style={[styles.addChecklistText, { fontSize: 17 }]}>+ {t('taskEdit.addItem')}</Text>
@@ -1096,6 +1158,32 @@ const styles = StyleSheet.create({
     headerBtn: { fontSize: 17, color: '#007AFF' },
     saveBtn: { fontWeight: '600' },
     headerTitle: { fontSize: 17, fontWeight: '600' },
+    modeTabs: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        gap: 8,
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        backgroundColor: '#fff',
+        borderBottomWidth: 1,
+    },
+    modeTab: {
+        paddingHorizontal: 16,
+        paddingVertical: 6,
+        borderRadius: 14,
+        backgroundColor: '#e5e5e5',
+    },
+    modeTabActive: {
+        backgroundColor: '#007AFF',
+    },
+    modeTabText: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#333',
+    },
+    modeTabTextActive: {
+        color: '#fff',
+    },
     content: { padding: 20 },
     formGroup: { marginBottom: 20 },
     label: { fontSize: 14, color: '#666', marginBottom: 8, textTransform: 'uppercase' },

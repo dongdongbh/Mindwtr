@@ -1,4 +1,4 @@
-import { useEffect, useState, type ComponentType } from 'react';
+import { useEffect, useMemo, useState, type ComponentType } from 'react';
 import {
     Bell,
     CalendarDays,
@@ -22,6 +22,7 @@ import { cn } from '../../lib/utils';
 
 type ThemeMode = 'system' | 'light' | 'dark';
 type SettingsPage = 'main' | 'gtd' | 'notifications' | 'sync' | 'calendar' | 'about';
+type LinuxDistroInfo = { id?: string; id_like?: string[] };
 
 const THEME_STORAGE_KEY = 'mindwtr-theme';
 
@@ -57,6 +58,7 @@ export function SettingsView() {
     const [showUpdateModal, setShowUpdateModal] = useState(false);
     const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
     const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
+    const [linuxDistro, setLinuxDistro] = useState<LinuxDistroInfo | null>(null);
 
     const [syncPath, setSyncPath] = useState<string>('');
     const [isSyncing, setIsSyncing] = useState(false);
@@ -90,12 +92,14 @@ export function SettingsView() {
 
         import('@tauri-apps/api/core')
             .then(async ({ invoke }) => {
-                const [data, config] = await Promise.all([
+                const [data, config, distro] = await Promise.all([
                     invoke<string>('get_data_path_cmd'),
                     invoke<string>('get_config_path_cmd'),
+                    invoke<LinuxDistroInfo | null>('get_linux_distro'),
                 ]);
                 setDataPath(data);
                 setConfigPath(config);
+                setLinuxDistro(distro);
             })
             .catch(console.error);
     }, []);
@@ -252,7 +256,7 @@ export function SettingsView() {
     };
 
     const handleDownloadUpdate = async () => {
-        const targetUrl = updateInfo?.downloadUrl || updateInfo?.releaseUrl || GITHUB_RELEASES_URL;
+        const targetUrl = preferredDownloadUrl;
         setIsDownloadingUpdate(true);
         setDownloadNotice(t.downloadStarting);
 
@@ -281,9 +285,6 @@ export function SettingsView() {
             }
         }
 
-        setTimeout(() => {
-            setIsDownloadingUpdate(false);
-        }, 1200);
     };
 
     const labels = {
@@ -365,6 +366,8 @@ export function SettingsView() {
             downloadStarting: 'Opening download…',
             downloadStarted: 'Download started in your browser.',
             downloadFailed: 'Failed to open download link.',
+            downloadRecommended: 'Recommended package',
+            downloadAURHint: 'Arch detected: update via AUR',
             changelog: 'Changelog',
             noChangelog: 'No changelog available',
             later: 'Later',
@@ -453,6 +456,8 @@ export function SettingsView() {
             downloadStarting: '正在打开下载…',
             downloadStarted: '已在浏览器开始下载。',
             downloadFailed: '打开下载链接失败。',
+            downloadRecommended: '推荐下载包',
+            downloadAURHint: '检测到 Arch：建议使用 AUR 更新',
             changelog: '更新日志',
             noChangelog: '暂无更新日志',
             later: '稍后',
@@ -466,6 +471,61 @@ export function SettingsView() {
     } as const;
 
     const t = labels[language];
+
+    const linuxFlavor = useMemo(() => {
+        if (!linuxDistro) return null;
+        const tokens = [
+            linuxDistro.id,
+            ...(linuxDistro.id_like ?? []),
+        ]
+            .filter(Boolean)
+            .map((value) => String(value).toLowerCase());
+        if (tokens.some((token) => token.includes('arch') || token.includes('manjaro'))) return 'arch';
+        if (tokens.some((token) => token.includes('debian') || token.includes('ubuntu') || token.includes('pop'))) return 'debian';
+        if (tokens.some((token) => token.includes('fedora') || token.includes('rhel') || token.includes('redhat') || token.includes('centos') || token.includes('rocky') || token.includes('alma'))) return 'rpm';
+        if (tokens.some((token) => token.includes('suse') || token.includes('opensuse'))) return 'rpm';
+        return 'other';
+    }, [linuxDistro]);
+
+    const recommendedDownload = useMemo(() => {
+        if (!updateInfo) return null;
+        const assets = updateInfo.assets || [];
+        const findAsset = (patterns: RegExp[]) => assets.find((asset) => patterns.some((pattern) => pattern.test(asset.name)));
+
+        if (updateInfo.platform === 'windows') {
+            const asset = findAsset([/\.msi$/i, /\.exe$/i]);
+            return asset ? { label: '.msi/.exe', url: asset.url } : null;
+        }
+
+        if (updateInfo.platform === 'macos') {
+            const asset = findAsset([/\.dmg$/i, /\.app\.tar\.gz$/i]);
+            return asset ? { label: '.dmg', url: asset.url } : null;
+        }
+
+        if (updateInfo.platform === 'linux') {
+            if (linuxFlavor === 'arch') {
+                return { label: 'AUR', url: null };
+            }
+            if (linuxFlavor === 'debian') {
+                const asset = findAsset([/\.deb$/i]);
+                return { label: '.deb', url: asset?.url ?? null };
+            }
+            if (linuxFlavor === 'rpm') {
+                const asset = findAsset([/\.rpm$/i]);
+                return { label: '.rpm', url: asset?.url ?? null };
+            }
+            const asset = findAsset([/\.AppImage$/i]);
+            return { label: '.AppImage', url: asset?.url ?? null };
+        }
+
+        return null;
+    }, [updateInfo, linuxFlavor]);
+
+    const preferredDownloadUrl =
+        recommendedDownload?.url ??
+        (linuxFlavor === 'arch' ? updateInfo?.releaseUrl : updateInfo?.downloadUrl) ??
+        updateInfo?.releaseUrl ??
+        GITHUB_RELEASES_URL;
 
     const lastSyncAt = settings?.lastSyncAt;
     const lastSyncStatus = settings?.lastSyncStatus;
@@ -1190,6 +1250,14 @@ export function SettingsView() {
                             <div className="bg-muted/50 rounded-md p-4 text-sm whitespace-pre-wrap max-h-60 overflow-y-auto">
                                 {updateInfo.releaseNotes || t.noChangelog}
                             </div>
+                            {recommendedDownload && (
+                                <div className="mt-4 text-xs text-muted-foreground">
+                                    {t.downloadRecommended}: {recommendedDownload.label}
+                                    {!recommendedDownload.url && linuxFlavor === 'arch' && (
+                                        <span className="ml-1">• {t.downloadAURHint}</span>
+                                    )}
+                                </div>
+                            )}
                             {(isDownloadingUpdate || downloadNotice) && (
                                 <div className="mt-4 space-y-2">
                                     {downloadNotice && (

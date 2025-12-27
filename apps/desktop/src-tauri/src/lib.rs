@@ -46,6 +46,12 @@ struct ExternalCalendarSubscription {
     enabled: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct LinuxDistroInfo {
+    id: Option<String>,
+    id_like: Vec<String>,
+}
+
 struct QuickAddPending(AtomicBool);
 
 #[tauri::command]
@@ -105,6 +111,15 @@ fn parse_toml_string_value(raw: &str) -> Option<String> {
     None
 }
 
+fn parse_os_release_value(raw: &str) -> String {
+    parse_toml_string_value(raw).unwrap_or_else(|| {
+        raw.trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_string()
+    })
+}
+
 fn serialize_toml_string_value(value: &str) -> String {
     // Use TOML basic strings with minimal escaping.
     let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
@@ -146,6 +161,41 @@ fn read_config_toml(path: &Path) -> AppConfigToml {
         }
     }
     config
+}
+
+#[tauri::command]
+fn get_linux_distro() -> Option<LinuxDistroInfo> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    let content = fs::read_to_string("/etc/os-release").ok()?;
+    let mut id: Option<String> = None;
+    let mut id_like: Vec<String> = Vec::new();
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.starts_with("ID=") {
+            if let Some(value) = line.split_once('=').map(|(_, v)| v) {
+                let parsed = parse_os_release_value(value);
+                if !parsed.is_empty() {
+                    id = Some(parsed);
+                }
+            }
+        } else if line.starts_with("ID_LIKE=") {
+            if let Some(value) = line.split_once('=').map(|(_, v)| v) {
+                let parsed = parse_os_release_value(value);
+                if !parsed.is_empty() {
+                    id_like = parsed
+                        .split_whitespace()
+                        .map(|item| item.trim().to_string())
+                        .filter(|item| !item.is_empty())
+                        .collect();
+                }
+            }
+        }
+    }
+
+    Some(LinuxDistroInfo { id, id_like })
 }
 
 fn write_config_toml(path: &Path, config: &AppConfigToml) -> Result<(), String> {
@@ -745,6 +795,7 @@ pub fn run() {
             set_external_calendars,
             read_sync_file,
             write_sync_file,
+            get_linux_distro,
             consume_quick_add_pending
         ])
         .run(tauri::generate_context!())

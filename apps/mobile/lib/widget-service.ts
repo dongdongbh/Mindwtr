@@ -17,9 +17,7 @@ async function getWidgetApi() {
         const api = require('react-native-android-widget');
         return api;
     } catch (error) {
-        if (error instanceof Error) {
-            console.warn('[RNWidget] Android widget API unavailable', error);
-        } else {
+        if (__DEV__) {
             console.warn('[RNWidget] Android widget API unavailable', error);
         }
         return null;
@@ -40,7 +38,9 @@ export async function updateAndroidWidgetFromData(data: AppData) {
             renderWidget: () => buildTasksWidgetTree(payload),
         });
     } catch (error) {
-        console.warn('[RNWidget] Failed to update Android widget', error);
+        if (__DEV__) {
+            console.warn('[RNWidget] Failed to update Android widget', error);
+        }
     }
 }
 

@@ -237,6 +237,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
             id: uuidv4(),
             title,
             status: 'inbox',
+            taskMode: 'task',
             tags: [],
             contexts: [],
             createdAt: new Date().toISOString(),

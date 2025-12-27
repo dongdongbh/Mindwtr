@@ -93,6 +93,8 @@ export const translations: Record<Language, Record<string, string>> = {
         // Task Edit
         'taskEdit.editTask': 'Edit Task',
         'taskEdit.checklist': 'Checklist',
+        'taskEdit.tab.task': 'Task',
+        'taskEdit.tab.list': 'List',
         'taskEdit.start': 'Start',
         'taskEdit.shoppingListPrompt': 'Shopping list?',
         'taskEdit.openChecklistMode': 'Open Checklist Mode',
@@ -681,6 +683,8 @@ export const translations: Record<Language, Record<string, string>> = {
         // Task Edit
         'taskEdit.editTask': '编辑任务',
         'taskEdit.checklist': '清单',
+        'taskEdit.tab.task': '任务',
+        'taskEdit.tab.list': '清单',
         'taskEdit.start': '开始',
         'taskEdit.shoppingListPrompt': '购物清单？',
         'taskEdit.openChecklistMode': '打开清单模式',
