@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { View, TextInput, FlatList, StyleSheet, TouchableOpacity, Text, RefreshControl, ScrollView, Modal, Pressable } from 'react-native';
 import { router } from 'expo-router';
-import { useTaskStore, Task, TaskStatus, sortTasksBy, parseQuickAdd, isTaskBlocked, safeParseDate, PRESET_CONTEXTS, createAIProvider } from '@mindwtr/core';
+import { useTaskStore, Task, TaskStatus, sortTasksBy, parseQuickAdd, isTaskBlocked, safeParseDate, PRESET_CONTEXTS, PRESET_TAGS, createAIProvider } from '@mindwtr/core';
 import type { TaskSortBy } from '@mindwtr/core';
 
 
@@ -25,6 +25,7 @@ export interface TaskListProps {
   emptyText?: string;
   headerAccessory?: React.ReactNode;
   enableCopilot?: boolean;
+  defaultEditTab?: 'task' | 'list' | 'view';
 }
 
 // ... inside TaskList component
@@ -40,16 +41,17 @@ export function TaskList({
   emptyText,
   headerAccessory,
   enableCopilot = true,
+  defaultEditTab,
 }: TaskListProps) {
   const { isDark } = useTheme();
   const { t } = useLanguage();
   const { tasks, projects, addTask, updateTask, deleteTask, fetchData, batchMoveTasks, batchDeleteTasks, batchUpdateTasks, settings, updateSettings } = useTaskStore();
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [aiKey, setAiKey] = useState('');
-  const [copilotSuggestion, setCopilotSuggestion] = useState<{ context?: string; timeEstimate?: Task['timeEstimate'] } | null>(null);
+  const [copilotSuggestion, setCopilotSuggestion] = useState<{ context?: string; timeEstimate?: Task['timeEstimate']; tags?: string[] } | null>(null);
   const [copilotApplied, setCopilotApplied] = useState(false);
   const [copilotContext, setCopilotContext] = useState<string | undefined>(undefined);
-  const [copilotEstimate, setCopilotEstimate] = useState<Task['timeEstimate'] | undefined>(undefined);
+  const [copilotTags, setCopilotTags] = useState<string[]>([]);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -95,6 +97,10 @@ export function TaskList({
     const taskContexts = tasks.flatMap((task) => task.contexts || []);
     return Array.from(new Set([...PRESET_CONTEXTS, ...taskContexts])).filter(Boolean);
   }, [tasks]);
+  const tagOptions = useMemo(() => {
+    const taskTags = tasks.flatMap((task) => task.tags || []);
+    return Array.from(new Set([...PRESET_TAGS, ...taskTags])).filter(Boolean);
+  }, [tasks]);
 
   useEffect(() => {
     loadAIKey(aiProvider).then(setAiKey).catch(console.error);
@@ -114,9 +120,9 @@ export function TaskList({
     const handle = setTimeout(async () => {
       try {
         const provider = createAIProvider(buildCopilotConfig(settings, aiKey));
-        const suggestion = await provider.predictMetadata({ title, contexts: contextOptions });
+        const suggestion = await provider.predictMetadata({ title, contexts: contextOptions, tags: tagOptions });
         if (cancelled) return;
-        if (!suggestion.context && !suggestion.timeEstimate) {
+        if (!suggestion.context && !suggestion.timeEstimate && !suggestion.tags?.length) {
           setCopilotSuggestion(null);
         } else {
           setCopilotSuggestion(suggestion);
@@ -131,7 +137,7 @@ export function TaskList({
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [aiEnabled, aiKey, aiProvider, contextOptions, enableCopilot, newTaskTitle, settings, statusFilter]);
+  }, [aiEnabled, aiKey, aiProvider, contextOptions, enableCopilot, newTaskTitle, settings, statusFilter, tagOptions]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -157,8 +163,9 @@ export function TaskList({
       const nextContexts = Array.from(new Set([...(initialProps.contexts ?? []), copilotContext]));
       initialProps.contexts = nextContexts;
     }
-    if (copilotEstimate && !props.timeEstimate) {
-      initialProps.timeEstimate = copilotEstimate;
+    if (copilotTags.length) {
+      const nextTags = Array.from(new Set([...(initialProps.tags ?? []), ...copilotTags]));
+      initialProps.tags = nextTags;
     }
 
     addTask(finalTitle, initialProps);
@@ -166,7 +173,7 @@ export function TaskList({
     setCopilotSuggestion(null);
     setCopilotApplied(false);
     setCopilotContext(undefined);
-    setCopilotEstimate(undefined);
+    setCopilotTags([]);
   };
 
   const handleEditTask = (task: Task) => {
@@ -336,7 +343,7 @@ export function TaskList({
                 setNewTaskTitle(text);
                 setCopilotApplied(false);
                 setCopilotContext(undefined);
-                setCopilotEstimate(undefined);
+                setCopilotTags([]);
               }}
               onSubmitEditing={handleAddTask}
               returnKeyType="done"
@@ -363,14 +370,14 @@ export function TaskList({
               style={[styles.copilotPill, { borderColor: themeColors.border, backgroundColor: themeColors.inputBg }]}
               onPress={() => {
                 setCopilotContext(copilotSuggestion.context);
-                setCopilotEstimate(copilotSuggestion.timeEstimate);
+                setCopilotTags(copilotSuggestion.tags ?? []);
                 setCopilotApplied(true);
               }}
             >
               <Text style={[styles.copilotText, { color: themeColors.text }]}>
                 ✨ {t('copilot.suggested')}{' '}
                 {copilotSuggestion.context ? `${copilotSuggestion.context} ` : ''}
-                {copilotSuggestion.timeEstimate ? `${copilotSuggestion.timeEstimate}` : ''}
+                {copilotSuggestion.tags?.length ? copilotSuggestion.tags.join(' ') : ''}
               </Text>
               <Text style={[styles.copilotHint, { color: themeColors.secondaryText }]}>
                 {t('copilot.applyHint')}
@@ -382,7 +389,7 @@ export function TaskList({
               <Text style={[styles.copilotText, { color: themeColors.text }]}>
                 ✅ {t('copilot.applied')}{' '}
                 {copilotContext ? `${copilotContext} ` : ''}
-                {copilotEstimate ? `${copilotEstimate}` : ''}
+                {copilotTags.length ? copilotTags.join(' ') : ''}
               </Text>
             </View>
           )}
@@ -493,6 +500,7 @@ export function TaskList({
         task={editingTask}
         onClose={() => setIsModalVisible(false)}
         onSave={onSaveTask}
+        defaultTab={defaultEditTab}
         onFocusMode={(taskId) => {
           setIsModalVisible(false);
           router.push(`/check-focus?id=${taskId}`);

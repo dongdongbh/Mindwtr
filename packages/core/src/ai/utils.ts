@@ -54,3 +54,12 @@ export function normalizeTimeEstimate(value?: string): string | undefined {
     const key = value.trim().toLowerCase();
     return TIME_ESTIMATE_MAP[key];
 }
+
+export function normalizeTags(tags?: string[] | null): string[] {
+    if (!tags || tags.length === 0) return [];
+    const normalized = tags
+        .map((tag) => String(tag).trim())
+        .filter(Boolean)
+        .map((tag) => (tag.startsWith('#') ? tag : `#${tag}`));
+    return Array.from(new Set(normalized));
+}

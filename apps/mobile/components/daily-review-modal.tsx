@@ -279,6 +279,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                     updateTask(taskId, updates);
                     closeTask();
                 }}
+                defaultTab="view"
                 onFocusMode={(taskId) => {
                     closeTask();
                     router.push(`/check-focus?id=${taskId}`);

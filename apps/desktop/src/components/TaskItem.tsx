@@ -20,6 +20,7 @@ import {
     stripMarkdown,
     createAIProvider,
     PRESET_CONTEXTS,
+    PRESET_TAGS,
     type ClarifyResponse,
 } from '@mindwtr/core';
 import { cn } from '../lib/utils';
@@ -76,7 +77,7 @@ export const TaskItem = memo(function TaskItem({
     const [aiClarifyResponse, setAiClarifyResponse] = useState<ClarifyResponse | null>(null);
     const [aiError, setAiError] = useState<string | null>(null);
     const [aiBreakdownSteps, setAiBreakdownSteps] = useState<string[] | null>(null);
-    const [copilotSuggestion, setCopilotSuggestion] = useState<{ context?: string; timeEstimate?: TimeEstimate } | null>(null);
+    const [copilotSuggestion, setCopilotSuggestion] = useState<{ context?: string; timeEstimate?: TimeEstimate; tags?: string[] } | null>(null);
     const [copilotApplied, setCopilotApplied] = useState(false);
     const [copilotContext, setCopilotContext] = useState<string | undefined>(undefined);
     const [copilotEstimate, setCopilotEstimate] = useState<TimeEstimate | undefined>(undefined);
@@ -98,6 +99,11 @@ export const TaskItem = memo(function TaskItem({
             projectTasks,
         };
     }, [editProjectId, projects, task.id, task.projectId, tasks]);
+
+    const tagOptions = useMemo(() => {
+        const taskTags = tasks.flatMap((t) => t.tags || []);
+        return Array.from(new Set([...PRESET_TAGS, ...taskTags])).filter(Boolean);
+    }, [tasks]);
 
     const ageLabel = getTaskAgeLabel(task.createdAt, language);
     const checklistProgress = getChecklistProgress(task);
@@ -203,6 +209,11 @@ export const TaskItem = memo(function TaskItem({
             setEditContexts(nextContexts.join(', '));
             setCopilotContext(copilotSuggestion.context);
         }
+        if (copilotSuggestion.tags?.length) {
+            const currentTags = editTags.split(',').map((t) => t.trim()).filter(Boolean);
+            const nextTags = Array.from(new Set([...currentTags, ...copilotSuggestion.tags]));
+            setEditTags(nextTags.join(', '));
+        }
         if (copilotSuggestion.timeEstimate) {
             setEditTimeEstimate(copilotSuggestion.timeEstimate);
             setCopilotEstimate(copilotSuggestion.timeEstimate);
@@ -235,9 +246,10 @@ export const TaskItem = memo(function TaskItem({
                 const suggestion = await provider.predictMetadata({
                     title: input,
                     contexts: Array.from(new Set([...PRESET_CONTEXTS, ...currentContexts])),
+                    tags: tagOptions,
                 });
                 if (cancelled) return;
-                if (!suggestion.context && !suggestion.timeEstimate) {
+                if (!suggestion.context && !suggestion.timeEstimate && !suggestion.tags?.length) {
                     setCopilotSuggestion(null);
                 } else {
                     setCopilotSuggestion(suggestion);
@@ -456,6 +468,7 @@ export const TaskItem = memo(function TaskItem({
                                     ✨ {t('copilot.suggested')}{' '}
                                     {copilotSuggestion.context ? `${copilotSuggestion.context} ` : ''}
                                     {copilotSuggestion.timeEstimate ? `${copilotSuggestion.timeEstimate}` : ''}
+                                    {copilotSuggestion.tags?.length ? copilotSuggestion.tags.join(' ') : ''}
                                     <span className="ml-2 text-muted-foreground/70">{t('copilot.applyHint')}</span>
                                 </button>
                             )}
@@ -464,6 +477,7 @@ export const TaskItem = memo(function TaskItem({
                                     ✅ {t('copilot.applied')}{' '}
                                     {copilotContext ? `${copilotContext} ` : ''}
                                     {copilotEstimate ? `${copilotEstimate}` : ''}
+                                    {copilotSuggestion?.tags?.length ? copilotSuggestion.tags.join(' ') : ''}
                                 </div>
                             )}
                             {aiEnabled && aiError && (
@@ -925,13 +939,6 @@ export const TaskItem = memo(function TaskItem({
                                                 >
                                                     {t('taskEdit.resetChecklist')}
                                                 </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => duplicateTask(task.id, false)}
-                                                    className="text-xs px-2 py-1 rounded bg-muted/50 hover:bg-muted transition-colors text-muted-foreground"
-                                                >
-                                                    {t('taskEdit.duplicateTask')}
-                                                </button>
                                             </div>
                                         )}
                                     </div>
@@ -953,6 +960,13 @@ export const TaskItem = memo(function TaskItem({
                                 )}
                             </div>
                             <div className="flex gap-2 pt-1">
+                                <button
+                                    type="button"
+                                    onClick={() => duplicateTask(task.id, false)}
+                                    className="text-xs px-3 py-1.5 rounded bg-muted/50 hover:bg-muted transition-colors text-muted-foreground"
+                                >
+                                    {t('taskEdit.duplicateTask')}
+                                </button>
                                 <button
                                     type="submit"
                                     className="text-xs bg-primary text-primary-foreground px-3 py-1.5 rounded hover:bg-primary/90"

@@ -604,6 +604,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                     task={editingTask}
                     onClose={() => setShowEditModal(false)}
                     onSave={(taskId, updates) => updateTask(taskId, updates)}
+                    defaultTab="view"
                 />
             </GestureHandlerRootView>
         </Modal>

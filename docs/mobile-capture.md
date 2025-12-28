@@ -1,4 +1,4 @@
-# Mobile Capture (Phase 2 MVP)
+# Mobile Capture
 
 Mindwtr Mobile now includes a lightweight capture screen at `/capture`.
 
@@ -6,18 +6,19 @@ Mindwtr Mobile now includes a lightweight capture screen at `/capture`.
 
 You can open the capture modal with a URL like:
 
-`mobile://capture?text=<url-encoded text>`
+`mindwtr://capture?text=<url-encoded text>`
 
 The screen pre‑fills the text and lets you confirm before adding to Inbox.  
 It supports the same quick‑add syntax as desktop (`/due:…`, `/note:…`, `@context`, `#tag`, `+Project`).
 
-## Share‑sheet integration (next)
+## Share‑sheet integration
 
-Native share‑sheet receiving requires a platform share‑intent/extension library.
-We will wire incoming shares to the `/capture` screen in a later Phase‑2 iteration.
+Mindwtr supports capture from the system share sheet:
+
+1. In any app, tap **Share**
+2. Choose **Mindwtr**
+3. The content opens `/capture` prefilled
 
 ## Home widget (optional)
 
-Widgets are planned as an optional enhancement after share‑sheet capture.
-The target is a small “+ Inbox” widget that opens `/capture`.
-
+Add the Mindwtr widget (2x2) for one-tap capture and quick focus access.

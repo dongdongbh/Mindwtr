@@ -60,3 +60,6 @@ Default sync folder: `~/Sync/mindwtr/`
 - [Mobile URL Polyfill](mobile-url-polyfill.md) - Critical polyfill documentation
 - [Desktop Keybindings](desktop-keybindings.md) - Vim/Emacs presets and shortcuts
 - [GTD Best Practices](gtd-best-practices.md) - GTD methodology reference
+- [AI Assistant](ai-assistant.md) - BYOK AI assistant and copilot
+- [Reusable Lists](reusable-lists.md) - Task templates and checklist reset
+- [Calendar Integration](calendar-integration.md) - External calendars (ICS)

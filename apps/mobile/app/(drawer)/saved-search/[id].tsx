@@ -148,6 +148,7 @@ export default function SavedSearchScreen() {
           setIsModalVisible(false);
           setEditingTask(null);
         }}
+        defaultTab="view"
         onFocusMode={(taskId) => {
           setIsModalVisible(false);
           router.push(`/check-focus?id=${taskId}`);

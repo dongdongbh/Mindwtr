@@ -1,6 +1,6 @@
 import type { AIProvider, AIProviderConfig, BreakdownInput, BreakdownResponse, ClarifyInput, ClarifyResponse, CopilotInput, CopilotResponse, ReviewAnalysisInput, ReviewAnalysisResponse } from '../types';
 import { buildBreakdownPrompt, buildClarifyPrompt, buildCopilotPrompt, buildReviewAnalysisPrompt } from '../prompts';
-import { normalizeTimeEstimate, parseJson } from '../utils';
+import { normalizeTags, normalizeTimeEstimate, parseJson } from '../utils';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1/chat/completions';
 
@@ -69,9 +69,11 @@ export function createOpenAIProvider(config: AIProviderConfig): AIProvider {
             const parsed = parseJson<CopilotResponse>(text);
             const context = typeof parsed.context === 'string' ? parsed.context : undefined;
             const timeEstimate = typeof parsed.timeEstimate === 'string' ? parsed.timeEstimate : undefined;
+            const tags = Array.isArray(parsed.tags) ? normalizeTags(parsed.tags) : [];
             return {
                 context,
                 timeEstimate: normalizeTimeEstimate(timeEstimate) as CopilotResponse['timeEstimate'],
+                tags,
             };
         },
     };

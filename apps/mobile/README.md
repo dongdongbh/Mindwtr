@@ -12,14 +12,19 @@ React Native mobile app for the Mindwtr productivity system.
 - **Smart Tags** - Frequent and recommended context tags
 - **Quick Status** - Instant status change via status badge tap
 - **Auto-Archive** - Automatically archive completed tasks
-- **Android Widget** - Home screen widget for quick access and agenda view
+- **Android Widget** - Home screen focus/next widget (2x2)
+- **AI Assistant (Optional)** - Clarify, break down, and review with BYOK AI
+- **Copilot Suggestions** - Context/tag/time hints while typing
 
 ### Productivity
 - **Global Search** - Search operators (status:, context:, due:<=7d)
 - **Saved Searches** - Save and reuse search filters
 - **Task Dependencies** - Block tasks until prerequisites complete
 - **Markdown Notes** - Rich text descriptions
-- **Attachments** - Files and links on tasks
+- **Attachments** - Files, images, and links on tasks
+- **Reusable Lists** - Duplicate tasks or reset checklists
+- **Task View/Edit** - Swipe between Task and View modes
+- **Checklist Mode** - Fast list-style checking for checklist tasks
 - **Share Sheet** - Capture from any app
 
 ### Notifications
@@ -32,14 +37,15 @@ React Native mobile app for the Mindwtr productivity system.
 | ------------- | ---------------------------------- |
 | Inbox         | Capture and process incoming items |
 | Next Actions  | Context-filtered actionable tasks  |
-| Agenda        | Time-based view                    |
-| Review        | Task review and status changes     |
-| Projects      | Multi-step outcomes (drawer)       |
-| Contexts      | Hierarchical filtering (drawer)    |
-| Waiting For   | Delegated items (drawer)           |
-| Someday/Maybe | Deferred ideas (drawer)            |
-| Board         | Kanban drag-and-drop (drawer)      |
-| Calendar      | Time-based view (drawer)           |
+| Agenda        | Daily focus and upcoming tasks     |
+| Projects      | Multi-step outcomes                |
+| Menu          | Board, Review, Calendar, Settings  |
+| Contexts      | Hierarchical filtering (menu)      |
+| Waiting For   | Delegated items (menu)             |
+| Someday/Maybe | Deferred ideas (menu)              |
+| Board         | Kanban drag-and-drop (menu)        |
+| Calendar      | Tasks + external events (menu)     |
+| Review        | Daily + weekly review (menu)       |
 | Settings      | Theme, sync, notifications         |
 
 ## Tech Stack
@@ -127,7 +133,7 @@ export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin
 
 ### Build
 ```bash
-npx eas-cli build --platform android --profile preview --local --output mindwtr-v0.2.7.apk
+npx eas-cli build --platform android --profile preview --local --output mindwtr.apk
 ```
 
 ### 4. Upload to GitHub Release
@@ -136,10 +142,10 @@ After building, upload the APK to GitHub releases using `gh` CLI:
 
 ```bash
 # Upload to existing release
-gh release upload v0.2.7 mindwtr-v0.2.7.apk --clobber
+gh release upload vX.Y.Z mindwtr.apk --clobber
 
 # Or create new release with APK
-gh release create v0.2.7 mindwtr-v0.2.7.apk --title "v0.2.7" --notes "Release notes here"
+gh release create vX.Y.Z mindwtr.apk --title "vX.Y.Z" --notes "Release notes here"
 
 # View releases
 gh release list
@@ -237,6 +243,9 @@ Configure a sync folder in Settings to sync via:
 - Dropbox
 - Syncthing
 - Any folder-based sync service
+
+### WebDAV / Cloud
+Mindwtr also supports WebDAV and self-hosted Cloud sync backends. Configure in **Settings → Data & Sync**.
 
 ## Troubleshooting
 

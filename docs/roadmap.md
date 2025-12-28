@@ -44,6 +44,8 @@ This document captures the phased product roadmap and how work splits between `@
 - ✅ Desktop Keyboard/A11y Pass
 - ✅ Daily Digest Notifications
 - ✅ Additional Sync Backends (WebDAV)
+- ✅ Reusable Lists (Templates + checklist reset)
+- ✅ AI Assistant (BYOK clarify/breakdown/review + copilot)
 
 ---
 
@@ -75,8 +77,7 @@ This document captures the phased product roadmap and how work splits between `@
 ### 🔜 Android Widget
 **Goal:** Surface agenda on home screen.
 
-- Placeholder stub added (`apps/mobile/lib/widget-service.ts`)
-- Full implementation requires EAS dev build + native code
+- ✅ Focus/Next widget with quick capture (2x2)
 
 ---
 
@@ -89,7 +90,7 @@ This document captures the phased product roadmap and how work splits between `@
   - Helpers for day planning (group by day, compute blocks, conflict detection).
 - **Desktop**
   - Day + 3‑day timeline views with drag scheduling.
-  - External calendar overlays (gray blocks) with refresh/status.
+  - External calendar overlays (ICS) with refresh/status.
 - **Mobile**
-  - Day + 3‑day views (initially pick-time scheduling; drag later).
-  - Settings UI to connect calendars and control refresh.
+  - Day + month views with task scheduling.
+  - Settings UI for ICS subscriptions and refresh.

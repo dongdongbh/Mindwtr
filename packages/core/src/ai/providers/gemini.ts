@@ -1,6 +1,6 @@
 import type { AIProvider, AIProviderConfig, BreakdownInput, BreakdownResponse, ClarifyInput, ClarifyResponse, CopilotInput, CopilotResponse, ReviewAnalysisInput, ReviewAnalysisResponse } from '../types';
 import { buildBreakdownPrompt, buildClarifyPrompt, buildCopilotPrompt, buildReviewAnalysisPrompt } from '../prompts';
-import { normalizeTimeEstimate, parseJson } from '../utils';
+import { normalizeTags, normalizeTimeEstimate, parseJson } from '../utils';
 
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 
@@ -74,6 +74,10 @@ const COPILOT_SCHEMA: GeminiSchema = {
     properties: {
         context: { type: 'string' },
         timeEstimate: { type: 'string' },
+        tags: {
+            type: 'array',
+            items: { type: 'string' },
+        },
     },
 };
 
@@ -179,9 +183,11 @@ export function createGeminiProvider(config: AIProviderConfig): AIProvider {
                 const parsed = parseJson<CopilotResponse>(text);
                 const context = typeof parsed.context === 'string' ? parsed.context : undefined;
                 const timeEstimate = typeof parsed.timeEstimate === 'string' ? parsed.timeEstimate : undefined;
+                const tags = Array.isArray(parsed.tags) ? normalizeTags(parsed.tags) : [];
                 return {
                     context,
                     timeEstimate: normalizeTimeEstimate(timeEstimate) as CopilotResponse['timeEstimate'],
+                    tags,
                 };
             } catch (error) {
                 const retryPrompt = {
@@ -192,9 +198,11 @@ export function createGeminiProvider(config: AIProviderConfig): AIProvider {
                 const parsed = parseJson<CopilotResponse>(retryText);
                 const context = typeof parsed.context === 'string' ? parsed.context : undefined;
                 const timeEstimate = typeof parsed.timeEstimate === 'string' ? parsed.timeEstimate : undefined;
+                const tags = Array.isArray(parsed.tags) ? normalizeTags(parsed.tags) : [];
                 return {
                     context,
                     timeEstimate: normalizeTimeEstimate(timeEstimate) as CopilotResponse['timeEstimate'],
+                    tags,
                 };
             }
         },

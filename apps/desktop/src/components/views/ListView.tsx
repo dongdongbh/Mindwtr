@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Plus, Play, X, Trash2, Moon, User, CheckCircle } from 'lucide-react';
-import { useTaskStore, TaskStatus, Task, PRESET_CONTEXTS, sortTasksBy, Project, parseQuickAdd, isTaskBlocked, matchesHierarchicalToken, safeParseDate, createAIProvider } from '@mindwtr/core';
+import { useTaskStore, TaskStatus, Task, PRESET_CONTEXTS, PRESET_TAGS, sortTasksBy, Project, parseQuickAdd, isTaskBlocked, matchesHierarchicalToken, safeParseDate, createAIProvider } from '@mindwtr/core';
 import type { TaskSortBy } from '@mindwtr/core';
 import { TaskItem } from '../TaskItem';
 import { cn } from '../../lib/utils';
@@ -29,9 +29,10 @@ export function ListView({ title, statusFilter }: ListViewProps) {
     const [multiSelectedIds, setMultiSelectedIds] = useState<Set<string>>(new Set());
     const addInputRef = useRef<HTMLInputElement>(null);
     const [aiKey, setAiKey] = useState('');
-    const [copilotSuggestion, setCopilotSuggestion] = useState<string | null>(null);
+    const [copilotSuggestion, setCopilotSuggestion] = useState<{ context?: string; tags?: string[] } | null>(null);
     const [copilotApplied, setCopilotApplied] = useState(false);
     const [copilotContext, setCopilotContext] = useState<string | null>(null);
+    const [copilotTags, setCopilotTags] = useState<string[]>([]);
     const aiEnabled = settings?.ai?.enabled === true;
     const aiProvider = (settings?.ai?.provider ?? 'openai') as 'openai' | 'gemini';
 
@@ -50,6 +51,10 @@ export function ListView({ title, statusFilter }: ListViewProps) {
     const allContexts = useMemo(() => {
         const taskContexts = tasks.flatMap(t => t.contexts || []);
         return Array.from(new Set([...PRESET_CONTEXTS, ...taskContexts])).sort();
+    }, [tasks]);
+    const allTags = useMemo(() => {
+        const taskTags = tasks.flatMap(t => t.tags || []);
+        return Array.from(new Set([...PRESET_TAGS, ...taskTags])).sort();
     }, [tasks]);
 
     useEffect(() => {
@@ -70,12 +75,12 @@ export function ListView({ title, statusFilter }: ListViewProps) {
         const handle = setTimeout(async () => {
             try {
                 const provider = createAIProvider(buildCopilotConfig(settings, aiKey));
-                const suggestion = await provider.predictMetadata({ title, contexts: allContexts });
+                const suggestion = await provider.predictMetadata({ title, contexts: allContexts, tags: allTags });
                 if (cancelled) return;
-                if (!suggestion.context) {
+                if (!suggestion.context && !suggestion.tags?.length) {
                     setCopilotSuggestion(null);
                 } else {
-                    setCopilotSuggestion(suggestion.context);
+                    setCopilotSuggestion({ context: suggestion.context, tags: suggestion.tags });
                 }
             } catch {
                 if (!cancelled) setCopilotSuggestion(null);
@@ -85,7 +90,7 @@ export function ListView({ title, statusFilter }: ListViewProps) {
             cancelled = true;
             clearTimeout(handle);
         };
-    }, [aiEnabled, aiKey, newTaskTitle, allContexts, settings]);
+    }, [aiEnabled, aiKey, newTaskTitle, allContexts, allTags, settings]);
 
     const projectMap = useMemo(() => {
         return projects.reduce((acc, project) => {
@@ -307,11 +312,16 @@ export function ListView({ title, statusFilter }: ListViewProps) {
                 const existing = initialProps.contexts ?? [];
                 initialProps.contexts = Array.from(new Set([...existing, copilotContext]));
             }
+            if (copilotTags.length) {
+                const existingTags = initialProps.tags ?? [];
+                initialProps.tags = Array.from(new Set([...existingTags, ...copilotTags]));
+            }
             addTask(finalTitle, initialProps);
             setNewTaskTitle('');
             setCopilotSuggestion(null);
             setCopilotApplied(false);
             setCopilotContext(null);
+            setCopilotTags([]);
         }
     };
 
@@ -811,6 +821,7 @@ export function ListView({ title, statusFilter }: ListViewProps) {
                             setNewTaskTitle(e.target.value);
                             setCopilotApplied(false);
                             setCopilotContext(null);
+                            setCopilotTags([]);
                         }}
                         className="w-full bg-card border border-border rounded-lg py-3 pl-4 pr-12 shadow-sm focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
                     />
@@ -827,18 +838,23 @@ export function ListView({ title, statusFilter }: ListViewProps) {
                 <button
                     type="button"
                     onClick={() => {
-                        setCopilotContext(copilotSuggestion);
+                        setCopilotContext(copilotSuggestion.context ?? null);
+                        setCopilotTags(copilotSuggestion.tags ?? []);
                         setCopilotApplied(true);
                     }}
                     className="mt-2 text-xs px-2 py-1 rounded bg-muted/30 border border-border text-muted-foreground hover:bg-muted/60 transition-colors text-left"
                 >
-                    ✨ {t('copilot.suggested')} {copilotSuggestion}
+                    ✨ {t('copilot.suggested')}{' '}
+                    {copilotSuggestion.context ? `${copilotSuggestion.context} ` : ''}
+                    {copilotSuggestion.tags?.length ? copilotSuggestion.tags.join(' ') : ''}
                     <span className="ml-2 text-muted-foreground/70">{t('copilot.applyHint')}</span>
                 </button>
             )}
             {['inbox', 'next'].includes(statusFilter) && aiEnabled && copilotApplied && (
                 <div className="mt-2 text-xs px-2 py-1 rounded bg-muted/30 border border-border text-muted-foreground">
-                    ✅ {t('copilot.applied')} {copilotContext}
+                    ✅ {t('copilot.applied')}{' '}
+                    {copilotContext ? `${copilotContext} ` : ''}
+                    {copilotTags.length ? copilotTags.join(' ') : ''}
                 </div>
             )}
             {['inbox', 'next'].includes(statusFilter) && !isProcessing && (

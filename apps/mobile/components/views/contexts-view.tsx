@@ -205,6 +205,7 @@ export function ContextsView() {
           task={editingTask}
           onClose={() => setEditingTask(null)}
           onSave={handleSaveTask}
+          defaultTab="view"
         />
       </View>
     </GestureHandlerRootView>

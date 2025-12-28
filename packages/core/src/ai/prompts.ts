@@ -72,19 +72,21 @@ export function buildReviewAnalysisPrompt(items: Array<{ id: string; title: stri
     return { system: SYSTEM_PROMPT, user };
 }
 
-export function buildCopilotPrompt(input: { title: string; contexts?: string[] }): { system: string; user: string } {
+export function buildCopilotPrompt(input: { title: string; contexts?: string[]; tags?: string[] }): { system: string; user: string } {
     const contexts = (input.contexts || []).filter(Boolean);
+    const tags = (input.tags || []).filter(Boolean);
     const user = [
         'You are a GTD autocomplete engine.',
-        'Predict the likely context and time estimate.',
+        'Predict the likely context, tags, and time estimate.',
         'Rules:',
         '- If uncertain, return null values.',
         '- Context must match one from the list or be a standard GTD context (@phone, @computer, @errands, @office, @home).',
+        '- Tags must match one from the list or be empty. Use #tag format.',
         '- timeEstimate must be one of: 5min, 10min, 15min, 30min, 1hr, 2hr, 3hr, 4hr, 4hr+.',
         'Output JSON:',
-        '{ "context": "@phone", "timeEstimate": "15min" }',
+        '{ "context": "@phone", "tags": ["#creative"], "timeEstimate": "15min" }',
         'Task:',
-        JSON.stringify({ title: input.title, contexts }),
+        JSON.stringify({ title: input.title, contexts, tags }),
     ].join('\n');
 
     return { system: SYSTEM_PROMPT, user };

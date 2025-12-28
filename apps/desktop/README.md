@@ -10,6 +10,7 @@ Tauri v2 desktop app for the Mindwtr productivity system.
 - **Weekly Review** - Step-by-step GTD review wizard
 - **Board View** - Kanban-style drag-and-drop
 - **Calendar View** - Time-based task planning
+- **AI Assistant (Optional)** - Clarify, break down, and review with BYOK AI
 
 ### Productivity
 - **Global Search** - Search operators (status:, context:, due:<=7d)
@@ -18,6 +19,7 @@ Tauri v2 desktop app for the Mindwtr productivity system.
 - **Task Dependencies** - Block tasks until prerequisites complete
 - **Markdown Notes** - Rich text descriptions with preview
 - **Attachments** - Files and links on tasks
+- **Reusable Lists** - Duplicate tasks or reset checklists
 - **Keyboard Shortcuts** - Vim and Emacs presets
 - **Global Hotkey** - Capture from anywhere
 - **Tray Icon** - Quick access and capture
@@ -101,6 +103,7 @@ Configure sync in Settings:
 - **File Sync** - Dropbox, Google Drive, Syncthing, etc.
 - **WebDAV** - Nextcloud, ownCloud, self-hosted servers
 - **Cloud** - Self-hosted cloud backend (see `../../docs/cloud-sync.md`)
+- **External Calendars (ICS)** - View-only calendar overlay
 
 ## Testing
 

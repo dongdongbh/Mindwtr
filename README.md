@@ -26,17 +26,20 @@ A complete Getting Things Done (GTD) productivity system for desktop and mobile.
 - **Organize** - Projects, contexts, and status lists
 - **Reflect** - Weekly review wizard with reminders
 - **Engage** - Context-filtered next actions
+- **AI Assist (Optional)** - Clarify, break down, and review with BYOK AI
 
 ### Views
 - 📥 **Inbox** - Capture zone with processing wizard
 - ▶️ **Next Actions** - Context-filtered actionable tasks
+- 🗓️ **Agenda** - Daily focus and time-based overview
 - 📁 **Projects** - Multi-step outcomes with areas
 - 🏷️ **Contexts** - Hierarchical contexts (@work/meetings)
 - ⏳ **Waiting For** - Delegated items
 - 💭 **Someday/Maybe** - Deferred ideas
 - 📅 **Calendar** - Time-based planning
 - 📋 **Board** - Kanban-style drag-and-drop
-- 📝 **Review** - Guided GTD weekly review
+- 📝 **Review** - Daily + weekly review workflows
+- 📦 **Archived** - Hidden history, searchable when needed
 
 ### Productivity Features
 - 🔍 **Global Search** - Search operators (status:, context:, due:<=7d)
@@ -45,6 +48,9 @@ A complete Getting Things Done (GTD) productivity system for desktop and mobile.
 - 🔗 **Task Dependencies** - Block tasks until prerequisites complete
 - 📎 **Attachments** - Files and links on tasks
 - ✏️ **Markdown Notes** - Rich text descriptions with preview
+- ♻️ **Reusable Lists** - Duplicate tasks or reset checklists
+- ✅ **Checklist Mode** - Fast list-style checking for checklist tasks
+- 🧭 **Copilot Suggestions** - Optional context/tag/time hints while typing
 - 🔔 **Notifications** - Due date reminders with snooze
 - 📊 **Daily Digest** - Morning briefing + evening review
 - 📅 **Weekly Review** - Customizable weekly reminder
@@ -55,6 +61,7 @@ A complete Getting Things Done (GTD) productivity system for desktop and mobile.
 - ☁️ **Cloud Sync** - Self-hosted cloud backend
 - 🔀 **Smart Merge** - Last-write-wins prevents data loss
 - 📤 **Export/Backup** - Export data to JSON
+- 🗓️ **External Calendars (ICS)** - View-only calendar overlay
 
 ### Automation
 - 🔌 **CLI** - Add, list, complete, search from terminal
@@ -64,6 +71,7 @@ A complete Getting Things Done (GTD) productivity system for desktop and mobile.
 ### Cross-Platform
 - 🖥️ **Desktop** - Tauri v2 (macOS, Linux, Windows)
 - 📱 **Mobile** - React Native/Expo (iOS, Android)
+- 📲 **Android Widget** - Home screen focus/next widget
 - ⌨️ **Keyboard Shortcuts** - Vim and Emacs presets
 - 🎨 **Themes** - Light/Dark
 - 🌍 **i18n** - English and Chinese
@@ -124,8 +132,8 @@ iOS builds require an Apple Developer account ($99/year). Currently available as
 ## Data Storage
 
 Tasks and projects are stored locally on your device:
-- **Desktop data (Linux)**: `~/.local/share/mindwtr/data.json` (main data + sync file)
-- **Desktop config (Linux)**: `~/.config/mindwtr/config.toml` (sync + app settings)
+- **Desktop data (Linux)**: `~/.local/share/mindwtr/data.json`
+- **Desktop config (Linux)**: `~/.config/mindwtr/config.toml`
 - **Mobile**: Device storage (AsyncStorage)
 
 Sync via File (Dropbox, etc.), WebDAV (Nextcloud, etc.), or Cloud can be configured in Settings.
@@ -135,9 +143,11 @@ Sync via File (Dropbox, etc.), WebDAV (Nextcloud, etc.), or Cloud can be configu
 - 📚 [Wiki](https://github.com/dongdongbh/Mindwtr/wiki) - Complete user guide
 - 🚀 [Getting Started](https://github.com/dongdongbh/Mindwtr/wiki/Getting-Started)
 - 💡 [GTD Best Practices](https://github.com/dongdongbh/Mindwtr/wiki/GTD-Best-Practices)
-- ☁️ [Cloud Sync (Self‑Hosted)](docs/cloud-sync.md)
-- 🔌 [Local API Server](docs/api.md)
-- 🌐 [Web / PWA](docs/pwa.md)
+- 🤖 [AI Assistant](https://github.com/dongdongbh/Mindwtr/wiki/AI-Assistant)
+- 🗓️ [Calendar Integration](https://github.com/dongdongbh/Mindwtr/wiki/Calendar-Integration)
+- ☁️ [Cloud Sync (Self‑Hosted)](https://github.com/dongdongbh/Mindwtr/wiki/Cloud-Sync)
+- 🔌 [Local API Server](https://github.com/dongdongbh/Mindwtr/wiki/Local-API)
+- 🌐 [Web / PWA](https://github.com/dongdongbh/Mindwtr/wiki/Web-App-PWA)
 
 ## Development
 

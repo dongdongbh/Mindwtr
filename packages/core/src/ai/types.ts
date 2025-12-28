@@ -30,11 +30,13 @@ export interface ReviewAnalysisInput {
 export interface CopilotInput {
     title: string;
     contexts?: string[];
+    tags?: string[];
 }
 
 export interface CopilotResponse {
     context?: string;
     timeEstimate?: TimeEstimate;
+    tags?: string[];
 }
 
 export interface ClarifyOption {

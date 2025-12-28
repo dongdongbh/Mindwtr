@@ -38,7 +38,7 @@ Authorization: Bearer <token>
 - `GET /tasks`
   - Query params:
     - `query=<string>` Search query (same operators as in-app search)
-    - `status=<inbox|todo|next|in-progress|waiting|someday|done|archived>`
+    - `status=<inbox|next|waiting|someday|done|archived>`
     - `all=1` Include `done` and `archived`
     - `deleted=1` Include soft-deleted tasks
   - Response: `{ tasks: Task[] }`
@@ -86,4 +86,3 @@ curl -s -X POST "http://127.0.0.1:4317/tasks/$TASK_ID/complete" | jq .
 
 - The server is intended to run on `127.0.0.1` (localhost). Don’t expose it publicly unless you understand the risks.
 - If you need remote access, set `MINDWTR_API_TOKEN` and place the server behind an authenticated reverse proxy.
-

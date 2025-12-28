@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { createAIProvider, PRESET_CONTEXTS, parseQuickAdd, type Task, type TimeEstimate, useTaskStore } from '@mindwtr/core';
+import { createAIProvider, PRESET_CONTEXTS, PRESET_TAGS, parseQuickAdd, type Task, type TimeEstimate, useTaskStore } from '@mindwtr/core';
 import { useTheme } from '../contexts/theme-context';
 import { useLanguage } from '../contexts/language-context';
 import { Colors } from '@/constants/theme';
@@ -15,11 +15,12 @@ export default function CaptureScreen() {
   const { t } = useLanguage();
   const initialText = typeof params.text === 'string' ? decodeURIComponent(params.text) : '';
   const [value, setValue] = useState(initialText);
-  const [copilotSuggestion, setCopilotSuggestion] = useState<{ context?: string; timeEstimate?: TimeEstimate } | null>(null);
+  const [copilotSuggestion, setCopilotSuggestion] = useState<{ context?: string; timeEstimate?: TimeEstimate; tags?: string[] } | null>(null);
   const [copilotApplied, setCopilotApplied] = useState(false);
   const [aiKey, setAiKey] = useState('');
   const [copilotContext, setCopilotContext] = useState<string | undefined>(undefined);
   const [copilotEstimate, setCopilotEstimate] = useState<TimeEstimate | undefined>(undefined);
+  const [copilotTags, setCopilotTags] = useState<string[]>([]);
   const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
@@ -43,6 +44,10 @@ export default function CaptureScreen() {
     const taskContexts = tasks.flatMap((task) => task.contexts || []);
     return Array.from(new Set([...PRESET_CONTEXTS, ...taskContexts])).filter(Boolean);
   }, [tasks]);
+  const tagOptions = React.useMemo(() => {
+    const taskTags = tasks.flatMap((task) => task.tags || []);
+    return Array.from(new Set([...PRESET_TAGS, ...taskTags])).filter(Boolean);
+  }, [tasks]);
 
   useEffect(() => {
     if (!aiEnabled || !aiKey) {
@@ -58,7 +63,7 @@ export default function CaptureScreen() {
     const handle = setTimeout(async () => {
       try {
         const provider = createAIProvider(buildCopilotConfig(settings, aiKey));
-        const suggestion = await provider.predictMetadata({ title, contexts: contextOptions });
+        const suggestion = await provider.predictMetadata({ title, contexts: contextOptions, tags: tagOptions });
         if (cancelled) return;
         if (!suggestion.context && !suggestion.timeEstimate) {
           setCopilotSuggestion(null);
@@ -92,6 +97,7 @@ export default function CaptureScreen() {
     setCopilotApplied(false);
     setCopilotContext(undefined);
     setCopilotEstimate(undefined);
+    setCopilotTags([]);
   };
 
   const tc = {
@@ -118,6 +124,10 @@ export default function CaptureScreen() {
     if (copilotEstimate && !initialProps.timeEstimate) {
       initialProps.timeEstimate = copilotEstimate;
     }
+    if (copilotTags.length) {
+      const nextTags = Array.from(new Set([...(initialProps.tags ?? []), ...copilotTags]));
+      initialProps.tags = nextTags;
+    }
     addTask(finalTitle, initialProps);
     router.replace('/inbox');
   };
@@ -143,6 +153,7 @@ export default function CaptureScreen() {
             onPress={() => {
               setCopilotContext(copilotSuggestion.context);
               setCopilotEstimate(copilotSuggestion.timeEstimate);
+              setCopilotTags(copilotSuggestion.tags ?? []);
               setCopilotApplied(true);
             }}
           >
@@ -150,6 +161,7 @@ export default function CaptureScreen() {
               ✨ {t('copilot.suggested')}{' '}
               {copilotSuggestion.context ? `${copilotSuggestion.context} ` : ''}
               {copilotSuggestion.timeEstimate ? `${copilotSuggestion.timeEstimate}` : ''}
+              {copilotSuggestion.tags?.length ? copilotSuggestion.tags.join(' ') : ''}
             </Text>
             <Text style={[styles.copilotHint, { color: tc.secondaryText }]}>
               {t('copilot.applyHint')}
@@ -162,6 +174,7 @@ export default function CaptureScreen() {
               ✅ {t('copilot.applied')}{' '}
               {copilotContext ? `${copilotContext} ` : ''}
               {copilotEstimate ? `${copilotEstimate}` : ''}
+              {copilotTags.length ? copilotTags.join(' ') : ''}
             </Text>
           </View>
         )}

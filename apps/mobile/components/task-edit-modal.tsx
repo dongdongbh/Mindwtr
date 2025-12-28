@@ -1,11 +1,10 @@
-import React, { useMemo, useState, useEffect } from 'react';
-import { View, Text, TextInput, Modal, StyleSheet, TouchableOpacity, ScrollView, Platform, KeyboardAvoidingView, Share, Alert } from 'react-native';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import { View, Text, TextInput, Modal, StyleSheet, TouchableOpacity, ScrollView, Platform, KeyboardAvoidingView, Share, Alert, Image, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
     Attachment,
     Task,
     TaskEditorFieldId,
-    TaskMode,
     TaskStatus,
     TimeEstimate,
     useTaskStore,
@@ -32,6 +31,7 @@ interface TaskEditModalProps {
     onClose: () => void;
     onSave: (taskId: string, updates: Partial<Task>) => void;
     onFocusMode?: (taskId: string) => void;
+    defaultTab?: 'task' | 'view';
 }
 
 const STATUS_OPTIONS: TaskStatus[] = ['inbox', 'next', 'waiting', 'someday', 'done'];
@@ -53,7 +53,9 @@ const DEFAULT_TASK_EDITOR_ORDER: TaskEditorFieldId[] = [
 
 const DEFAULT_TASK_EDITOR_HIDDEN = DEFAULT_TASK_EDITOR_ORDER.filter((id) => !['status', 'contexts', 'description'].includes(id));
 
-export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: TaskEditModalProps) {
+type TaskEditTab = 'task' | 'view';
+
+export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode, defaultTab }: TaskEditModalProps) {
     const { tasks, projects, settings, duplicateTask, resetTaskChecklist } = useTaskStore();
     const { t } = useLanguage();
     const tc = useThemeColors();
@@ -61,7 +63,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
     const [showDatePicker, setShowDatePicker] = useState<'start' | 'start-time' | 'due' | 'due-time' | 'review' | null>(null);
     const [pendingStartDate, setPendingStartDate] = useState<Date | null>(null);
     const [pendingDueDate, setPendingDueDate] = useState<Date | null>(null);
-    const [editTab, setEditTab] = useState<TaskMode>('task');
+    const [editTab, setEditTab] = useState<TaskEditTab>('task');
     const [showDescriptionPreview, setShowDescriptionPreview] = useState(false);
     const [showMoreOptions, setShowMoreOptions] = useState(false);
     const [linkModalVisible, setLinkModalVisible] = useState(false);
@@ -71,10 +73,11 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
     const aiEnabled = settings.ai?.enabled === true;
     const aiProvider = (settings.ai?.provider ?? 'openai') as 'openai' | 'gemini';
     const [aiKey, setAiKey] = useState('');
-    const [copilotSuggestion, setCopilotSuggestion] = useState<{ context?: string; timeEstimate?: TimeEstimate } | null>(null);
+    const [copilotSuggestion, setCopilotSuggestion] = useState<{ context?: string; timeEstimate?: TimeEstimate; tags?: string[] } | null>(null);
     const [copilotApplied, setCopilotApplied] = useState(false);
     const [copilotContext, setCopilotContext] = useState<string | undefined>(undefined);
     const [copilotEstimate, setCopilotEstimate] = useState<TimeEstimate | undefined>(undefined);
+    const [copilotTags, setCopilotTags] = useState<string[]>([]);
 
     // Compute most frequent tags from all tasks
     const suggestedTags = React.useMemo(() => {
@@ -100,6 +103,10 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
         const taskContexts = tasks.flatMap((item) => item.contexts || []);
         return Array.from(new Set([...PRESET_CONTEXTS, ...taskContexts])).filter(Boolean);
     }, [tasks]);
+    const tagOptions = React.useMemo(() => {
+        const taskTags = tasks.flatMap((item) => item.tags || []);
+        return Array.from(new Set([...PRESET_TAGS, ...taskTags])).filter(Boolean);
+    }, [tasks]);
 
     // Compute most frequent tags (hashtags)
     const suggestedHashtags = React.useMemo(() => {
@@ -122,18 +129,25 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
         return Array.from(unique).slice(0, 8);
     }, [tasks]);
 
+    const resolveInitialTab = (target?: TaskEditTab, currentTask?: Task | null): TaskEditTab => {
+        if (target) return target;
+        if (currentTask?.taskMode === 'list') return 'view';
+        return 'view';
+    };
+
     useEffect(() => {
         if (task) {
             setEditedTask({ ...task });
             setShowMoreOptions(false);
             setShowDescriptionPreview(false);
-            setEditTab(task.taskMode === 'list' ? 'list' : 'task');
+            setEditTab(resolveInitialTab(defaultTab, task));
             setCopilotSuggestion(null);
             setCopilotApplied(false);
             setCopilotContext(undefined);
             setCopilotEstimate(undefined);
+            setCopilotTags([]);
         }
-    }, [task]);
+    }, [task, defaultTab]);
 
     useEffect(() => {
         loadAIKey(aiProvider).then(setAiKey).catch(console.error);
@@ -155,9 +169,9 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
         const handle = setTimeout(async () => {
             try {
                 const provider = createAIProvider(buildCopilotConfig(settings, aiKey));
-                const suggestion = await provider.predictMetadata({ title: input, contexts: contextOptions });
+                const suggestion = await provider.predictMetadata({ title: input, contexts: contextOptions, tags: tagOptions });
                 if (cancelled) return;
-                if (!suggestion.context && !suggestion.timeEstimate) {
+                if (!suggestion.context && !suggestion.timeEstimate && !suggestion.tags?.length) {
                     setCopilotSuggestion(null);
                 } else {
                     setCopilotSuggestion(suggestion);
@@ -170,7 +184,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
             cancelled = true;
             clearTimeout(handle);
         };
-    }, [aiEnabled, aiKey, editedTask.title, editedTask.description, contextOptions, settings]);
+    }, [aiEnabled, aiKey, editedTask.title, editedTask.description, contextOptions, tagOptions, settings]);
 
     useEffect(() => {
         if (!visible) {
@@ -183,6 +197,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
         setCopilotApplied(false);
         setCopilotContext(undefined);
         setCopilotEstimate(undefined);
+        setCopilotTags([]);
     };
 
     const applyCopilotSuggestion = () => {
@@ -192,6 +207,12 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
             const next = Array.from(new Set([...current, copilotSuggestion.context]));
             setEditedTask(prev => ({ ...prev, contexts: next }));
             setCopilotContext(copilotSuggestion.context);
+        }
+        if (copilotSuggestion.tags?.length) {
+            const currentTags = editedTask.tags ?? [];
+            const nextTags = Array.from(new Set([...currentTags, ...copilotSuggestion.tags]));
+            setEditedTask(prev => ({ ...prev, tags: nextTags }));
+            setCopilotTags(copilotSuggestion.tags);
         }
         if (copilotSuggestion.timeEstimate) {
             setEditedTask(prev => ({ ...prev, timeEstimate: copilotSuggestion.timeEstimate }));
@@ -308,13 +329,17 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
             return;
         }
 
-        const permission = await imagePicker.requestMediaLibraryPermissionsAsync();
-        if (!permission.granted) return;
+        const permission = await imagePicker.getMediaLibraryPermissionsAsync();
+        if (!permission.granted) {
+            const requested = await imagePicker.requestMediaLibraryPermissionsAsync();
+            if (!requested.granted) return;
+        }
         const result = await imagePicker.launchImageLibraryAsync({
             mediaTypes: imagePicker.MediaTypeOptions.Images,
             quality: 0.9,
+            allowsMultipleSelection: false,
         });
-        if (result.canceled) return;
+        if (result.canceled || !result.assets?.length) return;
         const asset = result.assets[0];
         const now = new Date().toISOString();
         const attachment: Attachment = {
@@ -358,6 +383,12 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
         } else {
             Linking.openURL(attachment.uri).catch(console.error);
         }
+    };
+
+    const isImageAttachment = (attachment: Attachment) => {
+        const mime = attachment.mimeType?.toLowerCase();
+        if (mime?.startsWith('image/')) return true;
+        return /\.(png|jpg|jpeg|gif|webp|heic|heif)$/i.test(attachment.uri);
     };
 
     const removeAttachment = (id: string) => {
@@ -623,13 +654,27 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
         handleSave();
     };
 
-    const setModeTab = (mode: TaskMode) => {
+    const setModeTab = useCallback((mode: TaskEditTab) => {
         setEditTab(mode);
-        setEditedTask(prev => ({
-            ...prev,
-            taskMode: mode,
-            ...(mode === 'list' && !prev.checklist ? { checklist: [] } : null),
-        }));
+    }, []);
+
+    const [containerWidth, setContainerWidth] = useState(0);
+    const scrollX = useRef(new Animated.Value(0)).current;
+    const scrollRef = useRef<ScrollView | null>(null);
+
+    useEffect(() => {
+        if (!containerWidth) return;
+        scrollRef.current?.scrollTo({
+            x: editTab === 'task' ? 0 : containerWidth,
+            animated: true,
+        });
+    }, [editTab, containerWidth]);
+
+    const handleTabPress = (mode: TaskEditTab) => {
+        setModeTab(mode);
+        if (containerWidth) {
+            scrollRef.current?.scrollTo({ x: mode === 'task' ? 0 : containerWidth, animated: true });
+        }
     };
 
     const applyChecklistUpdate = (nextChecklist: NonNullable<Task['checklist']>) => {
@@ -794,26 +839,38 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
         }
     };
 
+    const inputStyle = { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text };
+    const getStatusChipStyle = (active: boolean) => ([
+        styles.statusChip,
+        { backgroundColor: active ? tc.tint : tc.filterBg, borderColor: active ? tc.tint : tc.border },
+    ]);
+    const getStatusTextStyle = (active: boolean) => ([
+        styles.statusText,
+        { color: active ? '#fff' : tc.secondaryText },
+    ]);
+    const getSuggestionChipStyle = (active: boolean) => ([
+        styles.suggestionChip,
+        { backgroundColor: active ? tc.tint : tc.filterBg, borderColor: active ? tc.tint : tc.border },
+    ]);
+    const getSuggestionTextStyle = (active: boolean) => ([
+        styles.suggestionText,
+        { color: active ? '#fff' : tc.secondaryText },
+    ]);
+
     const renderField = (fieldId: TaskEditorFieldId) => {
         switch (fieldId) {
             case 'status':
                 return (
                     <View style={styles.formGroup}>
-                        <Text style={styles.label}>{t('taskEdit.statusLabel')}</Text>
+                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.statusLabel')}</Text>
                         <View style={styles.statusContainer}>
                             {STATUS_OPTIONS.map(status => (
                                 <TouchableOpacity
                                     key={status}
-                                    style={[
-                                        styles.statusChip,
-                                        editedTask.status === status && styles.statusChipActive
-                                    ]}
+                                    style={getStatusChipStyle(editedTask.status === status)}
                                     onPress={() => setEditedTask(prev => ({ ...prev, status }))}
                                 >
-                                    <Text style={[
-                                        styles.statusText,
-                                        editedTask.status === status && styles.statusTextActive
-                                    ]}>
+                                    <Text style={getStatusTextStyle(editedTask.status === status)}>
                                         {t(`status.${status}`)}
                                     </Text>
                                 </TouchableOpacity>
@@ -824,9 +881,9 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
             case 'contexts':
                 return (
                     <View style={styles.formGroup}>
-                        <Text style={styles.label}>{t('taskEdit.contextsLabel')}</Text>
+                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.contextsLabel')}</Text>
                         <TextInput
-                            style={styles.input}
+                            style={[styles.input, inputStyle]}
                             value={editedTask.contexts?.join(', ')}
                             onChangeText={(text) => setEditedTask(prev => ({
                                 ...prev,
@@ -834,6 +891,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                             }))}
                             placeholder="@home, @work"
                             autoCapitalize="none"
+                            placeholderTextColor={tc.secondaryText}
                         />
                         <View style={styles.suggestionsContainer}>
                             <View style={styles.suggestionTags}>
@@ -842,16 +900,10 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                                     return (
                                         <TouchableOpacity
                                             key={tag}
-                                            style={[
-                                                styles.suggestionChip,
-                                                isActive && styles.suggestionChipActive
-                                            ]}
+                                            style={getSuggestionChipStyle(isActive)}
                                             onPress={() => toggleContext(tag)}
                                         >
-                                            <Text style={[
-                                                styles.suggestionText,
-                                                isActive && styles.suggestionTextActive
-                                            ]}>{tag}</Text>
+                                            <Text style={getSuggestionTextStyle(isActive)}>{tag}</Text>
                                         </TouchableOpacity>
                                     );
                                 })}
@@ -862,9 +914,9 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
             case 'tags':
                 return (
                     <View style={styles.formGroup}>
-                        <Text style={styles.label}>{t('taskEdit.tagsLabel')}</Text>
+                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.tagsLabel')}</Text>
                         <TextInput
-                            style={styles.input}
+                            style={[styles.input, inputStyle]}
                             value={editedTask.tags?.join(', ')}
                             onChangeText={(text) => setEditedTask(prev => ({
                                 ...prev,
@@ -872,6 +924,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                             }))}
                             placeholder="#urgent, #idea"
                             autoCapitalize="none"
+                            placeholderTextColor={tc.secondaryText}
                         />
                         <View style={styles.suggestionsContainer}>
                             <View style={styles.suggestionTags}>
@@ -880,20 +933,14 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                                     return (
                                         <TouchableOpacity
                                             key={tag}
-                                            style={[
-                                                styles.suggestionChip,
-                                                isActive && styles.suggestionChipActive
-                                            ]}
+                                            style={getSuggestionChipStyle(isActive)}
                                             onPress={() => {
                                                 const current = editedTask.tags || [];
                                                 const newTags = current.includes(tag) ? current.filter(t => t !== tag) : [...current, tag];
                                                 setEditedTask(prev => ({ ...prev, tags: newTags }));
                                             }}
                                         >
-                                            <Text style={[
-                                                styles.suggestionText,
-                                                isActive && styles.suggestionTextActive
-                                            ]}>{tag}</Text>
+                                            <Text style={getSuggestionTextStyle(isActive)}>{tag}</Text>
                                         </TouchableOpacity>
                                     );
                                 })}
@@ -904,7 +951,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
             case 'blockedBy':
                 return (
                     <View style={styles.formGroup}>
-                        <Text style={styles.label}>{t('taskEdit.blockedByLabel')}</Text>
+                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.blockedByLabel')}</Text>
                         <View style={styles.suggestionsContainer}>
                             <View style={styles.suggestionTags}>
 	                                {tasks
@@ -913,22 +960,16 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
 	                                        !otherTask.deletedAt &&
 	                                        otherTask.status !== 'done'
 	                                    )
-	                                    .map(otherTask => {
+                                    .map(otherTask => {
                                         const isActive = editedTask.blockedByTaskIds?.includes(otherTask.id);
                                         return (
                                             <TouchableOpacity
                                                 key={otherTask.id}
-                                                style={[
-                                                    styles.suggestionChip,
-                                                    isActive && styles.suggestionChipActive
-                                                ]}
+                                                style={getSuggestionChipStyle(isActive)}
                                                 onPress={() => toggleBlocker(otherTask.id)}
                                             >
                                                 <Text
-                                                    style={[
-                                                        styles.suggestionText,
-                                                        isActive && styles.suggestionTextActive
-                                                    ]}
+                                                    style={getSuggestionTextStyle(isActive)}
                                                     numberOfLines={1}
                                                 >
                                                     {otherTask.title}
@@ -943,22 +984,19 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
             case 'timeEstimate':
                 return (
                     <View style={styles.formGroup}>
-                        <Text style={styles.label}>{t('taskEdit.timeEstimateLabel')}</Text>
+                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.timeEstimateLabel')}</Text>
                         <View style={styles.statusContainer}>
                             {timeEstimateOptions.map(opt => (
                                 <TouchableOpacity
                                     key={opt.value || 'none'}
-                                    style={[
-                                        styles.statusChip,
-                                        editedTask.timeEstimate === opt.value && styles.statusChipActive,
-                                        !opt.value && !editedTask.timeEstimate && styles.statusChipActive
-                                    ]}
+                                    style={getStatusChipStyle(
+                                        editedTask.timeEstimate === opt.value || (!opt.value && !editedTask.timeEstimate)
+                                    )}
                                     onPress={() => setEditedTask(prev => ({ ...prev, timeEstimate: opt.value || undefined }))}
                                 >
-                                    <Text style={[
-                                        styles.statusText,
-                                        (editedTask.timeEstimate === opt.value || (!opt.value && !editedTask.timeEstimate)) && styles.statusTextActive
-                                    ]}>
+                                    <Text style={getStatusTextStyle(
+                                        editedTask.timeEstimate === opt.value || (!opt.value && !editedTask.timeEstimate)
+                                    )}>
                                         {opt.label}
                                     </Text>
                                 </TouchableOpacity>
@@ -969,22 +1007,19 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
             case 'recurrence':
                 return (
                     <View style={styles.formGroup}>
-                        <Text style={styles.label}>{t('taskEdit.recurrenceLabel')}</Text>
+                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.recurrenceLabel')}</Text>
                         <View style={styles.statusContainer}>
                             {recurrenceOptions.map(opt => (
                                 <TouchableOpacity
                                     key={opt.value || 'none'}
-                                    style={[
-                                        styles.statusChip,
-                                        editedTask.recurrence === opt.value && styles.statusChipActive,
-                                        !opt.value && !editedTask.recurrence && styles.statusChipActive
-                                    ]}
+                                    style={getStatusChipStyle(
+                                        editedTask.recurrence === opt.value || (!opt.value && !editedTask.recurrence)
+                                    )}
                                     onPress={() => setEditedTask(prev => ({ ...prev, recurrence: opt.value || undefined }))}
                                 >
-                                    <Text style={[
-                                        styles.statusText,
-                                        (editedTask.recurrence === opt.value || (!opt.value && !editedTask.recurrence)) && styles.statusTextActive
-                                    ]}>
+                                    <Text style={getStatusTextStyle(
+                                        editedTask.recurrence === opt.value || (!opt.value && !editedTask.recurrence)
+                                    )}>
                                         {opt.label}
                                     </Text>
                                 </TouchableOpacity>
@@ -995,17 +1030,17 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
             case 'startTime':
                 return (
                     <View style={styles.formGroup}>
-                        <Text style={styles.label}>{t('taskEdit.startDateLabel')}</Text>
+                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.startDateLabel')}</Text>
                         <View style={styles.dateRow}>
-                            <TouchableOpacity style={[styles.dateBtn, styles.flex1]} onPress={() => setShowDatePicker('start')}>
-                                <Text>{formatStartDateTime(editedTask.startTime)}</Text>
+                            <TouchableOpacity style={[styles.dateBtn, styles.flex1, { backgroundColor: tc.inputBg, borderColor: tc.border }]} onPress={() => setShowDatePicker('start')}>
+                                <Text style={{ color: tc.text }}>{formatStartDateTime(editedTask.startTime)}</Text>
                             </TouchableOpacity>
                             {!!editedTask.startTime && (
                                 <TouchableOpacity
-                                    style={styles.clearDateBtn}
+                                    style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
                                     onPress={() => setEditedTask(prev => ({ ...prev, startTime: undefined }))}
                                 >
-                                    <Text style={styles.clearDateText}>{t('common.clear')}</Text>
+                                    <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>{t('common.clear')}</Text>
                                 </TouchableOpacity>
                             )}
                         </View>
@@ -1014,17 +1049,17 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
             case 'dueDate':
                 return (
                     <View style={styles.formGroup}>
-                        <Text style={styles.label}>{t('taskEdit.dueDateLabel')}</Text>
+                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.dueDateLabel')}</Text>
                         <View style={styles.dateRow}>
-                            <TouchableOpacity style={[styles.dateBtn, styles.flex1]} onPress={() => setShowDatePicker('due')}>
-                                <Text>{formatDueDate(editedTask.dueDate)}</Text>
+                            <TouchableOpacity style={[styles.dateBtn, styles.flex1, { backgroundColor: tc.inputBg, borderColor: tc.border }]} onPress={() => setShowDatePicker('due')}>
+                                <Text style={{ color: tc.text }}>{formatDueDate(editedTask.dueDate)}</Text>
                             </TouchableOpacity>
                             {!!editedTask.dueDate && (
                                 <TouchableOpacity
-                                    style={styles.clearDateBtn}
+                                    style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
                                     onPress={() => setEditedTask(prev => ({ ...prev, dueDate: undefined }))}
                                 >
-                                    <Text style={styles.clearDateText}>{t('common.clear')}</Text>
+                                    <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>{t('common.clear')}</Text>
                                 </TouchableOpacity>
                             )}
                         </View>
@@ -1033,17 +1068,17 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
             case 'reviewAt':
                 return (
                     <View style={styles.formGroup}>
-                        <Text style={styles.label}>{t('taskEdit.reviewDateLabel')}</Text>
+                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.reviewDateLabel')}</Text>
                         <View style={styles.dateRow}>
-                            <TouchableOpacity style={[styles.dateBtn, styles.flex1]} onPress={() => setShowDatePicker('review')}>
-                                <Text>{formatDate(editedTask.reviewAt)}</Text>
+                            <TouchableOpacity style={[styles.dateBtn, styles.flex1, { backgroundColor: tc.inputBg, borderColor: tc.border }]} onPress={() => setShowDatePicker('review')}>
+                                <Text style={{ color: tc.text }}>{formatDate(editedTask.reviewAt)}</Text>
                             </TouchableOpacity>
                             {!!editedTask.reviewAt && (
                                 <TouchableOpacity
-                                    style={styles.clearDateBtn}
+                                    style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
                                     onPress={() => setEditedTask(prev => ({ ...prev, reviewAt: undefined }))}
                                 >
-                                    <Text style={styles.clearDateText}>{t('common.clear')}</Text>
+                                    <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>{t('common.clear')}</Text>
                                 </TouchableOpacity>
                             )}
                         </View>
@@ -1053,7 +1088,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                 return (
                     <View style={styles.formGroup}>
                         <View style={styles.inlineHeader}>
-                            <Text style={styles.label}>{t('taskEdit.descriptionLabel')}</Text>
+                            <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.descriptionLabel')}</Text>
                             <TouchableOpacity onPress={() => setShowDescriptionPreview((v) => !v)}>
                                 <Text style={[styles.inlineAction, { color: tc.tint }]}>
                                     {showDescriptionPreview ? t('markdown.edit') : t('markdown.preview')}
@@ -1066,7 +1101,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                             </View>
                         ) : (
                             <TextInput
-                                style={[styles.input, styles.textArea]}
+                                style={[styles.input, styles.textArea, inputStyle]}
                                 value={editedTask.description || ''}
                                 onChangeText={(text) => {
                                     setEditedTask(prev => ({ ...prev, description: text }));
@@ -1074,6 +1109,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                                 }}
                                 placeholder={t('taskEdit.descriptionPlaceholder')}
                                 multiline
+                                placeholderTextColor={tc.secondaryText}
                             />
                         )}
                     </View>
@@ -1082,7 +1118,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                 return (
                     <View style={styles.formGroup}>
                         <View style={styles.inlineHeader}>
-                            <Text style={styles.label}>{t('attachments.title')}</Text>
+                            <Text style={[styles.label, { color: tc.secondaryText }]}>{t('attachments.title')}</Text>
                             <View style={styles.inlineActions}>
                                 <TouchableOpacity
                                     onPress={addFileAttachment}
@@ -1132,10 +1168,10 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
             case 'checklist':
                 return (
                     <View style={styles.formGroup}>
-                        <Text style={styles.label}>{t('taskEdit.checklist')}</Text>
-                        <View style={styles.checklistContainer}>
+                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.checklist')}</Text>
+                        <View style={[styles.checklistContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                             {editedTask.checklist?.map((item, index) => (
-                                <View key={item.id || index} style={styles.checklistItem}>
+                                <View key={item.id || index} style={[styles.checklistItem, { borderBottomColor: tc.border }]}>
                                     <TouchableOpacity
                                         onPress={() => {
                                             const newChecklist = (editedTask.checklist || []).map((item, i) =>
@@ -1150,7 +1186,11 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                                         </View>
                                     </TouchableOpacity>
                                     <TextInput
-                                        style={[styles.checklistInput, item.isCompleted && styles.completedText]}
+                                        style={[
+                                            styles.checklistInput,
+                                            { color: item.isCompleted ? tc.secondaryText : tc.text },
+                                            item.isCompleted && styles.completedText,
+                                        ]}
                                         value={item.title}
                                         onChangeText={(text) => {
                                             const newChecklist = (editedTask.checklist || []).map((item, i) =>
@@ -1159,6 +1199,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                                             setEditedTask(prev => ({ ...prev, checklist: newChecklist }));
                                         }}
                                         placeholder={t('taskEdit.itemNamePlaceholder')}
+                                        placeholderTextColor={tc.secondaryText}
                                     />
                                     <TouchableOpacity
                                         onPress={() => {
@@ -1167,7 +1208,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                                         }}
                                         style={styles.deleteBtn}
                                     >
-                                        <Text style={styles.deleteBtnText}>×</Text>
+                                        <Text style={[styles.deleteBtnText, { color: tc.secondaryText }]}>×</Text>
                                     </TouchableOpacity>
                                 </View>
                             ))}
@@ -1197,14 +1238,6 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
                                             {t('taskEdit.resetChecklist')}
                                         </Text>
                                     </TouchableOpacity>
-                                    <TouchableOpacity
-                                        style={[styles.checklistActionButton, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
-                                        onPress={handleDuplicateTask}
-                                    >
-                                        <Text style={[styles.checklistActionText, { color: tc.secondaryText }]}>
-                                            {t('taskEdit.duplicateTask')}
-                                        </Text>
-                                    </TouchableOpacity>
                                 </View>
                             )}
                         </View>
@@ -1213,6 +1246,133 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
             default:
                 return null;
         }
+    };
+
+    const renderViewRow = (label: string, value?: string) => {
+        if (value === undefined || value === null || value === '') return null;
+        return (
+            <View style={[styles.viewRow, { backgroundColor: tc.inputBg, borderColor: tc.border }]}>
+                <Text style={[styles.viewLabel, { color: tc.secondaryText }]}>{label}</Text>
+                <Text style={[styles.viewValue, { color: tc.text }]}>{value}</Text>
+            </View>
+        );
+    };
+
+    const renderViewPills = (items: string[] | undefined) => {
+        if (!items || items.length === 0) return null;
+        return (
+            <View style={styles.viewPillRow}>
+                {items.map((item) => (
+                    <View key={item} style={[styles.viewPill, { borderColor: tc.border, backgroundColor: tc.inputBg }]}>
+                        <Text style={[styles.viewPillText, { color: tc.text }]}>{item}</Text>
+                    </View>
+                ))}
+            </View>
+        );
+    };
+
+    const renderViewContent = () => {
+        const project = projects.find((p) => p.id === mergedTask.projectId);
+        const blockedByTitles = (mergedTask.blockedByTaskIds || [])
+            .map((id) => tasks.find((t) => t.id === id)?.title)
+            .filter(Boolean) as string[];
+        const description = String(mergedTask.description || '').trim();
+        const checklist = mergedTask.checklist || [];
+
+        const statusLabel = mergedTask.status ? (t(`status.${mergedTask.status}`) || mergedTask.status) : undefined;
+        const timeEstimateLabel = mergedTask.timeEstimate
+            ? (formatTimeEstimateLabel(mergedTask.timeEstimate as TimeEstimate) || String(mergedTask.timeEstimate))
+            : undefined;
+        const recurrenceLabel = mergedTask.recurrence ? (t(`recurrence.${mergedTask.recurrence}`) || mergedTask.recurrence) : undefined;
+
+        return (
+            <ScrollView
+                style={styles.content}
+                contentContainerStyle={styles.contentContainer}
+                keyboardShouldPersistTaps="handled"
+            >
+                {renderViewRow(t('taskEdit.statusLabel'), statusLabel)}
+                {renderViewRow(t('taskEdit.projectLabel'), project?.title)}
+                {renderViewRow(t('taskEdit.startDateLabel'), mergedTask.startTime ? formatDate(mergedTask.startTime) : undefined)}
+                {renderViewRow(t('taskEdit.dueDateLabel'), mergedTask.dueDate ? formatDueDate(mergedTask.dueDate) : undefined)}
+                {renderViewRow(t('taskEdit.reviewDateLabel'), mergedTask.reviewAt ? formatDate(mergedTask.reviewAt) : undefined)}
+                {renderViewRow(t('taskEdit.timeEstimateLabel'), timeEstimateLabel)}
+                {mergedTask.contexts?.length ? (
+                    <View style={styles.viewSection}>
+                        <Text style={[styles.viewLabel, { color: tc.secondaryText }]}>{t('taskEdit.contextsLabel')}</Text>
+                        {renderViewPills(mergedTask.contexts)}
+                    </View>
+                ) : null}
+                {mergedTask.tags?.length ? (
+                    <View style={styles.viewSection}>
+                        <Text style={[styles.viewLabel, { color: tc.secondaryText }]}>{t('taskEdit.tagsLabel')}</Text>
+                        {renderViewPills(mergedTask.tags)}
+                    </View>
+                ) : null}
+                {mergedTask.location ? renderViewRow(t('taskEdit.locationLabel'), mergedTask.location) : null}
+                {recurrenceLabel ? renderViewRow(t('taskEdit.recurrenceLabel'), recurrenceLabel) : null}
+                {blockedByTitles.length ? (
+                    <View style={styles.viewSection}>
+                        <Text style={[styles.viewLabel, { color: tc.secondaryText }]}>{t('taskEdit.blockedByLabel')}</Text>
+                        {renderViewPills(blockedByTitles)}
+                    </View>
+                ) : null}
+                {description ? (
+                    <View style={styles.viewSection}>
+                        <Text style={[styles.viewLabel, { color: tc.secondaryText }]}>{t('taskEdit.descriptionLabel')}</Text>
+                        <View style={[styles.viewCard, { borderColor: tc.border, backgroundColor: tc.inputBg }]}>
+                            <MarkdownText markdown={description} tc={tc} />
+                        </View>
+                    </View>
+                ) : null}
+                {checklist.length ? (
+                    <View style={styles.viewSection}>
+                        <Text style={[styles.viewLabel, { color: tc.secondaryText }]}>{t('taskEdit.checklist')}</Text>
+                        <View style={styles.viewChecklist}>
+                            {checklist.map((item) => (
+                                <TouchableOpacity
+                                    key={item.id}
+                                    style={styles.viewChecklistItem}
+                                    onPress={() => {
+                                        const nextChecklist = checklist.map((entry) =>
+                                            entry.id === item.id ? { ...entry, isCompleted: !entry.isCompleted } : entry
+                                        );
+                                        applyChecklistUpdate(nextChecklist);
+                                    }}
+                                >
+                                    <Text style={[styles.viewChecklistMarker, { color: item.isCompleted ? tc.tint : tc.secondaryText }]}>
+                                        {item.isCompleted ? '✓' : '○'}
+                                    </Text>
+                                    <Text style={[styles.viewChecklistText, { color: tc.text }]}>{item.title}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    </View>
+                ) : null}
+                {visibleAttachments.length ? (
+                    <View style={styles.viewSection}>
+                        <Text style={[styles.viewLabel, { color: tc.secondaryText }]}>{t('attachments.title')}</Text>
+                        <View style={styles.viewAttachmentGrid}>
+                            {visibleAttachments.map((attachment) => (
+                                <TouchableOpacity
+                                    key={attachment.id}
+                                    style={[styles.viewAttachmentCard, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
+                                    onPress={() => openAttachment(attachment)}
+                                >
+                                    {isImageAttachment(attachment) ? (
+                                        <Image source={{ uri: attachment.uri }} style={styles.viewAttachmentImage} />
+                                    ) : (
+                                        <Text style={[styles.viewAttachmentText, { color: tc.text }]} numberOfLines={2}>
+                                            {attachment.title}
+                                        </Text>
+                                    )}
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    </View>
+                ) : null}
+            </ScrollView>
+        );
     };
 
     if (!task) return null;
@@ -1224,267 +1384,222 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode }: T
             presentationStyle="pageSheet"
             onRequestClose={handleDone}
         >
-            <SafeAreaView style={styles.container} edges={['top']}>
-                <View style={styles.header}>
+            <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['top']}>
+                <View style={[styles.header, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
                     <TouchableOpacity onPress={handleDone}>
-                        <Text style={styles.headerBtn}>{t('common.done')}</Text>
+                        <Text style={[styles.headerBtn, { color: tc.tint }]}>{t('common.done')}</Text>
                     </TouchableOpacity>
-                    <Text style={styles.headerTitle}>{editTab === 'list' ? (editedTask.title || t('taskEdit.checklist')) : t('taskEdit.editTask')}</Text>
+                    <Text style={[styles.headerTitle, { color: tc.text }]}>
+                        {String(editedTask.title || '').trim() || t('taskEdit.title')}
+                    </Text>
                     <View style={styles.headerRight}>
                         <TouchableOpacity onPress={handleShare}>
-                            <Text style={styles.headerBtn}>{t('common.share')}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={onClose}>
-                            <Text style={[styles.headerBtn, styles.saveBtn]}>{t('common.cancel')}</Text>
+                            <Text style={[styles.headerBtn, { color: tc.tint }]}>{t('common.share')}</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
 
-                <View style={[styles.modeTabs, { borderBottomColor: tc.border }]}>
-                    <TouchableOpacity
-                        style={[styles.modeTab, editTab === 'task' && styles.modeTabActive]}
-                        onPress={() => setModeTab('task')}
-                    >
-                        <Text style={[styles.modeTabText, editTab === 'task' && styles.modeTabTextActive]}>
-                            {t('taskEdit.tab.task')}
-                        </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.modeTab, editTab === 'list' && styles.modeTabActive]}
-                        onPress={() => setModeTab('list')}
-                    >
-                        <Text style={[styles.modeTabText, editTab === 'list' && styles.modeTabTextActive]}>
-                            {t('taskEdit.tab.list')}
-                        </Text>
-                    </TouchableOpacity>
+                <View style={[styles.modeTabs, { borderBottomColor: tc.border, backgroundColor: tc.cardBg }]}>
+                    <View style={[styles.modeTabsTrack, { backgroundColor: tc.filterBg, borderColor: tc.border }]}>
+                        {containerWidth > 0 && (
+                            <Animated.View
+                                style={[
+                                    styles.modeTabIndicator,
+                                    {
+                                        width: containerWidth / 2,
+                                        backgroundColor: tc.tint,
+                                        transform: [
+                                            {
+                                                translateX: scrollX.interpolate({
+                                                    inputRange: [0, containerWidth],
+                                                    outputRange: [0, containerWidth / 2],
+                                                    extrapolate: 'clamp',
+                                                }),
+                                            },
+                                        ],
+                                    },
+                                ]}
+                            />
+                        )}
+                        <TouchableOpacity
+                            style={styles.modeTab}
+                            onPress={() => handleTabPress('task')}
+                            activeOpacity={0.85}
+                        >
+                            <Text
+                                style={[
+                                    styles.modeTabText,
+                                    { color: editTab === 'task' ? '#fff' : tc.text },
+                                ]}
+                            >
+                                {t('taskEdit.tab.task')}
+                            </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.modeTab}
+                            onPress={() => handleTabPress('view')}
+                            activeOpacity={0.85}
+                        >
+                            <Text
+                                style={[
+                                    styles.modeTabText,
+                                    { color: editTab === 'view' ? '#fff' : tc.text },
+                                ]}
+                            >
+                                {t('taskEdit.tab.view')}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
                 </View>
 
-                {editTab === 'list' ? (
-                    <ScrollView style={styles.content}>
-                        {aiEnabled && (
-                            <View style={styles.aiRow}>
-                                <TouchableOpacity
-                                    style={[styles.aiButton, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
-                                    onPress={handleAIClarify}
-                                    disabled={isAIWorking}
-                                >
-                                    <Text style={[styles.aiButtonText, { color: tc.tint }]}>{t('taskEdit.aiClarify')}</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={[styles.aiButton, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
-                                    onPress={handleAIBreakdown}
-                                    disabled={isAIWorking}
-                                >
-                                    <Text style={[styles.aiButtonText, { color: tc.tint }]}>{t('taskEdit.aiBreakdown')}</Text>
-                                </TouchableOpacity>
-                            </View>
+                <View style={styles.tabContent} onLayout={(event) => setContainerWidth(event.nativeEvent.layout.width)}>
+                    <Animated.ScrollView
+                        ref={scrollRef}
+                        horizontal
+                        pagingEnabled
+                        scrollEventThrottle={16}
+                        showsHorizontalScrollIndicator={false}
+                        directionalLockEnabled
+                        onScroll={Animated.event(
+                            [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+                            { useNativeDriver: true }
                         )}
-                        {aiEnabled && copilotSuggestion && !copilotApplied && (
-                            <TouchableOpacity
-                                style={[styles.copilotPill, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
-                                onPress={applyCopilotSuggestion}
-                            >
-                                <Text style={[styles.copilotText, { color: tc.text }]}>
-                                    ✨ {t('copilot.suggested')}{' '}
-                                    {copilotSuggestion.context ? `${copilotSuggestion.context} ` : ''}
-                                    {copilotSuggestion.timeEstimate ? `${copilotSuggestion.timeEstimate}` : ''}
-                                </Text>
-                                <Text style={[styles.copilotHint, { color: tc.secondaryText }]}>
-                                    {t('copilot.applyHint')}
-                                </Text>
-                            </TouchableOpacity>
-                        )}
-                        {aiEnabled && copilotApplied && (
-                            <View style={[styles.copilotPill, { borderColor: tc.border, backgroundColor: tc.filterBg }]}>
-                                <Text style={[styles.copilotText, { color: tc.text }]}>
-                                    ✅ {t('copilot.applied')}{' '}
-                                    {copilotContext ? `${copilotContext} ` : ''}
-                                    {copilotEstimate ? `${copilotEstimate}` : ''}
-                                </Text>
-                            </View>
-                        )}
-                        <View style={styles.checklistContainer}>
-                            {editedTask.checklist?.map((item, index) => (
-                                <View key={item.id || index} style={styles.checklistItem}>
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            const newChecklist = (editedTask.checklist || []).map((item, i) =>
-                                                i === index ? { ...item, isCompleted: !item.isCompleted } : item
-                                            );
-                                            applyChecklistUpdate(newChecklist);
-                                        }}
-                                        style={styles.checkboxTouch}
-                                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                                        activeOpacity={0.6}
-                                    >
-                                        <View style={[styles.checkbox, item.isCompleted && styles.checkboxChecked]}>
-                                            {item.isCompleted && <Text style={styles.checkmark}>✓</Text>}
-                                        </View>
-                                    </TouchableOpacity>
-                                    <TextInput
-                                        style={[styles.checklistInput, { fontSize: 18, paddingVertical: 8 }, item.isCompleted && styles.completedText]}
-                                        value={item.title}
-                                        onChangeText={(text) => {
-                                            const newChecklist = (editedTask.checklist || []).map((item, i) =>
-                                                i === index ? { ...item, title: text } : item
-                                            );
-                                            applyChecklistUpdate(newChecklist);
-                                        }}
-                                        placeholder={t('taskEdit.itemNamePlaceholder')}
-                                    />
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            const newChecklist = (editedTask.checklist || []).filter((_, i) => i !== index);
-                                            applyChecklistUpdate(newChecklist);
-                                        }}
-                                        style={styles.deleteBtn}
-                                    >
-                                        <Text style={styles.deleteBtnText}>×</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            ))}
-                            <TouchableOpacity
-                                style={[styles.addChecklistBtn, { paddingVertical: 16 }]}
-                                onPress={() => {
-                                    const newItem = {
-                                        id: generateUUID(),
-                                        title: '',
-                                        isCompleted: false
-                                    };
-                                    applyChecklistUpdate([...(editedTask.checklist || []), newItem]);
-                                }}
-                            >
-                                <Text style={[styles.addChecklistText, { fontSize: 17 }]}>+ {t('taskEdit.addItem')}</Text>
-                            </TouchableOpacity>
-                            {(editedTask.checklist?.length ?? 0) > 0 && (
-                                <View style={styles.checklistActions}>
-                                    <TouchableOpacity
-                                        style={[styles.checklistActionButton, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
-                                        onPress={handleResetChecklist}
-                                    >
-                                        <Text style={[styles.checklistActionText, { color: tc.secondaryText }]}>
-                                            {t('taskEdit.resetChecklist')}
-                                        </Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        style={[styles.checklistActionButton, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
-                                        onPress={handleDuplicateTask}
-                                    >
-                                        <Text style={[styles.checklistActionText, { color: tc.secondaryText }]}>
-                                            {t('taskEdit.duplicateTask')}
-                                        </Text>
-                                    </TouchableOpacity>
-                                </View>
-                            )}
-                        </View>
-                    </ScrollView>
-                ) : (
-
-                    <KeyboardAvoidingView
-                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                        style={{ flex: 1 }}
-                        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+                        onMomentumScrollEnd={(event) => {
+                            const offsetX = event.nativeEvent.contentOffset.x;
+                            if (!containerWidth) return;
+                            setModeTab(offsetX >= containerWidth / 2 ? 'view' : 'task');
+                        }}
                     >
-                        <ScrollView style={styles.content}>
-                            <View style={styles.formGroup}>
-                                <Text style={styles.label}>{t('taskEdit.titleLabel')}</Text>
-                                <TextInput
-                                    style={styles.input}
-                                    value={editedTask.title}
-                                    onChangeText={(text) => {
-                                        setEditedTask(prev => ({ ...prev, title: text }));
-                                        resetCopilotDraft();
-                                    }}
-                                />
-                            </View>
-
-                            {aiEnabled && (
-                                <View style={styles.aiRow}>
-                                    <TouchableOpacity
-                                        style={[styles.aiButton, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
-                                        onPress={handleAIClarify}
-                                        disabled={isAIWorking}
-                                    >
-                                        <Text style={[styles.aiButtonText, { color: tc.tint }]}>{t('taskEdit.aiClarify')}</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        style={[styles.aiButton, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
-                                        onPress={handleAIBreakdown}
-                                        disabled={isAIWorking}
-                                    >
-                                        <Text style={[styles.aiButtonText, { color: tc.tint }]}>{t('taskEdit.aiBreakdown')}</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            )}
-                            {aiEnabled && copilotSuggestion && !copilotApplied && (
-                                <TouchableOpacity
-                                    style={[styles.copilotPill, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
-                                    onPress={applyCopilotSuggestion}
+                        <View style={[styles.tabPage, { width: containerWidth || '100%' }]}>
+                            <KeyboardAvoidingView
+                                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                                style={{ flex: 1 }}
+                                keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
+                            >
+                                <ScrollView
+                                    style={styles.content}
+                                    contentContainerStyle={styles.contentContainer}
+                                    keyboardShouldPersistTaps="handled"
+                                    nestedScrollEnabled
                                 >
-                                    <Text style={[styles.copilotText, { color: tc.text }]}>
-                                        ✨ {t('copilot.suggested')}{' '}
-                                        {copilotSuggestion.context ? `${copilotSuggestion.context} ` : ''}
-                                        {copilotSuggestion.timeEstimate ? `${copilotSuggestion.timeEstimate}` : ''}
-                                    </Text>
-                                    <Text style={[styles.copilotHint, { color: tc.secondaryText }]}>
-                                        {t('copilot.applyHint')}
-                                    </Text>
-                                </TouchableOpacity>
-                            )}
-                            {aiEnabled && copilotApplied && (
-                                <View style={[styles.copilotPill, { borderColor: tc.border, backgroundColor: tc.filterBg }]}>
-                                    <Text style={[styles.copilotText, { color: tc.text }]}>
-                                        ✅ {t('copilot.applied')}{' '}
-                                        {copilotContext ? `${copilotContext} ` : ''}
-                                        {copilotEstimate ? `${copilotEstimate}` : ''}
-                                    </Text>
-                                </View>
-                            )}
+                                    <View style={styles.formGroup}>
+                                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.titleLabel')}</Text>
+                                        <TextInput
+                                            style={[styles.input, inputStyle]}
+                                            value={editedTask.title}
+                                            onChangeText={(text) => {
+                                                setEditedTask(prev => ({ ...prev, title: text }));
+                                                resetCopilotDraft();
+                                            }}
+                                            placeholderTextColor={tc.secondaryText}
+                                        />
+                                    </View>
 
-                            {fieldIdsToRender.map((fieldId) => (
-                                <React.Fragment key={fieldId}>
-                                    {renderField(fieldId)}
-                                </React.Fragment>
-                            ))}
+                                    {aiEnabled && (
+                                        <View style={styles.aiRow}>
+                                            <TouchableOpacity
+                                                style={[styles.aiButton, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
+                                                onPress={handleAIClarify}
+                                                disabled={isAIWorking}
+                                            >
+                                                <Text style={[styles.aiButtonText, { color: tc.tint }]}>{t('taskEdit.aiClarify')}</Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={[styles.aiButton, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
+                                                onPress={handleAIBreakdown}
+                                                disabled={isAIWorking}
+                                            >
+                                                <Text style={[styles.aiButtonText, { color: tc.tint }]}>{t('taskEdit.aiBreakdown')}</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    )}
+                                    {aiEnabled && copilotSuggestion && !copilotApplied && (
+                                        <TouchableOpacity
+                                            style={[styles.copilotPill, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
+                                            onPress={applyCopilotSuggestion}
+                                        >
+                                            <Text style={[styles.copilotText, { color: tc.text }]}>
+                                                ✨ {t('copilot.suggested')}{' '}
+                                                {copilotSuggestion.context ? `${copilotSuggestion.context} ` : ''}
+                                                {copilotSuggestion.timeEstimate ? `${copilotSuggestion.timeEstimate}` : ''}
+                                                {copilotSuggestion.tags?.length ? copilotSuggestion.tags.join(' ') : ''}
+                                            </Text>
+                                            <Text style={[styles.copilotHint, { color: tc.secondaryText }]}>
+                                                {t('copilot.applyHint')}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    )}
+                                    {aiEnabled && copilotApplied && (
+                                        <View style={[styles.copilotPill, { borderColor: tc.border, backgroundColor: tc.filterBg }]}>
+                                            <Text style={[styles.copilotText, { color: tc.text }]}>
+                                                ✅ {t('copilot.applied')}{' '}
+                                                {copilotContext ? `${copilotContext} ` : ''}
+                                                {copilotEstimate ? `${copilotEstimate}` : ''}
+                                                {copilotTags.length ? copilotTags.join(' ') : ''}
+                                            </Text>
+                                        </View>
+                                    )}
+                                    {task && (
+                                        <View style={styles.checklistActions}>
+                                            <TouchableOpacity
+                                                style={[styles.checklistActionButton, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
+                                                onPress={handleDuplicateTask}
+                                            >
+                                                <Text style={[styles.checklistActionText, { color: tc.secondaryText }]}>
+                                                    {t('taskEdit.duplicateTask')}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    )}
 
-                            {hasHiddenFields && (
-                                <TouchableOpacity
-                                    style={[styles.moreOptionsButton, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
-                                    onPress={() => setShowMoreOptions((v) => !v)}
-                                >
-                                    <Text style={[styles.moreOptionsText, { color: tc.tint }]}>
-                                        {showMoreOptions ? t('common.less') : t('common.more')}
-                                    </Text>
-                                </TouchableOpacity>
-                            )}
+                                    {fieldIdsToRender.map((fieldId) => (
+                                        <React.Fragment key={fieldId}>
+                                            {renderField(fieldId)}
+                                        </React.Fragment>
+                                    ))}
 
-                            {/* Add extra padding at bottom for scrolling past keyboard */}
-                            <View style={{ height: 100 }} />
+                                    {hasHiddenFields && (
+                                        <TouchableOpacity
+                                            style={[styles.moreOptionsButton, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
+                                            onPress={() => setShowMoreOptions((v) => !v)}
+                                        >
+                                            <Text style={[styles.moreOptionsText, { color: tc.tint }]}>
+                                                {showMoreOptions ? t('common.less') : t('common.more')}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    )}
 
-                            {showDatePicker && (
-                                <DateTimePicker
-                                    value={(() => {
-                                        if (showDatePicker === 'start') return getSafePickerDateValue(editedTask.startTime);
-                                        if (showDatePicker === 'start-time') return pendingStartDate ?? getSafePickerDateValue(editedTask.startTime);
-                                        if (showDatePicker === 'review') return getSafePickerDateValue(editedTask.reviewAt);
-                                        if (showDatePicker === 'due-time') return pendingDueDate ?? getSafePickerDateValue(editedTask.dueDate);
-                                        return getSafePickerDateValue(editedTask.dueDate);
-                                    })()}
-                                    mode={
-                                        showDatePicker === 'start-time' || showDatePicker === 'due-time'
-                                            ? 'time'
-                                            : (showDatePicker === 'start' || showDatePicker === 'due') && Platform.OS !== 'android'
-                                                ? 'datetime'
-                                                : 'date'
-                                    }
-                                    display="default"
-                                    onChange={onDateChange}
-                                />
-                            )}
+                                    {/* Add extra padding at bottom for scrolling past keyboard */}
+                                    <View style={{ height: 100 }} />
 
-                        </ScrollView>
-                    </KeyboardAvoidingView>
-                )}
+                                    {showDatePicker && (
+                                        <DateTimePicker
+                                            value={(() => {
+                                                if (showDatePicker === 'start') return getSafePickerDateValue(editedTask.startTime);
+                                                if (showDatePicker === 'start-time') return pendingStartDate ?? getSafePickerDateValue(editedTask.startTime);
+                                                if (showDatePicker === 'review') return getSafePickerDateValue(editedTask.reviewAt);
+                                                if (showDatePicker === 'due-time') return pendingDueDate ?? getSafePickerDateValue(editedTask.dueDate);
+                                                return getSafePickerDateValue(editedTask.dueDate);
+                                            })()}
+                                            mode={
+                                                showDatePicker === 'start-time' || showDatePicker === 'due-time'
+                                                    ? 'time'
+                                                    : (showDatePicker === 'start' || showDatePicker === 'due') && Platform.OS !== 'android'
+                                                        ? 'datetime'
+                                                        : 'date'
+                                            }
+                                            display="default"
+                                            onChange={onDateChange}
+                                        />
+                                    )}
+                                </ScrollView>
+                            </KeyboardAvoidingView>
+                        </View>
+                        <View style={[styles.tabPage, { width: containerWidth || '100%' }]}>
+                            {React.cloneElement(renderViewContent(), { nestedScrollEnabled: true })}
+                        </View>
+                    </Animated.ScrollView>
+                </View>
 
                 <Modal
                     visible={linkModalVisible}
@@ -1563,11 +1678,24 @@ const styles = StyleSheet.create({
         backgroundColor: '#fff',
         borderBottomWidth: 1,
     },
+    modeTabsTrack: {
+        flex: 1,
+        flexDirection: 'row',
+        borderRadius: 12,
+        borderWidth: 1,
+        overflow: 'hidden',
+    },
     modeTab: {
-        paddingHorizontal: 16,
-        paddingVertical: 6,
-        borderRadius: 14,
-        backgroundColor: '#e5e5e5',
+        flex: 1,
+        paddingVertical: 10,
+        alignItems: 'center',
+    },
+    modeTabIndicator: {
+        position: 'absolute',
+        left: 0,
+        top: 0,
+        bottom: 0,
+        borderRadius: 12,
     },
     modeTabActive: {
         backgroundColor: '#007AFF',
@@ -1580,16 +1708,17 @@ const styles = StyleSheet.create({
     modeTabTextActive: {
         color: '#fff',
     },
-    content: { padding: 20 },
+    content: { padding: 20, flex: 1 },
+    contentContainer: { paddingBottom: 32, flexGrow: 1 },
     formGroup: { marginBottom: 20 },
     label: { fontSize: 14, color: '#666', marginBottom: 8, textTransform: 'uppercase' },
     input: {
-        backgroundColor: '#fff',
         padding: 12,
         borderRadius: 10,
         fontSize: 16,
         borderWidth: 1,
-        borderColor: '#e5e5e5',
+        borderColor: 'transparent',
+        backgroundColor: 'transparent',
     },
     textArea: { minHeight: 100, textAlignVertical: 'top' },
     row: { flexDirection: 'row', gap: 12 },
@@ -1617,8 +1746,8 @@ const styles = StyleSheet.create({
     statusChip: {
         paddingHorizontal: 12,
         paddingVertical: 6,
-        backgroundColor: '#e5e5e5',
         borderRadius: 16,
+        borderWidth: 1,
     },
     statusChipActive: { backgroundColor: '#007AFF' },
     statusText: { fontSize: 14, color: '#333' },
@@ -1634,10 +1763,8 @@ const styles = StyleSheet.create({
     suggestionChip: {
         paddingHorizontal: 10,
         paddingVertical: 5,
-        backgroundColor: '#e1e1e6',
         borderRadius: 14,
         borderWidth: 1,
-        borderColor: '#d1d1d6',
     },
     suggestionChipActive: {
         backgroundColor: '#e8f2ff',
@@ -1792,6 +1919,111 @@ const styles = StyleSheet.create({
         padding: 12,
         borderRadius: 10,
         borderWidth: 1,
+    },
+    viewRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderWidth: 1,
+        borderRadius: 10,
+        marginBottom: 12,
+    },
+    viewLabel: {
+        fontSize: 12,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        letterSpacing: 0.4,
+        flex: 1,
+    },
+    viewValue: {
+        fontSize: 14,
+        fontWeight: '600',
+        flex: 1,
+        textAlign: 'right',
+    },
+    tabContent: {
+        flex: 1,
+    },
+    tabPager: {
+        flexDirection: 'row',
+        flex: 1,
+    },
+    tabPage: {
+        flex: 1,
+    },
+    viewSection: {
+        marginBottom: 16,
+    },
+    viewPillRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+        marginTop: 8,
+    },
+    viewPill: {
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+    },
+    viewPillText: {
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    viewCard: {
+        marginTop: 8,
+        borderWidth: 1,
+        borderRadius: 10,
+        padding: 12,
+    },
+    viewChecklist: {
+        marginTop: 8,
+        gap: 6,
+    },
+    viewChecklistItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        paddingVertical: 6,
+    },
+    viewChecklistMarker: {
+        fontSize: 20,
+        width: 26,
+        height: 26,
+        textAlign: 'center',
+    },
+    viewChecklistText: {
+        fontSize: 14,
+        flex: 1,
+    },
+    viewAttachmentGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 10,
+        marginTop: 8,
+    },
+    viewAttachmentCard: {
+        width: '48%',
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: 90,
+    },
+    viewAttachmentImage: {
+        width: '100%',
+        height: 90,
+        borderRadius: 10,
+        resizeMode: 'cover',
+    },
+    viewAttachmentText: {
+        fontSize: 12,
+        fontWeight: '600',
+        textAlign: 'center',
     },
     moreOptionsButton: {
         borderWidth: 1,

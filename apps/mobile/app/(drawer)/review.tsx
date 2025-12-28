@@ -354,6 +354,7 @@ export default function ReviewScreen() {
         task={editingTask}
         onClose={() => setIsModalVisible(false)}
         onSave={(taskId, updates) => updateTask(taskId, updates)}
+        defaultTab="view"
         onFocusMode={(taskId) => {
           setIsModalVisible(false);
           router.push(`/check-focus?id=${taskId}`);

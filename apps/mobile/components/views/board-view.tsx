@@ -290,6 +290,7 @@ export function BoardView() {
         task={editingTask}
         onClose={() => setEditingTask(null)}
         onSave={handleSave}
+        defaultTab="view"
       />
     </View>
   );

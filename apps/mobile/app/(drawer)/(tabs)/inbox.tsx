@@ -682,6 +682,7 @@ export default function InboxScreen() {
         showQuickAddHelp={false}
         emptyText={t('inbox.empty')}
         headerAccessory={processButton}
+        defaultEditTab="task"
       />
       {aiModal && (
         <AIResponseModal

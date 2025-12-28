@@ -1,14 +1,12 @@
 # Calendar Integration (Hard + Soft Landscape)
 
-## Goals
+## Summary
 
-- **View-only** external calendars (Google / Outlook) inside Mindwtr.
-- Make planning feel natural by showing:
-  - **Hard Landscape**: meetings/classes (external calendar events)
-  - **Soft Landscape**: tasks (Mindwtr) with `timeEstimate`
-- Provide a “bridge” workflow:
-  - See busy blocks (gray)
-  - Place **existing** tasks into free time (no task creation from calendar)
+- **View-only** external calendars (ICS subscriptions) inside Mindwtr.
+- **Hard Landscape**: meetings/classes (external events).
+- **Soft Landscape**: tasks (Mindwtr) with `timeEstimate`.
+- Calendar is a **planning surface**, not a capture surface.
+  - You schedule **existing** tasks by setting `startTime`.
 
 ---
 
@@ -38,11 +36,7 @@
 ### Calendar Views
 
 - **Day view**: time grid with events + scheduled tasks.
-- **3‑day view**: same grid, multiple columns.
-- **Month view**: high-level overview with markers for:
-  - deadlines (`dueDate`)
-  - scheduled tasks (`startTime`)
-  - external events (summary/indicators)
+- **Month view**: overview with markers for deadlines, scheduled tasks, and events.
 
 ### Scheduling UX
 
@@ -51,24 +45,24 @@
   - `startTime` (and optionally inferred duration from `timeEstimate`)
 
 **Desktop**
-- Drag tasks from a “Next Actions” tray into empty slots.
-- Drag to move; resize to adjust duration (optional later).
+- Schedule existing tasks into open time by assigning a start time.
+- Move a scheduled task by adjusting its start time.
 
 **Mobile**
-- Long‑press task → “Schedule…” → pick time (or quick presets).
-- Optional drag scheduling later (gesture complexity).
+- Tap a task in the day view to schedule it.
+- Adjust start time from the task editor or the day list.
 
 ---
 
 ## Integrations
 
-### MVP: iCal / ICS Subscription (Recommended First Step)
+### iCal / ICS Subscription (View‑Only)
 
-- Allow users to paste a calendar **ICS URL** (view-only).
-- Fetch and parse events into an in-app cache.
-- Works with Google/Outlook calendar publishing links without implementing OAuth first.
+- Paste a calendar **ICS URL** in Settings.
+- Events are fetched and cached on-device.
+- Works with Google/Outlook calendar publishing links without OAuth.
 
-### Full: Provider OAuth (Later)
+### Provider OAuth (Later)
 
 - Google Calendar: OAuth + read-only scope.
 - Outlook/Microsoft 365: Microsoft Graph + read-only calendar scope.
@@ -81,34 +75,14 @@
 
 ## Data & Caching
 
-- External calendar events are **derived data**:
-  - Store in per-device cache with `lastFetchedAt`
-  - Refresh manually and on a cadence (e.g., every 15–60 minutes)
-- Do **not** sync external calendar event blobs via Mindwtr sync.
+- External events are **derived data** and cached per device.
+- Refresh manually or on a periodic cadence.
+- Events are not synced via Mindwtr sync (privacy + size).
 
 ---
 
-## Phased Implementation
+## Notes
 
-### Phase A — Planner Foundations
-
-- Add Day / 3‑day calendar views.
-- Render Mindwtr tasks as blocks using `startTime + timeEstimate`.
-- Enforce “calendar doesn’t create tasks” (schedule existing only).
-
-### Phase B — ICS Import
-
-- Settings: add “External Calendar (ICS URL)” + refresh + toggles.
-- Parse + cache events; show as background blocks.
-
-### Phase C — Provider Connectors
-
-- Google + Outlook sign-in flows.
-- Calendar selection (which calendars to show).
-- Token storage hardening.
-
-### Phase D — Drag Scheduling Polish
-
-- Desktop drag/drop from Next Actions into timeline.
-- Conflict highlighting and “free slot” snapping.
-
+- Use **dueDate** for hard deadlines.
+- Use **startTime** for “not before” scheduling/tickler behavior.
+- Use **timeEstimate** to indicate the default duration.

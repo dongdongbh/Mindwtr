@@ -698,6 +698,7 @@ export function CalendarView() {
           task={editingTask}
           onClose={() => setEditingTask(null)}
           onSave={(taskId, updates) => updateTask(taskId, updates)}
+          defaultTab="view"
         />
       </View>
     );
@@ -950,6 +951,7 @@ export function CalendarView() {
         task={editingTask}
         onClose={() => setEditingTask(null)}
         onSave={(taskId, updates) => updateTask(taskId, updates)}
+        defaultTab="view"
       />
     </View>
   );

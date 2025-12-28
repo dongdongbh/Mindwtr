@@ -174,6 +174,7 @@ export default function NextActionsScreen() {
         task={editingTask}
         onClose={() => setIsModalVisible(false)}
         onSave={onSaveTask}
+        defaultTab="view"
         onFocusMode={(taskId) => {
           setIsModalVisible(false);
           router.push(`/check-focus?id=${taskId}`);
