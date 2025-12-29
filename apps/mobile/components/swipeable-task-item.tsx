@@ -306,6 +306,7 @@ export function SwipeableTaskItem({
                                     <Pressable
                                         key={item.id || index}
                                         onPress={() => {
+                                            const taskId = task.id;
                                             const newList = (localChecklist || []).map((it, i) =>
                                                 i === index ? { ...it, isCompleted: !it.isCompleted } : it
                                             );
@@ -317,16 +318,17 @@ export function SwipeableTaskItem({
                                             checklistUpdateTimer.current = setTimeout(() => {
                                                 const pending = pendingChecklist.current;
                                                 if (!pending) return;
-                                                const isListMode = task.taskMode === 'list';
+                                                const latestTask = useTaskStore.getState().tasks.find((t) => t.id === taskId) || task;
+                                                const isListMode = latestTask.taskMode === 'list';
                                                 const allComplete = pending.length > 0 && pending.every((entry) => entry.isCompleted);
                                                 const nextStatus = isListMode
                                                     ? allComplete
                                                         ? 'done'
-                                                        : task.status === 'done'
+                                                        : latestTask.status === 'done'
                                                             ? 'next'
                                                             : undefined
                                                     : undefined;
-                                                updateTask(task.id, { checklist: pending, ...(nextStatus ? { status: nextStatus } : {}) });
+                                                updateTask(taskId, { checklist: pending, ...(nextStatus ? { status: nextStatus } : {}) });
                                             }, 200);
                                         }}
                                         style={styles.checklistItem}

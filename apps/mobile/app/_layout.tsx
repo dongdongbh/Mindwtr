@@ -34,6 +34,7 @@ function RootLayoutContent() {
   const lastAutoSyncAt = useRef(0);
   const syncDebounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const widgetRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryLoadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncInFlight = useRef<Promise<void> | null>(null);
   const syncQueued = useRef(false);
   const isActive = useRef(true);
@@ -120,6 +121,9 @@ function RootLayoutContent() {
       if (widgetRefreshTimer.current) {
         clearTimeout(widgetRefreshTimer.current);
       }
+      if (retryLoadTimer.current) {
+        clearTimeout(retryLoadTimer.current);
+      }
       // Flush on unmount/reload as well
       flushPendingSave().catch(console.error);
     };
@@ -140,6 +144,10 @@ function RootLayoutContent() {
     const loadData = async () => {
       try {
         loadAttempts.current += 1;
+        if (retryLoadTimer.current) {
+          clearTimeout(retryLoadTimer.current);
+          retryLoadTimer.current = null;
+        }
         // Verify critical polyfills
         verifyPolyfills();
 
@@ -159,7 +167,10 @@ function RootLayoutContent() {
       } catch (e) {
         console.error('[Mobile] Failed to load data:', e);
         if (loadAttempts.current < 3 && isActive.current) {
-          setTimeout(() => {
+          if (retryLoadTimer.current) {
+            clearTimeout(retryLoadTimer.current);
+          }
+          retryLoadTimer.current = setTimeout(() => {
             if (isActive.current) {
               loadData();
             }

@@ -252,7 +252,10 @@ async function rescheduleAll(api: NotificationsApi) {
 async function snoozeTask(api: NotificationsApi, taskId: string, minutes: number) {
   const { tasks } = useTaskStore.getState();
   const task = tasks.find((t) => t.id === taskId);
-  if (!task) return;
+  if (!task) {
+    logNotificationError(`Snooze skipped: task not found (${taskId})`, '');
+    return;
+  }
   const snoozeAt = new Date(Date.now() + minutes * 60 * 1000);
   await scheduleForTask(api, task, snoozeAt);
 }
@@ -263,6 +266,10 @@ export async function startMobileNotifications() {
 
   const api = await loadNotifications();
   if (!api || typeof api.scheduleNotificationAsync !== 'function') {
+    storeSubscription?.();
+    storeSubscription = null;
+    responseSubscription?.remove();
+    responseSubscription = null;
     scheduledByTask.clear();
     scheduledDigestByKind.clear();
     scheduledWeeklyReviewId = null;
@@ -274,6 +281,10 @@ export async function startMobileNotifications() {
 
   const granted = await ensurePermission(api);
   if (!granted) {
+    storeSubscription?.();
+    storeSubscription = null;
+    responseSubscription?.remove();
+    responseSubscription = null;
     scheduledByTask.clear();
     scheduledDigestByKind.clear();
     scheduledWeeklyReviewId = null;

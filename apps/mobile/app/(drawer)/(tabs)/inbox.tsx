@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, TextInput, Platform, Alert } from 'react-native';
 
 import { useTaskStore, PRESET_CONTEXTS, createAIProvider, safeFormatDate, safeParseDate, type Task } from '@mindwtr/core';
@@ -32,15 +32,18 @@ export default function InboxScreen() {
   const aiEnabled = settings.ai?.enabled === true;
   const closeAIModal = () => setAiModal(null);
 
-  const inboxTasks = tasks.filter(t => {
-    if (t.deletedAt) return false;
-    if (t.status !== 'inbox') return false;
-    const start = safeParseDate(t.startTime);
-    if (start && start > new Date()) return false;
-    return true;
-  });
-  const processingQueue = inboxTasks.filter(t => !skippedIds.has(t.id));
-  const currentTask = processingQueue[currentIndex] || null;
+  const inboxTasks = useMemo(() => {
+    const now = new Date();
+    return tasks.filter(t => {
+      if (t.deletedAt) return false;
+      if (t.status !== 'inbox') return false;
+      const start = safeParseDate(t.startTime);
+      if (start && start > now) return false;
+      return true;
+    });
+  }, [tasks]);
+  const processingQueue = useMemo(() => inboxTasks.filter(t => !skippedIds.has(t.id)), [inboxTasks, skippedIds]);
+  const currentTask = useMemo(() => processingQueue[currentIndex] || null, [processingQueue, currentIndex]);
   const totalCount = inboxTasks.length;
   const processedCount = totalCount - processingQueue.length + currentIndex;
 
