@@ -129,7 +129,9 @@ export default function SearchScreen() {
             )}
             {trimmedQuery !== '' && isTruncated && (
                 <Text style={[styles.helpText, { color: tc.secondaryText }]}>
-                    {t('search.showingFirst', { shown: results.length, total: totalResults })}
+                    {t('search.showingFirst')
+                        .replace('{shown}', String(results.length))
+                        .replace('{total}', String(totalResults))}
                 </Text>
             )}
 

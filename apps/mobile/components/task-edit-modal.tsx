@@ -899,7 +899,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode, def
                         <View style={styles.suggestionsContainer}>
                             <View style={styles.suggestionTags}>
                                 {suggestedTags.map(tag => {
-                                    const isActive = editedTask.contexts?.includes(tag);
+                                    const isActive = Boolean(editedTask.contexts?.includes(tag));
                                     return (
                                         <TouchableOpacity
                                             key={tag}
@@ -932,7 +932,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode, def
                         <View style={styles.suggestionsContainer}>
                             <View style={styles.suggestionTags}>
                                 {suggestedHashtags.map(tag => {
-                                    const isActive = editedTask.tags?.includes(tag);
+                                    const isActive = Boolean(editedTask.tags?.includes(tag));
                                     return (
                                         <TouchableOpacity
                                             key={tag}
@@ -964,7 +964,7 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode, def
 	                                        otherTask.status !== 'done'
 	                                    )
                                     .map(otherTask => {
-                                        const isActive = editedTask.blockedByTaskIds?.includes(otherTask.id);
+                                        const isActive = Boolean(editedTask.blockedByTaskIds?.includes(otherTask.id));
                                         return (
                                             <TouchableOpacity
                                                 key={otherTask.id}

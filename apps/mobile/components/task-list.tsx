@@ -25,7 +25,7 @@ export interface TaskListProps {
   emptyText?: string;
   headerAccessory?: React.ReactNode;
   enableCopilot?: boolean;
-  defaultEditTab?: 'task' | 'list' | 'view';
+  defaultEditTab?: 'task' | 'view';
 }
 
 // ... inside TaskList component

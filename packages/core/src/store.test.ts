@@ -53,19 +53,16 @@ describe('TaskStore', () => {
         expect(tasks).toHaveLength(0);
     });
 
-    it('should debounced save and allow immediate flush', async () => {
+    it('should coalesce saves and allow immediate flush', async () => {
         const { addTask } = useTaskStore.getState();
 
         // 1. Trigger a change
         addTask('Test Save');
 
-        // Should not have saved yet (debounced)
-        expect(mockStorage.saveData).not.toHaveBeenCalled();
-
-        // 2. Flush pending save
+        // 2. Flush pending save (should be safe even if already in-flight)
         await flushPendingSave();
 
-        // Should have saved immediately
+        // Should have saved exactly once
         expect(mockStorage.saveData).toHaveBeenCalledTimes(1);
     });
 

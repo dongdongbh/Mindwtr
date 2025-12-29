@@ -14,8 +14,9 @@ config.serializer = {
     ],
 };
 
-// 1. Watch all files within the monorepo
-config.watchFolders = [workspaceRoot];
+// 1. Watch all files within the monorepo (preserve Expo defaults)
+const defaultWatchFolders = config.watchFolders || [];
+config.watchFolders = Array.from(new Set([...defaultWatchFolders, workspaceRoot]));
 
 // 1.1 CRITICAL: Exclude build output directories that cause Metro to crash
 config.resolver.blockList = [

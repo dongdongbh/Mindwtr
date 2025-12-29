@@ -172,10 +172,11 @@ export default function SettingsPage() {
     };
 
     const selectWeeklyReviewDay = () => {
-        const options: Alert.Button[] = Array.from({ length: 7 }, (_, idx) => ({
-            text: getWeekdayLabel(idx),
-            onPress: () => updateSettings({ weeklyReviewDay: idx }).catch(console.error),
-        }));
+        const options: Array<{ text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }> =
+            Array.from({ length: 7 }, (_, idx) => ({
+                text: getWeekdayLabel(idx),
+                onPress: () => updateSettings({ weeklyReviewDay: idx }).catch(console.error),
+            }));
         options.push({ text: t('common.cancel'), style: 'cancel' });
         Alert.alert(t('settings.weeklyReviewDay'), '', options);
     };

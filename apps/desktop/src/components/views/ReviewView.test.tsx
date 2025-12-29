@@ -37,6 +37,10 @@ describe('ReviewView', () => {
 
         // Inbox -> Calendar
         fireEvent.click(getByText('Next Step'));
+        expect(getByText('AI insight')).toBeInTheDocument();
+
+        // AI -> Calendar
+        fireEvent.click(getByText('Next Step'));
         expect(getByText('Review Calendar')).toBeInTheDocument();
         expect(getByText('Past 14 Days')).toBeInTheDocument();
 
