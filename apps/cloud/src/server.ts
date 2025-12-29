@@ -10,6 +10,8 @@ type RateLimitState = {
     resetAt: number;
 };
 
+const corsOrigin = process.env.MINDWTR_CLOUD_CORS_ORIGIN || '*';
+
 function parseArgs(argv: string[]) {
     const flags: Flags = {};
     for (let i = 0; i < argv.length; i += 1) {
@@ -30,7 +32,7 @@ function parseArgs(argv: string[]) {
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
     const headers = new Headers(init.headers);
     headers.set('Content-Type', 'application/json; charset=utf-8');
-    headers.set('Access-Control-Allow-Origin', '*');
+    headers.set('Access-Control-Allow-Origin', corsOrigin);
     headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
     headers.set('Access-Control-Allow-Methods', 'GET,PUT,OPTIONS');
     return new Response(JSON.stringify(body, null, 2), { ...init, headers });

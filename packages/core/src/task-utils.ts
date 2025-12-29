@@ -77,6 +77,7 @@ export function sortTasksBy(tasks: Task[], sortBy: TaskSortBy = 'default'): Task
     const copy = [...tasks];
 
     const timeOrInfinity = (value?: string) => safeTime(value, Infinity);
+    const timeOrZero = (value?: string) => safeTime(value, 0);
 
     switch (sortBy) {
         case 'title':
@@ -90,26 +91,26 @@ export function sortTasksBy(tasks: Task[], sortBy: TaskSortBy = 'default'): Task
                 const aDue = timeOrInfinity(a.dueDate);
                 const bDue = timeOrInfinity(b.dueDate);
                 if (aDue !== bDue) return aDue - bDue;
-                return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+                return timeOrZero(a.createdAt) - timeOrZero(b.createdAt);
             });
         case 'start':
             return copy.sort((a, b) => {
                 const aStart = timeOrInfinity(a.startTime);
                 const bStart = timeOrInfinity(b.startTime);
                 if (aStart !== bStart) return aStart - bStart;
-                return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+                return timeOrZero(a.createdAt) - timeOrZero(b.createdAt);
             });
         case 'review':
             return copy.sort((a, b) => {
                 const aReview = timeOrInfinity(a.reviewAt);
                 const bReview = timeOrInfinity(b.reviewAt);
                 if (aReview !== bReview) return aReview - bReview;
-                return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+                return timeOrZero(a.createdAt) - timeOrZero(b.createdAt);
             });
         case 'created':
-            return copy.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+            return copy.sort((a, b) => timeOrZero(a.createdAt) - timeOrZero(b.createdAt));
         case 'created-desc':
-            return copy.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            return copy.sort((a, b) => timeOrZero(b.createdAt) - timeOrZero(a.createdAt));
         default:
             return sortTasks(tasks);
     }
