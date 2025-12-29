@@ -79,6 +79,7 @@ export function SettingsView() {
     const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
     const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
     const [updateError, setUpdateError] = useState<string | null>(null);
+    const [updateNotice, setUpdateNotice] = useState<string | null>(null);
     const [showUpdateModal, setShowUpdateModal] = useState(false);
     const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
     const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
@@ -270,10 +271,11 @@ export function SettingsView() {
         setIsCheckingUpdate(true);
         setUpdateInfo(null);
         setUpdateError(null);
+        setUpdateNotice(null);
         try {
             const info = await checkForUpdates(appVersion);
             if (!info || !info.hasUpdate) {
-                alert(t.upToDate);
+                setUpdateNotice(t.upToDate);
                 return;
             }
             setUpdateInfo(info);
@@ -283,7 +285,6 @@ export function SettingsView() {
         } catch (error) {
             console.error('Update check failed:', error);
             setUpdateError(String(error));
-            alert(t.checkFailed);
         } finally {
             setIsCheckingUpdate(false);
         }
@@ -312,7 +313,7 @@ export function SettingsView() {
             try {
                 const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : '';
                 if (/linux/i.test(userAgent)) {
-                    alert(t.linuxUpdateHint);
+                    setDownloadNotice(t.linuxUpdateHint);
                 }
             } catch (error) {
                 console.error('Failed to detect platform:', error);
@@ -1418,6 +1419,12 @@ export function SettingsView() {
                         <>
                             <div className="border-t border-border/50"></div>
                             <div className="text-red-500 text-sm">{t.checkFailed}</div>
+                        </>
+                    )}
+                    {updateNotice && !updateError && (
+                        <>
+                            <div className="border-t border-border/50"></div>
+                            <div className="text-sm text-muted-foreground">{updateNotice}</div>
                         </>
                     )}
                 </div>
