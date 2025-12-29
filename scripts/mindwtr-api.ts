@@ -100,12 +100,13 @@ function requireAuth(req: Request): Response | null {
     if (!token) return null;
 
     const header = (req.headers.get('authorization') || '').trim();
-    const [scheme, value] = header.split(/\s+/);
-    if (!scheme || !value) {
+    const match = header.match(/^Bearer\s+(.+)$/i);
+    if (!match) {
         return errorResponse('Unauthorized', 401);
     }
     const expected = token.trim();
-    if (scheme.toLowerCase() !== 'bearer' || value !== expected) {
+    const value = match[1].trim();
+    if (value !== expected) {
         return errorResponse('Unauthorized', 401);
     }
     return null;
