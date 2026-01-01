@@ -131,10 +131,34 @@ export PATH=$PATH:$ANDROID_HOME/platform-tools
 export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin
 ```
 
-### Build
+### Build (ABI-split APKs)
+Mindwtr builds **split APKs per ABI** (arm64-v8a, armeabi-v7a, x86, x86_64) so the arm64 file stays under store size limits like F-Droid/Izzy.
+
+If you already have `apps/mobile/android` on disk, run prebuild so the ABI split config is applied:
+
 ```bash
-npx eas-cli build --platform android --profile preview --local --output mindwtr.apk
+npx expo prebuild --clean --platform android
 ```
+
+Then build locally:
+
+```bash
+EAS_LOCAL_BUILD_ARTIFACTS_DIR=./build/android npx eas-cli build --platform android --profile production --local
+```
+
+After the build, grab the APKs from:
+
+```
+android/app/build/outputs/apk/release/
+```
+
+For IzzyOnDroid, upload the arm64 build:
+
+```
+app-arm64-v8a-release.apk
+```
+
+To change which ABIs are built, edit the `architectures` list for `./plugins/abi-splits` in `apps/mobile/app.json`.
 
 ### 4. Upload to GitHub Release
 

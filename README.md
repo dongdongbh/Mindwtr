@@ -23,7 +23,7 @@ A complete Getting Things Done (GTD) productivity system for desktop and mobile.
 <div align="center">
   <video src="https://github.com/user-attachments/assets/8b067635-196e-4c9c-ad26-92ca92fef327" width="60%" autoplay loop muted playsinline></video>
   
-  <video src="https://github.com/user-attachments/assets/08a8664a-f538-4bf2-b34e-fa75707fa169" width="25%" autoplay loop muted playsinline></video>
+  <video src="https://github.com/user-attachments/assets/fe1ce194-fa5a-491a-a3b2-17c96b924219" width="25%" autoplay loop muted playsinline></video>
 
   <p>
     <i>Local-First GTD on Arch Linux & Android</i>

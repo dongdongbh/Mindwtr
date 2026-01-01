@@ -150,19 +150,26 @@ jobs:
       - name: Setup EAS CLI
         run: npm install -g eas-cli
 
-      - name: Build Android APK
+      - name: Build Android APKs (ABI split)
         run: |
           cd apps/mobile
-          eas build --platform android --profile preview --non-interactive
+          eas build --platform android --profile production --non-interactive
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Download APK from EAS
+      - name: Download APKs from EAS
         run: |
           cd apps/mobile
           eas build:list --platform android --status finished --limit 1 --json > build.json
           BUILD_URL=$(cat build.json | jq -r '.[0].artifacts.buildUrl')
-          curl -L -o android-app.apk "$BUILD_URL"
+          curl -L -o android-artifact "$BUILD_URL"
+          mkdir -p android-build
+          if tar -tf android-artifact >/dev/null 2>&1; then
+            tar -xzf android-artifact -C android-build
+          else
+            mv android-artifact android-build/android-app.apk
+          fi
+          find android-build -name "*.apk" -maxdepth 3 -print
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
@@ -170,7 +177,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: apps/mobile/android-app.apk
+          path: apps/mobile/android-build/**/*.apk
           if-no-files-found: error
 
   # Optional iOS build (only when manually triggered with build_ios=true)
