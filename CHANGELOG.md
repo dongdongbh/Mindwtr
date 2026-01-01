@@ -2,6 +2,20 @@
 
 All notable changes to Mindwtr will be documented in this file.
 
+## [0.4.2] - 2025-12-31
+
+### Features
+- **Priority**: Added task priority metadata and badges across desktop and mobile.
+- **Filtering**: Added multi-criteria filters (contexts/tags, priority, time estimate) for Next/Agenda on desktop and mobile.
+- **Board/Projects**: Added project filters on the desktop board and area filters on the projects page.
+
+### Changed
+- **Windowing**: Sync native title bar theme with app theme; hide decorations on Linux with F11 fullscreen toggle.
+
+### Fixed
+- **Desktop**: `e` now opens the selected task editor in list views.
+- **Dependencies**: "Blocked by" now only shows tasks from the same project.
+
 ## [0.3.1] - 2025-12-12
 
 ### Features
