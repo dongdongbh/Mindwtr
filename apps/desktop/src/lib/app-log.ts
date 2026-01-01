@@ -84,11 +84,16 @@ async function appendLogLine(entry: LogEntry): Promise<string | null> {
         await ensureLogDir();
         const line = `${JSON.stringify(entry)}\n`;
         try {
-            await writeTextFile(LOG_FILE, line, { baseDir: BaseDirectory.Data, append: true });
+            const { invoke } = await import('@tauri-apps/api/core');
+            return await invoke<string>('append_log_line', { line });
         } catch (error) {
-            await writeTextFile(LOG_FILE, line, { baseDir: BaseDirectory.Data });
+            try {
+                await writeTextFile(LOG_FILE, line, { baseDir: BaseDirectory.Data, append: true });
+            } catch (writeError) {
+                await writeTextFile(LOG_FILE, line, { baseDir: BaseDirectory.Data });
+            }
+            return await getLogPath();
         }
-        return await getLogPath();
     } catch (error) {
         console.warn('Failed to write log', error);
         return null;

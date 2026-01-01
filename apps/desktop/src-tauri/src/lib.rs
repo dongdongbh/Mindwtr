@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
 use std::fs::File;
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
@@ -69,6 +70,36 @@ fn log_ai_debug(context: String, message: String, provider: Option<String>, mode
         task_id.unwrap_or_else(|| "-".into()),
         message
     );
+}
+
+#[tauri::command]
+fn append_log_line(app: tauri::AppHandle, line: String) -> Result<String, String> {
+    let log_dir = get_data_dir(&app).join("logs");
+    if let Err(err) = std::fs::create_dir_all(&log_dir) {
+        eprintln!("[log] failed to create log dir {:?}: {}", log_dir, err);
+        return Err(err.to_string());
+    }
+    let log_path = log_dir.join("mindwtr.log");
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|e| {
+            eprintln!("[log] failed to open {:?}: {}", log_path, e);
+            e.to_string()
+        })?;
+    if let Err(err) = file.write_all(line.as_bytes()) {
+        eprintln!("[log] failed to write {:?}: {}", log_path, err);
+        return Err(err.to_string());
+    }
+    if let Err(err) = file.flush() {
+        eprintln!("[log] failed to flush {:?}: {}", log_path, err);
+        return Err(err.to_string());
+    }
+    println!("[log] wrote {} bytes to {:?}", line.len(), log_path);
+
+    Ok(log_path.to_string_lossy().to_string())
 }
 
 fn get_config_dir(app: &tauri::AppHandle) -> PathBuf {
@@ -814,6 +845,7 @@ pub fn run() {
             write_sync_file,
             get_linux_distro,
             log_ai_debug,
+            append_log_line,
             consume_quick_add_pending
         ])
         .run(tauri::generate_context!())
