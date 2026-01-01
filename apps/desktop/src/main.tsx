@@ -7,6 +7,7 @@ import { setStorageAdapter } from '@mindwtr/core';
 import { LanguageProvider } from './contexts/language-context';
 import { isTauriRuntime } from './lib/runtime';
 import { webStorage } from './lib/storage-adapter-web';
+import { setupGlobalErrorLogging } from './lib/app-log';
 
 // Initialize theme immediately before React renders to prevent flash
 const THEME_STORAGE_KEY = 'mindwtr-theme';
@@ -40,6 +41,7 @@ async function initStorage() {
 
 async function bootstrap() {
     await initStorage();
+    setupGlobalErrorLogging();
 
     if (!isTauriRuntime() && 'serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js').catch(() => undefined);

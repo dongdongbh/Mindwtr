@@ -30,6 +30,7 @@ import { useKeybindings } from '../../contexts/keybinding-context';
 import { useLanguage, type Language } from '../../contexts/language-context';
 import { isTauriRuntime } from '../../lib/runtime';
 import { SyncService } from '../../lib/sync-service';
+import { clearLog, getLogPath } from '../../lib/app-log';
 import { ExternalCalendarService } from '../../lib/external-calendar-service';
 import { checkForUpdates, type UpdateInfo, GITHUB_RELEASES_URL } from '../../lib/update-service';
 import { loadAIKey, saveAIKey } from '../../lib/ai-config';
@@ -72,6 +73,7 @@ export function SettingsView() {
     const [appVersion, setAppVersion] = useState('0.1.0');
     const [dataPath, setDataPath] = useState('');
     const [configPath, setConfigPath] = useState('');
+    const [logPath, setLogPath] = useState('');
     const [aiApiKey, setAiApiKey] = useState('');
 
     const notificationsEnabled = settings?.notificationsEnabled !== false;
@@ -90,6 +92,7 @@ export function SettingsView() {
     const aiModelOptions = getModelOptions(aiProvider);
     const aiCopilotModel = settings?.ai?.copilotModel ?? getDefaultCopilotModel(aiProvider);
     const aiCopilotOptions = getCopilotModelOptions(aiProvider);
+    const loggingEnabled = settings?.diagnostics?.loggingEnabled === true;
 
     const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
     const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
@@ -140,6 +143,12 @@ export function SettingsView() {
                 setDataPath(data);
                 setConfigPath(config);
                 setLinuxDistro(distro);
+            })
+            .catch(console.error);
+
+        getLogPath()
+            .then((path) => {
+                if (path) setLogPath(path);
             })
             .catch(console.error);
     }, []);
@@ -286,6 +295,20 @@ export function SettingsView() {
         }
     };
 
+    const toggleLogging = async () => {
+        await updateSettings({
+            diagnostics: {
+                ...(settings?.diagnostics ?? {}),
+                loggingEnabled: !loggingEnabled,
+            },
+        }).then(showSaved).catch(console.error);
+    };
+
+    const handleClearLog = async () => {
+        await clearLog();
+        showSaved();
+    };
+
     const handleCheckUpdates = async () => {
         setIsCheckingUpdate(true);
         setUpdateInfo(null);
@@ -393,6 +416,12 @@ export function SettingsView() {
             localData: 'Local Data',
             localDataDesc: 'Config is stored in your system config folder; data is stored in your system data folder.',
             webDataDesc: 'The web app stores data in browser storage.',
+            diagnostics: 'Diagnostics',
+            diagnosticsDesc: 'Help troubleshoot issues.',
+            debugLogging: 'Debug logging',
+            debugLoggingDesc: 'Record errors locally to share with support.',
+            logFile: 'Log file',
+            clearLog: 'Clear log',
             sync: 'Sync',
             syncDescription:
                 'Configure a secondary folder to sync your data with (e.g., Dropbox, Syncthing). This merges your local data with the sync folder to prevent data loss.',
@@ -505,6 +534,12 @@ export function SettingsView() {
             localData: '本地数据',
             localDataDesc: '配置保存在系统配置目录；数据保存在系统数据目录。',
             webDataDesc: 'Web 版本使用浏览器存储。',
+            diagnostics: '诊断',
+            diagnosticsDesc: '帮助排查问题。',
+            debugLogging: '调试日志',
+            debugLoggingDesc: '将错误记录到本地以便提交反馈。',
+            logFile: '日志文件',
+            clearLog: '清除日志',
             sync: '同步',
             syncDescription:
                 '配置一个辅助文件夹来同步您的数据（如 Dropbox、Syncthing）。这会将本地数据与同步文件夹合并，以防止数据丢失。',
@@ -1148,6 +1183,56 @@ export function SettingsView() {
                             )}
                         </div>
                     </section>
+
+                    {isTauriRuntime() && (
+                        <section className="space-y-3">
+                            <h2 className="text-lg font-semibold flex items-center gap-2">
+                                <Info className="w-5 h-5" />
+                                {t.diagnostics}
+                            </h2>
+                            <div className="bg-card border border-border rounded-lg p-6 space-y-4">
+                                <p className="text-sm text-muted-foreground">{t.diagnosticsDesc}</p>
+                                <div className="flex items-start justify-between gap-4">
+                                    <div>
+                                        <p className="text-sm font-medium">{t.debugLogging}</p>
+                                        <p className="text-xs text-muted-foreground">{t.debugLoggingDesc}</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        role="switch"
+                                        aria-checked={loggingEnabled}
+                                        onClick={toggleLogging}
+                                        className={cn(
+                                            "relative inline-flex h-5 w-9 items-center rounded-full border transition-colors",
+                                            loggingEnabled ? "bg-primary border-primary" : "bg-muted/50 border-border"
+                                        )}
+                                    >
+                                        <span
+                                            className={cn(
+                                                "inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform",
+                                                loggingEnabled ? "translate-x-4" : "translate-x-1"
+                                            )}
+                                        />
+                                    </button>
+                                </div>
+                                {loggingEnabled && logPath && (
+                                    <div className="text-xs text-muted-foreground">
+                                        <span className="font-medium">{t.logFile}:</span>{' '}
+                                        <span className="font-mono break-all">{logPath}</span>
+                                    </div>
+                                )}
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={handleClearLog}
+                                        className="px-3 py-1.5 rounded-md text-xs font-medium bg-muted text-foreground hover:bg-muted/80 transition-colors"
+                                    >
+                                        {t.clearLog}
+                                    </button>
+                                </div>
+                            </div>
+                        </section>
+                    )}
 
                     <section className="space-y-3">
                         <h2 className="text-lg font-semibold flex items-center gap-2">

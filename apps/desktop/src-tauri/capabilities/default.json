@@ -12,6 +12,14 @@
     "global-shortcut:default",
     "shell:default",
     {
+      "identifier": "fs:scope",
+      "allow": [
+        {
+          "path": "$DATA/mindwtr/logs/**"
+        }
+      ]
+    },
+    {
       "identifier": "http:default",
       "allow": [
         {

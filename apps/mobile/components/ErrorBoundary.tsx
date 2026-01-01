@@ -1,6 +1,7 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Colors } from '@/constants/theme';
+import { logError } from '@/lib/app-log';
 
 interface Props {
     children: ReactNode;
@@ -23,6 +24,10 @@ export class ErrorBoundary extends Component<Props, State> {
 
     public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
         console.error('Uncaught error:', error, errorInfo);
+        void logError(error, {
+            scope: 'react',
+            extra: { componentStack: errorInfo.componentStack || '' },
+        });
     }
 
     private handleRetry = () => {

@@ -20,6 +20,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useTheme } from '../../contexts/theme-context';
@@ -45,6 +47,7 @@ import {
 import { pickAndParseSyncFile, exportData } from '../../lib/storage-file';
 import { fetchExternalCalendarEvents, getExternalCalendars, saveExternalCalendars } from '../../lib/external-calendar';
 import { loadAIKey, saveAIKey } from '../../lib/ai-config';
+import { clearLog, getLogPath } from '../../lib/app-log';
 import {
     performMobileSync,
     SYNC_PATH_KEY,
@@ -121,6 +124,7 @@ export default function SettingsPage() {
     const weeklyReviewEnabled = settings.weeklyReviewEnabled === true;
     const weeklyReviewTime = settings.weeklyReviewTime || '18:00';
     const weeklyReviewDay = Number.isFinite(settings.weeklyReviewDay) ? settings.weeklyReviewDay as number : 0;
+    const loggingEnabled = settings.diagnostics?.loggingEnabled === true;
     const aiProvider = (settings.ai?.provider ?? 'openai') as AIProviderId;
     const aiEnabled = settings.ai?.enabled === true;
     const aiModel = settings.ai?.model ?? getDefaultAIConfig(aiProvider).model;
@@ -419,6 +423,39 @@ export default function SettingsPage() {
         } finally {
             setIsSyncing(false);
         }
+    };
+
+    const toggleDebugLogging = (value: boolean) => {
+        updateSettings({
+            diagnostics: {
+                ...(settings.diagnostics ?? {}),
+                loggingEnabled: value,
+            },
+        }).catch(console.error);
+    };
+
+    const handleShareLog = async () => {
+        const path = await getLogPath();
+        if (!path) {
+            Alert.alert(t('settings.debugLogging'), t('settings.logMissing'));
+            return;
+        }
+        const info = await FileSystem.getInfoAsync(path);
+        if (!info.exists) {
+            Alert.alert(t('settings.debugLogging'), t('settings.logMissing'));
+            return;
+        }
+        const canShare = await Sharing.isAvailableAsync();
+        if (!canShare) {
+            Alert.alert(t('settings.debugLogging'), t('settings.shareUnavailable'));
+            return;
+        }
+        await Sharing.shareAsync(path, { mimeType: 'text/plain' });
+    };
+
+    const handleClearLog = async () => {
+        await clearLog();
+        Alert.alert(t('settings.debugLogging'), t('settings.logCleared'));
     };
 
     // Sub-screen header
@@ -1754,6 +1791,48 @@ export default function SettingsPage() {
                             </View>
                         </>
                     )}
+
+                    <Text style={[styles.sectionTitle, { color: tc.text, marginTop: 16 }]}>
+                        {t('settings.diagnostics')}
+                    </Text>
+                    <View style={[styles.settingCard, { backgroundColor: tc.cardBg }]}>
+                        <View style={styles.settingRow}>
+                            <View style={styles.settingInfo}>
+                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.debugLogging')}</Text>
+                                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
+                                    {t('settings.debugLoggingDesc')}
+                                </Text>
+                            </View>
+                            <Switch
+                                value={loggingEnabled}
+                                onValueChange={toggleDebugLogging}
+                                trackColor={{ false: '#767577', true: '#3B82F6' }}
+                            />
+                        </View>
+                        {loggingEnabled && (
+                            <>
+                                <TouchableOpacity
+                                    style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
+                                    onPress={handleShareLog}
+                                >
+                                    <View style={styles.settingInfo}>
+                                        <Text style={[styles.settingLabel, { color: tc.tint }]}>{t('settings.shareLog')}</Text>
+                                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
+                                            {t('settings.logFile')}
+                                        </Text>
+                                    </View>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
+                                    onPress={handleClearLog}
+                                >
+                                    <View style={styles.settingInfo}>
+                                        <Text style={[styles.settingLabel, { color: tc.secondaryText }]}>{t('settings.clearLog')}</Text>
+                                    </View>
+                                </TouchableOpacity>
+                            </>
+                        )}
+                    </View>
 
                     {/* Backup Section */}
                     <Text style={[styles.sectionTitle, { color: tc.text, marginTop: 24 }]}>

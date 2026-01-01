@@ -137,5 +137,8 @@ export interface AppData {
         lastSyncStatus?: 'idle' | 'syncing' | 'success' | 'error';
         lastSyncError?: string;
         lastSyncStats?: MergeStats;
+        diagnostics?: {
+            loggingEnabled?: boolean;
+        };
     };
 }

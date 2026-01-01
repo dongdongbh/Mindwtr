@@ -1,6 +1,7 @@
 
 import { mergeAppDataWithStats, AppData, useTaskStore, MergeStats, cloudGetJson, cloudPutJson, webdavGetJson, webdavPutJson } from '@mindwtr/core';
 import { isTauriRuntime } from './runtime';
+import { logSyncError, sanitizeLogMessage } from './app-log';
 import { webStorage } from './storage-adapter-web';
 
 type SyncBackend = 'file' | 'webdav' | 'cloud';
@@ -226,18 +227,25 @@ export class SyncService {
             return SyncService.syncInFlight;
         }
 
+        let step = 'init';
+        let backend: SyncBackend = 'file';
+        let syncUrl: string | undefined;
+
         const runSync = async (): Promise<{ success: boolean; stats?: MergeStats; error?: string }> => {
             // 1. Read Local Data
+            step = 'read-local';
             const localData = isTauriRuntime() ? await tauriInvoke<AppData>('get_data') : await webStorage.getData();
 
             // 2. Read Sync Data (file or WebDAV)
             let syncData: AppData;
-            const backend = await SyncService.getSyncBackend();
+            backend = await SyncService.getSyncBackend();
+            step = 'read-remote';
             if (backend === 'webdav') {
                 const { url, username, password } = await SyncService.getWebDavConfig();
                 if (!url) {
                     throw new Error('WebDAV URL not configured');
                 }
+                syncUrl = url;
                 const remote = await webdavGetJson<AppData>(url, { username, password });
                 syncData = remote || { tasks: [], projects: [], settings: {} };
             } else if (backend === 'cloud') {
@@ -245,6 +253,7 @@ export class SyncService {
                 if (!url || !token) {
                     throw new Error('Cloud sync not configured');
                 }
+                syncUrl = url;
                 const remote = await cloudGetJson<AppData>(url, { token });
                 syncData = remote || { tasks: [], projects: [], settings: {} };
             } else {
@@ -256,6 +265,7 @@ export class SyncService {
 
             // 3. Merge Strategies
             // mergeAppData uses Last-Write-Wins (LWW) based on updatedAt
+            step = 'merge';
             const mergeResult = mergeAppDataWithStats(localData, syncData);
             const mergedData = mergeResult.data;
             const stats = mergeResult.stats;
@@ -273,6 +283,7 @@ export class SyncService {
             };
 
             // 4. Write back to Local
+            step = 'write-local';
             if (isTauriRuntime()) {
                 await tauriInvoke('save_data', { data: finalData });
             } else {
@@ -280,6 +291,7 @@ export class SyncService {
             }
 
             // 5. Write back to Sync
+            step = 'write-remote';
             if (backend === 'webdav') {
                 const { url, username, password } = await SyncService.getWebDavConfig();
                 await webdavPutJson(url, finalData, { username, password });
@@ -291,6 +303,7 @@ export class SyncService {
             }
 
             // 6. Refresh UI Store
+            step = 'refresh';
             await useTaskStore.getState().fetchData();
 
             return { success: true, stats };
@@ -299,17 +312,24 @@ export class SyncService {
         const resultPromise = runSync().catch(async (error) => {
             console.error('Sync failed', error);
             const now = new Date().toISOString();
+            const logPath = await logSyncError(error, {
+                backend,
+                step,
+                url: syncUrl,
+            });
+            const logHint = logPath ? ` (log: ${logPath})` : '';
+            const safeMessage = sanitizeLogMessage(String(error));
             try {
                 await useTaskStore.getState().fetchData();
                 await useTaskStore.getState().updateSettings({
                     lastSyncAt: now,
                     lastSyncStatus: 'error',
-                    lastSyncError: String(error),
+                    lastSyncError: `${safeMessage}${logHint}`,
                 });
             } catch (e) {
                 console.error('Failed to persist sync error', e);
             }
-            return { success: false, error: String(error) };
+            return { success: false, error: `${safeMessage}${logHint}` };
         });
 
         SyncService.syncInFlight = resultPromise;

@@ -17,6 +17,7 @@ import { performMobileSync } from '../lib/sync-service';
 import { updateAndroidWidgetFromStore } from '../lib/widget-service';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { verifyPolyfills } from '../utils/verify-polyfills';
+import { setupGlobalErrorLogging } from '../lib/app-log';
 
 // Initialize storage for mobile
 let storageInitError: Error | null = null;
@@ -64,6 +65,7 @@ function RootLayoutContent() {
 
   // Auto-sync on data changes with debounce
   useEffect(() => {
+    setupGlobalErrorLogging();
     const unsubscribe = useTaskStore.subscribe((state, prevState) => {
       if (state.lastDataChangeAt === prevState.lastDataChangeAt) return;
       // Debounce sync: wait 5 seconds after last change
