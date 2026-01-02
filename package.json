@@ -81,5 +81,5 @@
     "webidl-conversions": "^8.0.0",
     "whatwg-url-without-unicode": "^8.0.0-3"
   },
-  "version": "0.4.2"
+  "version": "0.4.3"
 }

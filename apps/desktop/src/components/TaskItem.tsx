@@ -29,6 +29,7 @@ import { PromptModal } from './PromptModal';
 import { useLanguage } from '../contexts/language-context';
 import { Markdown } from './Markdown';
 import { isTauriRuntime } from '../lib/runtime';
+import { normalizeAttachmentInput } from '../lib/attachment-utils';
 import { buildAIConfig, buildCopilotConfig, loadAIKey } from '../lib/ai-config';
 
 // Convert stored ISO or datetime-local strings into datetime-local input values.
@@ -1305,14 +1306,14 @@ export const TaskItem = memo(function TaskItem({
             cancelLabel={t('common.cancel')}
             onCancel={() => setShowLinkPrompt(false)}
             onConfirm={(value) => {
-                const url = value.trim();
-                if (!url) return;
+                const normalized = normalizeAttachmentInput(value);
+                if (!normalized.uri) return;
                 const now = new Date().toISOString();
                 const attachment: Attachment = {
                     id: generateUUID(),
-                    kind: 'link',
-                    title: url,
-                    uri: url,
+                    kind: normalized.kind,
+                    title: normalized.title,
+                    uri: normalized.uri,
                     createdAt: now,
                     updatedAt: now,
                 };

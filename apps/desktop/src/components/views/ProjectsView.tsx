@@ -7,6 +7,7 @@ import { useLanguage } from '../../contexts/language-context';
 import { Markdown } from '../Markdown';
 import { PromptModal } from '../PromptModal';
 import { isTauriRuntime } from '../../lib/runtime';
+import { normalizeAttachmentInput } from '../../lib/attachment-utils';
 
 function toDateTimeLocalValue(dateStr: string | undefined): string {
     if (!dateStr) return '';
@@ -643,14 +644,14 @@ export function ProjectsView() {
             onCancel={() => setShowLinkPrompt(false)}
             onConfirm={(value) => {
                 if (!selectedProject) return;
-                const url = value.trim();
-                if (!url) return;
+                const normalized = normalizeAttachmentInput(value);
+                if (!normalized.uri) return;
                 const now = new Date().toISOString();
                 const attachment: Attachment = {
                     id: generateUUID(),
-                    kind: 'link',
-                    title: url,
-                    uri: url,
+                    kind: normalized.kind,
+                    title: normalized.title,
+                    uri: normalized.uri,
                     createdAt: now,
                     updatedAt: now,
                 };
