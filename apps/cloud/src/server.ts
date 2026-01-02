@@ -61,9 +61,11 @@ function validateAppData(value: unknown): { ok: true; data: Record<string, unkno
     const tasks = value.tasks;
     const projects = value.projects;
     const settings = value.settings;
+    const areas = value.areas;
 
     if (!Array.isArray(tasks)) return { ok: false, error: 'Invalid data: tasks must be an array' };
     if (!Array.isArray(projects)) return { ok: false, error: 'Invalid data: projects must be an array' };
+    if (areas !== undefined && !Array.isArray(areas)) return { ok: false, error: 'Invalid data: areas must be an array' };
     if (settings !== undefined && !isRecord(settings)) return { ok: false, error: 'Invalid data: settings must be an object' };
 
     for (const task of tasks) {

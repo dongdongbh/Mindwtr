@@ -60,10 +60,11 @@ function loadAppData(path: string): AppData {
         return {
             tasks: Array.isArray(parsed.tasks) ? (parsed.tasks as any) : [],
             projects: Array.isArray(parsed.projects) ? (parsed.projects as any) : [],
+            areas: Array.isArray((parsed as AppData).areas) ? ((parsed as AppData).areas as any) : [],
             settings: typeof parsed.settings === 'object' && parsed.settings ? (parsed.settings as any) : {},
         };
     } catch {
-        return { tasks: [], projects: [], settings: {} };
+        return { tasks: [], projects: [], areas: [], settings: {} };
     }
 }
 

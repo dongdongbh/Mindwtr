@@ -10,11 +10,11 @@ describe('TaskStore', () => {
     beforeEach(() => {
         // Create fresh mock storage for each test
         mockStorage = {
-            getData: vi.fn().mockResolvedValue({ tasks: [], projects: [], settings: {} }),
+            getData: vi.fn().mockResolvedValue({ tasks: [], projects: [], areas: [], settings: {} }),
             saveData: vi.fn().mockResolvedValue(undefined),
         };
         setStorageAdapter(mockStorage);
-        useTaskStore.setState({ tasks: [], projects: [], settings: {}, _allTasks: [], _allProjects: [] });
+        useTaskStore.setState({ tasks: [], projects: [], areas: [], settings: {}, _allTasks: [], _allProjects: [], _allAreas: [] });
         vi.useFakeTimers();
     });
 

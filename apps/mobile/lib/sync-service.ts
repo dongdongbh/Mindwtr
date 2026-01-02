@@ -55,13 +55,13 @@ export async function performMobileSync(syncPathOverride?: string): Promise<{ su
         }
         incomingData = await readSyncFile(fileSyncPath);
         if (!incomingData) {
-          incomingData = { tasks: [], projects: [], settings: {} };
+          incomingData = { tasks: [], projects: [], areas: [], settings: {} };
         }
       }
 
       const currentData = await mobileStorage.getData();
       step = 'merge';
-      const mergeResult = mergeAppDataWithStats(currentData, incomingData || { tasks: [], projects: [], settings: {} });
+      const mergeResult = mergeAppDataWithStats(currentData, incomingData || { tasks: [], projects: [], areas: [], settings: {} });
       const now = new Date().toISOString();
 
       const finalData: AppData = {

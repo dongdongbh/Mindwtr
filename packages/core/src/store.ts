@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { generateUUID as uuidv4 } from './uuid';
-import { Task, TaskStatus, AppData, Project } from './types';
+import { Task, TaskStatus, AppData, Project, Area } from './types';
 import { StorageAdapter, noopStorage } from './storage';
 import { createNextRecurringTask } from './recurrence';
 import { safeParseDate } from './date';
@@ -72,6 +72,7 @@ export const setStorageAdapter = (adapter: StorageAdapter) => {
 interface TaskStore {
     tasks: Task[];
     projects: Project[];
+    areas: Area[];
     settings: AppData['settings'];
     isLoading: boolean;
     error: string | null;
@@ -84,6 +85,7 @@ interface TaskStore {
     // Internal: full data including tombstones (not exposed to UI)
     _allTasks: Task[];
     _allProjects: Project[];
+    _allAreas: Area[];
 
     // Actions
     /** Load all data from storage */
@@ -117,6 +119,16 @@ interface TaskStore {
     /** Toggle focus status of a project (max 5) */
     toggleProjectFocus: (id: string) => Promise<void>;
 
+    // Area Actions
+    /** Add a new area */
+    addArea: (name: string, initialProps?: Partial<Area>) => Promise<void>;
+    /** Update an area */
+    updateArea: (id: string, updates: Partial<Area>) => Promise<void>;
+    /** Delete an area and clear areaId on child projects */
+    deleteArea: (id: string) => Promise<void>;
+    /** Reorder areas by id list */
+    reorderAreas: (orderedIds: string[]) => Promise<void>;
+
     // Settings Actions
     /** Update application settings */
     updateSettings: (updates: Partial<AppData['settings']>) => Promise<void>;
@@ -136,7 +148,12 @@ let saveInFlight: Promise<void> | null = null;
  * @param onError Callback for save failures
  */
 const debouncedSave = (data: AppData, onError?: (msg: string) => void) => {
-    pendingData = { ...data, tasks: [...data.tasks], projects: [...data.projects] };
+    pendingData = {
+        ...data,
+        tasks: [...data.tasks],
+        projects: [...data.projects],
+        areas: [...(data.areas || [])],
+    };
     if (onError) pendingOnError = onError;
     void flushPendingSave();
 };
@@ -168,6 +185,7 @@ export const flushPendingSave = async (): Promise<void> => {
 export const useTaskStore = create<TaskStore>((set, get) => ({
     tasks: [],
     projects: [],
+    areas: [],
     settings: {},
     isLoading: false,
     error: null,
@@ -177,6 +195,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     // Internal: full data including tombstones
     _allTasks: [],
     _allProjects: [],
+    _allAreas: [],
 
     /**
      * Fetch all data from the configured storage adapter.
@@ -189,6 +208,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
             const rawTasks = Array.isArray(data.tasks) ? data.tasks : [];
             const rawProjects = Array.isArray(data.projects) ? data.projects : [];
             const rawSettings = data.settings && typeof data.settings === 'object' ? data.settings : {};
+            const rawAreas = Array.isArray((data as AppData).areas) ? (data as AppData).areas : [];
             // Store ALL data including tombstones for persistence
             const nowIso = new Date().toISOString();
             let allTasks = rawTasks.map((task) => normalizeTaskForLoad(task, nowIso));
@@ -230,22 +250,30 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
                             : 'active';
                 return normalizedStatus === status ? project : { ...project, status: normalizedStatus };
             });
+            const allAreas = rawAreas
+                .map((area, index) => ({
+                    ...area,
+                    order: Number.isFinite(area.order) ? area.order : index,
+                }))
+                .sort((a, b) => a.order - b.order);
             // Filter out soft-deleted and archived items for day-to-day UI display
             const visibleTasks = allTasks.filter(t => !t.deletedAt && t.status !== 'archived');
             const visibleProjects = allProjects.filter(p => !p.deletedAt);
             set({
                 tasks: visibleTasks,
                 projects: visibleProjects,
+                areas: allAreas,
                 settings: rawSettings as AppData['settings'],
                 _allTasks: allTasks,
                 _allProjects: allProjects,
+                _allAreas: allAreas,
                 isLoading: false,
                 lastDataChangeAt: didAutoArchive ? Date.now() : get().lastDataChangeAt,
             });
 
             if (didAutoArchive) {
                 debouncedSave(
-                    { tasks: allTasks, projects: allProjects, settings: rawSettings as AppData['settings'] },
+                    { tasks: allTasks, projects: allProjects, areas: allAreas, settings: rawSettings as AppData['settings'] },
                     (msg) => set({ error: msg })
                 );
             }
@@ -278,7 +306,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         const newVisibleTasks = [...get().tasks, newTask];
         set({ tasks: newVisibleTasks, _allTasks: newAllTasks, lastDataChangeAt: changeAt });
         debouncedSave(
-            { tasks: newAllTasks, projects: get()._allProjects, settings: get().settings },
+            { tasks: newAllTasks, projects: get()._allProjects, areas: get()._allAreas, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -308,7 +336,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         const newVisibleTasks = newAllTasks.filter((t) => !t.deletedAt && t.status !== 'archived');
         set({ tasks: newVisibleTasks, _allTasks: newAllTasks, lastDataChangeAt: changeAt });
         debouncedSave(
-            { tasks: newAllTasks, projects: get()._allProjects, settings: get().settings },
+            { tasks: newAllTasks, projects: get()._allProjects, areas: get()._allAreas, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -329,7 +357,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         set({ tasks: newVisibleTasks, _allTasks: newAllTasks, lastDataChangeAt: changeAt });
         // Save with all data including tombstones
         debouncedSave(
-            { tasks: newAllTasks, projects: get()._allProjects, settings: get().settings },
+            { tasks: newAllTasks, projects: get()._allProjects, areas: get()._allAreas, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -379,7 +407,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         const newVisibleTasks = newAllTasks.filter((task) => !task.deletedAt && task.status !== 'archived');
         set({ tasks: newVisibleTasks, _allTasks: newAllTasks, lastDataChangeAt: changeAt });
         debouncedSave(
-            { tasks: newAllTasks, projects: get()._allProjects, settings: get().settings },
+            { tasks: newAllTasks, projects: get()._allProjects, areas: get()._allAreas, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -413,7 +441,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         const newVisibleTasks = newAllTasks.filter((task) => !task.deletedAt && task.status !== 'archived');
         set({ tasks: newVisibleTasks, _allTasks: newAllTasks, lastDataChangeAt: changeAt });
         debouncedSave(
-            { tasks: newAllTasks, projects: get()._allProjects, settings: get().settings },
+            { tasks: newAllTasks, projects: get()._allProjects, areas: get()._allAreas, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -451,7 +479,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         const newVisibleTasks = newAllTasks.filter((t) => !t.deletedAt && t.status !== 'archived');
         set({ tasks: newVisibleTasks, _allTasks: newAllTasks, lastDataChangeAt: changeAt });
         debouncedSave(
-            { tasks: newAllTasks, projects: get()._allProjects, settings: get().settings },
+            { tasks: newAllTasks, projects: get()._allProjects, areas: get()._allAreas, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -471,7 +499,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         const newVisibleTasks = newAllTasks.filter((t) => !t.deletedAt && t.status !== 'archived');
         set({ tasks: newVisibleTasks, _allTasks: newAllTasks, lastDataChangeAt: changeAt });
         debouncedSave(
-            { tasks: newAllTasks, projects: get()._allProjects, settings: get().settings },
+            { tasks: newAllTasks, projects: get()._allProjects, areas: get()._allAreas, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -496,7 +524,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         const newVisibleProjects = [...get().projects, newProject];
         set({ projects: newVisibleProjects, _allProjects: newAllProjects, lastDataChangeAt: changeAt });
         debouncedSave(
-            { tasks: get()._allTasks, projects: newAllProjects, settings: get().settings },
+            { tasks: get()._allTasks, projects: newAllProjects, areas: get()._allAreas, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -560,7 +588,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         });
 
         debouncedSave(
-            { tasks: newAllTasks, projects: newAllProjects, settings: get().settings },
+            { tasks: newAllTasks, projects: newAllProjects, areas: get()._allAreas, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -594,7 +622,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         });
         // Save with all data including tombstones
         debouncedSave(
-            { tasks: newAllTasks, projects: newAllProjects, settings: get().settings },
+            { tasks: newAllTasks, projects: newAllProjects, areas: get()._allAreas, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -627,7 +655,106 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         const newVisibleProjects = newAllProjects.filter(p => !p.deletedAt);
         set({ projects: newVisibleProjects, _allProjects: newAllProjects, lastDataChangeAt: changeAt });
         debouncedSave(
-            { tasks: get()._allTasks, projects: newAllProjects, settings: get().settings },
+            { tasks: get()._allTasks, projects: newAllProjects, areas: get()._allAreas, settings: get().settings },
+            (msg) => set({ error: msg })
+        );
+    },
+
+    addArea: async (name: string, initialProps?: Partial<Area>) => {
+        const changeAt = Date.now();
+        const now = new Date().toISOString();
+        const allAreas = get()._allAreas;
+        const maxOrder = allAreas.reduce(
+            (max, area) => Math.max(max, Number.isFinite(area.order) ? area.order : -1),
+            -1
+        );
+        const baseOrder = Number.isFinite(initialProps?.order) ? (initialProps?.order as number) : maxOrder + 1;
+        const newArea: Area = {
+            id: uuidv4(),
+            name,
+            ...initialProps,
+            order: baseOrder,
+            createdAt: initialProps?.createdAt ?? now,
+            updatedAt: now,
+        };
+        const newAllAreas = [...allAreas, newArea].sort((a, b) => a.order - b.order);
+        set({ areas: newAllAreas, _allAreas: newAllAreas, lastDataChangeAt: changeAt });
+        debouncedSave(
+            { tasks: get()._allTasks, projects: get()._allProjects, areas: newAllAreas, settings: get().settings },
+            (msg) => set({ error: msg })
+        );
+    },
+
+    updateArea: async (id: string, updates: Partial<Area>) => {
+        const allAreas = get()._allAreas;
+        const area = allAreas.find(a => a.id === id);
+        if (!area) return;
+        const changeAt = Date.now();
+        const now = new Date().toISOString();
+        const nextOrder = Number.isFinite(updates.order) ? (updates.order as number) : area.order;
+        const newAllAreas = allAreas
+            .map(a => (a.id === id ? { ...a, ...updates, order: nextOrder, updatedAt: now } : a))
+            .sort((a, b) => a.order - b.order);
+        set({ areas: newAllAreas, _allAreas: newAllAreas, lastDataChangeAt: changeAt });
+        debouncedSave(
+            { tasks: get()._allTasks, projects: get()._allProjects, areas: newAllAreas, settings: get().settings },
+            (msg) => set({ error: msg })
+        );
+    },
+
+    deleteArea: async (id: string) => {
+        const allAreas = get()._allAreas;
+        const areaExists = allAreas.some(a => a.id === id);
+        if (!areaExists) return;
+        const changeAt = Date.now();
+        const now = new Date().toISOString();
+        const newAllAreas = allAreas.filter(a => a.id !== id).sort((a, b) => a.order - b.order);
+        const newAllProjects = get()._allProjects.map((project) => {
+            if (project.areaId !== id) return project;
+            return { ...project, areaId: undefined, areaTitle: undefined, updatedAt: now };
+        });
+        const newVisibleProjects = newAllProjects.filter(p => !p.deletedAt);
+        set({
+            areas: newAllAreas,
+            _allAreas: newAllAreas,
+            projects: newVisibleProjects,
+            _allProjects: newAllProjects,
+            lastDataChangeAt: changeAt,
+        });
+        debouncedSave(
+            { tasks: get()._allTasks, projects: newAllProjects, areas: newAllAreas, settings: get().settings },
+            (msg) => set({ error: msg })
+        );
+    },
+
+    reorderAreas: async (orderedIds: string[]) => {
+        if (orderedIds.length === 0) return;
+        const allAreas = get()._allAreas;
+        const areaById = new Map(allAreas.map(area => [area.id, area]));
+        const seen = new Set<string>();
+        const now = new Date().toISOString();
+
+        const reordered: Area[] = [];
+        orderedIds.forEach((id, index) => {
+            const area = areaById.get(id);
+            if (!area) return;
+            seen.add(id);
+            reordered.push({ ...area, order: index, updatedAt: now });
+        });
+
+        const remaining = allAreas
+            .filter(area => !seen.has(area.id))
+            .sort((a, b) => a.order - b.order)
+            .map((area, idx) => ({
+                ...area,
+                order: reordered.length + idx,
+                updatedAt: now,
+            }));
+
+        const newAllAreas = [...reordered, ...remaining];
+        set({ areas: newAllAreas, _allAreas: newAllAreas, lastDataChangeAt: Date.now() });
+        debouncedSave(
+            { tasks: get()._allTasks, projects: get()._allProjects, areas: newAllAreas, settings: get().settings },
             (msg) => set({ error: msg })
         );
     },
@@ -680,7 +807,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
                     lastDataChangeAt: Date.now(),
                 });
                 debouncedSave(
-                    { tasks: newAllTasks, projects: get()._allProjects, settings: newSettings },
+                    { tasks: newAllTasks, projects: get()._allProjects, areas: get()._allAreas, settings: newSettings },
                     (msg) => set({ error: msg })
                 );
                 return;
@@ -689,7 +816,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
 
         set({ settings: newSettings });
         debouncedSave(
-            { tasks: get()._allTasks, projects: get()._allProjects, settings: newSettings },
+            { tasks: get()._allTasks, projects: get()._allProjects, areas: get()._allAreas, settings: newSettings },
             (msg) => set({ error: msg })
         );
     },

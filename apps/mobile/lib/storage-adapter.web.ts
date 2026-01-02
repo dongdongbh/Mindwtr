@@ -7,7 +7,7 @@ const LEGACY_DATA_KEYS = ['focus-gtd-data', 'gtd-todo-data', 'gtd-data'];
 export const mobileStorage: StorageAdapter = {
     getData: async (): Promise<AppData> => {
         if (typeof window === 'undefined') {
-            return { tasks: [], projects: [], settings: {} };
+            return { tasks: [], projects: [], areas: [], settings: {} };
         }
         let jsonValue = localStorage.getItem(DATA_KEY);
         if (jsonValue == null) {
@@ -21,7 +21,7 @@ export const mobileStorage: StorageAdapter = {
             }
         }
         if (jsonValue == null) {
-            return { tasks: [], projects: [], settings: {} };
+            return { tasks: [], projects: [], areas: [], settings: {} };
         }
         try {
             const data = JSON.parse(jsonValue);
@@ -29,6 +29,7 @@ export const mobileStorage: StorageAdapter = {
             if (!Array.isArray(data.tasks) || !Array.isArray(data.projects)) {
                 throw new Error('Invalid data format');
             }
+            data.areas = Array.isArray(data.areas) ? data.areas : [];
             return data;
         } catch (e) {
             console.error('Failed to load data', e);

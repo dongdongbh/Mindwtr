@@ -7,6 +7,6 @@ export interface StorageAdapter {
 
 // Default dummy adapter
 export const noopStorage: StorageAdapter = {
-    getData: async () => ({ tasks: [], projects: [], settings: {} }),
+    getData: async () => ({ tasks: [], projects: [], areas: [], settings: {} }),
     saveData: async () => { },
 };

@@ -11,7 +11,7 @@ import {
     WIDGET_LANGUAGE_KEY,
 } from './lib/widget-data';
 
-const DEFAULT_DATA: AppData = { tasks: [], projects: [], settings: {} };
+const DEFAULT_DATA: AppData = { tasks: [], projects: [], areas: [], settings: {} };
 
 async function loadWidgetContext() {
     try {

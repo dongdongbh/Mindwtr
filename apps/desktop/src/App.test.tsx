@@ -21,7 +21,7 @@ vi.mock('./components/Layout', () => ({
 Object.defineProperty(window, 'electronAPI', {
     value: {
         saveData: vi.fn(),
-        getData: vi.fn().mockResolvedValue({ tasks: [], projects: [], settings: {} }),
+        getData: vi.fn().mockResolvedValue({ tasks: [], projects: [], areas: [], settings: {} }),
     },
     writable: true,
 });

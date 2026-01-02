@@ -49,6 +49,16 @@ export interface Project {
     deletedAt?: string; // Soft-delete: if set, this item is considered deleted
 }
 
+export interface Area {
+    id: string;
+    name: string;
+    color?: string; // Hex code
+    icon?: string; // Emoji or icon name
+    order: number; // For sorting in the sidebar
+    createdAt?: string;
+    updatedAt?: string;
+}
+
 export type AttachmentKind = 'file' | 'link';
 
 export interface Attachment {
@@ -109,6 +119,7 @@ import type { MergeStats } from './sync';
 export interface AppData {
     tasks: Task[];
     projects: Project[];
+    areas: Area[];
     settings: {
         gtd?: {
             timeEstimatePresets?: TimeEstimate[];

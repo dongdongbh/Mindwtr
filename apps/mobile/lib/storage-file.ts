@@ -31,6 +31,7 @@ function parseAppData(text: string): AppData {
         if (!data.tasks || !data.projects) {
             throw new Error('Invalid data format');
         }
+        data.areas = Array.isArray(data.areas) ? data.areas : [];
         return data;
     };
 

@@ -259,7 +259,7 @@ export class SyncService {
                 syncUrl = url;
                 const fetcher = await getTauriFetch();
                 const remote = await webdavGetJson<AppData>(url, { username, password, fetcher });
-                syncData = remote || { tasks: [], projects: [], settings: {} };
+                syncData = remote || { tasks: [], projects: [], areas: [], settings: {} };
             } else if (backend === 'cloud') {
                 const { url, token } = await SyncService.getCloudConfig();
                 if (!url || !token) {
@@ -268,7 +268,7 @@ export class SyncService {
                 syncUrl = url;
                 const fetcher = await getTauriFetch();
                 const remote = await cloudGetJson<AppData>(url, { token, fetcher });
-                syncData = remote || { tasks: [], projects: [], settings: {} };
+                syncData = remote || { tasks: [], projects: [], areas: [], settings: {} };
             } else {
                 if (!isTauriRuntime()) {
                     throw new Error('File sync is not available in the web app.');

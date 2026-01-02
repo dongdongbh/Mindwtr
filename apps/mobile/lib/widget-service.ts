@@ -46,10 +46,11 @@ export async function updateAndroidWidgetFromData(data: AppData) {
 
 export async function updateAndroidWidgetFromStore() {
     if (Platform.OS !== 'android') return;
-    const { _allTasks, _allProjects, tasks, projects, settings } = useTaskStore.getState();
+    const { _allTasks, _allProjects, _allAreas, tasks, projects, areas, settings } = useTaskStore.getState();
     const data: AppData = {
         tasks: _allTasks?.length ? _allTasks : tasks,
         projects: _allProjects?.length ? _allProjects : projects,
+        areas: _allAreas?.length ? _allAreas : areas,
         settings: settings ?? {},
     };
     await updateAndroidWidgetFromData(data);

@@ -14,7 +14,7 @@ const createStorage = (): StorageAdapter => {
         return {
             getData: async (): Promise<AppData> => {
                 if (typeof window === 'undefined') {
-                    return { tasks: [], projects: [], settings: {} };
+                    return { tasks: [], projects: [], areas: [], settings: {} };
                 }
                 let jsonValue = localStorage.getItem(DATA_KEY);
                 if (jsonValue == null) {
@@ -28,10 +28,12 @@ const createStorage = (): StorageAdapter => {
                     }
                 }
                 if (jsonValue == null) {
-                    return { tasks: [], projects: [], settings: {} };
+                    return { tasks: [], projects: [], areas: [], settings: {} };
                 }
                 try {
-                    return JSON.parse(jsonValue);
+                    const data = JSON.parse(jsonValue) as AppData;
+                    data.areas = Array.isArray(data.areas) ? data.areas : [];
+                    return data;
                 } catch (e) {
                     // JSON parse error - data corrupted, throw so user is notified
                     console.error('Failed to parse stored data - may be corrupted', e);
@@ -69,10 +71,11 @@ const createStorage = (): StorageAdapter => {
                 }
             }
             if (jsonValue == null) {
-                return { tasks: [], projects: [], settings: {} };
+                return { tasks: [], projects: [], areas: [], settings: {} };
             }
             try {
                 const data = JSON.parse(jsonValue) as AppData;
+                data.areas = Array.isArray(data.areas) ? data.areas : [];
                 updateAndroidWidgetFromData(data).catch((error) => {
                     console.warn('[Widgets] Failed to update Android widget from storage load', error);
                 });

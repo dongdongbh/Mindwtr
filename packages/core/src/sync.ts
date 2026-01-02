@@ -1,5 +1,5 @@
 
-import type { AppData, Attachment, Project, Task } from './types';
+import type { AppData, Attachment, Project, Task, Area } from './types';
 import { normalizeTaskForLoad } from './task-status';
 
 export interface EntityMergeStats {
@@ -117,6 +117,46 @@ function mergeEntities<T extends { id: string; updatedAt: string; deletedAt?: st
     return mergeEntitiesWithStats(local, incoming).merged;
 }
 
+function mergeAreas(local: Area[], incoming: Area[]): Area[] {
+    const localMap = new Map<string, Area>(local.map(area => [area.id, area]));
+    const incomingMap = new Map<string, Area>(incoming.map(area => [area.id, area]));
+    const allIds = new Set<string>([...localMap.keys(), ...incomingMap.keys()]);
+    const merged: Area[] = [];
+
+    const resolveTime = (area?: Area): number => {
+        const timestamp = area?.updatedAt || area?.createdAt;
+        const parsed = timestamp ? new Date(timestamp).getTime() : 0;
+        return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    for (const id of allIds) {
+        const localArea = localMap.get(id);
+        const incomingArea = incomingMap.get(id);
+
+        if (localArea && !incomingArea) {
+            merged.push(localArea);
+            continue;
+        }
+        if (incomingArea && !localArea) {
+            merged.push(incomingArea);
+            continue;
+        }
+        if (!localArea || !incomingArea) continue;
+
+        const localTime = resolveTime(localArea);
+        const incomingTime = resolveTime(incomingArea);
+        const winner = incomingTime > localTime ? incomingArea : localArea;
+        merged.push(winner);
+    }
+
+    return merged
+        .map((area, index) => ({
+            ...area,
+            order: Number.isFinite(area.order) ? area.order : index,
+        }))
+        .sort((a, b) => a.order - b.order);
+}
+
 /**
  * Filter out soft-deleted items for display purposes.
  * Call this when loading data for the UI.
@@ -135,10 +175,14 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData): MergeR
     const localNormalized: AppData = {
         ...local,
         tasks: (local.tasks || []).map((t) => normalizeTaskForLoad(t, nowIso)),
+        projects: local.projects || [],
+        areas: local.areas || [],
     };
     const incomingNormalized: AppData = {
         ...incoming,
         tasks: (incoming.tasks || []).map((t) => normalizeTaskForLoad(t, nowIso)),
+        projects: incoming.projects || [],
+        areas: incoming.areas || [],
     };
 
     const mergeAttachments = (a?: Attachment[], b?: Attachment[]): Attachment[] | undefined => {
@@ -167,6 +211,7 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData): MergeR
         data: {
             tasks: tasksResult.merged,
             projects: projectsResult.merged,
+            areas: mergeAreas(localNormalized.areas, incomingNormalized.areas),
             settings: localNormalized.settings,
         },
         stats: {
