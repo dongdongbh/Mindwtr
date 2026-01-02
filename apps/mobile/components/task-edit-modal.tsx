@@ -730,9 +730,11 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode, def
     }, [containerWidth]);
 
     useEffect(() => {
-        if (!containerWidth) return;
+        if (!visible || !containerWidth) return;
+        const targetX = editTab === 'task' ? 0 : containerWidth;
+        scrollX.setValue(targetX);
         scrollToTab(editTab, false);
-    }, [containerWidth, scrollToTab, task?.id]);
+    }, [containerWidth, editTab, scrollToTab, task?.id, visible, scrollX]);
 
     const handleTabPress = (mode: TaskEditTab) => {
         isUserSwipe.current = false;
