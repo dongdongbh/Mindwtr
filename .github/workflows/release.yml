@@ -51,7 +51,7 @@ jobs:
             artifacts: |
               cp apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg release-artifacts/ 2>/dev/null || true
               cp apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz release-artifacts/ 2>/dev/null || true
-          - platform: macos-13  # x86_64 runner (Intel)
+          - platform: macos-15  # x86_64 runner (Intel)
             target: macos-x64
             rust_target: x86_64-apple-darwin
             deps: echo "No extra deps needed for macOS"
