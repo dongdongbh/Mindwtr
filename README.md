@@ -149,6 +149,15 @@ Download the disk image (`.dmg`) from [GitHub Releases](https://github.com/dongd
 **Android:**
 Download the APK from [GitHub Releases](https://github.com/dongdongbh/Mindwtr/releases).
 
+For those asking about the Android version, I have opened up the Closed Testing track on the Google Play Store.
+
+To get access, you need to be "whitelisted" by Google. I set up a Google Group to automate this process, so I don't need to add everyone's email address manually one by one.
+
+How to join:
+- Join the Alpha Group here: https://groups.google.com/g/mindwtr-alpha-testers
+- Once you join, your Google account is automatically approved for the Alpha.
+- Check the pinned post inside the group for the Play Store download link.
+
 **iOS:**
 iOS builds require an Apple Developer account ($99/year). Currently available as simulator builds only. If you want iOS builds, please consider [sponsoring the developer](https://github.com/sponsors/dongdongbh) so we can fund the Apple Developer account.
 
