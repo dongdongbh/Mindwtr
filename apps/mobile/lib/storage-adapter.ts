@@ -16,6 +16,13 @@ type SqliteState = {
 
 let sqliteStatePromise: Promise<SqliteState> | null = null;
 let preferJsonBackup = false;
+let didWarnPreferJsonBackup = false;
+
+const warnPreferJsonBackup = () => {
+    if (didWarnPreferJsonBackup) return;
+    console.warn('[Storage] SQLite unavailable; using JSON backup for reads until restart.');
+    didWarnPreferJsonBackup = true;
+};
 
 const createLegacyClient = (db: any): SqliteClient => {
     const execSql = (sql: string, params: unknown[] = []) =>
@@ -235,6 +242,7 @@ const createStorage = (): StorageAdapter => {
     return {
         getData: async (): Promise<AppData> => {
             if (preferJsonBackup) {
+                warnPreferJsonBackup();
                 const jsonValue = await getLegacyJson(AsyncStorage);
                 if (jsonValue != null) {
                     try {
@@ -290,8 +298,10 @@ const createStorage = (): StorageAdapter => {
                 const { adapter } = await getSqliteState();
                 await adapter.saveData(data);
                 preferJsonBackup = false;
+                didWarnPreferJsonBackup = false;
             } catch (error) {
                 preferJsonBackup = true;
+                warnPreferJsonBackup();
                 if (__DEV__ && !shouldUseSqlite && String(error).includes('Expo Go')) {
                     console.warn('[Storage] SQLite disabled in Expo Go, keeping JSON backup');
                 } else {
