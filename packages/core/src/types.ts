@@ -14,10 +14,14 @@ export type RecurrenceStrategy = 'strict' | 'fluid';
 
 export type RecurrenceWeekday = 'MO' | 'TU' | 'WE' | 'TH' | 'FR' | 'SA' | 'SU';
 
+export type RecurrenceByDay =
+    | RecurrenceWeekday
+    | `${'1' | '2' | '3' | '4' | '-1'}${RecurrenceWeekday}`;
+
 export interface Recurrence {
     rule: RecurrenceRule;
     strategy?: RecurrenceStrategy; // Defaults to 'strict'
-    byDay?: RecurrenceWeekday[]; // Explicit weekdays for weekly recurrences
+    byDay?: RecurrenceByDay[]; // Explicit weekdays for weekly/monthly recurrences
     rrule?: string; // Optional RFC 5545 fragment (e.g. FREQ=WEEKLY;BYDAY=MO,WE)
 }
 

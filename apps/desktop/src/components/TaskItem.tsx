@@ -63,6 +63,7 @@ const DEFAULT_TASK_EDITOR_HIDDEN: TaskEditorFieldId[] = [
     'attachments',
     'checklist',
 ];
+const WEEKDAY_ORDER: RecurrenceWeekday[] = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
 
 // Convert stored ISO or datetime-local strings into datetime-local input values.
 function toDateTimeLocalValue(dateStr: string | undefined): string {
@@ -152,6 +153,15 @@ export const TaskItem = memo(function TaskItem({
     const recurrenceRule = getRecurrenceRuleValue(task.recurrence);
     const recurrenceStrategy = getRecurrenceStrategyValue(task.recurrence);
     const isStagnant = (task.pushCount ?? 0) > 3;
+    const monthlyAnchorDate = safeParseDate(editDueDate) ?? safeParseDate(task.dueDate) ?? new Date();
+    const monthlyWeekdayCode = WEEKDAY_ORDER[monthlyAnchorDate.getDay()];
+    const monthlyWeekdayLabel = safeFormatDate(monthlyAnchorDate, 'EEEE', monthlyWeekdayCode);
+    const monthlyPattern = useMemo(() => {
+        if (editRecurrence !== 'monthly') return 'date';
+        const parsed = parseRRuleString(editRecurrenceRRule);
+        const hasLast = parsed.byDay?.some((day) => String(day).startsWith('-1'));
+        return hasLast ? 'last' : 'date';
+    }, [editRecurrence, editRecurrenceRRule]);
 
     useEffect(() => {
         if (!isHighlighted) return;
@@ -466,6 +476,12 @@ export const TaskItem = memo(function TaskItem({
                                         setEditRecurrenceRRule(buildRRuleString('weekly'));
                                     }
                                 }
+                                if (value === 'monthly') {
+                                    const parsed = parseRRuleString(editRecurrenceRRule);
+                                    if (!editRecurrenceRRule || parsed.rule !== 'monthly') {
+                                        setEditRecurrenceRRule(buildRRuleString('monthly'));
+                                    }
+                                }
                                 if (!value) {
                                     setEditRecurrenceRRule('');
                                 }
@@ -497,6 +513,37 @@ export const TaskItem = memo(function TaskItem({
                                     onChange={(rrule) => setEditRecurrenceRRule(rrule)}
                                     className="pt-1"
                                 />
+                            </div>
+                        )}
+                        {editRecurrence === 'monthly' && (
+                            <div className="pt-1 space-y-2">
+                                <span className="text-[10px] text-muted-foreground">Repeat on</span>
+                                <div className="flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setEditRecurrenceRRule(buildRRuleString('monthly'))}
+                                        className={cn(
+                                            'text-[10px] px-2 py-1 rounded border transition-colors',
+                                            monthlyPattern === 'date'
+                                                ? 'bg-primary text-primary-foreground border-primary'
+                                                : 'bg-transparent text-muted-foreground border-border hover:bg-accent'
+                                        )}
+                                    >
+                                        {t('recurrence.monthlyOnDay')}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setEditRecurrenceRRule(`FREQ=MONTHLY;BYDAY=-1${monthlyWeekdayCode}`)}
+                                        className={cn(
+                                            'text-[10px] px-2 py-1 rounded border transition-colors',
+                                            monthlyPattern === 'last'
+                                                ? 'bg-primary text-primary-foreground border-primary'
+                                                : 'bg-transparent text-muted-foreground border-border hover:bg-accent'
+                                        )}
+                                    >
+                                        {t('recurrence.monthlyOnLastWeekday').replace('{weekday}', monthlyWeekdayLabel)}
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -974,7 +1021,7 @@ export const TaskItem = memo(function TaskItem({
             const recurrenceValue: Recurrence | undefined = editRecurrence
                 ? { rule: editRecurrence, strategy: editRecurrenceStrategy }
                 : undefined;
-            if (recurrenceValue && editRecurrence === 'weekly' && editRecurrenceRRule) {
+            if (recurrenceValue && editRecurrenceRRule) {
                 const parsed = parseRRuleString(editRecurrenceRRule);
                 if (parsed.byDay && parsed.byDay.length > 0) {
                     recurrenceValue.byDay = parsed.byDay;

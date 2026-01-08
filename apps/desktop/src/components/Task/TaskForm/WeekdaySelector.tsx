@@ -19,7 +19,9 @@ type WeekdaySelectorProps = {
 
 export function WeekdaySelector({ value, onChange, className }: WeekdaySelectorProps) {
     const parsed = value ? parseRRuleString(value) : {};
-    const selected = new Set<RecurrenceWeekday>(parsed.byDay || []);
+    const selected = new Set<RecurrenceWeekday>(
+        (parsed.byDay || []).filter((day) => WEEKDAYS.some((weekday) => weekday.id === day)) as RecurrenceWeekday[]
+    );
 
     const handleToggle = (day: RecurrenceWeekday) => {
         const next = new Set(selected);

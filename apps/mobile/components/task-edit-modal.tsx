@@ -17,9 +17,12 @@ import {
     type AIProviderId,
     type RecurrenceStrategy,
     type RecurrenceWeekday,
+    type RecurrenceByDay,
     buildRRuleString,
     parseRRuleString,
     RECURRENCE_RULES,
+    safeParseDate,
+    safeFormatDate,
 } from '@mindwtr/core';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -95,10 +98,12 @@ const WEEKDAY_BUTTONS: { key: RecurrenceWeekday; label: string }[] = [
 
 const getRecurrenceByDayValue = (recurrence: Task['recurrence']): RecurrenceWeekday[] => {
     if (!recurrence || typeof recurrence === 'string') return [];
-    if (recurrence.byDay?.length) return recurrence.byDay;
+    if (recurrence.byDay?.length) {
+        return recurrence.byDay.filter((day) => WEEKDAY_ORDER.includes(day as RecurrenceWeekday)) as RecurrenceWeekday[];
+    }
     if (recurrence.rrule) {
         const parsed = parseRRuleString(recurrence.rrule);
-        return parsed.byDay || [];
+        return (parsed.byDay || []).filter((day) => WEEKDAY_ORDER.includes(day as RecurrenceWeekday)) as RecurrenceWeekday[];
     }
     return [];
 };
@@ -351,11 +356,22 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode, def
         const updates: Partial<Task> = { ...editedTask };
         const recurrenceRule = getRecurrenceRuleValue(editedTask.recurrence);
         const recurrenceStrategy = getRecurrenceStrategyValue(editedTask.recurrence);
-        if (recurrenceRule === 'weekly' && customWeekdays.length > 0) {
-            const rrule = buildRRuleString('weekly', customWeekdays);
-            updates.recurrence = { rule: 'weekly', strategy: recurrenceStrategy, byDay: customWeekdays, rrule };
+        if (recurrenceRule) {
+            if (recurrenceRule === 'weekly' && customWeekdays.length > 0) {
+                const rrule = buildRRuleString('weekly', customWeekdays);
+                updates.recurrence = { rule: 'weekly', strategy: recurrenceStrategy, byDay: customWeekdays, rrule };
+            } else if (recurrenceRRuleValue) {
+                const parsed = parseRRuleString(recurrenceRRuleValue);
+                if (parsed.byDay?.length) {
+                    updates.recurrence = { rule: recurrenceRule, strategy: recurrenceStrategy, byDay: parsed.byDay, rrule: recurrenceRRuleValue };
+                } else {
+                    updates.recurrence = { rule: recurrenceRule, strategy: recurrenceStrategy, rrule: recurrenceRRuleValue };
+                }
+            } else {
+                updates.recurrence = buildRecurrenceValue(recurrenceRule, recurrenceStrategy);
+            }
         } else {
-            updates.recurrence = buildRecurrenceValue(recurrenceRule, recurrenceStrategy);
+            updates.recurrence = undefined;
         }
         onSave(task.id, updates);
         onClose();
@@ -764,6 +780,18 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode, def
     ];
     const recurrenceRuleValue = getRecurrenceRuleValue(editedTask.recurrence);
     const recurrenceStrategyValue = getRecurrenceStrategyValue(editedTask.recurrence);
+    const recurrenceRRuleValue = getRecurrenceRRuleValue(editedTask.recurrence);
+    const monthlyAnchorDate = useMemo(() => {
+        return safeParseDate(editedTask.dueDate ?? task?.dueDate) ?? new Date();
+    }, [editedTask.dueDate, task?.dueDate]);
+    const monthlyWeekdayCode = WEEKDAY_ORDER[monthlyAnchorDate.getDay()];
+    const monthlyWeekdayLabel = safeFormatDate(monthlyAnchorDate, 'EEEE', monthlyWeekdayCode);
+    const monthlyPattern = useMemo(() => {
+        if (recurrenceRuleValue !== 'monthly') return 'date';
+        const parsed = parseRRuleString(recurrenceRRuleValue);
+        const hasLast = parsed.byDay?.some((day) => String(day).startsWith('-1'));
+        return hasLast ? 'last' : 'date';
+    }, [recurrenceRuleValue, recurrenceRRuleValue]);
 
     const toggleContext = (tag: string) => {
         const current = editedTask.contexts || [];
@@ -1180,6 +1208,17 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode, def
                                         if (opt.value !== 'weekly') {
                                             setCustomWeekdays([]);
                                         }
+                                        if (opt.value === 'monthly') {
+                                            setEditedTask(prev => ({
+                                                ...prev,
+                                                recurrence: {
+                                                    rule: 'monthly',
+                                                    strategy: recurrenceStrategyValue,
+                                                    rrule: buildRRuleString('monthly'),
+                                                },
+                                            }));
+                                            return;
+                                        }
                                         setEditedTask(prev => ({
                                             ...prev,
                                             recurrence: buildRecurrenceValue(opt.value as RecurrenceRule | '', recurrenceStrategyValue),
@@ -1230,6 +1269,47 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode, def
                                 })}
                             </View>
                         )}
+                        {recurrenceRuleValue === 'monthly' && (
+                            <View style={[styles.statusContainer, { marginTop: 8 }]}>
+                                <TouchableOpacity
+                                    style={getStatusChipStyle(monthlyPattern === 'date')}
+                                    onPress={() => {
+                                        setEditedTask(prev => ({
+                                            ...prev,
+                                            recurrence: {
+                                                rule: 'monthly',
+                                                strategy: recurrenceStrategyValue,
+                                                rrule: buildRRuleString('monthly'),
+                                            },
+                                        }));
+                                    }}
+                                >
+                                    <Text style={getStatusTextStyle(monthlyPattern === 'date')}>
+                                        {t('recurrence.monthlyOnDay')}
+                                    </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={getStatusChipStyle(monthlyPattern === 'last')}
+                                    onPress={() => {
+                                        const token = `-1${monthlyWeekdayCode}` as RecurrenceByDay;
+                                        const rrule = `FREQ=MONTHLY;BYDAY=${token}`;
+                                        setEditedTask(prev => ({
+                                            ...prev,
+                                            recurrence: {
+                                                rule: 'monthly',
+                                                strategy: recurrenceStrategyValue,
+                                                byDay: [token],
+                                                rrule,
+                                            },
+                                        }));
+                                    }}
+                                >
+                                    <Text style={getStatusTextStyle(monthlyPattern === 'last')}>
+                                        {t('recurrence.monthlyOnLastWeekday').replace('{weekday}', monthlyWeekdayLabel)}
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
                         {!!recurrenceRuleValue && (
                             <View style={[styles.statusContainer, { marginTop: 8 }]}>
                                 <TouchableOpacity
@@ -1246,7 +1326,9 @@ export function TaskEditModal({ visible, task, onClose, onSave, onFocusMode, def
                                                         byDay: customWeekdays,
                                                         rrule: buildRRuleString('weekly', customWeekdays),
                                                     }
-                                                    : buildRecurrenceValue(recurrenceRuleValue, nextStrategy),
+                                                    : recurrenceRuleValue && recurrenceRRuleValue
+                                                        ? { rule: recurrenceRuleValue, strategy: nextStrategy, ...(parseRRuleString(recurrenceRRuleValue).byDay ? { byDay: parseRRuleString(recurrenceRRuleValue).byDay } : {}), rrule: recurrenceRRuleValue }
+                                                        : buildRecurrenceValue(recurrenceRuleValue, nextStrategy),
                                         }));
                                     }}
                                 >
