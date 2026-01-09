@@ -70,7 +70,7 @@ function renderInline(text: string): React.ReactNode[] {
             return token.text;
         }
         return null;
-    }).filter((node): node is React.ReactNode => node !== null);
+    }).filter((node): node is string | React.ReactElement => node !== null);
 }
 
 export function Markdown({ markdown, className }: { markdown: string; className?: string }) {

@@ -10,6 +10,7 @@ import {
     type Recurrence,
     type RecurrenceRule,
     type RecurrenceStrategy,
+    type RecurrenceWeekday,
     type RecurrenceByDay,
     buildRRuleString,
     parseRRuleString,
@@ -164,7 +165,7 @@ export const TaskItem = memo(function TaskItem({
         const hasByMonthDay = parsed.byMonthDay && parsed.byMonthDay.length > 0;
         const interval = parsed.interval && parsed.interval > 0 ? parsed.interval : 1;
         const isCustomDay = hasByMonthDay && parsed.byMonthDay?.[0] !== monthlyAnchorDate.getDate();
-        const pattern = hasNth || hasLast || interval > 1 || isCustomDay ? 'custom' : 'date';
+        const pattern: 'custom' | 'date' = hasNth || hasLast || interval > 1 || isCustomDay ? 'custom' : 'date';
         return { pattern, interval };
     }, [editRecurrence, editRecurrenceRRule, monthlyAnchorDate]);
 

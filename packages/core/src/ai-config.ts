@@ -1,4 +1,5 @@
-import type { AIProviderConfig, AIProviderId, AppData } from './types';
+import type { AppData } from './types';
+import type { AIProviderConfig, AIProviderId } from './ai/types';
 import { DEFAULT_ANTHROPIC_THINKING_BUDGET, DEFAULT_GEMINI_THINKING_BUDGET, DEFAULT_REASONING_EFFORT, getDefaultAIConfig, getDefaultCopilotModel } from './ai/catalog';
 
 const AI_KEY_PREFIX = 'mindwtr-ai-key';

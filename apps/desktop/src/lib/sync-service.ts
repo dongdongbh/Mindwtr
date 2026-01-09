@@ -1,5 +1,5 @@
 
-import { AppData, useTaskStore, MergeStats, webdavGetJson, webdavPutJson, cloudGetJson, cloudPutJson, flushPendingSave, performSyncCycle } from '@mindwtr/core';
+import { AppData, useTaskStore, MergeStats, webdavGetJson, webdavPutJson, cloudGetJson, cloudPutJson, flushPendingSave, performSyncCycle, normalizeAppData } from '@mindwtr/core';
 import { isTauriRuntime } from './runtime';
 import { logSyncError, sanitizeLogMessage } from './app-log';
 import { webStorage } from './storage-adapter-web';

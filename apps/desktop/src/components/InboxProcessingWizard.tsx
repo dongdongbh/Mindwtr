@@ -1,4 +1,3 @@
-import React from 'react';
 import { CheckCircle, Moon, Trash2, User, X } from 'lucide-react';
 import type { Area, Project, Task } from '@mindwtr/core';
 
