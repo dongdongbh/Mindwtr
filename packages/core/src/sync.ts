@@ -27,6 +27,30 @@ export interface MergeResult {
 
 const CLOCK_SKEW_THRESHOLD_MS = 5 * 60 * 1000;
 
+export type SyncStep = 'read-local' | 'read-remote' | 'merge' | 'write-local' | 'write-remote';
+
+export type SyncCycleIO = {
+    readLocal: () => Promise<AppData>;
+    readRemote: () => Promise<AppData | null | undefined>;
+    writeLocal: (data: AppData) => Promise<void>;
+    writeRemote: (data: AppData) => Promise<void>;
+    now?: () => string;
+    onStep?: (step: SyncStep) => void;
+};
+
+export type SyncCycleResult = {
+    data: AppData;
+    stats: MergeStats;
+    status: 'success' | 'conflict';
+};
+
+export const normalizeAppData = (data: AppData): AppData => ({
+    tasks: Array.isArray(data.tasks) ? data.tasks : [],
+    projects: Array.isArray(data.projects) ? data.projects : [],
+    areas: Array.isArray(data.areas) ? data.areas : [],
+    settings: data.settings ?? {},
+});
+
 /**
  * Merge entities with soft-delete support using Last-Write-Wins (LWW) strategy.
  * 
@@ -236,4 +260,38 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData): MergeR
 
 export function mergeAppData(local: AppData, incoming: AppData): AppData {
     return mergeAppDataWithStats(local, incoming).data;
+}
+
+export async function performSyncCycle(io: SyncCycleIO): Promise<SyncCycleResult> {
+    io.onStep?.('read-local');
+    const localDataRaw = await io.readLocal();
+    const localData = normalizeAppData(localDataRaw);
+
+    io.onStep?.('read-remote');
+    const remoteDataRaw = await io.readRemote();
+    const remoteData = normalizeAppData(remoteDataRaw || { tasks: [], projects: [], areas: [], settings: {} });
+
+    io.onStep?.('merge');
+    const mergeResult = mergeAppDataWithStats(localData, remoteData);
+    const conflictCount = (mergeResult.stats.tasks.conflicts || 0) + (mergeResult.stats.projects.conflicts || 0);
+    const nextSyncStatus: SyncCycleResult['status'] = conflictCount > 0 ? 'conflict' : 'success';
+    const nowIso = io.now ? io.now() : new Date().toISOString();
+    const finalData: AppData = {
+        ...mergeResult.data,
+        settings: {
+            ...mergeResult.data.settings,
+            lastSyncAt: nowIso,
+            lastSyncStatus: nextSyncStatus,
+            lastSyncError: undefined,
+            lastSyncStats: mergeResult.stats,
+        },
+    };
+
+    io.onStep?.('write-local');
+    await io.writeLocal(finalData);
+
+    io.onStep?.('write-remote');
+    await io.writeRemote(finalData);
+
+    return { data: finalData, stats: mergeResult.stats, status: nextSyncStatus };
 }

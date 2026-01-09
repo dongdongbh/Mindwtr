@@ -1,5 +1,5 @@
 
-import { mergeAppDataWithStats, AppData, useTaskStore, MergeStats, webdavGetJson, webdavPutJson, cloudGetJson, cloudPutJson, flushPendingSave } from '@mindwtr/core';
+import { AppData, useTaskStore, MergeStats, webdavGetJson, webdavPutJson, cloudGetJson, cloudPutJson, flushPendingSave, performSyncCycle } from '@mindwtr/core';
 import { isTauriRuntime } from './runtime';
 import { logSyncError, sanitizeLogMessage } from './app-log';
 import { webStorage } from './storage-adapter-web';
@@ -43,13 +43,6 @@ const hashString = (value: string): string => {
     }
     return hash.toString(16);
 };
-
-const normalizeAppData = (data: AppData): AppData => ({
-    tasks: Array.isArray(data.tasks) ? data.tasks : [],
-    projects: Array.isArray(data.projects) ? data.projects : [],
-    areas: Array.isArray(data.areas) ? data.areas : [],
-    settings: data.settings ?? {},
-});
 
 const normalizePath = (input: string) => input.replace(/\\/g, '/').toLowerCase();
 
@@ -403,83 +396,66 @@ export class SyncService {
             step = 'flush';
             await flushPendingSave();
 
-            // 2. Read Local Data
-            step = 'read-local';
-            const localDataRaw = isTauriRuntime() ? await tauriInvoke<AppData>('get_data') : await webStorage.getData();
-            const localData = normalizeAppData(localDataRaw);
-
-            // 3. Read Sync Data (file or WebDAV)
-            let syncData: AppData;
+            // 2. Read/merge/write via shared core orchestration.
             backend = await SyncService.getSyncBackend();
-            step = 'read-remote';
-            if (backend === 'webdav') {
-                const { url, username, password } = await SyncService.getWebDavConfig();
-                if (!url) {
-                    throw new Error('WebDAV URL not configured');
-                }
-                syncUrl = url;
-                const fetcher = await getTauriFetch();
-                const remote = await webdavGetJson<AppData>(url, { username, password, fetcher });
-                syncData = normalizeAppData(remote || { tasks: [], projects: [], areas: [], settings: {} });
-            } else if (backend === 'cloud') {
-                const { url, token } = await SyncService.getCloudConfig();
-                if (!url) {
-                    throw new Error('Self-hosted URL not configured');
-                }
-                syncUrl = url;
-                const fetcher = await getTauriFetch();
-                const remote = await cloudGetJson<AppData>(url, { token, fetcher });
-                syncData = normalizeAppData(remote || { tasks: [], projects: [], areas: [], settings: {} });
-            } else {
-                if (!isTauriRuntime()) {
-                    throw new Error('File sync is not available in the web app.');
-                }
-                syncData = normalizeAppData(await tauriInvoke<AppData>('read_sync_file'));
-            }
-
-            // 4. Merge Strategies
-            // mergeAppData uses Last-Write-Wins (LWW) based on updatedAt
-            step = 'merge';
-            const mergeResult = mergeAppDataWithStats(localData, syncData);
-            const mergedData = mergeResult.data;
-            const stats = mergeResult.stats;
-            const conflictCount = (stats.tasks.conflicts || 0) + (stats.projects.conflicts || 0);
-            const nextSyncStatus = conflictCount > 0 ? 'conflict' : 'success';
-
-            const now = new Date().toISOString();
-            const finalData: AppData = {
-                ...mergedData,
-                settings: {
-                    ...mergedData.settings,
-                    lastSyncAt: now,
-                    lastSyncStatus: nextSyncStatus,
-                    lastSyncError: undefined,
-                    lastSyncStats: stats,
+            const syncResult = await performSyncCycle({
+                readLocal: async () => (
+                    isTauriRuntime()
+                        ? await tauriInvoke<AppData>('get_data')
+                        : await webStorage.getData()
+                ),
+                readRemote: async () => {
+                    if (backend === 'webdav') {
+                        const { url, username, password } = await SyncService.getWebDavConfig();
+                        if (!url) {
+                            throw new Error('WebDAV URL not configured');
+                        }
+                        syncUrl = url;
+                        const fetcher = await getTauriFetch();
+                        return await webdavGetJson<AppData>(url, { username, password, fetcher });
+                    }
+                    if (backend === 'cloud') {
+                        const { url, token } = await SyncService.getCloudConfig();
+                        if (!url) {
+                            throw new Error('Self-hosted URL not configured');
+                        }
+                        syncUrl = url;
+                        const fetcher = await getTauriFetch();
+                        return await cloudGetJson<AppData>(url, { token, fetcher });
+                    }
+                    if (!isTauriRuntime()) {
+                        throw new Error('File sync is not available in the web app.');
+                    }
+                    return await tauriInvoke<AppData>('read_sync_file');
                 },
-            };
-
-            // 5. Write back to Local
-            step = 'write-local';
-            if (isTauriRuntime()) {
-                await tauriInvoke('save_data', { data: finalData });
-            } else {
-                await webStorage.saveData(finalData);
-            }
-
-            // 6. Write back to Sync
-            step = 'write-remote';
-            if (backend === 'webdav') {
-                const { url, username, password } = await SyncService.getWebDavConfig();
-                const fetcher = await getTauriFetch();
-                await webdavPutJson(url, finalData, { username, password, fetcher });
-            } else if (backend === 'cloud') {
-                const { url, token } = await SyncService.getCloudConfig();
-                const fetcher = await getTauriFetch();
-                await cloudPutJson(url, finalData, { token, fetcher });
-            } else {
-                SyncService.markSyncWrite(finalData);
-                await tauriInvoke('write_sync_file', { data: finalData });
-            }
+                writeLocal: async (data) => {
+                    if (isTauriRuntime()) {
+                        await tauriInvoke('save_data', { data });
+                    } else {
+                        await webStorage.saveData(data);
+                    }
+                },
+                writeRemote: async (data) => {
+                    if (backend === 'webdav') {
+                        const { url, username, password } = await SyncService.getWebDavConfig();
+                        const fetcher = await getTauriFetch();
+                        await webdavPutJson(url, data, { username, password, fetcher });
+                        return;
+                    }
+                    if (backend === 'cloud') {
+                        const { url, token } = await SyncService.getCloudConfig();
+                        const fetcher = await getTauriFetch();
+                        await cloudPutJson(url, data, { token, fetcher });
+                        return;
+                    }
+                    SyncService.markSyncWrite(data);
+                    await tauriInvoke('write_sync_file', { data });
+                },
+                onStep: (next) => {
+                    step = next;
+                },
+            });
+            const stats = syncResult.stats;
 
             // 7. Refresh UI Store
             step = 'refresh';
