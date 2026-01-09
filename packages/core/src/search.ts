@@ -245,8 +245,7 @@ export function filterTasksBySearch(tasks: Task[], projects: Project[], query: s
     });
 }
 
-export function filterProjectsBySearch(projects: Project[], tasks: Task[], query: string, now: Date = new Date()): Project[] {
-    void tasks;
+export function filterProjectsBySearch(projects: Project[], query: string, now: Date = new Date()): Project[] {
     if (!query.trim()) {
         return projects.filter((project) => !project.deletedAt);
     }
@@ -264,6 +263,6 @@ export function filterProjectsBySearch(projects: Project[], tasks: Task[], query
 export function searchAll(tasks: Task[], projects: Project[], query: string, now: Date = new Date()) {
     return {
         tasks: filterTasksBySearch(tasks, projects, query, now),
-        projects: filterProjectsBySearch(projects, tasks, query, now),
+        projects: filterProjectsBySearch(projects, query, now),
     };
 }
