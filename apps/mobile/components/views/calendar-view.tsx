@@ -9,8 +9,8 @@ import {
   useTaskStore,
 } from '@mindwtr/core';
 import { useTheme } from '../../contexts/theme-context';
+import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useLanguage } from '../../contexts/language-context';
-import { Colors } from '@/constants/theme';
 import { fetchExternalCalendarEvents } from '../../lib/external-calendar';
 import { GestureDetector, Gesture, ScrollView } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
@@ -45,6 +45,18 @@ const SNAP_MINUTES = 5;
 export function CalendarView() {
   const { tasks, updateTask, deleteTask } = useTaskStore();
   const { isDark } = useTheme();
+  const tc = useThemeColors();
+  const toRgba = (hex: string, alpha: number) => {
+    const normalized = hex.replace('#', '');
+    const full = normalized.length === 3
+      ? normalized.split('').map((c) => c + c).join('')
+      : normalized.padEnd(6, '0');
+    const intVal = Number.parseInt(full, 16);
+    const r = (intVal >> 16) & 255;
+    const g = (intVal >> 8) & 255;
+    const b = intVal & 255;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  };
   const { t, language } = useLanguage();
   const localize = (enText: string, zhText?: string) =>
     language === 'zh' && zhText ? zhText : translateText(enText, language);
@@ -64,15 +76,6 @@ export function CalendarView() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
 
   // Theme colors
-  const tc = {
-    bg: isDark ? Colors.dark.background : Colors.light.background,
-    cardBg: isDark ? '#1F2937' : '#FFFFFF',
-    text: isDark ? Colors.dark.text : Colors.light.text,
-    secondaryText: isDark ? '#9CA3AF' : '#6B7280',
-    border: isDark ? '#374151' : '#E5E7EB',
-    inputBg: isDark ? '#374151' : '#F9FAFB',
-  };
-
   const daysInMonth = getDaysInMonth(currentYear, currentMonth);
   const firstDay = getFirstDayOfMonth(currentYear, currentMonth);
   const localeMap: Record<typeof language, string> = {
@@ -482,8 +485,8 @@ export function CalendarView() {
               height,
               paddingVertical: compact ? 2 : 8,
               justifyContent: compact ? 'center' : undefined,
-              backgroundColor: isDark ? 'rgba(59,130,246,0.85)' : '#3B82F6',
-              borderColor: isDark ? 'rgba(147,197,253,0.6)' : 'rgba(29,78,216,0.3)',
+              backgroundColor: isDark ? toRgba(tc.tint, 0.85) : tc.tint,
+              borderColor: toRgba(tc.tint, isDark ? 0.6 : 0.3),
             },
             animatedStyle,
           ]}
@@ -610,8 +613,8 @@ export function CalendarView() {
                       {
                         top,
                         height,
-                        backgroundColor: isDark ? 'rgba(107,114,128,0.35)' : 'rgba(107,114,128,0.18)',
-                        borderColor: isDark ? 'rgba(209,213,219,0.35)' : 'rgba(107,114,128,0.28)',
+                        backgroundColor: toRgba(tc.secondaryText, isDark ? 0.35 : 0.18),
+                        borderColor: toRgba(tc.border, isDark ? 0.35 : 0.28),
                       },
                     ]}
                   >
@@ -662,7 +665,7 @@ export function CalendarView() {
                     return (
                   <Pressable
                     key={task.id}
-                    style={[styles.taskItem, { backgroundColor: tc.inputBg }]}
+                    style={[styles.taskItem, { backgroundColor: tc.inputBg, borderLeftColor: tc.tint }]}
                     onPress={() => scheduleTaskOnSelectedDate(task.id)}
                   >
                     <Text style={[styles.taskItemTitle, { color: tc.text }]} numberOfLines={1}>
@@ -684,7 +687,7 @@ export function CalendarView() {
                 value={scheduleQuery}
                 onChangeText={setScheduleQuery}
                 placeholder={t('calendar.schedulePlaceholder')}
-                placeholderTextColor="#9CA3AF"
+                placeholderTextColor={tc.secondaryText}
               />
             </View>
 
@@ -701,7 +704,7 @@ export function CalendarView() {
                     return (
                   <Pressable
                     key={task.id}
-                    style={[styles.taskItem, { backgroundColor: tc.inputBg }]}
+                    style={[styles.taskItem, { backgroundColor: tc.inputBg, borderLeftColor: tc.tint }]}
                     onPress={() => scheduleTaskOnSelectedDate(task.id)}
                   >
                     <Text style={[styles.taskItemTitle, { color: tc.text }]} numberOfLines={1}>
@@ -734,13 +737,13 @@ export function CalendarView() {
     <View style={[styles.container, { backgroundColor: tc.bg }]}>
       <View style={[styles.header, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
         <Pressable onPress={handlePrevMonth} style={styles.navButton}>
-          <Text style={[styles.navButtonText]}>‹</Text>
+          <Text style={[styles.navButtonText, { color: tc.text }]}>‹</Text>
         </Pressable>
         <Text style={[styles.title, { color: tc.text }]}>
           {monthLabel}
         </Text>
         <Pressable onPress={handleNextMonth} style={styles.navButton}>
-          <Text style={[styles.navButtonText]}>›</Text>
+          <Text style={[styles.navButtonText, { color: tc.text }]}>›</Text>
         </Pressable>
       </View>
 
@@ -763,8 +766,8 @@ export function CalendarView() {
             const taskCount = getTaskCountForDate(date);
             const eventCount = getExternalEventsForDate(date).length;
             const isSelected = selectedDate && isSameDay(date, selectedDate);
-            const todayCellBg = isDark ? 'rgba(59,130,246,0.10)' : '#EFF6FF';
-            const selectedCellBg = isDark ? 'rgba(59,130,246,0.18)' : '#DBEAFE';
+            const todayCellBg = toRgba(tc.tint, isDark ? 0.12 : 0.08);
+            const selectedCellBg = toRgba(tc.tint, isDark ? 0.2 : 0.16);
 
             return (
               <Pressable
@@ -782,6 +785,7 @@ export function CalendarView() {
                     styles.dayNumber,
                     selectedDate && styles.dayNumberCompact,
                     isToday(date) && styles.todayNumber,
+                    isToday(date) && { backgroundColor: tc.tint },
                   ]}
                 >
                   <Text
@@ -790,6 +794,7 @@ export function CalendarView() {
                       selectedDate && styles.dayTextCompact,
                       { color: tc.text },
                       isToday(date) && styles.todayText,
+                      isToday(date) && { color: tc.onTint },
                     ]}
                   >
                     {day}
@@ -798,13 +803,13 @@ export function CalendarView() {
                 {(taskCount > 0 || eventCount > 0) && (
                   <View style={styles.indicatorRow}>
                     {taskCount > 0 && (
-                      <View style={styles.taskDot}>
-                        <Text style={styles.taskDotText}>{taskCount}</Text>
+                      <View style={[styles.taskDot, { backgroundColor: tc.tint }]}>
+                        <Text style={[styles.taskDotText, { color: tc.onTint }]}>{taskCount}</Text>
                       </View>
                     )}
                     {eventCount > 0 && (
-                      <View style={styles.eventDot}>
-                        <Text style={styles.eventDotText}>{eventCount}</Text>
+                      <View style={[styles.eventDot, { backgroundColor: tc.secondaryText }]}>
+                        <Text style={[styles.eventDotText, { color: tc.bg }]}>{eventCount}</Text>
                       </View>
                     )}
                   </View>
@@ -838,7 +843,7 @@ export function CalendarView() {
                     return (
                       <Pressable
                         key={task.id}
-                        style={[styles.taskItem, { backgroundColor: tc.inputBg }]}
+                        style={[styles.taskItem, { backgroundColor: tc.inputBg, borderLeftColor: tc.tint }]}
                         onPress={() => scheduleTaskOnSelectedDate(task.id)}
                       >
                         <Text style={[styles.taskItemTitle, { color: tc.text }]} numberOfLines={1}>
@@ -860,7 +865,7 @@ export function CalendarView() {
                 value={scheduleQuery}
                 onChangeText={setScheduleQuery}
                 placeholder={t('calendar.schedulePlaceholder')}
-                placeholderTextColor="#9CA3AF"
+                placeholderTextColor={tc.secondaryText}
               />
             </View>
 
@@ -878,7 +883,7 @@ export function CalendarView() {
                       return (
                         <Pressable
                           key={task.id}
-                          style={[styles.taskItem, { backgroundColor: tc.inputBg }]}
+                          style={[styles.taskItem, { backgroundColor: tc.inputBg, borderLeftColor: tc.tint }]}
                           onPress={() => scheduleTaskOnSelectedDate(task.id)}
                         >
                           <Text style={[styles.taskItemTitle, { color: tc.text }]} numberOfLines={1}>
@@ -905,12 +910,12 @@ export function CalendarView() {
                     </Text>
                   )}
                   {externalError && (
-                    <Text style={[styles.taskItemTime, { color: '#EF4444' }]} numberOfLines={2}>
+                    <Text style={[styles.taskItemTime, { color: tc.danger }]} numberOfLines={2}>
                       {externalError}
                     </Text>
                   )}
                   {getExternalEventsForDate(selectedDate).map((event) => (
-                    <View key={event.id} style={[styles.taskItem, styles.eventItem, { backgroundColor: tc.inputBg }]}>
+                    <View key={event.id} style={[styles.taskItem, styles.eventItem, { backgroundColor: tc.inputBg, borderLeftColor: tc.secondaryText }]}>
                       <Text style={[styles.taskItemTitle, { color: tc.text }]} numberOfLines={1}>
                         {event.title}
                         {calendarNameById.get(event.sourceId) ? ` (${calendarNameById.get(event.sourceId)})` : ''}
@@ -929,7 +934,7 @@ export function CalendarView() {
               )}
 
               {getDeadlinesForDate(selectedDate).map((task) => (
-                <View key={task.id} style={[styles.taskItem, { backgroundColor: tc.inputBg }]}>
+                <View key={task.id} style={[styles.taskItem, { backgroundColor: tc.inputBg, borderLeftColor: tc.tint }]}>
                   <Text style={[styles.taskItemTitle, { color: tc.text }]} numberOfLines={1}>
                     {task.title}
                   </Text>
@@ -942,7 +947,7 @@ export function CalendarView() {
               {getScheduledForDate(selectedDate).map((task) => (
                 <Pressable
                   key={task.id}
-                  style={[styles.taskItem, { backgroundColor: tc.inputBg }]}
+                  style={[styles.taskItem, { backgroundColor: tc.inputBg, borderLeftColor: tc.tint }]}
                   onPress={() => openTaskActions(task.id)}
                 >
                   <Text style={[styles.taskItemTitle, { color: tc.text }]} numberOfLines={1}>

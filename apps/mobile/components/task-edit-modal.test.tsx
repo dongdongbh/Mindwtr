@@ -32,6 +32,7 @@ vi.mock('@/hooks/use-theme-colors', () => ({
     text: '#fff',
     secondaryText: '#aaa',
     tint: '#3b82f6',
+    onTint: '#fff',
   }),
 }));
 

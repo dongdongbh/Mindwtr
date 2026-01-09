@@ -1,17 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet, Modal } from 'react-native';
 import { useTaskStore, Task, Project, searchAll, generateUUID, SavedSearch, getStorageAdapter } from '@mindwtr/core';
-import { useTheme } from '../contexts/theme-context';
+import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useLanguage } from '../contexts/language-context';
-import { Colors } from '@/constants/theme';
 import { useRouter } from 'expo-router';
 import { Search, X, Folder, CheckCircle, ChevronRight } from 'lucide-react-native';
 
-const PRIMARY_TINT = '#3B82F6';
-
 export default function SearchScreen() {
     const { _allTasks, projects, settings, updateSettings, setHighlightTask } = useTaskStore();
-    const { isDark } = useTheme();
+    const tc = useThemeColors();
     const { t } = useLanguage();
     const router = useRouter();
   const [query, setQuery] = useState('');
@@ -25,15 +22,7 @@ export default function SearchScreen() {
         setTimeout(() => inputRef.current?.focus(), 100);
     }, []);
 
-    const tc = {
-        bg: isDark ? Colors.dark.background : Colors.light.background,
-        text: isDark ? Colors.dark.text : Colors.light.text,
-        secondaryText: isDark ? '#9CA3AF' : '#6B7280',
-        itemBg: isDark ? '#1F2937' : '#F9FAFB',
-        border: isDark ? '#374151' : '#E5E7EB',
-        placeholder: isDark ? '#6B7280' : '#9CA3AF',
-        tint: PRIMARY_TINT,
-    };
+    const placeholderColor = tc.secondaryText;
 
   const trimmedQuery = query.trim();
   const shouldUseFts = trimmedQuery.length > 0 && !/\b\w+:/i.test(trimmedQuery);
@@ -131,7 +120,7 @@ export default function SearchScreen() {
                     ref={inputRef}
                     style={[styles.input, { color: tc.text }]}
                     placeholder={t('search.placeholder') || "Search..."}
-                    placeholderTextColor={tc.placeholder}
+                    placeholderTextColor={placeholderColor}
                     value={query}
                     onChangeText={setQuery}
                     returnKeyType="search"
@@ -177,7 +166,7 @@ export default function SearchScreen() {
                 }
                 renderItem={({ item }) => (
                     <TouchableOpacity
-                        style={[styles.resultItem, { backgroundColor: tc.itemBg, borderColor: tc.border }]}
+                        style={[styles.resultItem, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
                         onPress={() => handleSelect(item)}
                     >
                         {item.type === 'project' ? (
@@ -207,12 +196,12 @@ export default function SearchScreen() {
                 onRequestClose={() => setShowSaveModal(false)}
             >
                 <View style={styles.modalOverlay}>
-                    <View style={[styles.saveModal, { backgroundColor: tc.itemBg, borderColor: tc.border }]}>
+                    <View style={[styles.saveModal, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                         <Text style={[styles.modalTitle, { color: tc.text }]}>{t('search.saveSearch')}</Text>
                         <TextInput
                             style={[styles.modalInput, { color: tc.text, borderColor: tc.border }]}
                             placeholder={t('search.saveSearchPrompt')}
-                            placeholderTextColor={tc.placeholder}
+                            placeholderTextColor={placeholderColor}
                             value={saveName}
                             onChangeText={setSaveName}
                             autoFocus

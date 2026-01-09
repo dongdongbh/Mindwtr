@@ -1,4 +1,3 @@
-import { Platform } from 'react-native';
 import { Colors, Material3 } from '../constants/theme';
 import { useTheme } from '../contexts/theme-context';
 
@@ -10,6 +9,7 @@ export interface ThemeColors {
     secondaryText: string;
     border: string;
     tint: string;
+    onTint: string;
     inputBg: string;
     danger: string;
     success: string;
@@ -19,7 +19,7 @@ export interface ThemeColors {
 
 export function useThemeColors() {
     const { isDark, themeStyle } = useTheme();
-    const useMaterial3 = themeStyle === 'material3' && Platform.OS === 'android';
+    const useMaterial3 = themeStyle === 'material3';
 
     if (useMaterial3) {
         const palette = isDark ? Material3.dark : Material3.light;
@@ -31,6 +31,7 @@ export function useThemeColors() {
             secondaryText: palette.secondaryText,
             border: palette.outline,
             tint: palette.primary,
+            onTint: palette.onPrimary,
             inputBg: palette.surfaceVariant,
             danger: palette.error,
             success: palette.success,
@@ -47,6 +48,7 @@ export function useThemeColors() {
         secondaryText: isDark ? '#9CA3AF' : '#6B7280',
         border: isDark ? '#374151' : '#E5E7EB',
         tint: isDark ? Colors.dark.tint : Colors.light.tint,
+        onTint: '#FFFFFF',
         inputBg: isDark ? '#374151' : '#F3F4F6',
         danger: '#EF4444',
         success: '#10B981',

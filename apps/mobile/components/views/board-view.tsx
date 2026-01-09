@@ -4,7 +4,7 @@ import type { Task, TaskStatus } from '@mindwtr/core';
 import { useMemo, useState, useCallback } from 'react';
 import { useTheme } from '../../contexts/theme-context';
 import { useLanguage } from '../../contexts/language-context';
-import { Colors } from '@/constants/theme';
+import { useThemeColors } from '@/hooks/use-theme-colors';
 import { GestureDetector, Gesture, Swipeable } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
@@ -224,6 +224,7 @@ function Column({ columnIndex, label, color, tasks, isDark, onDrop, onTap, onDel
 export function BoardView() {
   const { tasks, projects, areas, updateTask, deleteTask } = useTaskStore();
   const { isDark } = useTheme();
+  const tc = useThemeColors();
   const { t } = useLanguage();
   const timeEstimatesEnabled = useTaskStore((state) => state.settings?.features?.timeEstimates === true);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -267,7 +268,7 @@ export function BoardView() {
   }, [deleteTask]);
 
   return (
-    <View style={[styles.container, { backgroundColor: isDark ? Colors.dark.background : Colors.light.background }]}>
+    <View style={[styles.container, { backgroundColor: tc.bg }]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         style={styles.boardScroll}

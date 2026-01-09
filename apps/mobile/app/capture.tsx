@@ -2,16 +2,15 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { createAIProvider, PRESET_CONTEXTS, PRESET_TAGS, parseQuickAdd, type Task, type TimeEstimate, type AIProviderId, useTaskStore } from '@mindwtr/core';
-import { useTheme } from '../contexts/theme-context';
+import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useLanguage } from '../contexts/language-context';
-import { Colors } from '@/constants/theme';
 import { buildCopilotConfig, loadAIKey } from '../lib/ai-config';
 
 export default function CaptureScreen() {
   const params = useLocalSearchParams<{ text?: string }>();
   const router = useRouter();
   const { addTask, projects, tasks, settings } = useTaskStore();
-  const { isDark } = useTheme();
+  const tc = useThemeColors();
   const { t } = useLanguage();
   const initialText = typeof params.text === 'string' ? decodeURIComponent(params.text) : '';
   const [value, setValue] = useState(initialText);
@@ -126,15 +125,7 @@ export default function CaptureScreen() {
     setCopilotTags([]);
   };
 
-  const tc = {
-    bg: isDark ? Colors.dark.background : Colors.light.background,
-    cardBg: isDark ? '#1F2937' : '#FFFFFF',
-    text: isDark ? Colors.dark.text : Colors.light.text,
-    secondaryText: isDark ? '#9CA3AF' : '#6B7280',
-    border: isDark ? '#374151' : '#E5E7EB',
-    placeholder: isDark ? '#6B7280' : '#9CA3AF',
-    inputBg: isDark ? '#374151' : '#F9FAFB',
-  };
+  const placeholderColor = tc.secondaryText;
 
   const handleSave = () => {
     if (!value.trim()) return;
@@ -174,7 +165,7 @@ export default function CaptureScreen() {
           ref={inputRef}
           style={[styles.input, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
           placeholder={t('quickAdd.example')}
-          placeholderTextColor={tc.placeholder}
+          placeholderTextColor={placeholderColor}
           value={value}
           onChangeText={handleInputChange}
           onSubmitEditing={handleSave}

@@ -5,12 +5,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState } from 'react';
 
 import { HapticTab } from '@/components/haptic-tab';
-import { useTheme } from '../../../contexts/theme-context';
+import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useLanguage } from '../../../contexts/language-context';
 import { QuickCaptureSheet } from '@/components/quick-capture-sheet';
 
 export default function TabLayout() {
-  const { isDark } = useTheme();
+  const tc = useThemeColors();
   const { t } = useLanguage();
   const insets = useSafeAreaInsets();
   const androidNavInset = Platform.OS === 'android' && insets.bottom >= 20
@@ -20,10 +20,10 @@ export default function TabLayout() {
   const iconLift = Platform.OS === 'android' ? 6 : 0;
   const [captureOpen, setCaptureOpen] = useState(false);
 
-  const iconTint = isDark ? '#E5E7EB' : '#1F2937';
-  const inactiveTint = isDark ? '#9CA3AF' : '#9CA3AF';
-  const activeIndicator = isDark ? '#60A5FA' : '#2563EB';
-  const captureColor = isDark ? '#F472B6' : '#FF7AA2';
+  const iconTint = tc.text;
+  const inactiveTint = tc.secondaryText;
+  const activeIndicator = tc.tint;
+  const captureColor = tc.tint;
 
   return (
     <>
@@ -37,11 +37,11 @@ export default function TabLayout() {
         headerTitleAlign: 'center',
         headerShadowVisible: false,
         headerStyle: {
-          backgroundColor: isDark ? '#1F2937' : '#F3F4F6',
+          backgroundColor: tc.cardBg,
           borderBottomWidth: StyleSheet.hairlineWidth,
-          borderBottomColor: isDark ? '#374151' : '#E5E7EB',
+          borderBottomColor: tc.border,
         },
-        headerTintColor: isDark ? '#F9FAFB' : '#111827',
+        headerTintColor: tc.text,
         headerTitleStyle: {
           fontSize: 17,
           fontWeight: '700',
@@ -51,7 +51,7 @@ export default function TabLayout() {
           : () => (
             <Link href="/global-search" asChild>
               <TouchableOpacity style={styles.headerIconButton} accessibilityLabel={t('search.title')}>
-                <Search size={22} color={isDark ? '#F9FAFB' : '#111827'} />
+                <Search size={22} color={tc.text} />
               </TouchableOpacity>
             </Link>
           ),
@@ -77,8 +77,8 @@ export default function TabLayout() {
           alignItems: 'center',
         },
         tabBarStyle: {
-          backgroundColor: isDark ? '#1F2937' : '#FFFFFF',
-          borderTopColor: isDark ? '#374151' : '#E5E7EB',
+          backgroundColor: tc.cardBg,
+          borderTopColor: tc.border,
           paddingTop: 0,
           paddingBottom: 0,
           height: tabBarHeight,
@@ -123,7 +123,7 @@ export default function TabLayout() {
               style={styles.captureButton}
             >
               <View style={[styles.captureButtonInner, { backgroundColor: captureColor }]}>
-                <Plus size={24} color="#FFFFFF" strokeWidth={3} />
+                <Plus size={24} color={tc.onTint} strokeWidth={3} />
               </View>
             </TouchableOpacity>
           ),
