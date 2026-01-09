@@ -127,7 +127,13 @@ function mergeEntitiesWithStats<T extends { id: string; updatedAt: string; delet
             const localDeleted = !!localItem.deletedAt;
             const incomingDeleted = !!incomingItem.deletedAt;
             if (localDeleted !== incomingDeleted) {
-                winner = localDeleted ? incomingItem : localItem;
+                const deletedItem = localDeleted ? localItem : incomingItem;
+                const liveItem = localDeleted ? incomingItem : localItem;
+                const deletedTimeRaw = deletedItem.deletedAt ? new Date(deletedItem.deletedAt).getTime() : 0;
+                const liveTimeRaw = liveItem.updatedAt ? new Date(liveItem.updatedAt).getTime() : 0;
+                const deletedTime = Number.isFinite(deletedTimeRaw) ? deletedTimeRaw : 0;
+                const liveTime = Number.isFinite(liveTimeRaw) ? liveTimeRaw : 0;
+                winner = deletedTime >= liveTime ? deletedItem : liveItem;
             } else if (safeIncomingTime === safeLocalTime) {
                 winner = localItem;
             }

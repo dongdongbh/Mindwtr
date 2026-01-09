@@ -151,15 +151,15 @@ describe('Sync Logic', () => {
             expect(merged.tasks[0].deletedAt).toBe('2023-01-02');
         });
 
-        it('prefers non-deleted item when timestamps are within skew threshold', () => {
+        it('prefers deletion when delete time is newer within skew threshold', () => {
             const local = mockAppData([createMockTask('1', '2023-01-02T00:00:00.000Z')]);
             const incoming = mockAppData([createMockTask('1', '2023-01-02T00:04:00.000Z', '2023-01-02T00:04:00.000Z')]);
 
             const merged = mergeAppData(local, incoming);
 
             expect(merged.tasks).toHaveLength(1);
-            expect(merged.tasks[0].deletedAt).toBeUndefined();
-            expect(merged.tasks[0].updatedAt).toBe('2023-01-02T00:00:00.000Z');
+            expect(merged.tasks[0].deletedAt).toBe('2023-01-02T00:04:00.000Z');
+            expect(merged.tasks[0].updatedAt).toBe('2023-01-02T00:04:00.000Z');
         });
 
         it('prefers newer item when timestamps are within skew threshold', () => {
