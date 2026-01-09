@@ -102,6 +102,7 @@ interface TaskItemProps {
     selectionMode?: boolean;
     isMultiSelected?: boolean;
     onToggleSelect?: () => void;
+    showQuickDone?: boolean;
 }
 
 export const TaskItem = memo(function TaskItem({
@@ -112,6 +113,7 @@ export const TaskItem = memo(function TaskItem({
     selectionMode = false,
     isMultiSelected = false,
     onToggleSelect,
+    showQuickDone = false,
 }: TaskItemProps) {
     const { updateTask, deleteTask, moveTask, projects, tasks, areas, settings, duplicateTask, resetTaskChecklist, highlightTaskId, setHighlightTask, addProject } = useTaskStore();
     const { t } = useLanguage();
@@ -832,6 +834,7 @@ export const TaskItem = memo(function TaskItem({
                             prioritiesEnabled={prioritiesEnabled}
                             timeEstimatesEnabled={timeEstimatesEnabled}
                             isStagnant={isStagnant}
+                            showQuickDone={showQuickDone}
                             t={t}
                         />
                     )}

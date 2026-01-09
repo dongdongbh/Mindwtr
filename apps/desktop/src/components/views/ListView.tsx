@@ -33,6 +33,7 @@ type VirtualTaskRowProps = {
     onSelect: () => void;
     onToggleSelect: () => void;
     onMeasure: (id: string, height: number) => void;
+    showQuickDone: boolean;
 };
 
 const VirtualTaskRow = React.memo(function VirtualTaskRow({
@@ -45,6 +46,7 @@ const VirtualTaskRow = React.memo(function VirtualTaskRow({
     onSelect,
     onToggleSelect,
     onMeasure,
+    showQuickDone,
 }: VirtualTaskRowProps) {
     const rowRef = useRef<HTMLDivElement | null>(null);
 
@@ -74,6 +76,7 @@ const VirtualTaskRow = React.memo(function VirtualTaskRow({
                     selectionMode={selectionMode}
                     isMultiSelected={isMultiSelected}
                     onToggleSelect={onToggleSelect}
+                    showQuickDone={showQuickDone}
                 />
             </div>
         </div>
@@ -111,6 +114,7 @@ export function ListView({ title, statusFilter }: ListViewProps) {
     const aiProvider = (settings?.ai?.provider ?? 'openai') as AIProviderId;
     const prioritiesEnabled = settings?.features?.priorities === true;
     const timeEstimatesEnabled = settings?.features?.timeEstimates === true;
+    const showQuickDone = statusFilter === 'next';
     const activePriorities = useMemo(
         () => (prioritiesEnabled ? selectedPriorities : EMPTY_PRIORITIES),
         [prioritiesEnabled, selectedPriorities]
@@ -896,6 +900,7 @@ export function ListView({ title, statusFilter }: ListViewProps) {
                                     isMultiSelected={multiSelectedIds.has(task.id)}
                                     onToggleSelect={() => toggleMultiSelect(task.id)}
                                     onMeasure={handleRowMeasure}
+                                    showQuickDone={showQuickDone}
                                 />
                             );
                         })}
@@ -914,6 +919,7 @@ export function ListView({ title, statusFilter }: ListViewProps) {
                                 selectionMode={selectionMode}
                                 isMultiSelected={multiSelectedIds.has(task.id)}
                                 onToggleSelect={() => toggleMultiSelect(task.id)}
+                                showQuickDone={showQuickDone}
                             />
                         ))}
                     </div>

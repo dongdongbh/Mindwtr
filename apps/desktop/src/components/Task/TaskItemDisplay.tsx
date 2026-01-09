@@ -21,6 +21,7 @@ interface TaskItemDisplayProps {
     prioritiesEnabled: boolean;
     timeEstimatesEnabled: boolean;
     isStagnant: boolean;
+    showQuickDone: boolean;
     t: (key: string) => string;
 }
 
@@ -67,6 +68,7 @@ export function TaskItemDisplay({
     prioritiesEnabled,
     timeEstimatesEnabled,
     isStagnant,
+    showQuickDone,
     t,
 }: TaskItemDisplayProps) {
     const checklistProgress = getChecklistProgress(task);
@@ -319,7 +321,7 @@ export function TaskItemDisplay({
                     >
                         <Pencil className="w-4 h-4" />
                     </button>
-                    {task.status !== 'done' && (
+                    {showQuickDone && task.status !== 'done' && (
                         <button
                             type="button"
                             onClick={() => onStatusChange('done')}
