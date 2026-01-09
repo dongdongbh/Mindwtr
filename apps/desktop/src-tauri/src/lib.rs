@@ -281,7 +281,7 @@ fn open_sqlite(app: &tauri::AppHandle) -> Result<Connection, String> {
     }
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
     conn.execute_batch(SQLITE_SCHEMA).map_err(|e| e.to_string())?;
-    ensure_fts_populated(&conn)?;
+    ensure_fts_populated(&conn, false)?;
     Ok(conn)
 }
 
@@ -301,11 +301,26 @@ fn sqlite_has_any_data(conn: &Connection) -> Result<bool, String> {
     Ok(task_count > 0 || project_count > 0 || area_count > 0 || settings_count > 0)
 }
 
-fn ensure_fts_populated(conn: &Connection) -> Result<(), String> {
+fn ensure_fts_populated(conn: &Connection, force_rebuild: bool) -> Result<(), String> {
     let tasks_fts_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM tasks_fts", [], |row| row.get(0))
         .unwrap_or(0);
-    if tasks_fts_count == 0 {
+    let missing_tasks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM tasks WHERE id NOT IN (SELECT id FROM tasks_fts)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    let extra_tasks: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM tasks_fts WHERE id NOT IN (SELECT id FROM tasks)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    if force_rebuild || tasks_fts_count == 0 || missing_tasks > 0 || extra_tasks > 0 {
+        conn.execute("DELETE FROM tasks_fts", []).map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT INTO tasks_fts (id, title, description, tags, contexts)
              SELECT id, title, coalesce(description, ''), coalesce(tags, ''), coalesce(contexts, '') FROM tasks",
@@ -317,7 +332,22 @@ fn ensure_fts_populated(conn: &Connection) -> Result<(), String> {
     let projects_fts_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM projects_fts", [], |row| row.get(0))
         .unwrap_or(0);
-    if projects_fts_count == 0 {
+    let missing_projects: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM projects WHERE id NOT IN (SELECT id FROM projects_fts)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    let extra_projects: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM projects_fts WHERE id NOT IN (SELECT id FROM projects)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    if force_rebuild || projects_fts_count == 0 || missing_projects > 0 || extra_projects > 0 {
+        conn.execute("DELETE FROM projects_fts", []).map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT INTO projects_fts (id, title, supportNotes, tagIds, areaTitle)
              SELECT id, title, coalesce(supportNotes, ''), coalesce(tagIds, ''), coalesce(areaTitle, '') FROM projects",
@@ -994,6 +1024,7 @@ fn get_data(app: tauri::AppHandle) -> Result<Value, String> {
         if let Ok(value) = read_json_with_retries(&data_path, 2) {
             let _ = fs::copy(&data_path, &backup_path);
             migrate_json_to_sqlite(&mut conn, &value)?;
+            ensure_fts_populated(&conn, true)?;
         }
     }
 
