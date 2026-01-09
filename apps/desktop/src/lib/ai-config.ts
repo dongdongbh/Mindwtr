@@ -1,19 +1,14 @@
 import type { AIProviderId } from '@mindwtr/core';
-import { getAIKeyStorageKey, buildAIConfig, buildCopilotConfig } from '@mindwtr/core';
+import { buildAIConfig, buildCopilotConfig, loadAIKeyFromStorageSync, saveAIKeyToStorageSync } from '@mindwtr/core';
 
 export function loadAIKey(provider: AIProviderId): string {
     if (typeof localStorage === 'undefined') return '';
-    return localStorage.getItem(getAIKeyStorageKey(provider)) ?? '';
+    return loadAIKeyFromStorageSync(localStorage, provider);
 }
 
 export function saveAIKey(provider: AIProviderId, value: string): void {
     if (typeof localStorage === 'undefined') return;
-    const key = getAIKeyStorageKey(provider);
-    if (!value) {
-        localStorage.removeItem(key);
-        return;
-    }
-    localStorage.setItem(key, value);
+    saveAIKeyToStorageSync(localStorage, provider, value);
 }
 
 export { buildAIConfig, buildCopilotConfig };

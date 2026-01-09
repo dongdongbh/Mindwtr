@@ -5,6 +5,7 @@ export * from './sync';
 export * from './task-utils';
 export * from './contexts';
 export * from './i18n';
+export * from './i18n-storage';
 export * from './i18n-loader';
 export * from './i18n-constants';
 export * from './recurrence';

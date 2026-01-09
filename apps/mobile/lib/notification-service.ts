@@ -1,4 +1,4 @@
-import { getNextScheduledAt, type Language, Task, useTaskStore, parseTimeOfDay, LANGUAGE_STORAGE_KEY, SUPPORTED_LANGUAGES, getTranslations } from '@mindwtr/core';
+import { getNextScheduledAt, type Language, Task, useTaskStore, parseTimeOfDay, getTranslations, loadStoredLanguage } from '@mindwtr/core';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 
@@ -67,11 +67,7 @@ async function loadNotifications(): Promise<NotificationsApi | null> {
 
 async function getCurrentLanguage(): Promise<Language> {
   try {
-    const saved = await AsyncStorage.getItem(LANGUAGE_STORAGE_KEY);
-    if (saved && SUPPORTED_LANGUAGES.includes(saved as Language)) {
-      return saved as Language;
-    }
-    return 'en';
+    return await loadStoredLanguage(AsyncStorage);
   } catch {
     return 'en';
   }

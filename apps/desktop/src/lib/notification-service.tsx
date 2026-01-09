@@ -1,4 +1,4 @@
-import { getDailyDigestSummary, getNextScheduledAt, stripMarkdown, type Language, Task, parseTimeOfDay, LANGUAGE_STORAGE_KEY, SUPPORTED_LANGUAGES, getTranslationsSync, loadTranslations } from '@mindwtr/core';
+import { getDailyDigestSummary, getNextScheduledAt, stripMarkdown, type Language, Task, parseTimeOfDay, getTranslationsSync, loadTranslations, loadStoredLanguageSync } from '@mindwtr/core';
 import { useTaskStore } from '@mindwtr/core';
 
 const notifiedAtByTask = new Map<string, string>();
@@ -17,13 +17,8 @@ let tauriNotificationApi: TauriNotificationApi | null = null;
 const CHECK_INTERVAL_MS = 15_000;
 
 function getCurrentLanguage(): Language {
-    try {
-        const raw = localStorage.getItem(LANGUAGE_STORAGE_KEY);
-        if (raw && SUPPORTED_LANGUAGES.includes(raw as Language)) return raw as Language;
-        return 'en';
-    } catch {
-        return 'en';
-    }
+    if (typeof localStorage === 'undefined') return 'en';
+    return loadStoredLanguageSync(localStorage);
 }
 
 function localDateKey(date: Date): string {

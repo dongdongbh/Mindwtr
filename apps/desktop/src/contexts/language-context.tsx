@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
-import { type Language, LANGUAGE_STORAGE_KEY, SUPPORTED_LANGUAGES, loadTranslations } from '@mindwtr/core';
+import { type Language, loadTranslations, loadStoredLanguageSync, saveStoredLanguageSync } from '@mindwtr/core';
 export type { Language };
 
 interface LanguageContextType {
@@ -19,9 +19,8 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     const [fallbackTranslations, setFallbackTranslations] = useState<Record<string, string>>({});
 
     useEffect(() => {
-        const saved = localStorage.getItem(LANGUAGE_STORAGE_KEY);
-        if (saved && SUPPORTED_LANGUAGES.includes(saved as Language)) {
-            setLanguageState(saved as Language);
+        if (typeof localStorage !== 'undefined') {
+            setLanguageState(loadStoredLanguageSync(localStorage));
         }
         loadTranslations('en').then(setFallbackTranslations).catch(() => setFallbackTranslations({}));
     }, []);
@@ -39,7 +38,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     }, [language]);
 
     const setLanguage = (lang: Language) => {
-        localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
+        if (typeof localStorage !== 'undefined') {
+            saveStoredLanguageSync(localStorage, lang);
+        }
         setLanguageState(lang);
     };
 

@@ -7,6 +7,45 @@ export function getAIKeyStorageKey(provider: AIProviderId): string {
     return `${AI_KEY_PREFIX}:${provider}`;
 }
 
+type KeyValueStorageSync = {
+    getItem: (key: string) => string | null;
+    setItem: (key: string, value: string) => void;
+    removeItem: (key: string) => void;
+};
+
+type KeyValueStorageAsync = {
+    getItem: (key: string) => Promise<string | null>;
+    setItem: (key: string, value: string) => Promise<void>;
+    removeItem: (key: string) => Promise<void>;
+};
+
+export function loadAIKeyFromStorageSync(storage: KeyValueStorageSync, provider: AIProviderId): string {
+    return storage.getItem(getAIKeyStorageKey(provider)) ?? '';
+}
+
+export function saveAIKeyToStorageSync(storage: KeyValueStorageSync, provider: AIProviderId, value: string): void {
+    const key = getAIKeyStorageKey(provider);
+    if (!value) {
+        storage.removeItem(key);
+        return;
+    }
+    storage.setItem(key, value);
+}
+
+export async function loadAIKeyFromStorage(storage: KeyValueStorageAsync, provider: AIProviderId): Promise<string> {
+    const value = await storage.getItem(getAIKeyStorageKey(provider));
+    return value ?? '';
+}
+
+export async function saveAIKeyToStorage(storage: KeyValueStorageAsync, provider: AIProviderId, value: string): Promise<void> {
+    const key = getAIKeyStorageKey(provider);
+    if (!value) {
+        await storage.removeItem(key);
+        return;
+    }
+    await storage.setItem(key, value);
+}
+
 export function buildAIConfig(settings: AppData['settings'], apiKey: string): AIProviderConfig {
     const provider = (settings.ai?.provider ?? 'openai') as AIProviderId;
     const defaults = getDefaultAIConfig(provider);
