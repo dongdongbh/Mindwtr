@@ -880,6 +880,7 @@ export default function ProjectsScreen() {
                   onEnterReorderMode={() => setTaskReorderMode(true)}
                   allowAdd={true}
                   onReorderActiveChange={setIsReorderingTasks}
+                  staticList
                 />
                     </ScrollView>
                   ) : null}

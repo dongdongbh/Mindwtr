@@ -31,6 +31,7 @@ export interface TaskListProps {
   allowAdd?: boolean;
   projectId?: string;
   enableReorder?: boolean;
+  staticList?: boolean;
   reorderMode?: boolean;
   onEnterReorderMode?: () => void;
   onReorderActiveChange?: (active: boolean) => void;
@@ -52,6 +53,7 @@ export function TaskList({
   allowAdd = true,
   projectId,
   enableReorder = false,
+  staticList = false,
   reorderMode = false,
   onEnterReorderMode,
   onReorderActiveChange,
@@ -661,6 +663,22 @@ export function TaskList({
             </View>
           }
         />
+      ) : staticList ? (
+        <View style={styles.staticList}>
+          {orderedTasks.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Text style={[styles.emptyText, { color: themeColors.secondaryText }]}>
+                {emptyText || t('list.noTasks')}
+              </Text>
+            </View>
+          ) : (
+            orderedTasks.map((item) => (
+              <View key={item.id} style={styles.staticItem}>
+                {renderTask({ item })}
+              </View>
+            ))
+          )}
+        </View>
       ) : (
         <FlatList
           data={orderedTasks}
@@ -996,6 +1014,12 @@ const styles = StyleSheet.create({
   },
   list: {
     flex: 1,
+  },
+  staticList: {
+    flex: 1,
+  },
+  staticItem: {
+    marginBottom: 0,
   },
   listContent: {
     padding: 12,
