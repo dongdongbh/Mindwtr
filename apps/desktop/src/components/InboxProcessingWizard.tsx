@@ -3,7 +3,7 @@ import type { Area, Project, Task } from '@mindwtr/core';
 
 import { cn } from '../lib/utils';
 
-export type ProcessingStep = 'refine' | 'actionable' | 'twomin' | 'decide' | 'context' | 'project' | 'waiting-note';
+export type ProcessingStep = 'refine' | 'actionable' | 'twomin' | 'decide' | 'context' | 'project' | 'delegate';
 
 type InboxProcessingWizardProps = {
     t: (key: string) => string;
@@ -22,8 +22,12 @@ type InboxProcessingWizardProps = {
     handleTwoMinNo: () => void;
     handleDefer: () => void;
     handleDelegate: () => void;
-    waitingNote: string;
-    setWaitingNote: (value: string) => void;
+    delegateWho: string;
+    setDelegateWho: (value: string) => void;
+    delegateFollowUp: string;
+    setDelegateFollowUp: (value: string) => void;
+    handleDelegateBack: () => void;
+    handleSendDelegateRequest: () => void;
     handleConfirmWaiting: () => void;
     selectedContexts: string[];
     allContexts: string[];
@@ -67,8 +71,12 @@ export function InboxProcessingWizard({
     handleTwoMinNo,
     handleDefer,
     handleDelegate,
-    waitingNote,
-    setWaitingNote,
+    delegateWho,
+    setDelegateWho,
+    delegateFollowUp,
+    setDelegateFollowUp,
+    handleDelegateBack,
+    handleSendDelegateRequest,
     handleConfirmWaiting,
     selectedContexts,
     allContexts,
@@ -242,31 +250,49 @@ export function InboxProcessingWizard({
                 </div>
             )}
 
-            {processingStep === 'waiting-note' && (
+            {processingStep === 'delegate' && (
                 <div className="space-y-4">
-                    <p className="text-center font-medium">👤 {t('process.waitingFor')}</p>
+                    <p className="text-center font-medium">👤 {t('process.delegateTitle')}</p>
                     <p className="text-center text-sm text-muted-foreground">
-                        {t('process.waitingForDesc')}
+                        {t('process.delegateDesc')}
                     </p>
-                    <textarea
-                        value={waitingNote}
-                        onChange={(e) => setWaitingNote(e.target.value)}
-                        placeholder={t('process.waitingPlaceholder')}
-                        className="w-full bg-muted border border-border rounded-lg px-3 py-3 text-sm focus:ring-2 focus:ring-primary resize-none"
-                        rows={3}
-                    />
+                    <div className="space-y-2">
+                        <label className="text-xs text-muted-foreground font-medium">{t('process.delegateWhoLabel')}</label>
+                        <input
+                            value={delegateWho}
+                            onChange={(e) => setDelegateWho(e.target.value)}
+                            placeholder={t('process.delegateWhoPlaceholder')}
+                            className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary"
+                        />
+                    </div>
+                    <div className="space-y-2">
+                        <label className="text-xs text-muted-foreground font-medium">{t('process.delegateFollowUpLabel')}</label>
+                        <input
+                            type="date"
+                            value={delegateFollowUp}
+                            onChange={(e) => setDelegateFollowUp(e.target.value)}
+                            className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary"
+                        />
+                    </div>
+                    <button
+                        type="button"
+                        onClick={handleSendDelegateRequest}
+                        className="w-full py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/80"
+                    >
+                        {t('process.delegateSendRequest')}
+                    </button>
                     <div className="flex gap-3">
                         <button
-                            onClick={handleConfirmWaiting}
+                            onClick={handleDelegateBack}
                             className="flex-1 py-3 bg-muted text-muted-foreground rounded-lg font-medium hover:bg-muted/80"
                         >
-                            {t('common.skip')}
+                            {t('common.back')}
                         </button>
                         <button
                             onClick={handleConfirmWaiting}
                             className="flex-1 py-3 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600"
                         >
-                            ✓ {t('common.done')}
+                            {t('process.delegateMoveToWaiting')}
                         </button>
                     </div>
                 </div>

@@ -34,7 +34,8 @@ export function InboxProcessor({
     const [processingTask, setProcessingTask] = useState<Task | null>(null);
     const [processingStep, setProcessingStep] = useState<ProcessingStep>('actionable');
     const [selectedContexts, setSelectedContexts] = useState<string[]>([]);
-    const [waitingNote, setWaitingNote] = useState('');
+    const [delegateWho, setDelegateWho] = useState('');
+    const [delegateFollowUp, setDelegateFollowUp] = useState('');
     const [projectSearch, setProjectSearch] = useState('');
     const [processingTitle, setProcessingTitle] = useState('');
     const [processingDescription, setProcessingDescription] = useState('');
@@ -76,7 +77,8 @@ export function InboxProcessor({
         setProcessingTask(null);
         setProcessingStep('actionable');
         setSelectedContexts([]);
-        setWaitingNote('');
+        setDelegateWho('');
+        setDelegateFollowUp('');
         setProjectSearch('');
         setProcessingTitle('');
         setProcessingDescription('');
@@ -152,20 +154,56 @@ export function InboxProcessor({
     const handleTwoMinNo = () => setProcessingStep('decide');
 
     const handleDelegate = () => {
-        setWaitingNote('');
-        setProcessingStep('waiting-note');
+        setDelegateWho('');
+        setDelegateFollowUp('');
+        setProcessingStep('delegate');
     };
 
     const handleConfirmWaiting = () => {
         if (processingTask) {
-            const description = waitingNote.trim().length > 0 ? waitingNote : processingDescription;
+            const baseDescription = processingDescription.trim() || processingTask.description || '';
+            const who = delegateWho.trim();
+            const waitingLine = who ? `Waiting for: ${who}` : '';
+            const nextDescription = [baseDescription, waitingLine]
+                .map((line) => line.trim())
+                .filter(Boolean)
+                .join('\n');
+            const followUpIso = delegateFollowUp
+                ? new Date(`${delegateFollowUp}T09:00:00`).toISOString()
+                : undefined;
             applyProcessingEdits({
                 status: 'waiting',
-                description: description.trim().length > 0 ? description : undefined,
+                description: nextDescription.length > 0 ? nextDescription : undefined,
+                reviewAt: followUpIso,
             });
         }
-        setWaitingNote('');
+        setDelegateWho('');
+        setDelegateFollowUp('');
         processNext();
+    };
+
+    const handleDelegateBack = () => {
+        setProcessingStep('decide');
+    };
+
+    const handleSendDelegateRequest = () => {
+        if (!processingTask) return;
+        const title = processingTitle.trim() || processingTask.title;
+        const baseDescription = processingDescription.trim() || processingTask.description || '';
+        const who = delegateWho.trim();
+        const greeting = who ? `Hi ${who},` : 'Hi,';
+        const bodyParts = [
+            greeting,
+            '',
+            `Could you please handle: ${title}`,
+            baseDescription ? `\nDetails:\n${baseDescription}` : '',
+            '',
+            'Thanks!',
+        ];
+        const body = bodyParts.join('\n');
+        const subject = `Delegation: ${title}`;
+        const mailto = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        window.open(mailto);
     };
 
     const handleDefer = () => {
@@ -255,8 +293,12 @@ export function InboxProcessor({
                 handleTwoMinNo={handleTwoMinNo}
                 handleDefer={handleDefer}
                 handleDelegate={handleDelegate}
-                waitingNote={waitingNote}
-                setWaitingNote={setWaitingNote}
+                delegateWho={delegateWho}
+                setDelegateWho={setDelegateWho}
+                delegateFollowUp={delegateFollowUp}
+                setDelegateFollowUp={setDelegateFollowUp}
+                handleDelegateBack={handleDelegateBack}
+                handleSendDelegateRequest={handleSendDelegateRequest}
                 handleConfirmWaiting={handleConfirmWaiting}
                 selectedContexts={selectedContexts}
                 allContexts={allContexts}

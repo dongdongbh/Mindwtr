@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, TextInput, Platform, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, TextInput, Platform, Alert, Share } from 'react-native';
 
 import { useTaskStore, PRESET_CONTEXTS, createAIProvider, safeFormatDate, safeParseDate, type Task, type AIProviderId } from '@mindwtr/core';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -18,10 +18,12 @@ export default function InboxScreen() {
   const { t } = useLanguage();
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [processingStep, setProcessingStep] = useState<'refine' | 'actionable' | 'twomin' | 'decide' | 'context' | 'project' | 'waiting-note'>('refine');
+  const [processingStep, setProcessingStep] = useState<'refine' | 'actionable' | 'twomin' | 'decide' | 'context' | 'project' | 'delegate'>('refine');
   const [newContext, setNewContext] = useState('');
   const [skippedIds, setSkippedIds] = useState<Set<string>>(new Set());
-  const [waitingNote, setWaitingNote] = useState('');
+  const [delegateWho, setDelegateWho] = useState('');
+  const [delegateFollowUpDate, setDelegateFollowUpDate] = useState<Date | null>(null);
+  const [showDelegateDatePicker, setShowDelegateDatePicker] = useState(false);
   const [projectSearch, setProjectSearch] = useState('');
   const [processingTitle, setProcessingTitle] = useState('');
   const [processingDescription, setProcessingDescription] = useState('');
@@ -57,6 +59,9 @@ export default function InboxScreen() {
     setProcessingStep('refine');
     setSkippedIds(new Set());
     setPendingStartDate(null);
+    setShowDelegateDatePicker(false);
+    setDelegateWho('');
+    setDelegateFollowUpDate(null);
     setSelectedContexts(processingQueue[0]?.contexts ?? []);
     setNewContext('');
     setProjectSearch('');
@@ -83,6 +88,9 @@ export default function InboxScreen() {
       setCurrentIndex(currentIndex + 1);
       setProcessingStep('refine');
       setPendingStartDate(null);
+      setShowDelegateDatePicker(false);
+      setDelegateWho('');
+      setDelegateFollowUpDate(null);
       const nextTask = processingQueue[currentIndex + 1];
       setSelectedContexts(nextTask?.contexts ?? []);
       setNewContext('');
@@ -99,6 +107,9 @@ export default function InboxScreen() {
       setProcessingTitle('');
       setProcessingDescription('');
       setSelectedContexts([]);
+      setShowDelegateDatePicker(false);
+      setDelegateWho('');
+      setDelegateFollowUpDate(null);
       setNewContext('');
     }
   };
@@ -172,8 +183,9 @@ export default function InboxScreen() {
     if (!currentTask) return;
 
     if (decision === 'delegate') {
-      setWaitingNote('');
-      setProcessingStep('waiting-note');
+      setDelegateWho('');
+      setDelegateFollowUpDate(null);
+      setProcessingStep('delegate');
     } else {
       setSelectedContexts(currentTask.contexts ?? []);
       setProcessingStep('context');
@@ -182,17 +194,46 @@ export default function InboxScreen() {
 
   const handleConfirmWaitingMobile = () => {
     if (currentTask) {
+      const who = delegateWho.trim();
+      const baseDescription = processingDescription.trim() || currentTask.description || '';
+      const waitingLine = who ? `Waiting for: ${who}` : '';
+      const nextDescription = [baseDescription, waitingLine]
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .join('\n');
       const updates: Partial<Task> = {
         status: 'waiting',
-        description: waitingNote || processingDescription || currentTask.description,
+        description: nextDescription.length > 0 ? nextDescription : undefined,
       };
-      if (pendingStartDate) {
-        updates.startTime = pendingStartDate.toISOString();
+      if (delegateFollowUpDate) {
+        updates.reviewAt = delegateFollowUpDate.toISOString();
       }
       applyProcessingEdits(updates);
     }
-    setWaitingNote('');
+    setDelegateWho('');
+    setDelegateFollowUpDate(null);
     moveToNext();
+  };
+
+  const handleSendDelegateRequest = async () => {
+    if (!currentTask) return;
+    const title = processingTitle.trim() || currentTask.title;
+    const baseDescription = processingDescription.trim() || currentTask.description || '';
+    const who = delegateWho.trim();
+    const greeting = who ? `Hi ${who},` : 'Hi,';
+    const message = [
+      greeting,
+      '',
+      `Could you please handle: ${title}`,
+      baseDescription ? `\nDetails:\n${baseDescription}` : '',
+      '',
+      'Thanks!',
+    ].join('\n');
+    try {
+      await Share.share({ message });
+    } catch {
+      // ignore share errors
+    }
   };
 
   const toggleContext = (ctx: string) => {
@@ -640,37 +681,88 @@ export default function InboxScreen() {
               />
             )}
 
-	            {processingStep === 'waiting-note' && (
+            {showDelegateDatePicker && (
+              <DateTimePicker
+                value={delegateFollowUpDate ?? new Date()}
+                mode="date"
+                display="default"
+                onChange={(event, date) => {
+                  if (Platform.OS === 'android') {
+                    if (event.type === 'dismissed') {
+                      setShowDelegateDatePicker(false);
+                      return;
+                    }
+                  }
+                  setShowDelegateDatePicker(false);
+                  if (!date) return;
+                  const next = new Date(date);
+                  next.setHours(9, 0, 0, 0);
+                  setDelegateFollowUpDate(next);
+                }}
+              />
+            )}
+
+	            {processingStep === 'delegate' && (
 	              <View style={styles.stepContent}>
 	                <Text style={[styles.stepQuestion, { color: tc.text }]}>
-	                  👤 {t('inbox.waitingQuestion')}
+	                  👤 {t('process.delegateTitle')}
 	                </Text>
 	                <Text style={[styles.stepHint, { color: tc.secondaryText }]}>
-	                  {t('inbox.waitingHint')}
+	                  {t('process.delegateDesc')}
 	                </Text>
 
+	                <Text style={[styles.refineLabel, { color: tc.secondaryText }]}>{t('process.delegateWhoLabel')}</Text>
 	                <TextInput
 	                  style={[styles.waitingInput, { borderColor: tc.border, color: tc.text }]}
-	                  placeholder={t('inbox.waitingPlaceholder')}
+	                  placeholder={t('process.delegateWhoPlaceholder')}
 	                  placeholderTextColor={tc.secondaryText}
-	                  value={waitingNote}
-	                  onChangeText={setWaitingNote}
-                  multiline
-                  numberOfLines={3}
-                />
+	                  value={delegateWho}
+	                  onChangeText={setDelegateWho}
+	                />
+
+                  <View style={styles.startDateRow}>
+                    <Text style={[styles.stepHint, { color: tc.secondaryText }]}>
+                      {t('process.delegateFollowUpLabel')}
+                    </Text>
+                    <View style={styles.startDateActions}>
+                      <TouchableOpacity
+                        style={[styles.startDateButton, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
+                        onPress={() => setShowDelegateDatePicker(true)}
+                      >
+                        <Text style={[styles.startDateButtonText, { color: tc.text }]}>
+                          {delegateFollowUpDate ? safeFormatDate(delegateFollowUpDate.toISOString(), 'P') : t('common.notSet')}
+                        </Text>
+                      </TouchableOpacity>
+                      {delegateFollowUpDate && (
+                        <TouchableOpacity
+                          style={[styles.startDateClear, { borderColor: tc.border }]}
+                          onPress={() => setDelegateFollowUpDate(null)}
+                        >
+                          <Text style={[styles.startDateClearText, { color: tc.secondaryText }]}>{t('common.clear')}</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  </View>
+
+                  <TouchableOpacity
+                    style={[styles.button, { backgroundColor: tc.border }]}
+                    onPress={handleSendDelegateRequest}
+                  >
+                    <Text style={[styles.buttonText, { color: tc.text }]}>{t('process.delegateSendRequest')}</Text>
+                  </TouchableOpacity>
 
                 <View style={styles.buttonRow}>
                   <TouchableOpacity
                     style={[styles.button, { backgroundColor: tc.border }]}
-                    onPress={handleConfirmWaitingMobile}
+                    onPress={() => setProcessingStep('decide')}
 	                  >
-	                    <Text style={[styles.buttonText, { color: tc.text }]}>{t('inbox.skip')}</Text>
+	                    <Text style={[styles.buttonText, { color: tc.text }]}>{t('common.back')}</Text>
 	                  </TouchableOpacity>
 	                  <TouchableOpacity
 	                    style={[styles.button, { backgroundColor: '#F59E0B' }]}
 	                    onPress={handleConfirmWaitingMobile}
 	                  >
-	                    <Text style={styles.buttonPrimaryText}>✓ {t('common.done')}</Text>
+	                    <Text style={styles.buttonPrimaryText}>{t('process.delegateMoveToWaiting')}</Text>
 	                  </TouchableOpacity>
                 </View>
               </View>
