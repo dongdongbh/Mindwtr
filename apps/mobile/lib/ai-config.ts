@@ -13,8 +13,12 @@ const secureAvailable = (() => {
     };
 })();
 
+const getSecureKey = (provider: AIProviderId) => {
+    return getAIKeyStorageKey(provider).replace(/[^A-Za-z0-9._-]/g, '_');
+};
+
 export async function loadAIKey(provider: AIProviderId): Promise<string> {
-    const key = getAIKeyStorageKey(provider);
+    const key = getSecureKey(provider);
     if (await secureAvailable()) {
         const value = await SecureStore.getItemAsync(key);
         if (value) return value;
@@ -23,7 +27,7 @@ export async function loadAIKey(provider: AIProviderId): Promise<string> {
 }
 
 export async function saveAIKey(provider: AIProviderId, value: string): Promise<void> {
-    const key = getAIKeyStorageKey(provider);
+    const key = getSecureKey(provider);
     if (await secureAvailable()) {
         if (!value) {
             await SecureStore.deleteItemAsync(key);
