@@ -10,7 +10,7 @@ import { Alert, AppState, AppStateStatus } from 'react-native';
 import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
 
 import { ThemeProvider, useTheme } from '../contexts/theme-context';
-import { LanguageProvider } from '../contexts/language-context';
+import { LanguageProvider, useLanguage } from '../contexts/language-context';
 import { setStorageAdapter, useTaskStore, flushPendingSave } from '@mindwtr/core';
 import { mobileStorage } from '../lib/storage-adapter';
 import { startMobileNotifications, stopMobileNotifications } from '../lib/notification-service';
@@ -29,11 +29,16 @@ try {
   console.error('[Mobile] Failed to initialize storage adapter:', e);
 }
 
+// Keep splash visible until app is ready.
+void SplashScreen.preventAutoHideAsync().catch(() => {});
+
 function RootLayoutContent() {
   const router = useRouter();
-  const { isDark } = useTheme();
+  const { isDark, isReady: themeReady } = useTheme();
+  const { isReady: languageReady } = useLanguage();
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
   const [storageWarningShown, setStorageWarningShown] = useState(false);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
   const appState = useRef(AppState.currentState);
   const lastAutoSyncAt = useRef(0);
   const syncDebounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -205,10 +210,7 @@ function RootLayoutContent() {
           [{ text: 'OK' }]
         );
       } finally {
-        // Hide splash screen (safe for web)
-        if (typeof SplashScreen?.hideAsync === 'function') {
-          SplashScreen.hideAsync().catch(console.warn);
-        }
+        setIsDataLoaded(true);
       }
     };
 
@@ -231,6 +233,19 @@ function RootLayoutContent() {
 
     return () => unsubscribe();
   }, []);
+
+  const isAppReady = isDataLoaded && themeReady && languageReady;
+
+  useEffect(() => {
+    if (!isAppReady) return;
+    if (typeof SplashScreen?.hideAsync === 'function') {
+      SplashScreen.hideAsync().catch(console.warn);
+    }
+  }, [isAppReady]);
+
+  if (!isAppReady) {
+    return null;
+  }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

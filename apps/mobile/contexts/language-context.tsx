@@ -9,6 +9,7 @@ interface LanguageContextType {
     language: Language;
     setLanguage: (lang: Language) => void;
     t: (key: string) => string;
+    isReady: boolean;
 }
 
 
@@ -19,10 +20,22 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     const [language, setLanguageState] = useState<Language>('en');
     const [translationsMap, setTranslationsMap] = useState<Record<string, string>>({});
     const [fallbackTranslations, setFallbackTranslations] = useState<Record<string, string>>({});
+    const [hasLoadedLanguage, setHasLoadedLanguage] = useState(false);
+    const [hasLoadedFallback, setHasLoadedFallback] = useState(false);
+    const [hasLoadedTranslations, setHasLoadedTranslations] = useState(false);
+    const [isReady, setIsReady] = useState(false);
 
     useEffect(() => {
-        loadLanguage();
-        loadTranslations('en').then(setFallbackTranslations).catch(() => setFallbackTranslations({}));
+        loadLanguage().finally(() => setHasLoadedLanguage(true));
+        loadTranslations('en')
+            .then((map) => {
+                setFallbackTranslations(map);
+                setHasLoadedFallback(true);
+            })
+            .catch(() => {
+                setFallbackTranslations({});
+                setHasLoadedFallback(true);
+            });
     }, []);
 
     const loadLanguage = async () => {
@@ -47,20 +60,28 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         let active = true;
         loadTranslations(language).then((map) => {
             if (active) setTranslationsMap(map);
+            if (active) setHasLoadedTranslations(true);
         }).catch(() => {
             if (active) setTranslationsMap({});
+            if (active) setHasLoadedTranslations(true);
         });
         return () => {
             active = false;
         };
     }, [language]);
 
+    useEffect(() => {
+        if (!isReady && hasLoadedLanguage && hasLoadedFallback && hasLoadedTranslations) {
+            setIsReady(true);
+        }
+    }, [hasLoadedFallback, hasLoadedLanguage, hasLoadedTranslations, isReady]);
+
     const t = (key: string): string => {
         return translationsMap[key] || fallbackTranslations[key] || key;
     };
 
     return (
-        <LanguageContext.Provider value={{ language, setLanguage, t }}>
+        <LanguageContext.Provider value={{ language, setLanguage, t, isReady }}>
             {children}
         </LanguageContext.Provider>
     );

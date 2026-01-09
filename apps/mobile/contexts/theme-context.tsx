@@ -13,6 +13,7 @@ interface ThemeContextType {
     setThemeMode: (mode: ThemeMode) => void;
     setThemeStyle: (style: ThemeStyle) => void;
     isDark: boolean;
+    isReady: boolean;
 }
 
 const THEME_STORAGE_KEY = '@mindwtr_theme';
@@ -24,7 +25,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const systemColorScheme = useSystemColorScheme() ?? 'light';
     const [themeMode, setThemeModeState] = useState<ThemeMode>('system');
     const [themeStyle, setThemeStyleState] = useState<ThemeStyle>('default');
-    const [isLoading, setIsLoading] = useState(true);
+    const [isReady, setIsReady] = useState(false);
 
     // Determine actual color scheme based on mode and system
     const colorScheme: ColorScheme = themeMode === 'system' ? systemColorScheme : themeMode;
@@ -49,7 +50,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         } catch (e) {
             console.error('Failed to load theme preference:', e);
         } finally {
-            setIsLoading(false);
+            setIsReady(true);
         }
     };
 
@@ -72,7 +73,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     };
 
     return (
-        <ThemeContext.Provider value={{ themeMode, themeStyle, colorScheme, setThemeMode, setThemeStyle, isDark }}>
+        <ThemeContext.Provider value={{ themeMode, themeStyle, colorScheme, setThemeMode, setThemeStyle, isDark, isReady }}>
             {children}
         </ThemeContext.Provider>
     );
