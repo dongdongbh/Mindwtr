@@ -7,7 +7,6 @@ import {
     Info,
     ListChecks,
     Monitor,
-    RefreshCw,
     Sparkles,
 } from 'lucide-react';
 import {
@@ -38,6 +37,11 @@ import { loadAIKey, saveAIKey } from '../../lib/ai-config';
 import { cn } from '../../lib/utils';
 import { SettingsMainPage } from './settings/SettingsMainPage';
 import { SettingsGtdPage } from './settings/SettingsGtdPage';
+import { SettingsAiPage } from './settings/SettingsAiPage';
+import { SettingsNotificationsPage } from './settings/SettingsNotificationsPage';
+import { SettingsCalendarPage } from './settings/SettingsCalendarPage';
+import { SettingsSyncPage } from './settings/SettingsSyncPage';
+import { SettingsAboutPage } from './settings/SettingsAboutPage';
 
 type ThemeMode = 'system' | 'light' | 'dark';
 type SettingsPage = 'main' | 'gtd' | 'notifications' | 'sync' | 'calendar' | 'ai' | 'about';
@@ -82,6 +86,7 @@ export function SettingsView() {
     const { language, setLanguage } = useLanguage();
     const { style: keybindingStyle, setStyle: setKeybindingStyle, openHelp } = useKeybindings();
     const { settings, updateSettings } = useTaskStore();
+    const isTauri = isTauriRuntime();
 
     const [saved, setSaved] = useState(false);
     const [appVersion, setAppVersion] = useState('0.1.0');
@@ -143,7 +148,7 @@ export function SettingsView() {
             setThemeMode(savedTheme);
         }
 
-        if (!isTauriRuntime()) {
+        if (!isTauri) {
             setAppVersion('web');
             return;
         }
@@ -173,7 +178,7 @@ export function SettingsView() {
                 if (path) setLogPath(path);
             })
             .catch(console.error);
-    }, []);
+    }, [isTauri]);
 
     useEffect(() => {
         SyncService.getSyncPath().then(setSyncPath).catch(console.error);
@@ -219,11 +224,11 @@ export function SettingsView() {
         } else {
             root.classList.toggle('dark', themeMode === 'dark');
         }
-        if (!isTauriRuntime()) return;
+        if (!isTauri) return;
         import('@tauri-apps/api/app')
             .then(({ setTheme }) => setTheme(themeMode === 'system' ? null : themeMode))
             .catch(console.error);
-    }, [themeMode]);
+    }, [isTauri, themeMode]);
 
     const showSaved = () => {
         setSaved(true);
@@ -258,13 +263,76 @@ export function SettingsView() {
             .catch(console.error);
     };
 
+    const handleAIProviderChange = (provider: AIProviderId) => {
+        updateAISettings({
+            provider,
+            model: getDefaultAIConfig(provider).model,
+            copilotModel: getDefaultCopilotModel(provider),
+            thinkingBudget: getDefaultAIConfig(provider).thinkingBudget,
+        });
+    };
+
+    const handleToggleAnthropicThinking = () => {
+        updateAISettings({
+            thinkingBudget: anthropicThinkingEnabled ? 0 : (DEFAULT_ANTHROPIC_THINKING_BUDGET || 1024),
+        });
+    };
+
+    const handleAiApiKeyChange = (value: string) => {
+        setAiApiKey(value);
+        saveAIKey(aiProvider, value);
+    };
+
+    const persistCalendars = async (next: ExternalCalendarSubscription[]) => {
+        setCalendarError(null);
+        setExternalCalendars(next);
+        try {
+            await ExternalCalendarService.setCalendars(next);
+            showSaved();
+        } catch (error) {
+            console.error(error);
+            setCalendarError(String(error));
+        }
+    };
+
+    const handleAddCalendar = () => {
+        const url = newCalendarUrl.trim();
+        if (!url) return;
+        const name = (newCalendarName.trim() || 'Calendar').trim();
+        const next = [
+            ...externalCalendars,
+            { id: generateUUID(), name, url, enabled: true },
+        ];
+        setNewCalendarName('');
+        setNewCalendarUrl('');
+        persistCalendars(next);
+    };
+
+    const handleToggleCalendar = (id: string, enabled: boolean) => {
+        const next = externalCalendars.map((calendar) => (calendar.id === id ? { ...calendar, enabled } : calendar));
+        persistCalendars(next);
+    };
+
+    const handleRemoveCalendar = (id: string) => {
+        const next = externalCalendars.filter((calendar) => calendar.id !== id);
+        persistCalendars(next);
+    };
+
+    const handleSaveSyncPath = async () => {
+        if (!syncPath.trim()) return;
+        const result = await SyncService.setSyncPath(syncPath.trim());
+        if (result.success) {
+            showSaved();
+        }
+    };
+
     const openLink = (url: string) => {
         window.open(url, '_blank');
     };
 
     const handleChangeSyncLocation = async () => {
         try {
-            if (!isTauriRuntime()) return;
+            if (!isTauri) return;
 
             const { open } = await import('@tauri-apps/plugin-dialog');
             const selected = await open({
@@ -396,7 +464,7 @@ export function SettingsView() {
         setDownloadNotice(t.downloadStarting);
 
         try {
-            if (isTauriRuntime()) {
+            if (isTauri) {
                 const { open } = await import('@tauri-apps/plugin-shell');
                 await open(targetUrl);
             } else {
@@ -409,7 +477,7 @@ export function SettingsView() {
             setDownloadNotice(t.downloadFailed);
         }
 
-        if (isTauriRuntime()) {
+        if (isTauri) {
             try {
                 const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : '';
                 if (/linux/i.test(userAgent)) {
@@ -825,7 +893,7 @@ export function SettingsView() {
 
     const lastSyncAt = settings?.lastSyncAt;
     const lastSyncStatus = settings?.lastSyncStatus;
-    const lastSyncStats = settings?.lastSyncStats;
+    const lastSyncStats = settings?.lastSyncStats ?? null;
     const lastSyncDisplay = lastSyncAt ? safeFormatDate(lastSyncAt, 'PPpp', lastSyncAt) : t.lastSyncNever;
     const conflictCount = (lastSyncStats?.tasks.conflicts || 0) + (lastSyncStats?.projects.conflicts || 0);
     const weeklyReviewEnabled = settings?.weeklyReviewEnabled === true;
@@ -918,848 +986,121 @@ export function SettingsView() {
 
         if (page === 'ai') {
             return (
-                <div className="space-y-6">
-                    <div className="bg-card border border-border rounded-lg divide-y divide-border">
-                        <div className="p-4 flex items-center justify-between gap-6">
-                            <div className="min-w-0">
-                                <div className="text-sm font-medium">{t.aiEnable}</div>
-                                <div className="text-xs text-muted-foreground mt-1">{t.aiDesc}</div>
-                            </div>
-                            <button
-                                type="button"
-                                role="switch"
-                                aria-checked={aiEnabled}
-                                onClick={() => updateAISettings({ enabled: !aiEnabled })}
-                                className={cn(
-                                    "relative inline-flex h-5 w-9 items-center rounded-full border transition-colors",
-                                    aiEnabled ? "bg-primary border-primary" : "bg-muted/50 border-border"
-                                )}
-                            >
-                                <span
-                                    className={cn(
-                                        "inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform",
-                                        aiEnabled ? "translate-x-4" : "translate-x-1"
-                                    )}
-                                />
-                            </button>
-                        </div>
-
-                        <div className="p-4 space-y-3">
-                            <div className="flex items-center justify-between gap-4">
-                                <div className="text-sm font-medium">{t.aiProvider}</div>
-                                <select
-                                    value={aiProvider}
-                                    onChange={(e) => updateAISettings({
-                                        provider: e.target.value as AIProviderId,
-                                        model: getDefaultAIConfig(e.target.value as AIProviderId).model,
-                                        copilotModel: getDefaultCopilotModel(e.target.value as AIProviderId),
-                                        thinkingBudget: getDefaultAIConfig(e.target.value as AIProviderId).thinkingBudget,
-                                    })}
-                                    className="text-sm bg-muted/50 text-foreground border border-border rounded px-2 py-1 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                >
-                                    <option value="openai">{t.aiProviderOpenAI}</option>
-                                    <option value="gemini">{t.aiProviderGemini}</option>
-                                    <option value="anthropic">{t.aiProviderAnthropic}</option>
-                                </select>
-                            </div>
-
-                            <div className="flex items-center justify-between gap-4">
-                                <div className="text-sm font-medium">{t.aiModel}</div>
-                                <select
-                                    value={aiModel}
-                                    onChange={(e) => updateAISettings({ model: e.target.value })}
-                                    className="text-sm bg-muted/50 text-foreground border border-border rounded px-2 py-1 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                >
-                                    {aiModelOptions.map((option) => (
-                                        <option key={option} value={option}>
-                                            {option}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div className="flex items-center justify-between gap-4">
-                                <div>
-                                    <div className="text-sm font-medium">{t.aiCopilotModel}</div>
-                                    <div className="text-xs text-muted-foreground">{t.aiCopilotHint}</div>
-                                </div>
-                                <select
-                                    value={aiCopilotModel}
-                                    onChange={(e) => updateAISettings({ copilotModel: e.target.value })}
-                                    className="text-sm bg-muted/50 text-foreground border border-border rounded px-2 py-1 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                >
-                                    {aiCopilotOptions.map((option) => (
-                                        <option key={option} value={option}>
-                                            {option}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            {aiProvider === 'openai' && (
-                                <div className="flex items-center justify-between gap-4">
-                                    <div>
-                                        <div className="text-sm font-medium">{t.aiReasoning}</div>
-                                        <div className="text-xs text-muted-foreground">{t.aiReasoningHint}</div>
-                                    </div>
-                                    <select
-                                        value={aiReasoningEffort}
-                                        onChange={(e) => updateAISettings({ reasoningEffort: e.target.value as AIReasoningEffort })}
-                                        className="text-sm bg-muted/50 text-foreground border border-border rounded px-2 py-1 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                    >
-                                        <option value="low">{t.aiEffortLow}</option>
-                                        <option value="medium">{t.aiEffortMedium}</option>
-                                        <option value="high">{t.aiEffortHigh}</option>
-                                    </select>
-                                </div>
-                            )}
-
-                            {aiProvider === 'anthropic' && (
-                                <div className="space-y-3">
-                                    <div className="flex items-center justify-between gap-4">
-                                        <div>
-                                            <div className="text-sm font-medium">{t.aiThinkingEnable}</div>
-                                            <div className="text-xs text-muted-foreground">{t.aiThinkingEnableDesc}</div>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            role="switch"
-                                            aria-checked={anthropicThinkingEnabled}
-                                            onClick={() => updateAISettings({
-                                                thinkingBudget: anthropicThinkingEnabled
-                                                    ? 0
-                                                    : (DEFAULT_ANTHROPIC_THINKING_BUDGET || 1024),
-                                            })}
-                                            className={cn(
-                                                "relative inline-flex h-5 w-9 items-center rounded-full border transition-colors",
-                                                anthropicThinkingEnabled ? "bg-primary border-primary" : "bg-muted/50 border-border"
-                                            )}
-                                        >
-                                            <span
-                                                className={cn(
-                                                    "inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform",
-                                                    anthropicThinkingEnabled ? "translate-x-4" : "translate-x-1"
-                                                )}
-                                            />
-                                        </button>
-                                    </div>
-                                    {anthropicThinkingEnabled && (
-                                        <div className="flex items-center justify-between gap-4">
-                                            <div>
-                                                <div className="text-sm font-medium">{t.aiThinkingBudget}</div>
-                                                <div className="text-xs text-muted-foreground">{t.aiThinkingHint}</div>
-                                            </div>
-                                            <select
-                                                value={String(aiThinkingBudget)}
-                                                onChange={(e) => updateAISettings({ thinkingBudget: Number(e.target.value) })}
-                                                className="text-sm bg-muted/50 text-foreground border border-border rounded px-2 py-1 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                            >
-                                                {anthropicThinkingOptions.map((option) => (
-                                                    <option key={option.value} value={String(option.value)}>
-                                                        {option.label}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {aiProvider === 'gemini' && (
-                                <div className="flex items-center justify-between gap-4">
-                                    <div>
-                                        <div className="text-sm font-medium">{t.aiThinkingBudget}</div>
-                                        <div className="text-xs text-muted-foreground">{t.aiThinkingHint}</div>
-                                    </div>
-                                    <select
-                                        value={String(aiThinkingBudget)}
-                                        onChange={(e) => updateAISettings({ thinkingBudget: Number(e.target.value) })}
-                                        className="text-sm bg-muted/50 text-foreground border border-border rounded px-2 py-1 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                    >
-                                        <option value="0">{t.aiThinkingOff}</option>
-                                        <option value="128">{t.aiThinkingLow}</option>
-                                        <option value="256">{t.aiThinkingMedium}</option>
-                                        <option value="512">{t.aiThinkingHigh}</option>
-                                    </select>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="p-4 space-y-2">
-                            <div className="text-sm font-medium">{t.aiApiKey}</div>
-                            <input
-                                type="password"
-                                value={aiApiKey}
-                                onChange={(e) => {
-                                    setAiApiKey(e.target.value);
-                                    saveAIKey(aiProvider, e.target.value);
-                                }}
-                                placeholder={t.aiApiKey}
-                                className="w-full text-sm bg-muted/50 text-foreground border border-border rounded px-2 py-2 focus:outline-none focus:ring-2 focus:ring-primary/40"
-                            />
-                            <div className="text-xs text-muted-foreground">{t.aiApiKeyHint}</div>
-                        </div>
-                    </div>
-                </div>
+                <SettingsAiPage
+                    t={t}
+                    aiEnabled={aiEnabled}
+                    aiProvider={aiProvider}
+                    aiModel={aiModel}
+                    aiModelOptions={aiModelOptions}
+                    aiCopilotModel={aiCopilotModel}
+                    aiCopilotOptions={aiCopilotOptions}
+                    aiReasoningEffort={aiReasoningEffort}
+                    aiThinkingBudget={aiThinkingBudget}
+                    anthropicThinkingEnabled={anthropicThinkingEnabled}
+                    anthropicThinkingOptions={anthropicThinkingOptions}
+                    aiApiKey={aiApiKey}
+                    onUpdateAISettings={updateAISettings}
+                    onProviderChange={handleAIProviderChange}
+                    onToggleAnthropicThinking={handleToggleAnthropicThinking}
+                    onAiApiKeyChange={handleAiApiKeyChange}
+                />
             );
         }
 
         if (page === 'notifications') {
             return (
-                <div className="bg-card border border-border rounded-lg p-6 space-y-4">
-                    <p className="text-sm text-muted-foreground">{t.notificationsDesc}</p>
-
-                    <div className="flex items-start justify-between gap-4">
-                        <div>
-                            <p className="text-sm font-medium">{t.notificationsEnable}</p>
-                        </div>
-                        <button
-                            type="button"
-                            role="switch"
-                            aria-checked={notificationsEnabled}
-                            onClick={() => updateSettings({ notificationsEnabled: !notificationsEnabled }).then(showSaved).catch(console.error)}
-                            className={cn(
-                                "relative inline-flex h-5 w-9 items-center rounded-full border transition-colors",
-                                notificationsEnabled ? "bg-primary border-primary" : "bg-muted/50 border-border"
-                            )}
-                        >
-                            <span
-                                className={cn(
-                                    "inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform",
-                                    notificationsEnabled ? "translate-x-4" : "translate-x-1"
-                                )}
-                            />
-                        </button>
-                    </div>
-
-                    <div className="border-t border-border/50"></div>
-
-                    <div className="space-y-3">
-                        <div>
-                            <p className="text-sm font-medium">{t.weeklyReview}</p>
-                            <p className="text-xs text-muted-foreground mt-1">{t.weeklyReviewDesc}</p>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-4">
-                            <div className="text-sm font-medium">{t.weeklyReview}</div>
-                            <button
-                                type="button"
-                                role="switch"
-                                aria-checked={weeklyReviewEnabled}
-                                onClick={() => updateSettings({ weeklyReviewEnabled: !weeklyReviewEnabled }).then(showSaved).catch(console.error)}
-                                disabled={!notificationsEnabled}
-                                className={cn(
-                                    "relative inline-flex h-5 w-9 items-center rounded-full border transition-colors disabled:opacity-50",
-                                    weeklyReviewEnabled ? "bg-primary border-primary" : "bg-muted/50 border-border"
-                                )}
-                            >
-                                <span
-                                    className={cn(
-                                        "inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform",
-                                        weeklyReviewEnabled ? "translate-x-4" : "translate-x-1"
-                                    )}
-                                />
-                            </button>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-4">
-                            <div className="text-sm font-medium">{t.weeklyReviewDay}</div>
-                            <select
-                                value={weeklyReviewDay}
-                                disabled={!notificationsEnabled || !weeklyReviewEnabled}
-                                onChange={(e) => updateSettings({ weeklyReviewDay: Number(e.target.value) }).then(showSaved).catch(console.error)}
-                                className="bg-muted px-2 py-1 rounded text-sm border border-border disabled:opacity-50"
-                            >
-                                {weekdayOptions.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-4">
-                            <div className="text-sm font-medium">{t.weeklyReviewTime}</div>
-                            <input
-                                type="time"
-                                value={weeklyReviewTime}
-                                disabled={!notificationsEnabled || !weeklyReviewEnabled}
-                                onChange={(e) => updateSettings({ weeklyReviewTime: e.target.value }).then(showSaved).catch(console.error)}
-                                className="bg-muted px-2 py-1 rounded text-sm border border-border disabled:opacity-50"
-                            />
-                        </div>
-                    </div>
-
-                    <div className="border-t border-border/50"></div>
-
-                    <div className="space-y-3">
-                        <div>
-                            <p className="text-sm font-medium">{t.dailyDigest}</p>
-                            <p className="text-xs text-muted-foreground mt-1">{t.dailyDigestDesc}</p>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-4">
-                            <div className="text-sm font-medium">{t.dailyDigestMorning}</div>
-                            <div className="flex items-center gap-3">
-                                <input
-                                    type="time"
-                                    value={dailyDigestMorningTime}
-                                    disabled={!notificationsEnabled || !dailyDigestMorningEnabled}
-                                    onChange={(e) => updateSettings({ dailyDigestMorningTime: e.target.value }).then(showSaved).catch(console.error)}
-                                    className="bg-muted px-2 py-1 rounded text-sm border border-border disabled:opacity-50"
-                                />
-                                <button
-                                    type="button"
-                                    role="switch"
-                                    aria-checked={dailyDigestMorningEnabled}
-                                    onClick={() => updateSettings({ dailyDigestMorningEnabled: !dailyDigestMorningEnabled }).then(showSaved).catch(console.error)}
-                                    disabled={!notificationsEnabled}
-                                    className={cn(
-                                        "relative inline-flex h-5 w-9 items-center rounded-full border transition-colors disabled:opacity-50",
-                                        dailyDigestMorningEnabled ? "bg-primary border-primary" : "bg-muted/50 border-border"
-                                    )}
-                                >
-                                    <span
-                                        className={cn(
-                                            "inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform",
-                                            dailyDigestMorningEnabled ? "translate-x-4" : "translate-x-1"
-                                        )}
-                                    />
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-4">
-                            <div className="text-sm font-medium">{t.dailyDigestEvening}</div>
-                            <div className="flex items-center gap-3">
-                                <input
-                                    type="time"
-                                    value={dailyDigestEveningTime}
-                                    disabled={!notificationsEnabled || !dailyDigestEveningEnabled}
-                                    onChange={(e) => updateSettings({ dailyDigestEveningTime: e.target.value }).then(showSaved).catch(console.error)}
-                                    className="bg-muted px-2 py-1 rounded text-sm border border-border disabled:opacity-50"
-                                />
-                                <button
-                                    type="button"
-                                    role="switch"
-                                    aria-checked={dailyDigestEveningEnabled}
-                                    onClick={() => updateSettings({ dailyDigestEveningEnabled: !dailyDigestEveningEnabled }).then(showSaved).catch(console.error)}
-                                    disabled={!notificationsEnabled}
-                                    className={cn(
-                                        "relative inline-flex h-5 w-9 items-center rounded-full border transition-colors disabled:opacity-50",
-                                        dailyDigestEveningEnabled ? "bg-primary border-primary" : "bg-muted/50 border-border"
-                                    )}
-                                >
-                                    <span
-                                        className={cn(
-                                            "inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform",
-                                            dailyDigestEveningEnabled ? "translate-x-4" : "translate-x-1"
-                                        )}
-                                    />
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <SettingsNotificationsPage
+                    t={t}
+                    notificationsEnabled={notificationsEnabled}
+                    weeklyReviewEnabled={weeklyReviewEnabled}
+                    weeklyReviewDay={weeklyReviewDay}
+                    weeklyReviewTime={weeklyReviewTime}
+                    weekdayOptions={weekdayOptions}
+                    dailyDigestMorningEnabled={dailyDigestMorningEnabled}
+                    dailyDigestEveningEnabled={dailyDigestEveningEnabled}
+                    dailyDigestMorningTime={dailyDigestMorningTime}
+                    dailyDigestEveningTime={dailyDigestEveningTime}
+                    updateSettings={updateSettings}
+                    showSaved={showSaved}
+                />
             );
         }
 
         if (page === 'calendar') {
-            const persistCalendars = async (next: ExternalCalendarSubscription[]) => {
-                setCalendarError(null);
-                setExternalCalendars(next);
-                try {
-                    await ExternalCalendarService.setCalendars(next);
-                    showSaved();
-                } catch (error) {
-                    console.error(error);
-                    setCalendarError(String(error));
-                }
-            };
-
             return (
-                <div className="space-y-6">
-                    <div className="bg-card border border-border rounded-lg p-6 space-y-4">
-                        <p className="text-sm text-muted-foreground">{t.calendarDesc}</p>
-
-                        <div className="grid gap-3 md:grid-cols-2">
-                            <div className="space-y-1">
-                                <div className="text-sm font-medium">{t.calendarName}</div>
-                                <input
-                                    value={newCalendarName}
-                                    onChange={(e) => setNewCalendarName(e.target.value)}
-                                    placeholder={t.calendarName}
-                                    className="w-full text-sm px-3 py-2 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
-                                />
-                            </div>
-                            <div className="space-y-1">
-                                <div className="text-sm font-medium">{t.calendarUrl}</div>
-                                <input
-                                    value={newCalendarUrl}
-                                    onChange={(e) => setNewCalendarUrl(e.target.value)}
-                                    placeholder="https://..."
-                                    className="w-full text-sm px-3 py-2 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-4">
-                            <button
-                                disabled={!newCalendarUrl.trim()}
-                                onClick={() => {
-                                    const url = newCalendarUrl.trim();
-                                    if (!url) return;
-                                    const name = (newCalendarName.trim() || 'Calendar').trim();
-                                    const next = [
-                                        ...externalCalendars,
-                                        { id: generateUUID(), name, url, enabled: true },
-                                    ];
-                                    setNewCalendarName('');
-                                    setNewCalendarUrl('');
-                                    persistCalendars(next);
-                                }}
-                                className={cn(
-                                    "text-sm px-3 py-2 rounded-md transition-colors",
-                                    newCalendarUrl.trim()
-                                        ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                                        : "bg-muted text-muted-foreground cursor-not-allowed"
-                                )}
-                            >
-                                {t.calendarAdd}
-                            </button>
-                            {calendarError && (
-                                <div className="text-xs text-red-400">{calendarError}</div>
-                            )}
-                        </div>
-                    </div>
-
-                    {externalCalendars.length > 0 && (
-                        <div className="bg-card border border-border rounded-lg overflow-hidden">
-                            <div className="px-4 py-3 text-sm font-medium border-b border-border">{t.externalCalendars}</div>
-                            <div className="divide-y divide-border">
-                                {externalCalendars.map((calendar) => (
-                                    <div key={calendar.id} className="p-4 flex items-start justify-between gap-4">
-                                        <div className="min-w-0">
-                                            <div className="text-sm font-medium truncate">{calendar.name}</div>
-                                            <div className="text-xs text-muted-foreground truncate mt-1">{maskCalendarUrl(calendar.url)}</div>
-                                        </div>
-                                        <div className="flex items-center gap-3">
-                                            <input
-                                                type="checkbox"
-                                                checked={calendar.enabled}
-                                                onChange={(e) => {
-                                                    const next = externalCalendars.map((c) => c.id === calendar.id ? { ...c, enabled: e.target.checked } : c);
-                                                    persistCalendars(next);
-                                                }}
-                                                className="h-4 w-4 accent-blue-600"
-                                            />
-                                            <button
-                                                onClick={() => {
-                                                    const next = externalCalendars.filter((c) => c.id !== calendar.id);
-                                                    persistCalendars(next);
-                                                }}
-                                                className="text-sm text-red-400 hover:text-red-300"
-                                            >
-                                                {t.calendarRemove}
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-                </div>
+                <SettingsCalendarPage
+                    t={t}
+                    newCalendarName={newCalendarName}
+                    newCalendarUrl={newCalendarUrl}
+                    calendarError={calendarError}
+                    externalCalendars={externalCalendars}
+                    onCalendarNameChange={setNewCalendarName}
+                    onCalendarUrlChange={setNewCalendarUrl}
+                    onAddCalendar={handleAddCalendar}
+                    onToggleCalendar={handleToggleCalendar}
+                    onRemoveCalendar={handleRemoveCalendar}
+                    maskCalendarUrl={maskCalendarUrl}
+                />
             );
         }
 
         if (page === 'sync') {
             return (
-                <div className="space-y-8">
-                    <section className="space-y-3">
-                        <h2 className="text-lg font-semibold flex items-center gap-2">
-                            <Database className="w-5 h-5" />
-                            {t.localData}
-                        </h2>
-                        <div className="bg-card border border-border rounded-lg p-6 space-y-3">
-                            <p className="text-sm text-muted-foreground">{isTauriRuntime() ? t.localDataDesc : t.webDataDesc}</p>
-                            {isTauriRuntime() && dataPath && (
-                                <div className="space-y-2 text-sm">
-                                    {dbPath && (
-                                        <div className="flex items-center justify-between gap-4">
-                                            <span className="text-muted-foreground">mindwtr.db</span>
-                                            <span className="font-mono text-xs break-all">{dbPath}</span>
-                                        </div>
-                                    )}
-                                    <div className="flex items-center justify-between gap-4">
-                                        <span className="text-muted-foreground">data.json (backup)</span>
-                                        <span className="font-mono text-xs break-all">{dataPath}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between gap-4">
-                                        <span className="text-muted-foreground">config.toml</span>
-                                        <span className="font-mono text-xs break-all">{configPath}</span>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </section>
-
-                    {isTauriRuntime() && (
-                        <section className="space-y-3">
-                            <h2 className="text-lg font-semibold flex items-center gap-2">
-                                <Info className="w-5 h-5" />
-                                {t.diagnostics}
-                            </h2>
-                            <div className="bg-card border border-border rounded-lg p-6 space-y-4">
-                                <p className="text-sm text-muted-foreground">{t.diagnosticsDesc}</p>
-                                <div className="flex items-start justify-between gap-4">
-                                    <div>
-                                        <p className="text-sm font-medium">{t.debugLogging}</p>
-                                        <p className="text-xs text-muted-foreground">{t.debugLoggingDesc}</p>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        role="switch"
-                                        aria-checked={loggingEnabled}
-                                        onClick={toggleLogging}
-                                        className={cn(
-                                            "relative inline-flex h-5 w-9 items-center rounded-full border transition-colors",
-                                            loggingEnabled ? "bg-primary border-primary" : "bg-muted/50 border-border"
-                                        )}
-                                    >
-                                        <span
-                                            className={cn(
-                                                "inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform",
-                                                loggingEnabled ? "translate-x-4" : "translate-x-1"
-                                            )}
-                                        />
-                                    </button>
-                                </div>
-                                {loggingEnabled && logPath && (
-                                    <div className="text-xs text-muted-foreground">
-                                        <span className="font-medium">{t.logFile}:</span>{' '}
-                                        <span className="font-mono break-all">{logPath}</span>
-                                    </div>
-                                )}
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={handleClearLog}
-                                        className="px-3 py-1.5 rounded-md text-xs font-medium bg-muted text-foreground hover:bg-muted/80 transition-colors"
-                                    >
-                                        {t.clearLog}
-                                    </button>
-                                </div>
-                            </div>
-                        </section>
-                    )}
-
-                    <section className="space-y-3">
-                        <h2 className="text-lg font-semibold flex items-center gap-2">
-                            <RefreshCw className="w-5 h-5" />
-                            {t.sync}
-                        </h2>
-
-                        <div className="bg-card border border-border rounded-lg p-6 space-y-4">
-                            <p className="text-sm text-muted-foreground">{t.syncDescription}</p>
-
-                            <div className="flex items-center justify-between gap-4">
-                                <span className="text-sm font-medium">{t.syncBackend}</span>
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={() => handleSetSyncBackend('file')}
-                                        className={cn(
-                                            "px-3 py-1.5 rounded-md text-sm font-medium transition-colors border",
-                                            syncBackend === 'file'
-                                                ? "bg-primary/10 text-primary border-primary ring-1 ring-primary"
-                                                : "bg-muted/50 text-muted-foreground border-border hover:bg-muted hover:text-foreground",
-                                        )}
-                                    >
-                                        {t.syncBackendFile}
-                                    </button>
-                                    <button
-                                        onClick={() => handleSetSyncBackend('webdav')}
-                                        className={cn(
-                                            "px-3 py-1.5 rounded-md text-sm font-medium transition-colors border",
-                                            syncBackend === 'webdav'
-                                                ? "bg-primary/10 text-primary border-primary ring-1 ring-primary"
-                                                : "bg-muted/50 text-muted-foreground border-border hover:bg-muted hover:text-foreground",
-                                        )}
-                                    >
-                                        {t.syncBackendWebdav}
-                                    </button>
-                                    <button
-                                        onClick={() => handleSetSyncBackend('cloud')}
-                                        className={cn(
-                                            "px-3 py-1.5 rounded-md text-sm font-medium transition-colors border",
-                                            syncBackend === 'cloud'
-                                                ? "bg-primary/10 text-primary border-primary ring-1 ring-primary"
-                                                : "bg-muted/50 text-muted-foreground border-border hover:bg-muted hover:text-foreground",
-                                        )}
-                                    >
-                                        {t.syncBackendCloud}
-                                    </button>
-                                </div>
-                            </div>
-
-                            {syncBackend === 'file' && (
-                                <div className="flex flex-col gap-2">
-                                    <label className="text-sm font-medium">{t.syncFolderLocation}</label>
-                                    <div className="flex gap-2">
-                                        <input
-                                            type="text"
-                                            value={syncPath}
-                                            onChange={(e) => setSyncPath(e.target.value)}
-                                            placeholder="/path/to/your/sync/folder"
-                                            className="flex-1 bg-muted p-2 rounded text-sm font-mono border border-border focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        />
-                                        <button
-                                            onClick={async () => {
-                                                if (syncPath.trim()) {
-                                                    const result = await SyncService.setSyncPath(syncPath.trim());
-                                                    if (result.success) {
-                                                        showSaved();
-                                                    }
-                                                }
-                                            }}
-                                            disabled={!syncPath.trim() || !isTauriRuntime()}
-                                            className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:bg-gray-400 whitespace-nowrap"
-                                        >
-                                            {t.savePath}
-                                        </button>
-                                        <button
-                                            onClick={handleChangeSyncLocation}
-                                            disabled={!isTauriRuntime()}
-                                            className="px-4 py-2 bg-secondary text-secondary-foreground rounded-md text-sm font-medium hover:bg-secondary/90 whitespace-nowrap disabled:opacity-50"
-                                        >
-                                            {t.browse}
-                                        </button>
-                                    </div>
-                                    <p className="text-xs text-muted-foreground">{t.pathHint}</p>
-                                </div>
-                            )}
-
-                            {syncBackend === 'webdav' && (
-                                <div className="space-y-3">
-                                    <div className="flex flex-col gap-2">
-                                        <label className="text-sm font-medium">{t.webdavUrl}</label>
-                                        <input
-                                            type="text"
-                                            value={webdavUrl}
-                                            onChange={(e) => setWebdavUrl(e.target.value)}
-                                            placeholder="https://example.com/remote.php/dav/files/user/data.json"
-                                            className="bg-muted p-2 rounded text-sm font-mono border border-border focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        />
-                                        <p className="text-xs text-muted-foreground">{t.webdavHint}</p>
-                                    </div>
-
-                                    <div className="grid sm:grid-cols-2 gap-2">
-                                        <div className="flex flex-col gap-2">
-                                            <label className="text-sm font-medium">{t.webdavUsername}</label>
-                                            <input
-                                                type="text"
-                                                value={webdavUsername}
-                                                onChange={(e) => setWebdavUsername(e.target.value)}
-                                                className="bg-muted p-2 rounded text-sm border border-border focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                            />
-                                        </div>
-                                        <div className="flex flex-col gap-2">
-                                            <label className="text-sm font-medium">{t.webdavPassword}</label>
-                                            <input
-                                                type="password"
-                                                value={webdavPassword}
-                                                onChange={(e) => setWebdavPassword(e.target.value)}
-                                                className="bg-muted p-2 rounded text-sm border border-border focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                            />
-                                        </div>
-                                    </div>
-
-                                    <div className="flex justify-end">
-                                        <button
-                                            onClick={handleSaveWebDav}
-                                            className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 whitespace-nowrap"
-                                        >
-                                            {t.webdavSave}
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-
-                            {syncBackend === 'cloud' && (
-                                <div className="space-y-3">
-                                    <div className="flex flex-col gap-2">
-                                        <label className="text-sm font-medium">{t.cloudUrl}</label>
-                                        <input
-                                            type="text"
-                                            value={cloudUrl}
-                                            onChange={(e) => setCloudUrl(e.target.value)}
-                                            placeholder="https://example.com/v1/data"
-                                            className="bg-muted p-2 rounded text-sm font-mono border border-border focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        />
-                                        <p className="text-xs text-muted-foreground">{t.cloudHint}</p>
-                                    </div>
-
-                                    <div className="flex flex-col gap-2">
-                                        <label className="text-sm font-medium">{t.cloudToken}</label>
-                                        <input
-                                            type="password"
-                                            value={cloudToken}
-                                            onChange={(e) => setCloudToken(e.target.value)}
-                                            className="bg-muted p-2 rounded text-sm border border-border focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        />
-                                    </div>
-
-                                    <div className="flex justify-end">
-                                        <button
-                                            onClick={handleSaveCloud}
-                                            className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 whitespace-nowrap"
-                                        >
-                                            {t.cloudSave}
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-
-                            {(syncBackend === 'webdav'
-                                ? !!webdavUrl.trim()
-                                : syncBackend === 'cloud'
-                                    ? !!cloudUrl.trim()
-                                    : !!syncPath.trim()) && (
-                                <div className="pt-2 flex items-center gap-3">
-                                    <button
-                                        onClick={handleSync}
-                                        disabled={isSyncing}
-                                        className={cn(
-                                            "flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium text-white transition-colors",
-                                            isSyncing ? "bg-blue-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700",
-                                        )}
-                                    >
-                                        <ExternalLink className={cn("w-4 h-4", isSyncing && "animate-spin")} />
-                                        {isSyncing ? t.syncing : t.syncNow}
-                                    </button>
-                                    {syncError && <span className="text-xs text-destructive">{syncError}</span>}
-                                </div>
-                            )}
-
-                            <div className="pt-3 text-xs text-muted-foreground space-y-1">
-                                <div>
-                                    {t.lastSync}: {lastSyncDisplay}
-                                    {lastSyncStatus === 'success' && ` • ${t.lastSyncSuccess}`}
-                                    {lastSyncStatus === 'conflict' && ` • ${t.lastSyncConflict}`}
-                                    {lastSyncStatus === 'error' && ` • ${t.lastSyncError}`}
-                                </div>
-                                {lastSyncStats && (
-                                    <div>
-                                        {t.lastSyncConflicts}: {conflictCount} • Tasks {lastSyncStats.tasks.mergedTotal} /
-                                        Projects {lastSyncStats.projects.mergedTotal}
-                                    </div>
-                                )}
-                                {lastSyncStatus === 'error' && settings?.lastSyncError && (
-                                    <div className="text-destructive">{settings.lastSyncError}</div>
-                                )}
-                            </div>
-                        </div>
-                    </section>
-                </div>
+                <SettingsSyncPage
+                    t={t}
+                    isTauri={isTauri}
+                    dataPath={dataPath}
+                    dbPath={dbPath}
+                    configPath={configPath}
+                    loggingEnabled={loggingEnabled}
+                    logPath={logPath}
+                    onToggleLogging={toggleLogging}
+                    onClearLog={handleClearLog}
+                    syncBackend={syncBackend}
+                    onSetSyncBackend={handleSetSyncBackend}
+                    syncPath={syncPath}
+                    onSyncPathChange={setSyncPath}
+                    onSaveSyncPath={handleSaveSyncPath}
+                    onBrowseSyncPath={handleChangeSyncLocation}
+                    webdavUrl={webdavUrl}
+                    webdavUsername={webdavUsername}
+                    webdavPassword={webdavPassword}
+                    onWebdavUrlChange={setWebdavUrl}
+                    onWebdavUsernameChange={setWebdavUsername}
+                    onWebdavPasswordChange={setWebdavPassword}
+                    onSaveWebDav={handleSaveWebDav}
+                    cloudUrl={cloudUrl}
+                    cloudToken={cloudToken}
+                    onCloudUrlChange={setCloudUrl}
+                    onCloudTokenChange={setCloudToken}
+                    onSaveCloud={handleSaveCloud}
+                    onSyncNow={handleSync}
+                    isSyncing={isSyncing}
+                    syncError={syncError}
+                    lastSyncDisplay={lastSyncDisplay}
+                    lastSyncStatus={lastSyncStatus}
+                    lastSyncStats={lastSyncStats}
+                    conflictCount={conflictCount}
+                    lastSyncError={settings?.lastSyncError}
+                />
             );
         }
 
         if (page === 'about') {
             return (
-                <div className="bg-muted/30 rounded-lg p-6 space-y-4 border border-border">
-                    <div className="space-y-1">
-                        <div className="text-sm font-medium">{t.localData}</div>
-                        <div className="text-xs text-muted-foreground">
-                            {isTauriRuntime() ? t.localDataDesc : t.webDataDesc}
-                        </div>
-                    </div>
-                    {isTauriRuntime() && (
-                        <div className="grid sm:grid-cols-2 gap-3">
-                            {dbPath && (
-                                <div className="space-y-1">
-                                    <div className="text-xs font-medium text-muted-foreground">mindwtr.db</div>
-                                    <div className="text-xs font-mono bg-muted/60 border border-border rounded px-2 py-1 break-all">
-                                        {dbPath}
-                                    </div>
-                                </div>
-                            )}
-                            <div className="space-y-1">
-                                <div className="text-xs font-medium text-muted-foreground">data.json (backup)</div>
-                                <div className="text-xs font-mono bg-muted/60 border border-border rounded px-2 py-1 break-all">
-                                    {dataPath}
-                                </div>
-                            </div>
-                            <div className="space-y-1">
-                                <div className="text-xs font-medium text-muted-foreground">config.toml</div>
-                                <div className="text-xs font-mono bg-muted/60 border border-border rounded px-2 py-1 break-all">
-                                    {configPath}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                    <div className="border-t border-border/50"></div>
-                    <div className="flex justify-between items-center">
-                        <span className="text-muted-foreground">{t.version}</span>
-                        <span className="font-mono bg-muted px-2 py-1 rounded text-sm">v{appVersion}</span>
-                    </div>
-                    <div className="border-t border-border/50"></div>
-                    <div className="flex justify-between items-center">
-                        <span className="text-muted-foreground">{t.developer}</span>
-                        <span className="font-medium">dongdongbh</span>
-                    </div>
-                    <div className="border-t border-border/50"></div>
-                    <div className="flex justify-between items-center">
-                        <span className="text-muted-foreground">{t.license}</span>
-                        <span className="font-medium">MIT</span>
-                    </div>
-                    <div className="border-t border-border/50"></div>
-                    <div className="flex justify-between items-center">
-                        <span className="text-muted-foreground">{t.website}</span>
-                        <button onClick={() => openLink('https://dongdongbh.tech')} className="text-primary hover:underline flex items-center gap-1">
-                            dongdongbh.tech
-                            <ExternalLink className="w-3 h-3" />
-                        </button>
-                    </div>
-                    <div className="border-t border-border/50"></div>
-                    <div className="flex justify-between items-center">
-                        <span className="text-muted-foreground">{t.github}</span>
-                        <button
-                            onClick={() => openLink('https://github.com/dongdongbh/Mindwtr')}
-                            className="text-blue-400 hover:underline cursor-pointer flex items-center gap-1"
-                        >
-                            github.com/dongdongbh/Mindwtr
-                            <ExternalLink className="w-3 h-3" />
-                        </button>
-                    </div>
-                    <div className="border-t border-border/50"></div>
-                    <div className="flex justify-between items-center">
-                        <span className="text-muted-foreground">{t.checkForUpdates}</span>
-                        <button
-                            onClick={handleCheckUpdates}
-                            disabled={isCheckingUpdate}
-                            className={cn(
-                                "flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
-                                isCheckingUpdate
-                                    ? "bg-muted text-muted-foreground cursor-not-allowed"
-                                    : "bg-primary text-primary-foreground hover:bg-primary/90",
-                            )}
-                        >
-                            <RefreshCw className={cn("w-4 h-4", isCheckingUpdate && "animate-spin")} />
-                            {isCheckingUpdate ? t.checking : t.checkForUpdates}
-                        </button>
-                    </div>
-                    {updateError && (
-                        <>
-                            <div className="border-t border-border/50"></div>
-                            <div className="text-red-500 text-sm">{t.checkFailed}</div>
-                        </>
-                    )}
-                    {updateNotice && !updateError && (
-                        <>
-                            <div className="border-t border-border/50"></div>
-                            <div className="text-sm text-muted-foreground">{updateNotice}</div>
-                        </>
-                    )}
-                </div>
+                <SettingsAboutPage
+                    t={t}
+                    isTauri={isTauri}
+                    dataPath={dataPath}
+                    dbPath={dbPath}
+                    configPath={configPath}
+                    appVersion={appVersion}
+                    onOpenLink={openLink}
+                    onCheckUpdates={handleCheckUpdates}
+                    isCheckingUpdate={isCheckingUpdate}
+                    updateError={updateError}
+                    updateNotice={updateNotice}
+                />
             );
         }
 
