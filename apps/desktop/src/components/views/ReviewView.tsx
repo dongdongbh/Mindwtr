@@ -567,9 +567,20 @@ function DailyReviewGuideModal({ onClose }: { onClose: () => void }) {
     const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
 
     const activeTasks = tasks.filter((task) => !task.deletedAt);
-    const inboxTasks = activeTasks.filter((task) => task.status === 'inbox');
+    const inboxTasks = useMemo(() => {
+        const now = new Date();
+        return activeTasks.filter((task) => {
+            if (task.status !== 'inbox') return false;
+            const start = safeParseDate(task.startTime);
+            if (start && start > now) return false;
+            return true;
+        });
+    }, [activeTasks]);
     const focusedTasks = activeTasks.filter((task) => task.isFocusedToday && task.status !== 'done');
-    const waitingTasks = activeTasks.filter((task) => task.status === 'waiting' && task.status !== 'done');
+    const waitingTasks = useMemo(
+        () => sortTasksBy(activeTasks.filter((task) => task.status === 'waiting'), sortBy),
+        [activeTasks, sortBy],
+    );
 
     const dueTodayTasks = activeTasks.filter((task) => {
         if (task.status === 'done') return false;
@@ -592,6 +603,38 @@ function DailyReviewGuideModal({ onClose }: { onClose: () => void }) {
         return Array.from(new Set([...PRESET_CONTEXTS, ...taskContexts])).sort();
     }, [tasks]);
 
+    const sequentialProjectIds = useMemo(
+        () => new Set(projects.filter((project) => project.isSequential && !project.deletedAt).map((project) => project.id)),
+        [projects],
+    );
+    const sequentialFirstTaskIds = useMemo(() => {
+        const tasksByProject = new Map<string, Task[]>();
+        activeTasks.forEach((task) => {
+            if (task.status !== 'next' || !task.projectId) return;
+            if (!sequentialProjectIds.has(task.projectId)) return;
+            const list = tasksByProject.get(task.projectId) ?? [];
+            list.push(task);
+            tasksByProject.set(task.projectId, list);
+        });
+        const firstIds: string[] = [];
+        tasksByProject.forEach((tasksForProject) => {
+            const hasOrder = tasksForProject.some((task) => Number.isFinite(task.orderNum));
+            let firstTask: Task | null = null;
+            let bestKey = Number.POSITIVE_INFINITY;
+            tasksForProject.forEach((task) => {
+                const key = hasOrder
+                    ? (Number.isFinite(task.orderNum) ? (task.orderNum as number) : Number.POSITIVE_INFINITY)
+                    : new Date(task.createdAt).getTime();
+                if (!firstTask || key < bestKey) {
+                    firstTask = task;
+                    bestKey = key;
+                }
+            });
+            if (firstTask) firstIds.push(firstTask.id);
+        });
+        return new Set(firstIds);
+    }, [activeTasks, sequentialProjectIds]);
+
     const focusCandidates = useMemo(() => {
         const now = new Date();
         const todayStr = now.toDateString();
@@ -608,6 +651,11 @@ function DailyReviewGuideModal({ onClose }: { onClose: () => void }) {
                 return;
             }
             if (task.status === 'next') {
+                const start = safeParseDate(task.startTime);
+                if (start && start > now) return;
+                if (task.projectId && sequentialProjectIds.has(task.projectId) && !sequentialFirstTaskIds.has(task.id)) {
+                    return;
+                }
                 addCandidate(task);
                 return;
             }
@@ -616,7 +664,7 @@ function DailyReviewGuideModal({ onClose }: { onClose: () => void }) {
             }
         });
         return sortTasksBy(Array.from(byId.values()), sortBy);
-    }, [activeTasks, sortBy]);
+    }, [activeTasks, sequentialFirstTaskIds, sequentialProjectIds, sortBy]);
 
     useEffect(() => {
         if (currentStep !== 'inbox' && isProcessing) {

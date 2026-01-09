@@ -10,6 +10,7 @@ import { useLanguage } from '../contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { SwipeableTaskItem } from './swipeable-task-item';
 import { TaskEditModal } from './task-edit-modal';
+import { InboxProcessingModal } from './inbox-processing-modal';
 
 type DailyReviewStep = 'intro' | 'today' | 'focus' | 'inbox' | 'waiting' | 'complete';
 
@@ -31,6 +32,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
     const [currentStep, setCurrentStep] = useState<DailyReviewStep>('intro');
     const [editingTask, setEditingTask] = useState<Task | null>(null);
     const [isTaskModalVisible, setIsTaskModalVisible] = useState(false);
+    const [showInboxProcessing, setShowInboxProcessing] = useState(false);
 
     const sortBy = (settings?.taskSortBy ?? 'default') as TaskSortBy;
 
@@ -41,15 +43,47 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
         [tasks],
     );
 
-    const inboxTasks = useMemo(
-        () => activeTasks.filter((task) => task.status === 'inbox'),
-        [activeTasks],
-    );
+    const inboxTasks = useMemo(() => {
+        const now = new Date();
+        return activeTasks.filter((task) => {
+            if (task.status !== 'inbox') return false;
+            const start = safeParseDate(task.startTime);
+            if (start && start > now) return false;
+            return true;
+        });
+    }, [activeTasks]);
 
     const focusedTasks = useMemo(
         () => activeTasks.filter((task) => task.isFocusedToday && task.status !== 'done'),
         [activeTasks],
     );
+
+    const focusCandidates = useMemo(() => {
+        const now = new Date();
+        const todayStr = now.toDateString();
+        const byId = new Map<string, Task>();
+        const addCandidate = (task: Task) => {
+            if (!byId.has(task.id)) byId.set(task.id, task);
+        };
+        activeTasks.forEach((task) => {
+            if (task.isFocusedToday) addCandidate(task);
+            const due = safeParseDueDate(task.dueDate);
+            if (due && (due < now || due.toDateString() === todayStr)) {
+                addCandidate(task);
+                return;
+            }
+            if (task.status === 'next') {
+                const start = safeParseDate(task.startTime);
+                if (start && start > now) return;
+                addCandidate(task);
+                return;
+            }
+            if ((task.status === 'waiting' || task.status === 'someday') && isDueForReview(task.reviewAt, now)) {
+                addCandidate(task);
+            }
+        });
+        return sortTasksBy(Array.from(byId.values()), sortBy);
+    }, [activeTasks, sortBy]);
 
     const dueTodayTasks = useMemo(() => {
         const dueToday = activeTasks.filter((task) => {
@@ -70,8 +104,8 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
         return sortTasksBy(overdue, sortBy);
     }, [activeTasks, sortBy, today]);
 
-    const waitingDueTasks = useMemo(() => {
-        const waiting = activeTasks.filter((task) => task.status === 'waiting' && isDueForReview(task.reviewAt));
+    const waitingTasks = useMemo(() => {
+        const waiting = activeTasks.filter((task) => task.status === 'waiting');
         return sortTasksBy(waiting, sortBy);
     }, [activeTasks, sortBy]);
 
@@ -105,7 +139,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
         setEditingTask(null);
     };
 
-    const renderTaskList = (list: Task[]) => (
+    const renderTaskList = (list: Task[], options?: { showFocusToggle?: boolean; hideStatusBadge?: boolean }) => (
         <ScrollView style={styles.taskList}>
             {list.map((task) => (
                 <SwipeableTaskItem
@@ -116,6 +150,8 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                     onPress={() => openTask(task)}
                     onStatusChange={(status) => updateTask(task.id, { status: status as TaskStatus })}
                     onDelete={() => deleteTask(task.id)}
+                    showFocusToggle={options?.showFocusToggle}
+                    hideStatusBadge={options?.hideStatusBadge}
                 />
             ))}
         </ScrollView>
@@ -169,13 +205,13 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                             </Text>
                             <Text style={[styles.guideText, { color: tc.secondaryText }]}>{t('dailyReview.focusDesc')}</Text>
                         </View>
-                        {focusedTasks.length === 0 ? (
+                        {focusCandidates.length === 0 ? (
                             <View style={styles.emptyState}>
                                 <Text style={styles.emptyIcon}>⭐</Text>
                                 <Text style={[styles.emptyText, { color: tc.secondaryText }]}>{t('agenda.focusHint')}</Text>
                             </View>
                         ) : (
-                            renderTaskList(focusedTasks)
+                            renderTaskList(focusCandidates.slice(0, 8), { showFocusToggle: true, hideStatusBadge: true })
                         )}
                     </View>
                 );
@@ -189,6 +225,16 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                             </Text>
                             <Text style={[styles.guideText, { color: tc.secondaryText }]}>{t('dailyReview.inboxDesc')}</Text>
                         </View>
+                        {inboxTasks.length > 0 && (
+                            <TouchableOpacity
+                                style={[styles.processButton, { backgroundColor: tc.tint }]}
+                                onPress={() => setShowInboxProcessing(true)}
+                            >
+                                <Text style={styles.processButtonText}>
+                                    ▷ {t('inbox.processButton')}
+                                </Text>
+                            </TouchableOpacity>
+                        )}
                         {inboxTasks.length === 0 ? (
                             <View style={styles.emptyState}>
                                 <Text style={styles.emptyIcon}>✅</Text>
@@ -205,17 +251,17 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                         <Text style={[styles.stepTitle, { color: tc.text }]}>⏳ {t('dailyReview.waitingStep')}</Text>
                         <View style={[styles.infoBox, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                             <Text style={[styles.infoText, { color: tc.text }]}>
-                                <Text style={{ fontWeight: '700' }}>{waitingDueTasks.length}</Text> {t('common.tasks')}
+                                <Text style={{ fontWeight: '700' }}>{waitingTasks.length}</Text> {t('common.tasks')}
                             </Text>
                             <Text style={[styles.guideText, { color: tc.secondaryText }]}>{t('dailyReview.waitingDesc')}</Text>
                         </View>
-                        {waitingDueTasks.length === 0 ? (
+                        {waitingTasks.length === 0 ? (
                             <View style={styles.emptyState}>
                                 <Text style={styles.emptyIcon}>✅</Text>
                                 <Text style={[styles.emptyText, { color: tc.secondaryText }]}>{t('review.waitingEmpty')}</Text>
                             </View>
                         ) : (
-                            renderTaskList(waitingDueTasks.slice(0, 8))
+                            renderTaskList(waitingTasks.slice(0, 8))
                         )}
                     </View>
                 );
@@ -270,6 +316,10 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                     </TouchableOpacity>
                 </View>
             )}
+            <InboxProcessingModal
+                visible={showInboxProcessing}
+                onClose={() => setShowInboxProcessing(false)}
+            />
 
             <TaskEditModal
                 visible={isTaskModalVisible}
@@ -396,6 +446,17 @@ const styles = StyleSheet.create({
     guideText: {
         fontSize: 13,
         lineHeight: 18,
+    },
+    processButton: {
+        alignSelf: 'flex-start',
+        borderRadius: 999,
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+    },
+    processButtonText: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '700',
     },
     quickActions: {
         flexDirection: 'row',
