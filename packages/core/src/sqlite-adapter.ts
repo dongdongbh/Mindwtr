@@ -13,7 +13,17 @@ const toJson = (value: unknown) => (value === undefined ? null : JSON.stringify(
 const fromJson = <T>(value: unknown, fallback: T): T => {
     if (value === null || value === undefined || value === '') return fallback;
     try {
-        return JSON.parse(String(value)) as T;
+        const parsed = JSON.parse(String(value));
+        if (fallback === undefined) {
+            return parsed && typeof parsed === 'object' ? (parsed as T) : fallback;
+        }
+        if (Array.isArray(fallback)) {
+            return Array.isArray(parsed) ? (parsed as T) : fallback;
+        }
+        if (typeof fallback === 'object' && fallback !== null) {
+            return parsed && typeof parsed === 'object' ? (parsed as T) : fallback;
+        }
+        return parsed as T;
     } catch (error) {
         console.warn('[SQLite] Failed to parse JSON value, falling back to defaults.', error);
         return fallback;
