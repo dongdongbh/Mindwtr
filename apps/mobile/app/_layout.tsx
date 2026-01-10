@@ -172,6 +172,7 @@ function RootLayoutContent() {
       if (retryLoadTimer.current) {
         clearTimeout(retryLoadTimer.current);
       }
+      syncInFlight.current = null;
       // Flush on unmount/reload as well
       flushPendingSave().catch(console.error);
     };
