@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Layout } from './components/Layout';
 import { ListView } from './components/views/ListView';
 import { CalendarView } from './components/views/CalendarView';
@@ -26,6 +26,14 @@ function App() {
     const [currentView, setCurrentView] = useState('inbox');
     const { fetchData } = useTaskStore();
     const { t } = useLanguage();
+    const isActiveRef = useRef(true);
+    const lastAutoSyncRef = useRef(0);
+    const syncDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const initialSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const syncInFlightRef = useRef<Promise<void> | null>(null);
+    const syncQueuedRef = useRef(false);
+    const lastSyncErrorRef = useRef<string | null>(null);
+    const lastSyncErrorAtRef = useRef(0);
 
     useEffect(() => {
         if (import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test') return;
@@ -36,6 +44,7 @@ function App() {
         };
         window.addEventListener('beforeunload', handleUnload);
         let unlistenClose: (() => void) | null = null;
+        let closingPromise: Promise<void> | null = null;
         let isClosing = false;
         let disposed = false;
         if (isTauriRuntime()) {
@@ -43,15 +52,17 @@ function App() {
                 .then(async ({ getCurrentWindow }) => {
                     const window = getCurrentWindow();
                     const unlisten = await window.onCloseRequested(async (event) => {
-                        if (isClosing) return;
+                        if (closingPromise || isClosing) return;
                         isClosing = true;
                         event.preventDefault();
-                        try {
-                            await flushPendingSave().catch(console.error);
-                            await window.close();
-                        } finally {
-                            isClosing = false;
-                        }
+                        closingPromise = flushPendingSave()
+                            .catch(console.error)
+                            .then(() => window.close())
+                            .finally(() => {
+                                closingPromise = null;
+                                isClosing = false;
+                            });
+                        await closingPromise;
                     });
                     if (disposed) {
                         unlisten();
@@ -67,14 +78,7 @@ function App() {
             SyncService.startFileWatcher().catch(console.error);
         }
 
-        let isActive = true;
-        let lastAutoSync = 0;
-        let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-        let initialSyncTimer: ReturnType<typeof setTimeout> | null = null;
-        let syncInFlight: Promise<void> | null = null;
-        let syncQueued = false;
-        let lastSyncError: string | null = null;
-        let lastSyncErrorAt = 0;
+        isActiveRef.current = true;
 
         const canSync = async () => {
             const backend = await SyncService.getSyncBackend();
@@ -90,47 +94,47 @@ function App() {
         };
 
         const performSync = async () => {
-            if (!isActive || !isTauriRuntime()) return;
+            if (!isActiveRef.current || !isTauriRuntime()) return;
             const now = Date.now();
-            if (now - lastAutoSync < 5_000) return;
+            if (now - lastAutoSyncRef.current < 5_000) return;
             if (!(await canSync())) return;
 
-            lastAutoSync = now;
+            lastAutoSyncRef.current = now;
             await flushPendingSave().catch(console.error);
             const result = await SyncService.performSync();
             if (!result.success && result.error) {
                 const nowMs = Date.now();
-                const shouldAlert = result.error !== lastSyncError || nowMs - lastSyncErrorAt > 10 * 60 * 1000;
+                const shouldAlert = result.error !== lastSyncErrorRef.current || nowMs - lastSyncErrorAtRef.current > 10 * 60 * 1000;
                 if (shouldAlert) {
-                    lastSyncError = result.error;
-                    lastSyncErrorAt = nowMs;
+                    lastSyncErrorRef.current = result.error;
+                    lastSyncErrorAtRef.current = nowMs;
                     window.alert(`Sync failed:\n${result.error}`);
                 }
             }
         };
 
         const queueSync = async () => {
-            if (!isActive || !isTauriRuntime()) return;
-            if (syncInFlight) {
-                syncQueued = true;
+            if (!isActiveRef.current || !isTauriRuntime()) return;
+            if (syncInFlightRef.current) {
+                syncQueuedRef.current = true;
                 return;
             }
-            syncInFlight = performSync()
+            syncInFlightRef.current = performSync()
                 .catch(console.error)
                 .finally(() => {
-                    syncInFlight = null;
-                    if (syncQueued && isActive) {
-                        syncQueued = false;
+                    syncInFlightRef.current = null;
+                    if (syncQueuedRef.current && isActiveRef.current) {
+                        syncQueuedRef.current = false;
                         void queueSync();
                     }
                 });
-            await syncInFlight;
+            await syncInFlightRef.current;
         };
 
         const focusListener = () => {
             // On focus, use 30s throttle to avoid excessive syncs
             const now = Date.now();
-            if (now - lastAutoSync > 30_000) {
+            if (now - lastAutoSyncRef.current > 30_000) {
                 queueSync().catch(console.error);
             }
         };
@@ -144,11 +148,11 @@ function App() {
         // Auto-sync on data changes with debounce
         const storeUnsubscribe = useTaskStore.subscribe((state, prevState) => {
             if (state.lastDataChangeAt === prevState.lastDataChangeAt) return;
-            if (syncDebounceTimer) {
-                clearTimeout(syncDebounceTimer);
+            if (syncDebounceTimerRef.current) {
+                clearTimeout(syncDebounceTimerRef.current);
             }
-            syncDebounceTimer = setTimeout(() => {
-                if (!isActive) return;
+            syncDebounceTimerRef.current = setTimeout(() => {
+                if (!isActiveRef.current) return;
                 queueSync().catch(console.error);
             }, 5000);
         });
@@ -156,14 +160,14 @@ function App() {
         // Background/on-resume sync (focus/blur) and initial auto-sync
         window.addEventListener('focus', focusListener);
         window.addEventListener('blur', blurListener);
-        initialSyncTimer = setTimeout(() => {
-            if (!isActive) return;
+        initialSyncTimerRef.current = setTimeout(() => {
+            if (!isActiveRef.current) return;
             queueSync().catch(console.error);
         }, 1500);
 
         return () => {
             disposed = true;
-            isActive = false;
+            isActiveRef.current = false;
             window.removeEventListener('beforeunload', handleUnload);
             window.removeEventListener('focus', focusListener);
             window.removeEventListener('blur', blurListener);
@@ -171,11 +175,11 @@ function App() {
                 unlistenClose();
             }
             storeUnsubscribe();
-            if (syncDebounceTimer) {
-                clearTimeout(syncDebounceTimer);
+            if (syncDebounceTimerRef.current) {
+                clearTimeout(syncDebounceTimerRef.current);
             }
-            if (initialSyncTimer) {
-                clearTimeout(initialSyncTimer);
+            if (initialSyncTimerRef.current) {
+                clearTimeout(initialSyncTimerRef.current);
             }
             stopDesktopNotifications();
             SyncService.stopFileWatcher().catch(console.error);
