@@ -8,14 +8,11 @@ import { ThemeColors } from '../hooks/use-theme-colors';
 export interface SwipeableTaskItemProps {
     task: Task;
     isDark: boolean;
-    /** Theme colors object with cardBg, text, secondaryText */
     /** Theme colors object from useThemeColors hook */
     tc: ThemeColors;
     onPress: () => void;
     onStatusChange: (status: TaskStatus) => void;
     onDelete: () => void;
-    onDragStart?: () => void;
-    onDragHandlePress?: () => void;
     onLongPressAction?: () => void;
     /** Hide context tags (useful when viewing a specific context) */
     hideContexts?: boolean;
@@ -26,7 +23,6 @@ export interface SwipeableTaskItemProps {
     isHighlighted?: boolean;
     showFocusToggle?: boolean;
     hideStatusBadge?: boolean;
-    showDragHandle?: boolean;
     disableSwipe?: boolean;
 }
 
@@ -46,8 +42,6 @@ export function SwipeableTaskItem({
     onPress,
     onStatusChange,
     onDelete,
-    onDragStart,
-    onDragHandlePress,
     onLongPressAction,
     hideContexts = false,
     selectionMode = false,
@@ -56,7 +50,6 @@ export function SwipeableTaskItem({
     isHighlighted = false,
     showFocusToggle = false,
     hideStatusBadge = false,
-    showDragHandle = false,
     disableSwipe = false,
 }: SwipeableTaskItemProps) {
     const swipeableRef = useRef<Swipeable>(null);
@@ -271,10 +264,7 @@ export function SwipeableTaskItem({
 
     const handleLongPress = () => {
         ignorePressUntil.current = Date.now() + 500;
-        if (onDragStart) {
-            onDragStart();
-            return;
-        }
+        // Note: onDragStart is handled by the drag handle directly, not here
         if (onLongPressAction) {
             onLongPressAction();
             return;
@@ -425,22 +415,6 @@ export function SwipeableTaskItem({
                             </Text>
                         )}
                     </View>
-                    {showDragHandle && (
-                        <Pressable
-                            onPressIn={(event) => {
-                                event.stopPropagation();
-                            }}
-                            onLongPress={() => {
-                                if (onDragHandlePress) onDragHandlePress();
-                            }}
-                            delayLongPress={120}
-                            style={[styles.dragHandle, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
-                            accessibilityLabel={t('projects.reorder') || 'Reorder task'}
-                            accessibilityRole="button"
-                        >
-                            <Text style={[styles.dragHandleText, { color: tc.secondaryText }]}>≡</Text>
-                        </Pressable>
-                    )}
                     {!hideStatusBadge && (
                         <Pressable
                             onPress={(e) => {
@@ -722,19 +696,6 @@ const styles = StyleSheet.create({
         marginLeft: 12,
         minWidth: 60,
         alignItems: 'center',
-    },
-    dragHandle: {
-        marginLeft: 12,
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: '#CBD5F5',
-        backgroundColor: 'transparent',
-    },
-    dragHandleText: {
-        fontSize: 14,
-        fontWeight: '700',
     },
     statusText: {
         fontSize: 10,

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, Modal, Alert, Pressable, ScrollView } from 'react-native';
-import DraggableFlatList from 'react-native-draggable-flatlist';
+import DraggableFlatList, { type RenderItemParams } from 'react-native-draggable-flatlist';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Area, Attachment, generateUUID, Project, PRESET_TAGS, useTaskStore } from '@mindwtr/core';
@@ -555,11 +555,7 @@ export default function ProjectsScreen() {
       >
                 <SafeAreaView style={{ flex: 1, backgroundColor: tc.bg }}>
                   {selectedProject ? (
-                    <ScrollView
-                      style={{ flex: 1 }}
-                      contentContainerStyle={styles.projectDetailScroll}
-                      keyboardShouldPersistTaps="handled"
-                    >
+                    <>
                 <View style={[styles.modalHeader, { borderBottomColor: tc.border, backgroundColor: tc.cardBg }]}>
                   <TextInput
                     style={[styles.modalTitle, { color: tc.text, marginLeft: 16, flex: 1 }]}
@@ -597,6 +593,11 @@ export default function ProjectsScreen() {
                     </Text>
                   </TouchableOpacity>
                 </View>
+                <ScrollView
+                  style={{ flex: 1 }}
+                  contentContainerStyle={styles.projectDetailScroll}
+                  keyboardShouldPersistTaps="handled"
+                >
 
                 <View style={[styles.statusBlock, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
                   <View style={styles.statusActionsRow}>
@@ -842,9 +843,12 @@ export default function ProjectsScreen() {
                   showHeader={false}
                   projectId={selectedProject.id}
                   allowAdd={true}
-                  staticList
+                  staticList={true}
+                  enableBulkActions={true}
+                  showSort={false}
                 />
-                    </ScrollView>
+                </ScrollView>
+                </>
                   ) : null}
                 </SafeAreaView>
       </Modal>
