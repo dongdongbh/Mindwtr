@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTaskStore, parseQuickAdd, PRESET_CONTEXTS, safeFormatDate, Task } from '@mindwtr/core';
 import { useLanguage } from '../contexts/language-context';
 import { cn } from '../lib/utils';
@@ -11,6 +11,8 @@ export function QuickAddModal() {
     const [isOpen, setIsOpen] = useState(false);
     const [value, setValue] = useState('');
     const [initialProps, setInitialProps] = useState<Partial<Task> | null>(null);
+    const lastActiveElementRef = useRef<HTMLElement | null>(null);
+    const modalRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         if (!isTauriRuntime()) return;
@@ -63,6 +65,7 @@ export function QuickAddModal() {
 
     useEffect(() => {
         if (!isOpen) return;
+        lastActiveElementRef.current = document.activeElement as HTMLElement | null;
         if (!value) setValue('');
     }, [isOpen, value]);
 
@@ -70,6 +73,7 @@ export function QuickAddModal() {
         setIsOpen(false);
         setInitialProps(null);
         setValue('');
+        lastActiveElementRef.current?.focus();
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -111,8 +115,31 @@ export function QuickAddModal() {
             }}
         >
             <div
+                ref={modalRef}
                 className="w-full max-w-lg bg-popover text-popover-foreground rounded-xl border shadow-2xl overflow-hidden flex flex-col"
+                role="dialog"
+                aria-modal="true"
                 onClick={(e) => e.stopPropagation()}
+                onKeyDown={(event) => {
+                    if (event.key !== 'Tab') return;
+                    const container = modalRef.current;
+                    if (!container) return;
+                    const focusable = Array.from(
+                        container.querySelectorAll<HTMLElement>(
+                            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+                        )
+                    ).filter((el) => !el.hasAttribute('disabled'));
+                    if (focusable.length === 0) return;
+                    const first = focusable[0];
+                    const last = focusable[focusable.length - 1];
+                    if (!event.shiftKey && document.activeElement === last) {
+                        event.preventDefault();
+                        first.focus();
+                    } else if (event.shiftKey && document.activeElement === first) {
+                        event.preventDefault();
+                        last.focus();
+                    }
+                }}
             >
                 <div className="px-4 py-3 border-b flex items-center justify-between">
                     <h3 className="font-semibold">{t('nav.addTask')}</h3>
