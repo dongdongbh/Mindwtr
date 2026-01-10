@@ -26,12 +26,13 @@ const VIRTUAL_OVERSCAN = 600;
 type VirtualTaskRowProps = {
     task: Task;
     project?: Project;
+    index: number;
     top: number;
     isSelected: boolean;
     selectionMode: boolean;
     isMultiSelected: boolean;
-    onSelect: () => void;
-    onToggleSelect: () => void;
+    onSelectIndex: (index: number) => void;
+    onToggleSelectId: (id: string) => void;
     onMeasure: (id: string, height: number) => void;
     showQuickDone: boolean;
     readOnly: boolean;
@@ -40,12 +41,13 @@ type VirtualTaskRowProps = {
 const VirtualTaskRow = React.memo(function VirtualTaskRow({
     task,
     project,
+    index,
     top,
     isSelected,
     selectionMode,
     isMultiSelected,
-    onSelect,
-    onToggleSelect,
+    onSelectIndex,
+    onToggleSelectId,
     onMeasure,
     showQuickDone,
     readOnly,
@@ -74,10 +76,10 @@ const VirtualTaskRow = React.memo(function VirtualTaskRow({
                     task={task}
                     project={project}
                     isSelected={isSelected}
-                    onSelect={onSelect}
+                    onSelect={() => onSelectIndex(index)}
                     selectionMode={selectionMode}
                     isMultiSelected={isMultiSelected}
-                    onToggleSelect={onToggleSelect}
+                    onToggleSelect={() => onToggleSelectId(task.id)}
                     showQuickDone={showQuickDone}
                     readOnly={readOnly}
                 />
@@ -514,6 +516,10 @@ export function ListView({ title, statusFilter }: ListViewProps) {
         });
     }, []);
 
+    const handleSelectIndex = useCallback((index: number) => {
+        if (!selectionMode) setSelectedIndex(index);
+    }, [selectionMode]);
+
     const selectedIdsArray = useMemo(() => Array.from(multiSelectedIds), [multiSelectedIds]);
 
     const handleBatchMove = useCallback(async (newStatus: TaskStatus) => {
@@ -923,14 +929,13 @@ export function ListView({ title, statusFilter }: ListViewProps) {
                                     key={task.id}
                                     task={task}
                                     project={task.projectId ? projectMap[task.projectId] : undefined}
+                                    index={actualIndex}
                                     top={rowOffsets[actualIndex] ?? 0}
                                     isSelected={actualIndex === selectedIndex}
-                                    onSelect={() => {
-                                        if (!selectionMode) setSelectedIndex(actualIndex);
-                                    }}
+                                    onSelectIndex={handleSelectIndex}
                                     selectionMode={selectionMode}
                                     isMultiSelected={multiSelectedIds.has(task.id)}
-                                    onToggleSelect={() => toggleMultiSelect(task.id)}
+                                    onToggleSelectId={toggleMultiSelect}
                                     onMeasure={handleRowMeasure}
                                     showQuickDone={showQuickDone}
                                     readOnly={readOnly}
@@ -946,9 +951,7 @@ export function ListView({ title, statusFilter }: ListViewProps) {
                                 task={task}
                                 project={task.projectId ? projectMap[task.projectId] : undefined}
                                 isSelected={index === selectedIndex}
-                                onSelect={() => {
-                                    if (!selectionMode) setSelectedIndex(index);
-                                }}
+                                onSelect={() => handleSelectIndex(index)}
                                 selectionMode={selectionMode}
                                 isMultiSelected={multiSelectedIds.has(task.id)}
                                 onToggleSelect={() => toggleMultiSelect(task.id)}
