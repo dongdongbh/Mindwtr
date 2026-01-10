@@ -63,6 +63,8 @@ function App() {
         let initialSyncTimer: ReturnType<typeof setTimeout> | null = null;
         let syncInFlight: Promise<void> | null = null;
         let syncQueued = false;
+        let lastSyncError: string | null = null;
+        let lastSyncErrorAt = 0;
 
         const canSync = async () => {
             const backend = await SyncService.getSyncBackend();
@@ -85,7 +87,16 @@ function App() {
 
             lastAutoSync = now;
             await flushPendingSave().catch(console.error);
-            await SyncService.performSync();
+            const result = await SyncService.performSync();
+            if (!result.success && result.error) {
+                const nowMs = Date.now();
+                const shouldAlert = result.error !== lastSyncError || nowMs - lastSyncErrorAt > 10 * 60 * 1000;
+                if (shouldAlert) {
+                    lastSyncError = result.error;
+                    lastSyncErrorAt = nowMs;
+                    window.alert(`Sync failed:\n${result.error}`);
+                }
+            }
         };
 
         const queueSync = async () => {
