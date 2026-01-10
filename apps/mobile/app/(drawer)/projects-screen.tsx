@@ -3,7 +3,7 @@ import { View, Text, TextInput, StyleSheet, TouchableOpacity, Modal, Alert, Pres
 import DraggableFlatList, { type RenderItemParams } from 'react-native-draggable-flatlist';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { Area, Attachment, generateUUID, Project, PRESET_TAGS, useTaskStore } from '@mindwtr/core';
+import { Area, Attachment, generateUUID, Project, PRESET_TAGS, Task, TaskStatus, useTaskStore } from '@mindwtr/core';
 import { Trash2 } from 'lucide-react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -11,14 +11,17 @@ import * as Linking from 'expo-linking';
 import * as Sharing from 'expo-sharing';
 
 import { TaskList } from '../../components/task-list';
+import { SwipeableTaskItem } from '../../components/swipeable-task-item';
+import { useTheme } from '../../contexts/theme-context';
 import { useLanguage } from '../../contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { MarkdownText } from '../../components/markdown-text';
 import { ListSectionHeader, defaultListContentStyle } from '@/components/list-layout';
 
 export default function ProjectsScreen() {
-  const { projects, tasks, areas, addProject, updateProject, deleteProject, toggleProjectFocus, addArea, updateArea, deleteArea, reorderAreas, reorderProjects } = useTaskStore();
+  const { projects, tasks, areas, addProject, updateProject, deleteProject, toggleProjectFocus, addArea, updateArea, deleteArea, reorderAreas, reorderProjects, reorderProjectTasks, updateTask, deleteTask } = useTaskStore();
   const { t } = useLanguage();
+  const { isDark } = useTheme();
   const tc = useThemeColors();
   const statusPalette: Record<Project['status'], { text: string; bg: string; border: string }> = {
     active: { text: tc.tint, bg: `${tc.tint}22`, border: tc.tint },
@@ -295,6 +298,40 @@ export default function ProjectsScreen() {
     updateProject(selectedProject.id, { attachments: next });
     setSelectedProject({ ...selectedProject, attachments: next });
   };
+
+  const reorderTasks = useMemo(() => {
+    if (!selectedProject) return [];
+    const list = tasks.filter((task) => task.projectId === selectedProject.id && !task.deletedAt);
+    const hasOrder = list.some((task) => Number.isFinite(task.orderNum));
+    return [...list].sort((a, b) => {
+      if (hasOrder) {
+        const orderA = Number.isFinite(a.orderNum) ? (a.orderNum as number) : Number.POSITIVE_INFINITY;
+        const orderB = Number.isFinite(b.orderNum) ? (b.orderNum as number) : Number.POSITIVE_INFINITY;
+        if (orderA !== orderB) return orderA - orderB;
+      }
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    });
+  }, [selectedProject, tasks]);
+
+  const renderReorderTask = ({ item, drag, isActive }: RenderItemParams<Task>) => (
+    <View style={{ opacity: isActive ? 0.7 : 1 }}>
+      <SwipeableTaskItem
+        task={item}
+        isDark={isDark}
+        tc={tc}
+        onPress={() => {}}
+        onStatusChange={(status) => updateTask(item.id, { status: status as TaskStatus })}
+        onDelete={() => deleteTask(item.id)}
+        onDragHandlePress={() => {
+          setIsReorderingTasks(true);
+          drag();
+        }}
+        disableSwipe
+        showDragHandle
+        hideStatusBadge
+      />
+    </View>
+  );
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -577,16 +614,25 @@ export default function ProjectsScreen() {
                           <Text style={[styles.reorderExitText, { color: tc.text }]}>✕</Text>
                         </TouchableOpacity>
                       </View>
-                      <TaskList
-                        statusFilter="all"
-                        title={selectedProject.title}
-                        showHeader={false}
-                        projectId={selectedProject.id}
-                        enableReorder
-                        reorderMode
-                        allowAdd={false}
-                        scrollEnabled
-                        onReorderActiveChange={setIsReorderingTasks}
+                      <DraggableFlatList
+                        data={reorderTasks}
+                        keyExtractor={(item: Task) => item.id}
+                        renderItem={renderReorderTask}
+                        activationDistance={12}
+                        contentContainerStyle={styles.reorderListContent}
+                        onDragBegin={() => setIsReorderingTasks(true)}
+                        onDragEnd={({ data }) => {
+                          reorderProjectTasks(selectedProject.id, data.map((task) => task.id));
+                          setIsReorderingTasks(false);
+                        }}
+                        onDragCancel={() => setIsReorderingTasks(false)}
+                        ListEmptyComponent={
+                          <View style={styles.emptyContainer}>
+                            <Text style={[styles.emptyText, { color: tc.secondaryText }]}>
+                              {t('list.noTasks')}
+                            </Text>
+                          </View>
+                        }
                       />
                     </View>
                   ) : selectedProject ? (
@@ -1381,6 +1427,10 @@ const styles = StyleSheet.create({
   },
   reorderContainer: {
     flex: 1,
+  },
+  reorderListContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   reorderHeader: {
     flexDirection: 'row',
