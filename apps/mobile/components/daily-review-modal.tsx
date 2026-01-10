@@ -11,6 +11,7 @@ import { useThemeColors } from '@/hooks/use-theme-colors';
 import { SwipeableTaskItem } from './swipeable-task-item';
 import { TaskEditModal } from './task-edit-modal';
 import { InboxProcessingModal } from './inbox-processing-modal';
+import { ErrorBoundary } from './ErrorBoundary';
 
 type DailyReviewStep = 'intro' | 'today' | 'focus' | 'inbox' | 'waiting' | 'complete';
 
@@ -316,25 +317,29 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                     </TouchableOpacity>
                 </View>
             )}
-            <InboxProcessingModal
-                visible={showInboxProcessing}
-                onClose={() => setShowInboxProcessing(false)}
-            />
+            <ErrorBoundary>
+                <InboxProcessingModal
+                    visible={showInboxProcessing}
+                    onClose={() => setShowInboxProcessing(false)}
+                />
+            </ErrorBoundary>
 
-            <TaskEditModal
-                visible={isTaskModalVisible}
-                task={editingTask}
-                onClose={closeTask}
-                onSave={(taskId, updates) => {
-                    updateTask(taskId, updates);
-                    closeTask();
-                }}
-                defaultTab="view"
-                onFocusMode={(taskId) => {
-                    closeTask();
-                    router.push(`/check-focus?id=${taskId}`);
-                }}
-            />
+            <ErrorBoundary>
+                <TaskEditModal
+                    visible={isTaskModalVisible}
+                    task={editingTask}
+                    onClose={closeTask}
+                    onSave={(taskId, updates) => {
+                        updateTask(taskId, updates);
+                        closeTask();
+                    }}
+                    defaultTab="view"
+                    onFocusMode={(taskId) => {
+                        closeTask();
+                        router.push(`/check-focus?id=${taskId}`);
+                    }}
+                />
+            </ErrorBoundary>
         </GestureHandlerRootView>
     );
 }

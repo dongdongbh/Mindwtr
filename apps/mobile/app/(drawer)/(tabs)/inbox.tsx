@@ -4,6 +4,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useTaskStore, safeParseDate } from '@mindwtr/core';
 import { TaskList } from '../../../components/task-list';
 import { InboxProcessingModal } from '../../../components/inbox-processing-modal';
+import { ErrorBoundary } from '../../../components/ErrorBoundary';
 
 import { useLanguage } from '../../../contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
@@ -52,10 +53,12 @@ export default function InboxScreen() {
         headerAccessory={processButton}
         defaultEditTab="task"
       />
-      <InboxProcessingModal
-        visible={showProcessing}
-        onClose={() => setShowProcessing(false)}
-      />
+      <ErrorBoundary>
+        <InboxProcessingModal
+          visible={showProcessing}
+          onClose={() => setShowProcessing(false)}
+        />
+      </ErrorBoundary>
     </View>
   );
 }

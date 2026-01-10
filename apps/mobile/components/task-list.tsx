@@ -14,9 +14,9 @@ import {
   type AIProviderId,
   type TaskSortBy,
 } from '@mindwtr/core';
-import DraggableFlatList, { type RenderItemParams } from 'react-native-draggable-flatlist';
 
 import { TaskEditModal } from './task-edit-modal';
+import { ErrorBoundary } from './ErrorBoundary';
 import { SwipeableTaskItem } from './swipeable-task-item';
 import { useTheme } from '../contexts/theme-context';
 import { useLanguage } from '../contexts/language-context';
@@ -30,11 +30,7 @@ export interface TaskListProps {
   showHeader?: boolean;
   allowAdd?: boolean;
   projectId?: string;
-  enableReorder?: boolean;
   staticList?: boolean;
-  reorderMode?: boolean;
-  onEnterReorderMode?: () => void;
-  onReorderActiveChange?: (active: boolean) => void;
   enableBulkActions?: boolean;
   showSort?: boolean;
   showQuickAddHelp?: boolean;
@@ -42,7 +38,6 @@ export interface TaskListProps {
   headerAccessory?: React.ReactNode;
   enableCopilot?: boolean;
   defaultEditTab?: 'task' | 'view';
-  scrollEnabled?: boolean;
 }
 
 // ... inside TaskList component
@@ -52,11 +47,7 @@ export function TaskList({
   showHeader = true,
   allowAdd = true,
   projectId,
-  enableReorder = false,
   staticList = false,
-  reorderMode = false,
-  onEnterReorderMode,
-  onReorderActiveChange,
   enableBulkActions = true,
   showSort = true,
   showQuickAddHelp = true,
@@ -64,11 +55,10 @@ export function TaskList({
   headerAccessory,
   enableCopilot = true,
   defaultEditTab,
-  scrollEnabled = true,
 }: TaskListProps) {
   const { isDark } = useTheme();
   const { t } = useLanguage();
-  const { tasks, projects, addTask, addProject, updateTask, deleteTask, fetchData, batchMoveTasks, batchDeleteTasks, batchUpdateTasks, reorderProjectTasks, settings, updateSettings, highlightTaskId, setHighlightTask } = useTaskStore();
+  const { tasks, projects, addTask, addProject, updateTask, deleteTask, fetchData, batchMoveTasks, batchDeleteTasks, batchUpdateTasks, settings, updateSettings, highlightTaskId, setHighlightTask } = useTaskStore();
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [aiKey, setAiKey] = useState('');
   const [copilotSuggestion, setCopilotSuggestion] = useState<{ context?: string; timeEstimate?: Task['timeEstimate']; tags?: string[] } | null>(null);
@@ -122,21 +112,8 @@ export function TaskList({
   }, [tasks, statusFilter, projectId, sortBy]);
 
   const orderedTasks = useMemo(() => {
-    if (enableReorder && projectId) {
-      const list = [...filteredTasks];
-      const hasOrder = list.some((task) => Number.isFinite(task.orderNum));
-      list.sort((a, b) => {
-        if (hasOrder) {
-          const aOrder = Number.isFinite(a.orderNum) ? (a.orderNum as number) : Number.POSITIVE_INFINITY;
-          const bOrder = Number.isFinite(b.orderNum) ? (b.orderNum as number) : Number.POSITIVE_INFINITY;
-          if (aOrder !== bOrder) return aOrder - bOrder;
-        }
-        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-      });
-      return list;
-    }
     return sortTasksBy(filteredTasks, sortBy);
-  }, [enableReorder, projectId, filteredTasks, sortBy]);
+  }, [filteredTasks, sortBy]);
 
   const contextOptions = useMemo(() => {
     const taskContexts = tasks.flatMap((task) => task.contexts || []);
@@ -418,10 +395,7 @@ export function TaskList({
       onStatusChange={(status) => updateTask(item.id, { status: status as TaskStatus })}
       onDelete={() => deleteTask(item.id)}
       isHighlighted={item.id === highlightTaskId}
-      onLongPressAction={enableReorder && !reorderMode ? onEnterReorderMode : undefined}
-      disableSwipe={reorderMode}
-      showDragHandle={reorderMode}
-      hideStatusBadge={reorderMode || hideStatusBadgeForList}
+      hideStatusBadge={hideStatusBadgeForList}
     />
   ), [
     deleteTask,
@@ -430,37 +404,12 @@ export function TaskList({
     highlightTaskId,
     isDark,
     multiSelectedIds,
-    onEnterReorderMode,
     selectionMode,
-    enableReorder,
-    reorderMode,
     hideStatusBadgeForList,
     themeColors,
     toggleMultiSelect,
     updateTask,
   ]);
-
-  const renderDraggableTask = useCallback(({ item, drag, isActive }: RenderItemParams<Task>) => (
-    <View style={{ opacity: isActive ? 0.7 : 1 }}>
-      <SwipeableTaskItem
-        task={item}
-        isDark={isDark}
-        tc={themeColors}
-        onPress={() => handleEditTask(item)}
-        onDragHandlePress={() => {
-          onReorderActiveChange?.(true);
-          drag();
-        }}
-        selectionMode={false}
-        onStatusChange={(status) => updateTask(item.id, { status: status as TaskStatus })}
-        onDelete={() => deleteTask(item.id)}
-        isHighlighted={item.id === highlightTaskId}
-        disableSwipe
-        showDragHandle
-        hideStatusBadge
-      />
-    </View>
-  ), [deleteTask, handleEditTask, highlightTaskId, isDark, onReorderActiveChange, themeColors, updateTask]);
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.bg }]}>
@@ -640,30 +589,7 @@ export function TaskList({
         </>
       )}
 
-      {enableReorder && projectId && reorderMode ? (
-        <DraggableFlatList
-          data={orderedTasks}
-          renderItem={renderDraggableTask}
-          keyExtractor={(item) => item.id}
-          style={styles.list}
-          contentContainerStyle={styles.listContent}
-          activationDistance={12}
-          scrollEnabled={scrollEnabled}
-          onDragBegin={() => onReorderActiveChange?.(true)}
-          onDragEnd={({ data }) => {
-            reorderProjectTasks(projectId, data.map((task) => task.id));
-            onReorderActiveChange?.(false);
-          }}
-          onDragCancel={() => onReorderActiveChange?.(false)}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={[styles.emptyText, { color: themeColors.secondaryText }]}>
-                {emptyText || t('list.noTasks')}
-              </Text>
-            </View>
-          }
-        />
-      ) : staticList ? (
+      {staticList ? (
         <View style={styles.staticList}>
           {orderedTasks.length === 0 ? (
             <View style={styles.emptyContainer}>
@@ -686,7 +612,6 @@ export function TaskList({
           keyExtractor={(item) => item.id}
           style={styles.list}
           contentContainerStyle={styles.listContent}
-          scrollEnabled={scrollEnabled}
           initialNumToRender={12}
           maxToRenderPerBatch={12}
           windowSize={5}
@@ -781,17 +706,19 @@ export function TaskList({
         </Pressable>
       </Modal>
 
-      <TaskEditModal
-        visible={isModalVisible}
-        task={editingTask}
-        onClose={() => setIsModalVisible(false)}
-        onSave={onSaveTask}
-        defaultTab={defaultEditTab}
-        onFocusMode={(taskId) => {
-          setIsModalVisible(false);
-          router.push(`/check-focus?id=${taskId}`);
-        }}
-      />
+      <ErrorBoundary>
+        <TaskEditModal
+          visible={isModalVisible}
+          task={editingTask}
+          onClose={() => setIsModalVisible(false)}
+          onSave={onSaveTask}
+          defaultTab={defaultEditTab}
+          onFocusMode={(taskId) => {
+            setIsModalVisible(false);
+            router.push(`/check-focus?id=${taskId}`);
+          }}
+        />
+      </ErrorBoundary>
     </View>
   );
 }
