@@ -181,7 +181,7 @@ export function TaskItemFieldRenderer({
                         </div>
                         ) : (
                             <textarea
-                                aria-label="Task description"
+                                aria-label={t('task.aria.description')}
                                 value={editDescription}
                                 onChange={(e) => setEditDescription(e.target.value)}
                                 className="text-xs bg-muted/50 border border-border rounded px-2 py-1 min-h-[60px] resize-y"
@@ -280,14 +280,14 @@ export function TaskItemFieldRenderer({
                         <div className="flex items-center gap-2">
                             <input
                                 type="date"
-                                aria-label="Start date"
+                                aria-label={t('task.aria.startDate')}
                                 value={dateValue}
                                 onChange={(e) => handleDateChange(e.target.value)}
                                 className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
                             />
                             <input
                                 type="time"
-                                aria-label="Start time"
+                                aria-label={t('task.aria.startTime')}
                                 value={timeValue}
                                 onChange={(e) => handleTimeChange(e.target.value)}
                                 className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
@@ -302,7 +302,7 @@ export function TaskItemFieldRenderer({
                     <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.reviewDateLabel')}</label>
                     <input
                         type="datetime-local"
-                        aria-label="Review date"
+                        aria-label={t('task.aria.reviewDate')}
                         value={editReviewAt}
                         onChange={(e) => setEditReviewAt(e.target.value)}
                         className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
@@ -315,7 +315,7 @@ export function TaskItemFieldRenderer({
                     <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.statusLabel')}</label>
                     <select
                             value={editStatus}
-                            aria-label="Status"
+                            aria-label={t('task.aria.status')}
                             onChange={(event) => setEditStatus(event.target.value as TaskStatus)}
                             className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
                         >
@@ -351,7 +351,7 @@ export function TaskItemFieldRenderer({
                     <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.recurrenceLabel')}</label>
                         <select
                             value={editRecurrence}
-                            aria-label="Recurrence"
+                            aria-label={t('task.aria.recurrence')}
                             onChange={(e) => {
                                 const value = e.target.value as RecurrenceRule | '';
                                 setEditRecurrence(value);
@@ -439,7 +439,7 @@ export function TaskItemFieldRenderer({
                     <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.timeEstimateLabel')}</label>
                         <select
                             value={editTimeEstimate}
-                            aria-label="Time estimate"
+                            aria-label={t('task.aria.timeEstimate')}
                             onChange={(e) => setEditTimeEstimate(e.target.value as TimeEstimate | '')}
                             className="text-xs bg-muted/50 border border-border rounded px-2 py-1 w-full text-foreground"
                         >
@@ -462,7 +462,7 @@ export function TaskItemFieldRenderer({
                     <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.contextsLabel')}</label>
                     <input
                         type="text"
-                        aria-label="Contexts"
+                        aria-label={t('task.aria.contexts')}
                         value={editContexts}
                         onChange={(e) => setEditContexts(e.target.value)}
                         placeholder="@home, @work"
@@ -505,7 +505,7 @@ export function TaskItemFieldRenderer({
                     <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.tagsLabel')}</label>
                     <input
                         type="text"
-                        aria-label="Tags"
+                        aria-label={t('task.aria.tags')}
                         value={editTags}
                         onChange={(e) => setEditTags(e.target.value)}
                         placeholder="#urgent, #idea"

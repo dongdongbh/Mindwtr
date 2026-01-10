@@ -284,14 +284,14 @@ export function TaskItemEditor({
                         <div className="flex items-center gap-2">
                             <input
                                 type="date"
-                                aria-label="Deadline date"
+                                aria-label={t('task.aria.dueDate')}
                                 value={dueDateValue}
                                 onChange={(e) => handleDueDateChange(e.target.value)}
                                 className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
                             />
                             <input
                                 type="time"
-                                aria-label="Deadline time"
+                                aria-label={t('task.aria.dueTime')}
                                 value={dueTimeValue}
                                 onChange={(e) => handleDueTimeChange(e.target.value)}
                                 className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
@@ -381,7 +381,7 @@ export function TaskItemEditor({
                                 <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.locationLabel')}</label>
                                 <input
                                     type="text"
-                                    aria-label="Location"
+                                    aria-label={t('task.aria.location')}
                                     value={editLocation}
                                     onChange={(e) => setEditLocation(e.target.value)}
                                     placeholder={t('taskEdit.locationPlaceholder')}

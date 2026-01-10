@@ -338,7 +338,7 @@ export function TaskItemDisplay({
                             </button>
                             <button
                                 onClick={onDelete}
-                                aria-label="Delete task"
+                                aria-label={t('task.aria.delete')}
                                 className="text-red-400 hover:text-red-300 p-1 rounded hover:bg-red-500/20"
                             >
                                 <Trash2 className="w-4 h-4" />
@@ -366,7 +366,7 @@ export function TaskItemDisplay({
                             )}
                             <select
                                 value={task.status}
-                                aria-label="Task status"
+                                aria-label={t('task.aria.status')}
                                 onChange={(e) => onStatusChange(e.target.value as TaskStatus)}
                                 className="text-xs px-2 py-1 rounded cursor-pointer bg-muted/50 text-foreground border border-border hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40"
                             >
@@ -378,7 +378,7 @@ export function TaskItemDisplay({
                             </select>
                             <button
                                 onClick={onDelete}
-                                aria-label="Delete task"
+                                aria-label={t('task.aria.delete')}
                                 className="text-red-400 hover:text-red-300 p-1 rounded hover:bg-red-500/20"
                             >
                                 <Trash2 className="w-4 h-4" />
