@@ -1561,9 +1561,16 @@ fn get_external_calendars(app: tauri::AppHandle) -> Result<Vec<ExternalCalendarS
 fn set_external_calendars(app: tauri::AppHandle, calendars: Vec<ExternalCalendarSubscription>) -> Result<bool, String> {
     let config_path = get_config_path(&app);
     let mut config = read_config(&app);
+    let is_valid_calendar_url = |raw: &str| {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        trimmed.starts_with("https://") || trimmed.starts_with("http://") || trimmed.starts_with("webcal://")
+    };
     let sanitized: Vec<ExternalCalendarSubscription> = calendars
         .into_iter()
-        .filter(|c| !c.url.trim().is_empty())
+        .filter(|c| is_valid_calendar_url(&c.url))
         .map(|mut c| {
             c.url = c.url.trim().to_string();
             c.name = c.name.trim().to_string();
