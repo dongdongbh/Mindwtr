@@ -1,0 +1,32 @@
+services:
+  mindwtr-cloud:
+    image: mindwtr-cloud:latest
+    build:
+      context: ..
+      dockerfile: docker/cloud/Dockerfile
+    container_name: mindwtr-cloud
+    hostname: mindwtr-cloud
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8787/health || echo 'Health check failed'"]
+      interval: 1m30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    ports:
+      - 8787:8787
+    environment:
+      - MINDWTR_CLOUD_TOKEN=your_token_here
+    volumes:
+      - /path/data_dir:/app/cloud_data
+
+  mindwtr-app:
+    image: mindwtr-app:latest
+    build:
+      context: ..
+      dockerfile: docker/app/Dockerfile
+    container_name: mindwtr-app
+    hostname: mindwtr-app
+    restart: always
+    ports:
+      - 5173:80
