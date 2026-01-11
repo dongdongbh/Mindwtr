@@ -466,8 +466,8 @@ export function SettingsView() {
             const targetPath = `${targetDir}/${entry.fileName}`;
             const alreadyExists = await exists(targetPath, { baseDir: BaseDirectory.Data });
             if (alreadyExists) {
-                const fileSize = await size(targetPath, { baseDir: BaseDirectory.Data });
                 const resolved = await resolveWhisperPath(entry.id);
+                const fileSize = resolved ? await size(resolved) : null;
                 setSpeechOfflineSize(fileSize);
                 setSpeechOfflinePath(resolved);
                 updateSpeechSettings({ offlineModelPath: resolved ?? undefined, model: entry.id });

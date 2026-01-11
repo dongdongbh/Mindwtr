@@ -205,7 +205,9 @@ const transcribeOpenAI = async (audioUri: string, config: SpeechToTextConfig) =>
     },
     { timeoutMs: DEFAULT_TIMEOUT_MS }
   );
-  const text = typeof (result as { text?: string }).text === 'string' ? (result as { text?: string }).text : '';
+  const text = typeof (result as { text?: unknown }).text === 'string'
+    ? (result as { text: string }).text
+    : '';
   return text.trim();
 };
 
@@ -405,10 +407,10 @@ const transcribeWhisper = async (audioUri: string, config: SpeechToTextConfig) =
   }
   const { promise } = context.transcribe(audioUri, options);
   const result = await promise;
-  const text = typeof (result as { result?: string }).result === 'string'
-    ? (result as { result?: string }).result
-    : typeof (result as { text?: string }).text === 'string'
-      ? (result as { text?: string }).text
+  const text = typeof (result as { result?: unknown }).result === 'string'
+    ? (result as { result: string }).result
+    : typeof (result as { text?: unknown }).text === 'string'
+      ? (result as { text: string }).text
       : '';
   return text.trim();
 };

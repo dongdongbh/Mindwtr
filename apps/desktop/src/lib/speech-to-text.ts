@@ -157,7 +157,8 @@ const transcribeOpenAI = async (audio: AudioInput, config: SpeechToTextConfig) =
     if (!config.apiKey) {
         throw new Error('OpenAI API key missing');
     }
-    const blob = new Blob([audio.bytes], { type: audio.mimeType });
+    const bytes = new Uint8Array(audio.bytes);
+    const blob = new Blob([bytes], { type: audio.mimeType });
     const fileName = audio.name || 'audio.wav';
     const file = new File([blob], fileName, { type: audio.mimeType });
     const form = new FormData();
@@ -180,7 +181,9 @@ const transcribeOpenAI = async (audio: AudioInput, config: SpeechToTextConfig) =
         },
         { timeoutMs: DEFAULT_TIMEOUT_MS }
     );
-    const text = typeof (result as { text?: string }).text === 'string' ? (result as { text?: string }).text : '';
+    const text = typeof (result as { text?: unknown }).text === 'string'
+        ? (result as { text: string }).text
+        : '';
     return text.trim();
 };
 

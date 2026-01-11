@@ -1310,6 +1310,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
   },
+  dragHandle: {
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    marginLeft: 4,
+    borderRadius: 6,
+  },
+  dragHandleText: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
   deleteButton: {
     width: 32,
     height: 32,
