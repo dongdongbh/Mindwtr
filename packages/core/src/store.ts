@@ -623,7 +623,12 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
 
             let adjustedUpdates = updates;
             if (Object.prototype.hasOwnProperty.call(updates, 'projectId')) {
-                const nextProjectId = updates.projectId ?? undefined;
+                const rawProjectId = updates.projectId;
+                const normalizedProjectId =
+                    typeof rawProjectId === 'string' && rawProjectId.trim().length > 0
+                        ? rawProjectId
+                        : undefined;
+                const nextProjectId = normalizedProjectId ?? undefined;
                 const projectChanged = (oldTask.projectId ?? undefined) !== nextProjectId;
                 if (projectChanged) {
                     const hasOrderNum = Object.prototype.hasOwnProperty.call(updates, 'orderNum');
@@ -637,9 +642,15 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
                     } else {
                         adjustedUpdates = {
                             ...adjustedUpdates,
+                            projectId: undefined,
                             orderNum: undefined,
                         };
                     }
+                } else if (normalizedProjectId !== updates.projectId) {
+                    adjustedUpdates = {
+                        ...adjustedUpdates,
+                        projectId: normalizedProjectId,
+                    };
                 }
             }
 

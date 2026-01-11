@@ -41,9 +41,14 @@ export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toI
     const { ...rest } = task as Task;
 
     const hasValidPushCount = typeof task.pushCount === 'number' && Number.isFinite(task.pushCount);
+    const projectId =
+        typeof task.projectId === 'string' && task.projectId.trim().length > 0
+            ? task.projectId
+            : undefined;
     const next: Task = {
         ...rest,
         status: normalizedStatus,
+        projectId,
         ...(hasValidPushCount ? {} : { pushCount: 0 }),
     };
 
