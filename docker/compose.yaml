@@ -1,7 +1,6 @@
 services:
   mindwtr_cloud:
-    # image: ghcr.io/dongdongbh/mindwtr_cloud:latest
-    image: mindwtr_cloud:latest
+    image: ghcr.io/dongdongbh/mindwtr_cloud:latest
     container_name: mindwtr_cloud
     hostname: mindwtr_cloud
     restart: always
@@ -19,14 +18,9 @@ services:
       - /path/data_dir:/app/apps/cloud/data/
 
   mindwtr_app:
-    # image: ghcr.io/dongdongbh/mindwtr_app:latest
-    image: mindwtr_app:latest
+    image: ghcr.io/dongdongbh/mindwtr_app:latest
     container_name: mindwtr_app
     hostname: mindwtr_app
     restart: always
     ports:
       - 5173:80
-    # environment:
-    #   - TOKEN=your_token_here
-    # volumes:
-    #   - /path/data_dir:/app/apps/app/data/
