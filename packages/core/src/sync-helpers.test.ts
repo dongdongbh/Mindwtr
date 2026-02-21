@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { assertNoPendingAttachmentUploads, findPendingAttachmentUploads, sanitizeAppDataForRemote } from './sync-helpers';
+import {
+    areSyncPayloadsEqual,
+    assertNoPendingAttachmentUploads,
+    findPendingAttachmentUploads,
+    sanitizeAppDataForRemote,
+} from './sync-helpers';
 import type { AppData, Attachment } from './types';
 
 const now = '2026-02-19T00:00:00.000Z';
@@ -216,5 +221,64 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
             fileHash: 'hash-a',
         });
         expect(attachment?.localStatus).toBeUndefined();
+    });
+});
+
+describe('sync-helpers areSyncPayloadsEqual', () => {
+    it('treats payloads as equal when object key order differs', () => {
+        const left: AppData = {
+            tasks: [],
+            projects: [],
+            sections: [],
+            areas: [],
+            settings: {
+                syncPreferences: { appearance: true, language: true },
+                syncPreferencesUpdatedAt: {
+                    language: now,
+                    appearance: now,
+                },
+                theme: 'dark',
+            },
+        };
+        const right: AppData = {
+            tasks: [],
+            projects: [],
+            sections: [],
+            areas: [],
+            settings: {
+                theme: 'dark',
+                syncPreferencesUpdatedAt: {
+                    appearance: now,
+                    language: now,
+                },
+                syncPreferences: { language: true, appearance: true },
+            },
+        };
+
+        expect(areSyncPayloadsEqual(left, right)).toBe(true);
+    });
+
+    it('detects real payload differences', () => {
+        const left: AppData = {
+            tasks: [{
+                id: 't1',
+                title: 'A',
+                status: 'inbox',
+                tags: [],
+                contexts: [],
+                createdAt: now,
+                updatedAt: now,
+            }],
+            projects: [],
+            sections: [],
+            areas: [],
+            settings: {},
+        };
+        const right: AppData = {
+            ...left,
+            tasks: [{ ...left.tasks[0], title: 'B' }],
+        };
+
+        expect(areSyncPayloadsEqual(left, right)).toBe(false);
     });
 });

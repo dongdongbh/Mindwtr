@@ -114,6 +114,7 @@ const toAttachments = (value: unknown): Attachment[] | undefined => {
 
 export class SqliteAdapter {
     private client: SqliteClient;
+    private schemaReadyPromise: Promise<void> | null = null;
 
     constructor(client: SqliteClient) {
         this.client = client;
@@ -183,7 +184,7 @@ export class SqliteAdapter {
         await this.client.run('DELETE FROM fts_lock WHERE id = 1 AND owner = ?', [owner]);
     }
 
-    async ensureSchema() {
+    private async ensureSchemaInternal(): Promise<void> {
         if (this.client.exec) {
             await this.client.exec(SQLITE_BASE_SCHEMA);
         } else {
@@ -211,6 +212,16 @@ export class SqliteAdapter {
                 error,
             });
         }
+    }
+
+    async ensureSchema(): Promise<void> {
+        if (!this.schemaReadyPromise) {
+            this.schemaReadyPromise = this.ensureSchemaInternal().catch((error) => {
+                this.schemaReadyPromise = null;
+                throw error;
+            });
+        }
+        await this.schemaReadyPromise;
     }
 
     private async ensureFtsTriggers() {
@@ -574,11 +585,13 @@ export class SqliteAdapter {
 
     async getData(): Promise<AppData> {
         await this.ensureSchema();
-        const tasksRows = await this.loadAllRows('tasks');
-        const projectsRows = await this.loadAllRows('projects');
-        const sectionsRows = await this.loadAllRows('sections');
-        const areasRows = await this.loadAllRows('areas');
-        const settingsRow = await this.client.get<Record<string, unknown>>('SELECT data FROM settings WHERE id = 1');
+        const [tasksRows, projectsRows, sectionsRows, areasRows, settingsRow] = await Promise.all([
+            this.loadAllRows('tasks'),
+            this.loadAllRows('projects'),
+            this.loadAllRows('sections'),
+            this.loadAllRows('areas'),
+            this.client.get<Record<string, unknown>>('SELECT data FROM settings WHERE id = 1'),
+        ]);
 
         const tasks: Task[] = tasksRows.map((row) => this.mapTaskRow(row));
         const projects: Project[] = projectsRows.map((row) => this.mapProjectRow(row));

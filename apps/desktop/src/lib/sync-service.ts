@@ -27,6 +27,7 @@ import {
     normalizeWebdavUrl,
     normalizeCloudUrl,
     sanitizeAppDataForRemote,
+    areSyncPayloadsEqual,
     assertNoPendingAttachmentUploads,
     injectExternalCalendars as injectExternalCalendarsForSync,
     persistExternalCalendars as persistExternalCalendarsForSync,
@@ -1395,6 +1396,7 @@ export class SyncService {
             const syncPath = backend === 'file' ? await SyncService.getSyncPath() : '';
             const fileBaseDir = backend === 'file' ? getFileSyncDir(syncPath, SYNC_FILE_NAME, LEGACY_SYNC_FILE_NAME) : '';
             let preSyncedLocalData: AppData | null = null;
+            let remoteDataForCompare: AppData | null = null;
             const ensureLocalSnapshotFresh = () => {
                 if (useTaskStore.getState().lastDataChangeAt > localSnapshotChangeAt) {
                     SyncService.syncQueued = true;
@@ -1448,6 +1450,7 @@ export class SyncService {
                             }
                             syncUrl = webdavConfig.url;
                             const data = await tauriInvoke<AppData>('webdav_get_json');
+                            remoteDataForCompare = data ?? null;
                             return data;
                         }
                         if (!webdavConfig?.url) {
@@ -1461,6 +1464,7 @@ export class SyncService {
                             password: webdavConfig.password || '',
                             fetcher,
                         });
+                        remoteDataForCompare = data ?? null;
                         return data;
                     }
                     if (backend === 'cloud') {
@@ -1471,12 +1475,14 @@ export class SyncService {
                         syncUrl = normalizedUrl;
                         const fetcher = await getTauriFetch();
                         const data = await cloudGetJson<AppData>(normalizedUrl, { token: cloudConfig.token, fetcher });
+                        remoteDataForCompare = data ?? null;
                         return data;
                     }
                     if (!isTauriRuntimeEnv()) {
                         throw new Error('File sync is not available in the web app.');
                     }
                     const data = await tauriInvoke<AppData>('read_sync_file');
+                    remoteDataForCompare = data ?? null;
                     return data;
                 },
                 writeLocal: async (data) => {
@@ -1491,15 +1497,23 @@ export class SyncService {
                     ensureLocalSnapshotFresh();
                     assertNoPendingAttachmentUploads(data);
                     const sanitized = sanitizeAppDataForRemote(data);
+                    const remoteSanitized = remoteDataForCompare
+                        ? sanitizeAppDataForRemote(remoteDataForCompare)
+                        : null;
+                    if (remoteSanitized && areSyncPayloadsEqual(remoteSanitized, sanitized)) {
+                        return;
+                    }
                     if (backend === 'webdav') {
                         if (isTauriRuntimeEnv()) {
                             await tauriInvoke('webdav_put_json', { data: sanitized });
+                            remoteDataForCompare = sanitized;
                             return;
                         }
                         const { url, username, password } = await SyncService.getWebDavConfig();
                         const normalizedUrl = normalizeWebdavUrl(url);
                         const fetcher = await getTauriFetch();
                         await webdavPutJson(normalizedUrl, sanitized, { username, password: password || '', fetcher });
+                        remoteDataForCompare = sanitized;
                         return;
                     }
                     if (backend === 'cloud') {
@@ -1507,10 +1521,12 @@ export class SyncService {
                         const normalizedUrl = normalizeCloudUrl(url);
                         const fetcher = await getTauriFetch();
                         await cloudPutJson(normalizedUrl, sanitized, { token, fetcher });
+                        remoteDataForCompare = sanitized;
                         return;
                     }
                     await SyncService.markSyncWrite(sanitized);
                     await tauriInvoke('write_sync_file', { data: sanitized });
+                    remoteDataForCompare = sanitized;
                 },
                 onStep: (next) => {
                     setStep(next);

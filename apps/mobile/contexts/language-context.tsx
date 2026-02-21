@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { type Language, getSystemDefaultLanguage, loadTranslations, loadStoredLanguage, saveStoredLanguage } from '@mindwtr/core';
 import { logError } from '../lib/app-log';
+import { markStartupPhase, measureStartupPhase } from '../lib/startup-profiler';
 
 export type { Language };
 
@@ -27,8 +28,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     const [isReady, setIsReady] = useState(false);
 
     useEffect(() => {
+        markStartupPhase('js.language.load:start');
         loadLanguage().finally(() => setHasLoadedLanguage(true));
-        loadTranslations('en')
+        measureStartupPhase('js.language.load_fallback_en', async () => loadTranslations('en'))
             .then((map) => {
                 setFallbackTranslations(map);
                 setHasLoadedFallback(true);
@@ -41,7 +43,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
     const loadLanguage = async () => {
         try {
-            const saved = await loadStoredLanguage(AsyncStorage, getSystemDefaultLanguage());
+            const saved = await measureStartupPhase('js.language.load_stored_language', async () =>
+                loadStoredLanguage(AsyncStorage, getSystemDefaultLanguage())
+            );
             setLanguageState(saved);
         } catch (error) {
             void logError(error, { scope: 'i18n', extra: { message: 'Failed to load language' } });
@@ -59,7 +63,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         let active = true;
-        loadTranslations(language).then((map) => {
+        void measureStartupPhase('js.language.load_active_translations', async () => loadTranslations(language)).then((map) => {
             if (active) setTranslationsMap(map);
             if (active) setHasLoadedTranslations(true);
         }).catch(() => {
@@ -74,6 +78,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         if (!isReady && hasLoadedLanguage && hasLoadedFallback && hasLoadedTranslations) {
             setIsReady(true);
+            markStartupPhase('js.language.load:end');
         }
     }, [hasLoadedFallback, hasLoadedLanguage, hasLoadedTranslations, isReady]);
 

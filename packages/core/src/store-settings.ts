@@ -1,6 +1,7 @@
 import { safeParseDate } from './date';
 import { logWarn } from './logger';
 import { purgeExpiredTombstones } from './sync';
+import { markCoreStartupPhase, measureCoreStartupPhase } from './startup-profiler';
 import { normalizeTaskForLoad } from './task-status';
 import type { StorageAdapter } from './storage';
 import type { AppData, Area, Project, TaskEditorFieldId } from './types';
@@ -45,6 +46,7 @@ type SettingsActionContext = {
     get: () => TaskStore;
     debouncedSave: (data: AppData, onError?: (msg: string) => void) => void;
     flushPendingSave: () => Promise<void>;
+    hasPendingSaveWork: () => boolean;
     getStorage: () => StorageAdapter;
 };
 
@@ -55,6 +57,7 @@ export const createSettingsActions = ({
     get,
     debouncedSave,
     flushPendingSave,
+    hasPendingSaveWork,
     getStorage,
 }: SettingsActionContext): SettingsActions => ({
     /**
@@ -62,7 +65,14 @@ export const createSettingsActions = ({
      * Stores full data internally, filters for UI display.
      */
     fetchData: async (options) => {
-        await flushPendingSave();
+        markCoreStartupPhase('core.fetch_data.start');
+        if (hasPendingSaveWork()) {
+            await measureCoreStartupPhase('core.fetch_data.flush_pending_save', async () => {
+                await flushPendingSave();
+            });
+        } else {
+            markCoreStartupPhase('core.fetch_data.flush_pending_save.skipped', { reason: 'no_pending_work' });
+        }
         if (options?.silent) {
             set({ error: null });
         } else {
@@ -81,7 +91,11 @@ export const createSettingsActions = ({
         }
         try {
             const storage = getStorage();
-            const data = await withTimeout(storage.getData(), STORAGE_TIMEOUT_MS, 'Storage request timed out');
+            const data = await measureCoreStartupPhase('core.fetch_data.storage_get_data', async () =>
+                withTimeout(storage.getData(), STORAGE_TIMEOUT_MS, 'Storage request timed out')
+            );
+            const postProcessStartedAt = Date.now();
+            markCoreStartupPhase('core.fetch_data.post_process:start');
             const rawTasks = Array.isArray(data.tasks) ? data.tasks : [];
             const rawProjects = Array.isArray(data.projects) ? data.projects : [];
             const rawSettings = data.settings && typeof data.settings === 'object' ? data.settings : {};
@@ -412,27 +426,33 @@ export const createSettingsActions = ({
             const visibleProjects = allProjects.filter(p => !p.deletedAt);
             const visibleSections = allSections.filter((section) => !section.deletedAt);
             const visibleAreas = allAreas.filter((area) => !area.deletedAt);
-            set({
-                tasks: visibleTasks,
-                projects: visibleProjects,
-                sections: visibleSections,
-                areas: visibleAreas,
-                settings: nextSettings,
-                _allTasks: allTasks,
-                _allProjects: allProjects,
-                _allSections: allSections,
-                _allAreas: allAreas,
-                isLoading: false,
-                lastDataChangeAt: didAutoArchive || didPromoteScheduled || didTombstoneCleanup ? Date.now() : get().lastDataChangeAt,
+            markCoreStartupPhase('core.fetch_data.post_process:end', { durationMs: Date.now() - postProcessStartedAt });
+            await measureCoreStartupPhase('core.fetch_data.zustand_set_state', async () => {
+                set({
+                    tasks: visibleTasks,
+                    projects: visibleProjects,
+                    sections: visibleSections,
+                    areas: visibleAreas,
+                    settings: nextSettings,
+                    _allTasks: allTasks,
+                    _allProjects: allProjects,
+                    _allSections: allSections,
+                    _allAreas: allAreas,
+                    isLoading: false,
+                    lastDataChangeAt: didAutoArchive || didPromoteScheduled || didTombstoneCleanup ? Date.now() : get().lastDataChangeAt,
+                });
             });
 
             if (didAutoArchive || didPromoteScheduled || didTombstoneCleanup || didAreaMigration || didProjectOrderMigration || didSettingsUpdate) {
+                markCoreStartupPhase('core.fetch_data.debounced_save_enqueued');
                 debouncedSave(
                     { tasks: allTasks, projects: allProjects, sections: allSections, areas: allAreas, settings: nextSettings },
                     (msg) => set({ error: msg })
                 );
             }
+            markCoreStartupPhase('core.fetch_data.end');
         } catch (err) {
+            markCoreStartupPhase('core.fetch_data.error');
             set({ error: 'Failed to fetch data', isLoading: false });
         }
     },

@@ -29,6 +29,7 @@ import { performMobileSync } from '../lib/sync-service';
 import { isLikelyOfflineSyncError, resolveBackend, type SyncBackend } from '../lib/sync-service-utils';
 import { SYNC_BACKEND_KEY } from '../lib/sync-constants';
 import { updateAndroidWidgetFromStore } from '../lib/widget-service';
+import { markStartupPhase, measureStartupPhase } from '../lib/startup-profiler';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { verifyPolyfills } from '../utils/verify-polyfills';
 import { logError, logWarn, setupGlobalErrorLogging } from '../lib/app-log';
@@ -148,6 +149,7 @@ try {
 
 // Keep splash visible until app is ready.
 void SplashScreen.preventAutoHideAsync().catch(() => {});
+markStartupPhase('js.root_layout.module_loaded');
 
 function RootLayoutContent() {
   const router = useRouter();
@@ -161,7 +163,6 @@ function RootLayoutContent() {
   const isExpoGo = Constants.appOwnership === 'expo';
   const appVersion = Constants.expoConfig?.version ?? '0.0.0';
   const [storageWarningShown, setStorageWarningShown] = useState(false);
-  const [isDataLoaded, setIsDataLoaded] = useState(false);
   const settingsLanguage = useTaskStore((state) => state.settings?.language);
   const settingsDateFormat = useTaskStore((state) => state.settings?.dateFormat);
   const appState = useRef(AppState.currentState);
@@ -170,6 +171,7 @@ function RootLayoutContent() {
   const syncThrottleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const widgetRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryLoadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const firstRenderLogged = useRef(false);
   const syncInFlight = useRef<Promise<void> | null>(null);
   const syncPending = useRef(false);
   const backgroundSyncPending = useRef(false);
@@ -182,6 +184,14 @@ function RootLayoutContent() {
     backend: 'off',
     readAt: 0,
   });
+  if (!firstRenderLogged.current) {
+    firstRenderLogged.current = true;
+    markStartupPhase('js.root_layout.first_render');
+  }
+
+  useEffect(() => {
+    markStartupPhase('js.root_layout.mounted');
+  }, []);
 
   const refreshSyncCadence = useCallback(async (): Promise<AutoSyncCadence> => {
     const now = Date.now();
@@ -430,6 +440,7 @@ function RootLayoutContent() {
     const loadData = async () => {
       try {
         loadAttempts.current += 1;
+        markStartupPhase('js.data_load.attempt_start', { attempt: loadAttempts.current });
         if (retryLoadTimer.current) {
           clearTimeout(retryLoadTimer.current);
           retryLoadTimer.current = null;
@@ -444,7 +455,10 @@ function RootLayoutContent() {
         }
 
         const store = useTaskStore.getState();
-        await store.fetchData();
+        await measureStartupPhase('js.store.fetch_data', async () => {
+          await store.fetchData();
+        });
+        markStartupPhase('js.store.fetch_data.applied');
         if (cancelled) return;
         if (!isFossBuild && !isExpoGo && !__DEV__ && analyticsHeartbeatUrl) {
           try {
@@ -452,17 +466,19 @@ function RootLayoutContent() {
               getOrCreateAnalyticsDistinctId(),
               getMobileAnalyticsChannel(isFossBuild),
             ]);
-            await sendDailyHeartbeat({
-              enabled: true,
-              endpointUrl: analyticsHeartbeatUrl,
-              distinctId,
-              platform: Platform.OS,
-              channel,
-              appVersion,
-              deviceClass: getMobileDeviceClass(),
-              osMajor: getMobileOsMajor(),
-              locale: getDeviceLocale(),
-              storage: AsyncStorage,
+            await measureStartupPhase('js.analytics.heartbeat', async () => {
+              await sendDailyHeartbeat({
+                enabled: true,
+                endpointUrl: analyticsHeartbeatUrl,
+                distinctId,
+                platform: Platform.OS,
+                channel,
+                appVersion,
+                deviceClass: getMobileDeviceClass(),
+                osMajor: getMobileOsMajor(),
+                locale: getDeviceLocale(),
+                storage: AsyncStorage,
+              });
             });
           } catch {
             // Keep analytics heartbeat failures silent on mobile.
@@ -483,7 +499,9 @@ function RootLayoutContent() {
         if (!cancelled && isActive.current) {
           requestSync(0);
         }
+        markStartupPhase('js.data_load.attempt_success', { attempt: loadAttempts.current });
       } catch (e) {
+        markStartupPhase('js.data_load.attempt_error', { attempt: loadAttempts.current });
         void logError(e, { scope: 'app', extra: { message: 'Failed to load data' } });
         if (cancelled) return;
         if (loadAttempts.current < 3 && isActive.current) {
@@ -495,6 +513,7 @@ function RootLayoutContent() {
               loadData();
             }
           }, 2000);
+          markStartupPhase('js.data_load.retry_scheduled', { attempt: loadAttempts.current, delayMs: 2000 });
           return;
         }
         Alert.alert(
@@ -504,13 +523,12 @@ function RootLayoutContent() {
         );
       } finally {
         if (!cancelled) {
-          setIsDataLoaded(true);
+          markStartupPhase('js.data_load.marked_ready');
         }
       }
     };
 
     if (storageInitError) {
-      setIsDataLoaded(true);
       return;
     }
     loadData();
@@ -544,18 +562,27 @@ function RootLayoutContent() {
     return () => unsubscribe();
   }, []);
 
-  const isAppReady = isDataLoaded && themeReady && languageReady;
+  const isShellReady = themeReady && languageReady;
   useEffect(() => {
-    if (!isAppReady) return;
+    if (!isShellReady) return;
+    markStartupPhase('js.shell_ready');
+    markStartupPhase('js.app_ready');
     if (typeof SplashScreen?.hideAsync === 'function') {
-      SplashScreen.hideAsync().catch((error) => {
-        void logWarn('Failed to hide splash screen', {
-          scope: 'app',
-          extra: { error: error instanceof Error ? error.message : String(error) },
+      SplashScreen.hideAsync()
+        .then(() => {
+          markStartupPhase('js.splash_hidden');
+        })
+        .catch((error) => {
+          markStartupPhase('js.splash_hide.failed');
+          void logWarn('Failed to hide splash screen', {
+            scope: 'app',
+            extra: { error: error instanceof Error ? error.message : String(error) },
+          });
         });
-      });
+      return;
     }
-  }, [isAppReady]);
+    markStartupPhase('js.splash_hidden.noop');
+  }, [isShellReady]);
 
   if (storageInitError) {
     return (
@@ -575,7 +602,7 @@ function RootLayoutContent() {
     );
   }
 
-  if (!isAppReady) {
+  if (!isShellReady) {
     return null;
   }
 

@@ -151,6 +151,24 @@ export const sanitizeAppDataForRemote = (data: AppData): AppData => {
     };
 };
 
+const normalizeForSyncComparison = (value: unknown): unknown => {
+    if (Array.isArray(value)) {
+        return value.map((item) => normalizeForSyncComparison(item));
+    }
+    if (value && typeof value === 'object') {
+        const record = value as Record<string, unknown>;
+        const normalized: Record<string, unknown> = {};
+        for (const key of Object.keys(record).sort()) {
+            normalized[key] = normalizeForSyncComparison(record[key]);
+        }
+        return normalized;
+    }
+    return value;
+};
+
+export const areSyncPayloadsEqual = (left: AppData, right: AppData): boolean =>
+    JSON.stringify(normalizeForSyncComparison(left)) === JSON.stringify(normalizeForSyncComparison(right));
+
 type ExternalCalendarProvider = {
     load: () => Promise<AppData['settings']['externalCalendars'] | undefined>;
     save: (calendars: AppData['settings']['externalCalendars'] | undefined) => Promise<void>;

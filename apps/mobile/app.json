@@ -108,6 +108,7 @@
       ],
       "expo-secure-store",
       "./plugins/android-manifest-fixes",
+      "./plugins/android-startup-trace",
       "./plugins/patch-alarm-notification-gradle"
     ],
     "experiments": {

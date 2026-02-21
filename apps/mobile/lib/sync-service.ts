@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { AppData, Attachment, MergeStats, useTaskStore, webdavGetJson, webdavPutJson, cloudGetJson, cloudPutJson, flushPendingSave, performSyncCycle, findOrphanedAttachments, removeOrphanedAttachmentsFromData, webdavDeleteFile, cloudDeleteFile, CLOCK_SKEW_THRESHOLD_MS, appendSyncHistory, withRetry, normalizeWebdavUrl, normalizeCloudUrl, sanitizeAppDataForRemote, assertNoPendingAttachmentUploads, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, mergeAppData, cloneAppData, LocalSyncAbort, getInMemoryAppDataSnapshot, shouldRunAttachmentCleanup } from '@mindwtr/core';
+import { AppData, Attachment, MergeStats, useTaskStore, webdavGetJson, webdavPutJson, cloudGetJson, cloudPutJson, flushPendingSave, performSyncCycle, findOrphanedAttachments, removeOrphanedAttachmentsFromData, webdavDeleteFile, cloudDeleteFile, CLOCK_SKEW_THRESHOLD_MS, appendSyncHistory, withRetry, normalizeWebdavUrl, normalizeCloudUrl, sanitizeAppDataForRemote, areSyncPayloadsEqual, assertNoPendingAttachmentUploads, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, mergeAppData, cloneAppData, LocalSyncAbort, getInMemoryAppDataSnapshot, shouldRunAttachmentCleanup } from '@mindwtr/core';
 import { mobileStorage } from './storage-adapter';
 import { logInfo, logSyncError, logWarn, sanitizeLogMessage } from './app-log';
 import { readSyncFile, resolveSyncFileUri, writeSyncFile } from './storage-file';
@@ -220,6 +220,7 @@ export async function performMobileSync(syncPathOverride?: string): Promise<{ su
       let cloudConfig: { url: string; token: string } | null = null;
       let fileSyncPath: string | null = null;
       let preSyncedLocalData: AppData | null = null;
+      let remoteDataForCompare: AppData | null = null;
       step = 'flush';
       await flushPendingSave();
       localSnapshotChangeAt = useTaskStore.getState().lastDataChangeAt;
@@ -314,6 +315,7 @@ export async function performMobileSync(syncPathOverride?: string): Promise<{ su
                 }),
               WEBDAV_RETRY_OPTIONS
             );
+            remoteDataForCompare = data ?? null;
             return data;
           }
           if (backend === 'cloud' && cloudConfig?.url) {
@@ -322,12 +324,14 @@ export async function performMobileSync(syncPathOverride?: string): Promise<{ su
               timeoutMs: DEFAULT_SYNC_TIMEOUT_MS,
               fetcher: fetchWithAbort,
             });
+            remoteDataForCompare = data ?? null;
             return data;
           }
           if (!fileSyncPath) {
             throw new Error('No sync folder configured');
           }
           const data = await readSyncFile(fileSyncPath);
+          remoteDataForCompare = data ?? null;
           return data;
         },
         writeLocal: async (data) => {
@@ -340,6 +344,12 @@ export async function performMobileSync(syncPathOverride?: string): Promise<{ su
           await ensureNetworkStillAvailable();
           assertNoPendingAttachmentUploads(data);
           const sanitized = sanitizeAppDataForRemote(data);
+          const remoteSanitized = remoteDataForCompare
+            ? sanitizeAppDataForRemote(remoteDataForCompare)
+            : null;
+          if (remoteSanitized && areSyncPayloadsEqual(remoteSanitized, sanitized)) {
+            return;
+          }
           if (backend === 'webdav') {
             if (!webdavConfig?.url) throw new Error('WebDAV URL not configured');
             await withRetry(
@@ -352,6 +362,7 @@ export async function performMobileSync(syncPathOverride?: string): Promise<{ su
                 }),
               WEBDAV_RETRY_OPTIONS
             );
+            remoteDataForCompare = sanitized;
             return;
           }
           if (backend === 'cloud') {
@@ -361,10 +372,12 @@ export async function performMobileSync(syncPathOverride?: string): Promise<{ su
               timeoutMs: DEFAULT_SYNC_TIMEOUT_MS,
               fetcher: fetchWithAbort,
             });
+            remoteDataForCompare = sanitized;
             return;
           }
           if (!fileSyncPath) throw new Error('No sync folder configured');
           await writeSyncFile(fileSyncPath, sanitized);
+          remoteDataForCompare = sanitized;
         },
         onStep: (next) => {
           step = next;

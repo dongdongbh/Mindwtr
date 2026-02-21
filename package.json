@@ -26,6 +26,7 @@
     "mobile:start": "bun run --filter mobile start",
     "mobile:android": "bun run --filter mobile android",
     "mobile:ios": "bun run --filter mobile ios",
+    "mobile:startup:bench": "bash apps/mobile/scripts/android_startup_benchmark.sh",
     "test:e2e": "playwright test",
     "mindwtr:cli": "bun run scripts/mindwtr-cli.ts --",
     "mindwtr:api": "bun run scripts/mindwtr-api.ts --",

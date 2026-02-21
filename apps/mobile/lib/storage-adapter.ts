@@ -5,6 +5,7 @@ import Constants from 'expo-constants';
 import { WIDGET_DATA_KEY } from './widget-data';
 import { updateAndroidWidgetFromData } from './widget-service';
 import { logError, logWarn } from './app-log';
+import { markStartupPhase, measureStartupPhase } from './startup-profiler';
 
 const DATA_KEY = WIDGET_DATA_KEY;
 const LEGACY_DATA_KEYS = ['focus-gtd-data', 'gtd-todo-data', 'gtd-data'];
@@ -21,6 +22,9 @@ const enqueueSave = async (work: () => Promise<void>): Promise<void> => {
     return next;
 };
 const SQLITE_DB_NAME = 'mindwtr.db';
+const PREFER_LEGACY_SQLITE_OPEN = true;
+const sqliteSyncOpenEnv = String(process.env.EXPO_PUBLIC_SQLITE_SYNC_OPEN || '').trim().toLowerCase();
+const ENABLE_SYNC_SQLITE_OPEN = sqliteSyncOpenEnv === '1' || sqliteSyncOpenEnv === 'true';
 
 type SqliteState = {
     adapter: SqliteAdapter;
@@ -144,14 +148,46 @@ const createLegacyClient = (db: any): SqliteClient => {
 };
 
 const createSqliteClient = async (): Promise<SqliteClient> => {
+    markStartupPhase('mobile.storage.sqlite_client.create:start');
     // Use require to avoid async bundle loading in dev client.
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const SQLite = require('expo-sqlite');
+    if (PREFER_LEGACY_SQLITE_OPEN && typeof (SQLite as any).openDatabase === 'function') {
+        const legacyDb = (SQLite as any).openDatabase(SQLITE_DB_NAME);
+        markStartupPhase('mobile.storage.sqlite_client.create:end', { mode: 'legacy_preferred' });
+        return createLegacyClient(legacyDb);
+    }
+    const openDatabaseSync = (SQLite as any).openDatabaseSync as ((name: string) => any) | undefined;
+    if (ENABLE_SYNC_SQLITE_OPEN && openDatabaseSync) {
+        try {
+            const db = openDatabaseSync(SQLITE_DB_NAME);
+            if (db?.runAsync && db?.getAllAsync && db?.getFirstAsync && db?.execAsync) {
+                markStartupPhase('mobile.storage.sqlite_client.create:end', { mode: 'sync' });
+                return {
+                    run: async (sql: string, params: unknown[] = []) => {
+                        await db.runAsync(sql, params);
+                    },
+                    all: async <T = Record<string, unknown>>(sql: string, params: unknown[] = []) =>
+                        db.getAllAsync(sql, params) as Promise<T[]>,
+                    get: async <T = Record<string, unknown>>(sql: string, params: unknown[] = []) =>
+                        (await db.getFirstAsync(sql, params)) as T | undefined,
+                    exec: async (sql: string) => {
+                        await db.execAsync(sql);
+                    },
+                };
+            }
+        } catch (error) {
+            if (__DEV__) {
+                logStorageWarn('[Storage] Sync SQLite open failed; falling back', error);
+            }
+        }
+    }
     const openDatabaseAsync = (SQLite as any).openDatabaseAsync as ((name: string) => Promise<any>) | undefined;
     if (openDatabaseAsync) {
         try {
             const db = await openDatabaseAsync(SQLITE_DB_NAME);
             if (db?.runAsync && db?.getAllAsync && db?.getFirstAsync && db?.execAsync) {
+                markStartupPhase('mobile.storage.sqlite_client.create:end', { mode: 'async' });
                 return {
                     run: async (sql: string, params: unknown[] = []) => {
                         await db.runAsync(sql, params);
@@ -173,6 +209,7 @@ const createSqliteClient = async (): Promise<SqliteClient> => {
     }
 
     const legacyDb = (SQLite as any).openDatabase(SQLITE_DB_NAME);
+    markStartupPhase('mobile.storage.sqlite_client.create:end', { mode: 'legacy' });
     return createLegacyClient(legacyDb);
 };
 
@@ -204,11 +241,12 @@ const getLegacyJson = async (AsyncStorage: any): Promise<string | null> => {
 };
 
 const initSqliteState = async (): Promise<SqliteState> => {
+    markStartupPhase('mobile.storage.sqlite_init.start');
     const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-    let client = await createSqliteClient();
+    let client = await measureStartupPhase('mobile.storage.sqlite_init.create_client', async () => createSqliteClient());
     let adapter = new SqliteAdapter(client);
     try {
-        await adapter.ensureSchema();
+        await measureStartupPhase('mobile.storage.sqlite_init.ensure_schema', async () => adapter.ensureSchema());
     } catch (error) {
         if (__DEV__) {
             logStorageWarn('[Storage] SQLite schema init failed, retrying with legacy API', error);
@@ -219,11 +257,11 @@ const initSqliteState = async (): Promise<SqliteState> => {
         const legacyDb = (SQLite as any).openDatabase(SQLITE_DB_NAME);
         client = createLegacyClient(legacyDb);
         adapter = new SqliteAdapter(client);
-        await adapter.ensureSchema();
+        await measureStartupPhase('mobile.storage.sqlite_init.ensure_schema_legacy_retry', async () => adapter.ensureSchema());
     }
     let hasData = false;
     try {
-        hasData = await sqliteHasAnyData(client);
+        hasData = await measureStartupPhase('mobile.storage.sqlite_init.has_any_data', async () => sqliteHasAnyData(client));
     } catch (error) {
         if (__DEV__) {
             logStorageWarn('[Storage] SQLite availability check failed', error);
@@ -231,33 +269,44 @@ const initSqliteState = async (): Promise<SqliteState> => {
         hasData = false;
     }
     if (!hasData) {
-        const jsonValue = await getLegacyJson(AsyncStorage);
+        const jsonValue = await measureStartupPhase('mobile.storage.sqlite_init.read_legacy_json', async () => getLegacyJson(AsyncStorage));
         if (jsonValue != null) {
             try {
                 const data = JSON.parse(jsonValue) as AppData;
                 data.areas = Array.isArray(data.areas) ? data.areas : [];
                 // Ensure JSON backup is updated before SQLite migration so fallback stays consistent.
-                await AsyncStorage.setItem(DATA_KEY, JSON.stringify(data));
-                await adapter.saveData(data);
+                await measureStartupPhase('mobile.storage.sqlite_init.migrate_json_backup_set', async () =>
+                    AsyncStorage.setItem(DATA_KEY, JSON.stringify(data))
+                );
+                await measureStartupPhase('mobile.storage.sqlite_init.migrate_json_to_sqlite', async () => adapter.saveData(data));
             } catch (error) {
                 logStorageWarn('[Storage] Failed to migrate JSON data to SQLite', error);
             }
         }
     }
+    markStartupPhase('mobile.storage.sqlite_init.end');
     return { adapter, client };
 };
 
 const getSqliteState = async (): Promise<SqliteState> => {
     if (!sqliteStatePromise) {
+        markStartupPhase('mobile.storage.sqlite_state.cache_miss');
         sqliteStatePromise = initSqliteState();
+    } else {
+        markStartupPhase('mobile.storage.sqlite_state.cache_hit');
     }
     try {
-        return await sqliteStatePromise;
+        const state = await sqliteStatePromise;
+        markStartupPhase('mobile.storage.sqlite_state.ready');
+        return state;
     } catch (error) {
+        markStartupPhase('mobile.storage.sqlite_state.retry_after_error');
         sqliteStatePromise = null;
         // Retry once on init failure to avoid a poisoned cache.
         sqliteStatePromise = initSqliteState();
-        return await sqliteStatePromise;
+        const state = await sqliteStatePromise;
+        markStartupPhase('mobile.storage.sqlite_state.ready_after_retry');
+        return state;
     }
 };
 
@@ -315,6 +364,7 @@ const createStorage = (): StorageAdapter => {
 
     return {
         getData: async (): Promise<AppData> => {
+            markStartupPhase('mobile.storage.get_data.start');
             const loadJsonBackup = async () => {
                 const jsonValue = await getLegacyJson(AsyncStorage);
                 if (jsonValue == null) {
@@ -350,21 +400,27 @@ const createStorage = (): StorageAdapter => {
                 if (!shouldUseSqlite) {
                     throw new Error('SQLite disabled in Expo Go');
                 }
-                const { adapter } = await withOperationTimeout(
-                    getSqliteState(),
-                    SQLITE_STARTUP_TIMEOUT_MS,
-                    'SQLite initialization timed out'
+                const { adapter } = await measureStartupPhase('mobile.storage.get_data.sqlite_get_state', async () =>
+                    withOperationTimeout(
+                        getSqliteState(),
+                        SQLITE_STARTUP_TIMEOUT_MS,
+                        'SQLite initialization timed out'
+                    )
                 );
-                const data = await withOperationTimeout(
-                    adapter.getData(),
-                    SQLITE_STARTUP_TIMEOUT_MS,
-                    'SQLite read timed out'
+                const data = await measureStartupPhase('mobile.storage.get_data.sqlite_read', async () =>
+                    withOperationTimeout(
+                        adapter.getData(),
+                        SQLITE_STARTUP_TIMEOUT_MS,
+                        'SQLite read timed out'
+                    )
                 );
                 data.areas = Array.isArray(data.areas) ? data.areas : [];
                 updateAndroidWidgetFromData(data).catch((error) => {
                     logStorageWarn('[Widgets] Failed to update Android widget from storage load', error);
                 });
+                markStartupPhase('mobile.storage.get_data.widget_update_dispatched');
                 clearPreferJsonBackup();
+                markStartupPhase('mobile.storage.get_data.end');
                 return data;
             } catch (e) {
                 if (__DEV__ && !shouldUseSqlite && String(e).includes('Expo Go')) {
@@ -373,17 +429,20 @@ const createStorage = (): StorageAdapter => {
                     logStorageWarn('[Storage] SQLite load failed, falling back to JSON backup', e);
                 }
                 markPreferJsonBackup();
-                return loadJsonBackup();
+                const fallbackData = await measureStartupPhase('mobile.storage.get_data.json_fallback_read', async () => loadJsonBackup());
+                markStartupPhase('mobile.storage.get_data.end');
+                return fallbackData;
             }
         },
         saveData: async (data: AppData): Promise<void> => {
             return enqueueSave(async () => {
+                markStartupPhase('mobile.storage.save_data.start');
                 try {
                     if (!shouldUseSqlite) {
                         throw new Error('SQLite disabled in Expo Go');
                     }
-                    const { adapter } = await getSqliteState();
-                    await adapter.saveData(data);
+                    const { adapter } = await measureStartupPhase('mobile.storage.save_data.sqlite_get_state', async () => getSqliteState());
+                    await measureStartupPhase('mobile.storage.save_data.sqlite_write', async () => adapter.saveData(data));
                     clearPreferJsonBackup();
                 } catch (error) {
                     markPreferJsonBackup();
@@ -394,10 +453,14 @@ const createStorage = (): StorageAdapter => {
                     }
                 }
                 try {
-                    const jsonValue = JSON.stringify(data);
-                    await AsyncStorage.setItem(DATA_KEY, jsonValue);
-                    await updateAndroidWidgetFromData(data);
+                    const jsonValue = await measureStartupPhase('mobile.storage.save_data.json_stringify', async () => JSON.stringify(data));
+                    await measureStartupPhase('mobile.storage.save_data.asyncstorage_set', async () =>
+                        AsyncStorage.setItem(DATA_KEY, jsonValue)
+                    );
+                    await measureStartupPhase('mobile.storage.save_data.widget_update', async () => updateAndroidWidgetFromData(data));
+                    markStartupPhase('mobile.storage.save_data.end');
                 } catch (e) {
+                    markStartupPhase('mobile.storage.save_data.error');
                     logStorageError('Failed to save data', e);
                     throw new Error('Failed to save data: ' + (e as Error).message);
                 }

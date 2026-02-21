@@ -9,6 +9,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
+    "startup:bench": "bash scripts/android_startup_benchmark.sh",
     "lint": "expo lint",
     "test": "vitest run"
   },

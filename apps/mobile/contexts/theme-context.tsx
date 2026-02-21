@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useColorScheme as useSystemColorScheme } from 'react-native';
 import { useTaskStore } from '@mindwtr/core';
 import { logError } from '../lib/app-log';
+import { markStartupPhase, measureStartupPhase } from '../lib/startup-profiler';
 
 type ThemeMode = 'system' | 'light' | 'dark' | 'material3-light' | 'material3-dark' | 'eink' | 'nord' | 'sepia' | 'oled';
 type ThemePreset = 'default' | 'eink' | 'nord' | 'sepia' | 'oled';
@@ -95,10 +96,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
     const loadThemePreference = async () => {
         try {
-            const [savedThemeMode, savedThemeStyle] = await Promise.all([
-                AsyncStorage.getItem(THEME_STORAGE_KEY),
-                AsyncStorage.getItem(THEME_STYLE_STORAGE_KEY),
-            ]);
+            markStartupPhase('js.theme.load:start');
+            const [savedThemeMode, savedThemeStyle] = await measureStartupPhase('js.theme.async_storage_read', async () =>
+                Promise.all([
+                    AsyncStorage.getItem(THEME_STORAGE_KEY),
+                    AsyncStorage.getItem(THEME_STYLE_STORAGE_KEY),
+                ])
+            );
             if (savedThemeMode) {
                 setThemeModeState(savedThemeMode as ThemeMode);
             }
@@ -111,6 +115,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
             void logError(e, { scope: 'theme', extra: { message: 'Failed to load theme preference' } });
         } finally {
             setIsReady(true);
+            markStartupPhase('js.theme.load:end');
         }
     };
 
