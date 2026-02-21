@@ -1,5 +1,5 @@
 import { format, isValid, parseISO, setDefaultOptions, type Locale } from 'date-fns';
-import { ar, de, enGB, enUS, es, fr, hi, it, ja, ko, ptBR, ru, tr, zhCN } from 'date-fns/locale';
+import { ar, de, enGB, enUS, es, fr, hi, it, ja, ko, pl, ptBR, ru, tr, zhCN } from 'date-fns/locale';
 import type { Language } from './i18n/i18n-types';
 
 export type DateFormatSetting = 'system' | 'dmy' | 'mdy' | 'ymd';
@@ -17,6 +17,7 @@ const DATE_LOCALE_BY_LANGUAGE: Record<Language, Locale> = {
     ja,
     fr,
     pt: ptBR,
+    pl,
     ko,
     it,
     tr,
@@ -32,6 +33,7 @@ const LOCALE_TAG_BY_LANGUAGE: Record<Language, string> = {
     ja: 'ja-JP',
     fr: 'fr-FR',
     pt: 'pt-PT',
+    pl: 'pl-PL',
     ko: 'ko-KR',
     it: 'it-IT',
     tr: 'tr-TR',

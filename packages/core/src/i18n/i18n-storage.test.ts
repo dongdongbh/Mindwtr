@@ -11,6 +11,7 @@ describe('i18n-storage locale defaults', () => {
     it('falls back to english for partially supported locales', () => {
         expect(resolveLanguageFromLocale('fr-FR')).toBe('en');
         expect(resolveLanguageFromLocale('de-DE')).toBe('en');
+        expect(resolveLanguageFromLocale('pl-PL')).toBe('en');
     });
 
     it('uses locale fallback when no stored language exists', () => {

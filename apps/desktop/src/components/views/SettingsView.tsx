@@ -80,6 +80,7 @@ const LANGUAGES: { id: Language; label: string; native: string }[] = [
     { id: 'ja', label: 'Japanese', native: '日本語' },
     { id: 'fr', label: 'French', native: 'Français' },
     { id: 'pt', label: 'Portuguese', native: 'Português' },
+    { id: 'pl', label: 'Polish', native: 'Polski' },
     { id: 'ko', label: 'Korean', native: '한국어' },
     { id: 'it', label: 'Italian', native: 'Italiano' },
     { id: 'tr', label: 'Turkish', native: 'Türkçe' },

@@ -111,6 +111,7 @@ const LANGUAGES: { id: Language; native: string }[] = [
     { id: 'ja', native: '日本語' },
     { id: 'fr', native: 'Français' },
     { id: 'pt', native: 'Português' },
+    { id: 'pl', native: 'Polski' },
     { id: 'ko', native: '한국어' },
     { id: 'it', native: 'Italiano' },
     { id: 'tr', native: 'Türkçe' },
