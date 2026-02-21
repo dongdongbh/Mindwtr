@@ -104,6 +104,14 @@ const loadOverrides = async (lang: Language): Promise<Record<string, string> | u
         );
         return mod.ptOverrides;
     }
+    if (lang === 'pl') {
+        const mod = await loadWithFallback(
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            () => require('./locales/pl') as typeof import('./locales/pl'),
+            () => import('./locales/pl')
+        );
+        return mod.plOverrides;
+    }
     if (lang === 'ko') {
         const mod = await loadWithFallback(
             // eslint-disable-next-line @typescript-eslint/no-var-requires
