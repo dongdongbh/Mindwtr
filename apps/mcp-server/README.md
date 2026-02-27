@@ -264,6 +264,27 @@ Any MCP-compatible client can work as long as it can launch a **stdio** server w
 
 ---
 
+## Migration: tool rename (`mindwtr.*` → `mindwtr_*`)
+
+> **Breaking change** (introduced in this release): all tool names have changed from dot-notation (`mindwtr.list_tasks`) to underscore-notation (`mindwtr_list_tasks`) to comply with MCP client validation rules (e.g. Claude Desktop).
+
+**Old → new mapping:**
+
+| Old name                  | New name                   |
+| ------------------------- | -------------------------- |
+| `mindwtr.list_tasks`      | `mindwtr_list_tasks`       |
+| `mindwtr.list_projects`   | `mindwtr_list_projects`    |
+| `mindwtr.get_task`        | `mindwtr_get_task`         |
+| `mindwtr.add_task`        | `mindwtr_add_task`         |
+| `mindwtr.update_task`     | `mindwtr_update_task`      |
+| `mindwtr.complete_task`   | `mindwtr_complete_task`    |
+| `mindwtr.delete_task`     | `mindwtr_delete_task`      |
+| `mindwtr.restore_task`    | `mindwtr_restore_task`     |
+
+**Upgrade action:** find and replace `mindwtr.` with `mindwtr_` in any MCP client configs, system prompts, scripts, or automations that reference these tool names. No other changes are required.
+
+---
+
 ## Tools
 
 - `mindwtr_list_tasks`
