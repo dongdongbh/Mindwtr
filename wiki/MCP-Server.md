@@ -13,11 +13,13 @@ This is a **local stdio** server (no HTTP). MCP clients launch it as a subproces
 - A local Mindwtr database (`mindwtr.db`)
 
 ### Default Database Locations
+
 - **Linux:** `~/.local/share/mindwtr/mindwtr.db`
 - **macOS:** `~/Library/Application Support/mindwtr/mindwtr.db`
 - **Windows:** `%APPDATA%\mindwtr\mindwtr.db`
 
 You can override the database location with:
+
 - `--db /path/to/mindwtr.db`
 - Environment variable: `MINDWTR_DB_PATH` or `MINDWTR_DB`
 
@@ -28,11 +30,14 @@ You can override the database location with:
 MCP clients run the server as a subprocess. You point them to **the command** and pass arguments.
 
 ### Key Arguments
+
 - `--db "/path/to/mindwtr.db"`: Path to your SQLite database.
 - `--write`: Enable write operations (add, update, complete, delete). **Without this flag, the server is read-only.**
 
 ### 1. Claude Desktop
+
 Add a server entry to your Claude Desktop configuration file.
+
 - **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 
@@ -51,9 +56,11 @@ Add a server entry to your Claude Desktop configuration file.
   }
 }
 ```
-*Note: Replace `/absolute/path/to/Mindwtr` and the DB path with your actual paths.*
+
+_Note: Replace `/absolute/path/to/Mindwtr` and the DB path with your actual paths._
 
 ### 2. Claude Code (CLI)
+
 You can add the server via the CLI:
 
 ```bash
@@ -62,9 +69,11 @@ claude mcp add mindwtr -- \
 ```
 
 ### 3. Gemini CLI
+
 Gemini CLI uses `settings.json` (User: `~/.gemini/settings.json` or Project: `.gemini/settings.json`).
 
 **Command Line:**
+
 ```bash
 gemini mcp add mindwtr \
   bun /absolute/path/to/Mindwtr/apps/mcp-server/src/index.ts \
@@ -72,12 +81,18 @@ gemini mcp add mindwtr \
 ```
 
 **Manual Config:**
+
 ```json
 {
   "mcpServers": {
     "mindwtr": {
       "command": "bun",
-      "args": ["/absolute/path/to/Mindwtr/apps/mcp-server/src/index.ts", "--db", "/path/to/mindwtr.db", "--write"]
+      "args": [
+        "/absolute/path/to/Mindwtr/apps/mcp-server/src/index.ts",
+        "--db",
+        "/path/to/mindwtr.db",
+        "--write"
+      ]
     }
   }
 }
@@ -90,6 +105,7 @@ gemini mcp add mindwtr \
 You usually don't need to run this manually (the MCP client does it), but it's useful for testing.
 
 ### From Source (Bun)
+
 ```bash
 # Read-only
 bun run mindwtr:mcp -- --db "/path/to/mindwtr.db"
@@ -99,6 +115,7 @@ bun run mindwtr:mcp -- --db "/path/to/mindwtr.db" --write
 ```
 
 ### Build & Run (Node)
+
 ```bash
 # Build
 bun run --filter mindwtr-mcp-server build
@@ -114,43 +131,45 @@ node apps/mcp-server/dist/index.js --db "/path/to/mindwtr.db"
 When connected, the AI agent has access to these tools. By default the server is **read-only**; pass `--write` to enable any write tool.
 Only `--write` is supported for write access (no alternate aliases).
 
-| Tool | Operation | Requires `--write` |
-| --- | --- | --- |
-| `mindwtr.list_tasks` | List tasks | No |
-| `mindwtr.list_projects` | List projects | No |
-| `mindwtr.get_task` | Fetch one task by ID | No |
-| `mindwtr.add_task` | Create task | Yes |
-| `mindwtr.update_task` | Update task | Yes |
-| `mindwtr.complete_task` | Mark done | Yes |
-| `mindwtr.delete_task` | Soft-delete task | Yes |
-| `mindwtr.restore_task` | Restore task | Yes |
+| Tool                    | Operation            | Requires `--write` |
+| ----------------------- | -------------------- | ------------------ |
+| `mindwtr_list_tasks`    | List tasks           | No                 |
+| `mindwtr_list_projects` | List projects        | No                 |
+| `mindwtr_get_task`      | Fetch one task by ID | No                 |
+| `mindwtr_add_task`      | Create task          | Yes                |
+| `mindwtr_update_task`   | Update task          | Yes                |
+| `mindwtr_complete_task` | Mark done            | Yes                |
+| `mindwtr_delete_task`   | Soft-delete task     | Yes                |
+| `mindwtr_restore_task`  | Restore task         | Yes                |
 
 ### Read Tools
-- **`mindwtr.list_tasks`**: List tasks with filters (status, project, date range, search).
-- **`mindwtr.list_projects`**: List all projects.
-- **`mindwtr.get_task`**: Get details of a specific task by ID.
+
+- **`mindwtr_list_tasks`**: List tasks with filters (status, project, date range, search).
+- **`mindwtr_list_projects`**: List all projects.
+- **`mindwtr_get_task`**: Get details of a specific task by ID.
 
 ### Write Tools (Requires `--write`)
-- **`mindwtr.add_task`**: Create a new task. Supports natural language `quickAdd` (e.g., "Buy milk @errands /due:tomorrow").
-- **`mindwtr.update_task`**: Update an existing task (supports clearing fields with `null`).
-- **`mindwtr.complete_task`**: Mark a task as done.
-- **`mindwtr.delete_task`**: Soft-delete a task.
-- **`mindwtr.restore_task`**: Restore a soft-deleted task.
+
+- **`mindwtr_add_task`**: Create a new task. Supports natural language `quickAdd` (e.g., "Buy milk @errands /due:tomorrow").
+- **`mindwtr_update_task`**: Update an existing task (supports clearing fields with `null`).
+- **`mindwtr_complete_task`**: Mark a task as done.
+- **`mindwtr_delete_task`**: Soft-delete a task.
+- **`mindwtr_restore_task`**: Restore a soft-deleted task.
 
 ## Permission Matrix
 
 Use this matrix when deciding whether to run the server in read-only mode or with `--write`.
 
-| Tool | Data Access | Mutation Type | Read-only Mode | `--write` Mode |
-| --- | --- | --- | --- | --- |
-| `mindwtr.list_tasks` | Task rows (filtered) | None | Allowed | Allowed |
-| `mindwtr.list_projects` | Project rows | None | Allowed | Allowed |
-| `mindwtr.get_task` | Single task by ID | None | Allowed | Allowed |
-| `mindwtr.add_task` | Task table | Insert | Denied | Allowed |
-| `mindwtr.update_task` | Task table | Update | Denied | Allowed |
-| `mindwtr.complete_task` | Task table | Update status | Denied | Allowed |
-| `mindwtr.delete_task` | Task table | Soft-delete | Denied | Allowed |
-| `mindwtr.restore_task` | Task table | Restore soft-delete | Denied | Allowed |
+| Tool                    | Data Access          | Mutation Type       | Read-only Mode | `--write` Mode |
+| ----------------------- | -------------------- | ------------------- | -------------- | -------------- |
+| `mindwtr_list_tasks`    | Task rows (filtered) | None                | Allowed        | Allowed        |
+| `mindwtr_list_projects` | Project rows         | None                | Allowed        | Allowed        |
+| `mindwtr_get_task`      | Single task by ID    | None                | Allowed        | Allowed        |
+| `mindwtr_add_task`      | Task table           | Insert              | Denied         | Allowed        |
+| `mindwtr_update_task`   | Task table           | Update              | Denied         | Allowed        |
+| `mindwtr_complete_task` | Task table           | Update status       | Denied         | Allowed        |
+| `mindwtr_delete_task`   | Task table           | Soft-delete         | Denied         | Allowed        |
+| `mindwtr_restore_task`  | Task table           | Restore soft-delete | Denied         | Allowed        |
 
 Practical guidance:
 
@@ -162,14 +181,14 @@ Practical guidance:
 
 ### 1) Guided Weekly Review
 
-1. `mindwtr.list_tasks` with `status: "waiting"` and `status: "someday"`.
+1. `mindwtr_list_tasks` with `status: "waiting"` and `status: "someday"`.
 2. Summarize stalled items by project.
-3. For selected items, call `mindwtr.update_task` to set `reviewAt`.
+3. For selected items, call `mindwtr_update_task` to set `reviewAt`.
 
 ### 2) Inbox Triage Session
 
-1. `mindwtr.list_tasks` with `status: "inbox"` and `sortBy: "createdAt"`.
-2. For each task, classify with `mindwtr.update_task` (`next`, `waiting`, `reference`, etc.).
+1. `mindwtr_list_tasks` with `status: "inbox"` and `sortBy: "createdAt"`.
+2. For each task, classify with `mindwtr_update_task` (`next`, `waiting`, `reference`, etc.).
 3. Add missing metadata (project, contexts, tags) in a second pass.
 
 ### 3) Safe Bulk Close Pattern
@@ -183,7 +202,7 @@ For potentially destructive automation:
 
 ### 4) Quick Capture with Natural Language
 
-Use `mindwtr.add_task` + `quickAdd`:
+Use `mindwtr_add_task` + `quickAdd`:
 
 ```json
 {
@@ -199,8 +218,10 @@ Use this for rapid capture flows where parsing commands is more efficient than s
 
 All tools return JSON in the `content.text` field. Parse the JSON to get the actual payload.
 
-### `mindwtr.list_tasks`
+### `mindwtr_list_tasks`
+
 **Input fields**
+
 - `status`: `inbox | next | waiting | someday | done | archived`
 - `projectId`: string
 - `includeDeleted`: boolean
@@ -213,6 +234,7 @@ All tools return JSON in the `content.text` field. Parse the JSON to get the act
 - `sortOrder`: `asc | desc`
 
 **Example**
+
 ```json
 {
   "status": "next",
@@ -224,6 +246,7 @@ All tools return JSON in the `content.text` field. Parse the JSON to get the act
 ```
 
 **Response**
+
 ```json
 {
   "tasks": [
@@ -237,11 +260,14 @@ All tools return JSON in the `content.text` field. Parse the JSON to get the act
 }
 ```
 
-### `mindwtr.list_projects`
+### `mindwtr_list_projects`
+
 **Input fields**
+
 - none
 
 **Response**
+
 ```json
 {
   "projects": [
@@ -254,18 +280,23 @@ All tools return JSON in the `content.text` field. Parse the JSON to get the act
 }
 ```
 
-### `mindwtr.get_task`
+### `mindwtr_get_task`
+
 **Input fields**
+
 - `id`: string (task UUID)
 - `includeDeleted`: boolean (optional)
 
 **Example**
+
 ```json
 { "id": "task-uuid" }
 ```
 
-### `mindwtr.add_task` (write)
+### `mindwtr_add_task` (write)
+
 **Input fields**
+
 - `title`: string (required if `quickAdd` omitted)
 - `quickAdd`: string (required if `title` omitted)
 - `status`: `inbox | next | waiting | someday | done | archived`
@@ -279,21 +310,26 @@ All tools return JSON in the `content.text` field. Parse the JSON to get the act
 - `timeEstimate`: string (e.g. `30m`, `2h`)
 
 **Example**
+
 ```json
 {
   "quickAdd": "Send invoice +Acme /due:tomorrow 9am #finance"
 }
 ```
 
-### `mindwtr.update_task` (write)
+### `mindwtr_update_task` (write)
+
 **Input fields**
+
 - `id`: string (task UUID)
 - `title`, `status`, `projectId`, `dueDate`, `startTime`, `contexts`, `tags`, `description`, `priority`, `timeEstimate`, `reviewAt`, `isFocusedToday`
 
 **Notes**
+
 - Use `null` to clear fields like `projectId`, `dueDate`, `startTime`, `contexts`, and `tags`.
 
 **Example**
+
 ```json
 {
   "id": "task-uuid",
@@ -302,16 +338,22 @@ All tools return JSON in the `content.text` field. Parse the JSON to get the act
 }
 ```
 
-### `mindwtr.complete_task` (write)
+### `mindwtr_complete_task` (write)
+
 **Input fields**
+
 - `id`: string (task UUID)
 
-### `mindwtr.delete_task` (write)
+### `mindwtr_delete_task` (write)
+
 **Input fields**
+
 - `id`: string (task UUID)
 
-### `mindwtr.restore_task` (write)
+### `mindwtr_restore_task` (write)
+
 **Input fields**
+
 - `id`: string (task UUID)
 
 ---

@@ -266,21 +266,21 @@ Any MCP-compatible client can work as long as it can launch a **stdio** server w
 
 ## Tools
 
-- `mindwtr.list_tasks`
+- `mindwtr_list_tasks`
   - Input: `{ status?: "inbox"|"next"|"waiting"|"someday"|"done"|"archived"|"all", projectId?, limit?, offset?, search?, includeDeleted? }`
-- `mindwtr.list_projects`
+- `mindwtr_list_projects`
   - Input: `{}`
-- `mindwtr.get_task`
+- `mindwtr_get_task`
   - Input: `{ id, includeDeleted? }`
-- `mindwtr.add_task` **(requires `--write`)**
+- `mindwtr_add_task` **(requires `--write`)**
   - Input: `{ title? | quickAdd?, status?, projectId?, dueDate?, startTime?, contexts?, tags?, description?, priority?, timeEstimate? }`
-- `mindwtr.update_task` **(requires `--write`)**
+- `mindwtr_update_task` **(requires `--write`)**
   - Input: `{ id, title?, status?, projectId?, dueDate?, startTime?, contexts?, tags?, description?, priority?, timeEstimate?, reviewAt?, isFocusedToday? }`
-- `mindwtr.complete_task` **(requires `--write`)**
+- `mindwtr_complete_task` **(requires `--write`)**
   - Input: `{ id }`
-- `mindwtr.delete_task` **(requires `--write`)**
+- `mindwtr_delete_task` **(requires `--write`)**
   - Input: `{ id }`
-- `mindwtr.restore_task` **(requires `--write`)**
+- `mindwtr_restore_task` **(requires `--write`)**
   - Input: `{ id }`
 
 All tools return JSON text payloads with the resulting task(s).
@@ -297,7 +297,7 @@ bun run mindwtr:mcp -- --db "/home/dd/.local/share/mindwtr/mindwtr.db"
 ```
 
 2) Connect via your MCP client and run:
-- `mindwtr.list_tasks` (limit 5)
+- `mindwtr_list_tasks` (limit 5)
 
 If you want to test writes, restart with `--write`:
 ```bash
@@ -305,14 +305,14 @@ bun run mindwtr:mcp -- --db "/home/dd/.local/share/mindwtr/mindwtr.db" --write
 ```
 
 Then test:
-- `mindwtr.add_task` (quickAdd: "Test task @home /due:tomorrow")
-- `mindwtr.complete_task` (use returned task id)
-- `mindwtr.update_task` (e.g. set status or dueDate)
-- `mindwtr.delete_task` (use returned task id)
-- `mindwtr.get_task` (use returned task id)
-- `mindwtr.restore_task` (after delete, restore the task)
-- `mindwtr.list_projects`
-- `mindwtr.list_tasks` with `dueDateFrom`, `dueDateTo`, `sortBy`, `sortOrder`
+- `mindwtr_add_task` (quickAdd: "Test task @home /due:tomorrow")
+- `mindwtr_complete_task` (use returned task id)
+- `mindwtr_update_task` (e.g. set status or dueDate)
+- `mindwtr_delete_task` (use returned task id)
+- `mindwtr_get_task` (use returned task id)
+- `mindwtr_restore_task` (after delete, restore the task)
+- `mindwtr_list_projects`
+- `mindwtr_list_tasks` with `dueDateFrom`, `dueDateTo`, `sortBy`, `sortOrder`
 
 If the list returns tasks and add/complete works, the server is healthy.
 
@@ -322,7 +322,7 @@ Use any MCP client or a small script to send:
 - `initialize`
 - `notifications/initialized`
 - `tools/list`
-- `tools/call` (e.g. `mindwtr.list_projects` or `mindwtr.list_tasks`)
+- `tools/call` (e.g. `mindwtr_list_projects` or `mindwtr_list_tasks`)
 
 If these succeed, the stdio transport is working end-to-end.
 
@@ -335,9 +335,9 @@ claude mcp add mindwtr -- \
 ```
 2) Restart Claude Code, run `/mcp`, and verify **mindwtr** is connected.
 3) Ask the model to call:
-   - `mindwtr.list_tasks` (limit 5)
-   - `mindwtr.add_task` (quickAdd: "Test MCP @home /due:tomorrow")
-   - `mindwtr.complete_task` (use returned id)
+   - `mindwtr_list_tasks` (limit 5)
+   - `mindwtr_add_task` (quickAdd: "Test MCP @home /due:tomorrow")
+   - `mindwtr_complete_task` (use returned id)
 
 ---
 

@@ -42,17 +42,17 @@ describe('mcp server index', () => {
     const { server, tools } = createMockServer();
     registerMindwtrTools(server, createMockService(), false);
     expect(tools.size).toBe(8);
-    expect(tools.has('mindwtr.list_tasks')).toBe(true);
-    expect(tools.has('mindwtr.add_task')).toBe(true);
-    expect(tools.has('mindwtr.restore_task')).toBe(true);
+    expect(tools.has('mindwtr_list_tasks')).toBe(true);
+    expect(tools.has('mindwtr_add_task')).toBe(true);
+    expect(tools.has('mindwtr_restore_task')).toBe(true);
   });
 
   test('blocks write tools when readonly', async () => {
     const { server, tools } = createMockServer();
     registerMindwtrTools(server, createMockService(), true);
 
-    const addHandler = tools.get('mindwtr.add_task')?.handler;
-    const deleteHandler = tools.get('mindwtr.delete_task')?.handler;
+    const addHandler = tools.get('mindwtr_add_task')?.handler;
+    const deleteHandler = tools.get('mindwtr_delete_task')?.handler;
     expect(addHandler).toBeTruthy();
     expect(deleteHandler).toBeTruthy();
 
@@ -67,7 +67,7 @@ describe('mcp server index', () => {
   test('validates add_task requires title or quickAdd', async () => {
     const { server, tools } = createMockServer();
     registerMindwtrTools(server, createMockService(), false);
-    const addHandler = tools.get('mindwtr.add_task')?.handler;
+    const addHandler = tools.get('mindwtr_add_task')?.handler;
     expect(addHandler).toBeTruthy();
     const result = await addHandler?.({});
     expect(result?.isError).toBe(true);
@@ -83,7 +83,7 @@ describe('mcp server index', () => {
       },
     };
     registerMindwtrTools(server, failingService, false);
-    const listHandler = tools.get('mindwtr.list_tasks')?.handler;
+    const listHandler = tools.get('mindwtr_list_tasks')?.handler;
     expect(listHandler).toBeTruthy();
     const result = await listHandler?.({});
     expect(result?.isError).toBe(true);
