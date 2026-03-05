@@ -10,6 +10,7 @@ type WeekStart = 'sunday' | 'monday';
 type DateFormatSetting = 'system' | 'dmy' | 'mdy';
 
 type Labels = {
+    lookAndFeel: string;
     appearance: string;
     density: string;
     densityDesc: string;
@@ -21,6 +22,7 @@ type Labels = {
     eink: string;
     nord: string;
     sepia: string;
+    localization: string;
     language: string;
     weekStart: string;
     weekStartSunday: string;
@@ -29,6 +31,7 @@ type Labels = {
     dateFormatSystem: string;
     dateFormatDmy: string;
     dateFormatMdy: string;
+    input: string;
     keybindings: string;
     keybindingsDesc: string;
     undoNotifications: string;
@@ -38,6 +41,7 @@ type Labels = {
     keybindingVim: string;
     keybindingEmacs: string;
     viewShortcuts: string;
+    windowBehavior: string;
     windowDecorations: string;
     windowDecorationsDesc: string;
     closeBehavior: string;
