@@ -1,2 +1,6 @@
-// Updated line 789 
+// Assuming remaining content here...
+
 'common.back': 'Retour',
+'common.skip': 'Passer',
+
+// Remaining content...
