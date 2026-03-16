@@ -75,7 +75,8 @@ import { clearLog, ensureLogFilePath, logInfo } from '../../lib/app-log';
 import {
     performMobileSync,
 } from '../../lib/sync-service';
-import { isLikelyOfflineSyncError } from '../../lib/sync-service-utils';
+import { isCloudKitAvailable } from '../../lib/cloudkit-sync';
+import { coerceSupportedBackend, isLikelyOfflineSyncError } from '../../lib/sync-service-utils';
 import { requestNotificationPermission, startMobileNotifications } from '../../lib/notification-service';
 import { authorizeDropbox, getDropboxRedirectUri } from '../../lib/dropbox-oauth';
 import {
@@ -258,6 +259,7 @@ export default function SettingsPage() {
     const [whisperDownloadState, setWhisperDownloadState] = useState<'idle' | 'downloading' | 'success' | 'error'>('idle');
     const [whisperDownloadError, setWhisperDownloadError] = useState('');
     const [aiAssistantOpen, setAiAssistantOpen] = useState(false);
+    const supportsNativeICloudSync = Platform.OS === 'ios' && isCloudKitAvailable();
     const [speechOpen, setSpeechOpen] = useState(false);
 
     const tc = useThemeColors();
@@ -562,7 +564,11 @@ export default function SettingsPage() {
             const resolvedBackend = backend === 'webdav' || backend === 'cloud' || backend === 'off' || backend === 'file' || backend === 'cloudkit'
                 ? backend
                 : 'off';
-            setSyncBackend(resolvedBackend);
+            const supportedBackend = coerceSupportedBackend(resolvedBackend, supportsNativeICloudSync);
+            setSyncBackend(supportedBackend);
+            if (resolvedBackend !== supportedBackend) {
+                AsyncStorage.setItem(SYNC_BACKEND_KEY, supportedBackend).catch(logSettingsError);
+            }
             if (url) setWebdavUrl(url);
             if (username) setWebdavUsername(username);
             if (password) setWebdavPassword(password);
@@ -577,7 +583,7 @@ export default function SettingsPage() {
                 AsyncStorage.setItem(CLOUD_PROVIDER_KEY, 'selfhosted').catch(logSettingsError);
             }
         }).catch(logSettingsError);
-    }, [isFossBuild]);
+    }, [isFossBuild, supportsNativeICloudSync]);
 
     useEffect(() => {
         void refreshSyncBadgeConfig();
@@ -4290,7 +4296,7 @@ export default function SettingsPage() {
                                         {t('settings.syncBackendOff')}
                                     </Text>
                                 </TouchableOpacity>
-                                {Platform.OS === 'ios' && (
+                                {supportsNativeICloudSync && (
                                     <TouchableOpacity
                                         style={[
                                             styles.backendOption,
@@ -4367,7 +4373,7 @@ export default function SettingsPage() {
                         </View>
                     )}
 
-                    {syncBackend === 'cloudkit' && (
+                    {syncBackend === 'cloudkit' && supportsNativeICloudSync && (
                         <View style={[styles.helpBox, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                             <Text style={[styles.helpTitle, { color: tc.text }]}>
                                 iCloud Sync

@@ -124,3 +124,6 @@ export const resolveBackend = (value: string | null): SyncBackend => {
   if (value === 'cloudkit') return 'cloudkit';
   return normalizeSyncBackend(value);
 };
+
+export const coerceSupportedBackend = (backend: SyncBackend, allowCloudKit: boolean): SyncBackend =>
+  backend === 'cloudkit' && !allowCloudKit ? 'off' : backend;

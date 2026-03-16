@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, Modal, TouchableOpacity, ScrollView, StyleSheet, Platform } from 'react-native';
 import { router } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -315,7 +315,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                                 <Text style={[styles.emptyText, { color: tc.secondaryText }]}>{t('agenda.focusHint')}</Text>
                             </View>
                         ) : (
-                            renderTaskList(focusCandidates.slice(0, 8), { hideStatusBadge: true })
+                            renderTaskList(focusCandidates.slice(0, 8), { showFocusToggle: true, hideStatusBadge: true })
                         )}
                     </View>
                 );

@@ -17,7 +17,7 @@ import {
 } from './dropbox-sync';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Network from 'expo-network';
-import { formatSyncErrorMessage, getFileSyncBaseDir, isLikelyFilePath, isLikelyOfflineSyncError, isRemoteSyncBackend, normalizeFileSyncPath, resolveBackend, type SyncBackend } from './sync-service-utils';
+import { coerceSupportedBackend, formatSyncErrorMessage, getFileSyncBaseDir, isLikelyFilePath, isLikelyOfflineSyncError, isRemoteSyncBackend, normalizeFileSyncPath, resolveBackend, type SyncBackend } from './sync-service-utils';
 import { ensureCloudKitReady, readRemoteCloudKit, writeRemoteCloudKit, isCloudKitAvailable } from './cloudkit-sync';
 import { createWebdavSyncRateLimitController } from './sync-rate-limit';
 import {
@@ -151,9 +151,12 @@ const getCachedConfigValue = async (key: string): Promise<string | null> => {
   return readConfigValue(key, true);
 };
 
+const getSupportedBackend = (rawBackend: string | null): SyncBackend =>
+  coerceSupportedBackend(resolveBackend(rawBackend), isCloudKitAvailable());
+
 export async function getMobileSyncConfigurationStatus(): Promise<{ backend: SyncBackend; configured: boolean }> {
   const rawBackend = (await readConfigValue(SYNC_BACKEND_KEY, false))?.trim() ?? null;
-  const backend: SyncBackend = resolveBackend(rawBackend);
+  const backend: SyncBackend = getSupportedBackend(rawBackend);
 
   if (backend === 'off') {
     return { backend, configured: false };
@@ -255,7 +258,7 @@ const deleteAttachmentFile = async (uri?: string): Promise<void> => {
 const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, MobileSyncResult>({
   runCycle: async (syncPathOverride, { requestFollowUp }) => {
     const rawBackend = (await getCachedConfigValue(SYNC_BACKEND_KEY))?.trim() ?? null;
-    const backend: SyncBackend = resolveBackend(rawBackend);
+    const backend: SyncBackend = getSupportedBackend(rawBackend);
 
     if (backend === 'off') {
       return { success: true };

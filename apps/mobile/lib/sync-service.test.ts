@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   formatSyncErrorMessage,
   getFileSyncBaseDir,
-  isLikelyOfflineSyncError,
-  isLikelyFilePath,
-  normalizeFileSyncPath,
-  isSyncFilePath,
-  resolveBackend,
+    isLikelyOfflineSyncError,
+    isLikelyFilePath,
+    normalizeFileSyncPath,
+    isSyncFilePath,
+    coerceSupportedBackend,
+    resolveBackend,
 } from './sync-service-utils';
 
 describe('mobile sync-service test utils', () => {
@@ -18,6 +19,12 @@ describe('mobile sync-service test utils', () => {
     expect(resolveBackend('off')).toBe('off');
     expect(resolveBackend('invalid')).toBe('off');
     expect(resolveBackend(null)).toBe('off');
+  });
+
+  it('coerces unsupported cloudkit backend to off', () => {
+    expect(coerceSupportedBackend('cloudkit', false)).toBe('off');
+    expect(coerceSupportedBackend('cloudkit', true)).toBe('cloudkit');
+    expect(coerceSupportedBackend('webdav', false)).toBe('webdav');
   });
 
   it('formats WebDAV unauthorized errors with actionable text', () => {

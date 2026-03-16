@@ -41,8 +41,9 @@ Data is stored in a local SQLite database, with a JSON sync/backup file:
 
 ## Sync Backends
 
-Mindwtr directly supports four sync backends:
+Mindwtr directly supports five sync backends:
 
+- **Native iCloud / CloudKit Sync**: Apple-only native sync where available
 - **File Sync**: a user-selected folder/file (`data.json` + `attachments/`)
 - **WebDAV**: any compatible WebDAV endpoint
 - **Mindwtr Cloud (Self-Hosted)**: your own `apps/cloud` endpoint
@@ -50,15 +51,16 @@ Mindwtr directly supports four sync backends:
 
 ### Direct vs indirect provider support
 
-- **Directly supported providers/protocols**: WebDAV servers, the Mindwtr self-hosted endpoint, and Dropbox OAuth (supported builds).
+- **Directly supported providers/protocols**: native iCloud / CloudKit on supported Apple builds, WebDAV servers, the Mindwtr self-hosted endpoint, and Dropbox OAuth (supported builds).
 - **Indirectly supported providers**: iCloud Drive, Google Drive, OneDrive, Syncthing, network shares, and Dropbox via File Sync.
-- **Important**: iCloud is not a native backend in Mindwtr. It can work through **File Sync** when your OS/file picker gives Mindwtr a writable folder.
+- **Important**: native iCloud sync is **Apple-only**. Android, Windows, and Linux should use File Sync, WebDAV, Mindwtr Cloud, or Dropbox instead.
 
 **Quick guidance:**
 - **Syncthing**: device-to-device file sync. Best on the same LAN/subnet. For remote sync, use a Syncthing relay or a mesh VPN (Nebula/Tailscale).
 - **WebDAV**: use a provider that supports WebDAV (e.g., Nextcloud, ownCloud, Fastmail, self-hosted).
 - **Dropbox**: use native Dropbox sync (supported builds) or File Sync.
-- **Google Drive/OneDrive/iCloud Drive**: use File Sync (and Android bridge apps when needed).
+- **iCloud**: use native iCloud sync on supported Apple mobile builds, or iCloud Drive via File Sync.
+- **Google Drive/OneDrive**: use File Sync (and Android bridge apps when needed).
 
 ## Sync Recommendations
 
@@ -66,7 +68,17 @@ Mindwtr directly supports four sync backends:
 - **File Sync (Syncthing/Dropbox/etc.):** works, but **conflicts are file-level** because `data.json` is a single file.
 - **Best practices for File Sync:** avoid editing on two devices at the same time, and wait for sync to finish before opening the app on another device. If conflicts appear, keep the newest `data.json` and delete the `data.json.sync-conflict-*` copies.
 
-### 1. File Sync
+### 1. Native iCloud / CloudKit Sync (Apple-only)
+
+Mindwtr includes a native **iCloud** backend on supported Apple mobile builds.
+
+- **Guide**: [[iCloud Sync]]
+- **Best for**: Apple-only device setups where you want a simpler experience than managing a shared folder
+- **Not for**: Android, Windows, or Linux devices in the same sync setup
+
+Today, macOS desktop should still use **iCloud Drive + File Sync** rather than the native CloudKit backend.
+
+### 2. File Sync
 
 Sync via a shared JSON file with any folder-based sync service:
 
@@ -143,7 +155,7 @@ Then:
 2. Use the bridge app to sync that folder to a local folder on Android.
 3. In Mindwtr, select that local folder in **Settings → Data & Sync** (Mindwtr will use `data.json` inside).
 
-### 2. WebDAV Sync
+### 3. WebDAV Sync
 
 Sync directly to a WebDAV server:
 
@@ -152,7 +164,7 @@ Sync directly to a WebDAV server:
 - Fastmail
 - Any WebDAV-compatible server
 
-### 3. Mindwtr Cloud (Self-Hosted)
+### 4. Mindwtr Cloud (Self-Hosted)
 
 For advanced users, Mindwtr includes a simple sync server (`apps/cloud`) that can be self-hosted.
 
@@ -162,7 +174,7 @@ For advanced users, Mindwtr includes a simple sync server (`apps/cloud`) that ca
 - **Docker setup**: [[Docker Deployment]]
 - **Operations guide**: [[Cloud Deployment]]
 
-### 4. Dropbox OAuth Sync
+### 5. Dropbox OAuth Sync
 
 Mindwtr also supports direct Dropbox sync in supported desktop/mobile builds.
 

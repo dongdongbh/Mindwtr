@@ -33,9 +33,9 @@ import {
   stopMobileNotifications,
 } from '../lib/notification-service';
 import { performMobileSync } from '../lib/sync-service';
-import { isLikelyOfflineSyncError, resolveBackend, type SyncBackend } from '../lib/sync-service-utils';
+import { coerceSupportedBackend, isLikelyOfflineSyncError, resolveBackend, type SyncBackend } from '../lib/sync-service-utils';
 import { SYNC_BACKEND_KEY } from '../lib/sync-constants';
-import { subscribeToCloudKitChanges } from '../lib/cloudkit-sync';
+import { isCloudKitAvailable, subscribeToCloudKitChanges } from '../lib/cloudkit-sync';
 import { updateMobileWidgetFromStore } from '../lib/widget-service';
 import { markStartupPhase, measureStartupPhase } from '../lib/startup-profiler';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -83,6 +83,9 @@ const getCadenceForBackend = (backend: SyncBackend): AutoSyncCadence => {
   if (backend === 'webdav' || backend === 'cloud' || backend === 'cloudkit') return AUTO_SYNC_CADENCE_REMOTE;
   return AUTO_SYNC_CADENCE_OFF;
 };
+
+const supportsNativeICloudSync = (): boolean =>
+  Platform.OS === 'ios' && isCloudKitAvailable();
 
 const parseBool = (value: unknown): boolean =>
   value === true || value === 1 || value === '1' || value === 'true';
@@ -243,7 +246,7 @@ function RootLayoutContent() {
       return syncCadenceRef.current;
     }
     const rawBackend = await AsyncStorage.getItem(SYNC_BACKEND_KEY);
-    const backend = resolveBackend(rawBackend);
+    const backend = coerceSupportedBackend(resolveBackend(rawBackend), supportsNativeICloudSync());
     syncBackendCacheRef.current = { backend, readAt: now };
     syncCadenceRef.current = getCadenceForBackend(backend);
     return syncCadenceRef.current;

@@ -49,6 +49,7 @@ Mindwtr is **simple by default and powerful when needed**. We focus on reducing 
 
 ### Data & Sync
 - [[Data and Sync]] — Storage locations and sync setup
+- [[iCloud Sync]] — Native Apple-only iCloud / CloudKit backend
 - [[Sync Algorithm]] — Conflict rules, tombstones, and merge behavior
 - Self-hosted cloud setup is split between [[Data and Sync]] (client setup) and [[Cloud Deployment]] (server operations)
 - [[Dropbox Sync]] — Native Dropbox OAuth sync setup
@@ -91,7 +92,7 @@ Mindwtr is **simple by default and powerful when needed**. We focus on reducing 
 | 🤖 **AI Assistant**    | Clarify, break down, review (optional)             |
 | 🧩 **Copilot**         | Context/tag/time suggestions while typing          |
 | ♻️ **Reusable Lists**  | Duplicate projects or reset checklists             |
-| 🔄 **Sync Options**    | File, WebDAV, Cloud, Local API                     |
+| 🔄 **Sync Options**    | iCloud (Apple), File, WebDAV, Cloud, Local API     |
 | 📲 **Android Widget**  | Home screen focus/next widget                      |
 | 🌐 **Web App (PWA)**   | Offline-capable browser version                    |
 | 🌍 **i18n**            | EN, 中文, ES, HI, AR, DE, RU, JA, FR, PT, PL, KO, IT, TR, NL |

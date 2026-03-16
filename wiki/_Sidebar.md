@@ -29,6 +29,7 @@
 
 **Data & Sync**
 * [[Data and Sync]]
+* [[iCloud Sync]]
 * [[Sync Algorithm]]
 * [[Dropbox Sync]]
 * [[Cloud Deployment]]
