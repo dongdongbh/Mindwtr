@@ -4,7 +4,9 @@ import { useTaskStore, sortTasksBy, type Task, type TaskStatus, type TaskSortBy 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTheme } from '../../contexts/theme-context';
 import { useLanguage } from '../../contexts/language-context';
+import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { taskMatchesAreaFilter } from '@/lib/area-filter';
 import { ReviewModal } from '../../components/review-modal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { logError } from '../../lib/app-log';
@@ -16,7 +18,7 @@ const STATUS_OPTIONS: TaskStatus[] = ['inbox', 'next', 'waiting', 'someday', 'do
 
 export default function ReviewScreen() {
   const router = useRouter();
-  const { tasks, updateTask, deleteTask, batchMoveTasks, batchDeleteTasks, batchUpdateTasks, settings } = useTaskStore();
+  const { tasks, projects, updateTask, deleteTask, batchMoveTasks, batchDeleteTasks, batchUpdateTasks, settings } = useTaskStore();
   const { isDark } = useTheme();
   const { t } = useLanguage();
   const [filterStatus, setFilterStatus] = useState<TaskStatus | 'all'>('all');
@@ -31,6 +33,8 @@ export default function ReviewScreen() {
 
   const tc = useThemeColors();
   const insets = useSafeAreaInsets();
+  const { areaById, resolvedAreaFilter } = useMobileAreaFilter();
+  const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
 
   const tasksById = useMemo(() => {
     return tasks.reduce((acc, task) => {
@@ -131,7 +135,11 @@ export default function ReviewScreen() {
   const bulkStatuses: TaskStatus[] = ['inbox', 'next', 'waiting', 'someday', 'reference', 'done'];
 
   // Filter out deleted tasks first, then apply status filter
-  const activeTasks = tasks.filter((t) => !t.deletedAt && t.status !== 'reference');
+  const activeTasks = tasks.filter((task) => (
+    !task.deletedAt
+    && task.status !== 'reference'
+    && taskMatchesAreaFilter(task, resolvedAreaFilter, projectById, areaById)
+  ));
   const filteredTasks = activeTasks.filter((task) =>
     filterStatus === 'all' ? true : task.status === filterStatus
   );

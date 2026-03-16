@@ -181,7 +181,7 @@ export function ContextsView() {
 
     return (
         <>
-            <div className="flex h-full gap-6">
+            <div className="mx-auto flex h-full w-full max-w-6xl gap-6">
             {/* Sidebar List of Contexts */}
             <div className="w-64 flex-shrink-0 flex flex-col gap-4 border-r border-border pr-6">
                 <div className="flex items-center justify-between">

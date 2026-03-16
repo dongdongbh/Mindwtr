@@ -6,7 +6,7 @@
  * alongside file, webdav, and cloud — the existing TypeScript merge engine
  * handles conflict resolution.
  */
-import type { NativeModule } from 'expo-modules-core';
+import { requireNativeModule, type NativeModule } from 'expo-modules-core';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AppData } from '@mindwtr/core';
 import { logInfo, logWarn, logError } from './app-log';
@@ -34,14 +34,14 @@ interface CloudKitSyncModule extends NativeModule {
     fetchAllRecords(recordType: string): Promise<Array<Record<string, unknown>>>;
     saveRecords(recordType: string, json: string): Promise<string[]>;
     deleteRecords(recordType: string, ids: string[]): Promise<boolean>;
+    consumePendingRemoteChange(): Promise<boolean>;
 }
 
 // The native module — loaded via requireNativeModule (Expo SDK 54+).
 // Will throw on non-iOS platforms, so we guard with a try/catch.
 let CloudKitSync: CloudKitSyncModule | null = null;
 try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    CloudKitSync = require('../modules/cloudkit-sync').default as CloudKitSyncModule;
+    CloudKitSync = requireNativeModule<CloudKitSyncModule>('CloudKitSync');
 } catch {
     // Not available — Android or missing native build
 }
@@ -270,6 +270,21 @@ export const subscribeToCloudKitChanges = (onChanged: () => void): (() => void) 
         void logInfo('CloudKit remote change notification received', { scope: 'cloudkit' });
         onChanged();
     });
+
+    void CloudKitSync.consumePendingRemoteChange()
+        .then((hadPendingChange) => {
+            if (!hadPendingChange) {
+                return;
+            }
+            void logInfo('CloudKit remote change notification replayed from pending state', { scope: 'cloudkit' });
+            onChanged();
+        })
+        .catch((error) => {
+            void logWarn('Failed to consume pending CloudKit remote change', {
+                scope: 'cloudkit',
+                extra: { error: error instanceof Error ? error.message : String(error) },
+            });
+        });
 
     return () => {
         changeSubscription?.remove();

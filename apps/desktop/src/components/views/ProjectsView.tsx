@@ -783,44 +783,46 @@ export function ProjectsView() {
     return (
         <ErrorBoundary>
             <div className="h-full px-4 py-3">
-                <div className="flex h-full gap-6 w-full max-w-[calc(16rem+1100px+1.5rem)] mx-auto">
-                    <ProjectsSidebar
-                        t={t}
-                        areaFilterLabel={areaFilterLabel ?? undefined}
-                        selectedTag={selectedTag}
-                        noAreaId={NO_AREA}
-                        allTagsId={ALL_TAGS}
-                        noTagsId={NO_TAGS}
-                        tagOptions={tagOptions}
-                        isCreating={isCreating}
-                        isCreatingProject={isCreatingProject}
-                        newProjectTitle={newProjectTitle}
-                        onStartCreate={() => setIsCreating(true)}
-                        onCancelCreate={() => setIsCreating(false)}
-                        onCreateProject={handleCreateProject}
-                        onChangeNewProjectTitle={setNewProjectTitle}
-                        onSelectTag={setSelectedTag}
-                        groupedActiveProjects={groupedActiveProjects}
-                        groupedDeferredProjects={groupedDeferredProjects}
-                        areaById={areaById}
-                        collapsedAreas={collapsedAreas}
-                        onToggleAreaCollapse={toggleAreaCollapse}
-                        showDeferredProjects={showDeferredProjects}
-                        onToggleDeferredProjects={() => setShowDeferredProjects((prev) => !prev)}
-                        selectedProjectId={selectedProjectId}
-                        onSelectProject={setSelectedProjectId}
-                        getProjectColor={getProjectColorForTask}
-                        tasksByProject={tasksByProject}
-                        projects={projects}
-                        toggleProjectFocus={toggleProjectFocus}
-                        updateProject={updateProject}
-                        reorderProjects={reorderProjects}
-                        onDuplicateProject={handleDuplicateProject}
-                    />
+                <div className="mx-auto flex h-full w-full max-w-6xl min-w-0 gap-6">
+                    <div className="min-w-[18rem] w-[clamp(19rem,26vw,28rem)] flex-none min-h-0">
+                        <ProjectsSidebar
+                            t={t}
+                            areaFilterLabel={areaFilterLabel ?? undefined}
+                            selectedTag={selectedTag}
+                            noAreaId={NO_AREA}
+                            allTagsId={ALL_TAGS}
+                            noTagsId={NO_TAGS}
+                            tagOptions={tagOptions}
+                            isCreating={isCreating}
+                            isCreatingProject={isCreatingProject}
+                            newProjectTitle={newProjectTitle}
+                            onStartCreate={() => setIsCreating(true)}
+                            onCancelCreate={() => setIsCreating(false)}
+                            onCreateProject={handleCreateProject}
+                            onChangeNewProjectTitle={setNewProjectTitle}
+                            onSelectTag={setSelectedTag}
+                            groupedActiveProjects={groupedActiveProjects}
+                            groupedDeferredProjects={groupedDeferredProjects}
+                            areaById={areaById}
+                            collapsedAreas={collapsedAreas}
+                            onToggleAreaCollapse={toggleAreaCollapse}
+                            showDeferredProjects={showDeferredProjects}
+                            onToggleDeferredProjects={() => setShowDeferredProjects((prev) => !prev)}
+                            selectedProjectId={selectedProjectId}
+                            onSelectProject={setSelectedProjectId}
+                            getProjectColor={getProjectColorForTask}
+                            tasksByProject={tasksByProject}
+                            projects={projects}
+                            toggleProjectFocus={toggleProjectFocus}
+                            updateProject={updateProject}
+                            reorderProjects={reorderProjects}
+                            onDuplicateProject={handleDuplicateProject}
+                        />
+                    </div>
 
                     {/* Project Details & Tasks */}
                     <div className="flex-1 min-w-0 h-full flex">
-                        <div className="flex flex-col h-full min-h-0 w-full max-w-[1100px]">
+                        <div className="flex flex-col h-full min-h-0 w-full max-w-none">
                             <div className="mb-4">
                                 <input
                                     type="text"

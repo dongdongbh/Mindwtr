@@ -1,6 +1,7 @@
 {
   "platforms": ["ios"],
   "ios": {
-    "modules": ["CloudKitSyncModule"]
+    "modules": ["CloudKitSyncModule"],
+    "appDelegateSubscribers": ["CloudKitSyncAppDelegateSubscriber"]
   }
 }

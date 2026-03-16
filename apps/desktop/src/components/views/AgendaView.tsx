@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { ErrorBoundary } from '../ErrorBoundary';
-import { shallow, useTaskStore, TaskPriority, TimeEstimate, PRESET_CONTEXTS, PRESET_TAGS, matchesHierarchicalToken, safeFormatDate, safeParseDate, safeParseDueDate, isDueForReview, isTaskInActiveProject } from '@mindwtr/core';
+import { shallow, useTaskStore, TaskPriority, TimeEstimate, getUsedTaskTokens, matchesHierarchicalToken, safeFormatDate, safeParseDate, safeParseDueDate, isDueForReview, isTaskInActiveProject } from '@mindwtr/core';
 import type { Task, Project } from '@mindwtr/core';
 import { useLanguage } from '../../contexts/language-context';
 import { cn } from '../../lib/utils';
@@ -172,10 +172,9 @@ export function AgendaView() {
             && isTaskInActiveProject(t, projectMap)
             && taskMatchesAreaFilter(t, resolvedAreaFilter, projectMap, areaById)
         );
-        const taskTokens = active.flatMap(t => [...(t.contexts || []), ...(t.tags || [])]);
         return {
             activeTasks: active,
-            allTokens: Array.from(new Set([...PRESET_CONTEXTS, ...PRESET_TAGS, ...taskTokens])).sort(),
+            allTokens: getUsedTaskTokens(active, (task) => [...(task.contexts || []), ...(task.tags || [])]),
         };
     }, [tasks, projectMap, resolvedAreaFilter, areaById]);
     const priorityOptions: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];

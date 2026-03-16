@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react'
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, Modal, Alert, Pressable, ScrollView, SectionList, Dimensions, Platform, Keyboard, ActionSheetIOS, Image } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { Area, Attachment, DEFAULT_PROJECT_COLOR, generateUUID, getAttachmentDisplayTitle, normalizeLinkAttachmentInput, Project, PRESET_TAGS, Task, TaskStatus, useTaskStore, validateAttachmentForUpload } from '@mindwtr/core';
+import { Area, Attachment, DEFAULT_PROJECT_COLOR, generateUUID, getAttachmentDisplayTitle, getUsedTaskTokens, normalizeLinkAttachmentInput, Project, Task, useTaskStore, validateAttachmentForUpload } from '@mindwtr/core';
 import { Trash2 } from 'lucide-react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -10,10 +10,9 @@ import * as Linking from 'expo-linking';
 import * as Sharing from 'expo-sharing';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import { SwipeableTaskItem } from '@/components/swipeable-task-item';
 import { TaskEditModal } from '@/components/task-edit-modal';
 import { TaskList } from '../../components/task-list';
-import { useTheme } from '../../contexts/theme-context';
+import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { useLanguage } from '../../contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { MarkdownText } from '../../components/markdown-text';
@@ -21,12 +20,12 @@ import { ListSectionHeader, defaultListContentStyle } from '@/components/list-la
 import { ensureAttachmentAvailable } from '../../lib/attachment-sync';
 import { AttachmentProgressIndicator } from '../../components/AttachmentProgressIndicator';
 import { logError, logWarn } from '../../lib/app-log';
+import { AREA_FILTER_ALL, AREA_FILTER_NONE, projectMatchesAreaFilter } from '@/lib/area-filter';
 
 type ProjectSectionItem = { type: 'project'; data: Project };
 
 export default function ProjectsScreen() {
-  const { projects, tasks, areas, addProject, updateProject, deleteProject, toggleProjectFocus, addArea, updateArea, deleteArea, reorderAreas, updateTask, deleteTask, setHighlightTask } = useTaskStore();
-  const { isDark } = useTheme();
+  const { projects, tasks, addProject, updateProject, deleteProject, toggleProjectFocus, addArea, updateArea, deleteArea, reorderAreas, updateTask, setHighlightTask } = useTaskStore();
   const { t } = useLanguage();
   const tc = useThemeColors();
   const insets = useSafeAreaInsets();
@@ -57,17 +56,20 @@ export default function ProjectsScreen() {
   const lastOpenedTaskIdRef = useRef<string | null>(null);
   const ALL_TAGS = '__all__';
   const NO_TAGS = '__none__';
-  const ALL_AREAS = '__all__';
-  const NO_AREA = '__no_area__';
+  const ALL_AREAS = AREA_FILTER_ALL;
+  const NO_AREA = AREA_FILTER_NONE;
   const [selectedTagFilter, setSelectedTagFilter] = useState(ALL_TAGS);
   const [showTagPicker, setShowTagPicker] = useState(false);
-  const [selectedAreaFilter, setSelectedAreaFilter] = useState(ALL_AREAS);
+  const {
+    areaById,
+    resolvedAreaFilter: selectedAreaFilter,
+    sortedAreas,
+  } = useMobileAreaFilter();
 
   const logProjectError = useCallback((message: string, error?: unknown) => {
     if (!error) return;
     void logError(error, { scope: 'project', extra: { message } });
   }, []);
-  const [showAreaFilter, setShowAreaFilter] = useState(false);
   const [showTagFilter, setShowTagFilter] = useState(false);
   const [tagDraft, setTagDraft] = useState('');
   const windowHeight = Dimensions.get('window').height;
@@ -100,9 +102,7 @@ export default function ProjectsScreen() {
     '#ec4899': { nameKey: 'projects.colorPink', swatch: '🩷' },
   };
 
-  const sortedAreas = useMemo(() => [...areas].sort((a, b) => a.order - b.order), [areas]);
   const focusedCount = useMemo(() => projects.filter((project) => project.isFocused).length, [projects]);
-  const areaById = useMemo(() => new Map(sortedAreas.map((area) => [area.id, area])), [sortedAreas]);
   const areaUsage = useMemo(() => {
     const counts = new Map<string, number>();
     projects.forEach((project) => {
@@ -114,9 +114,11 @@ export default function ProjectsScreen() {
   }, [projects]);
 
   const projectTagOptions = useMemo<string[]>(() => {
-    const taskTags = tasks.flatMap((item) => item.tags || []);
     const projectTags = projects.flatMap((item) => item.tagIds || []);
-    return Array.from(new Set([...PRESET_TAGS, ...taskTags, ...projectTags])).filter(Boolean);
+    return Array.from(new Set([
+      ...getUsedTaskTokens(tasks, (item) => item.tags, { prefix: '#' }),
+      ...projectTags,
+    ])).filter(Boolean);
   }, [tasks, projects]);
 
   const tagFilterOptions = useMemo<{ list: string[]; hasNoTags: boolean }>(() => {
@@ -219,12 +221,7 @@ export default function ProjectsScreen() {
       if (selectedTagFilter === NO_TAGS) return tags.length === 0;
       return tags.includes(selectedTagFilter);
     });
-    const filteredByArea = filteredByTag.filter((project) => {
-      if (selectedAreaFilter === ALL_AREAS) return true;
-      const areaId = project.areaId && areaById.has(project.areaId) ? project.areaId : NO_AREA;
-      if (selectedAreaFilter === NO_AREA) return areaId === NO_AREA;
-      return areaId === selectedAreaFilter;
-    });
+    const filteredByArea = filteredByTag.filter((project) => projectMatchesAreaFilter(project, selectedAreaFilter, areaById));
 
     const groups = new Map<string, Project[]>();
     for (const project of filteredByArea) {
@@ -252,7 +249,7 @@ export default function ProjectsScreen() {
     }
 
     return sections;
-  }, [projects, t, sortedAreas, areaById, selectedTagFilter, selectedAreaFilter, ALL_TAGS, NO_TAGS, ALL_AREAS, NO_AREA]);
+  }, [projects, t, sortedAreas, areaById, selectedTagFilter, selectedAreaFilter, ALL_TAGS, NO_TAGS]);
 
   const renderProjectRow = (project: Project) => {
     const projTasks = tasks.filter(t => t.projectId === project.id && t.status !== 'done' && t.status !== 'reference' && !t.deletedAt);
@@ -943,78 +940,6 @@ export default function ProjectsScreen() {
           onSubmitEditing={handleAddProject}
           returnKeyType="done"
         />
-        <View style={styles.filterSection}>
-          <TouchableOpacity
-            style={styles.filterHeader}
-            onPress={() => setShowAreaFilter((prev) => !prev)}
-          >
-            <Text style={[styles.tagFilterLabel, { color: tc.text }]}>{t('projects.areaFilter')}</Text>
-            <Text style={[styles.filterToggleText, { color: tc.secondaryText }]}>
-              {showAreaFilter ? t('filters.hide') : t('filters.show')}
-            </Text>
-          </TouchableOpacity>
-          {showAreaFilter && (
-            <View style={styles.tagFilterChips}>
-              <TouchableOpacity
-                style={[
-                  styles.tagFilterChip,
-                  selectedAreaFilter === ALL_AREAS
-                    ? { borderColor: tc.tint, backgroundColor: tc.tint }
-                    : { borderColor: tc.border, backgroundColor: tc.cardBg },
-                ]}
-                onPress={() => setSelectedAreaFilter(ALL_AREAS)}
-              >
-                <Text
-                  style={[
-                    styles.tagFilterText,
-                    { color: selectedAreaFilter === ALL_AREAS ? tc.onTint : tc.text },
-                  ]}
-                >
-                  {t('projects.allAreas')}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.tagFilterChip,
-                  selectedAreaFilter === NO_AREA
-                    ? { borderColor: tc.tint, backgroundColor: tc.tint }
-                    : { borderColor: tc.border, backgroundColor: tc.cardBg },
-                ]}
-                onPress={() => setSelectedAreaFilter(NO_AREA)}
-              >
-                <Text
-                  style={[
-                    styles.tagFilterText,
-                    { color: selectedAreaFilter === NO_AREA ? tc.onTint : tc.text },
-                  ]}
-                >
-                  {t('projects.noArea')}
-                </Text>
-              </TouchableOpacity>
-              {sortedAreas.map((area) => (
-                <TouchableOpacity
-                  key={area.id}
-                  style={[
-                    styles.tagFilterChip,
-                    selectedAreaFilter === area.id
-                      ? { borderColor: tc.tint, backgroundColor: tc.tint }
-                      : { borderColor: tc.border, backgroundColor: tc.cardBg },
-                  ]}
-                  onPress={() => setSelectedAreaFilter(area.id)}
-                >
-                  <Text
-                    style={[
-                      styles.tagFilterText,
-                      { color: selectedAreaFilter === area.id ? tc.onTint : tc.text },
-                    ]}
-                  >
-                    {area.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </View>
         <View style={styles.filterSection}>
           <TouchableOpacity
             style={styles.filterHeader}

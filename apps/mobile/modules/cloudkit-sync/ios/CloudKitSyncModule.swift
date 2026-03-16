@@ -1,14 +1,36 @@
+import Foundation
 import ExpoModulesCore
 import CloudKit
 
 public class CloudKitSyncModule: Module {
 
+    private static let remoteChangeNotification = Notification.Name("tech.dongdongbh.mindwtr.cloudkit.remoteChange")
+    private static let pendingRemoteChangeKey = "tech.dongdongbh.mindwtr.cloudkit.pendingRemoteChange"
+
     private let manager = CloudKitSyncManager.shared
+    private var remoteChangeObserver: NSObjectProtocol?
 
     public func definition() -> ModuleDefinition {
         Name("CloudKitSync")
 
         Events("onRemoteChange")
+
+        OnCreate {
+            self.remoteChangeObserver = NotificationCenter.default.addObserver(
+                forName: Self.remoteChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.sendEvent("onRemoteChange", [:])
+            }
+        }
+
+        OnDestroy {
+            if let observer = self.remoteChangeObserver {
+                NotificationCenter.default.removeObserver(observer)
+                self.remoteChangeObserver = nil
+            }
+        }
 
         // MARK: - Account Status
 
@@ -82,6 +104,15 @@ public class CloudKitSyncModule: Module {
             try await self.manager.deleteRecords(recordType: recordType, recordIDs: recordIDs)
             return true
         }
+
+        AsyncFunction("consumePendingRemoteChange") { () -> Bool in
+            let defaults = UserDefaults.standard
+            let hadPending = defaults.bool(forKey: Self.pendingRemoteChangeKey)
+            if hadPending {
+                defaults.removeObject(forKey: Self.pendingRemoteChangeKey)
+            }
+            return hadPending
+        }
     }
 
     // MARK: - Helpers
@@ -115,8 +146,19 @@ public class CloudKitSyncModule: Module {
 
     /// Call this from AppDelegate when a silent push arrives for CloudKit.
     public func handleRemoteNotification(userInfo: [AnyHashable: Any]) {
+        Self.handleRemoteNotificationPayload(userInfo)
+    }
+
+    @discardableResult
+    public static func handleRemoteNotificationPayload(_ userInfo: [AnyHashable: Any]) -> Bool {
         let notification = CKNotification(fromRemoteNotificationDictionary: userInfo)
-        guard notification?.subscriptionID == manager.subscriptionID else { return }
-        sendEvent("onRemoteChange", [:])
+        guard notification?.subscriptionID == CloudKitSyncManager.shared.subscriptionID else { return false }
+        publishRemoteChange()
+        return true
+    }
+
+    private static func publishRemoteChange() {
+        UserDefaults.standard.set(true, forKey: pendingRemoteChangeKey)
+        NotificationCenter.default.post(name: remoteChangeNotification, object: nil)
     }
 }

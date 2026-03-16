@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Modal, View, Text, TextInput, TouchableOpacity, StyleSheet, Pressable, ScrollView, FlatList, Switch, Platform, KeyboardAvoidingView, Keyboard, useWindowDimensions } from 'react-native';
+import { Alert, Modal, View, Text, TextInput, TouchableOpacity, StyleSheet, Pressable, FlatList, Switch, Platform, KeyboardAvoidingView, Keyboard, useWindowDimensions } from 'react-native';
 import { CalendarDays, Folder, Flag, X, AtSign, Mic, Square } from 'lucide-react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
 import { Directory, File, Paths } from 'expo-file-system';
 
-import { DEFAULT_PROJECT_COLOR, parseQuickAdd, safeFormatDate, safeParseDate, type Attachment, type Task, type TaskPriority, generateUUID, PRESET_CONTEXTS, useTaskStore } from '@mindwtr/core';
+import { DEFAULT_PROJECT_COLOR, parseQuickAdd, safeFormatDate, safeParseDate, type Attachment, type Task, type TaskPriority, generateUUID, getUsedTaskTokens, useTaskStore } from '@mindwtr/core';
 import { useLanguage } from '../contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { loadAIKey } from '../lib/ai-config';
 import { processAudioCapture, ensureWhisperModelPathForConfig, preloadWhisperContext, startWhisperRealtimeCapture, type SpeechToTextResult } from '../lib/speech-to-text';
@@ -54,7 +55,7 @@ export function QuickCaptureSheet({
   initialValue?: string;
   autoRecord?: boolean;
 }) {
-  const { addTask, addProject, updateTask, updateSettings, projects, settings, tasks, areas } = useTaskStore();
+  const { addTask, addProject, updateSettings, projects, settings, tasks, areas } = useTaskStore();
   const { t } = useLanguage();
   const tc = useThemeColors();
   const insets = useSafeAreaInsets();
@@ -62,6 +63,7 @@ export function QuickCaptureSheet({
   const inputRef = useRef<TextInput>(null);
   const contextInputRef = useRef<TextInput>(null);
   const prioritiesEnabled = settings?.features?.priorities === true;
+  const { selectedAreaIdForNewTasks } = useMobileAreaFilter();
 
   const updateSpeechSettings = useCallback(
     (next: Partial<NonNullable<NonNullable<typeof settings.ai>['speechToText']>>) => {
@@ -90,6 +92,8 @@ export function QuickCaptureSheet({
   const [projectId, setProjectId] = useState<string | null>(null);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [projectQuery, setProjectQuery] = useState('');
+  const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
+  const [showAreaPicker, setShowAreaPicker] = useState(false);
   const [priority, setPriority] = useState<TaskPriority | null>(null);
   const [showPriorityPicker, setShowPriorityPicker] = useState(false);
   const [addAnother, setAddAnother] = useState(false);
@@ -99,17 +103,20 @@ export function QuickCaptureSheet({
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
   const filteredProjects = useMemo(() => {
+    const visibleProjects = projects.filter((project) => !project.deletedAt);
+    const areaFilteredProjects = selectedAreaId
+      ? visibleProjects.filter((project) => project.areaId === selectedAreaId)
+      : visibleProjects;
     const query = projectQuery.trim().toLowerCase();
-    if (!query) return projects;
-    return projects.filter((project) => project.title.toLowerCase().includes(query));
-  }, [projectQuery, projects]);
+    if (!query) return areaFilteredProjects;
+    return areaFilteredProjects.filter((project) => project.title.toLowerCase().includes(query));
+  }, [projectQuery, projects, selectedAreaId]);
 
   const contextOptions = useMemo(() => {
-    const taskContexts = tasks.flatMap((task) => task.contexts || []);
     const initialContexts = initialProps?.contexts ?? [];
     return Array.from(
       new Set(
-        [...PRESET_CONTEXTS, ...taskContexts, ...initialContexts]
+        [...getUsedTaskTokens(tasks, (task) => task.contexts, { prefix: '@' }), ...initialContexts]
           .map((item) => normalizeContextToken(String(item || '')))
           .filter(Boolean)
       )
@@ -166,6 +173,7 @@ export function QuickCaptureSheet({
     const match = projects.find((project) => project.title.toLowerCase() === title.toLowerCase());
     if (match) {
       setProjectId(match.id);
+      setSelectedAreaId(null);
       setShowProjectPicker(false);
       setProjectQuery('');
       Keyboard.dismiss();
@@ -174,6 +182,7 @@ export function QuickCaptureSheet({
     const created = await addProject(title, DEFAULT_PROJECT_COLOR);
     if (!created) return;
     setProjectId(created.id);
+    setSelectedAreaId(null);
     setShowProjectPicker(false);
     setProjectQuery('');
     Keyboard.dismiss();
@@ -199,11 +208,12 @@ export function QuickCaptureSheet({
     );
     setContextTags(initialContextTokens);
     setProjectId(initialProps?.projectId ?? null);
+    setSelectedAreaId(initialProps?.projectId ? null : (initialProps?.areaId ?? selectedAreaIdForNewTasks ?? null));
     setPriority((initialProps?.priority as TaskPriority) ?? null);
     if (autoRecord) return;
     const handle = setTimeout(() => inputRef.current?.focus(), 120);
     return () => clearTimeout(handle);
-  }, [autoRecord, visible, initialProps, initialValue]);
+  }, [autoRecord, visible, initialProps, initialValue, selectedAreaIdForNewTasks]);
 
   useEffect(() => {
     if (prioritiesEnabled) return;
@@ -371,6 +381,8 @@ export function QuickCaptureSheet({
     }
 
     if (projectId) initialPropsMerged.projectId = projectId;
+    if (!initialPropsMerged.projectId && selectedAreaId) initialPropsMerged.areaId = selectedAreaId;
+    if (initialPropsMerged.projectId) initialPropsMerged.areaId = undefined;
     if (contextTags.length > 0) {
       initialPropsMerged.contexts = Array.from(new Set([...(initialPropsMerged.contexts ?? []), ...contextTags]));
     }
@@ -379,7 +391,7 @@ export function QuickCaptureSheet({
     if (startTime) initialPropsMerged.startTime = startTime.toISOString();
 
     return { title: finalTitle, props: initialPropsMerged, invalidDateCommands };
-  }, [addProject, contextTags, dueDate, initialProps, prioritiesEnabled, priority, projectId, projects, startTime, value]);
+  }, [addProject, areas, contextTags, dueDate, initialProps, prioritiesEnabled, priority, projectId, projects, selectedAreaId, startTime, value]);
 
   const applySpeechResult = useCallback(async (taskId: string, result: SpeechToTextResult) => {
     const { tasks: currentTasks, projects: currentProjects, addProject: addProjectNow, updateTask: updateTaskNow, settings: currentSettings } = useTaskStore.getState();
@@ -485,9 +497,11 @@ export function QuickCaptureSheet({
     setContextQuery('');
     setShowContextPicker(false);
     setProjectId(null);
+    setSelectedAreaId(selectedAreaIdForNewTasks ?? null);
     setPriority(null);
     setProjectQuery('');
     setShowProjectPicker(false);
+    setShowAreaPicker(false);
     setShowPriorityPicker(false);
     setShowDatePicker(false);
     setStartPickerMode(null);
@@ -1035,6 +1049,9 @@ export function QuickCaptureSheet({
     ? t('taskEdit.contextsLabel')
     : `${contextTags[0].replace(/^@+/, '')}${contextTags.length > 1 ? ` +${contextTags.length - 1}` : ''}`;
   const projectLabel = selectedProject ? selectedProject.title : t('taskEdit.projectLabel');
+  const areaLabel = selectedAreaId
+    ? areas.find((area) => area.id === selectedAreaId)?.name || t('taskEdit.noAreaOption')
+    : t('taskEdit.noAreaOption');
   const priorityLabel = priority ? t(`priority.${priority}`) : t('taskEdit.priorityLabel');
   const sheetMaxHeight = Math.max(260, windowHeight - Math.max(insets.top, 12) - 8);
   const openDueDatePicker = useCallback(() => {
@@ -1156,8 +1173,21 @@ export function QuickCaptureSheet({
 
             <TouchableOpacity
               style={[styles.optionChip, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
+              onPress={() => setShowAreaPicker(true)}
+              onLongPress={() => setSelectedAreaId(null)}
+              accessibilityRole="button"
+              accessibilityLabel={`${t('taskEdit.areaLabel')}: ${areaLabel}`}
+            >
+              <Text style={[styles.optionText, { color: tc.text }]} numberOfLines={1}>{areaLabel}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.optionChip, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
               onPress={() => setShowProjectPicker(true)}
-              onLongPress={() => setProjectId(null)}
+              onLongPress={() => {
+                setProjectId(null);
+                setSelectedAreaId(selectedAreaIdForNewTasks ?? null);
+              }}
               accessibilityRole="button"
               accessibilityLabel={`${t('taskEdit.project')}: ${projectLabel}`}
             >
@@ -1372,6 +1402,59 @@ export function QuickCaptureSheet({
       </Modal>
 
       <Modal
+        visible={showAreaPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowAreaPicker(false)}
+      >
+        <View style={styles.overlay}>
+          <Pressable
+            style={styles.overlayBackdrop}
+            onPress={() => setShowAreaPicker(false)}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.close')}
+          />
+          <View style={[styles.pickerCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
+            <Text style={[styles.pickerTitle, { color: tc.text }]}>{t('taskEdit.areaLabel')}</Text>
+            <FlatList
+              style={[styles.pickerList, { borderColor: tc.border }]}
+              contentContainerStyle={styles.pickerListContent}
+              data={areas.filter((area) => !area.deletedAt)}
+              keyExtractor={(area) => area.id}
+              keyboardShouldPersistTaps="handled"
+              ListHeaderComponent={(
+                <Pressable
+                  onPress={() => {
+                    setSelectedAreaId(null);
+                    setShowAreaPicker(false);
+                  }}
+                  style={styles.pickerRow}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('taskEdit.noAreaOption')}
+                >
+                  <Text style={[styles.pickerRowText, { color: tc.text }]}>{t('taskEdit.noAreaOption')}</Text>
+                </Pressable>
+              )}
+              renderItem={({ item: area }) => (
+                <Pressable
+                  onPress={() => {
+                    setSelectedAreaId(area.id);
+                    setProjectId(null);
+                    setShowAreaPicker(false);
+                  }}
+                  style={styles.pickerRow}
+                  accessibilityRole="button"
+                  accessibilityLabel={area.name}
+                >
+                  <Text style={[styles.pickerRowText, { color: tc.text }]}>{area.name}</Text>
+                </Pressable>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={showProjectPicker}
         transparent
         animationType="fade"
@@ -1433,6 +1516,7 @@ export function QuickCaptureSheet({
                 <Pressable
                   onPress={() => {
                     setProjectId(project.id);
+                    setSelectedAreaId(null);
                     setShowProjectPicker(false);
                   }}
                   style={styles.pickerRow}

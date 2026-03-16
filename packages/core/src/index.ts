@@ -8,6 +8,7 @@ export * from './sync-runtime-utils';
 export * from './sync-orchestrator';
 export * from './sync-service-utils';
 export * from './task-utils';
+export * from './task-token-usage';
 export * from './contexts';
 export * from './i18n';
 export * from './i18n/i18n-storage';

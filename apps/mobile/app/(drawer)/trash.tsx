@@ -4,7 +4,9 @@ import type { Task } from '@mindwtr/core';
 import { useTheme } from '../../contexts/theme-context';
 import { useLanguage } from '../../contexts/language-context';
 
+import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { useThemeColors, ThemeColors } from '@/hooks/use-theme-colors';
+import { taskMatchesAreaFilter } from '@/lib/area-filter';
 import { Swipeable, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useEffect, useRef } from 'react';
 
@@ -82,12 +84,18 @@ function TrashTaskItem({
 }
 
 export default function TrashScreen() {
-  const { _allTasks, restoreTask, purgeTask, purgeDeletedTasks, highlightTaskId, setHighlightTask } = useTaskStore();
+  const { _allTasks, projects, restoreTask, purgeTask, purgeDeletedTasks, highlightTaskId, setHighlightTask } = useTaskStore();
   const { t } = useLanguage();
   useTheme();
   const tc = useThemeColors();
+  const { areaById, resolvedAreaFilter } = useMobileAreaFilter();
+  const projectById = new Map(projects.map((project) => [project.id, project]));
 
-  const trashedTasks = _allTasks.filter((task) => task.deletedAt && !task.purgedAt);
+  const trashedTasks = _allTasks.filter((task) => (
+    task.deletedAt
+    && !task.purgedAt
+    && taskMatchesAreaFilter(task, resolvedAreaFilter, projectById, areaById)
+  ));
 
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {

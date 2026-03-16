@@ -72,6 +72,7 @@ describe('mobile sync-service test utils', () => {
   });
 
   it('detects likely offline sync errors', () => {
+    expect(isLikelyOfflineSyncError('Sync paused: offline state detected')).toBe(true);
     expect(isLikelyOfflineSyncError('TypeError: Network request failed')).toBe(true);
     expect(isLikelyOfflineSyncError('java.net.UnknownHostException: Unable to resolve host')).toBe(true);
     expect(isLikelyOfflineSyncError('Software caused connection abort')).toBe(true);

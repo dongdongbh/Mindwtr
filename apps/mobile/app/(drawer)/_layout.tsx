@@ -5,6 +5,7 @@ import { Stack } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { MobileHeaderSyncBar } from '@/components/mobile-header-sync-bar';
 import { useLanguage } from '../../contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 
@@ -50,6 +51,7 @@ function DrawerHeader({
         {title}
       </Text>
       <View style={styles.headerBackButton} />
+      <MobileHeaderSyncBar />
     </View>
   );
 }

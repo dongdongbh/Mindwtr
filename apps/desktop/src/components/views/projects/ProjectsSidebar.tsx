@@ -169,12 +169,12 @@ export function ProjectsSidebar({
     }, [noAreaId, reorderProjects, updateProject]);
 
     return (
-        <div className="w-64 h-full flex-shrink-0 flex flex-col gap-4 border-r border-border pr-6">
+        <div className="w-full h-full min-h-0 flex flex-col gap-4 border-r border-border pr-6">
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 min-w-0">
                     <h2 className="text-xl font-bold tracking-tight">{t('projects.title')}</h2>
                     {areaFilterLabel && (
-                        <span className="text-[10px] uppercase tracking-wide bg-muted/40 text-muted-foreground border border-border/60 rounded-full px-2 py-0.5 truncate max-w-[130px]">
+                        <span className="text-[10px] uppercase tracking-wide bg-muted/40 text-muted-foreground border border-border/60 rounded-full px-2 py-0.5 truncate max-w-[180px]">
                             {t('projects.areaLabel')}: {areaFilterLabel}
                         </span>
                     )}

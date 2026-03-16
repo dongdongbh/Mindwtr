@@ -15,6 +15,7 @@ const READONLY_ERROR_PATTERN = /isn't writable|not writable|read-only|read only|
 const IOS_TEMP_INBOX_PATTERN = /\/tmp\/[^/\s]*-Inbox\//i;
 const IOS_ABSOLUTE_PATH_PATTERN = /^\/(private\/)?var\/mobile\//i;
 const OFFLINE_ERROR_PATTERNS = [
+  /offline state detected/i,
   /network request failed/i,
   /internet connection appears to be offline/i,
   /airplane mode/i,

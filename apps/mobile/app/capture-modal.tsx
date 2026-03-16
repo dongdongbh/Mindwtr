@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { createAIProvider, PRESET_CONTEXTS, PRESET_TAGS, parseQuickAdd, type Task, type TimeEstimate, type AIProviderId, useTaskStore } from '@mindwtr/core';
+import { createAIProvider, getUsedTaskTokens, parseQuickAdd, type Task, type TimeEstimate, type AIProviderId, useTaskStore } from '@mindwtr/core';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useLanguage } from '../contexts/language-context';
 import { buildCopilotConfig, isAIKeyRequired, loadAIKey } from '../lib/ai-config';
@@ -48,12 +48,10 @@ export default function CaptureScreen() {
   }, [aiProvider]);
 
   const contextOptions = React.useMemo(() => {
-    const taskContexts = tasks.flatMap((task) => task.contexts || []);
-    return Array.from(new Set([...PRESET_CONTEXTS, ...taskContexts])).filter(Boolean);
+    return getUsedTaskTokens(tasks, (task) => task.contexts, { prefix: '@' });
   }, [tasks]);
   const tagOptions = React.useMemo(() => {
-    const taskTags = tasks.flatMap((task) => task.tags || []);
-    return Array.from(new Set([...PRESET_TAGS, ...taskTags])).filter(Boolean);
+    return getUsedTaskTokens(tasks, (task) => task.tags, { prefix: '#' });
   }, [tasks]);
 
   useEffect(() => {

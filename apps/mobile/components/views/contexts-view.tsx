@@ -1,17 +1,19 @@
 import { View, Text, ScrollView, Pressable, StyleSheet, TextInput } from 'react-native';
-import { useTaskStore, PRESET_CONTEXTS, sortTasksBy, matchesHierarchicalToken, type Task, type TaskSortBy, type TaskStatus } from '@mindwtr/core';
+import { useTaskStore, getUsedTaskTokens, sortTasksBy, matchesHierarchicalToken, type Task, type TaskSortBy, type TaskStatus } from '@mindwtr/core';
 import { useState } from 'react';
 import { useTheme } from '../../contexts/theme-context';
 import { useLanguage } from '../../contexts/language-context';
 
+import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { taskMatchesAreaFilter } from '@/lib/area-filter';
 import { TaskEditModal } from '../task-edit-modal';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SwipeableTaskItem } from '../swipeable-task-item';
 
 
 export function ContextsView() {
-  const { tasks, updateTask, deleteTask, settings } = useTaskStore();
+  const { tasks, projects, updateTask, deleteTask, settings } = useTaskStore();
   const { isDark } = useTheme();
   const { t } = useLanguage();
   const [selectedContexts, setSelectedContexts] = useState<string[]>([]);
@@ -19,14 +21,21 @@ export function ContextsView() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
 
   const tc = useThemeColors();
+  const { areaById, resolvedAreaFilter } = useMobileAreaFilter();
+  const projectById = new Map(projects.map((project) => [project.id, project]));
 
   const NO_CONTEXT_TOKEN = '__no_context__';
 
   // Combine preset contexts with contexts from tasks
-  const contextSourceTasks = tasks.filter((t) => !t.deletedAt && t.status !== 'archived');
-  const allContexts = Array.from(
-    new Set([...PRESET_CONTEXTS, ...contextSourceTasks.flatMap((t) => [...(t.contexts || []), ...(t.tags || [])])])
-  ).sort();
+  const contextSourceTasks = tasks.filter((task) => (
+    !task.deletedAt
+    && task.status !== 'archived'
+    && taskMatchesAreaFilter(task, resolvedAreaFilter, projectById, areaById)
+  ));
+  const allContexts = getUsedTaskTokens(
+    contextSourceTasks,
+    (task) => [...(task.contexts || []), ...(task.tags || [])]
+  );
 
   // Filter contexts by search query
   const filteredContexts = searchQuery

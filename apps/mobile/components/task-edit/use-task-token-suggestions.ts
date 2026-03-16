@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { Task } from '@mindwtr/core';
-import { PRESET_TAGS } from '@mindwtr/core';
+import { getFrequentTaskTokens, getUsedTaskTokens } from '@mindwtr/core';
 import { QUICK_TOKEN_LIMIT } from './task-edit-modal.utils';
 import { MAX_VISIBLE_SUGGESTIONS } from './recurrence-utils';
 import { getActiveTokenQuery, parseTokenList } from './task-edit-token-utils';
@@ -11,7 +11,6 @@ type UseTaskTokenSuggestionsParams = {
     editedTags?: string[];
     contextInputDraft: string;
     tagInputDraft: string;
-    suggestedContexts: string[];
 };
 
 export const useTaskTokenSuggestions = ({
@@ -20,16 +19,15 @@ export const useTaskTokenSuggestions = ({
     editedTags,
     contextInputDraft,
     tagInputDraft,
-    suggestedContexts,
 }: UseTaskTokenSuggestionsParams) => {
     const contextSuggestionPool = useMemo(() => {
-        const taskContexts = tasks.flatMap((item) => item.contexts || []);
+        const taskContexts = getUsedTaskTokens(tasks, (item) => item.contexts, { prefix: '@' });
         return Array.from(new Set([...(editedContexts ?? []), ...taskContexts]))
             .filter((item): item is string => Boolean(item?.startsWith('@')));
     }, [editedContexts, tasks]);
 
     const tagSuggestionPool = useMemo(() => {
-        const taskTags = tasks.flatMap((item) => item.tags || []);
+        const taskTags = getUsedTaskTokens(tasks, (item) => item.tags, { prefix: '#' });
         return Array.from(new Set([...(editedTags ?? []), ...taskTags]))
             .filter((item): item is string => Boolean(item?.startsWith('#')));
     }, [editedTags, tasks]);
@@ -62,22 +60,12 @@ export const useTaskTokenSuggestions = ({
     }, [tagInputDraft, tagSuggestionPool, tagTokenQuery]);
 
     const frequentContextSuggestions = useMemo(
-        () => suggestedContexts.slice(0, QUICK_TOKEN_LIMIT),
-        [suggestedContexts]
+        () => getFrequentTaskTokens(tasks, (item) => item.contexts, QUICK_TOKEN_LIMIT, { prefix: '@' }),
+        [tasks]
     );
 
     const frequentTagSuggestions = useMemo(() => {
-        const counts = new Map<string, number>();
-        tasks.forEach((item) => {
-            item.tags?.forEach((tag) => {
-                if (!tag?.startsWith('#')) return;
-                counts.set(tag, (counts.get(tag) || 0) + 1);
-            });
-        });
-        const sorted = Array.from(counts.entries())
-            .sort((a, b) => b[1] - a[1])
-            .map(([tag]) => tag);
-        return Array.from(new Set([...sorted, ...PRESET_TAGS])).slice(0, QUICK_TOKEN_LIMIT);
+        return getFrequentTaskTokens(tasks, (item) => item.tags, QUICK_TOKEN_LIMIT, { prefix: '#' });
     }, [tasks]);
 
     const selectedContextTokens = useMemo(

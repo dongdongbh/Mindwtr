@@ -5,6 +5,8 @@ import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import { useTheme } from '../../contexts/theme-context';
 import { useLanguage } from '../../contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
+import { taskMatchesAreaFilter } from '@/lib/area-filter';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureDetector, Gesture, Swipeable } from 'react-native-gesture-handler';
 import Animated, {
@@ -371,6 +373,7 @@ export function BoardView() {
   );
 
   const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
+  const { resolvedAreaFilter } = useMobileAreaFilter();
   const projectById = useMemo(() => {
     return projects.reduce((acc, project) => {
       const projectColor = project.areaId ? areaById.get(project.areaId)?.color : undefined;
@@ -381,13 +384,18 @@ export function BoardView() {
 
   // Filter active tasks and group by status
   const tasksByStatus = useMemo(() => {
-    const activeTasks = tasks.filter(t => !t.deletedAt && t.status !== 'reference');
+    const projectMap = new Map(projects.map((project) => [project.id, project]));
+    const activeTasks = tasks.filter((task) => (
+      !task.deletedAt
+      && task.status !== 'reference'
+      && taskMatchesAreaFilter(task, resolvedAreaFilter, projectMap, areaById)
+    ));
     const grouped: Record<string, Task[]> = {};
     COLUMNS.forEach(col => {
       grouped[col.id] = activeTasks.filter(t => t.status === col.id);
     });
     return grouped;
-  }, [tasks]);
+  }, [tasks, projects, resolvedAreaFilter, areaById]);
 
   const getTaskTopInContent = useCallback((taskId: string): number | null => {
     const taskLayout = taskLayoutsRef.current[taskId];

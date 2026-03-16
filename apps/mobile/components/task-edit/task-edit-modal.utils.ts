@@ -39,7 +39,6 @@ export const isValidLinkUri = (value: string): boolean => {
 };
 
 export const QUICK_TOKEN_LIMIT = 6;
-export const DEFAULT_CONTEXT_SUGGESTIONS = ['@home', '@work', '@errands', '@computer', '@phone'];
 
 export const getInitialWindowWidth = (): number => {
     const width = Dimensions?.get?.('window')?.width;

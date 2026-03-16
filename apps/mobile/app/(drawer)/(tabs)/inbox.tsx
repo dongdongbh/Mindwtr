@@ -8,12 +8,16 @@ import { ErrorBoundary } from '../../../components/ErrorBoundary';
 
 import { useLanguage } from '../../../contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
+import { taskMatchesAreaFilter } from '@/lib/area-filter';
 
 export default function InboxScreen() {
-  const { tasks, settings } = useTaskStore();
+  const { tasks, projects, settings } = useTaskStore();
   const { t } = useLanguage();
   const tc = useThemeColors();
   const [showProcessing, setShowProcessing] = useState(false);
+  const { areaById, resolvedAreaFilter } = useMobileAreaFilter();
+  const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
 
   const inboxTasks = useMemo(() => {
     const now = new Date();
@@ -22,9 +26,10 @@ export default function InboxScreen() {
       if (t.status !== 'inbox') return false;
       const start = safeParseDate(t.startTime);
       if (start && start > now) return false;
+      if (!taskMatchesAreaFilter(t, resolvedAreaFilter, projectById, areaById)) return false;
       return true;
     });
-  }, [tasks]);
+  }, [tasks, resolvedAreaFilter, projectById, areaById]);
 
   const defaultCaptureMethod = settings.gtd?.defaultCaptureMethod ?? 'text';
   const emptyHint = defaultCaptureMethod === 'audio'

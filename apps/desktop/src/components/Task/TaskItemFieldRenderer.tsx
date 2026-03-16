@@ -49,6 +49,7 @@ export type TaskItemFieldRendererData = {
     editContexts: string;
     editTags: string;
     language: string;
+    popularContextOptions: string[];
     popularTagOptions: string[];
 };
 
@@ -105,6 +106,7 @@ export function TaskItemFieldRenderer({
         editContexts,
         editTags,
         language,
+        popularContextOptions,
         popularTagOptions,
     } = data;
 
@@ -563,7 +565,7 @@ export function TaskItemFieldRenderer({
                         className="text-xs bg-muted/50 border border-border rounded px-2 py-1 w-full text-foreground placeholder:text-muted-foreground"
                     />
                     <div className="flex flex-wrap gap-2 pt-1">
-                        {['@home', '@work', '@errands', '@computer', '@phone'].map(tag => {
+                        {popularContextOptions.map(tag => {
                             const currentTags = editContexts.split(',').map(t => t.trim()).filter(Boolean);
                             const isActive = currentTags.includes(tag);
                             return (

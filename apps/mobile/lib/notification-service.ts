@@ -1,4 +1,5 @@
 import {
+  getLocalNotificationPermissionStatus,
   requestLocalNotificationPermission,
   sendLocalMobileNotification,
   setLocalNotificationOpenHandler,
@@ -27,6 +28,10 @@ export function setNotificationOpenHandler(handler: NotificationOpenHandler | nu
 
 export async function requestNotificationPermission(): Promise<NotificationPermissionResult> {
   return requestLocalNotificationPermission();
+}
+
+export async function getNotificationPermissionStatus(): Promise<NotificationPermissionResult> {
+  return getLocalNotificationPermissionStatus();
 }
 
 export async function startMobileNotifications(): Promise<void> {

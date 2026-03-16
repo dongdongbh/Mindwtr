@@ -275,6 +275,36 @@ describe('mobile sync-service runtime', () => {
     expect(coreMocks.webdavGetJson).toHaveBeenCalledTimes(1);
   }, 20_000);
 
+  it('skips remote sync before start when the device is offline', async () => {
+    networkMocks.getNetworkStateAsync.mockResolvedValue({
+      isConnected: false,
+      isInternetReachable: false,
+      isAirplaneModeEnabled: false,
+    });
+
+    const syncServiceModule = await syncServiceModulePromise;
+    const result = await syncServiceModule.performMobileSync();
+
+    expect(result).toEqual({ success: true, skipped: 'offline' });
+    expect(coreMocks.performSyncCycle).not.toHaveBeenCalled();
+    expect(coreMocks.webdavGetJson).not.toHaveBeenCalled();
+    expect(storeStateRef.current.updateSettings).not.toHaveBeenCalled();
+    expect(logMocks.logSyncError).not.toHaveBeenCalled();
+  });
+
+  it('skips remote sync when the request fails with an offline network error', async () => {
+    coreMocks.webdavGetJson.mockRejectedValue(new TypeError('Network request failed'));
+
+    const syncServiceModule = await syncServiceModulePromise;
+    const result = await syncServiceModule.performMobileSync();
+
+    expect(result).toEqual({ success: true, skipped: 'offline' });
+    expect(coreMocks.performSyncCycle).toHaveBeenCalledTimes(1);
+    expect(coreMocks.webdavGetJson).toHaveBeenCalledTimes(1);
+    expect(storeStateRef.current.updateSettings).not.toHaveBeenCalled();
+    expect(logMocks.logSyncError).not.toHaveBeenCalled();
+  });
+
   it('reports sync activity state while a sync cycle is in flight', async () => {
     let releaseSync!: () => void;
     const syncGate = new Promise<void>((resolve) => {

@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, Modal, ScrollView, FlatList, TextInput, P
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { DEFAULT_PROJECT_COLOR, useTaskStore, PRESET_CONTEXTS, PRESET_TAGS, createAIProvider, safeFormatDate, safeParseDate, resolveAutoTextDirection, type Task, type AIProviderId } from '@mindwtr/core';
+import { DEFAULT_PROJECT_COLOR, collectTaskTokenUsage, useTaskStore, createAIProvider, safeFormatDate, safeParseDate, resolveAutoTextDirection, type Task, type AIProviderId } from '@mindwtr/core';
 
 import { AIResponseModal, type AIResponseAction } from './ai-response-modal';
 import { useLanguage } from '../contexts/language-context';
@@ -90,74 +90,18 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
   const contextSuggestionPool = useMemo(() => {
-    const usage = new Map<string, { count: number; lastUsedAt: number }>();
-    const ensureToken = (token: string) => {
-      if (!usage.has(token)) {
-        usage.set(token, { count: 0, lastUsedAt: 0 });
-      }
-      return usage.get(token)!;
-    };
-    PRESET_CONTEXTS
-      .filter((item) => item.startsWith('@'))
-      .forEach((item) => {
-        const entry = ensureToken(item);
-        entry.count += 1;
-      });
-    tasks.forEach((task) => {
-      const taskUpdatedAt = safeParseDate(task.updatedAt)?.getTime()
-        ?? safeParseDate(task.createdAt)?.getTime()
-        ?? 0;
-      (task.contexts ?? []).forEach((ctx) => {
-        if (!ctx?.startsWith('@')) return;
-        const entry = ensureToken(ctx);
-        entry.count += 1;
-        if (taskUpdatedAt > entry.lastUsedAt) {
-          entry.lastUsedAt = taskUpdatedAt;
-        }
-      });
-    });
-    return Array.from(usage.entries())
+    return collectTaskTokenUsage(tasks, (task) => task.contexts, { prefix: '@' })
       .sort((a, b) => {
-        const aMeta = a[1];
-        const bMeta = b[1];
-        return bMeta.lastUsedAt - aMeta.lastUsedAt || bMeta.count - aMeta.count || a[0].localeCompare(b[0]);
+        return b.lastUsedAt - a.lastUsedAt || b.count - a.count || a.token.localeCompare(b.token);
       })
-      .map(([token]) => token);
+      .map((entry) => entry.token);
   }, [tasks]);
   const tagSuggestionPool = useMemo(() => {
-    const usage = new Map<string, { count: number; lastUsedAt: number }>();
-    const ensureToken = (token: string) => {
-      if (!usage.has(token)) {
-        usage.set(token, { count: 0, lastUsedAt: 0 });
-      }
-      return usage.get(token)!;
-    };
-    PRESET_TAGS
-      .filter((item) => item.startsWith('#'))
-      .forEach((item) => {
-        const entry = ensureToken(item);
-        entry.count += 1;
-      });
-    tasks.forEach((task) => {
-      const taskUpdatedAt = safeParseDate(task.updatedAt)?.getTime()
-        ?? safeParseDate(task.createdAt)?.getTime()
-        ?? 0;
-      (task.tags ?? []).forEach((tag) => {
-        if (!tag?.startsWith('#')) return;
-        const entry = ensureToken(tag);
-        entry.count += 1;
-        if (taskUpdatedAt > entry.lastUsedAt) {
-          entry.lastUsedAt = taskUpdatedAt;
-        }
-      });
-    });
-    return Array.from(usage.entries())
+    return collectTaskTokenUsage(tasks, (task) => task.tags, { prefix: '#' })
       .sort((a, b) => {
-        const aMeta = a[1];
-        const bMeta = b[1];
-        return bMeta.lastUsedAt - aMeta.lastUsedAt || bMeta.count - aMeta.count || a[0].localeCompare(b[0]);
+        return b.lastUsedAt - a.lastUsedAt || b.count - a.count || a.token.localeCompare(b.token);
       })
-      .map(([token]) => token);
+      .map((entry) => entry.token);
   }, [tasks]);
   const suggestionTerms = useMemo(() => {
     const raw = `${processingTitle} ${processingDescription} ${newContext}`.toLowerCase();
@@ -549,7 +493,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
     try {
       const provider = createAIProvider(buildAIConfig(settings ?? {}, apiKey));
       const contextOptions = Array.from(new Set([
-        ...PRESET_CONTEXTS,
+        ...contextSuggestionPool,
         ...selectedContexts,
         ...(currentTask.contexts ?? []),
       ]));

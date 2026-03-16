@@ -34,7 +34,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 keyring = "2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 hound = "3.5"
-whisper-rs = "0.15.1"
+whisper-rs = "0.16.0"
 cpal = "0.15"
 open = "5.3"
 time = { version = "0.3", features = ["formatting"] }

@@ -9,14 +9,16 @@ import { Swipeable } from 'react-native-gesture-handler';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { projectMatchesAreaFilter, taskMatchesAreaFilter } from '@/lib/area-filter';
 import { SwipeableTaskItem } from '../swipeable-task-item';
 import { TaskEditModal } from '../task-edit-modal';
 
 
 
 export function SomedayView() {
-  const { tasks, projects, areas, updateTask, updateProject, deleteTask, highlightTaskId, setHighlightTask } = useTaskStore();
+  const { tasks, projects, updateTask, updateProject, deleteTask, highlightTaskId, setHighlightTask } = useTaskStore();
   const { isDark } = useTheme();
   const { t } = useLanguage();
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -24,6 +26,8 @@ export function SomedayView() {
 
   const tc = useThemeColors();
   const insets = useSafeAreaInsets();
+  const { areaById, resolvedAreaFilter } = useMobileAreaFilter();
+  const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
   const navBarInset = Platform.OS === 'android' && insets.bottom >= 24 ? insets.bottom : 0;
   const taskListContentStyle = useMemo(
     () => [styles.taskListContent, navBarInset ? { paddingBottom: 16 + navBarInset } : null],
@@ -31,21 +35,28 @@ export function SomedayView() {
   );
 
   const somedayTasks = tasks
-    .filter((t) => !t.deletedAt && t.status === 'someday')
+    .filter((task) => (
+      !task.deletedAt
+      && task.status === 'someday'
+      && taskMatchesAreaFilter(task, resolvedAreaFilter, projectById, areaById)
+    ))
     .sort((a, b) => {
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
-  const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
   const deferredProjects = useMemo(() => {
     return [...projects]
-      .filter((project) => !project.deletedAt && project.status === 'someday')
+      .filter((project) => (
+        !project.deletedAt
+        && project.status === 'someday'
+        && projectMatchesAreaFilter(project, resolvedAreaFilter, areaById)
+      ))
       .sort((a, b) => {
         const aOrder = Number.isFinite(a.order) ? (a.order as number) : Number.POSITIVE_INFINITY;
         const bOrder = Number.isFinite(b.order) ? (b.order as number) : Number.POSITIVE_INFINITY;
         if (aOrder !== bOrder) return aOrder - bOrder;
         return a.title.localeCompare(b.title);
       });
-  }, [projects]);
+  }, [projects, resolvedAreaFilter, areaById]);
 
   const handleStatusChange = (id: string, status: TaskStatus) => {
     updateTask(id, { status });

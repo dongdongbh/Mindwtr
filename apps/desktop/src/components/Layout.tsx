@@ -28,8 +28,9 @@ import { useLanguage } from '../contexts/language-context';
 import { useUiStore } from '../store/ui-store';
 import { reportError } from '../lib/report-error';
 import { ToastHost } from './ToastHost';
-import { AREA_FILTER_ALL, AREA_FILTER_NONE, resolveAreaFilter, taskMatchesAreaFilter } from '../lib/area-filter';
+import { AREA_FILTER_ALL, resolveAreaFilter, taskMatchesAreaFilter } from '../lib/area-filter';
 import { SyncService } from '../lib/sync-service';
+import { SidebarAreaFilter } from './ui/SidebarAreaFilter';
 
 interface LayoutProps {
     children: React.ReactNode;
@@ -384,20 +385,14 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
                 <div className="mt-auto pt-2">
                     {!isCollapsed && (
                         <div className="px-2 pb-2">
-                            <select
+                            <SidebarAreaFilter
+                                areas={sortedAreas}
                                 value={resolvedAreaFilter}
-                                onChange={(event) => handleAreaFilterChange(event.target.value)}
-                                className="w-full text-[13px] bg-muted/40 border-none rounded-lg px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                aria-label={t('projects.areaFilter')}
-                            >
-                                <option value={AREA_FILTER_ALL}>{t('projects.allAreas')}</option>
-                                {sortedAreas.map((area) => (
-                                    <option key={area.id} value={area.id}>
-                                        {area.name}
-                                    </option>
-                                ))}
-                                <option value={AREA_FILTER_NONE}>{t('projects.noArea')}</option>
-                            </select>
+                                onChange={handleAreaFilterChange}
+                                ariaLabel={t('projects.areaFilter')}
+                                allAreasLabel={t('projects.allAreas')}
+                                noAreaLabel={t('projects.noArea')}
+                            />
                         </div>
                     )}
                     <div className="border-t border-border" />

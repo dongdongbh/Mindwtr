@@ -1,5 +1,5 @@
-import { PRESET_CONTEXTS, PRESET_TAGS } from './contexts';
 import { createNextRecurringTask } from './recurrence';
+import { getUsedTaskTokens } from './task-token-usage';
 import { rescheduleTask } from './task-utils';
 import type { AppData, Area, Project, Section, Task, TaskStatus } from './types';
 import { generateUUID as uuidv4 } from './uuid';
@@ -197,8 +197,6 @@ export const computeTaskDerivedState = (
 ): Pick<DerivedState, 'tasksById' | 'activeTasksByStatus' | 'allContexts' | 'allTags' | 'focusedCount'> => {
     const tasksById = new Map<string, Task>();
     const activeTasksByStatus = new Map<TaskStatus, Task[]>();
-    const contextsSet = new Set<string>(PRESET_CONTEXTS);
-    const tagsSet = new Set<string>(PRESET_TAGS);
     let focusedCount = 0;
 
     tasks.forEach((task) => {
@@ -210,15 +208,13 @@ export const computeTaskDerivedState = (
         if (task.isFocusedToday && task.status !== 'done' && task.status !== 'reference') {
             focusedCount += 1;
         }
-        task.contexts?.forEach((ctx) => contextsSet.add(ctx));
-        task.tags?.forEach((tag) => tagsSet.add(tag));
     });
 
     return {
         tasksById,
         activeTasksByStatus,
-        allContexts: Array.from(contextsSet).sort(),
-        allTags: Array.from(tagsSet).sort(),
+        allContexts: getUsedTaskTokens(tasks, (task) => task.contexts, { prefix: '@' }),
+        allTags: getUsedTaskTokens(tasks, (task) => task.tags, { prefix: '#' }),
         focusedCount,
     };
 };

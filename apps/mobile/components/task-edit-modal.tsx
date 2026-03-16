@@ -11,8 +11,6 @@ import {
     useTaskStore,
     createAIProvider,
     generateUUID,
-    PRESET_CONTEXTS,
-    PRESET_TAGS,
     RecurrenceRule,
     type AIProviderId,
     type RecurrenceStrategy,
@@ -34,6 +32,7 @@ import {
     getLocalizedWeekdayButtons,
     getLocalizedWeekdayLabels,
     filterProjectsBySelectedArea,
+    getUsedTaskTokens,
 } from '@mindwtr/core';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -61,7 +60,6 @@ import {
     TaskEditLinkModal,
 } from './task-edit/TaskEditOverlayModals';
 import {
-    MAX_SUGGESTED_TAGS,
     WEEKDAY_ORDER,
     getRecurrenceRuleValue,
     getRecurrenceStrategyValue,
@@ -71,7 +69,6 @@ import {
 } from './task-edit/recurrence-utils';
 import { useTaskEditCopilot } from './task-edit/use-task-edit-copilot';
 import {
-    DEFAULT_CONTEXT_SUGGESTIONS,
     DEFAULT_TASK_EDITOR_ORDER,
     DEFAULT_TASK_EDITOR_VISIBLE,
     getInitialWindowWidth,
@@ -203,33 +200,18 @@ function TaskEditModalInner({ visible, task, onClose, onSave, onFocusMode, defau
     const aiEnabled = settings.ai?.enabled === true;
     const aiProvider = (settings.ai?.provider ?? 'openai') as AIProviderId;
 
-    // Compute most frequent tags from all tasks
-    const suggestedTags = React.useMemo(() => {
-        const counts = new Map<string, number>();
-        tasks.forEach(t => {
-            t.contexts?.forEach(ctx => {
-                counts.set(ctx, (counts.get(ctx) || 0) + 1);
-            });
-        });
-
-        const sorted = Array.from(counts.entries())
-            .sort((a, b) => b[1] - a[1]) // Sort desc by count
-            .map(([tag]) => tag);
-
-        // Add default tags if we don't have enough history
-        const unique = new Set([...sorted, ...DEFAULT_CONTEXT_SUGGESTIONS]);
-
-        return Array.from(unique).slice(0, MAX_SUGGESTED_TAGS);
-    }, [tasks]);
-
     const contextOptions = React.useMemo(() => {
-        const taskContexts = tasks.flatMap((item) => item.contexts || []);
-        return Array.from(new Set([...PRESET_CONTEXTS, ...taskContexts])).filter(Boolean);
-    }, [tasks]);
+        return Array.from(new Set([
+            ...getUsedTaskTokens(tasks, (item) => item.contexts, { prefix: '@' }),
+            ...(editedTask.contexts ?? []),
+        ])).filter(Boolean);
+    }, [editedTask.contexts, tasks]);
     const tagOptions = React.useMemo(() => {
-        const taskTags = tasks.flatMap((item) => item.tags || []);
-        return Array.from(new Set([...PRESET_TAGS, ...taskTags])).filter(Boolean);
-    }, [tasks]);
+        return Array.from(new Set([
+            ...getUsedTaskTokens(tasks, (item) => item.tags, { prefix: '#' }),
+            ...(editedTask.tags ?? []),
+        ])).filter(Boolean);
+    }, [editedTask.tags, tasks]);
 
     const {
         copilotSuggestion,
@@ -255,10 +237,6 @@ function TaskEditModalInner({ visible, task, onClose, onSave, onFocusMode, defau
     });
 
     const {
-        contextSuggestionPool,
-        tagSuggestionPool,
-        contextTokenQuery,
-        tagTokenQuery,
         contextTokenSuggestions,
         tagTokenSuggestions,
         frequentContextSuggestions,
@@ -271,7 +249,6 @@ function TaskEditModalInner({ visible, task, onClose, onSave, onFocusMode, defau
         editedTags: editedTask.tags,
         contextInputDraft,
         tagInputDraft,
-        suggestedContexts: suggestedTags,
     });
 
     useEffect(() => {
@@ -1692,8 +1669,7 @@ function TaskEditModalInner({ visible, task, onClose, onSave, onFocusMode, defau
             const provider = await getAIProvider();
             if (!provider) return;
             const contextOptions = Array.from(new Set([
-                ...PRESET_CONTEXTS,
-                ...suggestedTags,
+                ...getUsedTaskTokens(tasks, (item) => item.contexts, { prefix: '@' }),
                 ...(editedTask.contexts ?? []),
             ]));
             const response = await provider.clarifyTask({

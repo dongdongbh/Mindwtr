@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Calendar, Check, CheckSquare, ChevronLeft, Star, X, type LucideIcon } from 'lucide-react';
 import {
-    PRESET_CONTEXTS,
+    getUsedTaskTokens,
     isDueForReview,
     safeFormatDate,
     safeParseDate,
@@ -89,8 +89,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
     });
 
     const allContexts = useMemo(() => {
-        const taskContexts = activeTasks.flatMap((task) => task.contexts || []);
-        return Array.from(new Set([...PRESET_CONTEXTS, ...taskContexts])).sort();
+        return getUsedTaskTokens(activeTasks, (task) => task.contexts, { prefix: '@' });
     }, [activeTasks]);
 
     const sequentialProjectIds = useMemo(

@@ -14,6 +14,8 @@ import {
 } from '@mindwtr/core';
 import { useTheme } from '../../contexts/theme-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
+import { taskMatchesAreaFilter } from '@/lib/area-filter';
 import { useLanguage } from '../../contexts/language-context';
 import { fetchExternalCalendarEvents } from '../../lib/external-calendar';
 import { logError } from '../../lib/app-log';
@@ -50,7 +52,7 @@ const PIXELS_PER_MINUTE = 1.4;
 const SNAP_MINUTES = 5;
 
 export function CalendarView() {
-  const { tasks, updateTask, deleteTask, settings } = useTaskStore();
+  const { tasks, projects, updateTask, deleteTask, settings } = useTaskStore();
   const { isDark } = useTheme();
   const tc = useThemeColors();
   const toRgba = (hex: string, alpha: number) => {
@@ -82,6 +84,8 @@ export function CalendarView() {
   const [pendingScrollMinutes, setPendingScrollMinutes] = useState<number | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const { openQuickCapture } = useQuickCapture();
+  const { areaById, resolvedAreaFilter } = useMobileAreaFilter();
+  const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
   const logCalendarError = (error: unknown) => {
     void logError(error, { scope: 'calendar' });
   };
@@ -106,9 +110,12 @@ export function CalendarView() {
     const base = new Date(2021, 7, 1 + ((i + weekStartIndex) % 7)); // Aug 1, 2021 is a Sunday
     return base.toLocaleDateString(locale, { weekday: 'short' });
   });
+  const visibleTasks = useMemo(() => (
+    tasks.filter((task) => taskMatchesAreaFilter(task, resolvedAreaFilter, projectById, areaById))
+  ), [tasks, resolvedAreaFilter, projectById, areaById]);
 
   const getDeadlinesForDate = (date: Date): Task[] => {
-    return tasks.filter((task) => {
+    return visibleTasks.filter((task) => {
       if (!task.dueDate) return false;
       const dueDate = safeParseDueDate(task.dueDate);
       return dueDate && isSameDay(dueDate, date);
@@ -116,7 +123,7 @@ export function CalendarView() {
   };
 
   const getScheduledForDate = (date: Date): Task[] => {
-    return tasks.filter((task) => {
+    return visibleTasks.filter((task) => {
       if (!task.startTime) return false;
       const startTime = safeParseDate(task.startTime);
       return startTime && isSameDay(startTime, date);
@@ -189,7 +196,7 @@ export function CalendarView() {
     }
 
 	    // Scheduled tasks (startTime + estimate).
-	    for (const task of tasks) {
+	    for (const task of visibleTasks) {
 	      if (task.deletedAt) continue;
 	      if (task.id === excludeTaskId) continue;
 	      if (task.status === 'done' || task.status === 'reference') continue;
@@ -244,7 +251,7 @@ export function CalendarView() {
       if (e > s && overlaps(startMs, endMs, s, e)) return false;
     }
 
-	    for (const task of tasks) {
+	    for (const task of visibleTasks) {
 	      if (task.deletedAt) continue;
 	      if (task.id === excludeTaskId) continue;
 	      if (task.status === 'done' || task.status === 'reference') continue;
@@ -296,7 +303,7 @@ export function CalendarView() {
 
   const nextQuickScheduleCandidates = useMemo(() => {
     if (!selectedDate) return [];
-    return tasks
+    return visibleTasks
       .filter((task) => {
         if (task.deletedAt) return false;
         if (task.status !== 'next') return false;
@@ -304,13 +311,13 @@ export function CalendarView() {
       })
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
       .slice(0, 6);
-  }, [tasks, selectedDate]);
+  }, [visibleTasks, selectedDate]);
 
 	  const searchCandidates = useMemo(() => {
 	    if (!selectedDate) return [];
 	    const query = scheduleQuery.trim().toLowerCase();
 	    if (!query) return [];
-	    return tasks
+	    return visibleTasks
 	      .filter((task) => {
 	        if (task.deletedAt) return false;
 	        if (task.status === 'done' || task.status === 'reference') return false;
@@ -318,11 +325,11 @@ export function CalendarView() {
 	        return task.title.toLowerCase().includes(query);
 	      })
 	      .slice(0, 8);
-	  }, [tasks, scheduleQuery, selectedDate]);
+	  }, [visibleTasks, scheduleQuery, selectedDate]);
 
   const scheduleTaskOnSelectedDate = (taskId: string) => {
     if (!selectedDate) return;
-    const task = tasks.find((t) => t.id === taskId);
+    const task = visibleTasks.find((t) => t.id === taskId);
     if (!task) return;
 
     const durationMinutes = timeEstimateToMinutes(task.timeEstimate);
@@ -407,7 +414,7 @@ export function CalendarView() {
   };
 
   const openTaskActions = (taskId: string) => {
-    const task = tasks.find((t) => t.id === taskId);
+    const task = visibleTasks.find((t) => t.id === taskId);
     if (!task) return;
 
     const buttons = [

@@ -30,6 +30,7 @@ import { useTheme } from '../../contexts/theme-context';
 import { useLanguage, Language } from '../../contexts/language-context';
 
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { useMobileSyncBadge } from '@/hooks/use-mobile-sync-badge';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import {
     DEFAULT_REASONING_EFFORT,
@@ -72,12 +73,9 @@ import {
 import { loadAIKey, saveAIKey } from '../../lib/ai-config';
 import { clearLog, ensureLogFilePath, logInfo } from '../../lib/app-log';
 import {
-    getMobileSyncActivityState,
-    getMobileSyncConfigurationStatus,
     performMobileSync,
-    subscribeMobileSyncActivityState,
 } from '../../lib/sync-service';
-import { MOBILE_SYNC_BADGE_COLORS, resolveMobileSyncBadgeState } from '../../lib/sync-badge';
+import { isLikelyOfflineSyncError } from '../../lib/sync-service-utils';
 import { requestNotificationPermission, startMobileNotifications } from '../../lib/notification-service';
 import { authorizeDropbox, getDropboxRedirectUri } from '../../lib/dropbox-oauth';
 import {
@@ -203,8 +201,11 @@ export default function SettingsPage() {
     const dropboxAppKey = typeof extraConfig?.dropboxAppKey === 'string' ? extraConfig.dropboxAppKey.trim() : '';
     const dropboxConfigured = !isFossBuild && isDropboxClientConfigured(dropboxAppKey);
     const [isSyncing, setIsSyncing] = useState(false);
-    const [syncConfigured, setSyncConfigured] = useState(false);
-    const [syncActivityState, setSyncActivityState] = useState(getMobileSyncActivityState());
+    const {
+        refreshSyncBadgeConfig,
+        syncBadgeAccessibilityLabel,
+        syncBadgeColor,
+    } = useMobileSyncBadge();
     const currentScreen = useMemo<SettingsScreen>(() => {
         const rawScreen = Array.isArray(settingsScreen) ? settingsScreen[0] : settingsScreen;
         if (!rawScreen) return 'main';
@@ -578,51 +579,20 @@ export default function SettingsPage() {
         }).catch(logSettingsError);
     }, [isFossBuild]);
 
-    const refreshSyncBadgeConfig = useCallback(async () => {
-        try {
-            const status = await getMobileSyncConfigurationStatus();
-            setSyncConfigured(status.configured);
-        } catch {
-            setSyncConfigured(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        const unsubscribe = subscribeMobileSyncActivityState(setSyncActivityState);
-        void refreshSyncBadgeConfig();
-        return unsubscribe;
-    }, [refreshSyncBadgeConfig]);
-
     useEffect(() => {
         void refreshSyncBadgeConfig();
     }, [
         refreshSyncBadgeConfig,
         syncBackend,
         syncPath,
+        webdavUrl,
+        cloudUrl,
+        cloudToken,
+        cloudProvider,
         settings.lastSyncStatus,
         settings.pendingRemoteWriteAt,
         settings.lastSyncAt,
     ]);
-
-    const syncBadgeState = useMemo(() => resolveMobileSyncBadgeState({
-        configured: syncConfigured,
-        activityState: syncActivityState,
-        pendingRemoteWriteAt: settings.pendingRemoteWriteAt,
-        lastSyncStatus: settings.lastSyncStatus,
-        lastSyncAt: settings.lastSyncAt,
-    }), [settings.lastSyncAt, settings.lastSyncStatus, settings.pendingRemoteWriteAt, syncActivityState, syncConfigured]);
-    const syncBadgeColor = syncBadgeState === 'hidden' ? undefined : MOBILE_SYNC_BADGE_COLORS[syncBadgeState];
-
-    const syncBadgeAccessibilityLabel = useMemo(() => {
-        if (syncBadgeState === 'hidden') return undefined;
-        if (syncBadgeState === 'syncing') {
-            return localize('Sync in progress', '同步进行中');
-        }
-        if (syncBadgeState === 'healthy') {
-            return localize('Sync healthy', '同步正常');
-        }
-        return localize('Sync needs attention', '同步需要关注');
-    }, [localize, syncBadgeState]);
 
     useEffect(() => {
         void loadSystemCalendarState();
@@ -1789,6 +1759,13 @@ export default function SettingsPage() {
 
             resetSyncStatusForBackendSwitch();
             const result = await performMobileSync(syncBackend === 'file' ? syncPath || undefined : undefined);
+            if (result.skipped === 'offline' || isLikelyOfflineSyncError(result.error)) {
+                Alert.alert(
+                    localize('Offline', '离线'),
+                    localize('No internet connection. Sync skipped.', '当前无网络连接，已跳过同步。')
+                );
+                return;
+            }
             if (result.success) {
                 const conflictCount = (result.stats?.tasks.conflicts || 0) + (result.stats?.projects.conflicts || 0);
                 Alert.alert(
@@ -4096,15 +4073,8 @@ export default function SettingsPage() {
                     <View style={[styles.settingCard, { backgroundColor: tc.cardBg }]}>
                         <View style={styles.settingRow}>
                             <View style={styles.settingInfo}>
-                                <Text style={[styles.settingLabel, { color: tc.text }]}>
-                                    {localize('Device calendars', '设备日历')}
-                                </Text>
-                                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                                    {localize(
-                                        'Read events from calendars already synced on this device (DAVx5, iCloud, Outlook, etc.).',
-                                        '读取设备上已同步的日历事件（DAVx5、iCloud、Outlook 等）。'
-                                    )}
-                                </Text>
+                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.deviceCalendars')}</Text>
+                                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.deviceCalendarsDesc')}</Text>
                             </View>
                             <Switch
                                 value={systemCalendarEnabled}
@@ -4119,14 +4089,8 @@ export default function SettingsPage() {
                                     <View>
                                         <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
                                             {systemCalendarPermission === 'denied'
-                                                ? localize(
-                                                    'Calendar access is denied. Enable it in system settings, then refresh.',
-                                                    '日历权限被拒绝。请在系统设置中开启后刷新。'
-                                                )
-                                                : localize(
-                                                    'Calendar access is required to read device events.',
-                                                    '读取设备日历事件需要日历权限。'
-                                                )}
+                                                ? t('settings.calendarAccessDenied')
+                                                : t('settings.calendarAccessRequired')}
                                         </Text>
                                         <TouchableOpacity
                                             style={[
@@ -4136,7 +4100,7 @@ export default function SettingsPage() {
                                             onPress={handleRequestSystemCalendarAccess}
                                         >
                                             <Text style={[styles.backendOptionText, { color: tc.text }]}>
-                                                {localize('Grant access', '授权访问')}
+                                                {t('settings.grantCalendarAccess')}
                                             </Text>
                                         </TouchableOpacity>
                                     </View>
@@ -4146,7 +4110,7 @@ export default function SettingsPage() {
                                     </View>
                                 ) : systemCalendars.length === 0 ? (
                                     <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                                        {localize('No device calendars found.', '未找到设备日历。')}
+                                        {t('settings.noDeviceCalendars')}
                                     </Text>
                                 ) : (
                                     <View>
@@ -4165,7 +4129,7 @@ export default function SettingsPage() {
                                                             {calendar.name}
                                                         </Text>
                                                         <Text style={[styles.settingDescription, { color: tc.secondaryText }]} numberOfLines={1}>
-                                                            {localize('Device calendar', '设备日历')}
+                                                            {t('settings.deviceCalendar')}
                                                         </Text>
                                                     </View>
                                                     <Switch
@@ -4395,10 +4359,10 @@ export default function SettingsPage() {
                     {syncBackend === 'off' && (
                         <View style={[styles.helpBox, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                             <Text style={[styles.helpTitle, { color: tc.text }]}>
-                                {localize('Sync is off', '同步已关闭')}
+                                {t('settings.syncOff')}
                             </Text>
                             <Text style={[styles.helpText, { color: tc.secondaryText }]}>
-                                {localize('Turn sync back on anytime from this screen.', '您可以随时在此页面重新开启同步。')}
+                                {t('settings.syncOffDesc')}
                             </Text>
                         </View>
                     )}

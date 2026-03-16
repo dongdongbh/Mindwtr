@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Project, Section, Task, Area } from '@mindwtr/core';
-import { PRESET_CONTEXTS, PRESET_TAGS, useTaskStore } from '@mindwtr/core';
+import { getFrequentTaskTokens, getUsedTaskTokens, useTaskStore } from '@mindwtr/core';
 
 type UseTaskItemProjectContextParams = {
     task: Task;
@@ -46,9 +46,10 @@ export function useTaskItemProjectContext({
     const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
 
     const [projectContext, setProjectContext] = useState<{ projectTitle: string; projectTasks: string[] } | null>(null);
-    const [tagOptions, setTagOptions] = useState<string[]>(Array.from(PRESET_TAGS));
-    const [popularTagOptions, setPopularTagOptions] = useState<string[]>(Array.from(PRESET_TAGS).slice(0, 8));
-    const [allContexts, setAllContexts] = useState<string[]>(Array.from(PRESET_CONTEXTS).sort());
+    const [tagOptions, setTagOptions] = useState<string[]>([]);
+    const [popularTagOptions, setPopularTagOptions] = useState<string[]>([]);
+    const [allContexts, setAllContexts] = useState<string[]>([]);
+    const [popularContextOptions, setPopularContextOptions] = useState<string[]>([]);
 
     useEffect(() => {
         if (!isEditing) return;
@@ -72,23 +73,10 @@ export function useTaskItemProjectContext({
             setProjectContext(null);
         }
 
-        const tagCounts = new Map<string, number>();
-        const tags = new Set<string>(PRESET_TAGS);
-        const contexts = new Set<string>(PRESET_CONTEXTS);
-        storeTasks.forEach((candidate) => {
-            candidate.tags?.forEach((tag) => {
-                tags.add(tag);
-                tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
-            });
-            candidate.contexts?.forEach((ctx) => contexts.add(ctx));
-        });
-        setTagOptions(Array.from(tags).filter(Boolean));
-
-        const sortedTags = Array.from(tagCounts.entries())
-            .sort((a, b) => b[1] - a[1])
-            .map(([tag]) => tag);
-        setPopularTagOptions(Array.from(new Set([...sortedTags, ...PRESET_TAGS])).slice(0, 8));
-        setAllContexts(Array.from(contexts).sort());
+        setTagOptions(getUsedTaskTokens(storeTasks, (candidate) => candidate.tags, { prefix: '#' }));
+        setPopularTagOptions(getFrequentTaskTokens(storeTasks, (candidate) => candidate.tags, 8, { prefix: '#' }));
+        setAllContexts(getUsedTaskTokens(storeTasks, (candidate) => candidate.contexts, { prefix: '@' }));
+        setPopularContextOptions(getFrequentTaskTokens(storeTasks, (candidate) => candidate.contexts, 5, { prefix: '@' }));
     }, [editProjectId, isEditing, propProject, setEditAreaId, task.id, task.projectId]);
 
     return {
@@ -99,5 +87,6 @@ export function useTaskItemProjectContext({
         tagOptions,
         popularTagOptions,
         allContexts,
+        popularContextOptions,
     };
 }

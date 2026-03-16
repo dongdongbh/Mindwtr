@@ -1,7 +1,7 @@
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { extractWaitingPerson, safeParseDueDate, useTaskStore } from '@mindwtr/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Task, TaskStatus } from '@mindwtr/core';
+import type { Task, TaskStatus, TimeEstimate } from '@mindwtr/core';
 import { useTheme } from '../../contexts/theme-context';
 import { useLanguage } from '../../contexts/language-context';
 import { Folder } from 'lucide-react-native';
@@ -10,22 +10,33 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
+import { projectMatchesAreaFilter, taskMatchesAreaFilter } from '@/lib/area-filter';
 import { SwipeableTaskItem } from '../swipeable-task-item';
 import { TaskEditModal } from '../task-edit-modal';
+import {
+  MOBILE_TIME_ESTIMATE_OPTIONS,
+  formatTimeEstimateChipLabel,
+  matchesSelectedTimeEstimates,
+} from '../time-estimate-filter-utils';
 
 
 
 export function WaitingView() {
-  const { tasks, projects, areas, updateTask, updateProject, deleteTask, highlightTaskId, setHighlightTask } = useTaskStore();
+  const { tasks, projects, updateTask, updateProject, deleteTask, highlightTaskId, setHighlightTask, settings } = useTaskStore();
   const { isDark } = useTheme();
   const { t } = useLanguage();
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [selectedWaitingPerson, setSelectedWaitingPerson] = useState('');
+  const [selectedTimeEstimates, setSelectedTimeEstimates] = useState<TimeEstimate[]>([]);
   const router = useRouter();
 
   const tc = useThemeColors();
+  const timeEstimatesEnabled = settings?.features?.timeEstimates === true;
   const insets = useSafeAreaInsets();
   const navBarInset = Platform.OS === 'android' && insets.bottom >= 24 ? insets.bottom : 0;
+  const { areaById, resolvedAreaFilter } = useMobileAreaFilter();
+  const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
   const taskListContentStyle = useMemo(
     () => [styles.taskListContent, navBarInset ? { paddingBottom: 16 + navBarInset } : null],
     [navBarInset],
@@ -33,7 +44,11 @@ export function WaitingView() {
 
   const waitingTasks = useMemo(() => {
     return tasks
-      .filter((task) => !task.deletedAt && task.status === 'waiting')
+      .filter((task) => (
+        !task.deletedAt
+        && task.status === 'waiting'
+        && taskMatchesAreaFilter(task, resolvedAreaFilter, projectById, areaById)
+      ))
       .sort((a, b) => {
         if (a.dueDate && !b.dueDate) return -1;
         if (!a.dueDate && b.dueDate) return 1;
@@ -44,7 +59,7 @@ export function WaitingView() {
         }
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       });
-  }, [tasks]);
+  }, [tasks, resolvedAreaFilter, projectById, areaById]);
   const waitingPeople = useMemo(() => {
     const people = new Map<string, string>();
     for (const task of waitingTasks) {
@@ -56,24 +71,33 @@ export function WaitingView() {
     return [...people.values()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
   }, [waitingTasks]);
   const filteredWaitingTasks = useMemo(() => {
-    if (!selectedWaitingPerson) return waitingTasks;
-    const selected = selectedWaitingPerson.toLowerCase();
     return waitingTasks.filter((task) => {
-      const person = extractWaitingPerson(task.description);
-      return !!person && person.toLowerCase() === selected;
+      if (selectedWaitingPerson) {
+        const person = extractWaitingPerson(task.description);
+        if (!person || person.toLowerCase() !== selectedWaitingPerson.toLowerCase()) {
+          return false;
+        }
+      }
+      if (timeEstimatesEnabled && !matchesSelectedTimeEstimates(task, selectedTimeEstimates)) {
+        return false;
+      }
+      return true;
     });
-  }, [selectedWaitingPerson, waitingTasks]);
-  const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
+  }, [selectedTimeEstimates, selectedWaitingPerson, timeEstimatesEnabled, waitingTasks]);
   const deferredProjects = useMemo(() => {
     return [...projects]
-      .filter((project) => !project.deletedAt && project.status === 'waiting')
+      .filter((project) => (
+        !project.deletedAt
+        && project.status === 'waiting'
+        && projectMatchesAreaFilter(project, resolvedAreaFilter, areaById)
+      ))
       .sort((a, b) => {
         const aOrder = Number.isFinite(a.order) ? (a.order as number) : Number.POSITIVE_INFINITY;
         const bOrder = Number.isFinite(b.order) ? (b.order as number) : Number.POSITIVE_INFINITY;
         if (aOrder !== bOrder) return aOrder - bOrder;
         return a.title.localeCompare(b.title);
       });
-  }, [projects]);
+  }, [projects, resolvedAreaFilter, areaById]);
 
   useEffect(() => {
     if (!selectedWaitingPerson) return;
@@ -82,6 +106,12 @@ export function WaitingView() {
       setSelectedWaitingPerson('');
     }
   }, [selectedWaitingPerson, waitingPeople]);
+
+  useEffect(() => {
+    if (!timeEstimatesEnabled && selectedTimeEstimates.length > 0) {
+      setSelectedTimeEstimates([]);
+    }
+  }, [selectedTimeEstimates.length, timeEstimatesEnabled]);
 
   const handleStatusChange = (id: string, status: TaskStatus) => {
     updateTask(id, { status });
@@ -169,6 +199,47 @@ export function WaitingView() {
           >
             <Text style={[styles.clearFilterText, { color: tc.text }]}>{t('common.clear')}</Text>
           </TouchableOpacity>
+        )}
+        {timeEstimatesEnabled && (
+          <>
+            <Text style={[styles.filterLabel, { color: tc.secondaryText, marginTop: 4 }]}>
+              {t('filters.timeEstimate')}
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
+              <TouchableOpacity
+                onPress={() => setSelectedTimeEstimates([])}
+                style={[
+                  styles.filterChip,
+                  { borderColor: tc.border, backgroundColor: selectedTimeEstimates.length === 0 ? tc.tint : tc.filterBg },
+                ]}
+              >
+                <Text style={[styles.filterChipText, { color: selectedTimeEstimates.length === 0 ? tc.onTint : tc.text }]}>
+                  {t('common.all')}
+                </Text>
+              </TouchableOpacity>
+              {MOBILE_TIME_ESTIMATE_OPTIONS.map((estimate) => {
+                const isActive = selectedTimeEstimates.includes(estimate);
+                return (
+                  <TouchableOpacity
+                    key={estimate}
+                    onPress={() => setSelectedTimeEstimates((prev) => (
+                      prev.includes(estimate)
+                        ? prev.filter((value) => value !== estimate)
+                        : [...prev, estimate]
+                    ))}
+                    style={[
+                      styles.filterChip,
+                      { borderColor: tc.border, backgroundColor: isActive ? tc.tint : tc.filterBg },
+                    ]}
+                  >
+                    <Text style={[styles.filterChipText, { color: isActive ? tc.onTint : tc.text }]}>
+                      {formatTimeEstimateChipLabel(estimate)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </>
         )}
       </View>
 

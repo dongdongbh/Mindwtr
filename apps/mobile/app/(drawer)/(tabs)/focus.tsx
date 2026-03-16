@@ -11,6 +11,8 @@ import { useLanguage } from '../../../contexts/language-context';
 import { TaskEditModal } from '@/components/task-edit-modal';
 import { PomodoroPanel } from '@/components/pomodoro-panel';
 import { orderFocusedTasksFirst } from '@/lib/focus-screen-utils';
+import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
+import { projectMatchesAreaFilter, taskMatchesAreaFilter } from '@/lib/area-filter';
 
 export default function FocusScreen() {
   const { taskId, openToken } = useLocalSearchParams<{ taskId?: string; openToken?: string }>();
@@ -23,6 +25,14 @@ export default function FocusScreen() {
   const lastOpenedFromNotificationRef = useRef<string | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pomodoroEnabled = settings?.features?.pomodoro === true;
+  const { areaById, resolvedAreaFilter } = useMobileAreaFilter();
+  const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
+  const visibleProjects = useMemo(() => (
+    projects.filter((project) => !project.deletedAt && projectMatchesAreaFilter(project, resolvedAreaFilter, areaById))
+  ), [projects, resolvedAreaFilter, areaById]);
+  const visibleTasks = useMemo(() => (
+    tasks.filter((task) => taskMatchesAreaFilter(task, resolvedAreaFilter, projectById, areaById))
+  ), [tasks, resolvedAreaFilter, projectById, areaById]);
 
   useEffect(() => {
     if (!taskId || typeof taskId !== 'string') return;
@@ -52,13 +62,13 @@ export default function FocusScreen() {
   }, [highlightTaskId, setHighlightTask]);
 
   const sequentialProjectIds = useMemo(() => {
-    return new Set(projects.filter((project) => project.isSequential && !project.deletedAt).map((project) => project.id));
-  }, [projects]);
+    return new Set(visibleProjects.filter((project) => project.isSequential).map((project) => project.id));
+  }, [visibleProjects]);
 
   const sequentialFirstTaskIds = useMemo(() => {
     if (sequentialProjectIds.size === 0) return new Set<string>();
     const tasksByProject = new Map<string, Task[]>();
-    tasks.forEach((task) => {
+    visibleTasks.forEach((task) => {
       if (task.deletedAt) return;
       if (task.status === 'done' || task.status === 'reference') return;
       if (!task.projectId) return;
@@ -91,7 +101,7 @@ export default function FocusScreen() {
     });
 
     return firstIds;
-  }, [tasks, sequentialProjectIds]);
+  }, [visibleTasks, sequentialProjectIds]);
 
   const { schedule, nextActions } = useMemo(() => {
     const now = new Date();
@@ -107,7 +117,7 @@ export default function FocusScreen() {
       return !sequentialFirstTaskIds.has(task.id);
     };
 
-    const scheduleItems = orderFocusedTasksFirst(tasks.filter((task) => {
+    const scheduleItems = orderFocusedTasksFirst(visibleTasks.filter((task) => {
       if (task.deletedAt) return false;
       if (task.status === 'done' || task.status === 'reference') return false;
       if (isSequentialBlocked(task)) return false;
@@ -121,7 +131,7 @@ export default function FocusScreen() {
 
     const scheduleIds = new Set(scheduleItems.map((task) => task.id));
 
-    const nextItems = tasks.filter((task) => {
+    const nextItems = visibleTasks.filter((task) => {
       if (task.deletedAt) return false;
       if (task.status !== 'next') return false;
       if (isPlannedForFuture(task)) return false;
@@ -130,7 +140,7 @@ export default function FocusScreen() {
     });
 
     return { schedule: scheduleItems, nextActions: nextItems };
-  }, [tasks, sequentialProjectIds, sequentialFirstTaskIds]);
+  }, [visibleTasks, sequentialProjectIds, sequentialFirstTaskIds]);
 
   const sections = useMemo(() => ([
     { title: t('focus.schedule') ?? 'Today', data: schedule, type: 'schedule' as const },

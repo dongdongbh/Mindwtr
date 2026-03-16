@@ -5,8 +5,10 @@ import { useTaskStore, filterTasksBySearch, sortTasksBy, type Task, type TaskSta
 import { SwipeableTaskItem } from '@/components/swipeable-task-item';
 import { TaskEditModal } from '@/components/task-edit-modal';
 import { useLanguage } from '@/contexts/language-context';
+import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { useTheme } from '@/contexts/theme-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { taskMatchesAreaFilter } from '@/lib/area-filter';
 import { Trash2 } from 'lucide-react-native';
 
 export default function SavedSearchScreen() {
@@ -15,6 +17,7 @@ export default function SavedSearchScreen() {
   const { t } = useLanguage();
   const { isDark } = useTheme();
   const tc = useThemeColors();
+  const { areaById, resolvedAreaFilter } = useMobileAreaFilter();
 
   const goBackOrInbox = useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -27,8 +30,12 @@ export default function SavedSearchScreen() {
 
   const filteredTasks = useMemo(() => {
     if (!query) return [];
-    return sortTasksBy(filterTasksBySearch(tasks, projects, query), sortBy);
-  }, [tasks, projects, query, sortBy]);
+    const projectMap = new Map(projects.map((project) => [project.id, project]));
+    return sortTasksBy(
+      filterTasksBySearch(tasks, projects, query).filter((task) => taskMatchesAreaFilter(task, resolvedAreaFilter, projectMap, areaById)),
+      sortBy,
+    );
+  }, [tasks, projects, query, sortBy, resolvedAreaFilter, areaById]);
 
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [isModalVisible, setIsModalVisible] = useState(false);

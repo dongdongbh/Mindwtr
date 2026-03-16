@@ -247,6 +247,14 @@ jobs:
           fi
           codesign --verify --deep --strict --verbose=4 "$APP_PATH"
           codesign -dvv "$APP_PATH/Contents/MacOS/mindwtr"
+          ENTITLEMENTS_PATH="$RUNNER_TEMP/macos-app-entitlements.plist"
+          codesign -d --entitlements :- "$APP_PATH" > "$ENTITLEMENTS_PATH" 2>/dev/null || true
+          if ! grep -Fq '<key>com.apple.security.personal-information.calendars</key>' "$ENTITLEMENTS_PATH"; then
+            echo "::error::Signed macOS app is missing the calendar entitlement."
+            echo "Resolved entitlements:"
+            cat "$ENTITLEMENTS_PATH" || true
+            exit 1
+          fi
         shell: bash
 
       - name: Notarize DMG

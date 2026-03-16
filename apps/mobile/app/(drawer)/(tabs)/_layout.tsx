@@ -7,6 +7,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCallback, useRef, useState } from 'react';
 
 import { HapticTab } from '@/components/haptic-tab';
+import { MobileAreaSwitcher } from '@/components/mobile-area-switcher';
+import { MobileHeaderSyncBar } from '@/components/mobile-header-sync-bar';
+import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
+import { useMobileSyncBadge } from '@/hooks/use-mobile-sync-badge';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useLanguage } from '../../../contexts/language-context';
 import { QuickCaptureSheet } from '@/components/quick-capture-sheet';
@@ -27,6 +31,7 @@ function NativeTabBar({
   iconLift,
   openQuickCapture,
   defaultAutoRecord,
+  menuSyncIndicatorColor,
 }: BottomTabBarProps & {
   iconTint: string;
   inactiveTint: string;
@@ -38,6 +43,7 @@ function NativeTabBar({
   iconLift: number;
   openQuickCapture: (options?: { initialValue?: string; initialProps?: Partial<Task>; autoRecord?: boolean }) => void;
   defaultAutoRecord: boolean;
+  menuSyncIndicatorColor?: string;
 }) {
   const longPressRef = useRef(false);
   const visibleTabNames = new Set(['inbox', 'focus', 'capture', 'projects', 'menu']);
@@ -136,7 +142,22 @@ function NativeTabBar({
               { paddingTop: iconLift, transform: [{ translateY: tabItemTopOffset }] },
             ]}
           >
-            <View style={styles.nativeTabIconWrap}>{tabIcon}</View>
+            <View style={styles.nativeTabIconWrap}>
+              {tabIcon}
+              {route.name === 'menu' && menuSyncIndicatorColor ? (
+                <View
+                  accessibilityElementsHidden
+                  importantForAccessibility="no"
+                  style={[
+                    styles.menuSyncDot,
+                    {
+                      backgroundColor: menuSyncIndicatorColor,
+                      borderColor: tc.cardBg,
+                    },
+                  ]}
+                />
+              ) : null}
+            </View>
           </TouchableOpacity>
         );
       })}
@@ -172,15 +193,24 @@ export default function TabLayout() {
     autoRecord: false,
   });
   const longPressRef = useRef(false);
+  const { selectedAreaIdForNewTasks } = useMobileAreaFilter();
+
+  const withSelectedArea = useCallback((initialProps?: Partial<Task> | null): Partial<Task> | undefined => {
+    const nextInitialProps = initialProps ? { ...initialProps } : {};
+    if (!nextInitialProps.projectId && !nextInitialProps.areaId && selectedAreaIdForNewTasks) {
+      nextInitialProps.areaId = selectedAreaIdForNewTasks;
+    }
+    return Object.keys(nextInitialProps).length > 0 ? nextInitialProps : undefined;
+  }, [selectedAreaIdForNewTasks]);
 
   const openQuickCapture = useCallback((options?: { initialValue?: string; initialProps?: Partial<Task>; autoRecord?: boolean }) => {
     setCaptureState({
       visible: true,
       initialValue: options?.initialValue ?? '',
-      initialProps: options?.initialProps ?? null,
+      initialProps: withSelectedArea(options?.initialProps) ?? null,
       autoRecord: options?.autoRecord ?? false,
     });
-  }, []);
+  }, [withSelectedArea]);
 
   const closeQuickCapture = useCallback(() => {
     setCaptureState({ visible: false, initialValue: '', initialProps: null, autoRecord: false });
@@ -188,10 +218,10 @@ export default function TabLayout() {
 
   const iconTint = tc.tabIconSelected;
   const inactiveTint = tc.tabIconDefault;
-  const activeIndicator = tc.tint;
   const captureColor = tc.tint;
   const defaultCapture = settings.gtd?.defaultCaptureMethod ?? 'text';
   const defaultAutoRecord = defaultCapture === 'audio';
+  const { syncBadgeAccessibilityLabel, syncBadgeColor } = useMobileSyncBadge();
 
   return (
     <QuickCaptureProvider value={{ openQuickCapture }}>
@@ -210,6 +240,7 @@ export default function TabLayout() {
             iconLift={iconLift}
             openQuickCapture={openQuickCapture}
             defaultAutoRecord={defaultAutoRecord}
+            menuSyncIndicatorColor={syncBadgeColor}
           />
         )}
         screenOptions={({ route }) => ({
@@ -221,8 +252,25 @@ export default function TabLayout() {
         headerShadowVisible: false,
         headerStyle: {
           backgroundColor: tc.cardBg,
-          borderBottomWidth: StyleSheet.hairlineWidth,
-          borderBottomColor: tc.border,
+          borderBottomWidth: 0,
+        },
+        headerBackground: () => (
+          <View
+            style={[
+              StyleSheet.absoluteFillObject,
+              {
+                backgroundColor: tc.cardBg,
+                borderBottomWidth: StyleSheet.hairlineWidth,
+                borderBottomColor: tc.border,
+              },
+            ]}
+          >
+            <MobileHeaderSyncBar />
+          </View>
+        ),
+        headerLeft: () => <MobileAreaSwitcher />,
+        headerLeftContainerStyle: {
+          paddingLeft: 16,
         },
         headerTintColor: tc.text,
         headerTitleStyle: {
@@ -238,6 +286,9 @@ export default function TabLayout() {
               </TouchableOpacity>
             </Link>
           ),
+        headerRightContainerStyle: {
+          paddingRight: 16,
+        },
         tabBarButton: (props) => (
           <HapticTab
             {...props}
@@ -321,6 +372,9 @@ export default function TabLayout() {
         name="menu"
         options={{
           title: t('tab.menu'),
+          tabBarAccessibilityLabel: syncBadgeAccessibilityLabel
+            ? `${t('tab.menu')}, ${syncBadgeAccessibilityLabel}`
+            : t('tab.menu'),
           tabBarIcon: ({ color, focused }) => (
             <Menu size={focused ? 26 : 24} color={color} strokeWidth={2} opacity={focused ? 1 : 0.8} />
           ),
@@ -351,11 +405,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   nativeTabIconWrap: {
+    position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
   } as ViewStyle,
+  menuSyncDot: {
+    position: 'absolute',
+    top: -2,
+    right: -7,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    borderWidth: 1.5,
+    opacity: 0.85,
+  },
   headerIconButton: {
-    marginRight: 16,
     padding: 4,
   },
   captureButton: {

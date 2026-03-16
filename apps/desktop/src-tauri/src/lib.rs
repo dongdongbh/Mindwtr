@@ -971,7 +971,9 @@ fn transcribe_whisper(model_path: String, audio_path: String, language: Option<S
     let mut audio = vec![0.0f32; samples.len()];
     whisper_rs::convert_integer_to_float_audio(&samples, &mut audio).map_err(|e| e.to_string())?;
     if spec.channels == 2 {
-        audio = whisper_rs::convert_stereo_to_mono_audio(&audio).map_err(|e| e.to_string())?;
+        let mut mono_audio = vec![0.0f32; audio.len() / 2];
+        whisper_rs::convert_stereo_to_mono_audio(&audio, &mut mono_audio).map_err(|e| e.to_string())?;
+        audio = mono_audio;
     }
     if spec.sample_rate != 16_000 {
         audio = resample_linear(&audio, spec.sample_rate, 16_000);

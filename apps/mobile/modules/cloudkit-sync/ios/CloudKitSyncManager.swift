@@ -214,12 +214,15 @@ final class CloudKitSyncManager {
         if !nonConflictErrors.isEmpty {
             let descriptions = nonConflictErrors.prefix(5).map { $0.localizedDescription }.joined(separator: "; ")
             NSLog("[CloudKitSyncManager] saveRecords had \(nonConflictErrors.count) non-conflict error(s): \(descriptions)")
-            // Still return conflicts so the caller can handle them, but also surface the errors
-            if conflictIDs.isEmpty {
-                throw nonConflictErrors[0]
+            var userInfo: [String: Any] = [
+                NSLocalizedDescriptionKey: nonConflictErrors[0].localizedDescription,
+                NSUnderlyingErrorKey: nonConflictErrors[0],
+            ]
+            if !conflictIDs.isEmpty {
+                userInfo["conflictIDs"] = conflictIDs.joined(separator: ",")
+                userInfo[NSLocalizedDescriptionKey] = "CloudKit save failed with both conflicts and non-conflict errors: \(nonConflictErrors[0].localizedDescription)"
             }
-            // If we have both conflicts and errors, log the errors but return conflicts
-            // so the caller can retry. The errors are logged above.
+            throw NSError(domain: "CloudKitSync", code: 2, userInfo: userInfo)
         }
 
         return conflictIDs
@@ -235,24 +238,44 @@ final class CloudKitSyncManager {
 
         return try await withCheckedThrowingContinuation { continuation in
             var results: [CKRecord.ID: CKRecord] = [:]
+            var perRecordErrors: [Error] = []
             op.perRecordResultBlock = { recordID, result in
                 cbQueue.sync {
-                    if case .success(let record) = result {
+                    switch result {
+                    case .success(let record):
                         results[recordID] = record
+                    case .failure(let error):
+                        // unknownItem means record doesn't exist yet — that's fine, skip it
+                        if let ckError = error as? CKError,
+                           ckError.code == .unknownItem {
+                            return
+                        }
+                        perRecordErrors.append(error)
                     }
-                    // .unknownItem means record doesn't exist yet — that's fine, skip it
                 }
             }
             op.fetchRecordsResultBlock = { overallResult in
                 cbQueue.sync {
                     switch overallResult {
                     case .success:
+                        if !perRecordErrors.isEmpty {
+                            let descriptions = perRecordErrors.prefix(5).map { $0.localizedDescription }.joined(separator: "; ")
+                            NSLog("[CloudKitSyncManager] fetchRecordsByID had \(perRecordErrors.count) per-record error(s): \(descriptions)")
+                            continuation.resume(throwing: perRecordErrors[0])
+                            return
+                        }
                         continuation.resume(returning: results)
                     case .failure(let error):
                         if let ckError = error as? CKError,
                            ckError.code == .partialFailure {
-                            // Some records didn't exist — that's expected for new records
-                            continuation.resume(returning: results)
+                            // Some records may be unknownItem (new records) — ignore only those.
+                            if perRecordErrors.isEmpty {
+                                continuation.resume(returning: results)
+                            } else {
+                                let descriptions = perRecordErrors.prefix(5).map { $0.localizedDescription }.joined(separator: "; ")
+                                NSLog("[CloudKitSyncManager] fetchRecordsByID had \(perRecordErrors.count) real partial error(s): \(descriptions)")
+                                continuation.resume(throwing: perRecordErrors[0])
+                            }
                         } else {
                             continuation.resume(throwing: error)
                         }

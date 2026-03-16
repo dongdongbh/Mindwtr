@@ -82,12 +82,44 @@ const applyAlarmReminderBehaviorPatchToSource = (original) => {
   let next = original;
 
   next = next.replace(
+    /\s*boolean playSound = alarm\.isPlaySound\(\);\s*if \(playSound\) {\s*this\.playAlarmSound\(alarm\.getSoundName\(\), alarm\.getSoundNames\(\), alarm\.isLoopSound\(\), alarm\.getVolume\(\)\);\s*}\s*/m,
+    '\n            boolean playSound = alarm.isPlaySound();\n'
+  );
+  next = next.replace(
     '        uri = Settings.System.DEFAULT_ALARM_ALERT_URI;',
     '        uri = Settings.System.DEFAULT_NOTIFICATION_URI;'
   );
   next = next.replace(
+    '.setPriority(NotificationCompat.PRIORITY_MAX)',
+    '.setPriority(NotificationCompat.PRIORITY_DEFAULT)'
+  );
+  next = next.replace(
     '.setCategory(NotificationCompat.CATEGORY_ALARM)',
     '.setCategory(NotificationCompat.CATEGORY_REMINDER)'
+  );
+  next = next.replace(
+    '.setSound(null)',
+    '.setSound(playSound ? android.provider.Settings.System.DEFAULT_NOTIFICATION_URI : null)'
+  );
+  next = next.replace(
+    'NotificationChannel mChannel = new NotificationChannel(channelID, "Alarm Notify", NotificationManager.IMPORTANCE_HIGH);',
+    'NotificationChannel mChannel = new NotificationChannel(channelID, "Mindwtr reminders", NotificationManager.IMPORTANCE_DEFAULT);'
+  );
+  next = next.replace(
+    `                mChannel.setVibrationPattern(null);
+
+                // play vibration
+                if (alarm.isVibrate()) {
+                    Vibrator vibrator = (Vibrator) mContext.getSystemService(Context.VIBRATOR_SERVICE);
+                    if (vibrator.hasVibrator()) {
+                        vibrator.vibrate(VibrationEffect.createWaveform(vibrationPattern, 0));
+                    }
+                }
+`,
+    `                mChannel.enableVibration(alarm.isVibrate());
+                mChannel.setVibrationPattern(alarm.isVibrate() ? vibrationPattern : null);
+                mChannel.setSound(playSound ? android.provider.Settings.System.DEFAULT_NOTIFICATION_URI : null, null);
+`
   );
   next = next.replace(
     'vibrator.vibrate(VibrationEffect.createWaveform(vibrationPattern, 0));',

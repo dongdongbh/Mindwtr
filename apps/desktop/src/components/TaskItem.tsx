@@ -289,6 +289,7 @@ export const TaskItem = memo(function TaskItem({
         areaById,
         projectContext,
         tagOptions,
+        popularContextOptions,
         popularTagOptions,
         allContexts,
     } = useTaskItemProjectContext({
@@ -457,6 +458,7 @@ export const TaskItem = memo(function TaskItem({
         editContexts,
         editTags,
         language,
+        popularContextOptions,
         popularTagOptions,
     }), [
         t,
@@ -477,6 +479,7 @@ export const TaskItem = memo(function TaskItem({
         editContexts,
         editTags,
         language,
+        popularContextOptions,
         popularTagOptions,
     ]);
     const fieldRendererHandlers = useMemo(() => ({

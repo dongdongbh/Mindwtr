@@ -112,6 +112,18 @@ describe('TaskStore', () => {
         expect(tasks).toHaveLength(0);
     });
 
+    it('keeps derived context and tag lists scoped to used tokens', () => {
+        const { addTask } = useTaskStore.getState();
+        addTask('Token Task', {
+            contexts: ['@office'],
+            tags: ['#deep'],
+        });
+
+        const derived = useTaskStore.getState().getDerivedState();
+        expect(derived.allContexts).toEqual(['@office']);
+        expect(derived.allTags).toEqual(['#deep']);
+    });
+
     it('keeps store state consistent under rapid add/delete interleaving', async () => {
         const { addTask, deleteTask } = useTaskStore.getState();
 

@@ -4,10 +4,32 @@ const {
   mockAsyncStorageGetItem,
   mockAsyncStorageSetItem,
   mockStoreSubscribe,
+  mockStoreState,
+  mockAlarmDeleteAlarm,
+  mockAlarmDeleteRepeatingAlarm,
+  mockAlarmRemoveAllFiredNotifications,
+  mockAlarmRemoveFiredNotification,
+  mockAlarmScheduleAlarm,
+  mockGetNextScheduledAt,
+  mockPermissionsAndroidCheck,
+  mockPermissionsAndroidRequest,
 } = vi.hoisted(() => ({
   mockAsyncStorageGetItem: vi.fn(),
   mockAsyncStorageSetItem: vi.fn(),
   mockStoreSubscribe: vi.fn(() => () => undefined),
+  mockStoreState: {
+    settings: {},
+    tasks: [],
+    projects: [],
+  },
+  mockAlarmDeleteAlarm: vi.fn(),
+  mockAlarmDeleteRepeatingAlarm: vi.fn(),
+  mockAlarmRemoveAllFiredNotifications: vi.fn(),
+  mockAlarmRemoveFiredNotification: vi.fn(),
+  mockAlarmScheduleAlarm: vi.fn(async () => ({ id: 99 })),
+  mockGetNextScheduledAt: vi.fn(() => null),
+  mockPermissionsAndroidCheck: vi.fn(async () => true),
+  mockPermissionsAndroidRequest: vi.fn(async () => 'granted'),
 }));
 
 vi.mock('@react-native-async-storage/async-storage', () => ({
@@ -27,8 +49,8 @@ vi.mock('react-native', () => ({
   PermissionsAndroid: {
     PERMISSIONS: { POST_NOTIFICATIONS: 'POST_NOTIFICATIONS' },
     RESULTS: { GRANTED: 'granted', NEVER_ASK_AGAIN: 'never_ask_again' },
-    check: vi.fn(async () => true),
-    request: vi.fn(async () => 'granted'),
+    check: mockPermissionsAndroidCheck,
+    request: mockPermissionsAndroidRequest,
   },
   Platform: {
     OS: 'android',
@@ -36,8 +58,19 @@ vi.mock('react-native', () => ({
   },
 }));
 
+vi.mock('react-native-alarm-notification', () => ({
+  default: {
+    parseDate: (date: Date) => date.toISOString(),
+    scheduleAlarm: mockAlarmScheduleAlarm,
+    deleteAlarm: mockAlarmDeleteAlarm,
+    deleteRepeatingAlarm: mockAlarmDeleteRepeatingAlarm,
+    removeFiredNotification: mockAlarmRemoveFiredNotification,
+    removeAllFiredNotifications: mockAlarmRemoveAllFiredNotifications,
+  },
+}));
+
 vi.mock('@mindwtr/core', () => ({
-  getNextScheduledAt: vi.fn(() => null),
+  getNextScheduledAt: mockGetNextScheduledAt,
   getSystemDefaultLanguage: vi.fn(() => 'en'),
   getTranslations: vi.fn(async () => ({
     'digest.morningTitle': 'Morning',
@@ -60,7 +93,7 @@ vi.mock('@mindwtr/core', () => ({
   }),
   safeParseDate: vi.fn((value?: string) => (value ? new Date(value) : null)),
   useTaskStore: {
-    getState: () => ({ settings: {}, tasks: [], projects: [] }),
+    getState: () => mockStoreState,
     subscribe: mockStoreSubscribe,
   },
 }));
@@ -72,6 +105,7 @@ vi.mock('./app-log', () => ({
 import {
   __localNotificationTestUtils,
   setLocalNotificationOpenHandler,
+  startLocalMobileNotifications,
   stopLocalMobileNotifications,
 } from './notification-service-local';
 
@@ -80,6 +114,21 @@ describe('notification-service-local', () => {
     mockAsyncStorageGetItem.mockReset();
     mockAsyncStorageSetItem.mockReset();
     mockStoreSubscribe.mockClear();
+    mockStoreState.settings = {};
+    mockStoreState.tasks = [];
+    mockStoreState.projects = [];
+    mockAlarmDeleteAlarm.mockReset();
+    mockAlarmDeleteRepeatingAlarm.mockReset();
+    mockAlarmRemoveAllFiredNotifications.mockReset();
+    mockAlarmRemoveFiredNotification.mockReset();
+    mockAlarmScheduleAlarm.mockReset();
+    mockAlarmScheduleAlarm.mockResolvedValue({ id: 99 });
+    mockGetNextScheduledAt.mockReset();
+    mockGetNextScheduledAt.mockReturnValue(null);
+    mockPermissionsAndroidCheck.mockReset();
+    mockPermissionsAndroidRequest.mockReset();
+    mockPermissionsAndroidCheck.mockResolvedValue(true);
+    mockPermissionsAndroidRequest.mockResolvedValue('granted');
     __localNotificationTestUtils.resetForTests();
   });
 
@@ -110,5 +159,47 @@ describe('notification-service-local', () => {
     await stopLocalMobileNotifications();
 
     expect(__localNotificationTestUtils.getNotificationOpenHandler()).toBeNull();
+  });
+
+  it('clears persisted alarms when Android notification permission is denied on startup', async () => {
+    mockAsyncStorageGetItem.mockResolvedValue(JSON.stringify({ 'task:1': { id: 42 } }));
+    mockPermissionsAndroidCheck.mockResolvedValue(false);
+    mockPermissionsAndroidRequest.mockResolvedValue('never_ask_again');
+
+    await startLocalMobileNotifications();
+
+    expect(mockAlarmDeleteAlarm).toHaveBeenCalledWith(42);
+    expect(mockAlarmDeleteRepeatingAlarm).toHaveBeenCalledWith(42);
+    expect(mockAlarmRemoveFiredNotification).toHaveBeenCalledWith(42);
+    expect(mockAlarmRemoveAllFiredNotifications).toHaveBeenCalledTimes(1);
+    expect(__localNotificationTestUtils.getAlarmMapSnapshot().size).toBe(0);
+    expect(mockAsyncStorageSetItem).toHaveBeenCalledWith('mindwtr:local:alarms:v1', '{}');
+  });
+
+  it('schedules task reminders as normal notification-style alerts', async () => {
+    mockStoreState.tasks = [
+      {
+        id: 'task-1',
+        title: 'Pay rent',
+        description: '',
+      },
+    ];
+    mockGetNextScheduledAt.mockReturnValue(new Date('2026-03-17T09:30:00.000Z'));
+
+    await startLocalMobileNotifications();
+
+    expect(mockAlarmScheduleAlarm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        auto_cancel: true,
+        channel: 'mindwtr_reminders_v2',
+        has_button: false,
+        loop_sound: false,
+        message: '',
+        play_sound: true,
+        title: 'Pay rent',
+        use_big_text: true,
+        vibrate: false,
+      })
+    );
   });
 });

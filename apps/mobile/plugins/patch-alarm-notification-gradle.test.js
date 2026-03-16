@@ -37,17 +37,37 @@ describe('patch-alarm-notification-gradle', () => {
         uri = Settings.System.DEFAULT_ALARM_ALERT_URI;
     }
 
-    void send(NotificationCompat.Builder builder, Vibrator vibrator) {
+    void send(Alarm alarm, NotificationCompat.Builder builder, Vibrator vibrator) {
+        boolean playSound = alarm.isPlaySound();
+        if (playSound) {
+            this.playAlarmSound(alarm.getSoundName(), alarm.getSoundNames(), alarm.isLoopSound(), alarm.getVolume());
+        }
+        NotificationChannel mChannel = new NotificationChannel(channelID, "Alarm Notify", NotificationManager.IMPORTANCE_HIGH);
+                mChannel.setVibrationPattern(null);
+
+                // play vibration
+                if (alarm.isVibrate()) {
+                    Vibrator vibrator = (Vibrator) mContext.getSystemService(Context.VIBRATOR_SERVICE);
+                    if (vibrator.hasVibrator()) {
+                        vibrator.vibrate(VibrationEffect.createWaveform(vibrationPattern, 0));
+                    }
+                }
+        builder.setPriority(NotificationCompat.PRIORITY_MAX);
         builder.setCategory(NotificationCompat.CATEGORY_ALARM);
-        vibrator.vibrate(VibrationEffect.createWaveform(vibrationPattern, 0));
+        builder.setSound(null);
     }
 }`;
 
     const output = applyAlarmReminderBehaviorPatchToSource(input);
 
     expect(output).toContain('Settings.System.DEFAULT_NOTIFICATION_URI');
+    expect(output).not.toContain('this.playAlarmSound(');
+    expect(output).toContain('NotificationManager.IMPORTANCE_DEFAULT');
+    expect(output).toContain('NotificationCompat.PRIORITY_DEFAULT');
     expect(output).toContain('NotificationCompat.CATEGORY_REMINDER');
-    expect(output).toContain('VibrationEffect.createWaveform(vibrationPattern, -1)');
+    expect(output).toContain('.setSound(playSound ? android.provider.Settings.System.DEFAULT_NOTIFICATION_URI : null)');
+    expect(output).toContain('mChannel.enableVibration(alarm.isVibrate());');
+    expect(output).toContain('mChannel.setSound(playSound ? android.provider.Settings.System.DEFAULT_NOTIFICATION_URI : null, null);');
   });
 
   it('patches AudioInterface fallback sound away from the alarm tone', () => {
