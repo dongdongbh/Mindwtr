@@ -29,6 +29,8 @@ enum CloudKitChangeTracker {
 
         return try await withCheckedThrowingContinuation { continuation in
             var result = ChangeResult()
+            var tokenExpired = false
+            var zoneError: Error?
 
             op.recordWasChangedBlock = { _, recordResult in
                 if case .success(let record) = recordResult {
@@ -49,18 +51,32 @@ enum CloudKitChangeTracker {
                     result.newChangeToken = serializeToken(serverChangeToken)
                     result.moreComing = moreComing
                 case .failure(let error):
-                    // If the token expired, we'll catch this in the completion
+                    // Token expiry is reported per-zone, not in the overall completion.
+                    if let ckError = error as? CKError, ckError.code == .changeTokenExpired {
+                        tokenExpired = true
+                    } else {
+                        zoneError = error
+                    }
                     NSLog("[CloudKitChangeTracker] Zone fetch error: \(error.localizedDescription)")
                 }
             }
 
             op.fetchRecordZoneChangesResultBlock = { overallResult in
+                // Check zone-level token expiry first — it's the authoritative signal.
+                if tokenExpired {
+                    continuation.resume(throwing: ChangeTokenExpiredError())
+                    return
+                }
+                if let zoneErr = zoneError {
+                    continuation.resume(throwing: zoneErr)
+                    return
+                }
                 switch overallResult {
                 case .success:
                     continuation.resume(returning: result)
                 case .failure(let error):
+                    // Fallback: overall completion may also report token expiry
                     if let ckError = error as? CKError, ckError.code == .changeTokenExpired {
-                        // Signal to caller that a full fetch is needed
                         continuation.resume(throwing: ChangeTokenExpiredError())
                     } else {
                         continuation.resume(throwing: error)

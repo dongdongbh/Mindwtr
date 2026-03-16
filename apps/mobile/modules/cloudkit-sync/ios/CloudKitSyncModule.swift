@@ -64,6 +64,7 @@ public class CloudKitSyncModule: Module {
         // MARK: - Save Records
 
         /// Save records from JSON. Returns array of conflicted record IDs.
+        /// Uses fetch-then-update internally to preserve server system fields.
         AsyncFunction("saveRecords") { (recordType: String, recordsJSON: String) -> [String] in
             guard let data = recordsJSON.data(using: .utf8),
                   let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
@@ -72,15 +73,7 @@ public class CloudKitSyncModule: Module {
                 ])
             }
 
-            let records = jsonArray.compactMap { json in
-                CloudKitRecordMapper.record(
-                    from: json,
-                    recordType: recordType,
-                    zoneID: self.manager.zoneID
-                )
-            }
-
-            return try await self.manager.saveRecords(records)
+            return try await self.manager.saveRecords(jsonArray, recordType: recordType)
         }
 
         // MARK: - Delete Records

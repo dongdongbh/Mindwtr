@@ -4412,7 +4412,7 @@ export default function SettingsPage() {
                                 No setup required — just sign in to iCloud on your devices.
                             </Text>
                             <Text style={[styles.helpText, { color: tc.secondaryText, marginTop: 8 }]}>
-                                Changes sync automatically in near real-time via push notifications.
+                                Changes sync automatically via periodic polling and push notifications when available.
                             </Text>
                         </View>
                     )}

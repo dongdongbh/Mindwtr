@@ -30,6 +30,7 @@ import { setNotificationOpenHandler, startMobileNotifications, stopMobileNotific
 import { performMobileSync } from '../lib/sync-service';
 import { isLikelyOfflineSyncError, resolveBackend, type SyncBackend } from '../lib/sync-service-utils';
 import { SYNC_BACKEND_KEY } from '../lib/sync-constants';
+import { subscribeToCloudKitChanges } from '../lib/cloudkit-sync';
 import { updateMobileWidgetFromStore } from '../lib/widget-service';
 import { markStartupPhase, measureStartupPhase } from '../lib/startup-profiler';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -74,7 +75,7 @@ type MobileExtraConfig = {
 
 const getCadenceForBackend = (backend: SyncBackend): AutoSyncCadence => {
   if (backend === 'file') return AUTO_SYNC_CADENCE_FILE;
-  if (backend === 'webdav' || backend === 'cloud') return AUTO_SYNC_CADENCE_REMOTE;
+  if (backend === 'webdav' || backend === 'cloud' || backend === 'cloudkit') return AUTO_SYNC_CADENCE_REMOTE;
   return AUTO_SYNC_CADENCE_OFF;
 };
 
@@ -486,8 +487,16 @@ function RootLayoutContent() {
     };
 
     const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+    // Wire CloudKit push notifications → immediate sync when remote changes arrive.
+    // subscribeToCloudKitChanges returns a no-op cleanup if CloudKit is unavailable.
+    const unsubscribeCloudKit = subscribeToCloudKitChanges(() => {
+      requestSync(0);
+    });
+
     return () => {
       subscription?.remove();
+      unsubscribeCloudKit();
       isActive.current = false;
       if (syncDebounceTimer.current) {
         clearTimeout(syncDebounceTimer.current);
