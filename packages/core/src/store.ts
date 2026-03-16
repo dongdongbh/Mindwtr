@@ -54,19 +54,20 @@ const getSaveQueueOverflowMessage = (droppedCount: number): string =>
 const enforcePendingSaveCap = () => {
     if (pendingSaves.length <= MAX_PENDING_SAVES) return;
     const overflow = pendingSaves.length - MAX_PENDING_SAVES;
+    // Keep only the newest saves — oldest are stale and safe to drop.
     const dropped = pendingSaves.splice(0, overflow);
     const callbacks = dropped
         .flatMap((item) => item.onErrorCallbacks)
         .filter((callback): callback is (msg: string) => void => typeof callback === 'function');
     if (callbacks.length > 0) {
         const message = getSaveQueueOverflowMessage(overflow);
-        callbacks.forEach((callback) => {
+        for (const callback of callbacks) {
             try {
                 callback(message);
             } catch {
                 // Ignore callback failures so the queue can keep draining.
             }
-        });
+        }
     }
     markCoreStartupPhase('core.debounced_save.capped', {
         dropped: overflow,

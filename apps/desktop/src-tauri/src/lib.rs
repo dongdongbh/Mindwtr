@@ -824,7 +824,7 @@ fn start_audio_recording(state: tauri::State<'_, AudioRecorderState>) -> Result<
                 .build_input_stream(
                     &stream_config,
                     move |data: &[f32], _| {
-                        let mut buffer = samples_clone.lock().unwrap();
+                        let Ok(mut buffer) = samples_clone.lock() else { return };
                         buffer.extend(data.iter().map(|sample| {
                             let clamped = sample.clamp(-1.0, 1.0);
                             (clamped * i16::MAX as f32) as i16
@@ -837,7 +837,7 @@ fn start_audio_recording(state: tauri::State<'_, AudioRecorderState>) -> Result<
                 .build_input_stream(
                     &stream_config,
                     move |data: &[i16], _| {
-                        let mut buffer = samples_clone.lock().unwrap();
+                        let Ok(mut buffer) = samples_clone.lock() else { return };
                         buffer.extend_from_slice(data);
                     },
                     err_fn,
@@ -847,7 +847,7 @@ fn start_audio_recording(state: tauri::State<'_, AudioRecorderState>) -> Result<
                 .build_input_stream(
                     &stream_config,
                     move |data: &[u16], _| {
-                        let mut buffer = samples_clone.lock().unwrap();
+                        let Ok(mut buffer) = samples_clone.lock() else { return };
                         buffer.extend(data.iter().map(|sample| (*sample as i32 - 32768) as i16));
                     },
                     err_fn,
@@ -869,8 +869,7 @@ fn start_audio_recording(state: tauri::State<'_, AudioRecorderState>) -> Result<
             return;
         }
 
-        {
-            let mut info_guard = info_clone.lock().unwrap();
+        if let Ok(mut info_guard) = info_clone.lock() {
             *info_guard = Some(RecorderInfo { sample_rate, channels });
         }
 
@@ -1090,13 +1089,20 @@ fn clear_log_file(app: tauri::AppHandle) -> Result<String, String> {
 fn get_config_dir(app: &tauri::AppHandle) -> PathBuf {
     app.path()
         .resolve(APP_NAME, BaseDirectory::Config)
-        .expect("failed to resolve app config root dir")
+        .unwrap_or_else(|_| {
+            // Fallback: use a sensible default under the user's home directory.
+            let home = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+            home.join(APP_NAME)
+        })
 }
 
 fn get_data_dir(app: &tauri::AppHandle) -> PathBuf {
     app.path()
         .resolve(APP_NAME, BaseDirectory::Data)
-        .expect("failed to resolve app data root dir")
+        .unwrap_or_else(|_| {
+            let home = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+            home.join(APP_NAME)
+        })
 }
 
 fn get_config_path(app: &tauri::AppHandle) -> PathBuf {
@@ -1918,14 +1924,14 @@ fn read_sqlite_data(conn: &Connection) -> Result<Value, String> {
 fn get_legacy_config_json_path(app: &tauri::AppHandle) -> PathBuf {
     app.path()
         .app_config_dir()
-        .expect("failed to get legacy app config dir")
+        .unwrap_or_else(|_| get_config_dir(app))
         .join("config.json")
 }
 
 fn get_legacy_data_json_path(app: &tauri::AppHandle) -> PathBuf {
     app.path()
         .app_data_dir()
-        .expect("failed to get legacy app data dir")
+        .unwrap_or_else(|_| get_data_dir(app))
         .join(DATA_FILE_NAME)
 }
 
@@ -3384,7 +3390,10 @@ fn get_webdav_config(app: tauri::AppHandle) -> Result<Value, String> {
     let mut config = read_config(&app);
     let mut password = match get_keyring_secret(&app, KEYRING_WEB_DAV_PASSWORD) {
         Ok(value) => value,
-        Err(_) => None,
+        Err(error) => {
+            log::warn!("Failed to read WebDAV password from keyring: {error}");
+            None
+        }
     };
     if password.is_none() {
         if let Some(legacy) = config.webdav_password.clone() {
@@ -3454,7 +3463,10 @@ fn webdav_get_json_blocking(app: &tauri::AppHandle) -> Result<Value, String> {
     let username = config.webdav_username.unwrap_or_default();
     let password = match get_keyring_secret(app, KEYRING_WEB_DAV_PASSWORD) {
         Ok(value) => value,
-        Err(_) => None,
+        Err(error) => {
+            log::warn!("Failed to read WebDAV password from keyring (GET): {error}");
+            None
+        }
     }
         .or(config.webdav_password.clone())
         .ok_or_else(|| "WebDAV password not configured".to_string())?;
@@ -3501,7 +3513,10 @@ fn webdav_put_json_blocking(app: &tauri::AppHandle, data: &Value) -> Result<bool
     let username = config.webdav_username.unwrap_or_default();
     let password = match get_keyring_secret(app, KEYRING_WEB_DAV_PASSWORD) {
         Ok(value) => value,
-        Err(_) => None,
+        Err(error) => {
+            log::warn!("Failed to read WebDAV password from keyring (PUT): {error}");
+            None
+        }
     }
         .or(config.webdav_password.clone())
         .ok_or_else(|| "WebDAV password not configured".to_string())?;
@@ -3649,13 +3664,13 @@ fn parse_macos_eventkit_json(raw: *mut c_char) -> Result<Value, String> {
     if raw.is_null() {
         return Err("EventKit bridge returned null output".to_string());
     }
-    let parsed = unsafe {
-        let text = CStr::from_ptr(raw).to_string_lossy().into_owned();
-        mindwtr_macos_calendar_free_string(raw);
-        serde_json::from_str::<Value>(&text)
-            .map_err(|error| format!("Failed to parse EventKit bridge output: {error}"))?
-    };
-    Ok(parsed)
+    // SAFETY: We have verified `raw` is non-null. The Objective-C bridge allocates
+    // via `strdup()` so the pointer is valid until we free it. We copy the string
+    // immediately and then free the original to avoid use-after-free.
+    let text = unsafe { CStr::from_ptr(raw) }.to_string_lossy().into_owned();
+    unsafe { mindwtr_macos_calendar_free_string(raw) };
+    serde_json::from_str::<Value>(&text)
+        .map_err(|error| format!("Failed to parse EventKit bridge output: {error}"))
 }
 
 #[tauri::command]
@@ -3910,6 +3925,7 @@ fn set_tray_visible(app: tauri::AppHandle, visible: bool) -> Result<(), String> 
     if let Some(tray) = app.tray_by_id("main") {
         tray.set_visible(visible).map_err(|e| e.to_string())
     } else {
+        log::warn!("set_tray_visible called but no tray icon exists");
         Ok(())
     }
 }
@@ -4067,9 +4083,25 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                if window.emit("close-requested", ()).is_err() {
+                let emit_ok = window.emit("close-requested", ()).is_ok();
+                if !emit_ok {
+                    // Frontend not responding — hide the window as a fallback so the
+                    // user isn't stuck with an unresponsive close button.
                     let _ = window.set_skip_taskbar(true);
                     let _ = window.hide();
+                } else {
+                    // Schedule a safety-net timeout: if the frontend hasn't hidden or
+                    // closed the window within 5 seconds, hide it automatically.
+                    let handle = window.app_handle().clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_secs(5));
+                        if let Some(w) = handle.get_webview_window("main") {
+                            if w.is_visible().unwrap_or(true) {
+                                let _ = w.set_skip_taskbar(true);
+                                let _ = w.hide();
+                            }
+                        }
+                    });
                 }
             }
         })

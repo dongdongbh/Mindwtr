@@ -84,10 +84,11 @@ function focusMainContent(): boolean {
 }
 
 function triggerGlobalSearch() {
+    const isMacPlatform = typeof navigator !== 'undefined' && /mac/i.test(navigator.userAgent);
     const event = new KeyboardEvent('keydown', {
         key: 'k',
-        metaKey: true,
-        ctrlKey: true,
+        metaKey: isMacPlatform,
+        ctrlKey: !isMacPlatform,
         bubbles: true,
     });
     window.dispatchEvent(event);
@@ -113,6 +114,7 @@ export function KeybindingProvider({
 }) {
     const isTest = import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test';
     const isWindows = typeof navigator !== 'undefined' && /win/i.test(navigator.userAgent);
+    const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.userAgent);
     const { settings, updateSettings } = useTaskStore(
         (state) => ({
             settings: state.settings,
@@ -136,9 +138,10 @@ export function KeybindingProvider({
     const [isHelpOpen, setIsHelpOpen] = useState(false);
     const quickAddShortcut = useMemo(
         () => normalizeGlobalQuickAddShortcut(settings.globalQuickAddShortcut, {
+            isMac,
             isWindows,
         }),
-        [isWindows, settings.globalQuickAddShortcut]
+        [isMac, isWindows, settings.globalQuickAddShortcut]
     );
 
     const isSidebarCollapsed = settings.sidebarCollapsed ?? false;
@@ -692,7 +695,7 @@ export function KeybindingProvider({
             )
             .then((result) => {
                 if (cancelled) return;
-                const appliedShortcut = normalizeGlobalQuickAddShortcut(result?.shortcut, { isWindows });
+                const appliedShortcut = normalizeGlobalQuickAddShortcut(result?.shortcut, { isMac, isWindows });
                 if (result?.warning) {
                     showToast(result.warning, 'info', 6000);
                 }
@@ -708,7 +711,7 @@ export function KeybindingProvider({
         return () => {
             cancelled = true;
         };
-    }, [isTest, isWindows, quickAddShortcut, showToast, updateSettings]);
+    }, [isTest, isMac, isWindows, quickAddShortcut, showToast, updateSettings]);
 
     const contextValue = useMemo<KeybindingContextType>(() => ({
         style,

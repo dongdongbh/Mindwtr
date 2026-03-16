@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useDeferredValue, useEffect, useRef, useCallback } from 'react';
+import React, { memo, useState, useMemo, useDeferredValue, useEffect, useRef, useCallback } from 'react';
 import { AlertTriangle, Folder } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { shallow, useTaskStore, TaskPriority, TimeEstimate, DEFAULT_AREA_COLOR, sortTasksBy, parseQuickAdd, matchesHierarchicalToken, safeParseDate, isTaskInActiveProject, extractWaitingPerson } from '@mindwtr/core';
@@ -38,7 +38,7 @@ const VIRTUALIZATION_THRESHOLD = 25;
 const VIRTUAL_ROW_ESTIMATE = 120;
 const VIRTUAL_OVERSCAN = 600;
 
-export function ListView({ title, statusFilter }: ListViewProps) {
+export const ListView = memo(function ListView({ title, statusFilter }: ListViewProps) {
     const perf = usePerformanceMonitor('ListView');
     const {
         tasks,
@@ -1281,4 +1281,4 @@ export function ListView({ title, statusFilter }: ListViewProps) {
         />
         </ErrorBoundary>
     );
-}
+});
