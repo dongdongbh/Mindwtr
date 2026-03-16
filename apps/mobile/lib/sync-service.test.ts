@@ -14,6 +14,7 @@ describe('mobile sync-service test utils', () => {
     expect(resolveBackend('file')).toBe('file');
     expect(resolveBackend('webdav')).toBe('webdav');
     expect(resolveBackend('cloud')).toBe('cloud');
+    expect(resolveBackend('cloudkit')).toBe('cloudkit');
     expect(resolveBackend('off')).toBe('off');
     expect(resolveBackend('invalid')).toBe('off');
     expect(resolveBackend(null)).toBe('off');

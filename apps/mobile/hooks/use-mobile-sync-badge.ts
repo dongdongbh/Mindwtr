@@ -12,10 +12,13 @@ import { MOBILE_SYNC_BADGE_COLORS, resolveMobileSyncBadgeState } from '../lib/sy
 
 export function useMobileSyncBadge() {
     const pathname = usePathname();
-    const { localize } = useLanguage();
+    const { language } = useLanguage();
     const settings = useTaskStore((state) => state.settings);
     const [syncConfigured, setSyncConfigured] = useState(false);
     const [syncActivityState, setSyncActivityState] = useState(() => getMobileSyncActivityState());
+    const localize = useCallback((enText: string, zhText?: string) => (
+        language.startsWith('zh') ? (zhText ?? enText) : enText
+    ), [language]);
 
     const refreshSyncBadgeConfig = useCallback(async () => {
         try {
