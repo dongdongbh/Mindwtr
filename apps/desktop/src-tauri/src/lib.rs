@@ -3263,13 +3263,24 @@ fn set_sync_path(app: tauri::AppHandle, sync_path: String) -> Result<serde_json:
     let config_path = get_config_path(&app);
     let sanitized_path = resolve_sync_dir(&app, Some(sync_path))?;
 
+    // Inform the user when they point sync at an iCloud Drive path.
+    let icloud = is_icloud_path(&sanitized_path);
+    if icloud {
+        log::info!(
+            "Sync path is inside iCloud Drive. Mindwtr will detect evicted files \
+             and fall back gracefully, but disabling 'Optimize Mac Storage' in \
+             iCloud settings is recommended for best reliability."
+        );
+    }
+
     let mut config = read_config(&app);
     config.sync_path = Some(sanitized_path.to_string_lossy().to_string());
     write_config_files(&config_path, &get_secrets_path(&app), &config)?;
-    
+
     Ok(serde_json::json!({
         "success": true,
-        "path": config.sync_path
+        "path": config.sync_path,
+        "icloud": icloud
     }))
 }
 
@@ -3806,6 +3817,81 @@ fn open_path(path: String) -> Result<bool, String> {
 }
 
 
+// ---------------------------------------------------------------------------
+// iCloud Drive helpers
+// ---------------------------------------------------------------------------
+
+/// Check if a file has been evicted by iCloud's "Optimize Storage" feature.
+/// When macOS evicts a file, it replaces it with a hidden placeholder named
+/// `.{original_name}.icloud` (a small binary plist). Reading the placeholder
+/// returns garbage, not the user's data, so we must detect and skip it.
+fn is_icloud_evicted(path: &Path) -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+    // 1) The file itself might be a placeholder (.icloud extension)
+    if let Some(ext) = path.extension() {
+        if ext == "icloud" {
+            return true;
+        }
+    }
+    // 2) The real file was replaced with a hidden .Name.icloud stub
+    if let (Some(parent), Some(name)) = (path.parent(), path.file_name().and_then(|n| n.to_str())) {
+        let placeholder_name = format!(".{}.icloud", name);
+        let placeholder_path = parent.join(&placeholder_name);
+        if placeholder_path.exists() && !path.exists() {
+            return true;
+        }
+        // 3) The file exists but is suspiciously small (< 50 bytes) and the
+        //    placeholder stub also exists — iCloud may be mid-download.
+        if placeholder_path.exists() && path.exists() {
+            if let Ok(meta) = fs::metadata(path) {
+                if meta.len() < 50 {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Returns true if the sync directory appears to be inside iCloud Drive.
+fn is_icloud_path(path: &Path) -> bool {
+    let path_str = path.to_string_lossy();
+    path_str.contains("Library/Mobile Documents/") || path_str.contains("iCloud")
+}
+
+/// Acquire a simple advisory lock file for the duration of a sync read or
+/// write. Returns the lock path on success. The caller MUST call
+/// `release_sync_lock` when done. If the lock is already held and recent
+/// (< 30 seconds old), returns Err so the caller can retry.
+fn acquire_sync_lock(sync_dir: &Path) -> Result<PathBuf, String> {
+    let lock_path = sync_dir.join(".mindwtr.lock");
+    // If a stale lock exists (> 30 seconds), remove it.
+    if lock_path.exists() {
+        if let Ok(meta) = fs::metadata(&lock_path) {
+            if let Ok(modified) = meta.modified() {
+                let age = SystemTime::now()
+                    .duration_since(modified)
+                    .unwrap_or(Duration::ZERO);
+                if age < Duration::from_secs(30) {
+                    return Err("Sync lock held by another process".to_string());
+                }
+            }
+        }
+        let _ = fs::remove_file(&lock_path);
+    }
+    // Write our PID + timestamp as the lock content for debugging.
+    let lock_content = format!("pid={} ts={}", std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO).as_secs());
+    fs::write(&lock_path, lock_content.as_bytes()).map_err(|e| format!("Failed to acquire sync lock: {e}"))?;
+    Ok(lock_path)
+}
+
+fn release_sync_lock(lock_path: &Path) {
+    let _ = fs::remove_file(lock_path);
+}
+
 #[tauri::command]
 fn read_sync_file(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let sync_path_str = get_sync_path(app)?;
@@ -3815,6 +3901,17 @@ fn read_sync_file(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let sync_dir = PathBuf::from(&sync_path_str);
     let sync_file = sync_dir.join(DATA_FILE_NAME);
     let backup_file = sync_dir.join(format!("{}.bak", DATA_FILE_NAME));
+
+    // Detect iCloud Drive evicted files before attempting to read.
+    if is_icloud_evicted(&sync_file) {
+        let msg = format!(
+            "Sync file has been offloaded by iCloud Optimize Storage. \
+             Open Finder and navigate to {:?} to trigger a re-download, then try again.",
+            sync_dir
+        );
+        log::warn!("{}", msg);
+        return Err(msg);
+    }
 
     let find_seed_backup_file = |dir: &Path| -> Option<PathBuf> {
         let mut latest: Option<(SystemTime, PathBuf)> = None;
@@ -3889,35 +3986,76 @@ fn write_sync_file(app: tauri::AppHandle, data: Value) -> Result<bool, String> {
     if sync_path_str.trim().is_empty() {
         return Err("Sync path is not configured".to_string());
     }
-    let sync_file = PathBuf::from(&sync_path_str).join(DATA_FILE_NAME);
-    let backup_file = PathBuf::from(&sync_path_str).join(format!("{}.bak", DATA_FILE_NAME));
-    let tmp_file = PathBuf::from(&sync_path_str).join(format!("{}.tmp", DATA_FILE_NAME));
+    let sync_dir = PathBuf::from(&sync_path_str);
+    let sync_file = sync_dir.join(DATA_FILE_NAME);
+    let backup_file = sync_dir.join(format!("{}.bak", DATA_FILE_NAME));
+    let tmp_file = sync_dir.join(format!("{}.tmp", DATA_FILE_NAME));
+
+    // Detect iCloud evicted target — writing over a placeholder can corrupt state.
+    if is_icloud_evicted(&sync_file) {
+        log::warn!("Sync target is iCloud-evicted; writing directly to avoid corrupting placeholder.");
+    }
 
     if let Some(parent) = sync_file.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    // Best-effort backup for recovery.
-    if sync_file.exists() {
-        let _ = fs::copy(&sync_file, &backup_file);
+    // Acquire advisory lock to coordinate with other Mindwtr instances.
+    let lock = acquire_sync_lock(&sync_dir);
+    let lock_path = match &lock {
+        Ok(path) => Some(path.clone()),
+        Err(msg) => {
+            log::warn!("Sync lock unavailable, proceeding without lock: {msg}");
+            None
+        }
+    };
+
+    let result = (|| -> Result<bool, String> {
+        // Best-effort backup for recovery.
+        if sync_file.exists() {
+            let _ = fs::copy(&sync_file, &backup_file);
+        }
+
+        let content = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
+
+        // Atomic-ish write: write to tmp then rename over the target.
+        {
+            let mut file = File::create(&tmp_file).map_err(|e| e.to_string())?;
+            file.write_all(content.as_bytes()).map_err(|e| e.to_string())?;
+            file.sync_all().map_err(|e| e.to_string())?;
+        }
+
+        if cfg!(windows) && sync_file.exists() {
+            // Windows doesn't allow renaming over an existing file.
+            fs::remove_file(&sync_file).map_err(|e| e.to_string())?;
+        }
+
+        // Rename may fail on iCloud Drive or other virtual filesystems.
+        // Fall back to a direct write if the atomic rename fails.
+        match fs::rename(&tmp_file, &sync_file) {
+            Ok(()) => Ok(true),
+            Err(rename_err) => {
+                log::warn!("Atomic rename failed ({}), falling back to direct write", rename_err);
+                // Direct copy as fallback — less safe but avoids total failure.
+                match fs::copy(&tmp_file, &sync_file) {
+                    Ok(_) => {
+                        let _ = fs::remove_file(&tmp_file);
+                        Ok(true)
+                    }
+                    Err(copy_err) => Err(format!(
+                        "Sync write failed: rename error: {rename_err}, copy fallback error: {copy_err}"
+                    )),
+                }
+            }
+        }
+    })();
+
+    // Always release the lock, even on failure.
+    if let Some(ref lp) = lock_path {
+        release_sync_lock(lp);
     }
 
-    let content = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
-
-    // Atomic-ish write: write to tmp then rename over the target.
-    {
-        let mut file = File::create(&tmp_file).map_err(|e| e.to_string())?;
-        file.write_all(content.as_bytes()).map_err(|e| e.to_string())?;
-        file.sync_all().map_err(|e| e.to_string())?;
-    }
-
-    if cfg!(windows) && sync_file.exists() {
-        // Windows doesn't allow renaming over an existing file.
-        fs::remove_file(&sync_file).map_err(|e| e.to_string())?;
-    }
-    fs::rename(&tmp_file, &sync_file).map_err(|e| e.to_string())?;
-    
-    Ok(true)
+    result
 }
 
 #[tauri::command]
@@ -4004,6 +4142,16 @@ fn normalize_sync_value(value: Value) -> Value {
 fn read_json_with_retries(path: &Path, attempts: usize) -> Result<Value, String> {
     let mut last_err: Option<String> = None;
     for attempt in 0..attempts {
+        // Re-check for iCloud eviction on each retry — the file may have been
+        // evicted between attempts if Optimize Storage kicked in.
+        if is_icloud_evicted(path) {
+            last_err = Some("File is iCloud-evicted (placeholder only)".to_string());
+            if attempt + 1 < attempts {
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            continue;
+        }
+
         match fs::read_to_string(path) {
             Ok(content) => match parse_json_relaxed(&content) {
                 Ok(value) => return Ok(normalize_sync_value(value)),
@@ -4012,7 +4160,7 @@ fn read_json_with_retries(path: &Path, attempts: usize) -> Result<Value, String>
             Err(e) => last_err = Some(e.to_string()),
         }
 
-        // Small backoff to allow other writers (Syncthing) to finish replacing the file.
+        // Small backoff to allow other writers (Syncthing/iCloud) to finish replacing the file.
         if attempt + 1 < attempts {
             std::thread::sleep(Duration::from_millis(120 + (attempt as u64) * 80));
         }

@@ -93,6 +93,20 @@ const normalizePathsFromEvent = (event: FsEvent): string[] => {
     return [];
 };
 
+/** Filter out iCloud placeholder events (.icloud files, lock files). */
+const isRelevantSyncEvent = (paths: string[]): boolean => {
+    return paths.some((p) => {
+        const name = p.split('/').pop() ?? '';
+        // Ignore iCloud placeholder stubs (.filename.icloud)
+        if (name.endsWith('.icloud')) return false;
+        // Ignore our own advisory lock file
+        if (name === '.mindwtr.lock') return false;
+        // Ignore temp files from atomic writes
+        if (name.endsWith('.tmp')) return false;
+        return true;
+    });
+};
+
 const resolveUnwatch = (unwatch: unknown): (() => void) | null => {
     if (typeof unwatch === 'function') return unwatch as () => void;
     if (unwatch && typeof (unwatch as any).stop === 'function') {
@@ -202,7 +216,11 @@ export async function start(dataPath: string): Promise<void> {
 
     try {
         const unwatch = await localDataWatcherDependencies.watchFile(dataPath, (event) => {
-            if (normalizePathsFromEvent(event).length === 0) return;
+            const paths = normalizePathsFromEvent(event);
+            if (paths.length === 0) return;
+            // Skip iCloud placeholder events, lock files, and temp files to
+            // avoid spurious merges from iCloud Drive housekeeping operations.
+            if (!isRelevantSyncEvent(paths)) return;
             void handleExternalChange();
         });
 

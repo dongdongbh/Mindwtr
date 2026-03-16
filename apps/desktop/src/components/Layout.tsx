@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Calendar,
     Inbox,
@@ -23,7 +23,7 @@ import {
     type LucideIcon,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { useTaskStore, safeParseDate, safeFormatDate } from '@mindwtr/core';
+import { shallow, useTaskStore, safeParseDate, safeFormatDate } from '@mindwtr/core';
 import { useLanguage } from '../contexts/language-context';
 import { useUiStore } from '../store/ui-store';
 import { reportError } from '../lib/report-error';
@@ -59,7 +59,7 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
         updateSettings: state.updateSettings,
         error: state.error,
         setError: state.setError,
-    }));
+    }), shallow);
     const { t } = useLanguage();
     const isCollapsed = settings?.sidebarCollapsed ?? false;
     const isFocusMode = useUiStore((state) => state.isFocusMode);
@@ -74,23 +74,43 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
     ), []);
     const lastSyncAt = settings?.lastSyncAt;
     const lastSyncStatus = settings?.lastSyncStatus;
-    const lastSyncAgeMs = lastSyncAt ? Math.max(0, Date.now() - Date.parse(lastSyncAt)) : Number.POSITIVE_INFINITY;
+
+    // Compute sync freshness bucket on a 60-second timer instead of every render
+    // to prevent idle re-render flicker from Date.now() changing each frame.
+    const getSyncFreshnessBucket = useCallback((syncAt: string | undefined): 'fresh' | 'stale' | 'old' | 'none' => {
+        if (!syncAt) return 'none';
+        const ageMs = Math.max(0, Date.now() - Date.parse(syncAt));
+        if (ageMs > 2 * 60 * 60 * 1000) return 'old';
+        if (ageMs > 30 * 60 * 1000) return 'stale';
+        return 'fresh';
+    }, []);
+    const [syncFreshness, setSyncFreshness] = useState(() => getSyncFreshnessBucket(lastSyncAt));
+    const lastSyncAtRef = useRef(lastSyncAt);
+    lastSyncAtRef.current = lastSyncAt;
+    useEffect(() => {
+        setSyncFreshness(getSyncFreshnessBucket(lastSyncAt));
+        const timer = setInterval(() => {
+            setSyncFreshness(getSyncFreshnessBucket(lastSyncAtRef.current));
+        }, 60_000);
+        return () => clearInterval(timer);
+    }, [lastSyncAt, getSyncFreshnessBucket]);
+
     const syncFreshnessDotClass = !isOnline
         ? 'bg-destructive'
         : lastSyncStatus === 'error'
             ? 'bg-orange-400'
-            : !lastSyncAt
+            : syncFreshness === 'none'
                 ? 'bg-muted-foreground/40'
-                : lastSyncAgeMs > 2 * 60 * 60 * 1000
+                : syncFreshness === 'old'
                     ? 'bg-destructive'
-                : lastSyncAgeMs > 30 * 60 * 1000
+                    : syncFreshness === 'stale'
                         ? 'bg-amber-400'
                         : 'bg-emerald-400';
     const fullSyncTimestamp = lastSyncAt ? safeFormatDate(lastSyncAt, 'PPpp', lastSyncAt) : t('settings.lastSyncNever');
     const syncTooltip = !isOnline
         ? (t('common.offline') || 'Offline')
         : `${tOrFallback('settings.lastSync', 'Last sync')}: ${fullSyncTimestamp}`;
-    const formatCompactSyncTime = (iso: string) => {
+    const formatCompactSyncTime = useCallback((iso: string) => {
         const date = new Date(iso);
         if (Number.isNaN(date.getTime())) return iso;
         return new Intl.DateTimeFormat(undefined, {
@@ -98,7 +118,7 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
             minute: '2-digit',
             hour12: false,
         }).format(date);
-    };
+    }, []);
     const compactSyncLabel = syncStatus.inFlight
         ? tOrFallback('settings.syncing', 'Syncing...')
         : lastSyncAt
