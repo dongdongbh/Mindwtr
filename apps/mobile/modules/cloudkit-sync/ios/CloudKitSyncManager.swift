@@ -15,8 +15,10 @@ final class CloudKitSyncManager {
     private(set) lazy var privateDB = container.privateCloudDatabase
     private(set) lazy var zoneID = CKRecordZone.ID(zoneName: zoneName, ownerName: CKCurrentUserDefaultName)
 
-    private var zoneCreated = false
-    private var subscriptionCreated = false
+    // Guards against concurrent ensureZone/ensureSubscription calls.
+    // Tasks awaiting the same operation share the first caller's result.
+    private var zoneTask: Task<Void, Error>?
+    private var subscriptionTask: Task<Void, Error>?
 
     private init() {}
 
@@ -29,63 +31,83 @@ final class CloudKitSyncManager {
     // MARK: - Zone Management
 
     func ensureZone() async throws {
-        if zoneCreated { return }
-        let zone = CKRecordZone(zoneID: zoneID)
-        let op = CKModifyRecordZonesOperation(recordZonesToSave: [zone], recordZoneIDsToDelete: nil)
-        op.qualityOfService = .userInitiated
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            op.modifyRecordZonesResultBlock = { result in
-                switch result {
-                case .success:
-                    continuation.resume()
-                case .failure(let error):
-                    continuation.resume(throwing: error)
-                }
-            }
-            privateDB.add(op)
+        if let existing = zoneTask {
+            try await existing.value
+            return
         }
-        zoneCreated = true
+        let task = Task<Void, Error> {
+            let zone = CKRecordZone(zoneID: zoneID)
+            let op = CKModifyRecordZonesOperation(recordZonesToSave: [zone], recordZoneIDsToDelete: nil)
+            op.qualityOfService = .userInitiated
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                op.modifyRecordZonesResultBlock = { result in
+                    switch result {
+                    case .success:
+                        continuation.resume()
+                    case .failure(let error):
+                        continuation.resume(throwing: error)
+                    }
+                }
+                privateDB.add(op)
+            }
+        }
+        zoneTask = task
+        do {
+            try await task.value
+        } catch {
+            zoneTask = nil // Allow retry on failure
+            throw error
+        }
     }
 
     // MARK: - Subscription Management
 
     func ensureSubscription() async throws {
-        if subscriptionCreated { return }
-
-        // Check if subscription already exists
-        do {
-            _ = try await privateDB.subscription(for: subscriptionID)
-            subscriptionCreated = true
+        if let existing = subscriptionTask {
+            try await existing.value
             return
-        } catch let error as CKError where error.code == .unknownItem {
-            // Subscription doesn't exist yet — create it
         }
-
-        let subscription = CKRecordZoneSubscription(
-            zoneID: zoneID,
-            subscriptionID: subscriptionID
-        )
-        let notificationInfo = CKSubscription.NotificationInfo()
-        notificationInfo.shouldSendContentAvailable = true // Silent push
-        subscription.notificationInfo = notificationInfo
-
-        let op = CKModifySubscriptionsOperation(
-            subscriptionsToSave: [subscription],
-            subscriptionIDsToDelete: nil
-        )
-        op.qualityOfService = .utility
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            op.modifySubscriptionsResultBlock = { result in
-                switch result {
-                case .success:
-                    continuation.resume()
-                case .failure(let error):
-                    continuation.resume(throwing: error)
-                }
+        let task = Task<Void, Error> {
+            // Check if subscription already exists
+            do {
+                _ = try await privateDB.subscription(for: subscriptionID)
+                return
+            } catch let error as CKError where error.code == .unknownItem {
+                // Subscription doesn't exist yet — create it
             }
-            privateDB.add(op)
+
+            let subscription = CKRecordZoneSubscription(
+                zoneID: zoneID,
+                subscriptionID: subscriptionID
+            )
+            let notificationInfo = CKSubscription.NotificationInfo()
+            notificationInfo.shouldSendContentAvailable = true // Silent push
+            subscription.notificationInfo = notificationInfo
+
+            let op = CKModifySubscriptionsOperation(
+                subscriptionsToSave: [subscription],
+                subscriptionIDsToDelete: nil
+            )
+            op.qualityOfService = .utility
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                op.modifySubscriptionsResultBlock = { result in
+                    switch result {
+                    case .success:
+                        continuation.resume()
+                    case .failure(let error):
+                        continuation.resume(throwing: error)
+                    }
+                }
+                privateDB.add(op)
+            }
         }
-        subscriptionCreated = true
+        subscriptionTask = task
+        do {
+            try await task.value
+        } catch {
+            subscriptionTask = nil // Allow retry on failure
+            throw error
+        }
     }
 
     // MARK: - Batch Save
@@ -146,32 +168,39 @@ final class CloudKitSyncManager {
             op.savePolicy = .changedKeys
             op.qualityOfService = .userInitiated
 
+            // Serialize per-record callbacks — CloudKit dispatches on arbitrary queues.
+            let cbQueue = DispatchQueue(label: "tech.dongdongbh.mindwtr.savecb")
+
             let (batchConflicts, batchErrors) = try await withCheckedThrowingContinuation {
                 (continuation: CheckedContinuation<([String], [Error]), Error>) in
                 var conflicts: [String] = []
                 var perRecordErrors: [Error] = []
 
                 op.perRecordSaveBlock = { recordID, result in
-                    if case .failure(let error) = result {
-                        if let ckError = error as? CKError,
-                           ckError.code == .serverRecordChanged {
-                            conflicts.append(recordID.recordName)
-                        } else {
-                            perRecordErrors.append(error)
+                    cbQueue.sync {
+                        if case .failure(let error) = result {
+                            if let ckError = error as? CKError,
+                               ckError.code == .serverRecordChanged {
+                                conflicts.append(recordID.recordName)
+                            } else {
+                                perRecordErrors.append(error)
+                            }
                         }
                     }
                 }
                 op.modifyRecordsResultBlock = { result in
-                    switch result {
-                    case .success:
-                        continuation.resume(returning: (conflicts, perRecordErrors))
-                    case .failure(let error):
-                        if let ckError = error as? CKError,
-                           ckError.code == .partialFailure {
-                            // Partial failure: per-record callbacks already captured details
+                    cbQueue.sync {
+                        switch result {
+                        case .success:
                             continuation.resume(returning: (conflicts, perRecordErrors))
-                        } else {
-                            continuation.resume(throwing: error)
+                        case .failure(let error):
+                            if let ckError = error as? CKError,
+                               ckError.code == .partialFailure {
+                                // Partial failure: per-record callbacks already captured details
+                                continuation.resume(returning: (conflicts, perRecordErrors))
+                            } else {
+                                continuation.resume(throwing: error)
+                            }
                         }
                     }
                 }
@@ -202,25 +231,31 @@ final class CloudKitSyncManager {
         let op = CKFetchRecordsOperation(recordIDs: ids)
         op.qualityOfService = .userInitiated
 
+        let cbQueue = DispatchQueue(label: "tech.dongdongbh.mindwtr.fetchcb")
+
         return try await withCheckedThrowingContinuation { continuation in
             var results: [CKRecord.ID: CKRecord] = [:]
             op.perRecordResultBlock = { recordID, result in
-                if case .success(let record) = result {
-                    results[recordID] = record
+                cbQueue.sync {
+                    if case .success(let record) = result {
+                        results[recordID] = record
+                    }
+                    // .unknownItem means record doesn't exist yet — that's fine, skip it
                 }
-                // .unknownItem means record doesn't exist yet — that's fine, skip it
             }
             op.fetchRecordsResultBlock = { overallResult in
-                switch overallResult {
-                case .success:
-                    continuation.resume(returning: results)
-                case .failure(let error):
-                    if let ckError = error as? CKError,
-                       ckError.code == .partialFailure {
-                        // Some records didn't exist — that's expected for new records
+                cbQueue.sync {
+                    switch overallResult {
+                    case .success:
                         continuation.resume(returning: results)
-                    } else {
-                        continuation.resume(throwing: error)
+                    case .failure(let error):
+                        if let ckError = error as? CKError,
+                           ckError.code == .partialFailure {
+                            // Some records didn't exist — that's expected for new records
+                            continuation.resume(returning: results)
+                        } else {
+                            continuation.resume(throwing: error)
+                        }
                     }
                 }
             }
@@ -241,37 +276,43 @@ final class CloudKitSyncManager {
 
             let op = CKModifyRecordsOperation(recordsToSave: nil, recordIDsToDelete: batch)
             op.qualityOfService = .utility
+            let cbQueue = DispatchQueue(label: "tech.dongdongbh.mindwtr.deletecb")
+
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 var realErrors: [Error] = []
 
                 op.perRecordDeleteBlock = { recordID, result in
-                    if case .failure(let error) = result {
-                        // unknownItem means already deleted — safe to ignore
-                        if let ckError = error as? CKError,
-                           ckError.code == .unknownItem {
-                            return
+                    cbQueue.sync {
+                        if case .failure(let error) = result {
+                            // unknownItem means already deleted — safe to ignore
+                            if let ckError = error as? CKError,
+                               ckError.code == .unknownItem {
+                                return
+                            }
+                            realErrors.append(error)
                         }
-                        realErrors.append(error)
                     }
                 }
 
                 op.modifyRecordsResultBlock = { result in
-                    switch result {
-                    case .success:
-                        continuation.resume()
-                    case .failure(let error):
-                        if let ckError = error as? CKError,
-                           ckError.code == .partialFailure {
-                            // Only suppress if every per-record error was unknownItem
-                            if realErrors.isEmpty {
-                                continuation.resume()
+                    cbQueue.sync {
+                        switch result {
+                        case .success:
+                            continuation.resume()
+                        case .failure(let error):
+                            if let ckError = error as? CKError,
+                               ckError.code == .partialFailure {
+                                // Only suppress if every per-record error was unknownItem
+                                if realErrors.isEmpty {
+                                    continuation.resume()
+                                } else {
+                                    let descriptions = realErrors.prefix(5).map { $0.localizedDescription }.joined(separator: "; ")
+                                    NSLog("[CloudKitSyncManager] deleteRecords had \(realErrors.count) real error(s): \(descriptions)")
+                                    continuation.resume(throwing: realErrors[0])
+                                }
                             } else {
-                                let descriptions = realErrors.prefix(5).map { $0.localizedDescription }.joined(separator: "; ")
-                                NSLog("[CloudKitSyncManager] deleteRecords had \(realErrors.count) real error(s): \(descriptions)")
-                                continuation.resume(throwing: realErrors[0])
+                                continuation.resume(throwing: error)
                             }
-                        } else {
-                            continuation.resume(throwing: error)
                         }
                     }
                 }

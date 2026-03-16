@@ -4364,6 +4364,7 @@ export default function SettingsPage() {
                                         { borderColor: tc.border, backgroundColor: syncBackend === 'webdav' ? tc.filterBg : 'transparent' },
                                     ]}
                                     onPress={() => {
+                                        AsyncStorage.setItem(SYNC_BACKEND_KEY, 'webdav').catch(logSettingsError);
                                         setSyncBackend('webdav');
                                         resetSyncStatusForBackendSwitch();
                                     }}

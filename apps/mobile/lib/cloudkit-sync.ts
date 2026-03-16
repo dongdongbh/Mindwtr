@@ -204,15 +204,22 @@ export const writeRemoteCloudKit = async (data: AppData): Promise<void> => {
         // Delete purged records from CloudKit
         await deletePurgedRecords(data);
 
-        // Update change token after successful write
-        const changeResult: ChangeResult = await CloudKitSync!.fetchChanges(
-            await AsyncStorage.getItem(CLOUDKIT_CHANGE_TOKEN_KEY)
-        );
-        if (changeResult.changeToken) {
-            await AsyncStorage.setItem(CLOUDKIT_CHANGE_TOKEN_KEY, changeResult.changeToken);
+        // Only advance the change token if no conflicts occurred.
+        // When conflicts exist, the conflicted records weren't actually written,
+        // so advancing the token would cause the next sync to skip them.
+        if (allConflicts.length === 0) {
+            const changeResult: ChangeResult = await CloudKitSync!.fetchChanges(
+                await AsyncStorage.getItem(CLOUDKIT_CHANGE_TOKEN_KEY)
+            );
+            if (changeResult.changeToken) {
+                await AsyncStorage.setItem(CLOUDKIT_CHANGE_TOKEN_KEY, changeResult.changeToken);
+            }
         }
 
-        void logInfo('CloudKit write complete', { scope: 'cloudkit' });
+        void logInfo('CloudKit write complete', {
+            scope: 'cloudkit',
+            extra: { conflicts: allConflicts.length },
+        });
     } catch (error) {
         void logError(error, { scope: 'cloudkit', extra: { operation: 'writeRemote' } });
         throw error;
@@ -221,14 +228,31 @@ export const writeRemoteCloudKit = async (data: AppData): Promise<void> => {
 
 // MARK: - Seed (first-time upload from local data)
 
+let seedingInFlight: Promise<void> | null = null;
+
 export const seedCloudKitFromLocal = async (data: AppData): Promise<void> => {
     const seeded = await AsyncStorage.getItem(CLOUDKIT_SEEDED_KEY);
     if (seeded) return;
 
-    void logInfo('Seeding CloudKit from local data', { scope: 'cloudkit' });
-    await writeRemoteCloudKit(data);
-    await AsyncStorage.setItem(CLOUDKIT_SEEDED_KEY, '1');
-    void logInfo('CloudKit seed complete', { scope: 'cloudkit' });
+    // Prevent concurrent seed writes — second caller awaits the first.
+    if (seedingInFlight) {
+        await seedingInFlight;
+        return;
+    }
+
+    seedingInFlight = (async () => {
+        void logInfo('Seeding CloudKit from local data', { scope: 'cloudkit' });
+        // Set the flag before writing so a crash mid-write doesn't re-seed stale data.
+        await AsyncStorage.setItem(CLOUDKIT_SEEDED_KEY, '1');
+        await writeRemoteCloudKit(data);
+        void logInfo('CloudKit seed complete', { scope: 'cloudkit' });
+    })();
+
+    try {
+        await seedingInFlight;
+    } finally {
+        seedingInFlight = null;
+    }
 };
 
 // MARK: - Push Notification Subscription
