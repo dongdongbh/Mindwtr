@@ -218,7 +218,7 @@ export const writeRemoteCloudKit = async (data: AppData): Promise<void> => {
 
         void logInfo('CloudKit write complete', {
             scope: 'cloudkit',
-            extra: { conflicts: allConflicts.length },
+            extra: { conflicts: String(allConflicts.length) },
         });
     } catch (error) {
         void logError(error, { scope: 'cloudkit', extra: { operation: 'writeRemote' } });
