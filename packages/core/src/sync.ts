@@ -47,7 +47,7 @@ export interface MergeResult {
 export type SyncHistoryEntry = {
     at: string;
     status: 'success' | 'conflict' | 'error';
-    backend?: 'file' | 'webdav' | 'cloud' | 'off';
+    backend?: 'file' | 'webdav' | 'cloud' | 'cloudkit' | 'off';
     type?: 'push' | 'pull' | 'merge';
     conflicts: number;
     conflictIds: string[];

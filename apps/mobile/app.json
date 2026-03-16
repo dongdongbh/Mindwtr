@@ -48,6 +48,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "./plugins/ios-cloudkit-sync",
       "./plugins/expo-router",
       [
         "expo-splash-screen",

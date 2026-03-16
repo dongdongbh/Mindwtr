@@ -3292,7 +3292,7 @@ fn set_sync_path(app: tauri::AppHandle, sync_path: String) -> Result<serde_json:
 
 fn normalize_backend(value: &str) -> Option<&str> {
     match value {
-        "off" | "file" | "webdav" | "cloud" => Some(value),
+        "off" | "file" | "webdav" | "cloud" | "cloudkit" => Some(value),
         _ => None,
     }
 }

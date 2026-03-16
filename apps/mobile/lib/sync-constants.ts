@@ -7,3 +7,6 @@ export const CLOUD_URL_KEY = '@mindwtr_cloud_url';
 export const CLOUD_TOKEN_KEY = '@mindwtr_cloud_token';
 export const CLOUD_PROVIDER_KEY = '@mindwtr_cloud_provider';
 export const DROPBOX_LAST_REV_KEY = '@mindwtr_dropbox_last_rev';
+export const CLOUDKIT_CHANGE_TOKEN_KEY = '@mindwtr_cloudkit_change_token';
+export const CLOUDKIT_SEEDED_KEY = '@mindwtr_cloudkit_seeded';
+export const CLOUDKIT_ZONE_CREATED_KEY = '@mindwtr_cloudkit_zone_created';

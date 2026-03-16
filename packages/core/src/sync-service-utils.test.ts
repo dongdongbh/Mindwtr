@@ -6,6 +6,7 @@ describe('sync-service-utils', () => {
         expect(normalizeSyncBackend('file')).toBe('file');
         expect(normalizeSyncBackend('webdav')).toBe('webdav');
         expect(normalizeSyncBackend('cloud')).toBe('cloud');
+        expect(normalizeSyncBackend('cloudkit')).toBe('cloudkit');
         expect(normalizeSyncBackend('off')).toBe('off');
         expect(normalizeSyncBackend('invalid')).toBe('off');
         expect(normalizeSyncBackend(null)).toBe('off');

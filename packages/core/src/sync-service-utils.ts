@@ -1,4 +1,4 @@
-export type SyncBackend = 'off' | 'file' | 'webdav' | 'cloud';
+export type SyncBackend = 'off' | 'file' | 'webdav' | 'cloud' | 'cloudkit';
 
 const DEFAULT_SYNC_FILE_NAME = 'data.json';
 const DEFAULT_LEGACY_SYNC_FILE_NAME = 'mindwtr-sync.json';
@@ -15,7 +15,7 @@ export const isSyncFilePath = (
 };
 
 export const normalizeSyncBackend = (raw: string | null): SyncBackend => {
-    if (raw === 'off' || raw === 'file' || raw === 'webdav' || raw === 'cloud') return raw;
+    if (raw === 'off' || raw === 'file' || raw === 'webdav' || raw === 'cloud' || raw === 'cloudkit') return raw;
     return 'off';
 };
 

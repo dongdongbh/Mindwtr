@@ -18,6 +18,7 @@ import {
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Network from 'expo-network';
 import { formatSyncErrorMessage, getFileSyncBaseDir, isLikelyFilePath, normalizeFileSyncPath, resolveBackend, type SyncBackend } from './sync-service-utils';
+import { ensureCloudKitReady, readRemoteCloudKit, writeRemoteCloudKit, seedCloudKitFromLocal, isCloudKitAvailable } from './cloudkit-sync';
 import { createWebdavSyncRateLimitController } from './sync-rate-limit';
 import {
   SYNC_PATH_KEY,
@@ -164,6 +165,10 @@ export async function getMobileSyncConfigurationStatus(): Promise<{ backend: Syn
     const webdavUrl = (await readConfigValue(WEBDAV_URL_KEY, false))?.trim();
     return { backend, configured: Boolean(webdavUrl) };
   }
+  if (backend === 'cloudkit') {
+    // CloudKit is always "configured" if the module is available — no user credentials needed.
+    return { backend, configured: isCloudKitAvailable() };
+  }
 
   const cloudProvider = resolveCloudProvider((await readConfigValue(CLOUD_PROVIDER_KEY, false))?.trim() ?? null);
   if (cloudProvider === CLOUD_PROVIDER_DROPBOX) {
@@ -186,7 +191,7 @@ const getAttachmentsArray = (attachments: Attachment[] | undefined): Attachment[
 );
 
 const shouldSkipSyncForOfflineState = async (backend: SyncBackend): Promise<boolean> => {
-  if (backend !== 'webdav' && backend !== 'cloud') return false;
+  if (backend !== 'webdav' && backend !== 'cloud' && backend !== 'cloudkit') return false;
   try {
     const state = await Network.getNetworkStateAsync();
     const isConnected = state.isConnected ?? false;
@@ -279,7 +284,7 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
       logSyncWarning('WebDAV rate limited; pausing remote sync', error);
     };
     const ensureNetworkStillAvailable = async () => {
-      if (backend !== 'webdav' && backend !== 'cloud') return;
+      if (backend !== 'webdav' && backend !== 'cloud' && backend !== 'cloudkit') return;
       if (networkWentOffline) {
         requestAbortController.abort();
         throw new Error('Sync paused: offline state detected');
@@ -291,7 +296,7 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
       }
     };
     try {
-      if (backend === 'webdav' || backend === 'cloud') {
+      if (backend === 'webdav' || backend === 'cloud' || backend === 'cloudkit') {
         try {
           networkSubscription = Network.addNetworkStateListener((state) => {
             const isConnected = state.isConnected ?? false;
@@ -395,6 +400,16 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
         }
       };
 
+      // CloudKit setup — ensure zone and subscription exist before sync cycle.
+      if (backend === 'cloudkit') {
+        if (!isCloudKitAvailable()) {
+          throw new Error('CloudKit is not available on this platform');
+        }
+        step = 'cloudkit_setup';
+        logSyncInfo('Sync step', { step });
+        await ensureCloudKitReady();
+      }
+
       // Pre-sync local attachments so cloudKeys exist before writing remote data.
       step = 'attachments_prepare';
       logSyncInfo('Sync step', { step });
@@ -478,6 +493,11 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
           remoteDataForCompare = data ?? null;
           return data;
         }
+        if (backend === 'cloudkit') {
+          const data = await readRemoteCloudKit();
+          remoteDataForCompare = data ?? null;
+          return data;
+        }
         if (!fileSyncPath) {
           throw new Error('No sync folder configured');
         }
@@ -552,6 +572,11 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
             timeoutMs: DEFAULT_SYNC_TIMEOUT_MS,
             fetcher: fetchWithAbort,
           });
+          remoteDataForCompare = sanitized;
+          return;
+        }
+        if (backend === 'cloudkit') {
+          await writeRemoteCloudKit(sanitized as AppData);
           remoteDataForCompare = sanitized;
           return;
         }
