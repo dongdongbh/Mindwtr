@@ -6,7 +6,7 @@
  * alongside file, webdav, and cloud — the existing TypeScript merge engine
  * handles conflict resolution.
  */
-import { NativeModulesProxy, EventEmitter } from 'expo-modules-core';
+import { EventEmitter, type NativeModule } from 'expo-modules-core';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AppData } from '@mindwtr/core';
 import { logInfo, logWarn, logError } from './app-log';
@@ -16,8 +16,35 @@ import {
     CLOUDKIT_ZONE_CREATED_KEY,
 } from './sync-constants';
 
-// The native module — will be undefined on non-iOS platforms.
-const CloudKitSync = NativeModulesProxy.CloudKitSync;
+// MARK: - Types
+
+type ChangeResult = {
+    records: Record<string, Array<Record<string, unknown>>>;
+    deletedIDs: Record<string, string[]>;
+    changeToken?: string;
+    tokenExpired?: boolean;
+};
+
+// Type-safe interface for the native module's async functions.
+interface CloudKitSyncModule extends NativeModule {
+    getAccountStatus(): Promise<string>;
+    ensureZone(): Promise<void>;
+    ensureSubscription(): Promise<void>;
+    fetchChanges(changeToken: string | null): Promise<ChangeResult>;
+    fetchAllRecords(recordType: string): Promise<Array<Record<string, unknown>>>;
+    saveRecords(recordType: string, json: string): Promise<string[]>;
+    deleteRecords(recordType: string, ids: string[]): Promise<boolean>;
+}
+
+// The native module — loaded via requireNativeModule (Expo SDK 54+).
+// Will throw on non-iOS platforms, so we guard with a try/catch.
+let CloudKitSync: CloudKitSyncModule | null = null;
+try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    CloudKitSync = require('../modules/cloudkit-sync').default as CloudKitSyncModule;
+} catch {
+    // Not available — Android or missing native build
+}
 
 // Record type names (must match CloudKitRecordMapper.swift)
 const RECORD_TYPES = {
@@ -27,13 +54,6 @@ const RECORD_TYPES = {
     area: 'MindwtrArea',
     settings: 'MindwtrSettings',
 } as const;
-
-type ChangeResult = {
-    records: Record<string, Array<Record<string, unknown>>>;
-    deletedIDs: Record<string, string[]>;
-    changeToken?: string;
-    tokenExpired?: boolean;
-};
 
 type AccountStatus = 'available' | 'noAccount' | 'restricted' | 'temporarilyUnavailable' | 'unknown';
 
@@ -48,7 +68,7 @@ export const isCloudKitAvailable = (): boolean => {
 export const getCloudKitAccountStatus = async (): Promise<AccountStatus> => {
     if (!isCloudKitAvailable()) return 'unknown';
     try {
-        return await CloudKitSync.getAccountStatus();
+        return await CloudKitSync!.getAccountStatus() as AccountStatus;
     } catch {
         return 'unknown';
     }
@@ -63,13 +83,13 @@ export const ensureCloudKitReady = async (): Promise<void> => {
 
     const zoneCreated = await AsyncStorage.getItem(CLOUDKIT_ZONE_CREATED_KEY);
     if (!zoneCreated) {
-        await CloudKitSync.ensureZone();
+        await CloudKitSync!.ensureZone();
         await AsyncStorage.setItem(CLOUDKIT_ZONE_CREATED_KEY, '1');
         void logInfo('CloudKit zone created', { scope: 'cloudkit' });
     }
 
     try {
-        await CloudKitSync.ensureSubscription();
+        await CloudKitSync!.ensureSubscription();
     } catch (error) {
         // Subscription failures are non-fatal — we still have timer-based sync
         void logWarn('CloudKit subscription setup failed (non-fatal)', {
@@ -89,7 +109,7 @@ export const readRemoteCloudKit = async (): Promise<AppData | null> => {
 
         // Try incremental fetch first
         if (changeToken) {
-            const result: ChangeResult = await CloudKitSync.fetchChanges(changeToken);
+            const result: ChangeResult = await CloudKitSync!.fetchChanges(changeToken);
 
             if (result.tokenExpired) {
                 void logInfo('CloudKit change token expired; doing full fetch', { scope: 'cloudkit' });
@@ -140,22 +160,22 @@ export const writeRemoteCloudKit = async (data: AppData): Promise<void> => {
 
         if (allTasks.length > 0) {
             savePromises.push(
-                CloudKitSync.saveRecords(RECORD_TYPES.task, JSON.stringify(allTasks))
+                CloudKitSync!.saveRecords(RECORD_TYPES.task, JSON.stringify(allTasks))
             );
         }
         if (allProjects.length > 0) {
             savePromises.push(
-                CloudKitSync.saveRecords(RECORD_TYPES.project, JSON.stringify(allProjects))
+                CloudKitSync!.saveRecords(RECORD_TYPES.project, JSON.stringify(allProjects))
             );
         }
         if (allSections.length > 0) {
             savePromises.push(
-                CloudKitSync.saveRecords(RECORD_TYPES.section, JSON.stringify(allSections))
+                CloudKitSync!.saveRecords(RECORD_TYPES.section, JSON.stringify(allSections))
             );
         }
         if (allAreas.length > 0) {
             savePromises.push(
-                CloudKitSync.saveRecords(RECORD_TYPES.area, JSON.stringify(allAreas))
+                CloudKitSync!.saveRecords(RECORD_TYPES.area, JSON.stringify(allAreas))
             );
         }
 
@@ -167,7 +187,7 @@ export const writeRemoteCloudKit = async (data: AppData): Promise<void> => {
                 updatedAt: new Date().toISOString(),
             }];
             savePromises.push(
-                CloudKitSync.saveRecords(RECORD_TYPES.settings, JSON.stringify(settingsRecord))
+                CloudKitSync!.saveRecords(RECORD_TYPES.settings, JSON.stringify(settingsRecord))
             );
         }
 
@@ -185,7 +205,7 @@ export const writeRemoteCloudKit = async (data: AppData): Promise<void> => {
         await deletePurgedRecords(data);
 
         // Update change token after successful write
-        const changeResult: ChangeResult = await CloudKitSync.fetchChanges(
+        const changeResult: ChangeResult = await CloudKitSync!.fetchChanges(
             await AsyncStorage.getItem(CLOUDKIT_CHANGE_TOKEN_KEY)
         );
         if (changeResult.changeToken) {
@@ -213,14 +233,18 @@ export const seedCloudKitFromLocal = async (data: AppData): Promise<void> => {
 
 // MARK: - Push Notification Subscription
 
-let changeEmitter: EventEmitter | null = null;
-let changeSubscription: { remove: () => void } | null = null;
+type EventSubscription = { remove: () => void };
+
+let changeEmitter: EventEmitter<{ onRemoteChange: () => void }> | null = null;
+let changeSubscription: EventSubscription | null = null;
 
 export const subscribeToCloudKitChanges = (onChanged: () => void): (() => void) => {
-    if (!isCloudKitAvailable()) return () => {};
+    if (!isCloudKitAvailable() || !CloudKitSync) return () => {};
 
     if (!changeEmitter) {
-        changeEmitter = new EventEmitter(CloudKitSync);
+        changeEmitter = new EventEmitter(
+            CloudKitSync as unknown as EventEmitter<{ onRemoteChange: () => void }>
+        );
     }
 
     // Remove any existing subscription
@@ -241,11 +265,11 @@ export const subscribeToCloudKitChanges = (onChanged: () => void): (() => void) 
 
 async function fullFetch(): Promise<AppData> {
     const [tasks, projects, sections, areas, settingsRecords] = await Promise.all([
-        CloudKitSync.fetchAllRecords(RECORD_TYPES.task),
-        CloudKitSync.fetchAllRecords(RECORD_TYPES.project),
-        CloudKitSync.fetchAllRecords(RECORD_TYPES.section),
-        CloudKitSync.fetchAllRecords(RECORD_TYPES.area),
-        CloudKitSync.fetchAllRecords(RECORD_TYPES.settings),
+        CloudKitSync!.fetchAllRecords(RECORD_TYPES.task),
+        CloudKitSync!.fetchAllRecords(RECORD_TYPES.project),
+        CloudKitSync!.fetchAllRecords(RECORD_TYPES.section),
+        CloudKitSync!.fetchAllRecords(RECORD_TYPES.area),
+        CloudKitSync!.fetchAllRecords(RECORD_TYPES.settings),
     ]);
 
     // Extract settings from the single settings record
@@ -262,7 +286,7 @@ async function fullFetch(): Promise<AppData> {
     if (!changeToken) {
         // After a full fetch, get the current token for future incremental fetches
         try {
-            const result: ChangeResult = await CloudKitSync.fetchChanges(null);
+            const result: ChangeResult = await CloudKitSync!.fetchChanges(null);
             if (result.changeToken) {
                 await AsyncStorage.setItem(CLOUDKIT_CHANGE_TOKEN_KEY, result.changeToken);
             }
@@ -291,10 +315,10 @@ async function deletePurgedRecords(data: AppData): Promise<void> {
 
     const deletePromises: Promise<boolean>[] = [];
     if (purgedTaskIDs.length > 0) {
-        deletePromises.push(CloudKitSync.deleteRecords(RECORD_TYPES.task, purgedTaskIDs));
+        deletePromises.push(CloudKitSync!.deleteRecords(RECORD_TYPES.task, purgedTaskIDs));
     }
     if (purgedProjectIDs.length > 0) {
-        deletePromises.push(CloudKitSync.deleteRecords(RECORD_TYPES.project, purgedProjectIDs));
+        deletePromises.push(CloudKitSync!.deleteRecords(RECORD_TYPES.project, purgedProjectIDs));
     }
 
     if (deletePromises.length > 0) {

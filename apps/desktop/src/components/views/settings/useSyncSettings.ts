@@ -4,7 +4,7 @@ import { useUiStore } from '../../../store/ui-store';
 import { logError } from '../../../lib/app-log';
 import { markSettingsOpenTrace, measureSettingsOpenStep } from '../../../lib/settings-open-diagnostics';
 
-export type SyncBackend = 'off' | 'file' | 'webdav' | 'cloud';
+export type SyncBackend = 'off' | 'file' | 'webdav' | 'cloud' | 'cloudkit';
 export type DropboxTestState = 'idle' | 'success' | 'error';
 export type WebDavTestState = 'idle' | 'success' | 'error';
 
