@@ -85,7 +85,7 @@ type Labels = {
     attachmentsCleanupRunning: string;
 };
 
-type SyncBackend = 'off' | 'file' | 'webdav' | 'cloud' | 'cloudkit';
+import type { SyncBackend } from '@mindwtr/core';
 type CloudProvider = 'selfhosted' | 'dropbox';
 type DropboxTestState = 'idle' | 'success' | 'error';
 
