@@ -306,7 +306,11 @@ function App() {
 
         const setup = async () => {
             const { listen } = await import('@tauri-apps/api/event');
+            const { invoke } = await import('@tauri-apps/api/core');
             unlisten = await listen('close-requested', async () => {
+                await invoke('acknowledge_close_request').catch((error) => {
+                    void logError(error, { scope: 'app', step: 'acknowledgeCloseRequest' });
+                });
                 if (isFlatpak) {
                     await quitApp().catch((error) => reportCloseError('Quit failed', error));
                     return;

@@ -372,6 +372,7 @@ struct TaskQueryOptions {
 }
 
 struct QuickAddPending(AtomicBool);
+struct CloseRequestHandled(AtomicBool);
 struct GlobalQuickAddShortcutState(Mutex<Option<String>>);
 
 struct AudioRecorderState(Mutex<Option<AudioRecorderHandle>>);
@@ -420,6 +421,11 @@ fn default_global_quick_add_shortcut() -> &'static str {
 #[tauri::command]
 fn consume_quick_add_pending(state: tauri::State<'_, QuickAddPending>) -> bool {
     state.0.swap(false, Ordering::SeqCst)
+}
+
+#[tauri::command]
+fn acknowledge_close_request(state: tauri::State<'_, CloseRequestHandled>) {
+    state.0.store(true, Ordering::SeqCst);
 }
 
 fn normalize_global_quick_add_shortcut(shortcut: Option<&str>) -> Result<Option<String>, String> {
@@ -3901,18 +3907,9 @@ fn read_sync_file(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let sync_dir = PathBuf::from(&sync_path_str);
     let sync_file = sync_dir.join(DATA_FILE_NAME);
     let backup_file = sync_dir.join(format!("{}.bak", DATA_FILE_NAME));
+    let legacy_sync_file = PathBuf::from(&sync_path_str).join(format!("{}-sync.json", APP_NAME));
 
     // Detect iCloud Drive evicted files before attempting to read.
-    if is_icloud_evicted(&sync_file) {
-        let msg = format!(
-            "Sync file has been offloaded by iCloud Optimize Storage. \
-             Open Finder and navigate to {:?} to trigger a re-download, then try again.",
-            sync_dir
-        );
-        log::warn!("{}", msg);
-        return Err(msg);
-    }
-
     let find_seed_backup_file = |dir: &Path| -> Option<PathBuf> {
         let mut latest: Option<(SystemTime, PathBuf)> = None;
         let entries = fs::read_dir(dir).ok()?;
@@ -3941,20 +3938,48 @@ fn read_sync_file(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
         }
         latest.map(|(_, path)| path)
     };
-    
-    if !sync_file.exists() {
-        let legacy_sync_file = PathBuf::from(&sync_path_str).join(format!("{}-sync.json", APP_NAME));
+
+    let read_seed_or_legacy_file = || -> Option<Result<Value, String>> {
         if legacy_sync_file.exists() {
-            let content = fs::read_to_string(&legacy_sync_file).map_err(|e| e.to_string())?;
-            return parse_json_relaxed(&content)
-                .map(normalize_sync_value)
-                .map_err(|e| e.to_string());
+            let content = fs::read_to_string(&legacy_sync_file).map_err(|e| e.to_string());
+            return Some(content.and_then(|text| {
+                parse_json_relaxed(&text)
+                    .map(normalize_sync_value)
+                    .map_err(|e| e.to_string())
+            }));
         }
         if let Some(seed_file) = find_seed_backup_file(&sync_dir) {
-            let content = fs::read_to_string(&seed_file).map_err(|e| e.to_string())?;
-            return parse_json_relaxed(&content)
-                .map(normalize_sync_value)
-                .map_err(|e| e.to_string());
+            let content = fs::read_to_string(&seed_file).map_err(|e| e.to_string());
+            return Some(content.and_then(|text| {
+                parse_json_relaxed(&text)
+                    .map(normalize_sync_value)
+                    .map_err(|e| e.to_string())
+            }));
+        }
+        None
+    };
+
+    if is_icloud_evicted(&sync_file) {
+        let msg = format!(
+            "Sync file has been offloaded by iCloud Optimize Storage. \
+             Open Finder and navigate to {:?} to trigger a re-download, then try again.",
+            sync_dir
+        );
+        log::warn!("{}", msg);
+        if backup_file.exists() {
+            if let Ok(value) = read_json_with_retries(&backup_file, 2) {
+                return Ok(value);
+            }
+        }
+        if let Some(result) = read_seed_or_legacy_file() {
+            return result;
+        }
+        return Err(msg);
+    }
+    
+    if !sync_file.exists() {
+        if let Some(result) = read_seed_or_legacy_file() {
+            return result;
         }
         // Return empty app data structure if file doesn't exist
         return Ok(serde_json::json!({
@@ -4199,6 +4224,7 @@ fn diagnostics_enabled() -> bool {
 pub fn run() {
     let builder = tauri::Builder::default()
         .manage(QuickAddPending(AtomicBool::new(false)))
+        .manage(CloseRequestHandled(AtomicBool::new(false)))
         .manage(GlobalQuickAddShortcutState(Mutex::new(None)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -4231,6 +4257,11 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
+                window
+                    .app_handle()
+                    .state::<CloseRequestHandled>()
+                    .0
+                    .store(false, Ordering::SeqCst);
                 let emit_ok = window.emit("close-requested", ()).is_ok();
                 if !emit_ok {
                     // Frontend not responding — hide the window as a fallback so the
@@ -4243,6 +4274,9 @@ pub fn run() {
                     let handle = window.app_handle().clone();
                     std::thread::spawn(move || {
                         std::thread::sleep(Duration::from_secs(5));
+                        if handle.state::<CloseRequestHandled>().0.load(Ordering::SeqCst) {
+                            return;
+                        }
                         if let Some(w) = handle.get_webview_window("main") {
                             if w.is_visible().unwrap_or(true) {
                                 let _ = w.set_skip_taskbar(true);
@@ -4366,6 +4400,7 @@ pub fn run() {
             get_data_path_cmd,
             get_db_path_cmd,
             get_config_path_cmd,
+            acknowledge_close_request,
             get_ai_key,
             set_ai_key,
             get_sync_path,
