@@ -114,6 +114,9 @@ export const getFileSyncBaseDir = (syncPath: string) => {
   return lastSlash > -1 ? stripped.slice(0, lastSlash) : '';
 };
 
+export const isRemoteSyncBackend = (backend: SyncBackend): boolean =>
+  backend === 'webdav' || backend === 'cloud' || backend === 'cloudkit';
+
 export const resolveBackend = (value: string | null): SyncBackend => normalizeSyncBackend(value);
 
 export type { SyncBackend };

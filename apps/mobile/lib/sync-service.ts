@@ -17,7 +17,7 @@ import {
 } from './dropbox-sync';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Network from 'expo-network';
-import { formatSyncErrorMessage, getFileSyncBaseDir, isLikelyFilePath, normalizeFileSyncPath, resolveBackend, type SyncBackend } from './sync-service-utils';
+import { formatSyncErrorMessage, getFileSyncBaseDir, isLikelyFilePath, isLikelyOfflineSyncError, isRemoteSyncBackend, normalizeFileSyncPath, resolveBackend, type SyncBackend } from './sync-service-utils';
 import { ensureCloudKitReady, readRemoteCloudKit, writeRemoteCloudKit, seedCloudKitFromLocal, isCloudKitAvailable } from './cloudkit-sync';
 import { createWebdavSyncRateLimitController } from './sync-rate-limit';
 import {
@@ -191,7 +191,7 @@ const getAttachmentsArray = (attachments: Attachment[] | undefined): Attachment[
 );
 
 const shouldSkipSyncForOfflineState = async (backend: SyncBackend): Promise<boolean> => {
-  if (backend !== 'webdav' && backend !== 'cloud' && backend !== 'cloudkit') return false;
+  if (!isRemoteSyncBackend(backend)) return false;
   try {
     const state = await Network.getNetworkStateAsync();
     const isConnected = state.isConnected ?? false;
@@ -284,7 +284,7 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
       logSyncWarning('WebDAV rate limited; pausing remote sync', error);
     };
     const ensureNetworkStillAvailable = async () => {
-      if (backend !== 'webdav' && backend !== 'cloud' && backend !== 'cloudkit') return;
+      if (!isRemoteSyncBackend(backend)) return;
       if (networkWentOffline) {
         requestAbortController.abort();
         throw new Error('Sync paused: offline state detected');
@@ -296,7 +296,7 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
       }
     };
     try {
-      if (backend === 'webdav' || backend === 'cloud' || backend === 'cloudkit') {
+      if (isRemoteSyncBackend(backend)) {
         try {
           networkSubscription = Network.addNetworkStateListener((state) => {
             const isConnected = state.isConnected ?? false;
