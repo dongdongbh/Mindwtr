@@ -11,11 +11,17 @@ const StorageAccessFramework = (FileSystem as any).StorageAccessFramework;
 
 interface PickResult extends AppData {
     __fileUri?: string;
+    /** True when the selected sync folder is inside iCloud Drive. */
+    __icloud?: boolean;
 }
 
 const SYNC_FILE_NAME = 'data.json';
+const BACKUP_FILE_NAME = 'data.json.bak';
 const LEGACY_SYNC_FILE_NAME = 'mindwtr-sync.json';
 const READONLY_FOLDER_MESSAGE = 'Selected folder is read-only. Please choose a writable folder or make it available offline.';
+const ICLOUD_EVICTED_MESSAGE =
+    'Sync file has been offloaded by iCloud Optimize Storage. ' +
+    'Open the Files app and navigate to the sync folder to trigger a re-download, then try again.';
 const IOS_TEMP_INBOX_PATTERN = /\/tmp\/[^/\s]*-Inbox\//i;
 const syncUriResolutionCache = new Map<string, string>();
 
@@ -45,6 +51,7 @@ const emptyPickResult = (fileUri: string): PickResult => ({
     areas: [],
     settings: {},
     __fileUri: fileUri,
+    __icloud: isICloudUri(fileUri),
 });
 
 const decodeUriSafe = (value: string): string => {
@@ -118,6 +125,35 @@ const buildTreeDocumentUri = (context: SafContext, documentId: string): string =
 };
 
 const isIosTemporaryInboxUri = (uri: string): boolean => IOS_TEMP_INBOX_PATTERN.test(uri);
+
+/** Returns true when the sync folder lives inside iCloud Drive. */
+const isICloudUri = (uri: string): boolean => {
+    const decoded = decodeUriSafe(uri);
+    return decoded.includes('Mobile Documents') || decoded.includes('iCloud');
+};
+
+/**
+ * Detect iCloud Optimize Storage eviction on iOS.
+ * When macOS/iOS evicts a file, the real file disappears and a hidden
+ * `.filename.icloud` placeholder appears instead.
+ */
+const isICloudEvicted = (fileUri: string): boolean => {
+    if (Platform.OS !== 'ios') return false;
+    if (!fileUri.startsWith('file://')) return false;
+    try {
+        const file = new ExpoFile(fileUri);
+        if (file.exists) return false; // Real file is present
+        // Check for .Name.icloud placeholder
+        const parts = fileUri.split('/');
+        const name = parts.pop() ?? '';
+        const parentUri = parts.join('/');
+        const placeholderUri = `${parentUri}/.${name}.icloud`;
+        const placeholder = new ExpoFile(placeholderUri);
+        return placeholder.exists;
+    } catch {
+        return false;
+    }
+};
 
 const listDirectoryForSyncFile = async (directoryUri: string): Promise<string | null> => {
     if (!StorageAccessFramework?.readDirectoryAsync) return null;
@@ -230,10 +266,11 @@ export const pickAndParseSyncFile = async (): Promise<PickResult | null> => {
         if (!fileContent) throw new Error('Sync file does not exist');
         const data = parseAppData(fileContent);
 
-        // Return data with file URI attached
+        // Return data with file URI and iCloud flag attached
         return {
             ...data,
             __fileUri: fileUri,
+            __icloud: isICloudUri(fileUri),
         };
     } catch (error) {
         void logError(error, { scope: 'sync', extra: { operation: 'import', message: 'Failed to import data' } });
@@ -383,7 +420,7 @@ const pickAndParseIosSyncFolder = async (): Promise<PickResult | null> => {
         if (pickedContent) {
             try {
                 const data = parseAppData(pickedContent);
-                return { ...data, __fileUri: pickedFileUri };
+                return { ...data, __fileUri: pickedFileUri, __icloud: isICloudUri(pickedFileUri) };
             } catch {
                 throw new Error('Selected JSON file is not a Mindwtr backup. Please select a Mindwtr backup JSON file in the target folder.');
             }
@@ -415,7 +452,7 @@ const pickAndParseIosSyncFolder = async (): Promise<PickResult | null> => {
 
         if (!fileContent) return emptyPickResult(primaryFileUri);
         const data = parseAppData(fileContent);
-        return { ...data, __fileUri: fileUri };
+        return { ...data, __fileUri: fileUri, __icloud: isICloudUri(fileUri) };
     } catch (error) {
         if (isPickerCanceledError(error)) {
             return await pickFolderFromExistingFile();
@@ -458,7 +495,7 @@ export const pickAndParseSyncFolder = async (): Promise<PickResult | null> => {
         }
         if (!fileContent) return emptyPickResult(fileUri);
         const data = parseAppData(fileContent);
-        return { ...data, __fileUri: fileUri };
+        return { ...data, __fileUri: fileUri, __icloud: isICloudUri(fileUri) };
     } catch (error) {
         void logError(error, { scope: 'sync', extra: { operation: 'import', message: 'Failed to import data from folder' } });
         throw error;
@@ -472,6 +509,24 @@ export const readSyncFile = async (fileUri: string): Promise<AppData | null> => 
         if (resolvedUri !== fileUri) {
             void logInfo('Resolved sync path from directory URI to file URI', { scope: 'sync' });
         }
+
+        // Detect iCloud Optimize Storage eviction before attempting reads.
+        if (isICloudEvicted(resolvedUri)) {
+            void logWarn(ICLOUD_EVICTED_MESSAGE, { scope: 'sync' });
+            // Try the backup file before giving up.
+            const backupUri = resolvedUri.replace(/\/[^/]+$/, '/' + BACKUP_FILE_NAME);
+            try {
+                const backupContent = await readFileText(backupUri);
+                if (backupContent) {
+                    void logInfo('Using backup file while primary is iCloud-evicted', { scope: 'sync' });
+                    return parseAppData(backupContent);
+                }
+            } catch {
+                // Backup also unavailable.
+            }
+            throw new Error(ICLOUD_EVICTED_MESSAGE);
+        }
+
         // Syncthing (or other tools) can replace files while we're reading. Retry a few times.
         let lastError: unknown = null;
         for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -507,11 +562,37 @@ export const writeSyncFile = async (fileUri: string, data: AppData): Promise<voi
     try {
         const content = JSON.stringify(data, null, 2);
         const resolvedUri = await resolveSyncFileUri(fileUri, { createIfMissing: true });
+
+        // Warn if writing to an iCloud-evicted target — the placeholder may get corrupted.
+        if (isICloudEvicted(resolvedUri)) {
+            void logWarn('Sync target is iCloud-evicted; writing directly to avoid corrupting placeholder.', { scope: 'sync' });
+        }
+
         // SAF URIs (content://) require special handling on Android
         if (resolvedUri.startsWith('content://') && StorageAccessFramework) {
             await StorageAccessFramework.writeAsStringAsync(resolvedUri, content);
             void logInfo('Written sync file via SAF', { scope: 'sync', extra: { fileUri: resolvedUri } });
         } else {
+            // Best-effort backup before overwriting, for recovery.
+            const backupUri = resolvedUri.replace(/\/[^/]+$/, '/' + BACKUP_FILE_NAME);
+            try {
+                if (Platform.OS === 'ios' && resolvedUri.startsWith('file://')) {
+                    const src = new ExpoFile(resolvedUri);
+                    if (src.exists) {
+                        const dst = new ExpoFile(backupUri);
+                        if (dst.exists) dst.delete();
+                        src.copy(dst);
+                    }
+                } else {
+                    const info = await FileSystem.getInfoAsync(resolvedUri);
+                    if (info.exists) {
+                        await FileSystem.copyAsync({ from: resolvedUri, to: backupUri });
+                    }
+                }
+            } catch {
+                // Backup is best-effort; don't block the write.
+            }
+
             if (Platform.OS === 'ios' && resolvedUri.startsWith('file://')) {
                 try {
                     writeWithModernFileApi(resolvedUri, content);
@@ -524,13 +605,24 @@ export const writeSyncFile = async (fileUri: string, data: AppData): Promise<voi
                     });
                 }
             }
+            // Atomic-ish write: write to tmp then rename over the target.
             const tempUri = `${resolvedUri}.tmp`;
             await FileSystem.writeAsStringAsync(tempUri, content);
-            const existing = await FileSystem.getInfoAsync(resolvedUri);
-            if (existing.exists) {
-                await FileSystem.deleteAsync(resolvedUri, { idempotent: true });
+            try {
+                const existing = await FileSystem.getInfoAsync(resolvedUri);
+                if (existing.exists) {
+                    await FileSystem.deleteAsync(resolvedUri, { idempotent: true });
+                }
+                await FileSystem.moveAsync({ from: tempUri, to: resolvedUri });
+            } catch (moveErr) {
+                // Rename may fail on iCloud Drive virtual filesystem — fall back to direct copy.
+                void logWarn('Atomic rename failed; falling back to direct copy', {
+                    scope: 'sync',
+                    extra: { error: moveErr instanceof Error ? moveErr.message : String(moveErr) },
+                });
+                await FileSystem.copyAsync({ from: tempUri, to: resolvedUri });
+                await FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
             }
-            await FileSystem.moveAsync({ from: tempUri, to: resolvedUri });
             void logInfo('Written sync file', { scope: 'sync', extra: { fileUri: resolvedUri } });
         }
     } catch (error) {
