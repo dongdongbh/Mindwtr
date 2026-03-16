@@ -6,7 +6,7 @@
  * alongside file, webdav, and cloud — the existing TypeScript merge engine
  * handles conflict resolution.
  */
-import { EventEmitter, type NativeModule } from 'expo-modules-core';
+import type { NativeModule } from 'expo-modules-core';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AppData } from '@mindwtr/core';
 import { logInfo, logWarn, logError } from './app-log';
@@ -233,24 +233,16 @@ export const seedCloudKitFromLocal = async (data: AppData): Promise<void> => {
 
 // MARK: - Push Notification Subscription
 
-type EventSubscription = { remove: () => void };
-
-let changeEmitter: EventEmitter<{ onRemoteChange: () => void }> | null = null;
-let changeSubscription: EventSubscription | null = null;
+let changeSubscription: { remove: () => void } | null = null;
 
 export const subscribeToCloudKitChanges = (onChanged: () => void): (() => void) => {
     if (!isCloudKitAvailable() || !CloudKitSync) return () => {};
 
-    if (!changeEmitter) {
-        changeEmitter = new EventEmitter(
-            CloudKitSync as unknown as EventEmitter<{ onRemoteChange: () => void }>
-        );
-    }
-
     // Remove any existing subscription
     changeSubscription?.remove();
 
-    changeSubscription = changeEmitter.addListener('onRemoteChange', () => {
+    // Expo SDK 54+: NativeModule from requireNativeModule has addListener built-in
+    changeSubscription = (CloudKitSync as any).addListener('onRemoteChange', () => {
         void logInfo('CloudKit remote change notification received', { scope: 'cloudkit' });
         onChanged();
     });
@@ -295,13 +287,15 @@ async function fullFetch(): Promise<AppData> {
         }
     }
 
+    // CloudKit records are untyped JSON — cast through unknown to AppData.
+    // The merge engine validates shape downstream.
     return {
         tasks: Array.isArray(tasks) ? tasks : [],
         projects: Array.isArray(projects) ? projects : [],
         sections: Array.isArray(sections) ? sections : [],
         areas: Array.isArray(areas) ? areas : [],
         settings,
-    } as AppData;
+    } as unknown as AppData;
 }
 
 async function deletePurgedRecords(data: AppData): Promise<void> {
