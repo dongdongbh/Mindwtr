@@ -3,6 +3,7 @@ import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DailyReviewScreen } from './daily-review-modal';
+import { SwipeableTaskItem } from './swipeable-task-item';
 
 vi.mock('@mindwtr/core', () => ({
   useTaskStore: () => ({
@@ -134,7 +135,7 @@ describe('DailyReviewScreen', () => {
       nextStepButton.props.onPress();
     });
 
-    const taskRows = tree.root.findAll((node) => String(node.type) === 'SwipeableTaskItem');
+    const taskRows = tree.root.findAllByType(SwipeableTaskItem);
     expect(taskRows).toHaveLength(1);
     expect(taskRows[0].props.showFocusToggle).toBe(true);
     expect(taskRows[0].props.hideStatusBadge).toBe(true);

@@ -91,3 +91,6 @@ scripts/ci/__pycache__/
 
 # Wiki (maintained in separate repo)
 Mindwtr.wiki/
+
+# Local workspace configuration
+pnpm-workspace.yaml
