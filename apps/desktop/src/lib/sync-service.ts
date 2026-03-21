@@ -55,11 +55,9 @@ import { markLocalWrite } from './local-data-watcher';
 import { ExternalCalendarService } from './external-calendar-service';
 import { webStorage } from './storage-adapter-web';
 import {
-    isCloudKitAvailable,
     ensureCloudKitReady,
     readRemoteCloudKit,
     writeRemoteCloudKit,
-    seedCloudKitFromLocal,
 } from './cloudkit-sync';
 import {
     collectAttachmentsById,
