@@ -55,6 +55,13 @@ import { markLocalWrite } from './local-data-watcher';
 import { ExternalCalendarService } from './external-calendar-service';
 import { webStorage } from './storage-adapter-web';
 import {
+    isCloudKitAvailable,
+    ensureCloudKitReady,
+    readRemoteCloudKit,
+    writeRemoteCloudKit,
+    seedCloudKitFromLocal,
+} from './cloudkit-sync';
+import {
     collectAttachmentsById,
     getBaseSyncUrl,
     getCloudBaseUrl,
@@ -2026,7 +2033,7 @@ export class SyncService {
             const createFetchWithAbort = (baseFetch: typeof fetch): typeof fetch =>
                 createAbortableFetch(baseFetch, { baseSignal: requestAbortController.signal });
             const ensureNetworkStillAvailable = () => {
-                if (backend !== 'cloud' && backend !== 'webdav') return;
+                if (backend !== 'cloud' && backend !== 'webdav' && backend !== 'cloudkit') return;
                 if (
                     networkWentOffline
                     || (typeof navigator !== 'undefined' && navigator.onLine === false)
@@ -2046,7 +2053,7 @@ export class SyncService {
             if (backend === 'off') {
                 return { success: true };
             }
-            if ((backend === 'cloud' || backend === 'webdav') && typeof window !== 'undefined') {
+            if ((backend === 'cloud' || backend === 'webdav' || backend === 'cloudkit') && typeof window !== 'undefined') {
                 const handleOffline = () => {
                     networkWentOffline = true;
                     requestAbortController.abort();
@@ -2066,7 +2073,7 @@ export class SyncService {
                     logSyncWarning('Failed to create pre-sync snapshot', error);
                 }
             }
-            if ((backend === 'cloud' || backend === 'webdav') && typeof navigator !== 'undefined' && navigator.onLine === false) {
+            if ((backend === 'cloud' || backend === 'webdav' || backend === 'cloudkit') && typeof navigator !== 'undefined' && navigator.onLine === false) {
                 throw new Error('Offline: network connection is unavailable for remote sync.');
             }
             const webdavConfig = backend === 'webdav' ? await SyncService.getWebDavConfig() : null;
@@ -2152,8 +2159,18 @@ export class SyncService {
                 }
             }
 
+            // CloudKit setup: ensure zone and subscription exist before syncing.
+            if (backend === 'cloudkit') {
+                setStep('cloudkit_setup');
+                await yieldToRenderer();
+                await ensureCloudKitReady();
+            }
+
             const readRemoteDataByBackend = async (): Promise<AppData | null> => {
                 ensureNetworkStillAvailable();
+                if (backend === 'cloudkit') {
+                    return await readRemoteCloudKit();
+                }
                 if (backend === 'webdav') {
                     try {
                         if (isTauriRuntimeEnv()) {
@@ -2230,6 +2247,11 @@ export class SyncService {
 
             const writeRemoteDataByBackend = async (data: AppData): Promise<void> => {
                 ensureNetworkStillAvailable();
+                if (backend === 'cloudkit') {
+                    const sanitized = sanitizeAppDataForRemote(data);
+                    await writeRemoteCloudKit(sanitized as AppData);
+                    return;
+                }
                 assertNoPendingAttachmentUploads(data);
                 const sanitized = sanitizeAppDataForRemote(data);
                 const remoteSanitized = remoteDataForCompare

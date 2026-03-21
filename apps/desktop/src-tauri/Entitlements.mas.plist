@@ -12,6 +12,16 @@
     <true/>
     <key>com.apple.security.network.client</key>
     <true/>
+    <key>com.apple.developer.icloud-services</key>
+    <array>
+        <string>CloudKit</string>
+    </array>
+    <key>com.apple.developer.icloud-container-identifiers</key>
+    <array>
+        <string>iCloud.tech.dongdongbh.mindwtr</string>
+    </array>
+    <key>aps-environment</key>
+    <string>production</string>
     <key>com.apple.application-identifier</key>
     <string>5X9JC5PL7T.tech.dongdongbh.mindwtr</string>
     <key>com.apple.developer.team-identifier</key>

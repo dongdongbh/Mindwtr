@@ -345,6 +345,18 @@ unsafe extern "C" {
     fn mindwtr_macos_create_security_bookmark(path_cstr: *const c_char) -> *mut c_char;
     fn mindwtr_macos_resolve_security_bookmark(base64_cstr: *const c_char) -> *mut c_char;
     fn mindwtr_macos_free_bookmark_string(ptr: *mut c_char);
+
+    // CloudKit bridge
+    fn mindwtr_cloudkit_account_status() -> *mut c_char;
+    fn mindwtr_cloudkit_ensure_zone() -> *mut c_char;
+    fn mindwtr_cloudkit_ensure_subscription() -> *mut c_char;
+    fn mindwtr_cloudkit_fetch_all_records(record_type: *const c_char) -> *mut c_char;
+    fn mindwtr_cloudkit_fetch_changes(change_token_base64: *const c_char) -> *mut c_char;
+    fn mindwtr_cloudkit_save_records(record_type: *const c_char, records_json: *const c_char) -> *mut c_char;
+    fn mindwtr_cloudkit_delete_records(record_type: *const c_char, record_ids_json: *const c_char) -> *mut c_char;
+    fn mindwtr_cloudkit_register_for_remote_notifications();
+    fn mindwtr_cloudkit_consume_pending_remote_change() -> i32;
+    fn mindwtr_cloudkit_free_string(ptr: *mut c_char);
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -4222,6 +4234,202 @@ fn get_macos_calendar_events(
     }
 }
 
+// ---------------------------------------------------------------------------
+// CloudKit bridge — Tauri commands
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "macos")]
+fn parse_cloudkit_json(raw: *mut c_char) -> Result<Value, String> {
+    if raw.is_null() {
+        return Err("CloudKit bridge returned null output".to_string());
+    }
+    let text = unsafe { CStr::from_ptr(raw) }
+        .to_string_lossy()
+        .into_owned();
+    unsafe { mindwtr_cloudkit_free_string(raw) };
+    let value: Value = serde_json::from_str(&text)
+        .map_err(|error| format!("Failed to parse CloudKit bridge output: {error}"))?;
+    if let Some(err) = value.get("error").and_then(|e| e.as_str()) {
+        return Err(format!("CloudKit error: {err}"));
+    }
+    Ok(value)
+}
+
+#[tauri::command]
+async fn cloudkit_account_status() -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let value = tauri::async_runtime::spawn_blocking(|| {
+            parse_cloudkit_json(unsafe { mindwtr_cloudkit_account_status() })
+        })
+        .await
+        .map_err(|error| format!("CloudKit account status task failed: {error}"))??;
+        let status = value
+            .get("status")
+            .and_then(|s| s.as_str())
+            .unwrap_or("unknown");
+        return Ok(status.to_string());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok("unsupported".to_string())
+    }
+}
+
+#[tauri::command]
+async fn cloudkit_ensure_zone() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        tauri::async_runtime::spawn_blocking(|| {
+            parse_cloudkit_json(unsafe { mindwtr_cloudkit_ensure_zone() })
+        })
+        .await
+        .map_err(|error| format!("CloudKit ensure zone task failed: {error}"))??;
+        return Ok(true);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("CloudKit is not available on this platform".to_string())
+    }
+}
+
+#[tauri::command]
+async fn cloudkit_ensure_subscription() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        tauri::async_runtime::spawn_blocking(|| {
+            parse_cloudkit_json(unsafe { mindwtr_cloudkit_ensure_subscription() })
+        })
+        .await
+        .map_err(|error| format!("CloudKit ensure subscription task failed: {error}"))??;
+        return Ok(true);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("CloudKit is not available on this platform".to_string())
+    }
+}
+
+#[tauri::command]
+async fn cloudkit_fetch_all_records(record_type: String) -> Result<Value, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let value = tauri::async_runtime::spawn_blocking(move || {
+            let c_type = CString::new(record_type.as_str())
+                .map_err(|e| format!("Invalid record type: {e}"))?;
+            parse_cloudkit_json(unsafe { mindwtr_cloudkit_fetch_all_records(c_type.as_ptr()) })
+        })
+        .await
+        .map_err(|error| format!("CloudKit fetch all records task failed: {error}"))??;
+        return Ok(value);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = record_type;
+        Err("CloudKit is not available on this platform".to_string())
+    }
+}
+
+#[tauri::command]
+async fn cloudkit_fetch_changes(change_token: Option<String>) -> Result<Value, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let value = tauri::async_runtime::spawn_blocking(move || {
+            let c_token = change_token
+                .as_deref()
+                .map(|s| CString::new(s).ok())
+                .flatten();
+            let ptr = c_token.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+            parse_cloudkit_json(unsafe { mindwtr_cloudkit_fetch_changes(ptr) })
+        })
+        .await
+        .map_err(|error| format!("CloudKit fetch changes task failed: {error}"))??;
+        return Ok(value);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = change_token;
+        Err("CloudKit is not available on this platform".to_string())
+    }
+}
+
+#[tauri::command]
+async fn cloudkit_save_records(record_type: String, records_json: String) -> Result<Value, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let value = tauri::async_runtime::spawn_blocking(move || {
+            let c_type = CString::new(record_type.as_str())
+                .map_err(|e| format!("Invalid record type: {e}"))?;
+            let c_json = CString::new(records_json.as_str())
+                .map_err(|e| format!("Invalid records JSON: {e}"))?;
+            parse_cloudkit_json(unsafe {
+                mindwtr_cloudkit_save_records(c_type.as_ptr(), c_json.as_ptr())
+            })
+        })
+        .await
+        .map_err(|error| format!("CloudKit save records task failed: {error}"))??;
+        return Ok(value);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (record_type, records_json);
+        Err("CloudKit is not available on this platform".to_string())
+    }
+}
+
+#[tauri::command]
+async fn cloudkit_delete_records(record_type: String, record_ids: Vec<String>) -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let value = tauri::async_runtime::spawn_blocking(move || {
+            let c_type = CString::new(record_type.as_str())
+                .map_err(|e| format!("Invalid record type: {e}"))?;
+            let ids_json = serde_json::to_string(&record_ids)
+                .map_err(|e| format!("Failed to serialize record IDs: {e}"))?;
+            let c_ids = CString::new(ids_json.as_str())
+                .map_err(|e| format!("Invalid record IDs JSON: {e}"))?;
+            parse_cloudkit_json(unsafe {
+                mindwtr_cloudkit_delete_records(c_type.as_ptr(), c_ids.as_ptr())
+            })
+        })
+        .await
+        .map_err(|error| format!("CloudKit delete records task failed: {error}"))??;
+        let _ = value;
+        return Ok(true);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (record_type, record_ids);
+        Err("CloudKit is not available on this platform".to_string())
+    }
+}
+
+#[tauri::command]
+fn cloudkit_consume_pending_remote_change() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let had_change = unsafe { mindwtr_cloudkit_consume_pending_remote_change() };
+        return Ok(had_change != 0);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+fn cloudkit_register_for_notifications() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        unsafe { mindwtr_cloudkit_register_for_remote_notifications() };
+        return Ok(true);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(false)
+    }
+}
+
 #[tauri::command]
 fn get_external_calendars(
     app: tauri::AppHandle,
@@ -4980,6 +5188,15 @@ pub fn run() {
             get_macos_calendar_permission_status,
             request_macos_calendar_permission,
             get_macos_calendar_events,
+            cloudkit_account_status,
+            cloudkit_ensure_zone,
+            cloudkit_ensure_subscription,
+            cloudkit_fetch_all_records,
+            cloudkit_fetch_changes,
+            cloudkit_save_records,
+            cloudkit_delete_records,
+            cloudkit_consume_pending_remote_change,
+            cloudkit_register_for_notifications,
             open_path,
             read_sync_file,
             write_sync_file,

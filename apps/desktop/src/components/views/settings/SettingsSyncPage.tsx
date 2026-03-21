@@ -20,6 +20,7 @@ type Labels = {
     syncBackendFile: string;
     syncBackendWebdav: string;
     syncBackendCloud: string;
+    syncBackendCloudkit: string;
     syncPreferences: string;
     syncPreferencesDesc: string;
     syncPreferenceAppearance: string;
@@ -235,12 +236,16 @@ export function SettingsSyncPage({
     isRestoringSnapshot,
     onRestoreSnapshot,
 }: SettingsSyncPageProps) {
+    const isMacOS = typeof navigator !== 'undefined'
+        && /mac/i.test(`${navigator.platform || ''} ${navigator.userAgent || ''}`);
     const webdavUrlError = webdavUrl.trim() ? !isValidHttpUrl(webdavUrl.trim()) : false;
     const cloudUrlError = cloudUrl.trim() ? !isValidHttpUrl(cloudUrl.trim()) : false;
     const isSyncTargetValid =
         syncBackend === 'file'
             ? !!syncPath.trim()
-            : syncBackend === 'webdav'
+            : syncBackend === 'cloudkit'
+                ? true
+                : syncBackend === 'webdav'
                 ? !!webdavUrl.trim() && !webdavUrlError
                 : syncBackend === 'cloud'
                     ? (cloudProvider === 'selfhosted'
@@ -384,6 +389,19 @@ export function SettingsSyncPage({
                             >
                                 {t.syncBackendCloud}
                             </button>
+                            {isMacOS && (
+                                <button
+                                    onClick={() => onSetSyncBackend('cloudkit')}
+                                    className={cn(
+                                        "px-3 py-1.5 rounded-md text-sm font-medium transition-colors border",
+                                        syncBackend === 'cloudkit'
+                                            ? "bg-primary/10 text-primary border-primary ring-1 ring-primary"
+                                            : "bg-muted/50 text-muted-foreground border-border hover:bg-muted hover:text-foreground",
+                                    )}
+                                >
+                                    {t.syncBackendCloudkit}
+                                </button>
+                            )}
                         </div>
                     </div>
 
