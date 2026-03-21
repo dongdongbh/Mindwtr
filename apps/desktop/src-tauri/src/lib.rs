@@ -35,6 +35,7 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::path::BaseDirectory;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
+use tauri_plugin_fs::FsExt;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use time::OffsetDateTime;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
@@ -261,6 +262,7 @@ struct LegacyAppConfigJson {
 #[derive(Debug, Default, Clone)]
 struct AppConfigToml {
     sync_path: Option<String>,
+    sync_path_bookmark: Option<String>,
     sync_backend: Option<String>,
     webdav_url: Option<String>,
     webdav_username: Option<String>,
@@ -340,6 +342,9 @@ unsafe extern "C" {
         range_end: *const c_char,
     ) -> *mut c_char;
     fn mindwtr_macos_calendar_free_string(value: *mut c_char);
+    fn mindwtr_macos_create_security_bookmark(path_cstr: *const c_char) -> *mut c_char;
+    fn mindwtr_macos_resolve_security_bookmark(base64_cstr: *const c_char) -> *mut c_char;
+    fn mindwtr_macos_free_bookmark_string(ptr: *mut c_char);
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -2229,6 +2234,8 @@ fn read_config_toml(path: &Path) -> AppConfigToml {
         let value = value.trim();
         if key == "sync_path" {
             config.sync_path = parse_toml_string_value(value);
+        } else if key == "sync_path_bookmark" {
+            config.sync_path_bookmark = parse_toml_string_value(value);
         } else if key == "sync_backend" {
             config.sync_backend = parse_toml_string_value(value);
         } else if key == "webdav_url" {
@@ -2318,6 +2325,12 @@ fn write_config_toml_with_header(
             serialize_toml_string_value(sync_path)
         ));
     }
+    if let Some(sync_path_bookmark) = &config.sync_path_bookmark {
+        lines.push(format!(
+            "sync_path_bookmark = {}",
+            serialize_toml_string_value(sync_path_bookmark)
+        ));
+    }
     if let Some(sync_backend) = &config.sync_backend {
         lines.push(format!(
             "sync_backend = {}",
@@ -2397,6 +2410,9 @@ fn write_config_toml_with_header(
 fn merge_config(base: &mut AppConfigToml, overrides: AppConfigToml) {
     if overrides.sync_path.is_some() {
         base.sync_path = overrides.sync_path;
+    }
+    if overrides.sync_path_bookmark.is_some() {
+        base.sync_path_bookmark = overrides.sync_path_bookmark;
     }
     if overrides.sync_backend.is_some() {
         base.sync_backend = overrides.sync_backend;
@@ -2485,6 +2501,7 @@ fn split_config_for_secrets(config: &AppConfigToml) -> (AppConfigToml, AppConfig
 
 fn config_has_values(config: &AppConfigToml) -> bool {
     config.sync_path.is_some()
+        || config.sync_path_bookmark.is_some()
         || config.sync_backend.is_some()
         || config.webdav_url.is_some()
         || config.webdav_username.is_some()
@@ -3601,6 +3618,61 @@ fn resolve_sync_dir(app: &tauri::AppHandle, path: Option<String>) -> Result<Path
     validate_sync_dir(&candidate)
 }
 
+// ---------------------------------------------------------------------------
+// macOS sandbox: security-scoped bookmark helpers
+// ---------------------------------------------------------------------------
+
+/// Create a security-scoped bookmark for `path` so the sandbox remembers
+/// access across app launches.  Returns the base64-encoded bookmark data,
+/// or `None` when not running on macOS or if creation fails.
+#[cfg(target_os = "macos")]
+fn create_sync_path_bookmark(path: &Path) -> Option<String> {
+    let c_path = CString::new(path.to_string_lossy().as_bytes()).ok()?;
+    let raw = unsafe { mindwtr_macos_create_security_bookmark(c_path.as_ptr()) };
+    if raw.is_null() {
+        log::warn!("Failed to create security-scoped bookmark for {:?}", path);
+        return None;
+    }
+    let result = unsafe { CStr::from_ptr(raw) }
+        .to_string_lossy()
+        .to_string();
+    unsafe { mindwtr_macos_free_bookmark_string(raw) };
+    log::info!("Created security-scoped bookmark for {:?}", path);
+    Some(result)
+}
+
+/// Resolve a previously stored bookmark, calling
+/// `startAccessingSecurityScopedResource` so the sandbox grants access.
+/// Returns the resolved path on success.
+#[cfg(target_os = "macos")]
+fn resolve_sync_path_bookmark(base64: &str) -> Option<PathBuf> {
+    let c_b64 = CString::new(base64).ok()?;
+    let raw = unsafe { mindwtr_macos_resolve_security_bookmark(c_b64.as_ptr()) };
+    if raw.is_null() {
+        log::warn!("Failed to resolve security-scoped bookmark");
+        return None;
+    }
+    let resolved = unsafe { CStr::from_ptr(raw) }
+        .to_string_lossy()
+        .to_string();
+    unsafe { mindwtr_macos_free_bookmark_string(raw) };
+    log::info!("Resolved security-scoped bookmark → {resolved}");
+    Some(PathBuf::from(resolved))
+}
+
+/// Add `dir` (and everything beneath it) to the Tauri runtime fs scope so
+/// the TypeScript frontend can use `@tauri-apps/plugin-fs` operations on it.
+fn expand_tauri_fs_scope(app: &tauri::AppHandle, dir: &Path) {
+    if let Err(error) = app.fs_scope().allow_directory(dir, true) {
+        log::warn!(
+            "Failed to expand Tauri fs scope for {:?}: {error}",
+            dir
+        );
+    } else {
+        log::info!("Expanded Tauri fs scope to include {:?}", dir);
+    }
+}
+
 #[tauri::command]
 fn get_sync_path(app: tauri::AppHandle) -> Result<String, String> {
     let config = read_config(&app);
@@ -3631,9 +3703,20 @@ fn set_sync_path(app: tauri::AppHandle, sync_path: String) -> Result<serde_json:
         );
     }
 
+    // Create a security-scoped bookmark so the sandbox remembers this path.
+    #[cfg(target_os = "macos")]
+    let bookmark = create_sync_path_bookmark(&sanitized_path);
+
     let mut config = read_config(&app);
     config.sync_path = Some(sanitized_path.to_string_lossy().to_string());
+    #[cfg(target_os = "macos")]
+    {
+        config.sync_path_bookmark = bookmark;
+    }
     write_config_files(&config_path, &get_secrets_path(&app), &config)?;
+
+    // Expand the Tauri fs scope so the frontend can watch / read / write here.
+    expand_tauri_fs_scope(&app, &sanitized_path);
 
     Ok(serde_json::json!({
         "success": true,
@@ -4730,6 +4813,28 @@ pub fn run() {
         .setup(|app| {
             // Ensure data file exists on startup
             ensure_data_file(&app.handle()).ok();
+
+            // On macOS, restore security-scoped bookmarks so the sandbox
+            // permits access to the user-selected sync folder, then expand the
+            // Tauri fs scope.  On other platforms just expand the scope directly.
+            {
+                let config = read_config(&app.handle());
+
+                #[cfg(target_os = "macos")]
+                if let Some(ref bookmark) = config.sync_path_bookmark {
+                    if let Some(resolved) = resolve_sync_path_bookmark(bookmark) {
+                        expand_tauri_fs_scope(&app.handle(), &resolved);
+                    }
+                }
+
+                if let Some(ref sp) = config.sync_path {
+                    let p = PathBuf::from(sp);
+                    if p.exists() {
+                        expand_tauri_fs_scope(&app.handle(), &p);
+                    }
+                }
+            }
+
             let diagnostics_enabled = diagnostics_enabled();
             let is_windows_store = is_windows_store_install();
             if let Some(window) = app.get_webview_window("main") {
