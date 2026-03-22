@@ -570,25 +570,56 @@ char *mindwtr_cloudkit_fetch_changes(const char *change_token_base64_cstr) {
 }
 
 /// Fetch records by their IDs. Returns a mutable dictionary keyed by CKRecordID.
+/// On error, returns nil and sets *outError. unknownItem (record doesn't exist) is
+/// silently skipped — mirrors iOS fetchRecordsByID behaviour.
 static NSMutableDictionary<CKRecordID *, CKRecord *> *
-ck_fetch_records_by_id(NSArray<CKRecordID *> *ids) {
+ck_fetch_records_by_id(NSArray<CKRecordID *> *ids, NSError **outError) {
     NSMutableDictionary<CKRecordID *, CKRecord *> *results = [NSMutableDictionary dictionary];
     if (ids.count == 0) return results;
 
     CKFetchRecordsOperation *op = [[CKFetchRecordsOperation alloc] initWithRecordIDs:ids];
     op.qualityOfService = NSQualityOfServiceUserInitiated;
 
+    __block NSMutableArray<NSError *> *perRecordErrors = [NSMutableArray array];
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+
     op.fetchRecordsCompletionBlock = ^(NSDictionary<CKRecordID *, CKRecord *> *recordsByID,
-                                       NSError *error __unused) {
+                                       NSError *error) {
+        // Collect successfully fetched records.
         if (recordsByID) {
             [results addEntriesFromDictionary:recordsByID];
+        }
+        if (error) {
+            if ([error.domain isEqualToString:CKErrorDomain] &&
+                error.code == CKErrorPartialFailure) {
+                // Inspect per-record errors — suppress unknownItem, collect real errors.
+                NSDictionary *partials = error.userInfo[CKPartialErrorsByItemIDKey];
+                for (CKRecordID *failedID in partials) {
+                    NSError *perErr = partials[failedID];
+                    if ([perErr.domain isEqualToString:CKErrorDomain] &&
+                        perErr.code == CKErrorUnknownItem) {
+                        continue; // record doesn't exist yet — skip
+                    }
+                    [perRecordErrors addObject:perErr];
+                }
+            } else {
+                [perRecordErrors addObject:error];
+            }
         }
         dispatch_semaphore_signal(sem);
     };
     [_ckPrivateDB addOperation:op];
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, kTimeoutSec * NSEC_PER_SEC));
+    long waited = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, kTimeoutSec * NSEC_PER_SEC));
 
+    if (waited != 0) {
+        if (outError) *outError = [NSError errorWithDomain:CKErrorDomain code:CKErrorNetworkFailure
+                                                  userInfo:@{NSLocalizedDescriptionKey: @"fetch-by-id-timeout"}];
+        return nil;
+    }
+    if (perRecordErrors.count > 0) {
+        if (outError) *outError = perRecordErrors.firstObject;
+        return nil;
+    }
     return results;
 }
 
@@ -618,11 +649,18 @@ char *mindwtr_cloudkit_save_records(const char *record_type_cstr, const char *re
         }
 
         // Step 2: Fetch existing records in batches.
+        // Mirrors iOS: unknownItem is silently skipped (new records), but real
+        // fetch errors abort the save — otherwise missing records are treated as
+        // brand-new CKRecords, dropping server system fields (changeTag).
         NSMutableDictionary<CKRecordID *, CKRecord *> *existingByID = [NSMutableDictionary dictionary];
         for (NSUInteger i = 0; i < recordIDs.count; i += kBatchSize) {
             NSUInteger end = MIN(i + kBatchSize, recordIDs.count);
             NSArray *batch = [recordIDs subarrayWithRange:NSMakeRange(i, end - i)];
-            NSDictionary *fetched = ck_fetch_records_by_id(batch);
+            NSError *fetchError = nil;
+            NSDictionary *fetched = ck_fetch_records_by_id(batch, &fetchError);
+            if (!fetched) {
+                return ck_copy_json(@{@"error": fetchError.localizedDescription ?: @"fetch-existing-failed"});
+            }
             [existingByID addEntriesFromDictionary:fetched];
         }
 
@@ -739,9 +777,24 @@ char *mindwtr_cloudkit_delete_records(const char *record_type_cstr __unused,
             op.modifyRecordsCompletionBlock = ^(NSArray *saved __unused,
                                                  NSArray *deleted __unused,
                                                  NSError *error) {
-                if (error && !([error.domain isEqualToString:CKErrorDomain] &&
-                               error.code == CKErrorPartialFailure)) {
-                    opError = error;
+                if (error) {
+                    if ([error.domain isEqualToString:CKErrorDomain] &&
+                        error.code == CKErrorPartialFailure) {
+                        // Inspect per-record errors — suppress only unknownItem
+                        // (already deleted). Mirror iOS deleteRecords behaviour.
+                        NSDictionary *partials = error.userInfo[CKPartialErrorsByItemIDKey];
+                        for (CKRecordID *failedID in partials) {
+                            NSError *perErr = partials[failedID];
+                            if ([perErr.domain isEqualToString:CKErrorDomain] &&
+                                perErr.code == CKErrorUnknownItem) {
+                                continue; // already deleted — safe to ignore
+                            }
+                            opError = perErr; // real error — surface it
+                            break;
+                        }
+                    } else {
+                        opError = error;
+                    }
                 }
                 dispatch_semaphore_signal(sem);
             };
