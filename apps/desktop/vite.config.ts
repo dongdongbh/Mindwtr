@@ -10,6 +10,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "@mindwtr/core": path.resolve(__dirname, "../../packages/core/src/index.ts"),
     },
   },
   // Prevent vite from obscuring rust errors in the console
