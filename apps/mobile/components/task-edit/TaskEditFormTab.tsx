@@ -14,7 +14,7 @@ import {
     findNodeHandle,
 } from 'react-native';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import type { Task, TaskEditorFieldId, TimeEstimate } from '@mindwtr/core';
+import type { Task, TaskEditorFieldId, TaskEditorSectionId, TimeEstimate } from '@mindwtr/core';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { CollapsibleSection } from './CollapsibleSection';
 
@@ -39,10 +39,11 @@ type TaskEditFormTabProps = {
     copilotTags: string[];
     timeEstimatesEnabled: boolean;
     renderField: (fieldId: TaskEditorFieldId) => React.ReactNode;
-    alwaysFields: TaskEditorFieldId[];
+    basicFields: TaskEditorFieldId[];
     schedulingFields: TaskEditorFieldId[];
     organizationFields: TaskEditorFieldId[];
     detailsFields: TaskEditorFieldId[];
+    sectionOpenDefaults: Record<TaskEditorSectionId, boolean>;
     showDatePicker: string | null;
     pendingStartDate: Date | null;
     pendingDueDate: Date | null;
@@ -53,6 +54,7 @@ type TaskEditFormTabProps = {
     titleDraft: string;
     onTitleDraftChange: (text: string) => void;
     registerScrollToEnd?: (handler: ((targetInput?: number | string) => void) | null) => void;
+    formResetKey?: string;
 };
 
 export function TaskEditFormTab({
@@ -74,10 +76,11 @@ export function TaskEditFormTab({
     copilotTags,
     timeEstimatesEnabled,
     renderField,
-    alwaysFields,
+    basicFields,
     schedulingFields,
     organizationFields,
     detailsFields,
+    sectionOpenDefaults,
     showDatePicker,
     pendingStartDate,
     pendingDueDate,
@@ -88,6 +91,7 @@ export function TaskEditFormTab({
     titleDraft,
     onTitleDraftChange,
     registerScrollToEnd,
+    formResetKey,
 }: TaskEditFormTabProps) {
     const [titleFocused, setTitleFocused] = React.useState(false);
     const formScrollRef = React.useRef<ScrollView | null>(null);
@@ -299,14 +303,15 @@ export function TaskEditFormTab({
                             </Text>
                         </View>
                     )}
-                    {alwaysFields.map((fieldId) => (
+                    {basicFields.map((fieldId) => (
                         <React.Fragment key={fieldId}>{renderField(fieldId)}</React.Fragment>
                     ))}
 
                     <CollapsibleSection
+                        resetKey={`${formResetKey ?? 'task'}:scheduling`}
                         title={t('taskEdit.scheduling')}
-                        badge={countFilledFields(['startTime', 'recurrence', 'reviewAt'])}
-                        defaultExpanded={countFilledFields(['startTime', 'recurrence', 'reviewAt']) > 0}
+                        badge={countFilledFields(schedulingFields)}
+                        defaultExpanded={sectionOpenDefaults.scheduling || countFilledFields(schedulingFields) > 0}
                     >
                         {schedulingFields.length === 0 ? (
                             <View style={[styles.emptySectionHint, { borderColor: tc.border, backgroundColor: tc.filterBg }]}>
@@ -322,9 +327,10 @@ export function TaskEditFormTab({
                     </CollapsibleSection>
 
                     <CollapsibleSection
+                        resetKey={`${formResetKey ?? 'task'}:organization`}
                         title={t('taskEdit.organization')}
-                        badge={countFilledFields(['contexts', 'tags', 'priority', 'timeEstimate'])}
-                        defaultExpanded={countFilledFields(['contexts', 'tags']) > 0}
+                        badge={countFilledFields(organizationFields)}
+                        defaultExpanded={sectionOpenDefaults.organization || countFilledFields(organizationFields) > 0}
                     >
                         {organizationFields.length === 0 ? (
                             <View style={[styles.emptySectionHint, { borderColor: tc.border, backgroundColor: tc.filterBg }]}>
@@ -340,9 +346,15 @@ export function TaskEditFormTab({
                     </CollapsibleSection>
 
                     <CollapsibleSection
+                        resetKey={`${formResetKey ?? 'task'}:details`}
                         title={t('taskEdit.details')}
-                        badge={countFilledFields(['description', 'checklist', 'attachments'])}
-                        defaultExpanded={countFilledFields(['description', 'checklist', 'attachments']) > 0}
+                        badge={countFilledFields(detailsFields)}
+                        defaultExpanded={
+                            sectionOpenDefaults.details
+                            || countFilledFields(detailsFields) > 0
+                            || detailsFields.includes('description')
+                            || detailsFields.includes('checklist')
+                        }
                     >
                         {detailsFields.length === 0 ? (
                             <View style={[styles.emptySectionHint, { borderColor: tc.border, backgroundColor: tc.filterBg }]}>

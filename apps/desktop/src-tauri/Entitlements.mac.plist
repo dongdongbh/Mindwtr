@@ -12,7 +12,7 @@
     <array>
         <string>iCloud.tech.dongdongbh.mindwtr</string>
     </array>
-    <key>aps-environment</key>
+    <key>com.apple.developer.aps-environment</key>
     <string>production</string>
 </dict>
 </plist>

@@ -107,6 +107,24 @@ Review contract @legal
 
 The context will be added and available for filtering.
 
+### Managing Saved Contexts and Tags
+
+When you want to clean up or rename reusable metadata:
+
+- Open **Settings → Manage**
+- Edit **Contexts**, **Tags**, and **Areas** from one place
+- Use this to merge duplicates, standardize naming, or remove values you no longer use
+
+### Bulk Editing Contexts
+
+On desktop, you can update contexts across many tasks at once:
+
+1. Enter **Select** mode in a list view
+2. Choose the tasks you want to edit
+3. Use **Add Context** or **Remove Context** in the bulk action bar
+
+This is useful when you want to reclassify a whole batch of tasks after a weekly review or project planning pass.
+
 ---
 
 ## Hierarchical Contexts & Tags

@@ -354,7 +354,11 @@ Select multiple tasks to perform batch operations:
 2. Click tasks to select/deselect them
 3. Use the action bar to:
    - **Move** — Change status for all selected
+   - **Assign Area** — Move all selected tasks under a specific area (or clear the area)
    - **Add Tag** — Add a tag to all selected
+   - **Remove Tag** — Remove a tag from all selected tasks
+   - **Add Context** — Add a context to all selected tasks
+   - **Remove Context** — Remove a context from all selected tasks
    - **Delete** — Delete all selected
 4. Click **"Done"** to exit selection mode
 
@@ -431,7 +435,12 @@ Access Settings from the sidebar.
 - **Features** — Optional signals you can enable when needed:
   - **Priorities** — Show a priority flag on tasks
   - **Time Estimates** — Add a duration field for time blocking
-- **Task Editor Layout** — Choose which fields are shown by default and reorder them
+- **Inbox Processing** — Keep guided inbox processing for teaching GTD, or switch the default to **Quick** mode for a compact one-screen flow
+  - Choose whether to show the 2-minute shortcut, ask for project early, include contexts/tags, allow scheduling, and offer reference during processing
+- **Task Editor Layout** — Choose which fields are shown by default, move fields between sections, and reorder them
+  - You can move fields like **Due Date** into **Scheduling** and choose which sections expand by default
+- **Manage** — Maintain your reusable metadata from one place
+  - Edit **Areas**, **Contexts**, and **Tags** without hunting through individual tasks
 
 ### Data & Sync
 

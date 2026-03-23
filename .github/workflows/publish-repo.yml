@@ -34,7 +34,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
       - name: Import GPG Key
-        uses: crazy-max/ghaction-import-gpg@e89d40939c28e39f97cf32126055eeae86ba74ec # v6
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
@@ -123,9 +123,41 @@ jobs:
           fi
 
       - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e # v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./build_repo
-          publish_branch: gh-pages
-          keep_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          pages_dir="$(mktemp -d)"
+
+          cleanup() {
+            git worktree remove --force "$pages_dir" >/dev/null 2>&1 || true
+            rm -rf "$pages_dir"
+          }
+
+          trap cleanup EXIT
+
+          git fetch origin gh-pages:refs/remotes/origin/gh-pages >/dev/null 2>&1 || true
+
+          if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
+            git worktree add --track -B gh-pages "$pages_dir" origin/gh-pages
+          else
+            git worktree add --detach "$pages_dir"
+            git -C "$pages_dir" checkout --orphan gh-pages
+            find "$pages_dir" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+          fi
+
+          rsync -a ./build_repo/ "$pages_dir"/
+          touch "$pages_dir/.nojekyll"
+
+          git -C "$pages_dir" config user.name "GitHub Actions"
+          git -C "$pages_dir" config user.email "actions@github.com"
+          git -C "$pages_dir" add -A
+
+          if git -C "$pages_dir" diff --cached --quiet; then
+            echo "No gh-pages changes to publish."
+            exit 0
+          fi
+
+          git -C "$pages_dir" commit -m "Publish Linux repos for ${RELEASE_TAG:-${GITHUB_REF_NAME}}"
+          git -C "$pages_dir" push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:gh-pages

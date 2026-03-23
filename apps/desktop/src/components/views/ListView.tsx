@@ -71,6 +71,11 @@ export async function restoreDeletedTasksWithFeedback(
     showToast(message, 'error');
 }
 
+export function reportArchivedTaskQueryFailure(error: unknown, showToast: ShowToast): void {
+    reportError('Failed to load archived tasks', error);
+    showToast('Failed to load archived tasks', 'error');
+}
+
 export const ListView = memo(function ListView({ title, statusFilter }: ListViewProps) {
     const perf = usePerformanceMonitor('ListView');
     const {
@@ -128,6 +133,10 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
     const setListFilters = useUiStore((state) => state.setListFilters);
     const resetListFilters = useUiStore((state) => state.resetListFilters);
     const showToast = useUiStore((state) => state.showToast);
+    const translateWithFallback = useCallback((key: string, fallback: string) => {
+        const value = t(key);
+        return value === key ? fallback : value;
+    }, [t]);
     const showListDetails = useUiStore((state) => state.listOptions.showDetails);
     const nextGroupBy = useUiStore((state) => state.listOptions.nextGroupBy);
     const setListOptions = useUiStore((state) => state.setListOptions);
@@ -281,14 +290,17 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                     const firstKey = queryCacheRef.current.keys().next().value;
                     if (firstKey) queryCacheRef.current.delete(firstKey);
                 }
-            }).catch(() => {
-                if (!cancelled) setBaseTasks([]);
+            }).catch((error) => {
+                if (!cancelled) {
+                    reportArchivedTaskQueryFailure(error, showToast);
+                    setBaseTasks([]);
+                }
             });
         }
         return () => {
             cancelled = true;
         };
-    }, [statusFilter, queryTasks, lastDataChangeAt, tasks]);
+    }, [statusFilter, queryTasks, lastDataChangeAt, showToast, tasks]);
 
     useEffect(() => {
         setSearchQuery('');
@@ -726,9 +738,9 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             exitSelectionMode();
         } catch (error) {
             reportError('Failed to batch move tasks', error);
-            showToast(t('bulk.moveFailed') || 'Failed to update selected tasks', 'error');
+            showToast(translateWithFallback('bulk.moveFailed', 'Failed to update selected tasks'), 'error');
         }
-    }, [batchMoveTasks, selectedIdsArray, exitSelectionMode, showToast, t]);
+    }, [batchMoveTasks, selectedIdsArray, exitSelectionMode, showToast, translateWithFallback]);
 
     const handleBatchDelete = useCallback(async () => {
         if (selectedIdsArray.length === 0) return;
@@ -758,12 +770,12 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             }
         } catch (error) {
             reportError('Failed to batch delete tasks', error);
-            showToast(t('bulk.deleteFailed') || 'Failed to delete selected tasks', 'error');
+            showToast(translateWithFallback('bulk.deleteFailed', 'Failed to delete selected tasks'), 'error');
         } finally {
             setIsBatchDeleting(false);
             setPendingBatchDeleteIds([]);
         }
-    }, [batchDeleteTasks, exitSelectionMode, restoreTask, showToast, t, undoNotificationsEnabled]);
+    }, [batchDeleteTasks, exitSelectionMode, restoreTask, showToast, t, translateWithFallback, undoNotificationsEnabled]);
 
     const handleBatchAssignArea = useCallback(async (areaId: string | null) => {
         if (selectedIdsArray.length === 0) return;
@@ -775,9 +787,9 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             exitSelectionMode();
         } catch (error) {
             reportError('Failed to batch assign area', error);
-            showToast(t('bulk.moveFailed') || 'Failed to update selected tasks', 'error');
+            showToast(translateWithFallback('bulk.moveFailed', 'Failed to update selected tasks'), 'error');
         }
-    }, [batchUpdateTasks, selectedIdsArray, exitSelectionMode, showToast, t]);
+    }, [batchUpdateTasks, selectedIdsArray, exitSelectionMode, showToast, translateWithFallback]);
 
     const handleBatchAddTag = useCallback(async () => {
         if (selectedIdsArray.length === 0) return;

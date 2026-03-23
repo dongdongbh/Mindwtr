@@ -1,0 +1,18 @@
+<en-US>
+- Matched more inbox and task-editor settings with desktop while keeping the mobile card-based processing flow.
+- Simplified mobile task-editor layout settings with presets, collapsible sections, and focused field actions.
+- Improved mobile inbox/list interactions and clearer auto-sync failure feedback.
+- Hardened sync reliability with safer refresh handling and stricter validation of task and project updates.
+</en-US>
+<zh-CN>
+- 让更多收件箱与任务编辑器设置与桌面端保持一致，同时继续保留移动端卡片式处理流程。
+- 简化移动端任务编辑器布局设置，加入预设、可折叠分组和更聚焦的字段操作。
+- 改进移动端收件箱/列表交互，并更清晰地提示自动同步失败。
+- 强化同步可靠性，加入更安全的刷新处理与更严格的任务、项目更新校验。
+</zh-CN>
+<es-ES>
+- Alineamos mas ajustes de bandeja de entrada y del editor de tareas con escritorio, manteniendo el flujo por tarjetas en movil.
+- Simplificamos los ajustes del editor de tareas en movil con preajustes, secciones plegables y acciones de campo mas claras.
+- Mejoramos las interacciones de bandeja/lista y mostramos mejor los fallos de auto-sync.
+- Reforzamos la fiabilidad del sync con un manejo mas seguro de refrescos y validacion mas estricta de tareas y proyectos.
+</es-ES>

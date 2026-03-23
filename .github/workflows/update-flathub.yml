@@ -123,114 +123,63 @@ jobs:
           set -euo pipefail
 
           worktree_dir="$(mktemp -d)"
-          cache_root="$(mktemp -d)"
 
           cleanup() {
             git worktree remove --force "$worktree_dir" >/dev/null 2>&1 || true
-            rm -rf "$worktree_dir" "$cache_root"
+            rm -rf "$worktree_dir"
           }
 
           trap cleanup EXIT
 
           git worktree add --force --detach "$worktree_dir" "${{ steps.version.outputs.tag }}" >/dev/null
 
-          python3 - "$GITHUB_WORKSPACE/flathub/tech.dongdongbh.mindwtr.node-sources.json" "$cache_root" <<'PY'
-          import base64
-          import io
+          python3 scripts/ci/repair-package-lock.py \
+            "$worktree_dir/apps/desktop/package-lock.json"
+
+          python3 - "$worktree_dir/apps/desktop/package-lock.json" "$GITHUB_WORKSPACE/flathub/tech.dongdongbh.mindwtr.node-sources.json" <<'PY'
           import json
-          import os
           import pathlib
-          import subprocess
-          import tarfile
-          import urllib.request
           import sys
 
-          node_sources_path = pathlib.Path(sys.argv[1])
-          cache_root = pathlib.Path(sys.argv[2])
-          host_arch = "x86_64"
+          lock_path = pathlib.Path(sys.argv[1])
+          node_sources_path = pathlib.Path(sys.argv[2])
 
-          entries = json.loads(node_sources_path.read_text())
+          lock = json.loads(lock_path.read_text())
+          node_sources = json.loads(node_sources_path.read_text())
 
-          def should_skip(entry: dict) -> bool:
-              arches = entry.get("only-arches")
-              return bool(arches and host_arch not in arches)
+          expected_urls = {
+              meta["resolved"]
+              for package_path, meta in lock.get("packages", {}).items()
+              if isinstance(meta, dict)
+              and package_path.startswith("node_modules/")
+              and not meta.get("link")
+              and "version" in meta
+              and isinstance(meta.get("resolved"), str)
+              and meta["resolved"].startswith("https://registry.npmjs.org/")
+          }
 
-          def extract_archive(payload: bytes, dest_dir: pathlib.Path, strip_components: int) -> None:
-              with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
-                  for member in archive.getmembers():
-                      parts = pathlib.PurePosixPath(member.name).parts[strip_components:]
-                      if not parts:
-                          continue
+          source_urls = {
+              entry["url"]
+              for entry in node_sources
+              if isinstance(entry, dict)
+              and entry.get("type") in {"file", "archive"}
+              and isinstance(entry.get("url"), str)
+          }
 
-                      target = dest_dir.joinpath(*parts)
-                      if member.isdir():
-                          target.mkdir(parents=True, exist_ok=True)
-                          continue
+          missing_urls = sorted(expected_urls - source_urls)
+          if missing_urls:
+              preview = "\n".join(f"  - {url}" for url in missing_urls[:20])
+              suffix = "" if len(missing_urls) <= 20 else f"\n  ... and {len(missing_urls) - 20} more"
+              raise SystemExit(
+                  f"Generated Flathub node sources are missing {len(missing_urls)} npm tarball URLs required by apps/desktop/package-lock.json:\n"
+                  + preview
+                  + suffix
+              )
 
-                      target.parent.mkdir(parents=True, exist_ok=True)
-                      extracted = archive.extractfile(member)
-                      if extracted is None:
-                          continue
-
-                      target.write_bytes(extracted.read())
-                      mode = member.mode & 0o777
-                      target.chmod(mode if mode else 0o644)
-
-          for entry in entries:
-              if should_skip(entry):
-                  continue
-
-              dest_dir = cache_root / entry.get("dest", "")
-              dest_dir.mkdir(parents=True, exist_ok=True)
-
-              if entry["type"] == "inline":
-                  raw = base64.b64decode(entry["contents"]) if entry.get("base64") else entry["contents"].encode()
-                  (dest_dir / entry["dest-filename"]).write_bytes(raw)
-                  continue
-
-              if entry["type"] == "script":
-                  script_path = dest_dir / entry["dest-filename"]
-                  script_path.write_text("\n".join(entry["commands"]) + "\n")
-                  script_path.chmod(0o755)
-                  continue
-
-              if entry["type"] == "shell":
-                  for command in entry["commands"]:
-                      subprocess.run(
-                          command,
-                          check=True,
-                          shell=True,
-                          executable="/bin/bash",
-                          cwd=dest_dir,
-                          env=os.environ,
-                      )
-                  continue
-
-              if entry["type"] not in {"file", "archive"}:
-                  raise SystemExit(f"Unsupported source type: {entry['type']}")
-
-              with urllib.request.urlopen(entry["url"]) as response:
-                  payload = response.read()
-
-              if entry["type"] == "archive":
-                  extract_archive(payload, dest_dir, entry["strip-components"])
-                  continue
-
-              strip_components = entry.get("strip-components")
-              if strip_components is None:
-                  (dest_dir / entry["dest-filename"]).write_bytes(payload)
-                  continue
-
-              extract_archive(payload, dest_dir, strip_components)
+          print(
+              f"Validated Flathub node sources coverage for {len(expected_urls)} npm tarball URLs in {lock_path}"
+          )
           PY
-
-          npm_config_cache="$cache_root/flatpak-node/npm-cache" \
-          XDG_CACHE_HOME="$cache_root/flatpak-node/cache" \
-          npm_config_offline=true \
-          npm_config_audit=false \
-          npm_config_fund=false \
-          npm_config_update_notifier=false \
-          npm ci --prefix="$worktree_dir/apps/desktop" --offline --legacy-peer-deps --workspaces=false
 
       - name: Create or update Flathub PR
         id: pr

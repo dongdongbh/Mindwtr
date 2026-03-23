@@ -1,6 +1,7 @@
 import type { ObsidianSourceRef } from '@mindwtr/core';
 import { isTauriRuntime } from './runtime';
 import { reportError } from './report-error';
+import { logWarn } from './app-log';
 import {
     deriveVaultName,
     normalizeObsidianConfig,
@@ -100,14 +101,20 @@ export class ObsidianService {
         try {
             return await tauriInvoke<boolean>('check_obsidian_vault_marker', { vaultPath: trimmed });
         } catch (error) {
-            reportError('Failed to check Obsidian vault marker', error);
+            void logWarn('Failed to check Obsidian vault marker', {
+                scope: 'obsidian',
+                extra: {
+                    vaultPath: trimmed,
+                    error: error instanceof Error ? error.message : String(error),
+                },
+            });
             return null;
         }
     }
 
-    static async inspectVault(vaultPath: string | null): Promise<{ hasObsidianDir: boolean }> {
+    static async inspectVault(vaultPath: string | null): Promise<{ hasObsidianDir: boolean | null }> {
         return {
-            hasObsidianDir: (await ObsidianService.hasVaultMarker(vaultPath)) === true,
+            hasObsidianDir: await ObsidianService.hasVaultMarker(vaultPath),
         };
     }
 

@@ -89,6 +89,26 @@ describe('TaskStore', () => {
         expect(updatedTask.status).toBe('next');
     });
 
+    it('rejects adding a task with a missing projectId', async () => {
+        const result = await useTaskStore.getState().addTask('Broken Task', {
+            projectId: 'missing-project',
+        });
+
+        expect(result).toEqual({ success: false, error: 'Project not found' });
+        expect(useTaskStore.getState().tasks).toHaveLength(0);
+    });
+
+    it('rejects updating a task to a missing projectId', async () => {
+        const { addTask, updateTask } = useTaskStore.getState();
+        await addTask('Task to Reassign');
+        const taskId = useTaskStore.getState().tasks[0].id;
+
+        const result = await updateTask(taskId, { projectId: 'missing-project' });
+
+        expect(result).toEqual({ success: false, error: 'Project not found' });
+        expect(useTaskStore.getState()._allTasks.find((task) => task.id === taskId)?.projectId).toBeUndefined();
+    });
+
     it('should clear action fields when a task becomes reference', () => {
         const { addTask, updateTask } = useTaskStore.getState();
         addTask('Reference Task', {
@@ -252,6 +272,55 @@ describe('TaskStore', () => {
         await fetchData({ silent: true });
         expect(mockStorage.getData).not.toHaveBeenCalled();
         unlockEditing();
+    });
+
+    it('does not overwrite local task edits made during an in-flight fetch', async () => {
+        const persistedData = {
+            tasks: [
+                {
+                    id: 'task-1',
+                    title: 'Original title',
+                    status: 'next',
+                    tags: [],
+                    contexts: [],
+                    createdAt: '2026-03-22T10:00:00.000Z',
+                    updatedAt: '2026-03-22T10:00:00.000Z',
+                },
+            ],
+            projects: [],
+            sections: [],
+            areas: [],
+            settings: {},
+        };
+        let resolveFetch: ((value: typeof persistedData) => void) | null = null;
+        mockStorage.getData = vi.fn()
+            .mockResolvedValue(persistedData)
+            .mockResolvedValueOnce(persistedData)
+            .mockImplementationOnce(
+                () =>
+                    new Promise<typeof persistedData>((resolve) => {
+                        resolveFetch = resolve;
+                    })
+            );
+
+        await useTaskStore.getState().fetchData({ silent: true });
+
+        const slowFetch = useTaskStore.getState().fetchData({ silent: true });
+        await waitForExpectation(() => {
+            expect(mockStorage.getData).toHaveBeenCalledTimes(2);
+        });
+
+        await useTaskStore.getState().updateTask('task-1', { title: 'Edited during sync' });
+        resolveFetch?.(persistedData);
+        await slowFetch;
+        await flushPendingSave();
+
+        const currentTask = useTaskStore.getState()._allTasks.find((task) => task.id === 'task-1');
+        expect(currentTask?.title).toBe('Edited during sync');
+
+        const saveCalls = (mockStorage.saveData as unknown as { mock: { calls: any[][] } }).mock.calls;
+        const lastSaved = saveCalls[saveCalls.length - 1]?.[0];
+        expect(lastSaved?.tasks?.[0]?.title).toBe('Edited during sync');
     });
 
     it('purges expired tombstones during fetch even without sync', async () => {
@@ -965,6 +1034,33 @@ describe('TaskStore', () => {
             expect(updatedAreaTask.areaId).toBeUndefined();
             expect(updatedAreaTask.order).toBe(1);
             expect(updatedAreaTask.orderNum).toBe(1);
+        });
+
+        it('fails batch updates when any task id is missing', async () => {
+            const { addTask, batchUpdateTasks } = useTaskStore.getState();
+            await addTask('Existing Task', { status: 'next' });
+            const task = useTaskStore.getState()._allTasks.find((item) => item.title === 'Existing Task')!;
+
+            const result = await batchUpdateTasks([
+                { id: task.id, updates: { title: 'Should not apply' } },
+                { id: 'missing-task', updates: { title: 'Missing' } },
+            ]);
+
+            expect(result).toEqual({ success: false, error: 'Tasks not found: missing-task' });
+            expect(useTaskStore.getState()._allTasks.find((item) => item.id === task.id)?.title).toBe('Existing Task');
+        });
+
+        it('fails batch updates when the target project is missing', async () => {
+            const { addTask, batchUpdateTasks } = useTaskStore.getState();
+            await addTask('Existing Task', { status: 'next' });
+            const task = useTaskStore.getState()._allTasks.find((item) => item.title === 'Existing Task')!;
+
+            const result = await batchUpdateTasks([
+                { id: task.id, updates: { projectId: 'missing-project' } },
+            ]);
+
+            expect(result).toEqual({ success: false, error: 'Project not found' });
+            expect(useTaskStore.getState()._allTasks.find((item) => item.id === task.id)?.projectId).toBeUndefined();
         });
 
         it('should clear sectionId when deleting a project', async () => {

@@ -528,6 +528,21 @@ describe('cloud server api', () => {
         expect(archiveDeleted.status).toBe(404);
     });
 
+    test('rejects invalid task ids in task and task-action routes', async () => {
+        const invalidGet = await fetch(`${baseUrl}/v1/tasks/not-a-uuid`, {
+            headers: authHeaders,
+        });
+        expect(invalidGet.status).toBe(400);
+        expect((await invalidGet.json()).error).toBe('Invalid task id');
+
+        const invalidAction = await fetch(`${baseUrl}/v1/tasks/not-a-uuid/complete`, {
+            method: 'POST',
+            headers: authHeaders,
+        });
+        expect(invalidAction.status).toBe(400);
+        expect((await invalidAction.json()).error).toBe('Invalid task id');
+    });
+
     test('rejects reserved fields on task patch', async () => {
         const createResponse = await fetch(`${baseUrl}/v1/tasks`, {
             method: 'POST',

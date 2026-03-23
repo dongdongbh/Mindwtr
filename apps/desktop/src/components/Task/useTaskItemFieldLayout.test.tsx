@@ -46,7 +46,8 @@ describe('useTaskItemFieldLayout', () => {
             editStatus: 'reference',
         })));
 
-        expect(result.current.showDueDate).toBe(false);
+        expect(result.current.basicFields).toContain('status');
+        expect(result.current.basicFields).not.toContain('dueDate');
         expect(result.current.schedulingFields).toEqual([]);
         expect(result.current.organizationFields).toContain('contexts');
         expect(result.current.organizationFields).toContain('tags');
@@ -67,11 +68,38 @@ describe('useTaskItemFieldLayout', () => {
             editStatus: 'next',
         })));
 
-        expect(result.current.showDueDate).toBe(true);
+        expect(result.current.basicFields).toContain('dueDate');
         expect(result.current.schedulingFields).toHaveLength(3);
         expect(result.current.schedulingFields).toEqual(expect.arrayContaining(['startTime', 'recurrence', 'reviewAt']));
         expect(result.current.organizationFields).toContain('priority');
         expect(result.current.organizationFields).toContain('timeEstimate');
         expect(result.current.detailsFields).toContain('checklist');
+    });
+
+    it('moves due date into scheduling when configured and preserves section open defaults', () => {
+        const { result } = renderHook(() => useTaskItemFieldLayout(buildParams({
+            settings: {
+                gtd: {
+                    taskEditor: {
+                        sections: {
+                            dueDate: 'scheduling',
+                        },
+                        sectionOpen: {
+                            scheduling: true,
+                            details: false,
+                        },
+                    },
+                },
+            },
+        })));
+
+        expect(result.current.basicFields).not.toContain('dueDate');
+        expect(result.current.schedulingFields).toContain('dueDate');
+        expect(result.current.sectionOpenDefaults).toEqual({
+            basic: true,
+            scheduling: true,
+            organization: false,
+            details: false,
+        });
     });
 });

@@ -21,12 +21,20 @@ const createMockServer = () => {
 const createMockService = () => ({
   listTasks: async () => [{ id: 't1' }],
   listProjects: async () => [{ id: 'p1' }],
+  listAreas: async () => [{ id: 'a1' }],
   getTask: async () => ({ id: 't1' }),
+  getProject: async () => ({ id: 'p1' }),
   addTask: async () => ({ id: 't1' }),
   updateTask: async () => ({ id: 't1' }),
   completeTask: async () => ({ id: 't1' }),
   deleteTask: async () => ({ id: 't1' }),
   restoreTask: async () => ({ id: 't1' }),
+  addProject: async () => ({ id: 'p1' }),
+  updateProject: async () => ({ id: 'p1' }),
+  deleteProject: async () => ({ id: 'p1' }),
+  addArea: async () => ({ id: 'a1' }),
+  updateArea: async () => ({ id: 'a1' }),
+  deleteArea: async () => ({ id: 'a1' }),
   close: async () => undefined,
 });
 
@@ -74,10 +82,14 @@ describe('mcp server index', () => {
   test('registers all mindwtr tools', () => {
     const { server, tools } = createMockServer();
     registerMindwtrTools(server, createMockService(), false);
-    expect(tools.size).toBe(8);
+    expect(tools.size).toBe(16);
     expect(tools.has('mindwtr_list_tasks')).toBe(true);
     expect(tools.has('mindwtr_add_task')).toBe(true);
     expect(tools.has('mindwtr_restore_task')).toBe(true);
+    expect(tools.has('mindwtr_get_project')).toBe(true);
+    expect(tools.has('mindwtr_list_areas')).toBe(true);
+    expect(tools.has('mindwtr_add_project')).toBe(true);
+    expect(tools.has('mindwtr_delete_area')).toBe(true);
   });
 
   test('blocks write tools when readonly', async () => {

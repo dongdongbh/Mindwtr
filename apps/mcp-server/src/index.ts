@@ -127,6 +127,7 @@ export const resolveServerModeFlags = (flags: Record<string, string | boolean>) 
 
 const taskStatusSchema = z.enum(['inbox', 'next', 'waiting', 'someday', 'reference', 'done', 'archived']);
 const taskStatusOrAllSchema = z.enum(['inbox', 'next', 'waiting', 'someday', 'reference', 'done', 'archived', 'all']);
+const projectStatusSchema = z.enum(['active', 'someday', 'waiting', 'archived']);
 const isoDateLikeSchema = z
   .string()
   .regex(
@@ -208,6 +209,49 @@ const restoreTaskSchema = z.object({
 });
 
 const listProjectsSchema = z.object({});
+const listAreasSchema = z.object({});
+const getProjectSchema = z.object({
+  id: z.string(),
+  includeDeleted: z.boolean().optional(),
+});
+const addProjectSchema = z.object({
+  title: z.string().min(1).max(MAX_TASK_TITLE_LENGTH),
+  color: z.string().optional(),
+  status: projectStatusSchema.optional(),
+  areaId: z.string().nullable().optional(),
+  isSequential: z.boolean().optional(),
+  isFocused: z.boolean().optional(),
+  reviewAt: isoDateLikeSchema.nullable().optional(),
+  supportNotes: z.string().nullable().optional(),
+});
+const updateProjectSchema = z.object({
+  id: z.string(),
+  title: z.string().min(1).max(MAX_TASK_TITLE_LENGTH).optional(),
+  color: z.string().nullable().optional(),
+  status: projectStatusSchema.optional(),
+  areaId: z.string().nullable().optional(),
+  isSequential: z.boolean().optional(),
+  isFocused: z.boolean().optional(),
+  reviewAt: isoDateLikeSchema.nullable().optional(),
+  supportNotes: z.string().nullable().optional(),
+});
+const deleteProjectSchema = z.object({
+  id: z.string(),
+});
+const addAreaSchema = z.object({
+  name: z.string().min(1).max(200),
+  color: z.string().optional(),
+  icon: z.string().optional(),
+});
+const updateAreaSchema = z.object({
+  id: z.string(),
+  name: z.string().min(1).max(200).optional(),
+  color: z.string().nullable().optional(),
+  icon: z.string().nullable().optional(),
+});
+const deleteAreaSchema = z.object({
+  id: z.string(),
+});
 
 export const registerMindwtrTools = (server: McpServer, service: MindwtrService, readonly: boolean) => {
   server.registerTool(
@@ -233,6 +277,30 @@ export const registerMindwtrTools = (server: McpServer, service: MindwtrService,
     withMcpErrorHandling('mindwtr_list_projects', async () => {
       const projects = await service.listProjects();
       return createMcpTextResponse({ projects });
+    }),
+  );
+
+  server.registerTool(
+    'mindwtr_get_project',
+    {
+      description: 'Get a single project by ID from the local Mindwtr SQLite database.',
+      inputSchema: getProjectSchema,
+    },
+    withMcpErrorHandling('mindwtr_get_project', async (input) => {
+      const project = await service.getProject({ id: input.id, includeDeleted: input.includeDeleted });
+      return createMcpTextResponse({ project });
+    }),
+  );
+
+  server.registerTool(
+    'mindwtr_list_areas',
+    {
+      description: 'List areas from the local Mindwtr SQLite database.',
+      inputSchema: listAreasSchema,
+    },
+    withMcpErrorHandling('mindwtr_list_areas', async () => {
+      const areas = await service.listAreas();
+      return createMcpTextResponse({ areas });
     }),
   );
 
@@ -315,6 +383,84 @@ export const registerMindwtrTools = (server: McpServer, service: MindwtrService,
       if (readonly) throw new Error('Database opened read-only. Start the server with --write to enable edits.');
       const task = await service.restoreTask(input.id);
       return createMcpTextResponse({ task });
+    }),
+  );
+
+  server.registerTool(
+    'mindwtr_add_project',
+    {
+      description: 'Add a project to the local Mindwtr SQLite database.',
+      inputSchema: addProjectSchema,
+    },
+    withMcpErrorHandling('mindwtr_add_project', async (input) => {
+      if (readonly) throw new Error('Database opened read-only. Start the server with --write to enable edits.');
+      const project = await service.addProject(input);
+      return createMcpTextResponse({ project });
+    }),
+  );
+
+  server.registerTool(
+    'mindwtr_update_project',
+    {
+      description: 'Update a project in the local Mindwtr SQLite database.',
+      inputSchema: updateProjectSchema,
+    },
+    withMcpErrorHandling('mindwtr_update_project', async (input) => {
+      if (readonly) throw new Error('Database opened read-only. Start the server with --write to enable edits.');
+      const project = await service.updateProject(input);
+      return createMcpTextResponse({ project });
+    }),
+  );
+
+  server.registerTool(
+    'mindwtr_delete_project',
+    {
+      description: 'Soft-delete a project in the local Mindwtr SQLite database.',
+      inputSchema: deleteProjectSchema,
+    },
+    withMcpErrorHandling('mindwtr_delete_project', async (input) => {
+      if (readonly) throw new Error('Database opened read-only. Start the server with --write to enable edits.');
+      const project = await service.deleteProject(input.id);
+      return createMcpTextResponse({ project });
+    }),
+  );
+
+  server.registerTool(
+    'mindwtr_add_area',
+    {
+      description: 'Add an area to the local Mindwtr SQLite database.',
+      inputSchema: addAreaSchema,
+    },
+    withMcpErrorHandling('mindwtr_add_area', async (input) => {
+      if (readonly) throw new Error('Database opened read-only. Start the server with --write to enable edits.');
+      const area = await service.addArea(input);
+      return createMcpTextResponse({ area });
+    }),
+  );
+
+  server.registerTool(
+    'mindwtr_update_area',
+    {
+      description: 'Update an area in the local Mindwtr SQLite database.',
+      inputSchema: updateAreaSchema,
+    },
+    withMcpErrorHandling('mindwtr_update_area', async (input) => {
+      if (readonly) throw new Error('Database opened read-only. Start the server with --write to enable edits.');
+      const area = await service.updateArea(input);
+      return createMcpTextResponse({ area });
+    }),
+  );
+
+  server.registerTool(
+    'mindwtr_delete_area',
+    {
+      description: 'Soft-delete an area in the local Mindwtr SQLite database.',
+      inputSchema: deleteAreaSchema,
+    },
+    withMcpErrorHandling('mindwtr_delete_area', async (input) => {
+      if (readonly) throw new Error('Database opened read-only. Start the server with --write to enable edits.');
+      const area = await service.deleteArea(input.id);
+      return createMcpTextResponse({ area });
     }),
   );
 };

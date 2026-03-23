@@ -36,11 +36,26 @@ export type Project = {
   title: string;
   status?: string;
   color?: string;
+  orderNum?: number;
+  tagIds?: string[];
   areaId?: string;
   areaTitle?: string;
   isSequential?: boolean;
   isFocused?: boolean;
+  supportNotes?: string;
+  attachments?: unknown[];
   reviewAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  deletedAt?: string;
+};
+
+export type Area = {
+  id: string;
+  name: string;
+  color?: string;
+  icon?: string;
+  order?: number;
   createdAt?: string;
   updatedAt?: string;
   deletedAt?: string;
@@ -61,6 +76,18 @@ const STATUS_TOKENS: Record<string, TaskStatus> = {
 const normalizeTaskStatus = (value: string): TaskStatus => {
   const key = value.toLowerCase();
   return STATUS_TOKENS[key] ?? 'inbox';
+};
+
+const parseTaskStatusInput = (value: unknown): TaskStatus | undefined => {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') {
+    throw new Error(`Invalid task status: ${String(value)}`);
+  }
+  const normalized = STATUS_TOKENS[value.toLowerCase()];
+  if (!normalized) {
+    throw new Error(`Invalid task status: ${value}`);
+  }
+  return normalized;
 };
 
 const generateUUID = (): string => {
@@ -337,24 +364,89 @@ const listProjectRefsForQuickAdd = (db: DbClient): ProjectRef[] => {
 export function listProjects(db: DbClient): Project[] {
   const { selectColumns } = getProjectColumns(db);
   const rows = db.prepare(`SELECT ${selectColumns.join(', ')} FROM projects WHERE deletedAt IS NULL`).all();
-  return rows.map((row: any) => ({
-    id: row.id,
-    title: row.title,
-    status: row.status,
-    color: row.color ?? DEFAULT_PROJECT_COLOR,
-    orderNum: row.orderNum ?? undefined,
-    tagIds: parseJson(row.tagIds, []),
-    isSequential: row.isSequential === 1,
-    isFocused: row.isFocused === 1,
-    supportNotes: row.supportNotes ?? undefined,
-    attachments: parseJson(row.attachments, []),
-    reviewAt: row.reviewAt ?? undefined,
-    areaId: row.areaId ?? undefined,
-    areaTitle: row.areaTitle ?? undefined,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-    deletedAt: row.deletedAt ?? undefined,
-  }));
+  return rows.map(mapProjectRow);
+}
+
+const mapProjectRow = (row: any): Project => ({
+  id: row.id,
+  title: row.title,
+  status: row.status,
+  color: row.color ?? DEFAULT_PROJECT_COLOR,
+  orderNum: row.orderNum ?? undefined,
+  tagIds: parseJson(row.tagIds, []),
+  isSequential: row.isSequential === 1,
+  isFocused: row.isFocused === 1,
+  supportNotes: row.supportNotes ?? undefined,
+  attachments: parseJson(row.attachments, []),
+  reviewAt: row.reviewAt ?? undefined,
+  areaId: row.areaId ?? undefined,
+  areaTitle: row.areaTitle ?? undefined,
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+  deletedAt: row.deletedAt ?? undefined,
+});
+
+export type GetProjectInput = { id: string; includeDeleted?: boolean };
+
+export function getProject(db: DbClient, input: GetProjectInput): Project {
+  const { selectColumns } = getProjectColumns(db);
+  const where = ['id = ?'];
+  if (!input.includeDeleted) {
+    where.push('deletedAt IS NULL');
+  }
+  const row = db.prepare(`SELECT ${selectColumns.join(', ')} FROM projects WHERE ${where.join(' AND ')}`).get(input.id);
+  if (!row) {
+    throw new Error(`Project not found: ${input.id}`);
+  }
+  return mapProjectRow(row);
+}
+
+const BASE_AREA_COLUMNS = [
+  'id',
+  'name',
+  'color',
+  'icon',
+  'orderNum',
+  'createdAt',
+  'updatedAt',
+  'deletedAt',
+];
+
+const areaColumnsCache = new WeakMap<DbClient, { hasOrderNum: boolean; selectColumns: string[] }>();
+
+const getAreaColumns = (db: DbClient) => {
+  const cached = areaColumnsCache.get(db);
+  if (cached) return cached;
+  try {
+    const columns = db.prepare('PRAGMA table_info(areas)').all();
+    const names = new Set<string>(columns.map((col: any) => String(col.name)));
+    const hasOrderNum = names.has('orderNum');
+    const selectColumns = BASE_AREA_COLUMNS.filter((name) => hasOrderNum || name !== 'orderNum');
+    const resolved = { hasOrderNum, selectColumns };
+    areaColumnsCache.set(db, resolved);
+    return resolved;
+  } catch {
+    const fallback = { hasOrderNum: true, selectColumns: BASE_AREA_COLUMNS };
+    areaColumnsCache.set(db, fallback);
+    return fallback;
+  }
+};
+
+const mapAreaRow = (row: any): Area => ({
+  id: row.id,
+  name: row.name,
+  color: row.color ?? undefined,
+  icon: row.icon ?? undefined,
+  order: row.orderNum ?? undefined,
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+  deletedAt: row.deletedAt ?? undefined,
+});
+
+export function listAreas(db: DbClient): Area[] {
+  const { selectColumns } = getAreaColumns(db);
+  const rows = db.prepare(`SELECT ${selectColumns.join(', ')} FROM areas WHERE deletedAt IS NULL ORDER BY orderNum ASC, updatedAt DESC`).all();
+  return rows.map(mapAreaRow);
 }
 
 const runInTransaction = <T>(db: DbClient, fn: () => T): T => {
@@ -390,7 +482,7 @@ export function addTask(db: DbClient, input: AddTaskInput): TaskRow {
       throw new Error('Task title is required.');
     }
 
-    const status = input.status ?? (props.status as TaskStatus) ?? 'inbox';
+    const status = parseTaskStatusInput(input.status) ?? parseTaskStatusInput(props.status) ?? 'inbox';
     const task: Task = {
       id: generateUUID(),
       title,
@@ -538,7 +630,7 @@ export function updateTask(db: DbClient, input: UpdateTaskInput): TaskRow {
     const updated: TaskRow = {
       ...current,
       title: input.title ?? current.title,
-      status: input.status ?? current.status,
+      status: parseTaskStatusInput(input.status) ?? current.status,
       projectId: input.projectId === null ? undefined : input.projectId ?? current.projectId,
       dueDate: input.dueDate === null ? undefined : input.dueDate ?? current.dueDate,
       startTime: input.startTime === null ? undefined : input.startTime ?? current.startTime,

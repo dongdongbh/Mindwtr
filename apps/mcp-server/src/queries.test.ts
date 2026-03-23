@@ -138,6 +138,15 @@ describe('mcp queries', () => {
         expect(calls.some((call) => call.sql === 'ROLLBACK')).toBe(true);
     });
 
+    test('rejects invalid task status instead of defaulting to inbox', () => {
+        const { db, calls } = createMockDb([]);
+
+        expect(() => addTask(db, { title: 'Task', status: 'not-a-status' as any })).toThrow('Invalid task status: not-a-status');
+
+        expect(calls.some((call) => call.sql === 'BEGIN IMMEDIATE')).toBe(true);
+        expect(calls.some((call) => call.sql === 'ROLLBACK')).toBe(true);
+    });
+
     test('wraps updateTask and deleteTask in transactions', () => {
         const now = '2026-02-01T00:00:00.000Z';
         const { db, calls } = createMockDb([
@@ -158,5 +167,24 @@ describe('mcp queries', () => {
         const commitCount = calls.filter((call) => call.sql === 'COMMIT').length;
         expect(beginCount).toBe(2);
         expect(commitCount).toBe(2);
+    });
+
+    test('rejects invalid status when updating tasks', () => {
+        const now = '2026-02-01T00:00:00.000Z';
+        const { db, calls } = createMockDb([
+            {
+                id: 't1',
+                title: 'Task',
+                status: 'inbox',
+                createdAt: now,
+                updatedAt: now,
+                isFocusedToday: 0,
+            },
+        ]);
+
+        expect(() => updateTask(db, { id: 't1', status: 'bad-status' as any })).toThrow('Invalid task status: bad-status');
+
+        const rollbackCount = calls.filter((call) => call.sql === 'ROLLBACK').length;
+        expect(rollbackCount).toBe(1);
     });
 });

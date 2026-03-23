@@ -1,6 +1,12 @@
 import { useCallback, useMemo } from 'react';
 import type { AppData, Task, TaskEditorFieldId, TaskPriority, TaskStatus, RecurrenceRule, TimeEstimate } from '@mindwtr/core';
-import { DEFAULT_TASK_EDITOR_HIDDEN, DEFAULT_TASK_EDITOR_ORDER } from './task-item-helpers';
+import {
+    DEFAULT_TASK_EDITOR_HIDDEN,
+    DEFAULT_TASK_EDITOR_ORDER,
+    TASK_EDITOR_FIXED_FIELDS,
+    getTaskEditorSectionAssignments,
+    getTaskEditorSectionOpenDefaults,
+} from './task-item-helpers';
 
 type UseTaskItemFieldLayoutParams = {
     settings: AppData['settings'] | undefined;
@@ -45,6 +51,14 @@ export function useTaskItemFieldLayout({
 }: UseTaskItemFieldLayoutParams) {
     const savedOrder = settings?.gtd?.taskEditor?.order ?? [];
     const savedHidden = settings?.gtd?.taskEditor?.hidden ?? DEFAULT_TASK_EDITOR_HIDDEN;
+    const sectionAssignments = useMemo(
+        () => getTaskEditorSectionAssignments(settings?.gtd?.taskEditor),
+        [settings?.gtd?.taskEditor]
+    );
+    const sectionOpenDefaults = useMemo(
+        () => getTaskEditorSectionOpenDefaults(settings?.gtd?.taskEditor),
+        [settings?.gtd?.taskEditor]
+    );
     const disabledFields = useMemo(() => {
         const disabled = new Set<TaskEditorFieldId>();
         if (!prioritiesEnabled) disabled.add('priority');
@@ -146,7 +160,6 @@ export function useTaskItemFieldLayout({
     const showProjectField = isFieldVisible('project');
     const showAreaField = isFieldVisible('area') && !editProjectId;
     const showSectionField = isFieldVisible('section') && !!editProjectId;
-    const showDueDate = isFieldVisible('dueDate');
     const orderFields = useCallback(
         (fields: TaskEditorFieldId[]) => {
             const ordered = taskEditorOrder.filter((id) => fields.includes(id));
@@ -155,21 +168,25 @@ export function useTaskItemFieldLayout({
         },
         [taskEditorOrder]
     );
-    const alwaysFields = useMemo(
-        () => orderFields(['status']).filter(isFieldVisible),
-        [orderFields, isFieldVisible]
+    const basicFields = useMemo(
+        () => orderFields(
+            ['status', ...taskEditorOrder.filter((fieldId) =>
+                !TASK_EDITOR_FIXED_FIELDS.includes(fieldId) && sectionAssignments[fieldId] === 'basic'
+            )]
+        ).filter(isFieldVisible),
+        [isFieldVisible, orderFields, sectionAssignments, taskEditorOrder]
     );
     const schedulingFields = useMemo(
-        () => orderFields(['startTime', 'recurrence', 'reviewAt']).filter(isFieldVisible),
-        [isFieldVisible, orderFields]
+        () => orderFields(taskEditorOrder.filter((fieldId) => sectionAssignments[fieldId] === 'scheduling')).filter(isFieldVisible),
+        [isFieldVisible, orderFields, sectionAssignments, taskEditorOrder]
     );
     const organizationFields = useMemo(
-        () => orderFields(['contexts', 'tags', 'priority', 'timeEstimate']).filter(isFieldVisible),
-        [isFieldVisible, orderFields]
+        () => orderFields(taskEditorOrder.filter((fieldId) => sectionAssignments[fieldId] === 'organization')).filter(isFieldVisible),
+        [isFieldVisible, orderFields, sectionAssignments, taskEditorOrder]
     );
     const detailsFields = useMemo(
-        () => orderFields(['description', 'attachments', 'checklist']).filter(isFieldVisible),
-        [isFieldVisible, orderFields]
+        () => orderFields(taskEditorOrder.filter((fieldId) => sectionAssignments[fieldId] === 'details')).filter(isFieldVisible),
+        [isFieldVisible, orderFields, sectionAssignments, taskEditorOrder]
     );
     const sectionCounts = useMemo(
         () => ({
@@ -184,11 +201,11 @@ export function useTaskItemFieldLayout({
         showProjectField,
         showAreaField,
         showSectionField,
-        showDueDate,
-        alwaysFields,
+        basicFields,
         schedulingFields,
         organizationFields,
         detailsFields,
         sectionCounts,
+        sectionOpenDefaults,
     };
 }

@@ -60,7 +60,7 @@ jobs:
 
       - name: Authenticate Google Play API
         id: play_auth
-        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           credentials_json: ${{ secrets.ANDROID_SERVICE_ACCOUNT_JSON }}
           token_format: access_token
@@ -174,15 +174,107 @@ jobs:
 
       - name: Publish to Google Play Store (Production)
         if: startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch'
-        uses: r0adkll/upload-google-play@935ef9c68bb393a8e6116b1575626a7f5be3a7fb # v1
-        with:
-          serviceAccountJsonPlainText: ${{ secrets.ANDROID_SERVICE_ACCOUNT_JSON }}
-          packageName: tech.dongdongbh.mindwtr
-          releaseFiles: apps/mobile/build/mindwtr-*.aab
-          track: production
-          status: completed
-          releaseName: ${{ steps.version.outputs.version }}
-          whatsNewDirectory: apps/mobile/build/play-release-notes
+        env:
+          ACCESS_TOKEN: ${{ steps.play_auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          PACKAGE="tech.dongdongbh.mindwtr"
+          VERSION="${{ steps.version.outputs.version }}"
+          AAB_PATH="apps/mobile/build/mindwtr-${VERSION}.aab"
+          NOTES_DIR="apps/mobile/build/play-release-notes"
+
+          if [ ! -f "$AAB_PATH" ]; then
+            echo "Missing AAB artifact: $AAB_PATH" >&2
+            exit 1
+          fi
+
+          EDIT_FILE=$(mktemp)
+          EDIT_CODE=$(curl -sS -o "$EDIT_FILE" -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits" \
+            -d '{}')
+          if [ "$EDIT_CODE" != "200" ]; then
+            echo "Failed to create Google Play edit (HTTP $EDIT_CODE): $(cat "$EDIT_FILE")" >&2
+            exit 1
+          fi
+          EDIT_ID=$(jq -r '.id' "$EDIT_FILE")
+          if [ -z "$EDIT_ID" ] || [ "$EDIT_ID" = "null" ]; then
+            echo "Failed to parse Google Play edit id: $(cat "$EDIT_FILE")" >&2
+            exit 1
+          fi
+
+          UPLOAD_FILE=$(mktemp)
+          UPLOAD_CODE=$(curl -sS -o "$UPLOAD_FILE" -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @"$AAB_PATH" \
+            "https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID/bundles?uploadType=media")
+          if [ "$UPLOAD_CODE" != "200" ]; then
+            echo "Failed to upload AAB to Google Play (HTTP $UPLOAD_CODE): $(cat "$UPLOAD_FILE")" >&2
+            exit 1
+          fi
+          VERSION_CODE=$(jq -r '.versionCode' "$UPLOAD_FILE")
+          if [ -z "$VERSION_CODE" ] || [ "$VERSION_CODE" = "null" ]; then
+            echo "Failed to parse uploaded versionCode: $(cat "$UPLOAD_FILE")" >&2
+            exit 1
+          fi
+
+          PAYLOAD_FILE=$(mktemp)
+          python3 - "$VERSION" "$VERSION_CODE" "$NOTES_DIR" > "$PAYLOAD_FILE" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          version = sys.argv[1]
+          version_code = sys.argv[2]
+          notes_dir = pathlib.Path(sys.argv[3])
+
+          release = {
+              "name": version,
+              "status": "completed",
+              "versionCodes": [version_code],
+          }
+
+          release_notes = []
+          if notes_dir.is_dir():
+              for path in sorted(notes_dir.glob("whatsnew-*")):
+                  text = path.read_text(encoding="utf-8").strip()
+                  if not text:
+                      continue
+                  release_notes.append({
+                      "language": path.name.replace("whatsnew-", "", 1),
+                      "text": text,
+                  })
+          if release_notes:
+              release["releaseNotes"] = release_notes
+
+          print(json.dumps({
+              "track": "production",
+              "releases": [release],
+          }))
+          PY
+
+          TRACK_FILE=$(mktemp)
+          TRACK_CODE=$(curl -sS -o "$TRACK_FILE" -w "%{http_code}" -X PUT \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID/tracks/production" \
+            -d @"$PAYLOAD_FILE")
+          if [ "$TRACK_CODE" != "200" ]; then
+            echo "Failed to update production track (HTTP $TRACK_CODE): $(cat "$TRACK_FILE")" >&2
+            exit 1
+          fi
+
+          COMMIT_FILE=$(mktemp)
+          COMMIT_CODE=$(curl -sS -o "$COMMIT_FILE" -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID:commit")
+          if [ "$COMMIT_CODE" != "200" ]; then
+            echo "Failed to commit production-track edit (HTTP $COMMIT_CODE): $(cat "$COMMIT_FILE")" >&2
+            exit 1
+          fi
+          echo "Published versionCode $VERSION_CODE to Google Play production."
 
       - name: Publish same versionCode to internal track (no re-upload)
         if: startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch'

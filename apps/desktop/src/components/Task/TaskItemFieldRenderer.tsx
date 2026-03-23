@@ -38,6 +38,7 @@ export type TaskItemFieldRendererData = {
     attachmentError: string | null;
     visibleEditAttachments: Attachment[];
     editStartTime: string;
+    editDueDate: string;
     editReviewAt: string;
     editStatus: TaskStatus;
     editPriority: TaskPriority | '';
@@ -61,6 +62,7 @@ export type TaskItemFieldRendererHandlers = {
     openAttachment: (attachment: Attachment) => void;
     removeAttachment: (id: string) => void;
     setEditStartTime: (value: string) => void;
+    setEditDueDate: (value: string) => void;
     setEditReviewAt: (value: string) => void;
     setEditStatus: (value: TaskStatus) => void;
     setEditPriority: (value: TaskPriority | '') => void;
@@ -95,6 +97,7 @@ export function TaskItemFieldRenderer({
         attachmentError,
         visibleEditAttachments,
         editStartTime,
+        editDueDate,
         editReviewAt,
         editStatus,
         editPriority,
@@ -125,6 +128,7 @@ export function TaskItemFieldRenderer({
         openAttachment,
         removeAttachment,
         setEditStartTime,
+        setEditDueDate,
         setEditReviewAt,
         setEditStatus,
         setEditPriority,
@@ -281,6 +285,55 @@ export function TaskItemFieldRenderer({
                             <input
                                 type="time"
                                 aria-label={t('task.aria.startTime')}
+                                value={timeValue}
+                                onChange={(e) => handleTimeChange(e.target.value)}
+                                className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
+                            />
+                        </div>
+                    </div>
+                );
+            }
+        case 'dueDate':
+            {
+                const hasTime = hasTimeComponent(editDueDate);
+                const parsed = editDueDate ? safeParseDate(editDueDate) : null;
+                const dateValue = parsed ? safeFormatDate(parsed, 'yyyy-MM-dd') : '';
+                const timeValue = hasTime && parsed ? safeFormatDate(parsed, 'HH:mm') : '';
+                const handleDateChange = (value: string) => {
+                    const normalizedDate = normalizeDateInputValue(value);
+                    if (!normalizedDate) {
+                        setEditDueDate('');
+                        return;
+                    }
+                    if (hasTime && timeValue) {
+                        setEditDueDate(`${normalizedDate}T${timeValue}`);
+                        return;
+                    }
+                    setEditDueDate(normalizedDate);
+                };
+                const handleTimeChange = (value: string) => {
+                    if (!value) {
+                        if (dateValue) setEditDueDate(dateValue);
+                        else setEditDueDate('');
+                        return;
+                    }
+                    const datePart = dateValue || safeFormatDate(new Date(), 'yyyy-MM-dd');
+                    setEditDueDate(`${datePart}T${value}`);
+                };
+                return (
+                    <div className="flex flex-col gap-1">
+                        <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.dueDateLabel')}</label>
+                        <div className="flex items-center gap-2">
+                            <input
+                                type="date"
+                                aria-label={t('task.aria.dueDate')}
+                                value={dateValue}
+                                onChange={(e) => handleDateChange(e.target.value)}
+                                className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
+                            />
+                            <input
+                                type="time"
+                                aria-label={t('task.aria.dueTime')}
                                 value={timeValue}
                                 onChange={(e) => handleTimeChange(e.target.value)}
                                 className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"

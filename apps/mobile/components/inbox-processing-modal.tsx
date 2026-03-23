@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, Modal, ScrollView, FlatList, TextInput, Platform, Alert, Share, ActivityIndicator, Dimensions, type TextStyle } from 'react-native';
+import { View, Text, TouchableOpacity, Modal, ScrollView, TextInput, Platform, Alert, Share, ActivityIndicator, Dimensions, type TextStyle } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -49,6 +49,9 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
   const processingScrollRef = useRef<ScrollView | null>(null);
 
   const inboxProcessing = settings?.gtd?.inboxProcessing ?? {};
+  const twoMinuteEnabled = inboxProcessing.twoMinuteEnabled !== false;
+  const projectFirst = inboxProcessing.projectFirst === true;
+  const contextStepEnabled = inboxProcessing.contextStepEnabled !== false;
   const scheduleEnabled = inboxProcessing.scheduleEnabled === true;
   const referenceEnabled = inboxProcessing.referenceEnabled === true;
 
@@ -307,7 +310,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
       handleNotActionable(actionabilityChoice);
       return;
     }
-    if (twoMinuteChoice === 'yes') {
+    if (twoMinuteEnabled && twoMinuteChoice === 'yes') {
       handleTwoMinYes();
       return;
     }
@@ -603,6 +606,174 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
   const windowHeight = Dimensions.get('window').height;
   const taskDisplayMaxHeight = Math.max(220, Math.floor(windowHeight * 0.44));
   const descriptionMaxHeight = Math.max(120, Math.floor(windowHeight * 0.28));
+  const showExecutionSection = actionabilityChoice === 'actionable' && (!twoMinuteEnabled || twoMinuteChoice === 'no');
+
+  const renderContextSection = () => {
+    if (!contextStepEnabled) return null;
+    return (
+      <View style={[styles.singleSection, { borderBottomColor: tc.border }]}>
+        <Text style={[styles.stepQuestion, { color: tc.text }]}>
+          {t('inbox.whereDoIt')} {t('inbox.selectMultipleHint')}
+        </Text>
+        {selectedContexts.length > 0 && (
+          <View style={[styles.selectedContextsContainer, { backgroundColor: '#3B82F620' }]}>
+            <Text style={{ fontSize: 12, color: '#3B82F6', marginBottom: 4 }}>{t('inbox.selectedLabel')}</Text>
+            <View style={styles.selectedTokensRow}>
+              {selectedContexts.map(ctx => (
+                <TouchableOpacity
+                  key={ctx}
+                  onPress={() => toggleContext(ctx)}
+                  style={[styles.selectedTokenChip, styles.selectedContextChip]}
+                >
+                  <Text style={styles.selectedTokenText}>{ctx} x</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+        {selectedTags.length > 0 && (
+          <View style={[styles.selectedContextsContainer, { backgroundColor: '#8B5CF620' }]}>
+            <Text style={{ fontSize: 12, color: '#8B5CF6', marginBottom: 4 }}>{t('taskEdit.tagsLabel')}</Text>
+            <View style={styles.selectedTokensRow}>
+              {selectedTags.map(tag => (
+                <TouchableOpacity
+                  key={tag}
+                  onPress={() => toggleTag(tag)}
+                  style={[styles.selectedTokenChip, styles.selectedTagChip]}
+                >
+                  <Text style={styles.selectedTokenText}>{tag} x</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+        <View style={styles.customContextContainer}>
+          <TextInput
+            style={[styles.contextInput, { borderColor: tc.border, color: tc.text }]}
+            placeholder={t('inbox.addContextPlaceholder')}
+            placeholderTextColor={tc.secondaryText}
+            value={newContext}
+            onChangeText={setNewContext}
+            onSubmitEditing={addCustomContextMobile}
+          />
+          <TouchableOpacity
+            style={styles.addContextButton}
+            onPress={addCustomContextMobile}
+            disabled={!newContext.trim()}
+          >
+            <Text style={styles.addContextButtonText}>+</Text>
+          </TouchableOpacity>
+        </View>
+        {tokenSuggestions.length > 0 && (
+          <View style={[styles.tokenSuggestionsContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
+            {tokenSuggestions.map((token) => (
+              <TouchableOpacity
+                key={token}
+                style={styles.tokenSuggestionChip}
+                onPress={() => applyTokenSuggestion(token)}
+              >
+                <Text style={[styles.tokenSuggestionText, { color: tc.text }]}>{token}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+        {contextCopilotSuggestions.length > 0 && (
+          <View style={[styles.tokenSuggestionsContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
+            <Text style={[styles.tokenSectionTitle, { color: tc.secondaryText }]}>Suggested contexts</Text>
+            <View style={styles.tokenChipWrap}>
+              {contextCopilotSuggestions.map((token) => (
+                <TouchableOpacity
+                  key={`ctx-${token}`}
+                  style={[styles.suggestionChip, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
+                  onPress={() => applyTokenSuggestion(token)}
+                >
+                  <Text style={[styles.tokenSuggestionText, { color: tc.text }]}>{token}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+        {tagCopilotSuggestions.length > 0 && (
+          <View style={[styles.tokenSuggestionsContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
+            <Text style={[styles.tokenSectionTitle, { color: tc.secondaryText }]}>Suggested tags</Text>
+            <View style={styles.tokenChipWrap}>
+              {tagCopilotSuggestions.map((token) => (
+                <TouchableOpacity
+                  key={`tag-${token}`}
+                  style={[styles.suggestionChip, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
+                  onPress={() => applyTokenSuggestion(token)}
+                >
+                  <Text style={[styles.tokenSuggestionText, { color: tc.text }]}>{token}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderProjectSection = () => (
+    <View style={[styles.singleSection, { borderBottomColor: tc.border }]}>
+      <Text style={[styles.stepQuestion, { color: tc.text }]}>
+        📁 {t('inbox.assignProjectQuestion')}
+      </Text>
+      {currentProject && (
+        <TouchableOpacity
+          style={[styles.projectChip, { backgroundColor: tc.tint }]}
+          onPress={() => selectProjectEarly(currentProject.id)}
+        >
+          <Text style={styles.projectChipText}>✓ {currentProject.title}</Text>
+        </TouchableOpacity>
+      )}
+      <View style={styles.projectSearchRow}>
+        <TextInput
+          value={projectSearch}
+          onChangeText={setProjectSearch}
+          placeholder={t('projects.addPlaceholder')}
+          placeholderTextColor={tc.secondaryText}
+          style={[styles.projectSearchInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
+          onSubmitEditing={handleCreateProjectEarly}
+          returnKeyType="done"
+        />
+        {!hasExactProjectMatch && projectSearch.trim() && (
+          <TouchableOpacity
+            style={[styles.createProjectButton, { backgroundColor: tc.tint }]}
+            onPress={handleCreateProjectEarly}
+          >
+            <Text style={styles.createProjectButtonText}>{t('projects.create')}</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      <View style={styles.projectListContainer}>
+        <TouchableOpacity
+          style={[styles.projectChip, { backgroundColor: '#10B981' }]}
+          onPress={() => selectProjectEarly(null)}
+        >
+          <Text style={styles.projectChipText}>✓ {t('inbox.noProject')}</Text>
+        </TouchableOpacity>
+        {filteredProjects.map((proj) => {
+          const projectColor = proj.areaId ? areaById.get(proj.areaId)?.color : undefined;
+          const isSelected = selectedProjectId === proj.id;
+          return (
+            <TouchableOpacity
+              key={proj.id}
+              style={[
+                styles.projectChip,
+                isSelected
+                  ? { backgroundColor: '#3B82F620', borderWidth: 1, borderColor: tc.tint }
+                  : { backgroundColor: tc.cardBg, borderWidth: 1, borderColor: tc.border },
+              ]}
+              onPress={() => selectProjectEarly(proj.id)}
+            >
+              <View style={[styles.projectDot, { backgroundColor: projectColor || '#6B7280' }]} />
+              <Text style={[styles.projectChipText, { color: tc.text }]}>{proj.title}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
 
   return (
     <>
@@ -833,7 +1004,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
                 </View>
               </View>
 
-              {actionabilityChoice === 'actionable' && (
+              {actionabilityChoice === 'actionable' && twoMinuteEnabled && (
                 <View style={[styles.singleSection, { borderBottomColor: tc.border }]}>
                   <Text style={[styles.stepQuestion, { color: tc.text }]}>
                     ⏱️ {t('inbox.twoMinRule')}
@@ -860,7 +1031,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
                 </View>
               )}
 
-              {actionabilityChoice === 'actionable' && twoMinuteChoice === 'no' && (
+              {showExecutionSection && (
                 <>
                   {scheduleEnabled && (
                     <View style={[styles.singleSection, { borderBottomColor: tc.border }]}>
@@ -960,171 +1131,8 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
                     </View>
                   ) : (
                     <>
-                      <View style={[styles.singleSection, { borderBottomColor: tc.border }]}>
-                        <Text style={[styles.stepQuestion, { color: tc.text }]}>
-                          {t('inbox.whereDoIt')} {t('inbox.selectMultipleHint')}
-                        </Text>
-                        {selectedContexts.length > 0 && (
-                          <View style={[styles.selectedContextsContainer, { backgroundColor: '#3B82F620' }]}>
-                            <Text style={{ fontSize: 12, color: '#3B82F6', marginBottom: 4 }}>{t('inbox.selectedLabel')}</Text>
-                            <View style={styles.selectedTokensRow}>
-                              {selectedContexts.map(ctx => (
-                                <TouchableOpacity
-                                  key={ctx}
-                                  onPress={() => toggleContext(ctx)}
-                                  style={[styles.selectedTokenChip, styles.selectedContextChip]}
-                                >
-                                  <Text style={styles.selectedTokenText}>{ctx} x</Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-                          </View>
-                        )}
-                        {selectedTags.length > 0 && (
-                          <View style={[styles.selectedContextsContainer, { backgroundColor: '#8B5CF620' }]}>
-                            <Text style={{ fontSize: 12, color: '#8B5CF6', marginBottom: 4 }}>{t('taskEdit.tagsLabel')}</Text>
-                            <View style={styles.selectedTokensRow}>
-                              {selectedTags.map(tag => (
-                                <TouchableOpacity
-                                  key={tag}
-                                  onPress={() => toggleTag(tag)}
-                                  style={[styles.selectedTokenChip, styles.selectedTagChip]}
-                                >
-                                  <Text style={styles.selectedTokenText}>{tag} x</Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-                          </View>
-                        )}
-                        <View style={styles.customContextContainer}>
-                          <TextInput
-                            style={[styles.contextInput, { borderColor: tc.border, color: tc.text }]}
-                            placeholder={t('inbox.addContextPlaceholder')}
-                            placeholderTextColor={tc.secondaryText}
-                            value={newContext}
-                            onChangeText={setNewContext}
-                            onSubmitEditing={addCustomContextMobile}
-                          />
-                          <TouchableOpacity
-                            style={styles.addContextButton}
-                            onPress={addCustomContextMobile}
-                            disabled={!newContext.trim()}
-                          >
-                            <Text style={styles.addContextButtonText}>+</Text>
-                          </TouchableOpacity>
-                        </View>
-                        {tokenSuggestions.length > 0 && (
-                          <View style={[styles.tokenSuggestionsContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
-                            {tokenSuggestions.map((token) => (
-                              <TouchableOpacity
-                                key={token}
-                                style={styles.tokenSuggestionChip}
-                                onPress={() => applyTokenSuggestion(token)}
-                              >
-                                <Text style={[styles.tokenSuggestionText, { color: tc.text }]}>{token}</Text>
-                              </TouchableOpacity>
-                            ))}
-                          </View>
-                        )}
-                        {contextCopilotSuggestions.length > 0 && (
-                          <View style={[styles.tokenSuggestionsContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
-                            <Text style={[styles.tokenSectionTitle, { color: tc.secondaryText }]}>Suggested contexts</Text>
-                            <View style={styles.tokenChipWrap}>
-                              {contextCopilotSuggestions.map((token) => (
-                                <TouchableOpacity
-                                  key={`ctx-${token}`}
-                                  style={[styles.suggestionChip, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
-                                  onPress={() => applyTokenSuggestion(token)}
-                                >
-                                  <Text style={[styles.tokenSuggestionText, { color: tc.text }]}>{token}</Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-                          </View>
-                        )}
-                        {tagCopilotSuggestions.length > 0 && (
-                          <View style={[styles.tokenSuggestionsContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
-                            <Text style={[styles.tokenSectionTitle, { color: tc.secondaryText }]}>Suggested tags</Text>
-                            <View style={styles.tokenChipWrap}>
-                              {tagCopilotSuggestions.map((token) => (
-                                <TouchableOpacity
-                                  key={`tag-${token}`}
-                                  style={[styles.suggestionChip, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
-                                  onPress={() => applyTokenSuggestion(token)}
-                                >
-                                  <Text style={[styles.tokenSuggestionText, { color: tc.text }]}>{token}</Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-                          </View>
-                        )}
-                      </View>
-
-                      <View style={[styles.singleSection, { borderBottomColor: tc.border }]}>
-                        <Text style={[styles.stepQuestion, { color: tc.text }]}>
-                          📁 {t('inbox.assignProjectQuestion')}
-                        </Text>
-                        {currentProject && (
-                          <TouchableOpacity
-                            style={[styles.projectChip, { backgroundColor: tc.tint }]}
-                            onPress={() => selectProjectEarly(currentProject.id)}
-                          >
-                            <Text style={styles.projectChipText}>✓ {currentProject.title}</Text>
-                          </TouchableOpacity>
-                        )}
-                        <View style={styles.projectSearchRow}>
-                          <TextInput
-                            value={projectSearch}
-                            onChangeText={setProjectSearch}
-                            placeholder={t('projects.addPlaceholder')}
-                            placeholderTextColor={tc.secondaryText}
-                            style={[styles.projectSearchInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-                            onSubmitEditing={handleCreateProjectEarly}
-                            returnKeyType="done"
-                          />
-                          {!hasExactProjectMatch && projectSearch.trim() && (
-                            <TouchableOpacity
-                              style={[styles.createProjectButton, { backgroundColor: tc.tint }]}
-                              onPress={handleCreateProjectEarly}
-                            >
-                              <Text style={styles.createProjectButtonText}>{t('projects.create')}</Text>
-                            </TouchableOpacity>
-                          )}
-                        </View>
-                        <FlatList
-                          style={{ maxHeight: 280 }}
-                          data={filteredProjects}
-                          keyExtractor={(proj) => proj.id}
-                          nestedScrollEnabled
-                          keyboardShouldPersistTaps="handled"
-                          ListHeaderComponent={(
-                            <TouchableOpacity
-                              style={[styles.projectChip, { backgroundColor: '#10B981' }]}
-                              onPress={() => selectProjectEarly(null)}
-                            >
-                              <Text style={styles.projectChipText}>✓ {t('inbox.noProject')}</Text>
-                            </TouchableOpacity>
-                          )}
-                          renderItem={({ item: proj }) => {
-                            const projectColor = proj.areaId ? areaById.get(proj.areaId)?.color : undefined;
-                            const isSelected = selectedProjectId === proj.id;
-                            return (
-                              <TouchableOpacity
-                                style={[
-                                  styles.projectChip,
-                                  isSelected
-                                    ? { backgroundColor: '#3B82F620', borderWidth: 1, borderColor: tc.tint }
-                                    : { backgroundColor: tc.cardBg, borderWidth: 1, borderColor: tc.border },
-                                ]}
-                                onPress={() => selectProjectEarly(proj.id)}
-                              >
-                                <View style={[styles.projectDot, { backgroundColor: projectColor || '#6B7280' }]} />
-                                <Text style={[styles.projectChipText, { color: tc.text }]}>{proj.title}</Text>
-                              </TouchableOpacity>
-                            );
-                          }}
-                        />
-                      </View>
+                      {projectFirst ? renderProjectSection() : renderContextSection()}
+                      {projectFirst ? renderContextSection() : renderProjectSection()}
                     </>
                   )}
                 </>

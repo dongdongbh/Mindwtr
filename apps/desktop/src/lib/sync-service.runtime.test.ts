@@ -226,4 +226,50 @@ describe('desktop sync-service runtime', () => {
             }),
         });
     });
+
+    it('preserves attachment pre-sync mutations when local edits land during file attachment sync', async () => {
+        const syncServiceModule = await syncServiceModulePromise;
+
+        performSyncCycleMock.mockResolvedValue({
+            status: 'success',
+            stats: emptyStats,
+            data: structuredClone(localData),
+        });
+        fsMocks.readFile.mockImplementation(async (path: string) => {
+            if (path === '/local/doc.txt') {
+                storeStateRef.current = {
+                    ...storeStateRef.current,
+                    _allTasks: storeStateRef.current._allTasks.map((task) =>
+                        task.id === 'task-1'
+                            ? { ...task, title: 'Edited during attachment sync', updatedAt: '2026-01-02T00:00:00.000Z' }
+                            : task
+                    ),
+                    lastDataChangeAt: 2,
+                };
+            }
+            return new Uint8Array([1, 2, 3]);
+        });
+
+        const result = await syncServiceModule.SyncService.performSync();
+
+        expect(result).toEqual({ success: true });
+        expect(performSyncCycleMock).not.toHaveBeenCalled();
+        expect(invokeMock).toHaveBeenCalledWith('save_data', {
+            data: expect.objectContaining({
+                tasks: [
+                    expect.objectContaining({
+                        id: 'task-1',
+                        title: 'Edited during attachment sync',
+                        attachments: [
+                            expect.objectContaining({
+                                id: 'att-1',
+                                cloudKey: 'attachments/att-1.txt',
+                                localStatus: 'available',
+                            }),
+                        ],
+                    }),
+                ],
+            }),
+        });
+    });
 });

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, LayoutAnimation, Platform, UIManager } from 'react-native';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 
@@ -10,6 +10,7 @@ type CollapsibleSectionProps = {
     title: string;
     badge?: number;
     defaultExpanded?: boolean;
+    resetKey?: string | number;
     children: React.ReactNode;
 };
 
@@ -17,10 +18,17 @@ export function CollapsibleSection({
     title,
     badge = 0,
     defaultExpanded = false,
+    resetKey,
     children,
 }: CollapsibleSectionProps) {
     const [expanded, setExpanded] = useState(defaultExpanded);
     const tc = useThemeColors();
+    const latestDefaultExpandedRef = useRef(defaultExpanded);
+    latestDefaultExpandedRef.current = defaultExpanded;
+
+    useEffect(() => {
+        setExpanded(latestDefaultExpandedRef.current);
+    }, [resetKey]);
 
     const toggle = () => {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);

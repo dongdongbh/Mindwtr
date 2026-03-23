@@ -404,12 +404,12 @@ export const TaskItem = memo(function TaskItem({
         showProjectField,
         showAreaField,
         showSectionField,
-        showDueDate,
-        alwaysFields,
+        basicFields,
         schedulingFields,
         organizationFields,
         detailsFields,
         sectionCounts,
+        sectionOpenDefaults,
     } = useTaskItemFieldLayout({
         settings,
         task,
@@ -448,6 +448,7 @@ export const TaskItem = memo(function TaskItem({
         attachmentError,
         visibleEditAttachments,
         editStartTime,
+        editDueDate,
         editReviewAt,
         editStatus,
         editPriority,
@@ -469,6 +470,7 @@ export const TaskItem = memo(function TaskItem({
         attachmentError,
         visibleEditAttachments,
         editStartTime,
+        editDueDate,
         editReviewAt,
         editStatus,
         editPriority,
@@ -491,6 +493,7 @@ export const TaskItem = memo(function TaskItem({
         openAttachment,
         removeAttachment,
         setEditStartTime,
+        setEditDueDate,
         setEditReviewAt,
         setEditStatus,
         setEditPriority,
@@ -511,6 +514,7 @@ export const TaskItem = memo(function TaskItem({
         openAttachment,
         removeAttachment,
         setEditStartTime,
+        setEditDueDate,
         setEditReviewAt,
         setEditStatus,
         setEditPriority,
@@ -880,14 +884,12 @@ export const TaskItem = memo(function TaskItem({
             showProjectField={showProjectField}
             showAreaField={showAreaField}
             showSectionField={showSectionField}
-            showDueDate={showDueDate}
-            editDueDate={editDueDate}
-            setEditDueDate={setEditDueDate}
-            alwaysFields={alwaysFields}
+            basicFields={basicFields}
             schedulingFields={schedulingFields}
             organizationFields={organizationFields}
             detailsFields={detailsFields}
             sectionCounts={sectionCounts}
+            sectionOpenDefaults={sectionOpenDefaults}
             renderField={renderField}
             editLocation={editLocation}
             setEditLocation={setEditLocation}

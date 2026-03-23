@@ -2,7 +2,7 @@
   "name": "mobile",
   "license": "AGPL-3.0-only",
   "main": "index.js",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",

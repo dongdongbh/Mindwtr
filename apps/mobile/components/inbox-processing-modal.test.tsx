@@ -7,6 +7,7 @@ import { InboxProcessingModal } from './inbox-processing-modal';
 const updateTask = vi.fn();
 const deleteTask = vi.fn();
 const addProject = vi.fn();
+const mockSettings = { gtd: { inboxProcessing: {} }, ai: {} } as any;
 
 vi.mock('@mindwtr/core', async () => {
   const actual = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
@@ -27,7 +28,7 @@ vi.mock('@mindwtr/core', async () => {
       ],
       projects: [],
       areas: [],
-      settings: { gtd: { inboxProcessing: {} }, ai: {} },
+      settings: mockSettings,
       updateTask,
       deleteTask,
       addProject,
@@ -86,6 +87,7 @@ vi.mock('@react-native-community/datetimepicker', () => ({
 
 describe('InboxProcessingModal', () => {
   it('replaces the header next action with skip and saves edits before advancing', () => {
+    mockSettings.gtd.inboxProcessing = {};
     updateTask.mockClear();
     deleteTask.mockClear();
     addProject.mockClear();
@@ -127,5 +129,33 @@ describe('InboxProcessingModal', () => {
       })
     );
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('hides the two-minute section when that shortcut is disabled', () => {
+    mockSettings.gtd.inboxProcessing = { twoMinuteEnabled: false };
+    const onClose = vi.fn();
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={onClose} />);
+    });
+
+    const root = tree!.root;
+
+    expect(root.findAllByProps({ children: '✅ inbox.doneIt' })).toHaveLength(0);
+  });
+
+  it('hides the contexts and tags section when disabled', () => {
+    mockSettings.gtd.inboxProcessing = { contextStepEnabled: false };
+    const onClose = vi.fn();
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={onClose} />);
+    });
+
+    const root = tree!.root;
+
+    expect(root.findAllByProps({ placeholder: 'inbox.addContextPlaceholder' })).toHaveLength(0);
   });
 });

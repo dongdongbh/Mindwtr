@@ -24,14 +24,11 @@ import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/dat
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { GestureDetector, Gesture } from 'react-native-gesture-handler';
-import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useTheme } from '../../contexts/theme-context';
 import { useLanguage, Language } from '../../contexts/language-context';
 
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useMobileSyncBadge } from '@/hooks/use-mobile-sync-badge';
-import { IconSymbol } from '@/components/ui/icon-symbol';
 import {
     DEFAULT_REASONING_EFFORT,
     DEFAULT_ANTHROPIC_THINKING_BUDGET,
@@ -54,6 +51,7 @@ import {
     type AppData,
     type ExternalCalendarSubscription,
     type TaskEditorFieldId,
+    type TaskEditorSectionId,
     type TimeEstimate,
     useTaskStore,
 } from '@mindwtr/core';
@@ -95,7 +93,21 @@ import {
     logSettingsError,
     logSettingsWarn,
     maskCalendarUrl,
-} from './settings-utils';
+} from '../../lib/settings-utils';
+import {
+    buildTaskEditorPresetConfig,
+    DEFAULT_TASK_EDITOR_ORDER,
+    DEFAULT_TASK_EDITOR_SECTION_BY_FIELD,
+    DEFAULT_TASK_EDITOR_SECTION_OPEN,
+    DEFAULT_TASK_EDITOR_VISIBLE,
+    TASK_EDITOR_FIXED_FIELDS,
+    TASK_EDITOR_SECTION_ORDER,
+    getTaskEditorSectionAssignments,
+    getTaskEditorSectionOpenDefaults,
+    isTaskEditorSectionableField,
+    resolveTaskEditorPresetId,
+    type TaskEditorPresetId,
+} from '../../components/task-edit/task-edit-modal.utils';
 import {
     SYNC_PATH_KEY,
     SYNC_BACKEND_KEY,
@@ -240,6 +252,13 @@ export default function SettingsPage() {
     const [weeklyReviewTimeDraft, setWeeklyReviewTimeDraft] = useState<Date | null>(null);
     const [weeklyReviewDayPickerOpen, setWeeklyReviewDayPickerOpen] = useState(false);
     const [gtdInboxProcessingExpanded, setGtdInboxProcessingExpanded] = useState(false);
+    const [taskEditorExpandedSections, setTaskEditorExpandedSections] = useState<Record<TaskEditorSectionId, boolean>>({
+        basic: true,
+        scheduling: false,
+        organization: false,
+        details: false,
+    });
+    const [taskEditorSelectedField, setTaskEditorSelectedField] = useState<TaskEditorFieldId | null>(null);
     const [modelPicker, setModelPicker] = useState<null | 'model' | 'copilot' | 'speech'>(null);
     const [languagePickerOpen, setLanguagePickerOpen] = useState(false);
     const [weekStartPickerOpen, setWeekStartPickerOpen] = useState(false);
@@ -338,8 +357,9 @@ export default function SettingsPage() {
     const defaultCaptureMethod = settings.gtd?.defaultCaptureMethod ?? 'text';
     const saveAudioAttachments = settings.gtd?.saveAudioAttachments !== false;
     const inboxProcessing = settings.gtd?.inboxProcessing ?? {};
-    const inboxTwoMinuteFirst = inboxProcessing.twoMinuteFirst === true;
+    const inboxTwoMinuteEnabled = inboxProcessing.twoMinuteEnabled !== false;
     const inboxProjectFirst = inboxProcessing.projectFirst === true;
+    const inboxContextStepEnabled = inboxProcessing.contextStepEnabled !== false;
     const inboxScheduleEnabled = inboxProcessing.scheduleEnabled === true;
     const inboxReferenceEnabled = inboxProcessing.referenceEnabled === true;
     const includeContextStep = settings.gtd?.weeklyReview?.includeContextStep !== false;
@@ -349,6 +369,31 @@ export default function SettingsPage() {
     const prioritiesEnabled = settings.features?.priorities === true;
     const timeEstimatesEnabled = settings.features?.timeEstimates === true;
     const pomodoroEnabled = settings.features?.pomodoro === true;
+
+    useEffect(() => {
+        if (currentScreen !== 'gtd-task-editor') {
+            setTaskEditorSelectedField(null);
+            return;
+        }
+        setTaskEditorExpandedSections({
+            basic: true,
+            scheduling: typeof settings.gtd?.taskEditor?.sectionOpen?.scheduling === 'boolean'
+                ? settings.gtd.taskEditor.sectionOpen.scheduling
+                : DEFAULT_TASK_EDITOR_SECTION_OPEN.scheduling,
+            organization: typeof settings.gtd?.taskEditor?.sectionOpen?.organization === 'boolean'
+                ? settings.gtd.taskEditor.sectionOpen.organization
+                : DEFAULT_TASK_EDITOR_SECTION_OPEN.organization,
+            details: typeof settings.gtd?.taskEditor?.sectionOpen?.details === 'boolean'
+                ? settings.gtd.taskEditor.sectionOpen.details
+                : DEFAULT_TASK_EDITOR_SECTION_OPEN.details,
+        });
+        setTaskEditorSelectedField(null);
+    }, [
+        currentScreen,
+        settings.gtd?.taskEditor?.sectionOpen?.scheduling,
+        settings.gtd?.taskEditor?.sectionOpen?.organization,
+        settings.gtd?.taskEditor?.sectionOpen?.details,
+    ]);
 
     const updateSyncPreferences = (partial: Partial<NonNullable<AppData['settings']['syncPreferences']>>) => {
         updateSettings({ syncPreferences: { ...syncPreferences, ...partial } }).catch(logSettingsError);
@@ -3701,11 +3746,11 @@ export default function SettingsPage() {
                         {gtdInboxProcessingExpanded && (
                         <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
                             <View style={styles.settingInfo}>
-                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.inboxTwoMinuteFirst')}</Text>
+                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.inboxTwoMinuteEnabled')}</Text>
                             </View>
                             <Switch
-                                value={inboxTwoMinuteFirst}
-                                onValueChange={(value) => updateInboxProcessing({ twoMinuteFirst: value })}
+                                value={inboxTwoMinuteEnabled}
+                                onValueChange={(value) => updateInboxProcessing({ twoMinuteEnabled: value })}
                                 trackColor={{ false: '#767577', true: '#3B82F6' }}
                             />
                         </View>
@@ -3718,6 +3763,18 @@ export default function SettingsPage() {
                             <Switch
                                 value={inboxProjectFirst}
                                 onValueChange={(value) => updateInboxProcessing({ projectFirst: value })}
+                                trackColor={{ false: '#767577', true: '#3B82F6' }}
+                            />
+                        </View>
+                        )}
+                        {gtdInboxProcessingExpanded && (
+                        <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                            <View style={styles.settingInfo}>
+                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.inboxContextStepEnabled')}</Text>
+                            </View>
+                            <Switch
+                                value={inboxContextStepEnabled}
+                                onValueChange={(value) => updateInboxProcessing({ contextStepEnabled: value })}
                                 trackColor={{ false: '#767577', true: '#3B82F6' }}
                             />
                         </View>
@@ -3885,40 +3942,12 @@ export default function SettingsPage() {
 
     // ============ GTD: TASK EDITOR ============
     if (currentScreen === 'gtd-task-editor') {
-        const ROW_HEIGHT = 52;
-
         const featureHiddenFields = new Set<TaskEditorFieldId>();
         if (!prioritiesEnabled) featureHiddenFields.add('priority');
         if (!timeEstimatesEnabled) featureHiddenFields.add('timeEstimate');
 
-        const baseTaskEditorOrder: TaskEditorFieldId[] = [
-            'status',
-            'project',
-            'area',
-            'priority',
-            'contexts',
-            'description',
-            'tags',
-            'timeEstimate',
-            'recurrence',
-            'startTime',
-            'dueDate',
-            'reviewAt',
-            'attachments',
-            'checklist',
-        ];
-        const defaultTaskEditorOrder = baseTaskEditorOrder;
-        const defaultVisibleFields: TaskEditorFieldId[] = [
-            'status',
-            'project',
-            'area',
-            'description',
-            'checklist',
-            'contexts',
-            'dueDate',
-            'priority',
-            'timeEstimate',
-        ];
+        const defaultTaskEditorOrder = DEFAULT_TASK_EDITOR_ORDER;
+        const defaultVisibleFields = DEFAULT_TASK_EDITOR_VISIBLE;
         const defaultTaskEditorHidden = defaultTaskEditorOrder.filter(
             (id) => !defaultVisibleFields.includes(id) || featureHiddenFields.has(id)
         );
@@ -3928,17 +3957,53 @@ export default function SettingsPage() {
 
         const savedHidden = settings.gtd?.taskEditor?.hidden ?? defaultTaskEditorHidden;
         const hiddenSet = new Set(savedHidden.filter((id) => known.has(id)));
+        const taskEditorSections = getTaskEditorSectionAssignments(settings.gtd?.taskEditor);
+        const taskEditorSectionOpen = getTaskEditorSectionOpenDefaults(settings.gtd?.taskEditor);
+        const taskEditorDefaultOpenLabel = t('settings.taskEditorDefaultOpen');
+        const resolvedTaskEditorDefaultOpenLabel = taskEditorDefaultOpenLabel === 'settings.taskEditorDefaultOpen'
+            ? 'Open sections by default'
+            : taskEditorDefaultOpenLabel;
+        const taskEditorPresetOptions: { id: Exclude<TaskEditorPresetId, 'custom'>; label: string }[] = [
+            { id: 'simple', label: localize('Simple', '简洁') },
+            { id: 'standard', label: localize('Standard', '标准') },
+            { id: 'full', label: localize('Full', '完整') },
+        ];
+        const activeTaskEditorPreset = resolveTaskEditorPresetId({
+            order: taskEditorOrder,
+            hidden: hiddenSet,
+            sections: settings.gtd?.taskEditor?.sections,
+            sectionOpen: settings.gtd?.taskEditor?.sectionOpen,
+            featureHiddenFields,
+        });
+        const taskEditorHelperText = localize(
+            'Choose a preset, then open a section to fine-tune fields.',
+            '先选择一个预设，再展开分组微调字段。'
+        );
+        const taskEditorCustomLabel = localize('Current layout: Custom', '当前布局：自定义');
+        const taskEditorPresetLabel = localize('Presets', '预设');
+        const taskEditorMoveSectionLabel = localize('Move to section', '移动到分组');
+        const taskEditorOrderLabel = localize('Order within section', '调整分组内顺序');
+        const taskEditorKeepOpenLabel = localize(
+            'Start task editing with this section expanded.',
+            '编辑任务时默认展开此分组。'
+        );
+        const showInEditorLabel = localize('Show in editor', '在编辑器中显示');
+        const moveUpLabel = localize('Move up', '上移');
+        const moveDownLabel = localize('Move down', '下移');
+        const doneLabel = t('common.done') === 'common.done' ? localize('Done', '完成') : t('common.done');
 
-            const fieldLabel = (fieldId: TaskEditorFieldId) => {
-                switch (fieldId) {
-                    case 'status':
-                        return t('taskEdit.statusLabel');
-                    case 'project':
-                        return t('taskEdit.projectLabel');
-                    case 'area':
-                        return t('taskEdit.areaLabel');
-                    case 'priority':
-                        return t('taskEdit.priorityLabel');
+        const fieldLabel = (fieldId: TaskEditorFieldId) => {
+            switch (fieldId) {
+                case 'status':
+                    return t('taskEdit.statusLabel');
+                case 'project':
+                    return t('taskEdit.projectLabel');
+                case 'section':
+                    return t('taskEdit.sectionLabel');
+                case 'area':
+                    return t('taskEdit.areaLabel');
+                case 'priority':
+                    return t('taskEdit.priorityLabel');
                 case 'contexts':
                     return t('taskEdit.contextsLabel');
                 case 'description':
@@ -3964,8 +4029,35 @@ export default function SettingsPage() {
             }
         };
 
+        const sectionLabel = (sectionId: TaskEditorSectionId) => {
+            switch (sectionId) {
+                case 'basic':
+                    return t('taskEdit.basic');
+                case 'scheduling':
+                    return t('taskEdit.scheduling');
+                case 'organization':
+                    return t('taskEdit.organization');
+                case 'details':
+                    return t('taskEdit.details');
+                default:
+                    return sectionId;
+            }
+        };
+
+        const toggleTaskEditorSectionExpanded = (sectionId: TaskEditorSectionId) => {
+            setTaskEditorExpandedSections((prev) => ({
+                ...prev,
+                [sectionId]: !prev[sectionId],
+            }));
+        };
+
         const saveTaskEditor = (
-            next: { order?: TaskEditorFieldId[]; hidden?: TaskEditorFieldId[] },
+            next: {
+                order?: TaskEditorFieldId[];
+                hidden?: TaskEditorFieldId[];
+                sections?: Partial<Record<TaskEditorFieldId, TaskEditorSectionId>>;
+                sectionOpen?: Partial<Record<TaskEditorSectionId, boolean>>;
+            },
             nextFeatures?: AppData['settings']['features']
         ) => {
             updateSettings({
@@ -3974,8 +4066,7 @@ export default function SettingsPage() {
                     ...(settings.gtd ?? {}),
                     taskEditor: {
                         ...(settings.gtd?.taskEditor ?? {}),
-                        ...(next.order ? { order: next.order } : null),
-                        ...(next.hidden ? { hidden: next.hidden } : null),
+                        ...next,
                     },
                 },
             }).catch(logSettingsError);
@@ -4007,82 +4098,96 @@ export default function SettingsPage() {
             saveTaskEditor({ order: nextOrder, hidden: Array.from(hiddenSet) });
         };
 
-        const fieldGroups: { id: string; title: string; fields: TaskEditorFieldId[] }[] = [
-            { id: 'basic', title: t('taskEdit.basic') || 'Basic', fields: ['status', 'project', 'area', 'dueDate'] },
-            { id: 'scheduling', title: t('taskEdit.scheduling'), fields: ['startTime', 'recurrence', 'reviewAt'] },
-            { id: 'organization', title: t('taskEdit.organization'), fields: ['contexts', 'tags', 'priority', 'timeEstimate'] },
-            { id: 'details', title: t('taskEdit.details'), fields: ['description', 'attachments', 'checklist'] },
-        ];
+        const updateFieldSection = (fieldId: TaskEditorFieldId, sectionId: TaskEditorSectionId) => {
+            if (!isTaskEditorSectionableField(fieldId)) return;
+            const nextSections = { ...(settings.gtd?.taskEditor?.sections ?? {}) };
+            if (sectionId === DEFAULT_TASK_EDITOR_SECTION_BY_FIELD[fieldId]) {
+                delete nextSections[fieldId];
+            } else {
+                nextSections[fieldId] = sectionId;
+            }
+            saveTaskEditor({ order: taskEditorOrder, hidden: Array.from(hiddenSet), sections: nextSections });
+        };
 
-        function TaskEditorRow({
+        const updateSectionOpenDefault = (sectionId: Exclude<TaskEditorSectionId, 'basic'>, isOpen: boolean) => {
+            const nextSectionOpen = { ...(settings.gtd?.taskEditor?.sectionOpen ?? {}) };
+            if (isOpen === DEFAULT_TASK_EDITOR_SECTION_OPEN[sectionId]) {
+                delete nextSectionOpen[sectionId];
+            } else {
+                nextSectionOpen[sectionId] = isOpen;
+            }
+            saveTaskEditor({ sectionOpen: nextSectionOpen });
+        };
+
+        const fieldGroups: { id: TaskEditorSectionId; title: string; fields: TaskEditorFieldId[] }[] = TASK_EDITOR_SECTION_ORDER.map((sectionId) => ({
+            id: sectionId,
+            title: sectionLabel(sectionId),
+            fields: taskEditorOrder.filter((fieldId) => {
+                if (sectionId === 'basic' && TASK_EDITOR_FIXED_FIELDS.includes(fieldId)) return true;
+                return isTaskEditorSectionableField(fieldId) && taskEditorSections[fieldId] === sectionId;
+            }),
+        }));
+
+        const applyTaskEditorPreset = (presetId: Exclude<TaskEditorPresetId, 'custom'>) => {
+            const preset = buildTaskEditorPresetConfig(presetId, featureHiddenFields);
+            saveTaskEditor(preset);
+        };
+
+        const selectedFieldId = taskEditorSelectedField;
+        const selectedFieldGroup = selectedFieldId
+            ? fieldGroups.find((group) => group.fields.includes(selectedFieldId)) ?? null
+            : null;
+        const selectedFieldGroupFields = selectedFieldGroup?.fields ?? [];
+        const selectedFieldGroupOrder = taskEditorOrder.filter((id) => selectedFieldGroupFields.includes(id));
+        const selectedFieldIndex = selectedFieldId ? selectedFieldGroupOrder.indexOf(selectedFieldId) : -1;
+        const selectedFieldSectionable = selectedFieldId ? isTaskEditorSectionableField(selectedFieldId) : false;
+        const selectedFieldVisible = selectedFieldId ? !hiddenSet.has(selectedFieldId) : false;
+        const closeTaskEditorFieldSheet = () => setTaskEditorSelectedField(null);
+
+        function TaskEditorFieldRow({
             fieldId,
-            index,
-            groupFields,
             isFirst,
+            showTopBorder = false,
         }: {
             fieldId: TaskEditorFieldId;
-            index: number;
-            groupFields: TaskEditorFieldId[];
             isFirst: boolean;
+            showTopBorder?: boolean;
         }) {
-            const translateY = useSharedValue(0);
-            const scale = useSharedValue(1);
-            const zIndex = useSharedValue(0);
-
-            const onDrop = (deltaRows: number) => {
-                moveOrderInGroup(fieldId, deltaRows, groupFields);
-            };
-
-            const panGesture = Gesture.Pan()
-                .activateAfterLongPress(220)
-                .onStart(() => {
-                    scale.value = withSpring(1.02);
-                    zIndex.value = 50;
-                })
-                .onUpdate((event) => {
-                    translateY.value = event.translationY;
-                })
-            .onEnd((event) => {
-                    const deltaRows = Math.round(event.translationY / ROW_HEIGHT);
-                    if (deltaRows !== 0) runOnJS(onDrop)(deltaRows);
-                    translateY.value = withSpring(0);
-                    scale.value = withSpring(1);
-                    zIndex.value = 0;
-                });
-
-            const animatedStyle = useAnimatedStyle(() => ({
-                transform: [{ translateY: translateY.value }, { scale: scale.value }],
-                zIndex: zIndex.value,
-            }));
-
             const visible = !hiddenSet.has(fieldId);
 
             return (
-                <Animated.View
+                <TouchableOpacity
                     style={[
-                        styles.taskEditorRow,
+                        styles.taskEditorCompactRow,
                         { borderTopColor: tc.border },
-                        !isFirst && styles.taskEditorRowBorder,
-                        animatedStyle,
+                        (showTopBorder || !isFirst) && styles.taskEditorCompactRowBorder,
                     ]}
+                    onPress={() => setTaskEditorSelectedField(fieldId)}
+                    activeOpacity={0.8}
                 >
-                    <TouchableOpacity
-                        style={styles.taskEditorRowContent}
-                        onPress={() => toggleFieldVisibility(fieldId)}
-                        activeOpacity={0.7}
+                    <View
+                        style={[
+                            styles.taskEditorVisibilityBadge,
+                            {
+                                backgroundColor: visible ? tc.filterBg : 'transparent',
+                                borderColor: visible ? tc.tint : tc.border,
+                            },
+                        ]}
                     >
-                        <View style={styles.taskEditorCheckSlot}>
-                            {visible ? <Text style={{ color: tc.tint, fontSize: 18 }}>✓</Text> : null}
-                        </View>
+                        <Ionicons
+                            name={visible ? 'eye-outline' : 'eye-off-outline'}
+                            size={16}
+                            color={visible ? tc.tint : tc.secondaryText}
+                        />
+                    </View>
+                    <View style={styles.settingInfo}>
                         <Text style={[styles.settingLabel, { color: tc.text }]}>{fieldLabel(fieldId)}</Text>
-                    </TouchableOpacity>
-
-                    <GestureDetector gesture={panGesture}>
-                        <View style={styles.taskEditorDragHandle}>
-                            <IconSymbol name="line.3.horizontal" size={18} color={tc.icon} />
-                        </View>
-                    </GestureDetector>
-                </Animated.View>
+                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
+                            {visible ? t('settings.visible') : t('settings.hidden')}
+                        </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={tc.secondaryText} />
+                </TouchableOpacity>
             );
         }
 
@@ -4091,7 +4196,12 @@ export default function SettingsPage() {
             nextFeatures.priorities = !defaultTaskEditorHidden.includes('priority');
             nextFeatures.timeEstimates = !defaultTaskEditorHidden.includes('timeEstimate');
             saveTaskEditor(
-                { order: [...defaultTaskEditorOrder], hidden: [...defaultTaskEditorHidden] },
+                {
+                    order: [...defaultTaskEditorOrder],
+                    hidden: [...defaultTaskEditorHidden],
+                    sections: {},
+                    sectionOpen: {},
+                },
                 nextFeatures
             );
         };
@@ -4102,29 +4212,107 @@ export default function SettingsPage() {
                 <SubHeader title={t('settings.taskEditorLayout')} />
                 <ScrollView style={styles.scrollView} contentContainerStyle={scrollContentStyle}>
                     <Text style={[styles.description, { color: tc.secondaryText }]}>{t('settings.taskEditorLayoutDesc')}</Text>
-                    <Text style={[styles.description, { color: tc.secondaryText, marginTop: -6 }]}>{t('settings.taskEditorLayoutHint')}</Text>
+                    <Text style={[styles.description, { color: tc.secondaryText, marginTop: -6 }]}>{taskEditorHelperText}</Text>
 
                     <View style={[styles.settingCard, { backgroundColor: tc.cardBg, overflow: 'visible' }]}>
-                        {fieldGroups.map((group) => {
-                            const groupOrder = taskEditorOrder.filter((id) => group.fields.includes(id));
-                            return (
-                                <View key={group.id} style={{ marginBottom: 8 }}>
-                                    <Text style={[styles.sectionHeaderText, { color: tc.secondaryText }]}>
-                                        {group.title}
-                                    </Text>
-                                    {groupOrder.map((fieldId, index) => (
-                                        <TaskEditorRow
-                                            key={fieldId}
-                                            fieldId={fieldId}
-                                            index={index}
-                                            groupFields={group.fields}
-                                            isFirst={index === 0}
-                                        />
-                                    ))}
-                                </View>
-                            );
-                        })}
+                        <Text style={[styles.sectionHeaderText, { color: tc.secondaryText }]}>{taskEditorPresetLabel}</Text>
+                        <View style={styles.taskEditorPresetRow}>
+                            {taskEditorPresetOptions.map((option) => {
+                                const selected = activeTaskEditorPreset === option.id;
+                                return (
+                                    <TouchableOpacity
+                                        key={option.id}
+                                        style={[
+                                            styles.taskEditorPresetButton,
+                                            {
+                                                backgroundColor: selected ? tc.filterBg : 'transparent',
+                                                borderColor: selected ? tc.tint : tc.border,
+                                            },
+                                        ]}
+                                        onPress={() => applyTaskEditorPreset(option.id)}
+                                    >
+                                        <Text
+                                            style={[
+                                                styles.taskEditorPresetButtonText,
+                                                { color: selected ? tc.tint : tc.secondaryText },
+                                            ]}
+                                        >
+                                            {option.label}
+                                        </Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </View>
+                        {activeTaskEditorPreset === 'custom' && (
+                            <Text style={[styles.settingDescription, { color: tc.secondaryText, paddingHorizontal: 16, paddingBottom: 16 }]}>
+                                {taskEditorCustomLabel}
+                            </Text>
+                        )}
                     </View>
+
+                    {fieldGroups.map((group) => {
+                        const groupOrder = taskEditorOrder.filter((id) => group.fields.includes(id));
+                        if (groupOrder.length === 0) return null;
+                        const expanded = taskEditorExpandedSections[group.id];
+                        return (
+                            <View
+                                key={group.id}
+                                style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 12 }]}
+                            >
+                                <TouchableOpacity
+                                    style={styles.taskEditorSectionHeaderRow}
+                                    onPress={() => toggleTaskEditorSectionExpanded(group.id)}
+                                    activeOpacity={0.8}
+                                >
+                                    <View style={styles.taskEditorSectionHeaderMain}>
+                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{group.title}</Text>
+                                        <View style={[styles.taskEditorSectionCountBadge, { backgroundColor: tc.filterBg }]}>
+                                            <Text style={[styles.taskEditorSectionCountText, { color: tc.tint }]}>
+                                                {groupOrder.length}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                    <Ionicons
+                                        name={expanded ? 'chevron-up' : 'chevron-down'}
+                                        size={18}
+                                        color={tc.secondaryText}
+                                    />
+                                </TouchableOpacity>
+                                {expanded && (
+                                    <>
+                                        {group.id !== 'basic' && (
+                                            <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                                                <View style={styles.settingInfo}>
+                                                    <Text style={[styles.settingLabel, { color: tc.text }]}>
+                                                        {resolvedTaskEditorDefaultOpenLabel}
+                                                    </Text>
+                                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
+                                                        {taskEditorKeepOpenLabel}
+                                                    </Text>
+                                                </View>
+                                                <Switch
+                                                    value={taskEditorSectionOpen[group.id]}
+                                                    onValueChange={(value) => updateSectionOpenDefault(
+                                                        group.id as Exclude<TaskEditorSectionId, 'basic'>,
+                                                        value
+                                                    )}
+                                                    trackColor={{ false: '#767577', true: '#3B82F6' }}
+                                                />
+                                            </View>
+                                        )}
+                                        {groupOrder.map((fieldId, index) => (
+                                            <TaskEditorFieldRow
+                                                key={fieldId}
+                                                fieldId={fieldId}
+                                                isFirst={index === 0}
+                                                showTopBorder={group.id !== 'basic' && index === 0}
+                                            />
+                                        ))}
+                                    </>
+                                )}
+                            </View>
+                        );
+                    })}
 
                     <TouchableOpacity
                         style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 12 }]}
@@ -4135,6 +4323,150 @@ export default function SettingsPage() {
                         </View>
                     </TouchableOpacity>
                 </ScrollView>
+
+                <Modal
+                    visible={Boolean(selectedFieldId)}
+                    transparent
+                    animationType="slide"
+                    onRequestClose={closeTaskEditorFieldSheet}
+                >
+                    <View style={styles.taskEditorSheetOverlay}>
+                        <Pressable style={StyleSheet.absoluteFill} onPress={closeTaskEditorFieldSheet} />
+                        <View
+                            style={[
+                                styles.taskEditorSheetCard,
+                                {
+                                    backgroundColor: tc.cardBg,
+                                    borderColor: tc.border,
+                                    paddingBottom: 16 + Math.max(insets.bottom, 8),
+                                },
+                            ]}
+                        >
+                            <View style={[styles.taskEditorSheetHandle, { backgroundColor: tc.border }]} />
+                            {selectedFieldId && (
+                                <>
+                                    <View style={styles.settingRowColumn}>
+                                        <Text style={[styles.pickerTitle, { color: tc.text, marginBottom: 4 }]}>
+                                            {fieldLabel(selectedFieldId)}
+                                        </Text>
+                                        {selectedFieldGroup && (
+                                            <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
+                                                {selectedFieldGroup.title}
+                                            </Text>
+                                        )}
+                                    </View>
+
+                                    <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                                        <View style={styles.settingInfo}>
+                                            <Text style={[styles.settingLabel, { color: tc.text }]}>{showInEditorLabel}</Text>
+                                        </View>
+                                        <Switch
+                                            value={selectedFieldVisible}
+                                            onValueChange={() => toggleFieldVisibility(selectedFieldId!)}
+                                            trackColor={{ false: '#767577', true: '#3B82F6' }}
+                                        />
+                                    </View>
+
+                                    {selectedFieldSectionable && (
+                                        <View style={[styles.settingRowColumn, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                                            <Text style={[styles.settingLabel, { color: tc.text }]}>{taskEditorMoveSectionLabel}</Text>
+                                            <View style={styles.taskEditorSectionChips}>
+                                                {TASK_EDITOR_SECTION_ORDER.map((sectionId) => {
+                                                    const selected = taskEditorSections[selectedFieldId!] === sectionId;
+                                                    return (
+                                                        <TouchableOpacity
+                                                            key={sectionId}
+                                                            style={[
+                                                                styles.taskEditorSectionChip,
+                                                                {
+                                                                    borderColor: selected ? tc.tint : tc.border,
+                                                                    backgroundColor: selected ? tc.filterBg : 'transparent',
+                                                                },
+                                                            ]}
+                                                            onPress={() => updateFieldSection(selectedFieldId!, sectionId)}
+                                                        >
+                                                            <Text
+                                                                style={[
+                                                                    styles.taskEditorSectionChipText,
+                                                                    { color: selected ? tc.tint : tc.secondaryText },
+                                                                ]}
+                                                            >
+                                                                {sectionLabel(sectionId)}
+                                                            </Text>
+                                                        </TouchableOpacity>
+                                                    );
+                                                })}
+                                            </View>
+                                        </View>
+                                    )}
+
+                                    <View style={[styles.settingRowColumn, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{taskEditorOrderLabel}</Text>
+                                        <View style={styles.taskEditorSheetActions}>
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.taskEditorSheetActionButton,
+                                                    {
+                                                        borderColor: tc.border,
+                                                        backgroundColor: tc.filterBg,
+                                                    },
+                                                    selectedFieldIndex <= 0 && styles.taskEditorSheetActionDisabled,
+                                                ]}
+                                                onPress={() => moveOrderInGroup(selectedFieldId!, -1, selectedFieldGroupFields)}
+                                                disabled={selectedFieldIndex <= 0}
+                                            >
+                                                <Ionicons name="arrow-up" size={16} color={selectedFieldIndex <= 0 ? tc.secondaryText : tc.text} />
+                                                <Text style={[styles.taskEditorSheetActionText, { color: selectedFieldIndex <= 0 ? tc.secondaryText : tc.text }]}>
+                                                    {moveUpLabel}
+                                                </Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.taskEditorSheetActionButton,
+                                                    {
+                                                        borderColor: tc.border,
+                                                        backgroundColor: tc.filterBg,
+                                                    },
+                                                    selectedFieldIndex >= selectedFieldGroupOrder.length - 1 && styles.taskEditorSheetActionDisabled,
+                                                ]}
+                                                onPress={() => moveOrderInGroup(selectedFieldId!, 1, selectedFieldGroupFields)}
+                                                disabled={selectedFieldIndex >= selectedFieldGroupOrder.length - 1}
+                                            >
+                                                <Ionicons
+                                                    name="arrow-down"
+                                                    size={16}
+                                                    color={selectedFieldIndex >= selectedFieldGroupOrder.length - 1 ? tc.secondaryText : tc.text}
+                                                />
+                                                <Text
+                                                    style={[
+                                                        styles.taskEditorSheetActionText,
+                                                        {
+                                                            color: selectedFieldIndex >= selectedFieldGroupOrder.length - 1
+                                                                ? tc.secondaryText
+                                                                : tc.text,
+                                                        },
+                                                    ]}
+                                                >
+                                                    {moveDownLabel}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.taskEditorSheetDoneButton,
+                                            { backgroundColor: tc.tint },
+                                        ]}
+                                        onPress={closeTaskEditorFieldSheet}
+                                    >
+                                        <Text style={styles.taskEditorSheetDoneButtonText}>{doneLabel}</Text>
+                                    </TouchableOpacity>
+                                </>
+                            )}
+                        </View>
+                    </View>
+                </Modal>
             </SafeAreaView>
         );
     }
@@ -5395,11 +5727,76 @@ const styles = StyleSheet.create({
     settingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16 },
     settingRowColumn: { padding: 16 },
     sectionHeaderText: { fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.6, paddingHorizontal: 16, marginTop: 12, marginBottom: 4 },
-    taskEditorRow: { flexDirection: 'row', alignItems: 'center', height: 52, paddingHorizontal: 16, position: 'relative' },
-    taskEditorRowBorder: { borderTopWidth: 1 },
-    taskEditorRowContent: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-    taskEditorCheckSlot: { width: 28, alignItems: 'center', marginRight: 12 },
-    taskEditorDragHandle: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+    taskEditorPresetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 16, paddingBottom: 16 },
+    taskEditorPresetButton: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1 },
+    taskEditorPresetButtonText: { fontSize: 13, fontWeight: '700' },
+    taskEditorSectionHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16 },
+    taskEditorSectionHeaderMain: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 12 },
+    taskEditorSectionCountBadge: {
+        minWidth: 26,
+        height: 26,
+        borderRadius: 13,
+        paddingHorizontal: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    taskEditorSectionCountText: { fontSize: 12, fontWeight: '700' },
+    taskEditorCompactRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14 },
+    taskEditorCompactRowBorder: { borderTopWidth: 1 },
+    taskEditorVisibilityBadge: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    taskEditorSectionChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+    taskEditorSectionChip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1 },
+    taskEditorSectionChipText: { fontSize: 12, fontWeight: '600' },
+    taskEditorSheetOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.35)',
+        justifyContent: 'flex-end',
+    },
+    taskEditorSheetCard: {
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        borderWidth: 1,
+        overflow: 'hidden',
+    },
+    taskEditorSheetHandle: {
+        width: 42,
+        height: 5,
+        borderRadius: 999,
+        alignSelf: 'center',
+        marginTop: 10,
+        marginBottom: 2,
+    },
+    taskEditorSheetActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+    taskEditorSheetActionButton: {
+        flex: 1,
+        minHeight: 44,
+        borderRadius: 12,
+        borderWidth: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        paddingHorizontal: 12,
+    },
+    taskEditorSheetActionDisabled: { opacity: 0.45 },
+    taskEditorSheetActionText: { fontSize: 14, fontWeight: '600' },
+    taskEditorSheetDoneButton: {
+        marginHorizontal: 16,
+        marginTop: 16,
+        borderRadius: 12,
+        minHeight: 48,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    taskEditorSheetDoneButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
     settingInfo: { flex: 1, marginRight: 16 },
     settingLabel: { fontSize: 16, fontWeight: '500' },
     settingDescription: { fontSize: 13, marginTop: 2 },

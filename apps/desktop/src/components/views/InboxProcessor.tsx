@@ -1,8 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Play } from 'lucide-react';
-import { DEFAULT_PROJECT_COLOR, safeParseDate, safeFormatDate, hasTimeComponent, type AppData, type Area, type Project, type Task } from '@mindwtr/core';
+import {
+    DEFAULT_PROJECT_COLOR,
+    getFrequentTaskTokens,
+    getRecentTaskTokens,
+    safeParseDate,
+    safeFormatDate,
+    hasTimeComponent,
+    type AppData,
+    type Area,
+    type Project,
+    type Task,
+} from '@mindwtr/core';
 
 import { InboxProcessingWizard, type ProcessingStep } from '../InboxProcessingWizard';
+import { InboxProcessingQuickPanel, type QuickActionabilityChoice, type QuickExecutionChoice, type QuickTwoMinuteChoice } from '../InboxProcessingQuickPanel';
 import { resolveAreaFilter, taskMatchesAreaFilter } from '../../lib/area-filter';
 
 type InboxProcessorProps = {
@@ -20,6 +32,20 @@ type InboxProcessorProps = {
     setIsProcessing: (value: boolean) => void;
 };
 
+const parseTokenListInput = (value: string, prefix: '@' | '#'): string[] => Array.from(
+    new Set(
+        value
+            .split(/[,\n]+/)
+            .map((part) => part.trim())
+            .map((part) => part.replace(/^[@#]+/, '').trim())
+            .filter(Boolean)
+            .map((part) => `${prefix}${part}`)
+    )
+);
+
+const mergeSuggestedTokens = (...groups: string[][]): string[] =>
+    Array.from(new Set(groups.flat()));
+
 export function InboxProcessor({
     t,
     isInbox,
@@ -34,9 +60,13 @@ export function InboxProcessor({
     isProcessing,
     setIsProcessing,
 }: InboxProcessorProps) {
+    const [processingMode, setProcessingMode] = useState<'guided' | 'quick'>('guided');
     const [processingTask, setProcessingTask] = useState<Task | null>(null);
     const [processingStep, setProcessingStep] = useState<ProcessingStep>('actionable');
     const [stepHistory, setStepHistory] = useState<ProcessingStep[]>([]);
+    const [quickActionability, setQuickActionability] = useState<QuickActionabilityChoice>('actionable');
+    const [quickTwoMinuteChoice, setQuickTwoMinuteChoice] = useState<QuickTwoMinuteChoice>('no');
+    const [quickExecutionChoice, setQuickExecutionChoice] = useState<QuickExecutionChoice>('defer');
     const [selectedContexts, setSelectedContexts] = useState<string[]>([]);
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
     const [delegateWho, setDelegateWho] = useState('');
@@ -48,6 +78,7 @@ export function InboxProcessor({
     const [projectTitleDraft, setProjectTitleDraft] = useState('');
     const [nextActionDraft, setNextActionDraft] = useState('');
     const [customContext, setCustomContext] = useState('');
+    const [customTag, setCustomTag] = useState('');
     const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
     const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
     const [scheduleDate, setScheduleDate] = useState('');
@@ -56,8 +87,11 @@ export function InboxProcessor({
     const [skippedIds, setSkippedIds] = useState<Set<string>>(new Set());
 
     const inboxProcessing = settings?.gtd?.inboxProcessing ?? {};
+    const defaultProcessingMode = inboxProcessing.defaultMode === 'quick' ? 'quick' : 'guided';
+    const twoMinuteEnabled = inboxProcessing.twoMinuteEnabled !== false;
     const twoMinuteFirst = inboxProcessing.twoMinuteFirst === true;
     const projectFirst = inboxProcessing.projectFirst === true;
+    const contextStepEnabled = inboxProcessing.contextStepEnabled !== false;
     const scheduleEnabled = inboxProcessing.scheduleEnabled === true;
     const referenceEnabled = inboxProcessing.referenceEnabled === true;
 
@@ -105,9 +139,13 @@ export function InboxProcessor({
 
     useEffect(() => {
         if (isProcessing) return;
+        setProcessingMode(defaultProcessingMode);
         setProcessingTask(null);
         setProcessingStep('actionable');
         setStepHistory([]);
+        setQuickActionability('actionable');
+        setQuickTwoMinuteChoice('no');
+        setQuickExecutionChoice('defer');
         setSelectedContexts([]);
         setSelectedTags([]);
         setDelegateWho('');
@@ -119,21 +157,26 @@ export function InboxProcessor({
         setProjectTitleDraft('');
         setNextActionDraft('');
         setCustomContext('');
+        setCustomTag('');
         setSelectedProjectId(null);
         setSelectedAreaId(null);
         setScheduleDate('');
         setScheduleTime('');
         setScheduleTimeDraft('');
         setSkippedIds(new Set());
-    }, [isProcessing]);
+    }, [defaultProcessingMode, isProcessing]);
 
     const hydrateProcessingTask = useCallback((task: Task) => {
         setProcessingTask(task);
         setProcessingStep('refine');
         setStepHistory([]);
+        setQuickActionability('actionable');
+        setQuickTwoMinuteChoice('no');
+        setQuickExecutionChoice('defer');
         setSelectedContexts(task.contexts ?? []);
         setSelectedTags(task.tags ?? []);
         setCustomContext('');
+        setCustomTag('');
         setProjectSearch('');
         setProcessingTitle(task.title);
         setProcessingDescription(task.description || '');
@@ -151,6 +194,21 @@ export function InboxProcessor({
         setScheduleTime(timeValue);
         setScheduleTimeDraft(timeValue);
     }, []);
+
+    const suggestedContexts = useMemo(
+        () => mergeSuggestedTokens(
+            getRecentTaskTokens(tasks, (task) => task.contexts, 6, { prefix: '@' }),
+            getFrequentTaskTokens(tasks, (task) => task.contexts, 6, { prefix: '@' }),
+        ).slice(0, 8),
+        [tasks],
+    );
+    const suggestedTags = useMemo(
+        () => mergeSuggestedTokens(
+            getRecentTaskTokens(tasks, (task) => task.tags, 6, { prefix: '#' }),
+            getFrequentTaskTokens(tasks, (task) => task.tags, 6, { prefix: '#' }),
+        ).slice(0, 8),
+        [tasks],
+    );
 
     const startProcessing = useCallback(() => {
         const inboxTasks = tasks.filter((task) => task.status === 'inbox' && matchesAreaFilter(task));
@@ -226,9 +284,17 @@ export function InboxProcessor({
         });
     }, []);
 
+    const getInitialGuidedStep = useCallback<() => ProcessingStep>(() => (
+        twoMinuteEnabled && twoMinuteFirst ? 'twomin' : 'actionable'
+    ), [twoMinuteEnabled, twoMinuteFirst]);
+
     const continueFromProjectCheck = useCallback(() => {
+        if (!twoMinuteEnabled) {
+            goToStep('decide');
+            return;
+        }
         goToStep(twoMinuteFirst ? 'decide' : 'twomin');
-    }, [goToStep, twoMinuteFirst]);
+    }, [goToStep, twoMinuteEnabled, twoMinuteFirst]);
 
     const handleActionable = () => goToStep('projectcheck');
 
@@ -310,12 +376,6 @@ export function InboxProcessor({
         window.open(mailto);
     };
 
-    const handleDefer = () => {
-        setSelectedContexts(processingTask?.contexts ?? []);
-        setSelectedTags(processingTask?.tags ?? []);
-        goToStep('context');
-    };
-
     const toggleTag = (tag: string) => {
         setSelectedTags((prev) =>
             prev.includes(tag) ? prev.filter((item) => item !== tag) : [...prev, tag]
@@ -336,19 +396,21 @@ export function InboxProcessor({
         const trimmed = customContext.trim();
         if (!trimmed) return;
         const raw = trimmed.replace(/^@/, '');
-        if (raw.startsWith('#')) {
-            const tag = `#${raw.replace(/^#+/, '').trim()}`;
-            if (tag.length > 1 && !selectedTags.includes(tag)) {
-                setSelectedTags((prev) => [...prev, tag]);
-            }
-            setCustomContext('');
-            return;
-        }
         const ctx = `@${raw.replace(/^@/, '').trim()}`;
         if (ctx.length > 1 && !selectedContexts.includes(ctx)) {
             setSelectedContexts((prev) => [...prev, ctx]);
         }
         setCustomContext('');
+    };
+
+    const addCustomTag = () => {
+        const trimmed = customTag.trim();
+        if (!trimmed) return;
+        const tag = `#${trimmed.replace(/^#+/, '').trim()}`;
+        if (tag.length > 1 && !selectedTags.includes(tag)) {
+            setSelectedTags((prev) => [...prev, tag]);
+        }
+        setCustomTag('');
     };
 
     const normalizeTimeInput = (value: string): string | null => {
@@ -419,6 +481,20 @@ export function InboxProcessor({
         processNext();
     };
 
+    const handleDefer = () => {
+        if (contextStepEnabled) {
+            setSelectedContexts(processingTask?.contexts ?? []);
+            setSelectedTags(processingTask?.tags ?? []);
+            goToStep('context');
+            return;
+        }
+        if (projectFirst) {
+            handleSetProject(selectedProjectId);
+            return;
+        }
+        goToStep('project');
+    };
+
     const handleConvertToProject = async () => {
         if (!processingTask) return;
         const projectTitle = projectTitleDraft.trim() || processingTitle.trim();
@@ -444,6 +520,39 @@ export function InboxProcessor({
         processNext();
     };
 
+    const handleQuickSubmit = useCallback(async () => {
+        handleScheduleTimeCommit();
+        if (quickActionability !== 'actionable') {
+            handleNotActionable(quickActionability);
+            return;
+        }
+        if (quickTwoMinuteChoice === 'yes') {
+            handleTwoMinDone();
+            return;
+        }
+        if (quickExecutionChoice === 'delegate') {
+            handleConfirmWaiting();
+            return;
+        }
+        if (convertToProject) {
+            await handleConvertToProject();
+            return;
+        }
+        handleSetProject(selectedProjectId);
+    }, [
+        handleConfirmWaiting,
+        handleConvertToProject,
+        handleNotActionable,
+        handleScheduleTimeCommit,
+        handleSetProject,
+        handleTwoMinDone,
+        quickActionability,
+        quickExecutionChoice,
+        quickTwoMinuteChoice,
+        convertToProject,
+        selectedProjectId,
+    ]);
+
     if (!isInbox) return null;
 
     return (
@@ -458,74 +567,138 @@ export function InboxProcessor({
                 </button>
             )}
 
-            <InboxProcessingWizard
-                t={t}
-                isProcessing={isProcessing}
-                processingTask={processingTask}
-                processingStep={processingStep}
-                processingTitle={processingTitle}
-                processingDescription={processingDescription}
-                setProcessingTitle={setProcessingTitle}
-                setProcessingDescription={setProcessingDescription}
-                setIsProcessing={setIsProcessing}
-                canGoBack={stepHistory.length > 0}
-                onBack={goBack}
-                handleRefineNext={() => goToStep(twoMinuteFirst ? 'twomin' : 'actionable')}
-                handleSkip={handleSkip}
-                handleNotActionable={handleNotActionable}
-                handleActionable={handleActionable}
-                showReferenceOption={referenceEnabled}
-                handleProjectCheckNo={handleProjectCheckNo}
-                handleProjectCheckYes={handleProjectCheckYes}
-                handleTwoMinDone={handleTwoMinDone}
-                handleTwoMinNo={handleTwoMinNo}
-                handleDefer={handleDefer}
-                handleDelegate={handleDelegate}
-                delegateWho={delegateWho}
-                setDelegateWho={setDelegateWho}
-                delegateFollowUp={delegateFollowUp}
-                setDelegateFollowUp={setDelegateFollowUp}
-                handleDelegateBack={handleDelegateBack}
-                handleSendDelegateRequest={handleSendDelegateRequest}
-                handleConfirmWaiting={handleConfirmWaiting}
-                selectedContexts={selectedContexts}
-                selectedTags={selectedTags}
-                allContexts={allContexts}
-                customContext={customContext}
-                setCustomContext={setCustomContext}
-                addCustomContext={addCustomContext}
-                toggleContext={toggleContext}
-                toggleTag={toggleTag}
-                handleConfirmContexts={handleConfirmContexts}
-                convertToProject={convertToProject}
-                setConvertToProject={setConvertToProject}
-                setProjectTitleDraft={setProjectTitleDraft}
-                setNextActionDraft={setNextActionDraft}
-                projectTitleDraft={projectTitleDraft}
-                nextActionDraft={nextActionDraft}
-                handleConvertToProject={handleConvertToProject}
-                projectSearch={projectSearch}
-                setProjectSearch={setProjectSearch}
-                projects={projects}
-                areas={activeAreas}
-                filteredProjects={filteredProjects}
-                addProject={addProject}
-                handleSetProject={handleSetProject}
-                hasExactProjectMatch={hasExactProjectMatch}
-                areaById={areaById}
-                remainingCount={remainingInboxCount}
-                showProjectInRefine={projectFirst}
-                selectedProjectId={selectedProjectId}
-                setSelectedProjectId={setSelectedProjectId}
-                selectedAreaId={selectedAreaId}
-                setSelectedAreaId={setSelectedAreaId}
-                scheduleDate={scheduleDate}
-                scheduleTimeDraft={scheduleTimeDraft}
-                setScheduleDate={handleScheduleDateChange}
-                setScheduleTimeDraft={setScheduleTimeDraft}
-                onScheduleTimeCommit={handleScheduleTimeCommit}
-                showScheduleFields={scheduleEnabled}
-            />
+            {isProcessing && processingTask && processingMode === 'quick' ? (
+                <InboxProcessingQuickPanel
+                    t={t}
+                    processingTask={processingTask}
+                    remainingCount={remainingInboxCount}
+                    processingTitle={processingTitle}
+                    processingDescription={processingDescription}
+                    setProcessingTitle={setProcessingTitle}
+                    setProcessingDescription={setProcessingDescription}
+                    processingMode={processingMode}
+                    onModeChange={setProcessingMode}
+                    onSkip={handleSkip}
+                    onClose={() => setIsProcessing(false)}
+                    showReferenceOption={referenceEnabled}
+                    actionabilityChoice={quickActionability}
+                    setActionabilityChoice={setQuickActionability}
+                    twoMinuteChoice={quickTwoMinuteChoice}
+                    setTwoMinuteChoice={setQuickTwoMinuteChoice}
+                    executionChoice={quickExecutionChoice}
+                    setExecutionChoice={setQuickExecutionChoice}
+                    showScheduleFields={scheduleEnabled}
+                    scheduleDate={scheduleDate}
+                    scheduleTimeDraft={scheduleTimeDraft}
+                    setScheduleDate={handleScheduleDateChange}
+                    setScheduleTimeDraft={setScheduleTimeDraft}
+                    onScheduleTimeCommit={handleScheduleTimeCommit}
+                    delegateWho={delegateWho}
+                    setDelegateWho={setDelegateWho}
+                    delegateFollowUp={delegateFollowUp}
+                    setDelegateFollowUp={setDelegateFollowUp}
+                    onSendDelegateRequest={handleSendDelegateRequest}
+                    selectedContexts={selectedContexts}
+                    selectedTags={selectedTags}
+                    onContextsInputChange={(value) => setSelectedContexts(parseTokenListInput(value, '@'))}
+                    onTagsInputChange={(value) => setSelectedTags(parseTokenListInput(value, '#'))}
+                    toggleContext={toggleContext}
+                    toggleTag={toggleTag}
+                    suggestedContexts={suggestedContexts}
+                    suggestedTags={suggestedTags}
+                    projects={projects}
+                    areas={activeAreas}
+                    selectedProjectId={selectedProjectId}
+                    setSelectedProjectId={setSelectedProjectId}
+                    selectedAreaId={selectedAreaId}
+                    setSelectedAreaId={setSelectedAreaId}
+                    convertToProject={convertToProject}
+                    setConvertToProject={setConvertToProject}
+                    projectTitleDraft={projectTitleDraft}
+                    setProjectTitleDraft={setProjectTitleDraft}
+                    nextActionDraft={nextActionDraft}
+                    setNextActionDraft={setNextActionDraft}
+                    addProject={addProject}
+                    onSubmit={handleQuickSubmit}
+                />
+            ) : (
+                <InboxProcessingWizard
+                    t={t}
+                    isProcessing={isProcessing}
+                    processingTask={processingTask}
+                    processingMode={processingMode}
+                    onModeChange={setProcessingMode}
+                    processingStep={processingStep}
+                    processingTitle={processingTitle}
+                    processingDescription={processingDescription}
+                    setProcessingTitle={setProcessingTitle}
+                    setProcessingDescription={setProcessingDescription}
+                    setIsProcessing={setIsProcessing}
+                    canGoBack={stepHistory.length > 0}
+                    onBack={goBack}
+                    handleRefineNext={() => goToStep(getInitialGuidedStep())}
+                    handleSkip={handleSkip}
+                    handleNotActionable={handleNotActionable}
+                    handleActionable={handleActionable}
+                    showDoneNowShortcut={twoMinuteEnabled && !twoMinuteFirst}
+                    showReferenceOption={referenceEnabled}
+                    handleProjectCheckNo={handleProjectCheckNo}
+                    handleProjectCheckYes={handleProjectCheckYes}
+                    handleTwoMinDone={handleTwoMinDone}
+                    handleTwoMinNo={handleTwoMinNo}
+                    handleDefer={handleDefer}
+                    handleDelegate={handleDelegate}
+                    delegateWho={delegateWho}
+                    setDelegateWho={setDelegateWho}
+                    delegateFollowUp={delegateFollowUp}
+                    setDelegateFollowUp={setDelegateFollowUp}
+                    handleDelegateBack={handleDelegateBack}
+                    handleSendDelegateRequest={handleSendDelegateRequest}
+                    handleConfirmWaiting={handleConfirmWaiting}
+                    selectedContexts={selectedContexts}
+                    selectedTags={selectedTags}
+                    allContexts={allContexts}
+                    customContext={customContext}
+                    setCustomContext={setCustomContext}
+                    addCustomContext={addCustomContext}
+                    customTag={customTag}
+                    setCustomTag={setCustomTag}
+                    addCustomTag={addCustomTag}
+                    toggleContext={toggleContext}
+                    toggleTag={toggleTag}
+                    suggestedContexts={suggestedContexts}
+                    suggestedTags={suggestedTags}
+                    handleConfirmContexts={handleConfirmContexts}
+                    convertToProject={convertToProject}
+                    setConvertToProject={setConvertToProject}
+                    setProjectTitleDraft={setProjectTitleDraft}
+                    setNextActionDraft={setNextActionDraft}
+                    projectTitleDraft={projectTitleDraft}
+                    nextActionDraft={nextActionDraft}
+                    handleConvertToProject={handleConvertToProject}
+                    projectSearch={projectSearch}
+                    setProjectSearch={setProjectSearch}
+                    projects={projects}
+                    areas={activeAreas}
+                    filteredProjects={filteredProjects}
+                    addProject={addProject}
+                    handleSetProject={handleSetProject}
+                    hasExactProjectMatch={hasExactProjectMatch}
+                    areaById={areaById}
+                    remainingCount={remainingInboxCount}
+                    showProjectInRefine={projectFirst}
+                    selectedProjectId={selectedProjectId}
+                    setSelectedProjectId={setSelectedProjectId}
+                    selectedAreaId={selectedAreaId}
+                    setSelectedAreaId={setSelectedAreaId}
+                    scheduleDate={scheduleDate}
+                    scheduleTimeDraft={scheduleTimeDraft}
+                    setScheduleDate={handleScheduleDateChange}
+                    setScheduleTimeDraft={setScheduleTimeDraft}
+                    onScheduleTimeCommit={handleScheduleTimeCommit}
+                    showScheduleFields={scheduleEnabled}
+                />
+            )}
         </>
     );
 }

@@ -1,5 +1,5 @@
-import { DropboxUnauthorizedError } from '../../lib/dropbox-sync';
-import { logError, logWarn } from '../../lib/app-log';
+import { DropboxUnauthorizedError } from './dropbox-sync';
+import { logError, logWarn } from './app-log';
 
 export const formatError = (error: unknown) => (error instanceof Error ? error.message : String(error));
 

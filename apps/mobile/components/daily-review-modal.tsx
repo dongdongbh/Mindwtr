@@ -350,6 +350,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                             <TouchableOpacity
                                 style={[styles.processButton, { backgroundColor: tc.tint }]}
                                 onPress={() => setShowInboxProcessing(true)}
+                                hitSlop={8}
                             >
                                 <Text style={styles.processButtonText}>
                                     ▷ {t('inbox.processButton')}

@@ -1018,16 +1018,20 @@ const parseMergeTimestamp = (value: unknown, maxAllowedMs?: number): number => {
 };
 
 const containsAttachmentTraversalSegment = (value: string): boolean => {
-    const candidates = [value];
-    try {
-        const decoded = decodeURIComponent(value);
-        if (decoded !== value) {
-            candidates.push(decoded);
+    const candidates = new Set<string>([value]);
+    let current = value;
+    for (let depth = 0; depth < 8; depth += 1) {
+        try {
+            const decoded = decodeURIComponent(current);
+            if (decoded === current) break;
+            candidates.add(decoded);
+            current = decoded;
+        } catch {
+            // Ignore malformed URI escapes and fall back to the candidates gathered so far.
+            break;
         }
-    } catch {
-        // Ignore malformed URI escapes and fall back to the raw string check.
     }
-    return candidates.some((candidate) => /(^|[\\/])\.\.([\\/]|$)/.test(candidate));
+    return Array.from(candidates).some((candidate) => /(^|[\\/])\.\.([\\/]|$)/.test(candidate));
 };
 
 const sanitizeMergedAttachmentUri = (value: unknown): string | undefined => {
@@ -1178,6 +1182,18 @@ function mergeEntitiesWithStats<T extends MergeableEntity>(
             const incomingOpTime = resolveOperationTime(incomingCandidate);
             const operationDiff = incomingOpTime - localOpTime;
             if (Math.abs(operationDiff) <= DELETE_VS_LIVE_AMBIGUOUS_WINDOW_MS) {
+                if (hasRevision) {
+                    if (revDiff !== 0) {
+                        return revDiff > 0 ? normalizedLocalItem : normalizedIncomingItem;
+                    }
+                    if (safeIncomingTime !== safeLocalTime) {
+                        return safeIncomingTime > safeLocalTime ? normalizedIncomingItem : normalizedLocalItem;
+                    }
+                    if (revByDiff && localRevBy && incomingRevBy) {
+                        return incomingRevBy > localRevBy ? normalizedIncomingItem : normalizedLocalItem;
+                    }
+                    return chooseDeterministicWinner(normalizedLocalItem, normalizedIncomingItem);
+                }
                 return localCandidate.deletedAt ? incomingCandidate : localCandidate;
             }
             if (operationDiff > 0) return incomingCandidate;

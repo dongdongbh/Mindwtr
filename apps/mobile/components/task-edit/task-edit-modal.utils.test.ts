@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { getTaskEditTabOffset, syncTaskEditPagerPosition } from './task-edit-modal.utils';
+import {
+    buildTaskEditorPresetConfig,
+    getTaskEditTabOffset,
+    getTaskEditorSectionAssignments,
+    getTaskEditorSectionOpenDefaults,
+    resolveTaskEditorPresetId,
+    syncTaskEditPagerPosition,
+} from './task-edit-modal.utils';
 
 describe('task-edit-modal pager sync', () => {
     it('returns the right offset for the selected tab', () => {
@@ -52,5 +59,64 @@ describe('task-edit-modal pager sync', () => {
 
         expect(setValue).not.toHaveBeenCalled();
         expect(scrollTo).not.toHaveBeenCalled();
+    });
+
+    it('merges saved task editor section overrides with defaults', () => {
+        expect(getTaskEditorSectionAssignments({
+            sections: {
+                dueDate: 'scheduling',
+                tags: 'details',
+            },
+        })).toMatchObject({
+            dueDate: 'scheduling',
+            tags: 'details',
+            section: 'basic',
+            contexts: 'organization',
+        });
+    });
+
+    it('uses saved section-open defaults when present', () => {
+        expect(getTaskEditorSectionOpenDefaults({
+            sectionOpen: {
+                scheduling: true,
+                details: false,
+            },
+        })).toEqual({
+            basic: true,
+            scheduling: true,
+            organization: false,
+            details: false,
+        });
+    });
+
+    it('builds the full preset with expanded optional sections', () => {
+        expect(buildTaskEditorPresetConfig('full')).toMatchObject({
+            hidden: [],
+            sectionOpen: {
+                scheduling: true,
+                organization: true,
+            },
+        });
+    });
+
+    it('detects the standard preset while respecting feature-hidden fields', () => {
+        const preset = buildTaskEditorPresetConfig('standard', ['priority']);
+        expect(resolveTaskEditorPresetId({
+            order: preset.order,
+            hidden: preset.hidden,
+            sections: preset.sections,
+            sectionOpen: preset.sectionOpen,
+            featureHiddenFields: ['priority'],
+        })).toBe('standard');
+    });
+
+    it('returns custom when the saved layout no longer matches a preset', () => {
+        const preset = buildTaskEditorPresetConfig('simple');
+        expect(resolveTaskEditorPresetId({
+            order: [...preset.order].reverse(),
+            hidden: preset.hidden,
+            sections: preset.sections,
+            sectionOpen: preset.sectionOpen,
+        })).toBe('custom');
     });
 });

@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../../contexts/language-context';
 import { KeybindingProvider } from '../../contexts/keybinding-context';
 import { useUiStore } from '../../store/ui-store';
-import { ListView, restoreDeletedTasksWithFeedback } from './ListView';
+import { ListView, reportArchivedTaskQueryFailure, restoreDeletedTasksWithFeedback } from './ListView';
 
 const reportErrorMock = vi.hoisted(() => vi.fn());
 
@@ -89,7 +89,7 @@ const renderStaticListView = (statusFilter: 'inbox' | 'done', title: string) =>
     </LanguageProvider>
   );
 
-const renderListView = (statusFilter: 'next' | 'done' = 'next', title = 'Next') =>
+const renderListView = (statusFilter: 'next' | 'done' | 'archived' = 'next', title = 'Next') =>
   render(
     <LanguageProvider>
       <KeybindingProvider currentView={statusFilter} onNavigate={() => {}}>
@@ -192,6 +192,15 @@ describe('ListView', () => {
     await waitFor(() => {
       expect(queryByText('Filtering...')).toBeInTheDocument();
     });
+  });
+
+  it('shows an error toast when loading archived tasks fails', () => {
+    const showToast = vi.fn();
+
+    reportArchivedTaskQueryFailure(new Error('disk read failed'), showToast);
+
+    expect(reportErrorMock).toHaveBeenCalledWith('Failed to load archived tasks', expect.any(Error));
+    expect(showToast).toHaveBeenCalledWith('Failed to load archived tasks', 'error');
   });
 
   it('shows an error toast when a batch undo restore returns a failed result', async () => {

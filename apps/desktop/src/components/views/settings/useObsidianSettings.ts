@@ -72,7 +72,7 @@ export const useObsidianSettings = ({
             if (!selected) return;
             setVaultPath(selected);
             const inspection = await ObsidianService.inspectVault(selected);
-            if (!inspection.hasObsidianDir) {
+            if (inspection.hasObsidianDir === false) {
                 showToast(messages.missingMarker, 'info', 5000);
             }
         } catch (error) {

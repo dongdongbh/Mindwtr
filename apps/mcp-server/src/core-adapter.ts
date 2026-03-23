@@ -1,18 +1,25 @@
 import { existsSync } from 'fs';
 
-import type { Task } from './queries.js';
+import type { Area, Project, Task } from './queries.js';
 import type { DbOptions } from './db.js';
 import { resolveMindwtrDbPath } from './paths.js';
 
 type CoreStore = {
   getState: () => {
     _allTasks: Task[];
-    _allProjects: Array<{ id: string; title: string }>;
+    _allProjects: Project[];
+    _allAreas: Area[];
     fetchData: () => Promise<void>;
     addTask: (title: string, initialProps?: Partial<Task>) => Promise<void>;
     updateTask: (id: string, updates: Partial<Task>) => Promise<void>;
     deleteTask: (id: string) => Promise<void>;
     restoreTask: (id: string) => Promise<void>;
+    addProject: (title: string, color: string, initialProps?: Partial<Project>) => Promise<Project | null>;
+    updateProject: (id: string, updates: Partial<Project>) => Promise<void>;
+    deleteProject: (id: string) => Promise<void>;
+    addArea: (name: string, initialProps?: Partial<Area>) => Promise<Area | null>;
+    updateArea: (id: string, updates: Partial<Area>) => Promise<void>;
+    deleteArea: (id: string) => Promise<void>;
   };
 };
 
@@ -29,6 +36,12 @@ type CoreService = {
   completeTask: (id: string) => Promise<Task>;
   deleteTask: (id: string) => Promise<Task>;
   restoreTask: (id: string) => Promise<Task>;
+  addProject: (input: { title: string; color: string; props?: Partial<Project> }) => Promise<Project>;
+  updateProject: (input: { id: string; updates: Partial<Project> }) => Promise<Project>;
+  deleteProject: (id: string) => Promise<Project>;
+  addArea: (input: { name: string; props?: Partial<Area> }) => Promise<Area>;
+  updateArea: (input: { id: string; updates: Partial<Area> }) => Promise<Area>;
+  deleteArea: (id: string) => Promise<Area>;
 };
 
 let coreService: CoreService | null = null;
@@ -200,6 +213,62 @@ const ensureCoreReady = async (options: DbOptions) => {
         const updated = core.useTaskStore.getState()._allTasks.find((t) => t.id === id);
         if (!updated) throw new Error(`Task not found after restore: ${id}`);
         return updated as Task;
+      },
+      addProject: async ({ title, color, props }) => {
+        const state = core.useTaskStore.getState();
+        await state.fetchData();
+        const created = await state.addProject(title, color, props);
+        if (!created) throw new Error('Failed to create project.');
+        await core.flushPendingSave();
+        const saved = core.useTaskStore.getState()._allProjects.find((project) => project.id === created.id);
+        if (!saved) throw new Error(`Project not found after create: ${created.id}`);
+        return saved as Project;
+      },
+      updateProject: async ({ id, updates }) => {
+        const state = core.useTaskStore.getState();
+        await state.fetchData();
+        await state.updateProject(id, updates);
+        await core.flushPendingSave();
+        const updated = core.useTaskStore.getState()._allProjects.find((project) => project.id === id);
+        if (!updated) throw new Error(`Project not found after update: ${id}`);
+        return updated as Project;
+      },
+      deleteProject: async (id) => {
+        const state = core.useTaskStore.getState();
+        await state.fetchData();
+        await state.deleteProject(id);
+        await core.flushPendingSave();
+        const updated = core.useTaskStore.getState()._allProjects.find((project) => project.id === id);
+        if (!updated) throw new Error(`Project not found after delete: ${id}`);
+        return updated as Project;
+      },
+      addArea: async ({ name, props }) => {
+        const state = core.useTaskStore.getState();
+        await state.fetchData();
+        const created = await state.addArea(name, props);
+        if (!created) throw new Error('Failed to create area.');
+        await core.flushPendingSave();
+        const saved = core.useTaskStore.getState()._allAreas.find((area) => area.id === created.id);
+        if (!saved) throw new Error(`Area not found after create: ${created.id}`);
+        return saved as Area;
+      },
+      updateArea: async ({ id, updates }) => {
+        const state = core.useTaskStore.getState();
+        await state.fetchData();
+        await state.updateArea(id, updates);
+        await core.flushPendingSave();
+        const updated = core.useTaskStore.getState()._allAreas.find((area) => area.id === id);
+        if (!updated) throw new Error(`Area not found after update: ${id}`);
+        return updated as Area;
+      },
+      deleteArea: async (id) => {
+        const state = core.useTaskStore.getState();
+        await state.fetchData();
+        await state.deleteArea(id);
+        await core.flushPendingSave();
+        const updated = core.useTaskStore.getState()._allAreas.find((area) => area.id === id);
+        if (!updated) throw new Error(`Area not found after delete: ${id}`);
+        return updated as Area;
       },
     };
   })();

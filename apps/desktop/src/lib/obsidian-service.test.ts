@@ -3,6 +3,7 @@ import type { ObsidianSourceRef } from '@mindwtr/core';
 
 const isTauriRuntimeMock = vi.hoisted(() => vi.fn(() => false));
 const invokeMock = vi.hoisted(() => vi.fn());
+const logWarnMock = vi.hoisted(() => vi.fn());
 
 vi.mock('./runtime', () => ({
     isTauriRuntime: isTauriRuntimeMock,
@@ -10,6 +11,10 @@ vi.mock('./runtime', () => ({
 
 vi.mock('@tauri-apps/api/core', () => ({
     invoke: invokeMock,
+}));
+
+vi.mock('./app-log', () => ({
+    logWarn: logWarnMock,
 }));
 
 import { ObsidianService, formatScanFoldersInput, parseScanFoldersInput } from './obsidian-service';
@@ -28,6 +33,7 @@ afterEach(() => {
     isTauriRuntimeMock.mockReset();
     isTauriRuntimeMock.mockReturnValue(false);
     invokeMock.mockReset();
+    logWarnMock.mockReset();
     vi.restoreAllMocks();
 });
 
@@ -72,5 +78,16 @@ describe('obsidian-service helpers', () => {
         expect(invokeMock).toHaveBeenCalledWith('check_obsidian_vault_marker', {
             vaultPath: '/Vault',
         });
+    });
+
+    it('treats vault marker lookup failures as unknown instead of surfacing a UI error', async () => {
+        isTauriRuntimeMock.mockReturnValue(true);
+        invokeMock.mockRejectedValue(new Error('forbidden'));
+
+        await expect(ObsidianService.hasVaultMarker('/Vault')).resolves.toBeNull();
+        await expect(ObsidianService.inspectVault('/Vault')).resolves.toEqual({
+            hasObsidianDir: null,
+        });
+        expect(logWarnMock).toHaveBeenCalledTimes(2);
     });
 });

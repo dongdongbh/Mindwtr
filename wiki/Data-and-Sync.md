@@ -59,7 +59,7 @@ Mindwtr directly supports five sync backends:
 - **Syncthing**: device-to-device file sync. Best on the same LAN/subnet. For remote sync, use a Syncthing relay or a mesh VPN (Nebula/Tailscale).
 - **WebDAV**: use a provider that supports WebDAV (e.g., Nextcloud, ownCloud, Fastmail, self-hosted).
 - **Dropbox**: use native Dropbox sync (supported builds) or File Sync.
-- **iCloud**: use native iCloud sync on supported Apple mobile builds, or iCloud Drive via File Sync.
+- **iCloud**: use native iCloud sync on supported Apple builds, or iCloud Drive via File Sync.
 - **Google Drive/OneDrive**: use File Sync (and Android bridge apps when needed).
 
 ## Sync Recommendations
@@ -70,13 +70,13 @@ Mindwtr directly supports five sync backends:
 
 ### 1. Native iCloud / CloudKit Sync (Apple-only)
 
-Mindwtr includes a native **iCloud** backend on supported Apple mobile builds.
+Mindwtr includes a native **iCloud** backend on supported Apple builds.
 
 - **Guide**: [[iCloud Sync]]
 - **Best for**: Apple-only device setups where you want a simpler experience than managing a shared folder
 - **Not for**: Android, Windows, or Linux devices in the same sync setup
 
-Today, macOS desktop should still use **iCloud Drive + File Sync** rather than the native CloudKit backend.
+This backend is available on iPhone, iPad, and macOS. If you prefer a folder-based setup on macOS, you can still use **iCloud Drive + File Sync** instead.
 
 ### 2. File Sync
 
@@ -91,7 +91,7 @@ Sync via a shared JSON file with any folder-based sync service:
 
 #### iCloud Drive as File Sync (macOS + iOS)
 
-iCloud Drive works with Mindwtr through **File Sync** (not a native iCloud backend yet).
+iCloud Drive also works with Mindwtr through **File Sync** if you want to sync through a shared folder instead of the native CloudKit backend.
 
 Recommended setup:
 1. On macOS, create a folder like `iCloud Drive/Mindwtr`.

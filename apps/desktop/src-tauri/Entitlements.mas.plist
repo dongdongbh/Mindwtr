@@ -20,8 +20,10 @@
     <array>
         <string>iCloud.tech.dongdongbh.mindwtr</string>
     </array>
-    <key>aps-environment</key>
+    <key>com.apple.developer.aps-environment</key>
     <string>production</string>
+    <key>com.apple.developer.icloud-container-environment</key>
+    <string>Production</string>
     <key>com.apple.application-identifier</key>
     <string>5X9JC5PL7T.tech.dongdongbh.mindwtr</string>
     <key>com.apple.developer.team-identifier</key>

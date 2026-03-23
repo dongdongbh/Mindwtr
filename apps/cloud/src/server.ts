@@ -90,6 +90,7 @@ const RATE_LIMIT_MAX_KEYS = Number.isFinite(rateLimitMaxKeysValue) && rateLimitM
     ? Math.floor(rateLimitMaxKeysValue)
     : 10_000;
 const MAX_PENDING_REMOTE_DELETE_ATTEMPTS = 100;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const authFailureRateMaxValue = Number(process.env.MINDWTR_CLOUD_AUTH_FAILURE_RATE_MAX || 30);
 const AUTH_FAILURE_RATE_MAX = Number.isFinite(authFailureRateMaxValue) && authFailureRateMaxValue > 0
     ? Math.floor(authFailureRateMaxValue)
@@ -207,6 +208,20 @@ function decodeAttachmentPath(rawPath: string): string | null {
     } catch {
         return null;
     }
+}
+
+function decodePathParam(rawValue: string): string | null {
+    try {
+        return decodeURIComponent(rawValue);
+    } catch {
+        return null;
+    }
+}
+
+function parseTaskRouteId(rawValue: string): string | null {
+    const decoded = decodePathParam(rawValue);
+    if (!decoded) return null;
+    return UUID_PATTERN.test(decoded) ? decoded : null;
 }
 
 function isPathWithinRoot(pathValue: string, rootPath: string): boolean {
@@ -1270,7 +1285,8 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
 
                 const actionMatch = pathname.match(/^\/v1\/tasks\/([^/]+)\/(complete|archive)$/);
                 if (actionMatch && req.method === 'POST') {
-                    const taskId = decodeURIComponent(actionMatch[1]);
+                    const taskId = parseTaskRouteId(actionMatch[1]);
+                    if (!taskId) return errorResponse('Invalid task id', 400);
                     const action = actionMatch[2];
                     const status: TaskStatus = action === 'archive' ? 'archived' : 'done';
 
@@ -1297,7 +1313,8 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
 
                 const taskMatch = pathname.match(/^\/v1\/tasks\/([^/]+)$/);
                 if (taskMatch) {
-                    const taskId = decodeURIComponent(taskMatch[1]);
+                    const taskId = parseTaskRouteId(taskMatch[1]);
+                    if (!taskId) return errorResponse('Invalid task id', 400);
 
                     if (req.method === 'GET') {
                         const data = loadAppData(filePath);

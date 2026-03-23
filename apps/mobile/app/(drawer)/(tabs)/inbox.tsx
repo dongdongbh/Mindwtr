@@ -40,6 +40,7 @@ export default function InboxScreen() {
     <TouchableOpacity
       style={[styles.processHeaderButton, { backgroundColor: tc.tint }]}
       onPress={() => setShowProcessing(true)}
+      hitSlop={8}
       accessibilityRole="button"
       accessibilityLabel={t('inbox.processButton')}
     >

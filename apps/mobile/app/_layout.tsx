@@ -184,7 +184,7 @@ function RootLayoutContent() {
   const incomingUrl = Linking.useURL();
   const { isDark, isReady: themeReady } = useTheme();
   const tc = useThemeColors();
-  const { language, setLanguage, isReady: languageReady } = useLanguage();
+  const { language, setLanguage, isReady: languageReady, t } = useLanguage();
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
   const extraConfig = Constants.expoConfig?.extra as MobileExtraConfig | undefined;
   const isFossBuild = parseBool(extraConfig?.isFossBuild);
@@ -291,7 +291,18 @@ function RootLayoutContent() {
         if (shouldShow) {
           lastSyncErrorShown.current = result.error;
           lastSyncErrorAt.current = nowMs;
-          void logWarn('Auto-sync failed (ui alert suppressed)', {
+          const syncFailedTitle = t('settings.lastSyncError') === 'settings.lastSyncError' ? 'Sync failed' : t('settings.lastSyncError');
+          const closeLabel = t('common.close') === 'common.close' ? 'Close' : t('common.close');
+          const settingsLabel = t('settings.title') === 'settings.title' ? 'Settings' : t('settings.title');
+          Alert.alert(
+            syncFailedTitle,
+            result.error,
+            [
+              { text: closeLabel, style: 'cancel' },
+              { text: settingsLabel, onPress: () => router.push('/settings') },
+            ]
+          );
+          void logWarn('Auto-sync failed', {
             scope: 'sync',
             extra: { error: result.error },
           });
@@ -309,7 +320,7 @@ function RootLayoutContent() {
         runSync(syncCadenceRef.current.minIntervalMs);
       }
     });
-  }, []);
+  }, [router, t]);
 
   useEffect(() => {
     setNotificationOpenHandler((payload) => {

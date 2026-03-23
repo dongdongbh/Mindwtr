@@ -487,10 +487,20 @@ Customize how Mindwtr works for your GTD workflow:
 - Automatically move completed tasks to the Archive after a set number of days (default: 7 days)
 - Set to "Never" to keep completions in the Done list indefinitely
 
+**Inbox Processing:**
+- Mobile keeps the card-based inbox processing flow
+- The same shared settings can hide or show the 2-minute shortcut, project-first prompt, contexts/tags section, scheduling section, and reference option
+
 **Task Editor Layout:**
 - Tap a field to toggle visibility (hidden fields still show when they have values)
 - Long-press the drag handle to reorder fields
+- Move fields between sections like **Basic**, **Scheduling**, **Organization**, and **Details**
+- Choose which collapsible sections open by default
 - Hidden fields can be revealed with the **More** button in the editor
+
+**Manage:**
+- Use **Settings → Manage** to edit saved **Areas**, **Contexts**, and **Tags**
+- This is the fastest place to clean up duplicates or rename reusable metadata
 
 ### Data & Sync
 

@@ -1,6 +1,6 @@
 name: mindwtr
 base: core22
-version: '0.7.5'
+version: '0.7.6'
 summary: Local-first GTD application
 description: |
   Mindwtr is a privacy-focused, local-first GTD app for desktop.
@@ -22,5 +22,5 @@ apps:
 parts:
   mindwtr:
     plugin: dump
-    source: apps/desktop/src-tauri/target/release/bundle/deb/mindwtr_0.7.5_amd64.deb
+    source: apps/desktop/src-tauri/target/release/bundle/deb/mindwtr_0.7.6_amd64.deb
     source-type: deb

@@ -162,6 +162,42 @@ describe('Sync Logic', () => {
             expect(attachment?.cloudKey).toBe('attachments/att-traversal.txt');
         });
 
+        it('blocks double-encoded traversal segments in attachment uris', () => {
+            const localAttachment: Attachment = {
+                id: 'att-double-encoded',
+                kind: 'file',
+                title: 'doc.txt',
+                uri: '/local/doc.txt',
+                localStatus: 'available',
+                createdAt: '2023-01-01T00:00:00.000Z',
+                updatedAt: '2023-01-02T00:00:00.000Z',
+            };
+            const incomingAttachment: Attachment = {
+                id: 'att-double-encoded',
+                kind: 'file',
+                title: 'doc.txt',
+                uri: '/incoming/%252e%252e/secret.txt',
+                cloudKey: 'attachments/att-double-encoded.txt',
+                createdAt: '2023-01-01T00:00:00.000Z',
+                updatedAt: '2023-01-03T00:00:00.000Z',
+            };
+
+            const localTask: Task = {
+                ...createMockTask('1', '2023-01-02'),
+                attachments: [localAttachment],
+            };
+            const incomingTask: Task = {
+                ...createMockTask('1', '2023-01-03'),
+                attachments: [incomingAttachment],
+            };
+
+            const merged = mergeAppData(mockAppData([localTask]), mockAppData([incomingTask]));
+            const attachment = merged.tasks[0].attachments?.find((item) => item.id === 'att-double-encoded');
+
+            expect(attachment?.uri).toBe('/local/doc.txt');
+            expect(attachment?.cloudKey).toBe('attachments/att-double-encoded.txt');
+        });
+
         it('marks attachment as available when local URI exists without localStatus', () => {
             const localAttachment: Attachment = {
                 id: 'att-available',
@@ -571,6 +607,43 @@ describe('Sync Logic', () => {
             expect(merged.tasks).toHaveLength(1);
             expect(merged.tasks[0].deletedAt).toBeUndefined();
             expect(merged.tasks[0].updatedAt).toBe('2023-01-02T00:03:00.000Z');
+        });
+
+        it('uses higher revisions to break ambiguous delete-vs-live conflicts', () => {
+            const localTask = {
+                ...createMockTask('1', '2023-01-02T00:00:00.100Z', '2023-01-02T00:00:00.100Z'),
+                rev: 5,
+                revBy: 'device-a',
+            } satisfies Task;
+            const incomingTask = {
+                ...createMockTask('1', '2023-01-02T00:00:00.000Z'),
+                rev: 4,
+                revBy: 'device-b',
+            } satisfies Task;
+
+            const merged = mergeAppData(mockAppData([localTask]), mockAppData([incomingTask]));
+
+            expect(merged.tasks).toHaveLength(1);
+            expect(merged.tasks[0].deletedAt).toBe('2023-01-02T00:00:00.100Z');
+        });
+
+        it('keeps the live item when it has the higher revision inside the ambiguity window', () => {
+            const localTask = {
+                ...createMockTask('1', '2023-01-02T00:00:00.100Z', '2023-01-02T00:00:00.100Z'),
+                rev: 4,
+                revBy: 'device-a',
+            } satisfies Task;
+            const incomingTask = {
+                ...createMockTask('1', '2023-01-02T00:00:00.000Z'),
+                rev: 5,
+                revBy: 'device-b',
+            } satisfies Task;
+
+            const merged = mergeAppData(mockAppData([localTask]), mockAppData([incomingTask]));
+
+            expect(merged.tasks).toHaveLength(1);
+            expect(merged.tasks[0].deletedAt).toBeUndefined();
+            expect(merged.tasks[0].updatedAt).toBe('2023-01-02T00:00:00.000Z');
         });
 
         it('keeps newer live update when delete is only 100ms older', () => {

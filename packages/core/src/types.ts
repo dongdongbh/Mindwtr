@@ -53,6 +53,10 @@ export type TaskEditorFieldId =
     | 'attachments'
     | 'checklist';
 
+export type TaskEditorSectionId = 'basic' | 'scheduling' | 'organization' | 'details';
+
+export type InboxProcessingMode = 'guided' | 'quick';
+
 export interface Project {
     id: string;
     title: string;
@@ -197,14 +201,19 @@ export interface AppData {
             taskEditor?: {
                 order?: TaskEditorFieldId[];
                 hidden?: TaskEditorFieldId[];
+                sections?: Partial<Record<TaskEditorFieldId, TaskEditorSectionId>>;
+                sectionOpen?: Partial<Record<TaskEditorSectionId, boolean>>;
                 defaultsVersion?: number;
             };
             autoArchiveDays?: number;
             defaultCaptureMethod?: 'text' | 'audio';
             saveAudioAttachments?: boolean;
             inboxProcessing?: {
+                defaultMode?: InboxProcessingMode;
+                twoMinuteEnabled?: boolean;
                 twoMinuteFirst?: boolean;
                 projectFirst?: boolean;
+                contextStepEnabled?: boolean;
                 scheduleEnabled?: boolean;
                 referenceEnabled?: boolean;
             };

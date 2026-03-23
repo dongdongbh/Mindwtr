@@ -10,7 +10,9 @@ describe('mcp service', () => {
       closeDb: () => undefined,
       listTasks: () => [{ id: 't1', title: 'Task', status: 'inbox', createdAt: '2026-01-01', updatedAt: '2026-01-01' }],
       listProjects: () => [{ id: 'p1', title: 'Project' }],
+      listAreas: () => [{ id: 'a1', name: 'Area' }],
       getTask: () => ({ id: 't1', title: 'Task', status: 'inbox', createdAt: '2026-01-01', updatedAt: '2026-01-01' }),
+      getProject: () => ({ id: 'p1', title: 'Project' }),
       parseQuickAdd: () => ({ title: '', props: {} }),
       runCoreService: async (_options: any, fn: any) =>
         fn({
@@ -19,17 +21,27 @@ describe('mcp service', () => {
           completeTask: async () => ({ id: 't1' }),
           deleteTask: async () => ({ id: 't1' }),
           restoreTask: async () => ({ id: 't1' }),
+          addProject: async () => ({ id: 'p1', title: 'Project' }),
+          updateProject: async () => ({ id: 'p1', title: 'Project' }),
+          deleteProject: async () => ({ id: 'p1', title: 'Project', deletedAt: '2026-01-02' }),
+          addArea: async () => ({ id: 'a1', name: 'Area' }),
+          updateArea: async () => ({ id: 'a1', name: 'Area' }),
+          deleteArea: async () => ({ id: 'a1', name: 'Area', deletedAt: '2026-01-02' }),
         }),
     };
     const service = createService({ readonly: true }, deps as any);
 
     const tasks = await service.listTasks({});
     const projects = await service.listProjects();
+    const areas = await service.listAreas();
     const task = await service.getTask({ id: 't1' });
+    const project = await service.getProject({ id: 'p1' });
 
     expect(tasks).toHaveLength(1);
     expect(projects).toHaveLength(1);
+    expect(areas).toHaveLength(1);
     expect(task.id).toBe('t1');
+    expect(project.id).toBe('p1');
   });
 
   test('uses quick-add parser and forwards merged props to core addTask', async () => {
@@ -41,7 +53,11 @@ describe('mcp service', () => {
       closeDb: () => undefined,
       listTasks: () => [],
       listProjects: () => [{ id: 'p1', title: 'Home' }],
+      listAreas: () => [],
       getTask: () => {
+        throw new Error('not used');
+      },
+      getProject: () => {
         throw new Error('not used');
       },
       parseQuickAdd: () => {
@@ -67,6 +83,12 @@ describe('mcp service', () => {
           completeTask: async () => ({ id: 't1' }),
           deleteTask: async () => ({ id: 't1' }),
           restoreTask: async () => ({ id: 't1' }),
+          addProject: async () => ({ id: 'p1', title: 'Project' }),
+          updateProject: async () => ({ id: 'p1', title: 'Project' }),
+          deleteProject: async () => ({ id: 'p1', title: 'Project' }),
+          addArea: async () => ({ id: 'a1', name: 'Area' }),
+          updateArea: async () => ({ id: 'a1', name: 'Area' }),
+          deleteArea: async () => ({ id: 'a1', name: 'Area' }),
         }),
     };
     const service = createService({ readonly: false }, deps as any);
@@ -96,7 +118,9 @@ describe('mcp service', () => {
       },
       listTasks: () => [],
       listProjects: () => [],
+      listAreas: () => [],
       getTask: () => ({ id: 't1', title: 'Task', status: 'inbox', createdAt: '2026-01-01', updatedAt: '2026-01-01' }),
+      getProject: () => ({ id: 'p1', title: 'Project' }),
       parseQuickAdd: () => ({ title: '', props: {} }),
       runCoreService: async (_options: any, fn: any) =>
         fn({
@@ -114,6 +138,12 @@ describe('mcp service', () => {
           completeTask: async () => ({ id: 't1' }),
           deleteTask: async () => ({ id: 't1' }),
           restoreTask: async () => ({ id: 't1' }),
+          addProject: async () => ({ id: 'p1', title: 'Project' }),
+          updateProject: async () => ({ id: 'p1', title: 'Project' }),
+          deleteProject: async () => ({ id: 'p1', title: 'Project' }),
+          addArea: async () => ({ id: 'a1', name: 'Area' }),
+          updateArea: async () => ({ id: 'a1', name: 'Area' }),
+          deleteArea: async () => ({ id: 'a1', name: 'Area' }),
         }),
     };
     const service = createService({ readonly: false }, deps as any);
@@ -146,7 +176,9 @@ describe('mcp service', () => {
       closeDb: () => undefined,
       listTasks: () => [],
       listProjects: () => [],
+      listAreas: () => [],
       getTask: () => ({ id: 't1', title: 'Task', status: 'inbox', createdAt: '2026-01-01', updatedAt: '2026-01-01' }),
+      getProject: () => ({ id: 'p1', title: 'Project' }),
       parseQuickAdd: () => ({ title: '', props: {} }),
       runCoreService: async (_options: any, fn: any) =>
         fn({
@@ -155,6 +187,12 @@ describe('mcp service', () => {
           completeTask: async () => ({ id: 't1' }),
           deleteTask: async () => ({ id: 't1' }),
           restoreTask: async () => ({ id: 't1' }),
+          addProject: async () => ({ id: 'p1', title: 'Project' }),
+          updateProject: async () => ({ id: 'p1', title: 'Project' }),
+          deleteProject: async () => ({ id: 'p1', title: 'Project' }),
+          addArea: async () => ({ id: 'a1', name: 'Area' }),
+          updateArea: async () => ({ id: 'a1', name: 'Area' }),
+          deleteArea: async () => ({ id: 'a1', name: 'Area' }),
         }),
     };
     const service = createService({ readonly: false }, deps as any);
@@ -171,7 +209,9 @@ describe('mcp service', () => {
       closeDb: () => undefined,
       listTasks: () => [],
       listProjects: () => [],
+      listAreas: () => [],
       getTask: () => ({ id: 't1', title: 'Task', status: 'inbox', createdAt: '2026-01-01', updatedAt: '2026-01-01' }),
+      getProject: () => ({ id: 'p1', title: 'Project' }),
       parseQuickAdd: () => ({ title: '', props: {} }),
       runCoreService: async (_options: any, fn: any) =>
         fn({
@@ -180,6 +220,12 @@ describe('mcp service', () => {
           completeTask: async () => ({ id: 't1' }),
           deleteTask: async () => ({ id: 't1' }),
           restoreTask: async () => ({ id: 't1' }),
+          addProject: async () => ({ id: 'p1', title: 'Project' }),
+          updateProject: async () => ({ id: 'p1', title: 'Project' }),
+          deleteProject: async () => ({ id: 'p1', title: 'Project' }),
+          addArea: async () => ({ id: 'a1', name: 'Area' }),
+          updateArea: async () => ({ id: 'a1', name: 'Area' }),
+          deleteArea: async () => ({ id: 'a1', name: 'Area' }),
         }),
     };
     const service = createService({ readonly: false }, deps as any);
@@ -188,5 +234,50 @@ describe('mcp service', () => {
     await expect(service.addTask({ title: longTitle } as any)).rejects.toThrow(
       'Task title too long (max 500 characters)'
     );
+  });
+
+  test('delegates project and area writes through core deps', async () => {
+    let receivedProjectCreate: any = null;
+    let receivedAreaUpdate: any = null;
+    const fakeDb = {} as any;
+    const deps = {
+      openMindwtrDb: async () => ({ db: fakeDb }),
+      closeDb: () => undefined,
+      listTasks: () => [],
+      listProjects: () => [],
+      listAreas: () => [],
+      getTask: () => ({ id: 't1', title: 'Task', status: 'inbox', createdAt: '2026-01-01', updatedAt: '2026-01-01' }),
+      getProject: () => ({ id: 'p1', title: 'Project' }),
+      parseQuickAdd: () => ({ title: '', props: {} }),
+      runCoreService: async (_options: any, fn: any) =>
+        fn({
+          addTask: async () => ({ id: 't1' }),
+          updateTask: async () => ({ id: 't1' }),
+          completeTask: async () => ({ id: 't1' }),
+          deleteTask: async () => ({ id: 't1' }),
+          restoreTask: async () => ({ id: 't1' }),
+          addProject: async (input: any) => {
+            receivedProjectCreate = input;
+            return { id: 'p1', title: input.title, color: input.color };
+          },
+          updateProject: async () => ({ id: 'p1', title: 'Project' }),
+          deleteProject: async () => ({ id: 'p1', title: 'Project' }),
+          addArea: async () => ({ id: 'a1', name: 'Area' }),
+          updateArea: async (input: any) => {
+            receivedAreaUpdate = input;
+            return { id: input.id, name: 'Updated Area' };
+          },
+          deleteArea: async () => ({ id: 'a1', name: 'Area' }),
+        }),
+    };
+    const service = createService({ readonly: false }, deps as any);
+
+    await service.addProject({ title: 'Project', areaId: null });
+    await service.updateArea({ id: 'a1', color: null, icon: 'briefcase' });
+
+    expect(receivedProjectCreate.color).toBeTruthy();
+    expect(receivedProjectCreate.props.areaId).toBeUndefined();
+    expect(receivedAreaUpdate.updates.icon).toBe('briefcase');
+    expect(receivedAreaUpdate.updates.color).toBeUndefined();
   });
 });

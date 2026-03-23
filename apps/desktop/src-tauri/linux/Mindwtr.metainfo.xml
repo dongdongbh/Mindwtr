@@ -51,6 +51,18 @@
   <url type="bugtracker">https://github.com/dongdongbh/Mindwtr/issues</url>
   <url type="vcs-browser">https://github.com/dongdongbh/Mindwtr</url>
   <releases>
+    <release version="0.7.6" date="2026-03-22">
+      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v0.7.6</url>
+      <description translate="no">
+        <p>Mindwtr 0.7.6 expands desktop workflow customization, adds Manage controls, and tightens sync and Linux packaging behavior.</p>
+        <ul>
+          <li>Added guided and quick inbox processing with more flexible desktop task editor layout settings.</li>
+          <li>Added a desktop Manage settings page for areas, contexts, and tags, plus bulk context editing support.</li>
+          <li>Improved sync resilience with safer refresh handling, better delete conflict resolution, and attachment presync recovery.</li>
+          <li>Polished Linux distribution details with refreshed Flathub assets and safer release tooling updates.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.7.5" date="2026-03-18">
       <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v0.7.5</url>
       <description translate="no">

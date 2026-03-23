@@ -10,6 +10,8 @@ type InboxProcessingWizardProps = {
     t: (key: string) => string;
     isProcessing: boolean;
     processingTask: Task | null;
+    processingMode: 'guided' | 'quick';
+    onModeChange: (mode: 'guided' | 'quick') => void;
     processingStep: ProcessingStep;
     processingTitle: string;
     processingDescription: string;
@@ -22,6 +24,7 @@ type InboxProcessingWizardProps = {
     handleSkip: () => void;
     handleNotActionable: (destination: 'trash' | 'someday' | 'reference') => void;
     handleActionable: () => void;
+    showDoneNowShortcut: boolean;
     showReferenceOption: boolean;
     handleProjectCheckNo: () => void;
     handleProjectCheckYes: () => void;
@@ -42,8 +45,13 @@ type InboxProcessingWizardProps = {
     customContext: string;
     setCustomContext: (value: string) => void;
     addCustomContext: () => void;
+    customTag: string;
+    setCustomTag: (value: string) => void;
+    addCustomTag: () => void;
     toggleContext: (ctx: string) => void;
     toggleTag: (tag: string) => void;
+    suggestedContexts: string[];
+    suggestedTags: string[];
     handleConfirmContexts: () => void;
     convertToProject: boolean;
     setConvertToProject: (value: boolean) => void;
@@ -79,6 +87,8 @@ export function InboxProcessingWizard({
     t,
     isProcessing,
     processingTask,
+    processingMode,
+    onModeChange,
     processingStep,
     processingTitle,
     processingDescription,
@@ -91,6 +101,7 @@ export function InboxProcessingWizard({
     handleSkip,
     handleNotActionable,
     handleActionable,
+    showDoneNowShortcut,
     showReferenceOption,
     handleProjectCheckNo,
     handleProjectCheckYes,
@@ -111,8 +122,13 @@ export function InboxProcessingWizard({
     customContext,
     setCustomContext,
     addCustomContext,
+    customTag,
+    setCustomTag,
+    addCustomTag,
     toggleContext,
     toggleTag,
+    suggestedContexts,
+    suggestedTags,
     handleConfirmContexts,
     convertToProject,
     setConvertToProject,
@@ -181,6 +197,32 @@ export function InboxProcessingWizard({
                     </span>
                 </div>
                 <div className="flex items-center gap-3">
+                    <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5">
+                        <button
+                            type="button"
+                            onClick={() => onModeChange('guided')}
+                            className={cn(
+                                'px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
+                                processingMode === 'guided'
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'text-muted-foreground hover:text-foreground'
+                            )}
+                        >
+                            {t('process.modeGuided')}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => onModeChange('quick')}
+                            className={cn(
+                                'px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
+                                processingMode === 'quick'
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'text-muted-foreground hover:text-foreground'
+                            )}
+                        >
+                            {t('process.modeQuick')}
+                        </button>
+                    </div>
                     <button
                         type="button"
                         onClick={handleSkip}
@@ -327,12 +369,25 @@ export function InboxProcessingWizard({
                             </button>
                         )}
                     </div>
-                    <button
-                        onClick={handleActionable}
-                        className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3 rounded-lg font-semibold hover:bg-primary/90 transition-colors"
-                    >
-                        {t('process.yesActionable')} <CheckCircle className="w-4 h-4" />
-                    </button>
+                    <div className={cn('gap-3', showDoneNowShortcut ? 'flex' : 'block')}>
+                        <button
+                            onClick={handleActionable}
+                            className={cn(
+                                'flex items-center justify-center gap-2 bg-primary text-primary-foreground py-3 rounded-lg font-semibold hover:bg-primary/90 transition-colors',
+                                showDoneNowShortcut ? 'flex-1' : 'w-full'
+                            )}
+                        >
+                            {t('process.yesActionable')} <CheckCircle className="w-4 h-4" />
+                        </button>
+                        {showDoneNowShortcut && (
+                            <button
+                                onClick={handleTwoMinDone}
+                                className="flex-1 flex items-center justify-center gap-2 bg-green-500 text-white py-3 rounded-lg font-semibold hover:bg-green-600 transition-colors"
+                            >
+                                <CheckCircle className="w-4 h-4" /> {t('process.doneIt')}
+                            </button>
+                        )}
+                    </div>
                 </div>
             )}
 
@@ -500,7 +555,7 @@ export function InboxProcessingWizard({
                     <div className="flex gap-2">
                         <input
                             type="text"
-                            placeholder={t('process.newContextPlaceholder')}
+                            placeholder="@home"
                             value={customContext}
                             onChange={(e) => setCustomContext(e.target.value)}
                             className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary"
@@ -519,9 +574,33 @@ export function InboxProcessingWizard({
                         </button>
                     </div>
 
+                    {suggestedContexts.length > 0 && (
+                        <div className="space-y-2">
+                            <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">
+                                {t('taskEdit.contextsLabel')}
+                            </div>
+                            <div className="flex flex-wrap gap-2 justify-center">
+                                {suggestedContexts.map(ctx => (
+                                    <button
+                                        key={ctx}
+                                        onClick={() => toggleContext(ctx)}
+                                        className={cn(
+                                            'px-4 py-2 rounded-full text-sm font-medium transition-colors',
+                                            selectedContexts.includes(ctx)
+                                                ? 'bg-primary text-primary-foreground'
+                                                : 'bg-muted hover:bg-muted/80'
+                                        )}
+                                    >
+                                        {ctx}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
                     {allContexts.length > 0 && (
                         <div className="flex flex-wrap gap-2 justify-center">
-                            {allContexts.map(ctx => (
+                            {allContexts.filter((ctx) => !suggestedContexts.includes(ctx)).map(ctx => (
                                 <button
                                     key={ctx}
                                     onClick={() => toggleContext(ctx)}
@@ -535,6 +614,51 @@ export function InboxProcessingWizard({
                             ))}
                         </div>
                     )}
+
+                    <div className="space-y-2">
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">
+                            {t('taskEdit.tagsLabel')}
+                        </div>
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                placeholder="#deep-work"
+                                value={customTag}
+                                onChange={(e) => setCustomTag(e.target.value)}
+                                className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary"
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        addCustomTag();
+                                    }
+                                }}
+                            />
+                            <button
+                                onClick={addCustomTag}
+                                disabled={!customTag.trim()}
+                                className="px-4 py-2 bg-secondary text-secondary-foreground rounded-lg text-sm font-medium hover:bg-secondary/80 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                +
+                            </button>
+                        </div>
+                        {suggestedTags.length > 0 && (
+                            <div className="flex flex-wrap gap-2 justify-center">
+                                {suggestedTags.map(tag => (
+                                    <button
+                                        key={tag}
+                                        onClick={() => toggleTag(tag)}
+                                        className={cn(
+                                            'px-4 py-2 rounded-full text-sm font-medium transition-colors',
+                                            selectedTags.includes(tag)
+                                                ? 'bg-emerald-500 text-white'
+                                                : 'bg-muted hover:bg-muted/80'
+                                        )}
+                                    >
+                                        {tag}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
 
                     <button
                         onClick={handleConfirmContexts}

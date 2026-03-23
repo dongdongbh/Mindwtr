@@ -2,22 +2,19 @@ import { useState, useEffect, useRef, type FormEvent, type ReactNode } from 'rea
 import { Loader2, Sparkles } from 'lucide-react';
 import {
     filterProjectsBySelectedArea,
-    hasTimeComponent,
-    safeFormatDate,
-    safeParseDate,
     resolveAutoTextDirection,
     type Area,
     type ClarifyResponse,
     type Project,
     type Section,
     type TaskEditorFieldId,
+    type TaskEditorSectionId,
     type TimeEstimate,
 } from '@mindwtr/core';
 import { AreaSelector } from '../ui/AreaSelector';
 import { ProjectSelector } from '../ui/ProjectSelector';
 import { SectionSelector } from '../ui/SectionSelector';
 import { TaskInput } from './TaskInput';
-import { normalizeDateInputValue } from './task-item-helpers';
 
 interface TaskItemEditorProps {
     t: (key: string) => string;
@@ -59,10 +56,7 @@ interface TaskItemEditorProps {
     showProjectField: boolean;
     showAreaField: boolean;
     showSectionField: boolean;
-    showDueDate: boolean;
-    editDueDate: string;
-    setEditDueDate: (value: string) => void;
-    alwaysFields: TaskEditorFieldId[];
+    basicFields: TaskEditorFieldId[];
     schedulingFields: TaskEditorFieldId[];
     organizationFields: TaskEditorFieldId[];
     detailsFields: TaskEditorFieldId[];
@@ -71,6 +65,7 @@ interface TaskItemEditorProps {
         organization: number;
         details: number;
     };
+    sectionOpenDefaults: Record<TaskEditorSectionId, boolean>;
     renderField: (fieldId: TaskEditorFieldId) => ReactNode;
     editLocation: string;
     setEditLocation: (value: string) => void;
@@ -121,14 +116,12 @@ export function TaskItemEditor({
     showProjectField,
     showAreaField,
     showSectionField,
-    showDueDate,
-    editDueDate,
-    setEditDueDate,
-    alwaysFields,
+    basicFields,
     schedulingFields,
     organizationFields,
     detailsFields,
     sectionCounts,
+    sectionOpenDefaults,
     renderField,
     editLocation,
     setEditLocation,
@@ -138,34 +131,7 @@ export function TaskItemEditor({
     onCancel,
     onSubmit,
 }: TaskItemEditorProps) {
-    const dueHasTime = hasTimeComponent(editDueDate);
-    const dueParsed = editDueDate ? safeParseDate(editDueDate) : null;
-    const dueDateValue = dueParsed ? safeFormatDate(dueParsed, 'yyyy-MM-dd') : '';
-    const dueTimeValue = dueHasTime && dueParsed ? safeFormatDate(dueParsed, 'HH:mm') : '';
     const titleDirection = resolveAutoTextDirection(editTitle, language);
-
-    const handleDueDateChange = (value: string) => {
-        const normalizedDate = normalizeDateInputValue(value);
-        if (!normalizedDate) {
-            setEditDueDate('');
-            return;
-        }
-        if (dueHasTime && dueTimeValue) {
-            setEditDueDate(`${normalizedDate}T${dueTimeValue}`);
-            return;
-        }
-        setEditDueDate(normalizedDate);
-    };
-
-    const handleDueTimeChange = (value: string) => {
-        if (!value) {
-            if (dueDateValue) setEditDueDate(dueDateValue);
-            else setEditDueDate('');
-            return;
-        }
-        const datePart = dueDateValue || safeFormatDate(new Date(), 'yyyy-MM-dd');
-        setEditDueDate(`${datePart}T${value}`);
-    };
 
     const compareLabels = (left: string, right: string) =>
         left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
@@ -173,10 +139,13 @@ export function TaskItemEditor({
     const sortedAreas = [...areas].sort((a, b) => compareLabels(a.name, b.name));
     const projectFilterAreaId = editAreaId || undefined;
     const filteredProjects = filterProjectsBySelectedArea(sortedProjects, projectFilterAreaId);
-    const [schedulingOpen, setSchedulingOpen] = useState(sectionCounts.scheduling > 0);
-    const [organizationOpen, setOrganizationOpen] = useState(sectionCounts.organization > 0);
+    const [schedulingOpen, setSchedulingOpen] = useState(sectionOpenDefaults.scheduling || sectionCounts.scheduling > 0);
+    const [organizationOpen, setOrganizationOpen] = useState(sectionOpenDefaults.organization || sectionCounts.organization > 0);
     const [detailsOpen, setDetailsOpen] = useState(
-        sectionCounts.details > 0 || detailsFields.includes('description') || detailsFields.includes('checklist')
+        sectionOpenDefaults.details
+            || sectionCounts.details > 0
+            || detailsFields.includes('description')
+            || detailsFields.includes('checklist')
     );
     const [aiMenuOpen, setAiMenuOpen] = useState(false);
     const aiMenuRef = useRef<HTMLDivElement>(null);
@@ -419,31 +388,10 @@ export function TaskItemEditor({
                         />
                     </div>
                 )}
-                {showDueDate && (
-                    <div className="flex flex-col gap-1">
-                        <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.dueDateLabel')}</label>
-                        <div className="flex items-center gap-2">
-                            <input
-                                type="date"
-                                aria-label={t('task.aria.dueDate')}
-                                value={dueDateValue}
-                                onChange={(e) => handleDueDateChange(e.target.value)}
-                                className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
-                            />
-                            <input
-                                type="time"
-                                aria-label={t('task.aria.dueTime')}
-                                value={dueTimeValue}
-                                onChange={(e) => handleDueTimeChange(e.target.value)}
-                                className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
-                            />
-                        </div>
-                    </div>
-                )}
             </div>
-            {alwaysFields.length > 0 && (
+            {basicFields.length > 0 && (
                 <div className="space-y-3">
-                    {alwaysFields.map((fieldId) => (
+                    {basicFields.map((fieldId) => (
                         <div key={fieldId}>{renderField(fieldId)}</div>
                     ))}
                 </div>

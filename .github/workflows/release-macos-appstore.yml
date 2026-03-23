@@ -365,6 +365,33 @@ jobs:
           grep -n '"infoPlist"\|"files"' apps/desktop/src-tauri/tauri.conf.json || true
           grep -n '"infoPlist"\|"files"' apps/desktop/src-tauri/tauri.appstore.conf.json || true
 
+      - name: Validate Mac App Store entitlements
+        run: |
+          python3 - <<'PY'
+          import plistlib
+          from pathlib import Path
+
+          path = Path("apps/desktop/src-tauri/Entitlements.mas.plist")
+          entitlements = plistlib.loads(path.read_bytes())
+
+          if "aps-environment" in entitlements:
+              raise SystemExit("Invalid macOS entitlement: use com.apple.developer.aps-environment, not aps-environment")
+
+          aps_env = entitlements.get("com.apple.developer.aps-environment")
+          if aps_env != "production":
+              raise SystemExit(
+                  f"Invalid com.apple.developer.aps-environment in {path}: expected 'production', got {aps_env!r}"
+              )
+
+          icloud_env = entitlements.get("com.apple.developer.icloud-container-environment")
+          if icloud_env != "Production":
+              raise SystemExit(
+                  f"Invalid com.apple.developer.icloud-container-environment in {path}: expected 'Production', got {icloud_env!r}"
+              )
+
+          print(f"Validated Mac App Store entitlements in {path}")
+          PY
+
       - name: Build signed macOS app bundle (App Store)
         timeout-minutes: 45
         env:

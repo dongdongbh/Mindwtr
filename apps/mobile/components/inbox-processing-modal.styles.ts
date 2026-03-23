@@ -393,6 +393,9 @@ export const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '700',
   },
+  projectListContainer: {
+    gap: 0,
+  },
   projectChip: {
     paddingHorizontal: 12,
     paddingVertical: 10,

@@ -30,6 +30,7 @@ import { taskMatchesAreaFilter } from '@/lib/area-filter';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import { buildCopilotConfig, isAIKeyRequired, loadAIKey } from '../lib/ai-config';
 import { logError } from '../lib/app-log';
+import { getBulkActionFailureMessage } from './task-list-utils';
 import {
   MOBILE_TIME_ESTIMATE_OPTIONS,
   formatTimeEstimateChipLabel,
@@ -626,11 +627,17 @@ function TaskListComponent({
     setBulkActionLoading(true);
     try {
       await action();
+    } catch (error) {
+      void logError(error, { scope: 'tasks', extra: { message: `Bulk action failed: ${label}` } });
+      Alert.alert(
+        t('common.notice'),
+        getBulkActionFailureMessage(error, `${label} failed.`)
+      );
     } finally {
       setBulkActionLoading(false);
       setBulkActionLabel('');
     }
-  }, [bulkActionLoading]);
+  }, [bulkActionLoading, t]);
 
   const toggleMultiSelect = useCallback((taskId: string) => {
     if (!selectionMode) setSelectionMode(true);
@@ -921,6 +928,8 @@ function TaskListComponent({
           <View style={[styles.inputContainer, { borderBottomColor: themeColors.border }]}>
             <TextInput
               style={[styles.input, { backgroundColor: themeColors.inputBg, borderColor: themeColors.border, color: themeColors.text }]}
+              autoCapitalize="sentences"
+              autoCorrect={false}
               placeholder={t('inbox.addPlaceholder')}
               placeholderTextColor={themeColors.secondaryText}
               value={newTaskTitle}
@@ -1043,6 +1052,8 @@ function TaskListComponent({
           keyExtractor={(item) => (item.type === 'section' ? `section-${item.id}` : item.task.id)}
           style={styles.list}
           contentContainerStyle={listContentStyle}
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
           getItemLayout={getItemLayout}
           initialNumToRender={12}
           maxToRenderPerBatch={12}

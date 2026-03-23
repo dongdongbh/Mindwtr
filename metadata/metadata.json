@@ -30,7 +30,7 @@
           "完全离线可用，无需互联网连接",
           "完全开源，安全透明"
         ],
-        "ReleaseNotes": "• 桌面端列表删除新增确认与撤销，并在恢复失败时提供更清晰的提示。\n• 稳定 Integrations 设置界面，并阻止在仅参考项目上编辑清单项。\n• 强化同步可靠性，加入任务变更校验、更安全的待写入保留与更好的自写过滤。\n• 改进桌面端删除提示与无效日期命令错误的本地化。",
+        "ReleaseNotes": "• 桌面端新增 Guided / Quick 收件箱处理模式，并提供更灵活的任务编辑器布局设置。\n• 新增 Manage 设置页，可管理区域、情境与标签，并支持批量编辑情境。\n• 强化同步恢复能力，加入更安全的刷新处理、更稳妥的删除冲突解决与更严格的任务/项目校验。\n• 改进桌面端 Obsidian 标记检查、归档项操作与批量操作错误反馈。",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -82,7 +82,7 @@
           "No internet connection required to function",
           "Open source and transparent"
         ],
-        "ReleaseNotes": "• Added desktop confirmation and undo for list deletions, with clearer restore failure feedback.\n• Stabilized Integrations settings and blocked checklist edits on reference-only items.\n• Hardened sync reliability with task mutation validation, safer pending writes, and better self-write filtering.\n• Improved desktop localization for delete toasts and invalid date command errors.",
+        "ReleaseNotes": "• Added guided and quick inbox processing on desktop, with more flexible task editor layout settings.\n• Added a Manage settings page for areas, contexts, and tags, plus bulk context editing support.\n• Hardened sync recovery with safer refresh handling, better delete conflict resolution, and stricter task and project validation.\n• Improved desktop vault and settings behavior around Obsidian marker checks, archived-task actions, and bulk error feedback.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -130,7 +130,7 @@
           "No requiere conexión a internet para funcionar",
           "Código abierto y transparente"
         ],
-        "ReleaseNotes": "• Anadimos confirmacion y deshacer para eliminar listas en escritorio, con mensajes mas claros cuando falla la restauracion.\n• Estabilizamos la pantalla de Integrations y bloqueamos la edicion de checklists en elementos solo de referencia.\n• Reforzamos la fiabilidad del sync con validacion de mutaciones, escrituras pendientes mas seguras y mejor filtrado de autoescrituras.\n• Mejoramos la localizacion de los avisos de borrado y de los errores de comandos de fecha no valida en escritorio.",
+        "ReleaseNotes": "• Anadimos procesamiento guiado y rapido en la bandeja de entrada de escritorio, con ajustes mas flexibles para el editor de tareas.\n• Anadimos una pagina Manage para areas, contextos y etiquetas, junto con edicion masiva de contextos.\n• Reforzamos la recuperacion del sync con refrescos mas seguros, mejor resolucion de conflictos de borrado y validacion mas estricta de tareas y proyectos.\n• Mejoramos el comportamiento del vault y de ajustes en escritorio para comprobaciones del marcador de Obsidian, acciones sobre archivados y errores en lote.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",

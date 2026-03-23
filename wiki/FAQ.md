@@ -71,11 +71,11 @@ Mindwtr supports File Sync, WebDAV, self-hosted Cloud Sync, and Dropbox sync (su
 
 ### Does Mindwtr support iCloud sync directly?
 
-Yes, on supported Apple mobile builds.
+Yes, on supported Apple builds.
 
 - **iPhone / iPad:** native **iCloud** backend is available in **Settings → Data & Sync**
+- **macOS desktop:** native **iCloud** backend is available in **Settings → Data & Sync**
 - **Android / Windows / Linux:** no native iCloud backend
-- **macOS desktop:** use **iCloud Drive + File Sync** for now
 
 See [[iCloud Sync]] and [[Data and Sync]].
 

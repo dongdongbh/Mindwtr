@@ -160,11 +160,35 @@ jobs:
           scripts/ci/resolve-release-version.sh "$INPUT_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Download build artifacts
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
-        with:
-          pattern: release-*
-          path: ./release-assets
-          merge-multiple: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          tmp_dir="$(mktemp -d)"
+          mkdir -p ./release-assets
+
+          cleanup() {
+            rm -rf "$tmp_dir"
+          }
+
+          trap cleanup EXIT
+
+          artifact_names="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" --paginate --jq '.artifacts[] | select(.expired == false and (.name | startswith("release-"))) | .name')"
+          if [ -z "$artifact_names" ]; then
+            echo "No release-* artifacts found for run ${GITHUB_RUN_ID}." >&2
+            exit 1
+          fi
+
+          while IFS= read -r artifact_name; do
+            [ -n "$artifact_name" ] || continue
+            artifact_dir="${tmp_dir}/${artifact_name}"
+            mkdir -p "$artifact_dir"
+            gh run download "${GITHUB_RUN_ID}" --repo "${GITHUB_REPOSITORY}" -n "$artifact_name" -D "$artifact_dir"
+            find "$artifact_dir" -type f -print0 | while IFS= read -r -d '' file; do
+              cp "$file" ./release-assets/
+            done
+          done <<< "$artifact_names"
 
       - name: List release assets
         run: ls -la ./release-assets/ || echo "No assets found"
@@ -245,14 +269,31 @@ jobs:
           exit 1
 
       - name: Create Release
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
-        with:
-          files: ./release-assets/*
-          body_path: ${{ steps.release_notes.outputs.body_path }}
-          draft: false
-          prerelease: ${{ contains(steps.release_version.outputs.tag, '-') }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          TAG="${{ steps.release_version.outputs.tag }}"
+          NOTES_FILE="${{ steps.release_notes.outputs.body_path }}"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --draft=false \
+              --notes-file "$NOTES_FILE"
+            gh release upload "$TAG" ./release-assets/* --clobber
+          else
+            if [[ "$TAG" == *-* ]]; then
+              gh release create "$TAG" ./release-assets/* \
+                --draft=false \
+                --prerelease \
+                --notes-file "$NOTES_FILE"
+            else
+              gh release create "$TAG" ./release-assets/* \
+                --draft=false \
+                --notes-file "$NOTES_FILE"
+            fi
+          fi
 
   update-packages:
     needs: release

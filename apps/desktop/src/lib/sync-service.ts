@@ -2146,8 +2146,8 @@ export class SyncService {
                         preMutated = await syncDropboxAttachments(localData, resolveDropboxAccessToken);
                     }
                     if (preMutated) {
-                        ensureLocalSnapshotFresh();
                         preSyncedLocalData = preSyncedLocalData ?? localData;
+                        ensureLocalSnapshotFresh();
                     }
                 } catch (error) {
                     if (error instanceof LocalSyncAbort) {

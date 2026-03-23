@@ -70,7 +70,10 @@ import {
 import { useTaskEditCopilot } from './task-edit/use-task-edit-copilot';
 import {
     DEFAULT_TASK_EDITOR_ORDER,
+    TASK_EDITOR_FIXED_FIELDS,
     DEFAULT_TASK_EDITOR_VISIBLE,
+    getTaskEditorSectionAssignments,
+    getTaskEditorSectionOpenDefaults,
     getInitialWindowWidth,
     getTaskEditTabOffset,
     isReleasedAudioPlayerError,
@@ -1167,6 +1170,14 @@ function TaskEditModalInner({
         const missing = DEFAULT_TASK_EDITOR_ORDER.filter((id) => !normalized.includes(id));
         return [...normalized, ...missing].filter((id) => !disabledFields.has(id));
     }, [savedOrder, disabledFields]);
+    const sectionAssignments = useMemo(
+        () => getTaskEditorSectionAssignments(settings.gtd?.taskEditor),
+        [settings.gtd?.taskEditor]
+    );
+    const sectionOpenDefaults = useMemo(
+        () => getTaskEditorSectionOpenDefaults(settings.gtd?.taskEditor),
+        [settings.gtd?.taskEditor]
+    );
     const hiddenSet = useMemo(() => {
         const known = new Set(taskEditorOrder);
         const next = new Set(savedHidden.filter((id) => known.has(id)));
@@ -1271,21 +1282,25 @@ function TaskEditModalInner({
         (fields: TaskEditorFieldId[]) => fields.filter(isFieldVisible),
         [isFieldVisible]
     );
-    const alwaysFields = useMemo(
-        () => filterVisibleFields(orderFields(['status', 'project', 'section', 'area', 'dueDate'])),
-        [filterVisibleFields, orderFields]
+    const basicFields = useMemo(
+        () => filterVisibleFields(orderFields(
+            ['status', ...taskEditorOrder.filter((fieldId) =>
+                !TASK_EDITOR_FIXED_FIELDS.includes(fieldId) && sectionAssignments[fieldId] === 'basic'
+            )]
+        )),
+        [filterVisibleFields, orderFields, sectionAssignments, taskEditorOrder]
     );
     const schedulingFields = useMemo(
-        () => filterVisibleFields(orderFields(['startTime', 'recurrence', 'reviewAt'])),
-        [filterVisibleFields, orderFields]
+        () => filterVisibleFields(orderFields(taskEditorOrder.filter((fieldId) => sectionAssignments[fieldId] === 'scheduling'))),
+        [filterVisibleFields, orderFields, sectionAssignments, taskEditorOrder]
     );
     const organizationFields = useMemo(
-        () => filterVisibleFields(orderFields(['contexts', 'tags', 'priority', 'timeEstimate'])),
-        [filterVisibleFields, orderFields]
+        () => filterVisibleFields(orderFields(taskEditorOrder.filter((fieldId) => sectionAssignments[fieldId] === 'organization'))),
+        [filterVisibleFields, orderFields, sectionAssignments, taskEditorOrder]
     );
     const detailsFields = useMemo(
-        () => filterVisibleFields(orderFields(['description', 'checklist', 'attachments'])),
-        [filterVisibleFields, orderFields]
+        () => filterVisibleFields(orderFields(taskEditorOrder.filter((fieldId) => sectionAssignments[fieldId] === 'details'))),
+        [filterVisibleFields, orderFields, sectionAssignments, taskEditorOrder]
     );
 
     const mergedTask = useMemo(() => ({
@@ -2677,10 +2692,11 @@ function TaskEditModalInner({
                             copilotTags={copilotTags}
                             timeEstimatesEnabled={timeEstimatesEnabled}
                             renderField={renderField}
-                            alwaysFields={alwaysFields}
+                            basicFields={basicFields}
                             schedulingFields={schedulingFields}
                             organizationFields={organizationFields}
                             detailsFields={detailsFields}
+                            sectionOpenDefaults={sectionOpenDefaults}
                             showDatePicker={showDatePicker}
                             pendingStartDate={pendingStartDate}
                             pendingDueDate={pendingDueDate}
@@ -2691,6 +2707,7 @@ function TaskEditModalInner({
                             titleDraft={titleDraft}
                             onTitleDraftChange={handleTitleDraftChange}
                             registerScrollToEnd={registerScrollTaskFormToEnd}
+                            formResetKey={`${task.id}:${visible ? 'open' : 'closed'}`}
                         />
                         <View style={[styles.tabPage, { width: containerWidth || '100%' }]}>
                             <TaskEditViewTab

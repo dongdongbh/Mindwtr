@@ -1,6 +1,8 @@
 import {
+    type AppData,
     Task,
     TaskEditorFieldId,
+    type TaskEditorSectionId,
     type Recurrence,
     type RecurrenceRule,
     type RecurrenceStrategy,
@@ -37,6 +39,79 @@ export const DEFAULT_TASK_EDITOR_HIDDEN: TaskEditorFieldId[] = [
     'reviewAt',
     'attachments',
 ];
+
+export const TASK_EDITOR_FIXED_FIELDS: TaskEditorFieldId[] = ['status', 'project', 'section', 'area'];
+
+export const TASK_EDITOR_SECTION_ORDER: TaskEditorSectionId[] = ['basic', 'scheduling', 'organization', 'details'];
+
+export const DEFAULT_TASK_EDITOR_SECTION_BY_FIELD: Record<TaskEditorFieldId, TaskEditorSectionId> = {
+    status: 'basic',
+    project: 'basic',
+    section: 'basic',
+    area: 'basic',
+    priority: 'organization',
+    contexts: 'organization',
+    tags: 'organization',
+    timeEstimate: 'organization',
+    recurrence: 'scheduling',
+    startTime: 'scheduling',
+    dueDate: 'basic',
+    reviewAt: 'scheduling',
+    description: 'details',
+    textDirection: 'details',
+    attachments: 'details',
+    checklist: 'details',
+};
+
+export const TASK_EDITOR_SECTIONABLE_FIELDS: TaskEditorFieldId[] = DEFAULT_TASK_EDITOR_ORDER.filter(
+    (fieldId) => !TASK_EDITOR_FIXED_FIELDS.includes(fieldId) && fieldId !== 'textDirection'
+);
+
+export const DEFAULT_TASK_EDITOR_SECTION_OPEN: Record<TaskEditorSectionId, boolean> = {
+    basic: true,
+    scheduling: false,
+    organization: false,
+    details: true,
+};
+
+type TaskEditorSettings = NonNullable<NonNullable<AppData['settings']['gtd']>['taskEditor']> | undefined;
+
+const isTaskEditorSectionId = (value: unknown): value is TaskEditorSectionId =>
+    value === 'basic' || value === 'scheduling' || value === 'organization' || value === 'details';
+
+export const isTaskEditorSectionableField = (fieldId: TaskEditorFieldId): boolean =>
+    TASK_EDITOR_SECTIONABLE_FIELDS.includes(fieldId);
+
+export const getTaskEditorSectionAssignments = (
+    taskEditor: TaskEditorSettings
+): Record<TaskEditorFieldId, TaskEditorSectionId> => {
+    const savedSections = taskEditor?.sections ?? {};
+    const next = { ...DEFAULT_TASK_EDITOR_SECTION_BY_FIELD };
+    (Object.keys(savedSections) as TaskEditorFieldId[]).forEach((fieldId) => {
+        const sectionId = savedSections[fieldId];
+        if (!isTaskEditorSectionableField(fieldId) || !isTaskEditorSectionId(sectionId)) return;
+        next[fieldId] = sectionId;
+    });
+    return next;
+};
+
+export const getTaskEditorSectionOpenDefaults = (
+    taskEditor: TaskEditorSettings
+): Record<TaskEditorSectionId, boolean> => {
+    const savedSectionOpen = taskEditor?.sectionOpen ?? {};
+    return {
+        basic: DEFAULT_TASK_EDITOR_SECTION_OPEN.basic,
+        scheduling: typeof savedSectionOpen.scheduling === 'boolean'
+            ? savedSectionOpen.scheduling
+            : DEFAULT_TASK_EDITOR_SECTION_OPEN.scheduling,
+        organization: typeof savedSectionOpen.organization === 'boolean'
+            ? savedSectionOpen.organization
+            : DEFAULT_TASK_EDITOR_SECTION_OPEN.organization,
+        details: typeof savedSectionOpen.details === 'boolean'
+            ? savedSectionOpen.details
+            : DEFAULT_TASK_EDITOR_SECTION_OPEN.details,
+    };
+};
 
 // Convert stored ISO or datetime-local strings into datetime-local input values.
 export function toDateTimeLocalValue(dateStr: string | undefined): string {

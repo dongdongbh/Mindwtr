@@ -136,6 +136,7 @@ export const createSettingsActions = ({
             });
             return;
         }
+        const fetchStartedAt = get().lastDataChangeAt;
         try {
             const storage = getStorage();
             const data = await measureCoreStartupPhase('core.fetch_data.storage_get_data', async () =>
@@ -593,29 +594,48 @@ export const createSettingsActions = ({
             const visibleSections = allSections.filter((section) => !section.deletedAt);
             const visibleAreas = allAreas.filter((area) => !area.deletedAt);
             markCoreStartupPhase('core.fetch_data.post_process:end', { durationMs: Date.now() - postProcessStartedAt });
+            let skippedDueToConcurrentLocalChange = false;
             await measureCoreStartupPhase('core.fetch_data.zustand_set_state', async () => {
-                set({
-                    tasks: visibleTasks,
-                    projects: visibleProjects,
-                    sections: visibleSections,
-                    areas: visibleAreas,
-                    settings: nextSettings,
-                    _allTasks: allTasks,
-                    _allProjects: allProjects,
-                    _allSections: allSections,
-                    _allAreas: allAreas,
-                    isLoading: false,
-                    lastDataChangeAt:
-                        didAutoArchive
-                            || didPromoteScheduled
-                            || didArchiveTasksForArchivedProjects
-                            || didArchiveSectionsForArchivedProjects
-                            || didRepairEntityReferences
-                            || didTombstoneCleanup
-                            ? Date.now()
-                            : get().lastDataChangeAt,
+                set((state) => {
+                    if (state.lastDataChangeAt > fetchStartedAt) {
+                        skippedDueToConcurrentLocalChange = true;
+                        return options?.silent ? {} : { isLoading: false };
+                    }
+                    return {
+                        tasks: visibleTasks,
+                        projects: visibleProjects,
+                        sections: visibleSections,
+                        areas: visibleAreas,
+                        settings: nextSettings,
+                        _allTasks: allTasks,
+                        _allProjects: allProjects,
+                        _allSections: allSections,
+                        _allAreas: allAreas,
+                        isLoading: false,
+                        lastDataChangeAt:
+                            didAutoArchive
+                                || didPromoteScheduled
+                                || didArchiveTasksForArchivedProjects
+                                || didArchiveSectionsForArchivedProjects
+                                || didRepairEntityReferences
+                                || didTombstoneCleanup
+                                ? Date.now()
+                                : state.lastDataChangeAt,
+                    };
                 });
             });
+            if (skippedDueToConcurrentLocalChange) {
+                markCoreStartupPhase('core.fetch_data.skipped_local_change');
+                logWarn('Skipped fetch result because local data changed during fetch', {
+                    scope: 'store',
+                    category: 'storage',
+                    context: {
+                        fetchStartedAt,
+                        currentChangeAt: get().lastDataChangeAt,
+                    },
+                });
+                return;
+            }
 
             if (
                 didAutoArchive
