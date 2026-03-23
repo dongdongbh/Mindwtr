@@ -46,7 +46,11 @@ def fetch_dist(package_name: str, version: str, cache: dict[tuple[str, str], dic
     return cached
 
 
-def repair_lock(lock_path: pathlib.Path) -> tuple[int, list[tuple[str, str]]]:
+def repair_lock(
+    lock_path: pathlib.Path,
+    *,
+    write_changes: bool,
+) -> tuple[int, list[tuple[str, str]]]:
     lock = json.loads(lock_path.read_text())
     missing: list[tuple[str, str]] = []
     dist_cache: dict[tuple[str, str], dict[str, str | None]] = {}
@@ -60,7 +64,7 @@ def repair_lock(lock_path: pathlib.Path) -> tuple[int, list[tuple[str, str]]]:
 
         resolved = meta.get("resolved")
         integrity = meta.get("integrity")
-        if not resolved or not integrity:
+        if write_changes and (not resolved or not integrity):
             package_name = package_name_from_path(package_path)
             version = meta.get("version")
             if package_name and version:
@@ -84,32 +88,50 @@ def repair_lock(lock_path: pathlib.Path) -> tuple[int, list[tuple[str, str]]]:
     if missing:
         return changed, missing
 
-    if changed:
+    if write_changes and changed:
         lock_path.write_text(json.dumps(lock, indent=2) + "\n")
     return changed, []
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print(f"Usage: {pathlib.Path(sys.argv[0]).name} <package-lock.json>", file=sys.stderr)
-        return 1
+    check_only = False
+    args = sys.argv[1:]
+    if len(args) == 2 and args[0] == "--check":
+        check_only = True
+        args = args[1:]
 
-    lock_path = pathlib.Path(sys.argv[1])
-    if not lock_path.is_file():
-        print(f"Package-lock file not found: {lock_path}", file=sys.stderr)
-        return 1
-
-    changed, missing = repair_lock(lock_path)
-    if missing:
-        details = "\n".join(f"  - {package_path} is missing {field}" for package_path, field in missing)
+    if len(args) != 1:
         print(
-            "Desktop package-lock.json has incomplete npm metadata required for Flathub node source generation:\n"
-            + details,
+            f"Usage: {pathlib.Path(sys.argv[0]).name} [--check] <package-lock.json>",
             file=sys.stderr,
         )
         return 1
 
-    if changed:
+    lock_path = pathlib.Path(args[0])
+    if not lock_path.is_file():
+        print(f"Package-lock file not found: {lock_path}", file=sys.stderr)
+        return 1
+
+    changed, missing = repair_lock(lock_path, write_changes=not check_only)
+    if missing:
+        details = "\n".join(f"  - {package_path} is missing {field}" for package_path, field in missing)
+        if check_only:
+            print(
+                "Desktop package-lock.json is incomplete and would require repair before tagging/releasing:\n"
+                + details,
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "Desktop package-lock.json has incomplete npm metadata required for Flathub node source generation:\n"
+                + details,
+                file=sys.stderr,
+            )
+        return 1
+
+    if check_only:
+        print(f"Package-lock metadata already complete: {lock_path}")
+    elif changed:
         print(f"Repaired {changed} package-lock metadata fields in {lock_path}")
     else:
         print(f"Package-lock metadata already complete: {lock_path}")

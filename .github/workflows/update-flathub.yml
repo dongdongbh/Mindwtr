@@ -134,6 +134,7 @@ jobs:
           git worktree add --force --detach "$worktree_dir" "${{ steps.version.outputs.tag }}" >/dev/null
 
           python3 scripts/ci/repair-package-lock.py \
+            --check \
             "$worktree_dir/apps/desktop/package-lock.json"
 
           python3 - "$worktree_dir/apps/desktop/package-lock.json" "$GITHUB_WORKSPACE/flathub/tech.dongdongbh.mindwtr.node-sources.json" <<'PY'

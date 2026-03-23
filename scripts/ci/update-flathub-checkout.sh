@@ -82,6 +82,7 @@ trap cleanup EXIT
 git -C "${repo_root}" worktree add --force --detach "${worktree_dir}" "${upstream_commit}" >/dev/null
 
 python3 "${repo_root}/scripts/ci/repair-package-lock.py" \
+  --check \
   "${worktree_dir}/apps/desktop/package-lock.json"
 
 python3 "${tools_dir}/cargo/flatpak-cargo-generator.py" \

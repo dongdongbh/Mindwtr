@@ -21,6 +21,7 @@
     "fs:allow-remove",
     "fs:allow-exists",
     "fs:allow-size",
+    "fs:allow-stat",
     "fs:allow-read-dir",
     "fs:allow-rename",
     "fs:allow-watch",

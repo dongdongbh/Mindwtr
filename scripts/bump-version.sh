@@ -91,6 +91,15 @@ echo "Updating lockfile..."
 bun install
 
 echo ""
+echo "Validating desktop package-lock metadata..."
+if ! python3 scripts/ci/repair-package-lock.py --check apps/desktop/package-lock.json; then
+    echo ""
+    echo "Desktop package-lock.json is incomplete. Repair it before tagging with:"
+    echo "  python3 scripts/ci/repair-package-lock.py apps/desktop/package-lock.json"
+    exit 1
+fi
+
+echo ""
 echo "Done! Now you can:"
 echo "  git add -A"
 echo "  git commit -m 'chore(release): v$NEW_VERSION'"
