@@ -472,7 +472,16 @@ char *mindwtr_cloudkit_fetch_all_records(const char *record_type_cstr) {
 
             long waited = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, kTimeoutSec * NSEC_PER_SEC));
             if (waited != 0) return ck_copy_json(@{@"error": @"fetch-timeout"});
-            if (batchError) return ck_error_json(batchError);
+            if (batchError) {
+                // Record type not yet created in CloudKit schema — treat as empty.
+                // The type is auto-created on first save in the Development environment.
+                if (batchError.code == CKErrorUnknownItem ||
+                    (batchError.code == CKErrorServerRejectedRequest &&
+                     [batchError.localizedDescription containsString:@"Did not find record type"])) {
+                    return strdup("[]");
+                }
+                return ck_error_json(batchError);
+            }
 
             for (CKRecord *r in batchRecords) {
                 [allResults addObject:ck_json_from_record(r)];
