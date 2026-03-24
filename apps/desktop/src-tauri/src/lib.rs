@@ -4896,8 +4896,7 @@ fn is_niri_session() -> bool {
     false
 }
 
-fn flatpak_install_channel() -> Option<String> {
-    let contents = fs::read_to_string("/.flatpak-info").ok()?;
+fn parse_flatpak_install_channel(contents: &str) -> Option<String> {
     let mut in_instance = false;
     for line in contents.lines() {
         let trimmed = line.trim();
@@ -4921,8 +4920,15 @@ fn flatpak_install_channel() -> Option<String> {
     None
 }
 
+fn flatpak_install_channel() -> Option<String> {
+    let contents = fs::read_to_string("/.flatpak-info").ok()?;
+    parse_flatpak_install_channel(&contents)
+}
+
 fn is_flatpak() -> bool {
-    env::var("FLATPAK_ID").is_ok() || env::var("FLATPAK_SANDBOX_DIR").is_ok()
+    env::var("FLATPAK_ID").is_ok()
+        || env::var("FLATPAK_SANDBOX_DIR").is_ok()
+        || Path::new("/.flatpak-info").exists()
 }
 
 fn diagnostics_enabled() -> bool {
@@ -5287,5 +5293,20 @@ mod tests {
         assert_eq!(secrets_config.dropbox_tokens, Some(payload));
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn flatpak_install_channel_reads_branch_from_instance_section() {
+        let contents = r#"
+[Application]
+name=tech.dongdongbh.mindwtr
+
+[Instance]
+instance-id=123456
+branch=stable
+arch=x86_64
+"#;
+
+        assert_eq!(parse_flatpak_install_channel(contents).as_deref(), Some("stable"));
     }
 }

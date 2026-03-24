@@ -743,11 +743,9 @@ export function QuickCaptureSheet({
           }
         }
 
-        const taskId = generateUUID();
         const attachments = [...(initialProps?.attachments ?? [])];
         if (attachment) attachments.push(attachment);
         const { title, props, invalidDateCommands } = await buildTaskProps(displayTitle, {
-          id: taskId,
           attachments,
         });
         if (invalidDateCommands && invalidDateCommands.length > 0) {
@@ -756,8 +754,11 @@ export function QuickCaptureSheet({
         }
         if (!title.trim()) return;
 
-        await addTask(title, props);
+        const addTaskResult = await addTask(title, props);
         handleClose();
+
+        if (!addTaskResult.success || !addTaskResult.id) return;
+        const taskId = addTaskResult.id;
 
         if (!speechReady) {
           const diag = provider === 'whisper'
@@ -935,11 +936,9 @@ export function QuickCaptureSheet({
         }
       }
 
-      const taskId = generateUUID();
       const attachments = [...(initialProps?.attachments ?? [])];
       if (attachment) attachments.push(attachment);
       const { title, props, invalidDateCommands } = await buildTaskProps(displayTitle, {
-        id: taskId,
         attachments,
       });
       if (invalidDateCommands && invalidDateCommands.length > 0) {
@@ -948,8 +947,11 @@ export function QuickCaptureSheet({
       }
       if (!title.trim()) return;
 
-      await addTask(title, props);
+      const addTaskResult = await addTask(title, props);
       handleClose();
+
+      if (!addTaskResult.success || !addTaskResult.id) return;
+      const taskId = addTaskResult.id;
 
       if (!speechReady) {
         const diag = provider === 'whisper'

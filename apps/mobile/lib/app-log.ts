@@ -4,6 +4,7 @@ type ExpoDirectory = {
   exists: boolean;
   create: (options: { intermediates?: boolean; idempotent?: boolean }) => void;
   delete: () => void;
+  info?: () => { exists?: boolean };
   uri: string;
 };
 
@@ -11,6 +12,7 @@ type ExpoFile = {
   exists: boolean;
   create: (options: { intermediates?: boolean; overwrite?: boolean }) => void;
   delete: () => void;
+  info?: () => { exists?: boolean; size?: number };
   write: (content: string, options?: { encoding?: string }) => void;
   text: () => Promise<string>;
   uri: string;
@@ -40,18 +42,22 @@ const getExpoFileSystem = async (): Promise<ExpoFileSystemModule | null> => {
 };
 
 const ensureLogTargets = async (): Promise<void> => {
-  if (logTargetsInitialized) return;
-  logTargetsInitialized = true;
+  if (logTargetsInitialized && LOG_DIR && LOG_FILE) return;
   try {
     const fs = await getExpoFileSystem();
     const baseUri = fs?.Paths?.document?.uri;
-    if (!fs || !baseUri) return;
+    if (!fs || !baseUri) {
+      logTargetsInitialized = false;
+      return;
+    }
     const normalizedBase = baseUri.endsWith('/') ? baseUri : `${baseUri}/`;
     LOG_DIR_URI = `${normalizedBase}logs`;
     LOG_FILE_URI = `${LOG_DIR_URI}/mindwtr.log`;
     LOG_DIR = new fs.Directory(LOG_DIR_URI);
     LOG_FILE = new fs.File(LOG_FILE_URI);
+    logTargetsInitialized = true;
   } catch {
+    logTargetsInitialized = false;
     LOG_DIR = null;
     LOG_FILE = null;
     LOG_DIR_URI = null;
@@ -152,18 +158,38 @@ function sanitizeUrl(raw?: string): string | undefined {
 async function ensureLogDir(): Promise<void> {
   await ensureLogTargets();
   if (!LOG_DIR) return;
-  if (!LOG_DIR.exists) {
+  if (!directoryExists(LOG_DIR)) {
     LOG_DIR.create({ intermediates: true, idempotent: true });
   }
+}
+
+function directoryExists(directory: ExpoDirectory | null): boolean {
+  if (!directory) return false;
+  try {
+    const info = directory.info?.();
+    if (typeof info?.exists === 'boolean') return info.exists;
+  } catch {
+  }
+  return directory.exists;
+}
+
+function fileExists(file: ExpoFile | null): boolean {
+  if (!file) return false;
+  try {
+    const info = file.info?.();
+    if (typeof info?.exists === 'boolean') return info.exists;
+  } catch {
+  }
+  return file.exists;
 }
 
 async function ensureLogFile(): Promise<boolean> {
   await ensureLogTargets();
   if (!LOG_DIR || !LOG_FILE) return false;
-  if (!LOG_DIR.exists) {
+  if (!directoryExists(LOG_DIR)) {
     LOG_DIR.create({ intermediates: true, idempotent: true });
   }
-  if (!LOG_FILE.exists) {
+  if (!fileExists(LOG_FILE)) {
     try {
       LOG_FILE.create({ intermediates: true, overwrite: true });
     } catch (error) {
@@ -184,21 +210,21 @@ async function ensureLogFile(): Promise<boolean> {
       }
     }
   }
-  return true;
+  return fileExists(LOG_FILE);
 }
 
 function isLoggingEnabled(): boolean {
   return useTaskStore.getState().settings.diagnostics?.loggingEnabled === true;
 }
 
-async function appendLogLine(entry: LogEntry): Promise<string | null> {
-  if (!isLoggingEnabled()) return null;
+async function appendLogLine(entry: LogEntry, options?: { force?: boolean }): Promise<string | null> {
+  if (!options?.force && !isLoggingEnabled()) return null;
   try {
     await ensureLogDir();
     if (!await ensureLogFile()) return null;
     if (!LOG_FILE) return null;
     const line = `${JSON.stringify(entry)}\n`;
-    const current = LOG_FILE.exists ? await LOG_FILE.text().catch(() => '') : '';
+    const current = fileExists(LOG_FILE) ? await LOG_FILE.text().catch(() => '') : '';
     let next = current + line;
     if (next.length > MAX_LOG_CHARS) {
       next = next.slice(-MAX_LOG_CHARS);
@@ -221,7 +247,7 @@ export async function ensureLogFilePath(): Promise<string | null> {
     await ensureLogDir();
     if (!await ensureLogFile()) return null;
     if (!LOG_FILE) return null;
-    if (!LOG_FILE.exists) return null;
+    if (!fileExists(LOG_FILE)) return null;
     return LOG_FILE.uri;
   } catch {
     return null;
@@ -232,7 +258,7 @@ export async function clearLog(): Promise<void> {
   await ensureLogTargets();
   if (!LOG_FILE) return;
   try {
-    if (LOG_FILE.exists) {
+    if (fileExists(LOG_FILE)) {
       LOG_FILE.delete();
       return;
     }
@@ -275,7 +301,7 @@ export async function logError(
 
 export async function logInfo(
   message: string,
-  context?: { scope?: string; extra?: Record<string, string> }
+  context?: { scope?: string; extra?: Record<string, string>; force?: boolean }
 ): Promise<string | null> {
   const safeMessage = redactSensitiveText(message);
   return appendLogLine({
@@ -284,7 +310,7 @@ export async function logInfo(
     scope: context?.scope ?? 'info',
     message: safeMessage,
     context: sanitizeContext(context?.extra),
-  });
+  }, { force: context?.force });
 }
 
 export async function logWarn(

@@ -5,6 +5,7 @@ import { AudioPcmStreamAdapter } from 'whisper.rn/realtime-transcription/adapter
 import { RealtimeTranscriber, type RealtimeTranscriberEvent } from 'whisper.rn/realtime-transcription/index.js';
 import type { AudioCaptureMode, AudioFieldStrategy } from '@mindwtr/core';
 import { logInfo, logWarn } from './app-log';
+import { buildMultipartAudioPart } from './speech-to-text.helpers';
 
 type SpeechProvider = 'openai' | 'gemini' | 'whisper';
 
@@ -95,11 +96,32 @@ const getRNFSModule = (): RNFSModule | null => {
 const getWhisperModule = () => {
   if (whisperModuleCache) return whisperModuleCache;
   try {
-    // whisper.rn ships a broken root export map in 0.5.x, so load the built CJS entry directly.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const mod = require('whisper.rn/lib/commonjs/index.js') as WhisperModule;
-    whisperModuleCache = mod;
-    return mod;
+    // Use static fallback paths so Metro can bundle this file.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const mod = require('whisper.rn/src/index') as WhisperModule;
+      whisperModuleCache = mod;
+      return mod;
+    } catch (sourceError) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const mod = require('whisper.rn') as WhisperModule;
+        whisperModuleCache = mod;
+        return mod;
+      } catch (rootError) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const mod = require('whisper.rn/index') as WhisperModule;
+          whisperModuleCache = mod;
+          return mod;
+        } catch (finalError) {
+          const errors = [sourceError, rootError, finalError]
+            .map((value) => (value instanceof Error ? value.message : String(value)))
+            .join(' | ');
+          throw new Error(`Whisper module unavailable: ${errors}`);
+        }
+      }
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Whisper module unavailable: ${message}`);
@@ -268,39 +290,155 @@ const fetchJson = async (url: string, init: RequestInit, options?: FetchOptions)
   }
 };
 
+type OpenAIUploadStrategy = 'blob' | 'uri';
+
+const buildOpenAIMultipartPayload = async (
+  audioUri: string,
+  strategy: OpenAIUploadStrategy
+): Promise<{
+  part: Blob | { uri: string; name: string; type: string };
+  fileName?: string;
+  meta: Record<string, string>;
+}> => {
+  const file = new File(audioUri);
+  const name = file.name || `audio${getExtension(audioUri)}`;
+  const type = file.type || getMimeType(audioUri);
+  const uriScheme = audioUri.split(':')[0] || 'unknown';
+  const baseMeta = {
+    strategy,
+    uriScheme,
+    fileName: name,
+    mimeType: type,
+    fileExists: String(Boolean(file.exists)),
+    fileSize: String(typeof file.size === 'number' ? file.size : 0),
+    expoGo: String(IS_EXPO_GO),
+  };
+
+  if (strategy === 'blob') {
+    let bytes: Uint8Array | null = null;
+    try {
+      bytes = await file.bytes();
+    } catch (error) {
+      throw new Error(
+        `Failed to read audio bytes for Blob upload: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+    const { part, fileName } = buildMultipartAudioPart({
+      uri: audioUri,
+      name,
+      type,
+      bytes,
+    });
+    if (fileName && part instanceof Blob) {
+      return {
+        part,
+        fileName,
+        meta: {
+          ...baseMeta,
+          byteLength: String(bytes.byteLength),
+        },
+      };
+    }
+    throw new Error('Blob upload requested but Blob multipart part could not be created.');
+  }
+
+  return {
+    part: { uri: audioUri, name, type },
+    meta: baseMeta,
+  };
+};
+
 const transcribeOpenAI = async (audioUri: string, config: SpeechToTextConfig) => {
   if (!config.apiKey) {
     throw new Error('OpenAI API key missing');
   }
-  const file = new File(audioUri);
-  const form = new FormData();
-  form.append('file', {
-    uri: audioUri,
-    name: file.name || `audio${getExtension(audioUri)}`,
-    type: getMimeType(audioUri),
-  } as any);
-  form.append('model', config.model);
   const language = resolveLanguage(config.language);
-  if (language !== 'auto') {
-    form.append('language', language);
-  }
-  form.append('response_format', 'json');
+  const strategies: OpenAIUploadStrategy[] = IS_EXPO_GO ? ['uri', 'blob'] : ['blob', 'uri'];
+  let lastError: unknown = null;
 
-  const result = await fetchJson(
-    OPENAI_TRANSCRIBE_URL,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-      },
-      body: form,
-    },
-    { timeoutMs: DEFAULT_TIMEOUT_MS }
-  );
-  const text = typeof (result as { text?: unknown }).text === 'string'
-    ? (result as { text: string }).text
-    : '';
-  return text.trim();
+  for (let index = 0; index < strategies.length; index += 1) {
+    const strategy = strategies[index];
+    try {
+      const { part, fileName, meta } = await buildOpenAIMultipartPayload(audioUri, strategy);
+      void logInfo('OpenAI transcription starting', {
+        scope: 'speech',
+        extra: {
+          provider: 'openai',
+          model: config.model,
+          language,
+          attempt: String(index + 1),
+          ...meta,
+        },
+      });
+
+      const form = new FormData();
+      if (fileName) {
+        form.append('file', part as Blob, fileName);
+      } else {
+        form.append('file', part as any);
+      }
+      form.append('model', config.model);
+      if (language !== 'auto') {
+        form.append('language', language);
+      }
+      form.append('response_format', 'json');
+
+      const result = await fetchJson(
+        OPENAI_TRANSCRIBE_URL,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${config.apiKey}`,
+          },
+          body: form,
+        },
+        { timeoutMs: DEFAULT_TIMEOUT_MS }
+      );
+      const text = typeof (result as { text?: unknown }).text === 'string'
+        ? (result as { text: string }).text
+        : '';
+      void logInfo('OpenAI transcription completed', {
+        scope: 'speech',
+        extra: {
+          provider: 'openai',
+          model: config.model,
+          language,
+          attempt: String(index + 1),
+          strategy,
+          transcriptLength: String(text.trim().length),
+        },
+      });
+      return text.trim();
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      void logWarn('OpenAI transcription failed', {
+        scope: 'speech',
+        extra: {
+          provider: 'openai',
+          model: config.model,
+          language,
+          attempt: String(index + 1),
+          strategy,
+          expoGo: String(IS_EXPO_GO),
+          audioUri,
+          error: message,
+        },
+      });
+      if (index < strategies.length - 1) {
+        void logWarn('Retrying OpenAI transcription with alternate upload strategy', {
+          scope: 'speech',
+          extra: {
+            currentStrategy: strategy,
+            nextStrategy: strategies[index + 1],
+            expoGo: String(IS_EXPO_GO),
+          },
+        });
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'OpenAI transcription failed'));
 };
 
 const resolveOpenAIParseModel = (value?: string) => {

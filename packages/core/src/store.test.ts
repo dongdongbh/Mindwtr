@@ -60,7 +60,7 @@ describe('TaskStore', () => {
 
     it('should ignore reserved task fields when adding a task', async () => {
         const { addTask } = useTaskStore.getState();
-        await addTask('Safe Task', {
+        const result = await addTask('Safe Task', {
             id: 'custom-id',
             rev: 99,
             revBy: 'other-device',
@@ -69,6 +69,8 @@ describe('TaskStore', () => {
         });
 
         const task = useTaskStore.getState().tasks[0];
+        expect(result.success).toBe(true);
+        expect(result.id).toBe(task.id);
         expect(task.id).not.toBe('custom-id');
         expect(task.rev).toBe(1);
         expect(task.revBy).toBeTruthy();

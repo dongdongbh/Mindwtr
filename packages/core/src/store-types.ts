@@ -4,6 +4,7 @@ import type { TaskQueryOptions } from './storage';
 export type StoreActionResult = {
     success: boolean;
     error?: string;
+    id?: string;
 };
 
 /**

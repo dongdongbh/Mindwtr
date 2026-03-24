@@ -436,19 +436,20 @@ export function QuickAddModal() {
                 }
                 : null;
 
-            const taskId = generateUUID();
             const attachments = [...(initialProps?.attachments ?? [])];
             if (attachment) attachments.push(attachment);
             const props: Partial<Task> = {
                 status: 'inbox',
                 ...initialProps,
                 attachments,
-                id: taskId,
             };
             if (!props.status) props.status = 'inbox';
 
-            await addTask(displayTitle, props);
+            const addTaskResult = await addTask(displayTitle, props);
             close();
+
+            if (!addTaskResult.success || !addTaskResult.id) return;
+            const taskId = addTaskResult.id;
 
             const runSpeech = async (bytes: Uint8Array) => {
                 const timeZone = typeof Intl === 'object' && typeof Intl.DateTimeFormat === 'function'

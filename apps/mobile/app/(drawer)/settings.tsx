@@ -1981,7 +1981,7 @@ export default function SettingsPage() {
                 if (!value) return;
                 const ensuredPath = await ensureLogFilePath();
                 if (!ensuredPath) return;
-                await logInfo('Debug logging enabled', { scope: 'diagnostics' });
+                await logInfo('Debug logging enabled', { scope: 'diagnostics', force: true });
             })
             .catch(logSettingsError);
     };

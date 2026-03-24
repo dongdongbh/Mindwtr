@@ -49,7 +49,7 @@ type TaskActionContext = {
     debouncedSave: (data: AppData, onError?: (msg: string) => void) => void;
 };
 
-const actionOk = (): StoreActionResult => ({ success: true });
+const actionOk = (extra?: Omit<StoreActionResult, 'success'>): StoreActionResult => ({ success: true, ...extra });
 const actionFail = (error: string): StoreActionResult => ({ success: false, error });
 const normalizeProjectIdInput = (value: unknown): string | undefined => (
     typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined
@@ -176,6 +176,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave }: TaskA
             : {};
         const now = new Date().toISOString();
         let snapshot: AppData | null = null;
+        let createdTaskId = '';
 
         set((state) => {
             const deviceState = ensureDeviceId(state.settings);
@@ -184,9 +185,10 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave }: TaskA
             const resolvedOrder = !hasTaskOrder && resolvedProjectId
                 ? reserveNextProjectOrder(resolvedProjectId, state._allTasks, state.lastDataChangeAt)
                 : explicitOrder;
+            createdTaskId = uuidv4();
             const newTask: Task = {
                 ...initialProps,
-                id: uuidv4(),
+                id: createdTaskId,
                 title: trimmedTitle,
                 status: resolvedStatus,
                 taskMode: initialProps?.taskMode ?? 'task',
@@ -222,7 +224,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave }: TaskA
         if (snapshot) {
             debouncedSave(snapshot, (msg) => set({ error: msg }));
         }
-        return actionOk();
+        return actionOk({ id: createdTaskId });
     },
 
     /**

@@ -6,6 +6,7 @@ import './index.css';
 import { generateUUID, sendDailyHeartbeat, setStorageAdapter } from '@mindwtr/core';
 import { LanguageProvider } from './contexts/language-context';
 import { getInstallSourceOrFallback, isTauriRuntime } from './lib/runtime';
+import { normalizeAnalyticsInstallChannel } from './lib/install-source';
 import { reportError } from './lib/report-error';
 import { webStorage } from './lib/storage-adapter-web';
 import { logWarn, setupGlobalErrorLogging } from './lib/app-log';
@@ -53,42 +54,6 @@ const getDesktopOsMajor = (platform: string): string => {
     return 'unknown';
 };
 
-const normalizeDesktopChannel = (value: string | null | undefined): string => {
-    const normalized = String(value || '').trim().toLowerCase();
-    if (normalized === 'flatpak' || normalized.startsWith('flatpak:')) {
-        return 'flatpak';
-    }
-    switch (normalized) {
-        case 'mac-app-store':
-        case 'app-store':
-        case 'appstore':
-            return 'app-store';
-        case 'microsoft-store':
-        case 'microsoftstore':
-        case 'windows-store':
-        case 'ms-store':
-        case 'msstore':
-            return 'microsoft-store';
-        case 'brew':
-        case 'home-brew':
-            return 'homebrew';
-        case 'github-release':
-        case 'winget':
-        case 'homebrew':
-        case 'aur':
-        case 'aur-bin':
-        case 'aur-source':
-        case 'apt':
-        case 'rpm':
-        case 'snap':
-        case 'appimage':
-        case 'direct':
-            return normalized;
-        default:
-            return 'unknown';
-    }
-};
-
 const getOrCreateAnalyticsDistinctId = (): string => {
     const existing = localStorage.getItem(ANALYTICS_DISTINCT_ID_KEY)?.trim();
     if (existing) return existing;
@@ -101,7 +66,7 @@ const getDesktopChannel = async (): Promise<string> => {
     if (!isTauriRuntime()) return 'web';
     try {
         const source = await getInstallSourceOrFallback('unknown');
-        return normalizeDesktopChannel(source);
+        return normalizeAnalyticsInstallChannel(source);
     } catch {
         return 'unknown';
     }
