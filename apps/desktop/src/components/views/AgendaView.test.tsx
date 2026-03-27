@@ -192,4 +192,34 @@ describe('AgendaView', () => {
         expect(getByText('Work next task')).toBeInTheDocument();
         expect(getByText('Home next task')).toBeInTheDocument();
     });
+
+    it('renders every grouped no-context task when the list is large', () => {
+        const tasks = Array.from({ length: 30 }, (_, index) => ({
+            id: `next-task-${index + 1}`,
+            title: `Next task ${index + 1}`,
+            status: 'next',
+            tags: [],
+            contexts: [],
+            createdAt: nowIso,
+            updatedAt: nowIso,
+        } satisfies Task));
+
+        useTaskStore.setState({
+            tasks,
+            _allTasks: tasks,
+            projects: [],
+            _allProjects: [],
+            areas: [],
+            _allAreas: [],
+            settings: {},
+            highlightTaskId: null,
+        });
+
+        const { getByLabelText, getByText } = renderAgenda();
+        const groupSelect = getByLabelText('Group') as HTMLSelectElement;
+        fireEvent.change(groupSelect, { target: { value: 'context' } });
+
+        expect(getByText(/no context/i)).toBeInTheDocument();
+        expect(getByText('Next task 30')).toBeInTheDocument();
+    });
 });

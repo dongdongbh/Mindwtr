@@ -7,8 +7,10 @@ services:
     container_name: mindwtr-cloud
     hostname: mindwtr-cloud
     restart: always
+    cpus: "1.0"
+    mem_limit: 512m
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8787/health || echo 'Health check failed'"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8787/health >/dev/null || exit 1"]
       interval: 1m30s
       timeout: 10s
       retries: 3
@@ -16,7 +18,7 @@ services:
     ports:
       - 8787:8787
     environment:
-      - MINDWTR_CLOUD_AUTH_TOKENS=your_token_here
+      - MINDWTR_CLOUD_AUTH_TOKENS=${MINDWTR_CLOUD_AUTH_TOKENS:?MINDWTR_CLOUD_AUTH_TOKENS must be set}
     volumes:
       - ./data:/app/cloud_data
 
@@ -28,5 +30,7 @@ services:
     container_name: mindwtr-app
     hostname: mindwtr-app
     restart: always
+    cpus: "1.0"
+    mem_limit: 512m
     ports:
       - 5173:5173

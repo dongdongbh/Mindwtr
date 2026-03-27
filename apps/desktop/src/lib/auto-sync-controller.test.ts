@@ -148,4 +148,41 @@ describe('createDesktopAutoSyncController', () => {
             expect(performSync).toHaveBeenCalledTimes(1);
         });
     });
+
+    it('pauses focus and blur syncs while edits are active without blocking save-driven sync', async () => {
+        const scheduler = createManualScheduler(50_000);
+        let pauseWindowSync = true;
+
+        const performSync = vi.fn(async () => ({ success: true }));
+        const controller = createDesktopAutoSyncController({
+            canSync: async () => true,
+            performSync,
+            flushPendingSave: async () => undefined,
+            reportError: vi.fn(),
+            isRuntimeActive: () => true,
+            shouldPauseWindowSync: () => pauseWindowSync,
+            now: scheduler.now,
+            setTimer: scheduler.setTimer,
+            clearTimer: scheduler.clearTimer,
+            minIntervalMs: 0,
+        });
+
+        controller.handleBlur();
+        controller.handleFocus();
+        await Promise.resolve();
+
+        expect(performSync).not.toHaveBeenCalled();
+
+        controller.handleDataChange();
+        await scheduler.advanceBy(2_000);
+        await waitForAssertion(() => {
+            expect(performSync).toHaveBeenCalledTimes(1);
+        });
+
+        pauseWindowSync = false;
+        controller.handleBlur();
+        await waitForAssertion(() => {
+            expect(performSync).toHaveBeenCalledTimes(2);
+        });
+    });
 });

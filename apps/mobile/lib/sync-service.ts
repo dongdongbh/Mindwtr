@@ -471,11 +471,15 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
           preSyncedLocalData = localData;
           ensureLocalSnapshotFresh();
         }
+        logSyncInfo('Attachment pre-sync complete', {
+          backend,
+          mutated: preMutated ? 'true' : 'false',
+        });
       } catch (error) {
         if (error instanceof LocalSyncAbort) {
           throw error;
         }
-        logSyncWarning('Attachment pre-sync warning', error);
+        logSyncWarning('Attachment pre-sync warning; continuing sync merge', error);
       }
 
       const readRemoteDataByBackend = async (): Promise<AppData | null> => {
@@ -907,6 +911,7 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
           lastSyncAt: now,
           lastSyncStatus: 'error',
           lastSyncError: `${safeMessage}${logHint}`,
+          lastSyncStats: undefined,
           lastSyncHistory: nextHistory,
         });
       } catch (e) {

@@ -97,6 +97,33 @@ describe('search', () => {
         expect(results.map(t => t.id)).toEqual(['t1']);
     });
 
+    it('matches parent context filters against slash-delimited child contexts', () => {
+        const nowIso = new Date('2025-01-01T00:00:00Z').toISOString();
+        const tasks: Task[] = [
+            {
+                id: 't1',
+                title: 'Team sync',
+                status: 'next',
+                tags: [],
+                contexts: ['@work/meetings'],
+                createdAt: nowIso,
+                updatedAt: nowIso,
+            },
+            {
+                id: 't2',
+                title: 'Home admin',
+                status: 'next',
+                tags: [],
+                contexts: ['@home'],
+                createdAt: nowIso,
+                updatedAt: nowIso,
+            },
+        ];
+
+        const results = filterTasksBySearch(tasks, [], 'context:work');
+        expect(results.map((task) => task.id)).toEqual(['t1']);
+    });
+
     it('matches project filter by title', () => {
         const nowIso = new Date('2025-01-01T00:00:00Z').toISOString();
         const projects: Project[] = [

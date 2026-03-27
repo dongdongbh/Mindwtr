@@ -2,7 +2,7 @@
 
 Mindwtr provides official Docker support for running:
 - **mindwtr-app**: The desktop web/PWA build, served by Nginx.
-- **mindwtr-cloud**: The lightweight sync server.
+- **mindwtr-cloud**: The lightweight sync server and task automation REST API.
 
 These are available as Docker images and can be easily orchestrated using Docker Compose.
 
@@ -26,6 +26,7 @@ The easiest way to get started is using the `compose.yaml` file included in the 
 3. **Access the services**:
    - **PWA (Web App):** Open `http://localhost:5173` in your browser.
    - **Cloud Health Check:** Open `http://localhost:8787/health`.
+   - **Cloud Sync + REST API Base URL:** `http://localhost:8787/v1`
 
 ---
 
@@ -59,6 +60,26 @@ To connect your Mindwtr clients (Desktop or Mobile) to this self-hosted cloud:
    ```
    *Mindwtr will automatically append `/data` to this URL.*
 4. Enter the **same token** you configured in `MINDWTR_CLOUD_AUTH_TOKENS`.
+
+### Task Automation API
+
+The same `mindwtr-cloud` container also exposes the REST API for task automation. It uses the same base URL and the same bearer token as sync.
+
+Common endpoints:
+
+- `GET /v1/data` and `PUT /v1/data` for sync
+- `GET /v1/tasks` and `POST /v1/tasks` for task listing and creation
+- `GET /v1/projects` for projects
+- `GET /v1/search?query=...` for task and project search
+
+Example:
+
+```bash
+curl -X POST http://localhost:8787/v1/tasks \
+  -H "Authorization: Bearer your_token_here" \
+  -H "Content-Type: application/json" \
+  -d '{"input":"Review PR @work /due:tomorrow"}'
+```
 
 ### CORS Origin (Production)
 

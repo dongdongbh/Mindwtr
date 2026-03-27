@@ -4,7 +4,7 @@ This page is an operations-focused companion to [[Cloud Sync]]. It covers how to
 
 ## Scope
 
-- Mindwtr Cloud is a lightweight JSON sync service, not a full hosted app UI.
+- Mindwtr Cloud is a lightweight self-hosted backend for JSON sync and token-authenticated task automation endpoints, not a full hosted app UI.
 - It is best for single-tenant or small trusted deployments.
 - You should run it behind HTTPS reverse proxying and standard server hardening controls.
 
@@ -16,6 +16,11 @@ Recommended layout:
 2. Cloud server container/process listens on private interface.
 3. Persistent volume stores `MINDWTR_CLOUD_DATA_DIR`.
 4. Regular backups snapshot the data directory.
+
+The same cloud service handles both:
+
+- Sync traffic under `/v1/data`
+- Task automation endpoints such as `/v1/tasks`, `/v1/projects`, and `/v1/search`
 
 ## Environment Baseline
 
@@ -111,6 +116,7 @@ Operational notes:
 - Pin the Bun image tag instead of floating latest for stable upgrades.
 - Mount `/data` on durable disk, not ephemeral container FS.
 - Keep tokens in secrets manager or `.env` outside git.
+- The same deployed container serves both sync and REST API traffic on the same host/port.
 
 ## Reverse Proxy Checklist
 
@@ -157,6 +163,7 @@ Safe rolling procedure:
 3. Run smoke checks:
    - `GET /health`
    - authenticated `GET /v1/data`
+   - authenticated `GET /v1/tasks`
    - small and large attachment upload/download
 4. Deploy to production.
 5. Monitor logs for `rate limit`, `invalid payload`, and `permission denied` errors.

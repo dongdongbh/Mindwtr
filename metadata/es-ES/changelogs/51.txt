@@ -1,0 +1,4 @@
+- Reforzamos el dictado en Android y la carga de Whisper/OpenAI, con diagnosticos mas claros cuando falla la configuracion de transcripcion.
+- Restauramos el campo Proyecto en el editor de tareas movil y corregimos las actualizaciones tras crear tareas por voz.
+- Limpiamos detalles de conflictos obsoletos despues de fallos posteriores de sync para que el estado movil siga siendo fiable.
+- Mejoramos la fiabilidad compartida del sync con un orden de merge mas seguro y validacion mas estricta en cloud y MCP.

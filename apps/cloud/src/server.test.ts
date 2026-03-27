@@ -82,6 +82,44 @@ describe('cloud server utils', () => {
         expect(__cloudTestUtils.getClientIp(req, true)).toBe('203.0.113.10');
     });
 
+    test('derives auth failure rate keys from the best available client identity', () => {
+        const token = 'demo-token-1234567890';
+        const req = new Request('http://localhost/v1/data', {
+            headers: {
+                authorization: `Bearer ${token}`,
+                'x-forwarded-for': '203.0.113.10, 10.0.0.1',
+            },
+        });
+
+        expect(__cloudTestUtils.getAuthFailureRateKey(req, {
+            trustProxyHeaders: true,
+            requestIpAddress: '127.0.0.1',
+            token,
+        })).toBe('auth-failure:ip:203.0.113.10');
+
+        expect(__cloudTestUtils.getAuthFailureRateKey(req, {
+            trustProxyHeaders: false,
+            requestIpAddress: '127.0.0.1',
+            token,
+        })).toBe('auth-failure:ip:127.0.0.1');
+
+        expect(__cloudTestUtils.getAuthFailureRateKey(req, {
+            trustProxyHeaders: false,
+            requestIpAddress: null,
+            token,
+        })).toBe(`auth-failure:token:${__cloudTestUtils.tokenToKey(token)}`);
+
+        expect(__cloudTestUtils.getAuthFailureRateKey(new Request('http://localhost/v1/data', {
+            headers: {
+                authorization: 'Bearer malformed',
+            },
+        }), {
+            trustProxyHeaders: false,
+            requestIpAddress: null,
+            authHeader: 'Bearer malformed',
+        })).toBe(`auth-failure:header:${__cloudTestUtils.tokenToKey('Bearer malformed')}`);
+    });
+
     test('rejects invalid app data payload', () => {
         const result = __cloudTestUtils.validateAppData({ tasks: 'invalid', projects: [] });
         expect(result.ok).toBe(false);

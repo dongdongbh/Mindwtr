@@ -1,4 +1,4 @@
-- Matched more inbox and task-editor settings with desktop while keeping the mobile card-based processing flow.
-- Simplified mobile task-editor layout settings with presets, collapsible sections, and focused field actions.
-- Improved mobile inbox/list interactions and clearer auto-sync failure feedback.
-- Hardened sync reliability with safer refresh handling and stricter validation of task and project updates.
+- Restored the Project field in the mobile task editor so project assignment stays available while editing tasks.
+- Cleared stale sync conflict details after later sync failures so mobile sync status stays accurate.
+- Improved shared merge handling for future timestamps and related-record ordering.
+- Tightened self-hosted cloud and MCP validation around auth rate limits and quick-add input handling.

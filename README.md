@@ -123,7 +123,7 @@ Mindwtr is built to be **simple by default and powerful when you need it**. We f
 - 📥 **Inbox** - Capture zone with processing wizard
 - 🎯 **Focus** - Agenda (time-based) + Next Actions in one view
 - 📁 **Projects** - Multi-step outcomes with areas
-- 🏷️ **Contexts** - Hierarchical contexts (@work/meetings)
+- 🏷️ **Contexts** - Slash-delimited contexts with parent matching (@work/meetings)
 - ⏳ **Waiting For** - Delegated items
 - 💭 **Someday/Maybe** - Deferred ideas
 - 📅 **Calendar** - Time-based planning
@@ -340,6 +340,8 @@ You can help in several ways:
 - ☁️ Expand native iCloud/CloudKit sync to macOS desktop
 - 🗣️ iOS Reminders Inbox import (Siri capture -> Mindwtr Inbox)
 - ✉️ Email to Inbox
+- 📥 Todoist import
+- 🕒 Natural language input using `chrono-node`
 
 ## Documentation
 

@@ -20,8 +20,10 @@ export const buildMultipartAudioPart = ({
   const BlobCtor = globalThis.Blob;
   if (bytes && bytes.byteLength > 0 && typeof BlobCtor === 'function') {
     try {
+      const blobBytes = new Uint8Array(bytes.byteLength);
+      blobBytes.set(bytes);
       return {
-        part: new BlobCtor([bytes], { type }),
+        part: new BlobCtor([blobBytes.buffer], { type }),
         fileName: name,
       };
     } catch {

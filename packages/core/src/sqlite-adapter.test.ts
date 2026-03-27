@@ -226,6 +226,132 @@ describeSqlite('SqliteAdapter', () => {
         expect(area.revBy).toBe('device-desktop');
     });
 
+    it('saves and deletes linked area, project, section, and task records without foreign key failures', async () => {
+        const now = new Date().toISOString();
+        const linkedData: AppData = {
+            tasks: [
+                {
+                    id: 'task-linked-1',
+                    title: 'Task in section',
+                    status: 'next',
+                    projectId: 'proj-linked-1',
+                    sectionId: 'section-linked-1',
+                    areaId: 'area-linked-1',
+                    createdAt: now,
+                    updatedAt: now,
+                },
+            ],
+            projects: [
+                {
+                    id: 'proj-linked-1',
+                    title: 'Linked project',
+                    status: 'active',
+                    color: '#2563EB',
+                    order: 0,
+                    areaId: 'area-linked-1',
+                    createdAt: now,
+                    updatedAt: now,
+                },
+            ],
+            sections: [
+                {
+                    id: 'section-linked-1',
+                    projectId: 'proj-linked-1',
+                    title: 'Linked section',
+                    order: 0,
+                    createdAt: now,
+                    updatedAt: now,
+                },
+            ],
+            areas: [
+                {
+                    id: 'area-linked-1',
+                    name: 'Linked area',
+                    order: 0,
+                },
+            ],
+            settings: {},
+        };
+
+        await expect(adapter.saveData(linkedData)).resolves.toBeUndefined();
+
+        const loaded = await adapter.getData();
+        expect(loaded.tasks[0]?.projectId).toBe('proj-linked-1');
+        expect(loaded.tasks[0]?.sectionId).toBe('section-linked-1');
+        expect(loaded.tasks[0]?.areaId).toBe('area-linked-1');
+        expect(loaded.projects[0]?.areaId).toBe('area-linked-1');
+        expect(loaded.sections[0]?.projectId).toBe('proj-linked-1');
+
+        await expect(adapter.saveData({
+            tasks: [],
+            projects: [],
+            sections: [],
+            areas: [],
+            settings: {},
+        })).resolves.toBeUndefined();
+
+        const cleared = await adapter.getData();
+        expect(cleared.tasks).toHaveLength(0);
+        expect(cleared.projects).toHaveLength(0);
+        expect(cleared.sections).toHaveLength(0);
+        expect(cleared.areas).toHaveLength(0);
+    });
+
+    it('keeps task references consistent when a project row is hard-deleted', async () => {
+        const now = new Date().toISOString();
+        await adapter.saveData({
+            tasks: [
+                {
+                    id: 'task-hard-delete-1',
+                    title: 'Task in deleted project',
+                    status: 'next',
+                    projectId: 'proj-hard-delete-1',
+                    sectionId: 'section-hard-delete-1',
+                    createdAt: now,
+                    updatedAt: now,
+                },
+            ],
+            projects: [
+                {
+                    id: 'proj-hard-delete-1',
+                    title: 'Project to delete',
+                    status: 'active',
+                    color: '#2563EB',
+                    order: 0,
+                    createdAt: now,
+                    updatedAt: now,
+                },
+            ],
+            sections: [
+                {
+                    id: 'section-hard-delete-1',
+                    projectId: 'proj-hard-delete-1',
+                    title: 'Section to delete',
+                    order: 0,
+                    createdAt: now,
+                    updatedAt: now,
+                },
+            ],
+            areas: [],
+            settings: {},
+        });
+
+        runSql(db, 'DELETE FROM projects WHERE id = ?', ['proj-hard-delete-1']);
+
+        const taskRow = getSql<{ projectId: string | null; sectionId: string | null }>(
+            db,
+            'SELECT projectId, sectionId FROM tasks WHERE id = ?',
+            ['task-hard-delete-1']
+        );
+        const remainingSections = allSql<{ id: string }>(db, 'SELECT id FROM sections');
+
+        expect(taskRow).toEqual({
+            projectId: null,
+            sectionId: null,
+        });
+        expect(remainingSections).toHaveLength(0);
+    });
+
     it('returns lightweight search results for FTS queries', async () => {
         const allMock = vi
             .fn()

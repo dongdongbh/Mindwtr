@@ -305,6 +305,33 @@ describe('mobile sync-service runtime', () => {
     expect(logMocks.logSyncError).not.toHaveBeenCalled();
   });
 
+  it('clears stale sync stats when a sync error occurs after prior conflicts', async () => {
+    storeStateRef.current = {
+      ...storeStateRef.current,
+      settings: {
+        lastSyncStatus: 'conflict',
+        lastSyncStats: {
+          tasks: { mergedTotal: 1, conflicts: 3, conflictIds: ['task-1'], maxClockSkewMs: 0, timestampAdjustments: 0 },
+          projects: { mergedTotal: 0, conflicts: 0, conflictIds: [], maxClockSkewMs: 0, timestampAdjustments: 0 },
+          sections: { mergedTotal: 0, conflicts: 0, conflictIds: [], maxClockSkewMs: 0, timestampAdjustments: 0 },
+          areas: { mergedTotal: 0, conflicts: 0, conflictIds: [], maxClockSkewMs: 0, timestampAdjustments: 0 },
+        },
+      },
+      updateSettings: vi.fn().mockResolvedValue(undefined),
+    };
+    coreMocks.webdavGetJson.mockRejectedValue(new Error('sync read failed'));
+
+    const syncServiceModule = await syncServiceModulePromise;
+    const result = await syncServiceModule.performMobileSync();
+
+    expect(result.success).toBe(false);
+    expect(coreMocks.performSyncCycle).toHaveBeenCalledTimes(1);
+    expect(storeStateRef.current.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      lastSyncStatus: 'error',
+      lastSyncStats: undefined,
+    }));
+  });
+
   it('reports sync activity state while a sync cycle is in flight', async () => {
     let releaseSync!: () => void;
     const syncGate = new Promise<void>((resolve) => {

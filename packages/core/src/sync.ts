@@ -1,117 +1,50 @@
-
-import type { AppData, Attachment, Project, Task, Area, Section, SettingsSyncGroup } from './types';
-import { normalizeTaskForLoad } from './task-status';
+import type { AppData, Attachment, Area, Project, Task } from './types';
 import { logWarn } from './logger';
 import {
-    AI_PROVIDER_VALUE_SET,
-    AI_REASONING_EFFORT_VALUE_SET,
-    SETTINGS_DENSITY_VALUE_SET,
-    SETTINGS_KEYBINDING_STYLE_VALUE_SET,
-    SETTINGS_LANGUAGE_VALUE_SET,
-    SETTINGS_THEME_VALUE_SET,
-    SETTINGS_TIME_FORMAT_VALUE_SET,
-    SETTINGS_WEEK_START_VALUE_SET,
-    STT_FIELD_STRATEGY_VALUE_SET,
-    STT_MODE_VALUE_SET,
-    STT_PROVIDER_VALUE_SET,
-} from './settings-options';
+    type ConflictReason,
+    type EntityMergeStats,
+    type MergeResult,
+    type SyncCycleIO,
+    type SyncCycleResult,
+    type SyncHistoryEntry,
+    CLOCK_SKEW_THRESHOLD_MS,
+} from './sync-types';
+import {
+    isValidTimestamp,
+    normalizeAppData,
+    normalizeProjectForSyncMerge,
+    normalizeRevisionMetadata,
+    normalizeTaskForSyncMerge,
+    validateMergedSyncData,
+    validateSyncPayloadShape,
+} from './sync-normalization';
+import { mergeSettingsForSync } from './sync-merge-settings';
+import {
+    chooseDeterministicWinner,
+    collectComparableDiffKeys,
+    hashComparableSignature,
+    normalizeProjectForContentComparison,
+    normalizeSectionForContentComparison,
+    normalizeTaskForContentComparison,
+    toComparableSignature,
+    toComparableValue,
+} from './sync-signatures';
+import { purgeExpiredTombstones } from './sync-tombstones';
 
-export interface EntityMergeStats {
-    localTotal: number;
-    incomingTotal: number;
-    mergedTotal: number;
-    localOnly: number;
-    incomingOnly: number;
-    conflicts: number;
-    resolvedUsingLocal: number;
-    resolvedUsingIncoming: number;
-    deletionsWon: number;
-    conflictIds: string[];
-    maxClockSkewMs: number;
-    timestampAdjustments: number;
-    timestampAdjustmentIds: string[];
-    conflictReasonCounts?: Partial<Record<ConflictReason, number>>;
-    conflictSamples?: MergeConflictSample[];
-}
-
-export type ConflictReason = 'revision' | 'deleteState' | 'content';
-
-export interface MergeConflictSample {
-    id: string;
-    winner: 'local' | 'incoming';
-    reasons: ConflictReason[];
-    hasRevision: boolean;
-    timeDiffMs: number;
-    localUpdatedAt: string;
-    incomingUpdatedAt: string;
-    localDeletedAt?: string;
-    incomingDeletedAt?: string;
-    localRev: number;
-    incomingRev: number;
-    localRevBy?: string;
-    incomingRevBy?: string;
-    localComparableHash: string;
-    incomingComparableHash: string;
-    diffKeys: string[];
-}
-
-export interface MergeStats {
-    tasks: EntityMergeStats;
-    projects: EntityMergeStats;
-    sections: EntityMergeStats;
-    areas: EntityMergeStats;
-}
-
-export interface MergeResult {
-    data: AppData;
-    stats: MergeStats;
-}
-
-export type SyncHistoryEntry = {
-    at: string;
-    status: 'success' | 'conflict' | 'error';
-    backend?: 'file' | 'webdav' | 'cloud' | 'cloudkit' | 'off';
-    type?: 'push' | 'pull' | 'merge';
-    conflicts: number;
-    conflictIds: string[];
-    maxClockSkewMs: number;
-    timestampAdjustments: number;
-    details?: string;
-    error?: string;
-};
-
-// Log clock skew warnings if merges show >5 minutes drift.
-export const CLOCK_SKEW_THRESHOLD_MS = 5 * 60 * 1000;
-// Within a small delete-vs-live window, prefer the live record to avoid accidental data loss
-// from near-simultaneous "edit vs delete" races across devices.
-const DELETE_VS_LIVE_AMBIGUOUS_WINDOW_MS = 5 * 1000;
-const DEFAULT_TOMBSTONE_RETENTION_DAYS = 90;
-const MIN_TOMBSTONE_RETENTION_DAYS = 1;
-const MAX_TOMBSTONE_RETENTION_DAYS = 3650;
-
-export type SyncStep = 'read-local' | 'read-remote' | 'merge' | 'write-local' | 'write-remote';
-
-export type SyncCycleIO = {
-    readLocal: () => Promise<AppData>;
-    readRemote: () => Promise<AppData | null | undefined>;
-    writeLocal: (data: AppData) => Promise<void>;
-    writeRemote: (data: AppData) => Promise<void>;
-    historyContext?: {
-        backend?: SyncHistoryEntry['backend'];
-        type?: SyncHistoryEntry['type'];
-        details?: string;
-    };
-    tombstoneRetentionDays?: number;
-    now?: () => string;
-    onStep?: (step: SyncStep) => void;
-    yieldToUi?: () => Promise<void>;
-};
-
-export type SyncCycleResult = {
-    data: AppData;
-    stats: MergeStats;
-    status: 'success' | 'conflict';
-};
+export type {
+    ConflictReason,
+    EntityMergeStats,
+    MergeConflictSample,
+    MergeResult,
+    MergeStats,
+    SyncCycleIO,
+    SyncCycleResult,
+    SyncHistoryEntry,
+    SyncStep,
+} from './sync-types';
+export { CLOCK_SKEW_THRESHOLD_MS } from './sync-types';
+export { normalizeAppData } from './sync-normalization';
+export { purgeExpiredTombstones } from './sync-tombstones';
 
 export const appendSyncHistory = (
     settings: AppData['settings'] | undefined,
@@ -131,688 +64,6 @@ export const appendSyncHistory = (
     return next.slice(0, Math.max(1, limit));
 };
 
-export const normalizeAppData = (data: AppData): AppData => ({
-    tasks: Array.isArray(data.tasks) ? data.tasks : [],
-    projects: Array.isArray(data.projects) ? data.projects : [],
-    sections: Array.isArray(data.sections) ? data.sections : [],
-    areas: Array.isArray(data.areas) ? data.areas : [],
-    settings: data.settings ?? {},
-});
-
-const isNonEmptyString = (value: unknown): value is string =>
-    typeof value === 'string' && value.trim().length > 0;
-
-const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
-    typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const isValidTimestamp = (value: unknown): value is string =>
-    typeof value === 'string' && Number.isFinite(Date.parse(value));
-
-const normalizeOptionalString = (value: unknown): string | undefined =>
-    typeof value === 'string' && value.trim().length > 0 ? value : undefined;
-
-const normalizeStringArray = (value: unknown): string[] =>
-    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-
-type RevisionMetadata = {
-    rev?: unknown;
-    revBy?: unknown;
-};
-
-const normalizeRevisionMetadata = <T extends RevisionMetadata>(item: T): T => {
-    const normalized = { ...item };
-    const rawRev = normalized.rev;
-    if (
-        typeof rawRev !== 'number'
-        || !Number.isFinite(rawRev)
-        || !Number.isInteger(rawRev)
-        || rawRev < 0
-    ) {
-        delete normalized.rev;
-    }
-    const rawRevBy = normalized.revBy;
-    if (typeof rawRevBy === 'string') {
-        const trimmed = rawRevBy.trim();
-        if (trimmed.length > 0) {
-            normalized.revBy = trimmed;
-        } else {
-            delete normalized.revBy;
-        }
-    } else {
-        delete normalized.revBy;
-    }
-    return normalized;
-};
-
-const normalizeProjectStatusForMerge = (value: unknown): Project['status'] => {
-    if (value === 'active' || value === 'someday' || value === 'waiting' || value === 'archived') {
-        return value;
-    }
-    if (typeof value === 'string') {
-        const lowered = value.toLowerCase().trim();
-        if (lowered === 'active' || lowered === 'someday' || lowered === 'waiting' || lowered === 'archived') {
-            return lowered as Project['status'];
-        }
-    }
-    return 'active';
-};
-
-const normalizeTaskForSyncMerge = (task: Task, nowIso: string): Task => {
-    const normalized = normalizeTaskForLoad(task, nowIso);
-    return {
-        ...normalized,
-        tags: normalizeStringArray(normalized.tags),
-        contexts: normalizeStringArray(normalized.contexts),
-        sectionId: normalizeOptionalString(normalized.sectionId),
-        isFocusedToday: normalized.isFocusedToday === true,
-    };
-};
-
-const normalizeProjectForSyncMerge = (project: Project): Project => {
-    return {
-        ...project,
-        status: normalizeProjectStatusForMerge(project.status),
-        color: normalizeOptionalString(project.color) ?? '#6B7280',
-        tagIds: normalizeStringArray(project.tagIds),
-        isSequential: project.isSequential === true,
-        isFocused: project.isFocused === true,
-        areaId: normalizeOptionalString(project.areaId),
-        areaTitle: normalizeOptionalString(project.areaTitle),
-    };
-};
-
-const validateRevisionFields = (
-    item: Record<string, unknown>,
-    label: string,
-    index: number,
-    errors: string[]
-) => {
-    const rev = item.rev;
-    if (rev !== undefined) {
-        if (typeof rev !== 'number' || !Number.isFinite(rev) || rev < 0 || !Number.isInteger(rev)) {
-            errors.push(`${label}[${index}].rev must be a non-negative integer when present`);
-        }
-    }
-    const revBy = item.revBy;
-    if (revBy !== undefined && !isNonEmptyString(revBy)) {
-        errors.push(`${label}[${index}].revBy must be a non-empty string when present`);
-    }
-};
-
-const validateEntityShape = (
-    items: unknown[],
-    label: 'tasks' | 'projects' | 'sections',
-    errors: string[]
-) => {
-    for (let index = 0; index < items.length; index += 1) {
-        const item = items[index];
-        if (!isObjectRecord(item)) {
-            errors.push(`${label}[${index}] must be an object`);
-            continue;
-        }
-        if (!isNonEmptyString(item.id)) {
-            errors.push(`${label}[${index}].id must be a non-empty string`);
-        }
-        if (item.createdAt !== undefined && !isNonEmptyString(item.createdAt)) {
-            errors.push(`${label}[${index}].createdAt must be a non-empty string when present`);
-        } else if (isNonEmptyString(item.createdAt) && !isValidTimestamp(item.createdAt)) {
-            errors.push(`${label}[${index}].createdAt must be a valid ISO timestamp when present`);
-        }
-        if (!isNonEmptyString(item.updatedAt)) {
-            errors.push(`${label}[${index}].updatedAt must be a non-empty string`);
-        } else if (!isValidTimestamp(item.updatedAt)) {
-            errors.push(`${label}[${index}].updatedAt must be a valid ISO timestamp`);
-        }
-        if (isValidTimestamp(item.createdAt) && isValidTimestamp(item.updatedAt)) {
-            const createdMs = Date.parse(item.createdAt);
-            const updatedMs = Date.parse(item.updatedAt);
-            if (updatedMs < createdMs) {
-                errors.push(`${label}[${index}].updatedAt must be greater than or equal to createdAt`);
-            }
-        }
-        validateRevisionFields(item, label, index, errors);
-    }
-};
-
-const validateMergedSyncData = (data: AppData): string[] => {
-    const errors: string[] = [];
-    if (!Array.isArray(data.tasks)) errors.push('tasks must be an array');
-    if (!Array.isArray(data.projects)) errors.push('projects must be an array');
-    if (!Array.isArray(data.sections)) errors.push('sections must be an array');
-    if (!Array.isArray(data.areas)) errors.push('areas must be an array');
-    if (!isObjectRecord(data.settings)) errors.push('settings must be an object');
-
-    if (Array.isArray(data.tasks)) validateEntityShape(data.tasks as unknown[], 'tasks', errors);
-    if (Array.isArray(data.projects)) validateEntityShape(data.projects as unknown[], 'projects', errors);
-    if (Array.isArray(data.sections)) validateEntityShape(data.sections as unknown[], 'sections', errors);
-    if (Array.isArray(data.areas)) {
-        for (let index = 0; index < data.areas.length; index += 1) {
-            const area = data.areas[index] as unknown;
-            if (!isObjectRecord(area)) {
-                errors.push(`areas[${index}] must be an object`);
-                continue;
-            }
-            if (!isNonEmptyString(area.id)) {
-                errors.push(`areas[${index}].id must be a non-empty string`);
-            }
-            if (!isNonEmptyString(area.name)) {
-                errors.push(`areas[${index}].name must be a non-empty string`);
-            }
-            if (!isNonEmptyString(area.createdAt)) {
-                errors.push(`areas[${index}].createdAt must be a non-empty string`);
-            } else if (!isValidTimestamp(area.createdAt)) {
-                errors.push(`areas[${index}].createdAt must be a valid ISO timestamp`);
-            }
-            if (!isNonEmptyString(area.updatedAt)) {
-                errors.push(`areas[${index}].updatedAt must be a non-empty string`);
-            } else if (!isValidTimestamp(area.updatedAt)) {
-                errors.push(`areas[${index}].updatedAt must be a valid ISO timestamp`);
-            }
-            if (isValidTimestamp(area.createdAt) && isValidTimestamp(area.updatedAt)) {
-                const createdMs = Date.parse(area.createdAt);
-                const updatedMs = Date.parse(area.updatedAt);
-                if (updatedMs < createdMs) {
-                    errors.push(`areas[${index}].updatedAt must be greater than or equal to createdAt`);
-                }
-            }
-            validateRevisionFields(area, 'areas', index, errors);
-        }
-    }
-    return errors;
-};
-
-const validateSyncPayloadShape = (data: unknown, source: 'local' | 'remote'): string[] => {
-    const errors: string[] = [];
-    if (!isObjectRecord(data)) {
-        errors.push(`${source} payload must be an object`);
-        return errors;
-    }
-    const record = data as Record<string, unknown>;
-    if (record.tasks !== undefined && !Array.isArray(record.tasks)) {
-        errors.push(`${source} payload field "tasks" must be an array when present`);
-    }
-    if (record.projects !== undefined && !Array.isArray(record.projects)) {
-        errors.push(`${source} payload field "projects" must be an array when present`);
-    }
-    if (record.sections !== undefined && !Array.isArray(record.sections)) {
-        errors.push(`${source} payload field "sections" must be an array when present`);
-    }
-    if (record.areas !== undefined && !Array.isArray(record.areas)) {
-        errors.push(`${source} payload field "areas" must be an array when present`);
-    }
-    if (record.settings !== undefined && !isObjectRecord(record.settings)) {
-        errors.push(`${source} payload field "settings" must be an object when present`);
-    }
-    return errors;
-};
-
-const resolveTombstoneRetentionDays = (value?: number): number => {
-    if (!Number.isFinite(value)) return DEFAULT_TOMBSTONE_RETENTION_DAYS;
-    const rounded = Math.floor(value as number);
-    return Math.min(MAX_TOMBSTONE_RETENTION_DAYS, Math.max(MIN_TOMBSTONE_RETENTION_DAYS, rounded));
-};
-
-const parseTimestampOrInfinity = (value?: string): number => {
-    if (!value) return Number.POSITIVE_INFINITY;
-    const parsed = Date.parse(value);
-    return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
-};
-
-const pruneAttachmentTombstones = (
-    attachments: Attachment[] | undefined,
-    cutoffMs: number
-): { next: Attachment[] | undefined; removed: number } => {
-    if (!attachments || attachments.length === 0) return { next: attachments, removed: 0 };
-    let removed = 0;
-    const next = attachments.filter((attachment) => {
-        if (!attachment.deletedAt) return true;
-        const deletedMs = parseTimestampOrInfinity(attachment.deletedAt);
-        if (deletedMs <= cutoffMs) {
-            removed += 1;
-            return false;
-        }
-        return true;
-    });
-    return {
-        next: next.length > 0 ? next : undefined,
-        removed,
-    };
-};
-
-export const purgeExpiredTombstones = (
-    data: AppData,
-    nowIso: string,
-    retentionDays?: number
-): {
-    data: AppData;
-    removedTaskTombstones: number;
-    removedAttachmentTombstones: number;
-    removedPendingRemoteDeletes: number;
-} => {
-    const nowMs = Date.parse(nowIso);
-    if (!Number.isFinite(nowMs)) {
-        return { data, removedTaskTombstones: 0, removedAttachmentTombstones: 0, removedPendingRemoteDeletes: 0 };
-    }
-    const keepDays = resolveTombstoneRetentionDays(retentionDays);
-    const cutoffMs = nowMs - keepDays * 24 * 60 * 60 * 1000;
-
-    let removedTaskTombstones = 0;
-    let removedAttachmentTombstones = 0;
-    const nextTasks: Task[] = [];
-    for (const task of data.tasks) {
-        const tombstoneAt = task.purgedAt ? parseTimestampOrInfinity(task.purgedAt) : Number.POSITIVE_INFINITY;
-        if (task.deletedAt && task.purgedAt && tombstoneAt <= cutoffMs) {
-            removedTaskTombstones += 1;
-            continue;
-        }
-        const pruned = pruneAttachmentTombstones(task.attachments, cutoffMs);
-        removedAttachmentTombstones += pruned.removed;
-        if (pruned.removed > 0) {
-            nextTasks.push({ ...task, attachments: pruned.next });
-            continue;
-        }
-        nextTasks.push(task);
-    }
-
-    const nextProjects: Project[] = data.projects.map((project) => {
-        const pruned = pruneAttachmentTombstones(project.attachments, cutoffMs);
-        removedAttachmentTombstones += pruned.removed;
-        return pruned.removed > 0 ? { ...project, attachments: pruned.next } : project;
-    });
-    const previousPendingRemoteDeletes = data.settings.attachments?.pendingRemoteDeletes;
-    let removedPendingRemoteDeletes = 0;
-    const nextPendingRemoteDeletes = previousPendingRemoteDeletes?.filter((entry) => {
-        const lastErrorMs = parseTimestampOrInfinity(entry.lastErrorAt);
-        const expired = Number.isFinite(lastErrorMs) && lastErrorMs <= cutoffMs;
-        if (expired) {
-            removedPendingRemoteDeletes += 1;
-            return false;
-        }
-        return true;
-    });
-    const hasPendingChanged = removedPendingRemoteDeletes > 0;
-    const nextSettings = hasPendingChanged
-        ? {
-            ...data.settings,
-            attachments: {
-                ...data.settings.attachments,
-                pendingRemoteDeletes: nextPendingRemoteDeletes && nextPendingRemoteDeletes.length > 0
-                    ? nextPendingRemoteDeletes
-                    : undefined,
-            },
-        }
-        : data.settings;
-
-    return {
-        data: {
-            ...data,
-            tasks: nextTasks,
-            projects: nextProjects,
-            settings: nextSettings,
-        },
-        removedTaskTombstones,
-        removedAttachmentTombstones,
-        removedPendingRemoteDeletes,
-    };
-};
-
-const parseSyncTimestamp = (value?: string): number => {
-    if (!value) return NaN;
-    const parsed = Date.parse(value);
-    return Number.isFinite(parsed) ? parsed : NaN;
-};
-
-const isIncomingNewer = (localAt?: string, incomingAt?: string): boolean => {
-    const localTime = parseSyncTimestamp(localAt);
-    const incomingTime = parseSyncTimestamp(incomingAt);
-    if (!Number.isFinite(incomingTime)) return false;
-    if (!Number.isFinite(localTime)) return true;
-    return incomingTime > localTime;
-};
-
-const sanitizeAiForSync = (
-    ai: AppData['settings']['ai'] | undefined,
-    localAi?: AppData['settings']['ai']
-): AppData['settings']['ai'] | undefined => {
-    if (!ai) return ai;
-    const sanitized: AppData['settings']['ai'] = {
-        ...ai,
-        apiKey: undefined,
-    };
-    if (sanitized.speechToText) {
-        sanitized.speechToText = {
-            ...sanitized.speechToText,
-            offlineModelPath: localAi?.speechToText?.offlineModelPath,
-        };
-    }
-    return sanitized;
-};
-
-const SETTINGS_SYNC_GROUP_KEYS: SettingsSyncGroup[] = ['appearance', 'language', 'externalCalendars', 'ai'];
-const SETTINGS_SYNC_UPDATED_AT_KEYS: Array<SettingsSyncGroup | 'preferences'> = ['preferences', ...SETTINGS_SYNC_GROUP_KEYS];
-
-const cloneSettingValue = <T>(value: T): T => {
-    if (typeof globalThis.structuredClone === 'function') {
-        try {
-            return globalThis.structuredClone(value);
-        } catch {
-            // Fallback to manual deep clone for environments/values unsupported by structuredClone.
-        }
-    }
-    if (Array.isArray(value)) {
-        return value.map((item) => cloneSettingValue(item)) as unknown as T;
-    }
-    if (value && typeof value === 'object') {
-        const cloned: Record<string, unknown> = {};
-        for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-            cloned[key] = cloneSettingValue(item);
-        }
-        return cloned as T;
-    }
-    return value;
-};
-
-const sanitizeSyncPreferences = (
-    value: AppData['settings']['syncPreferences'] | undefined,
-    fallback: AppData['settings']['syncPreferences'] | undefined
-): AppData['settings']['syncPreferences'] | undefined => {
-    if (value === undefined) return fallback ? cloneSettingValue(fallback) : undefined;
-    if (!isObjectRecord(value)) return fallback ? cloneSettingValue(fallback) : undefined;
-    const next: NonNullable<AppData['settings']['syncPreferences']> = {};
-    for (const key of SETTINGS_SYNC_GROUP_KEYS) {
-        const candidate = (value as Record<string, unknown>)[key];
-        if (typeof candidate === 'boolean') {
-            next[key] = candidate;
-        }
-    }
-    return Object.keys(next).length > 0 ? next : (fallback ? cloneSettingValue(fallback) : undefined);
-};
-
-const sanitizeSyncPreferencesUpdatedAt = (
-    value: AppData['settings']['syncPreferencesUpdatedAt'] | undefined,
-    fallback: AppData['settings']['syncPreferencesUpdatedAt'] | undefined
-): AppData['settings']['syncPreferencesUpdatedAt'] | undefined => {
-    if (value === undefined) return fallback ? cloneSettingValue(fallback) : undefined;
-    if (!isObjectRecord(value)) return fallback ? cloneSettingValue(fallback) : undefined;
-    const next: NonNullable<AppData['settings']['syncPreferencesUpdatedAt']> = {};
-    for (const key of SETTINGS_SYNC_UPDATED_AT_KEYS) {
-        const candidate = (value as Record<string, unknown>)[key];
-        if (isValidTimestamp(candidate)) {
-            next[key] = candidate;
-        }
-    }
-    return Object.keys(next).length > 0 ? next : (fallback ? cloneSettingValue(fallback) : undefined);
-};
-
-const sanitizeExternalCalendars = (
-    value: AppData['settings']['externalCalendars'] | undefined,
-    fallback: AppData['settings']['externalCalendars'] | undefined
-): AppData['settings']['externalCalendars'] | undefined => {
-    if (value === undefined) return fallback ? cloneSettingValue(fallback) : undefined;
-    if (!Array.isArray(value)) return fallback ? cloneSettingValue(fallback) : undefined;
-    const next = value
-        .filter((item): item is { id: string; name: string; url: string; enabled: boolean } =>
-            isObjectRecord(item)
-            && isNonEmptyString(item.id)
-            && isNonEmptyString(item.name)
-            && isNonEmptyString(item.url)
-            && typeof item.enabled === 'boolean'
-        )
-        .map((item) => ({
-            id: item.id.trim(),
-            name: item.name.trim(),
-            url: item.url.trim(),
-            enabled: item.enabled,
-        }));
-    const deduped = new Map<string, (typeof next)[number]>();
-    for (const item of next) {
-        deduped.set(item.id, item);
-    }
-    if (value.length > 0 && deduped.size === 0 && fallback) {
-        return cloneSettingValue(fallback);
-    }
-    return Array.from(deduped.values());
-};
-
-const sanitizeAiSettings = (
-    value: AppData['settings']['ai'] | undefined,
-    fallback: AppData['settings']['ai'] | undefined
-): AppData['settings']['ai'] | undefined => {
-    if (value === undefined) return fallback ? sanitizeAiForSync(cloneSettingValue(fallback), fallback) : undefined;
-    if (!isObjectRecord(value)) return fallback ? sanitizeAiForSync(cloneSettingValue(fallback), fallback) : undefined;
-    const next: NonNullable<AppData['settings']['ai']> = cloneSettingValue(
-        value as NonNullable<AppData['settings']['ai']>
-    );
-    if (next.enabled !== undefined && typeof next.enabled !== 'boolean') {
-        next.enabled = fallback?.enabled;
-    }
-    if (next.provider !== undefined && !AI_PROVIDER_VALUE_SET.has(next.provider)) {
-        next.provider = fallback?.provider;
-    }
-    if (next.baseUrl !== undefined && !isNonEmptyString(next.baseUrl)) {
-        next.baseUrl = fallback?.baseUrl;
-    }
-    if (next.model !== undefined && !isNonEmptyString(next.model)) {
-        next.model = fallback?.model;
-    }
-    if (next.reasoningEffort !== undefined && !AI_REASONING_EFFORT_VALUE_SET.has(next.reasoningEffort)) {
-        next.reasoningEffort = fallback?.reasoningEffort;
-    }
-    if (next.thinkingBudget !== undefined && (!Number.isFinite(next.thinkingBudget) || next.thinkingBudget < 0)) {
-        next.thinkingBudget = fallback?.thinkingBudget;
-    }
-    if (next.copilotModel !== undefined && !isNonEmptyString(next.copilotModel)) {
-        next.copilotModel = fallback?.copilotModel;
-    }
-    if (next.speechToText !== undefined && !isObjectRecord(next.speechToText)) {
-        next.speechToText = fallback?.speechToText ? cloneSettingValue(fallback.speechToText) : undefined;
-    } else if (next.speechToText) {
-        const speechFallback = fallback?.speechToText;
-        if (next.speechToText.enabled !== undefined && typeof next.speechToText.enabled !== 'boolean') {
-            next.speechToText.enabled = speechFallback?.enabled;
-        }
-        if (next.speechToText.provider !== undefined && !STT_PROVIDER_VALUE_SET.has(next.speechToText.provider)) {
-            next.speechToText.provider = speechFallback?.provider;
-        }
-        if (next.speechToText.model !== undefined && !isNonEmptyString(next.speechToText.model)) {
-            next.speechToText.model = speechFallback?.model;
-        }
-        if (next.speechToText.language !== undefined && !isNonEmptyString(next.speechToText.language)) {
-            next.speechToText.language = speechFallback?.language;
-        }
-        if (next.speechToText.mode !== undefined && !STT_MODE_VALUE_SET.has(next.speechToText.mode)) {
-            next.speechToText.mode = speechFallback?.mode;
-        }
-        if (
-            next.speechToText.fieldStrategy !== undefined
-            && !STT_FIELD_STRATEGY_VALUE_SET.has(next.speechToText.fieldStrategy)
-        ) {
-            next.speechToText.fieldStrategy = speechFallback?.fieldStrategy;
-        }
-    }
-    return sanitizeAiForSync(next, fallback);
-};
-
-const sanitizeMergedSettingsForSync = (
-    merged: AppData['settings'],
-    localSettings: AppData['settings']
-): AppData['settings'] => {
-    const next: AppData['settings'] = cloneSettingValue(merged);
-
-    if (next.theme !== undefined && !SETTINGS_THEME_VALUE_SET.has(next.theme)) {
-        next.theme = localSettings.theme;
-    }
-    if (next.language !== undefined && !SETTINGS_LANGUAGE_VALUE_SET.has(next.language)) {
-        next.language = localSettings.language;
-    }
-    if (next.weekStart !== undefined && !SETTINGS_WEEK_START_VALUE_SET.has(next.weekStart)) {
-        next.weekStart = localSettings.weekStart;
-    }
-    if (next.timeFormat !== undefined && !SETTINGS_TIME_FORMAT_VALUE_SET.has(next.timeFormat)) {
-        next.timeFormat = localSettings.timeFormat;
-    }
-    if (next.keybindingStyle !== undefined && !SETTINGS_KEYBINDING_STYLE_VALUE_SET.has(next.keybindingStyle)) {
-        next.keybindingStyle = localSettings.keybindingStyle;
-    }
-    if (next.dateFormat !== undefined && typeof next.dateFormat !== 'string') {
-        next.dateFormat = localSettings.dateFormat;
-    }
-    if (next.appearance !== undefined && !isObjectRecord(next.appearance)) {
-        next.appearance = localSettings.appearance ? cloneSettingValue(localSettings.appearance) : undefined;
-    } else if (next.appearance?.density !== undefined && !SETTINGS_DENSITY_VALUE_SET.has(next.appearance.density)) {
-        next.appearance = {
-            ...(localSettings.appearance ? cloneSettingValue(localSettings.appearance) : {}),
-            ...next.appearance,
-            density: localSettings.appearance?.density,
-        };
-    }
-
-    next.syncPreferences = sanitizeSyncPreferences(next.syncPreferences, localSettings.syncPreferences);
-    next.syncPreferencesUpdatedAt = sanitizeSyncPreferencesUpdatedAt(
-        next.syncPreferencesUpdatedAt,
-        localSettings.syncPreferencesUpdatedAt
-    );
-    next.externalCalendars = sanitizeExternalCalendars(next.externalCalendars, localSettings.externalCalendars);
-    next.ai = sanitizeAiSettings(next.ai, localSettings.ai);
-
-    return next;
-};
-
-const mergeSettingsForSync = (localSettings: AppData['settings'], incomingSettings: AppData['settings']): AppData['settings'] => {
-    const merged: AppData['settings'] = { ...localSettings };
-    const nextSyncUpdatedAt: NonNullable<AppData['settings']['syncPreferencesUpdatedAt']> = {
-        ...(localSettings.syncPreferencesUpdatedAt ?? {}),
-        ...(incomingSettings.syncPreferencesUpdatedAt ?? {}),
-    };
-
-    const localPrefs = localSettings.syncPreferences ?? {};
-    const incomingPrefs = incomingSettings.syncPreferences ?? {};
-    const localPrefsAt = localSettings.syncPreferencesUpdatedAt?.preferences;
-    const incomingPrefsAt = incomingSettings.syncPreferencesUpdatedAt?.preferences;
-    const incomingPrefsWins = isIncomingNewer(localPrefsAt, incomingPrefsAt);
-    const mergedPrefs = incomingPrefsWins ? incomingPrefs : localPrefs;
-
-    merged.syncPreferences = cloneSettingValue(mergedPrefs);
-    if (incomingPrefsWins) {
-        if (incomingPrefsAt) nextSyncUpdatedAt.preferences = incomingPrefsAt;
-    } else if (localPrefsAt) {
-        nextSyncUpdatedAt.preferences = localPrefsAt;
-    }
-
-    const isSameValue = (left: unknown, right: unknown): boolean => {
-        if (left === right) return true;
-        return JSON.stringify(left) === JSON.stringify(right);
-    };
-    const chooseGroupFieldValue = <T>(localValue: T, incomingValue: T, incomingWins: boolean): T => {
-        if (incomingValue === undefined) return cloneSettingValue(localValue);
-        if (localValue === undefined) return cloneSettingValue(incomingValue);
-        if (isSameValue(localValue, incomingValue)) return cloneSettingValue(localValue);
-        return cloneSettingValue(incomingWins ? incomingValue : localValue);
-    };
-    const mergeRecordFields = <T extends Record<string, unknown>>(localValue: T, incomingValue: T, incomingWins: boolean): T => {
-        const mergedValue: Record<string, unknown> = {};
-        const localRecord = (localValue ?? {}) as Record<string, unknown>;
-        const incomingRecord = (incomingValue ?? {}) as Record<string, unknown>;
-        const keys = new Set([...Object.keys(localRecord), ...Object.keys(incomingRecord)]);
-        for (const fieldKey of keys) {
-            mergedValue[fieldKey] = chooseGroupFieldValue(localRecord[fieldKey], incomingRecord[fieldKey], incomingWins);
-        }
-        return mergedValue as T;
-    };
-    const mergeGroup = <T>(
-        key: SettingsSyncGroup,
-        localValue: T,
-        incomingValue: T,
-        apply: (value: T, incomingWins: boolean) => void,
-        mergeValues?: (localValue: T, incomingValue: T, incomingWins: boolean) => T
-    ) => {
-        const localAt = localSettings.syncPreferencesUpdatedAt?.[key];
-        const incomingAt = incomingSettings.syncPreferencesUpdatedAt?.[key];
-        const incomingWins = isIncomingNewer(localAt, incomingAt);
-        const resolvedValue = mergeValues
-            ? mergeValues(localValue, incomingValue, incomingWins)
-            : (incomingWins ? incomingValue : localValue);
-        apply(cloneSettingValue(resolvedValue), incomingWins);
-        const winnerAt = incomingWins ? incomingAt : localAt;
-        if (winnerAt) nextSyncUpdatedAt[key] = winnerAt;
-    };
-
-    mergeGroup(
-        'appearance',
-        {
-            theme: localSettings.theme,
-            appearance: localSettings.appearance,
-            keybindingStyle: localSettings.keybindingStyle,
-        },
-        {
-            theme: incomingSettings.theme,
-            appearance: incomingSettings.appearance,
-            keybindingStyle: incomingSettings.keybindingStyle,
-        },
-        (value) => {
-            merged.theme = value.theme;
-            merged.appearance = value.appearance;
-            merged.keybindingStyle = value.keybindingStyle;
-        },
-        (localValue, incomingValue, incomingWins) => mergeRecordFields(localValue, incomingValue, incomingWins)
-    );
-
-    mergeGroup(
-        'language',
-        {
-            language: localSettings.language,
-            weekStart: localSettings.weekStart,
-            dateFormat: localSettings.dateFormat,
-            timeFormat: localSettings.timeFormat,
-        },
-        {
-            language: incomingSettings.language,
-            weekStart: incomingSettings.weekStart,
-            dateFormat: incomingSettings.dateFormat,
-            timeFormat: incomingSettings.timeFormat,
-        },
-        (value) => {
-            merged.language = value.language;
-            merged.weekStart = value.weekStart;
-            merged.dateFormat = value.dateFormat;
-            merged.timeFormat = value.timeFormat;
-        },
-        (localValue, incomingValue, incomingWins) => mergeRecordFields(localValue, incomingValue, incomingWins)
-    );
-
-    mergeGroup(
-        'externalCalendars',
-        localSettings.externalCalendars,
-        incomingSettings.externalCalendars,
-        (value) => {
-            merged.externalCalendars = value;
-        }
-    );
-
-    mergeGroup(
-        'ai',
-        localSettings.ai,
-        incomingSettings.ai,
-        (value) => {
-            merged.ai = sanitizeAiForSync(value, localSettings.ai);
-        },
-        (localValue, incomingValue, incomingWins) => chooseGroupFieldValue(localValue, incomingValue, incomingWins)
-    );
-
-    merged.syncPreferencesUpdatedAt = Object.keys(nextSyncUpdatedAt).length > 0 ? nextSyncUpdatedAt : merged.syncPreferencesUpdatedAt;
-    return sanitizeMergedSettingsForSync(merged, localSettings);
-};
-
-/**
- * Merge entities with soft-delete support using revision-aware conflict resolution.
- *
- * Rules:
- * 1. If an item exists only in one source, include it.
- * 2. When revisions are present, resolve by operation semantics:
- *    deletion op time, revision number, timestamp, then deterministic tie-break.
- * 3. Without revisions, fall back to timestamp-based conflict resolution.
- * 4. Deleted items (deletedAt set) are preserved so deletion propagates cross-device.
- */
 function createEmptyEntityStats(localTotal: number, incomingTotal: number): EntityMergeStats {
     return {
         localTotal,
@@ -833,188 +84,46 @@ function createEmptyEntityStats(localTotal: number, incomingTotal: number): Enti
     };
 }
 
-const CONTENT_DIFF_IGNORED_KEYS = new Set([
-    'rev',
-    'revBy',
-    'updatedAt',
-    'createdAt',
-    'localStatus',
-    'purgedAt',
-    // Order fields can differ due local adapter fallbacks (for legacy rows) without user edits.
-    'order',
-    'orderNum',
-]);
-
 const CONFLICT_SAMPLE_LIMIT = 5;
 const CONFLICT_DIFF_KEY_LIMIT = 8;
+const DELETE_VS_LIVE_AMBIGUOUS_WINDOW_MS = 5 * 1000;
 
 type ComparisonNormalizer<T> = (item: T) => unknown;
 
-const normalizeOptionalArrayForComparison = <T>(value: T[] | undefined): T[] | undefined =>
-    Array.isArray(value) && value.length > 0 ? value : undefined;
-
-const normalizeTaskForContentComparison = (task: Task): Record<string, unknown> => {
-    const comparable: Record<string, unknown> = {
-        ...task,
-        tags: normalizeOptionalArrayForComparison(task.tags),
-        contexts: normalizeOptionalArrayForComparison(task.contexts),
-        checklist: normalizeOptionalArrayForComparison(task.checklist),
-        attachments: normalizeOptionalArrayForComparison(task.attachments),
-        isFocusedToday: task.isFocusedToday ? true : undefined,
-        pushCount: task.pushCount === 0 ? undefined : task.pushCount,
-    };
-    if (task.status === 'inbox') delete comparable.status;
-    return comparable;
+type MergeTimestampInfo = {
+    raw: number;
+    safe: number;
+    wasClamped: boolean;
 };
 
-const normalizeProjectForContentComparison = (project: Project): Record<string, unknown> => {
-    const comparable: Record<string, unknown> = {
-        ...project,
-        tagIds: normalizeOptionalArrayForComparison(project.tagIds),
-        attachments: normalizeOptionalArrayForComparison(project.attachments),
-        isSequential: project.isSequential ? true : undefined,
-        isFocused: project.isFocused ? true : undefined,
-    };
-    if (project.status === 'active') delete comparable.status;
-    if (project.color === '#6B7280') delete comparable.color;
-    return comparable;
-};
-
-const normalizeSectionForContentComparison = (section: Section): Record<string, unknown> => ({
-    ...section,
-    isCollapsed: section.isCollapsed ? true : undefined,
-});
-
-const toComparableValue = (value: unknown, options?: { includeIgnoredKeys?: boolean }): unknown => {
-    const includeIgnoredKeys = options?.includeIgnoredKeys === true;
-    if (Array.isArray(value)) {
-        return value.map((item) => toComparableValue(item, options));
+const parseMergeTimestamp = (value: unknown, maxAllowedMs?: number): MergeTimestampInfo => {
+    if (typeof value !== 'string') {
+        return { raw: -1, safe: -1, wasClamped: false };
     }
-    if (value && typeof value === 'object') {
-        const record = value as Record<string, unknown>;
-        const comparable: Record<string, unknown> = {};
-        for (const key of Object.keys(record).sort()) {
-            if (!includeIgnoredKeys && CONTENT_DIFF_IGNORED_KEYS.has(key)) continue;
-            if (!includeIgnoredKeys && key === 'uri' && record.kind === 'file') continue;
-            comparable[key] = toComparableValue(record[key], options);
-        }
-        return comparable;
-    }
-    return value;
-};
-
-const comparableSignatureCache = new WeakMap<object, string>();
-const deterministicSignatureCache = new WeakMap<object, string>();
-
-const toComparableSignature = (value: unknown): string => {
-    if (value && typeof value === 'object') {
-        const cached = comparableSignatureCache.get(value);
-        if (cached) return cached;
-        const signature = JSON.stringify(toComparableValue(value));
-        comparableSignatureCache.set(value, signature);
-        return signature;
-    }
-    return JSON.stringify(toComparableValue(value));
-};
-
-const toDeterministicSignature = (value: unknown): string => {
-    if (value && typeof value === 'object') {
-        const cached = deterministicSignatureCache.get(value);
-        if (cached) return cached;
-        const signature = JSON.stringify(toComparableValue(value, { includeIgnoredKeys: true }));
-        deterministicSignatureCache.set(value, signature);
-        return signature;
-    }
-    return JSON.stringify(toComparableValue(value, { includeIgnoredKeys: true }));
-};
-
-const hashComparableSignature = (signature: string): string => {
-    let hash = 0x811c9dc5;
-    for (let index = 0; index < signature.length; index += 1) {
-        hash ^= signature.charCodeAt(index);
-        hash = Math.imul(hash, 0x01000193);
-    }
-    return (hash >>> 0).toString(16).padStart(8, '0');
-};
-
-const collectComparableDiffKeys = (
-    localValue: unknown,
-    incomingValue: unknown,
-    limit: number = CONFLICT_DIFF_KEY_LIMIT
-): string[] => {
-    const diffKeys: string[] = [];
-    const visit = (left: unknown, right: unknown, path: string) => {
-        if (diffKeys.length >= limit) return;
-        if (Object.is(left, right)) return;
-
-        const leftIsArray = Array.isArray(left);
-        const rightIsArray = Array.isArray(right);
-        if (leftIsArray || rightIsArray) {
-            if (!leftIsArray || !rightIsArray) {
-                diffKeys.push(path || '(root)');
-                return;
-            }
-            if (left.length !== right.length) {
-                diffKeys.push(path || '(root)');
-                return;
-            }
-            for (let index = 0; index < left.length; index += 1) {
-                visit(left[index], right[index], `${path}[${index}]`);
-                if (diffKeys.length >= limit) return;
-            }
-            return;
-        }
-
-        const leftIsObject = typeof left === 'object' && left !== null;
-        const rightIsObject = typeof right === 'object' && right !== null;
-        if (leftIsObject || rightIsObject) {
-            if (!leftIsObject || !rightIsObject) {
-                diffKeys.push(path || '(root)');
-                return;
-            }
-            const leftRecord = left as Record<string, unknown>;
-            const rightRecord = right as Record<string, unknown>;
-            const keys = Array.from(new Set([...Object.keys(leftRecord), ...Object.keys(rightRecord)])).sort();
-            for (const key of keys) {
-                const nextPath = path ? `${path}.${key}` : key;
-                if (!(key in leftRecord) || !(key in rightRecord)) {
-                    diffKeys.push(nextPath);
-                    if (diffKeys.length >= limit) return;
-                    continue;
-                }
-                visit(leftRecord[key], rightRecord[key], nextPath);
-                if (diffKeys.length >= limit) return;
-            }
-            return;
-        }
-
-        diffKeys.push(path || '(root)');
-    };
-
-    visit(localValue, incomingValue, '');
-    return diffKeys;
-};
-
-const chooseDeterministicWinner = <T>(localItem: T, incomingItem: T): T => {
-    const localSignature = toComparableSignature(localItem);
-    const incomingSignature = toComparableSignature(incomingItem);
-    if (localSignature === incomingSignature) {
-        const localFullSignature = toDeterministicSignature(localItem);
-        const incomingFullSignature = toDeterministicSignature(incomingItem);
-        if (localFullSignature === incomingFullSignature) return incomingItem;
-        return incomingFullSignature > localFullSignature ? incomingItem : localItem;
-    }
-    return incomingSignature > localSignature ? incomingItem : localItem;
-};
-
-const parseMergeTimestamp = (value: unknown, maxAllowedMs?: number): number => {
-    if (typeof value !== 'string') return -1;
     const parsed = new Date(value).getTime();
-    if (!Number.isFinite(parsed)) return -1;
-    if (maxAllowedMs !== undefined && parsed > maxAllowedMs) {
-        return maxAllowedMs;
+    if (!Number.isFinite(parsed)) {
+        return { raw: -1, safe: -1, wasClamped: false };
     }
-    return parsed;
+    if (maxAllowedMs !== undefined && parsed > maxAllowedMs) {
+        return { raw: parsed, safe: maxAllowedMs, wasClamped: true };
+    }
+    return { raw: parsed, safe: parsed, wasClamped: false };
+};
+
+const getMergeTimestampComparison = (
+    localTime: MergeTimestampInfo,
+    incomingTime: MergeTimestampInfo,
+): number => {
+    const safeDiff = incomingTime.safe - localTime.safe;
+    if (safeDiff !== 0) return safeDiff;
+    if (
+        localTime.wasClamped
+        && incomingTime.wasClamped
+        && incomingTime.raw !== localTime.raw
+    ) {
+        return incomingTime.raw - localTime.raw;
+    }
+    return 0;
 };
 
 const containsAttachmentTraversalSegment = (value: string): boolean => {
@@ -1027,7 +136,6 @@ const containsAttachmentTraversalSegment = (value: string): boolean => {
             candidates.add(decoded);
             current = decoded;
         } catch {
-            // Ignore malformed URI escapes and fall back to the candidates gathered so far.
             break;
         }
     }
@@ -1110,8 +218,11 @@ function mergeEntitiesWithStats<T extends MergeableEntity>(
 
         const normalizedLocalItem = normalizeTimestamps(localItem);
         const normalizedIncomingItem = normalizeTimestamps(incomingItem);
-        const safeLocalTime = parseMergeTimestamp(normalizedLocalItem.updatedAt, maxAllowedMergeTime);
-        const safeIncomingTime = parseMergeTimestamp(normalizedIncomingItem.updatedAt, maxAllowedMergeTime);
+        const localUpdatedTime = parseMergeTimestamp(normalizedLocalItem.updatedAt, maxAllowedMergeTime);
+        const incomingUpdatedTime = parseMergeTimestamp(normalizedIncomingItem.updatedAt, maxAllowedMergeTime);
+        const safeLocalTime = localUpdatedTime.safe;
+        const safeIncomingTime = incomingUpdatedTime.safe;
+        const comparableUpdatedTimeDiff = getMergeTimestampComparison(localUpdatedTime, incomingUpdatedTime);
         const localRev = typeof normalizedLocalItem.rev === 'number' && Number.isFinite(normalizedLocalItem.rev)
             ? normalizedLocalItem.rev
             : 0;
@@ -1151,14 +262,14 @@ function mergeEntitiesWithStats<T extends MergeableEntity>(
             }
         }
 
-        const timeDiff = safeIncomingTime - safeLocalTime;
-        const absoluteSkew = Math.abs(timeDiff);
+        const safeTimeDiff = safeIncomingTime - safeLocalTime;
+        const absoluteSkew = Math.abs(safeTimeDiff);
         if (absoluteSkew > stats.maxClockSkewMs) {
             stats.maxClockSkewMs = absoluteSkew;
         }
-        const withinSkew = Math.abs(timeDiff) <= CLOCK_SKEW_THRESHOLD_MS;
+        const withinSkew = Math.abs(safeTimeDiff) <= CLOCK_SKEW_THRESHOLD_MS;
         const resolveOperationTime = (item: T): number => {
-            const updatedTime = parseMergeTimestamp(item.updatedAt, maxAllowedMergeTime);
+            const updatedTime = parseMergeTimestamp(item.updatedAt, maxAllowedMergeTime).safe;
             if (!item.deletedAt) return updatedTime;
 
             const deletedTimeRaw = new Date(item.deletedAt).getTime();
@@ -1176,7 +287,7 @@ function mergeEntitiesWithStats<T extends MergeableEntity>(
 
             return deletedTimeRaw > maxAllowedMergeTime ? maxAllowedMergeTime : deletedTimeRaw;
         };
-        let winner = safeIncomingTime > safeLocalTime ? normalizedIncomingItem : normalizedLocalItem;
+        let winner = comparableUpdatedTimeDiff > 0 ? normalizedIncomingItem : normalizedLocalItem;
         const resolveDeleteVsLiveWinner = (localCandidate: T, incomingCandidate: T): T => {
             const localOpTime = resolveOperationTime(localCandidate);
             const incomingOpTime = resolveOperationTime(incomingCandidate);
@@ -1186,8 +297,8 @@ function mergeEntitiesWithStats<T extends MergeableEntity>(
                     if (revDiff !== 0) {
                         return revDiff > 0 ? normalizedLocalItem : normalizedIncomingItem;
                     }
-                    if (safeIncomingTime !== safeLocalTime) {
-                        return safeIncomingTime > safeLocalTime ? normalizedIncomingItem : normalizedLocalItem;
+                    if (comparableUpdatedTimeDiff !== 0) {
+                        return comparableUpdatedTimeDiff > 0 ? normalizedIncomingItem : normalizedLocalItem;
                     }
                     if (revByDiff && localRevBy && incomingRevBy) {
                         return incomingRevBy > localRevBy ? normalizedIncomingItem : normalizedLocalItem;
@@ -1206,18 +317,16 @@ function mergeEntitiesWithStats<T extends MergeableEntity>(
                 winner = resolveDeleteVsLiveWinner(normalizedLocalItem, normalizedIncomingItem);
             } else if (revDiff !== 0) {
                 winner = revDiff > 0 ? normalizedLocalItem : normalizedIncomingItem;
-            } else if (safeIncomingTime !== safeLocalTime) {
-                // When revisions tie, prefer fresher timestamps before revBy tie-break.
-                winner = safeIncomingTime > safeLocalTime ? normalizedIncomingItem : normalizedLocalItem;
+            } else if (comparableUpdatedTimeDiff !== 0) {
+                winner = comparableUpdatedTimeDiff > 0 ? normalizedIncomingItem : normalizedLocalItem;
             } else if (revByDiff && localRevBy && incomingRevBy) {
                 winner = incomingRevBy > localRevBy ? normalizedIncomingItem : normalizedLocalItem;
             } else {
-                // Preserve deterministic convergence when metadata ties but content differs.
                 winner = chooseDeterministicWinner(normalizedLocalItem, normalizedIncomingItem);
             }
         } else if (localDeleted !== incomingDeleted) {
             winner = resolveDeleteVsLiveWinner(normalizedLocalItem, normalizedIncomingItem);
-        } else if (withinSkew && safeIncomingTime === safeLocalTime) {
+        } else if (withinSkew && comparableUpdatedTimeDiff === 0) {
             winner = chooseDeterministicWinner(normalizedLocalItem, normalizedIncomingItem);
         }
         if (winner === normalizedIncomingItem) stats.resolvedUsingIncoming += 1;
@@ -1292,40 +401,31 @@ function mergeAreas(local: Area[], incoming: Area[], nowIso: string): { merged: 
     return { merged, stats: result.stats };
 }
 
-/**
- * Filter out soft-deleted items for display purposes.
- * Call this when loading data for the UI.
- */
 export function filterDeleted<T extends { deletedAt?: string }>(items: T[]): T[] {
-    return items.filter(item => !item.deletedAt);
+    return items.filter((item) => !item.deletedAt);
 }
 
-/**
- * Merge two AppData objects for synchronization.
- * Uses revision-aware entity merge plus deterministic tie-breakers for convergence.
- * Preserves local-only settings while merging sync-enabled settings groups.
- */
 export function mergeAppDataWithStats(local: AppData, incoming: AppData): MergeResult {
     const nowIso = new Date().toISOString();
     const localNormalized: AppData = {
         ...local,
-        tasks: (local.tasks || []).map((t) => normalizeRevisionMetadata(normalizeTaskForSyncMerge(t, nowIso))),
+        tasks: (local.tasks || []).map((task) => normalizeRevisionMetadata(normalizeTaskForSyncMerge(task, nowIso))),
         projects: (local.projects || []).map((project) => normalizeRevisionMetadata(normalizeProjectForSyncMerge(project))),
         sections: (local.sections || []).map((section) => normalizeRevisionMetadata(section)),
         areas: (local.areas || []).map((area) => normalizeRevisionMetadata(area)),
     };
     const incomingNormalized: AppData = {
         ...incoming,
-        tasks: (incoming.tasks || []).map((t) => normalizeRevisionMetadata(normalizeTaskForSyncMerge(t, nowIso))),
+        tasks: (incoming.tasks || []).map((task) => normalizeRevisionMetadata(normalizeTaskForSyncMerge(task, nowIso))),
         projects: (incoming.projects || []).map((project) => normalizeRevisionMetadata(normalizeProjectForSyncMerge(project))),
         sections: (incoming.sections || []).map((section) => normalizeRevisionMetadata(section)),
         areas: (incoming.areas || []).map((area) => normalizeRevisionMetadata(area)),
     };
 
-    const mergeAttachments = (local?: Attachment[], incoming?: Attachment[]): Attachment[] | undefined => {
-        const hadExplicitAttachments = local !== undefined || incoming !== undefined;
-        const localList = local || [];
-        const incomingList = incoming || [];
+    const mergeAttachments = (localAttachments?: Attachment[], incomingAttachments?: Attachment[]): Attachment[] | undefined => {
+        const hadExplicitAttachments = localAttachments !== undefined || incomingAttachments !== undefined;
+        const localList = localAttachments || [];
+        const incomingList = incomingAttachments || [];
         if (localList.length === 0 && incomingList.length === 0) {
             return hadExplicitAttachments ? [] : undefined;
         }
@@ -1540,7 +640,9 @@ export async function performSyncCycle(io: SyncCycleIO): Promise<SyncCycleResult
             throw new Error(`Invalid remote sync payload: ${sample}`);
         }
     }
-    const remoteNormalized = normalizeAppData(remoteDataRaw || { tasks: [], projects: [], sections: [], areas: [], settings: {} });
+    const remoteNormalized = normalizeAppData(
+        remoteDataRaw || { tasks: [], projects: [], sections: [], areas: [], settings: {} }
+    );
     const remoteData = purgeExpiredTombstones(remoteNormalized, nowIso, io.tombstoneRetentionDays).data;
 
     io.onStep?.('merge');
@@ -1630,8 +732,6 @@ export async function performSyncCycle(io: SyncCycleIO): Promise<SyncCycleResult
     await yieldToUi();
     await io.writeLocal(finalDataWithPendingRemoteWrite);
 
-    // Write local first so a local persistence failure cannot leave remote ahead.
-    // The pending flag is crash-recovery state for the local device only.
     io.onStep?.('write-remote');
     await yieldToUi();
     await io.writeRemote(persistedFinalData);

@@ -272,4 +272,48 @@ describe('desktop sync-service runtime', () => {
             }),
         });
     });
+
+    it('cleans up the offline listener even when sync error logging fails', async () => {
+        const syncServiceModule = await syncServiceModulePromise;
+        const addEventListenerSpy = vi.spyOn(window, 'addEventListener');
+        const removeEventListenerSpy = vi.spyOn(window, 'removeEventListener');
+
+        invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+            if (command === 'get_sync_backend') return 'cloud';
+            if (command === 'get_cloud_config') return { url: '', token: '' };
+            if (command === 'create_data_snapshot') return undefined;
+            if (command === 'get_data') return structuredClone(localData);
+            if (command === 'save_data') return undefined;
+            throw new Error(`Unexpected command: ${command} ${JSON.stringify(args)}`);
+        });
+        performSyncCycleMock.mockRejectedValue(new Error('remote read failed'));
+        logSyncErrorMock.mockRejectedValue(new Error('disk full'));
+
+        try {
+            const result = await syncServiceModule.SyncService.performSync();
+
+            expect(result).toEqual({
+                success: false,
+                error: 'Error: remote read failed',
+            });
+            const addedOfflineListeners = addEventListenerSpy.mock.calls.filter(([eventName]) => eventName === 'offline');
+            const removedOfflineListeners = removeEventListenerSpy.mock.calls.filter(([eventName]) => eventName === 'offline');
+            expect(addedOfflineListeners.length).toBeGreaterThan(0);
+            const addedOfflineHandler = addedOfflineListeners[addedOfflineListeners.length - 1]?.[1];
+            expect(removedOfflineListeners.some(([, handler]) => handler === addedOfflineHandler)).toBe(true);
+            expect(syncServiceModule.SyncService.getSyncStatus()).toMatchObject({
+                inFlight: false,
+                lastResult: 'error',
+            });
+            expect(logWarnMock).toHaveBeenCalledWith(
+                'Failed to write sync error log',
+                expect.objectContaining({
+                    scope: 'sync',
+                }),
+            );
+        } finally {
+            addEventListenerSpy.mockRestore();
+            removeEventListenerSpy.mockRestore();
+        }
+    });
 });

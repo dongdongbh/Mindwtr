@@ -236,6 +236,40 @@ describe('mcp service', () => {
     );
   });
 
+  test('rejects addTask quickAdd when length exceeds max bound', async () => {
+    const fakeDb = {} as any;
+    const deps = {
+      openMindwtrDb: async () => ({ db: fakeDb }),
+      closeDb: () => undefined,
+      listTasks: () => [],
+      listProjects: () => [],
+      listAreas: () => [],
+      getTask: () => ({ id: 't1', title: 'Task', status: 'inbox', createdAt: '2026-01-01', updatedAt: '2026-01-01' }),
+      getProject: () => ({ id: 'p1', title: 'Project' }),
+      parseQuickAdd: () => ({ title: '', props: {} }),
+      runCoreService: async (_options: any, fn: any) =>
+        fn({
+          addTask: async () => ({ id: 't1' }),
+          updateTask: async () => ({ id: 't1' }),
+          completeTask: async () => ({ id: 't1' }),
+          deleteTask: async () => ({ id: 't1' }),
+          restoreTask: async () => ({ id: 't1' }),
+          addProject: async () => ({ id: 'p1', title: 'Project' }),
+          updateProject: async () => ({ id: 'p1', title: 'Project' }),
+          deleteProject: async () => ({ id: 'p1', title: 'Project' }),
+          addArea: async () => ({ id: 'a1', name: 'Area' }),
+          updateArea: async () => ({ id: 'a1', name: 'Area' }),
+          deleteArea: async () => ({ id: 'a1', name: 'Area' }),
+        }),
+    };
+    const service = createService({ readonly: false }, deps as any);
+    const longQuickAdd = `Task ${'x'.repeat(1997)}`;
+
+    await expect(service.addTask({ quickAdd: longQuickAdd } as any)).rejects.toThrow(
+      'Quick-add input too long (max 2000 characters)'
+    );
+  });
+
   test('delegates project and area writes through core deps', async () => {
     let receivedProjectCreate: any = null;
     let receivedAreaUpdate: any = null;

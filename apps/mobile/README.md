@@ -6,7 +6,7 @@ React Native mobile app for the Mindwtr productivity system.
 
 ### GTD Workflow
 - **Inbox Processing** - Guided clarify workflow with 2-minute rule
-- **Context Filtering** - Hierarchical contexts (@work/meetings)
+- **Context Filtering** - Slash-delimited contexts with parent matching (@work/meetings)
 - **Dark Mode** - Full dark theme support with system preference
 - **Swipe Actions** - Quick task management gestures
 - **Smart Tags** - Frequent and recommended context tags

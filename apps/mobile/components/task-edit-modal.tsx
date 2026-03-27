@@ -1,8 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, TextInput, Modal, TouchableOpacity, ScrollView, Platform, Share, Alert, Animated, Pressable, Keyboard } from 'react-native';
+import { View, Modal, ScrollView, Share, Alert, Animated, Keyboard } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-    Attachment,
     Task,
     TaskEditorFieldId,
     TaskStatus,
@@ -13,20 +12,13 @@ import {
     generateUUID,
     RecurrenceRule,
     type AIProviderId,
-    type RecurrenceStrategy,
     type RecurrenceWeekday,
     type RecurrenceByDay,
     buildRRuleString,
     parseRRuleString,
     RECURRENCE_RULES,
-    hasTimeComponent,
-    safeFormatDate,
     safeParseDate,
-    safeParseDueDate,
     resolveAutoTextDirection,
-    getAttachmentDisplayTitle,
-    normalizeLinkAttachmentInput,
-    validateAttachmentForUpload,
     parseQuickAdd,
     DEFAULT_PROJECT_COLOR,
     getLocalizedWeekdayButtons,
@@ -34,37 +26,24 @@ import {
     filterProjectsBySelectedArea,
     getUsedTaskTokens,
 } from '@mindwtr/core';
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import * as DocumentPicker from 'expo-document-picker';
-import * as Linking from 'expo-linking';
-import * as Sharing from 'expo-sharing';
-import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
-import { Paths } from 'expo-file-system';
 import { useLanguage } from '../contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
-import { MarkdownText } from './markdown-text';
 import { buildAIConfig, isAIKeyRequired, loadAIKey } from '../lib/ai-config';
-import { ensureAttachmentAvailable, persistAttachmentLocally } from '../lib/attachment-sync';
-import { AIResponseModal, type AIResponseAction } from './ai-response-modal';
+import type { AIResponseAction } from './ai-response-modal';
 import { styles } from './task-edit/task-edit-modal.styles';
+import { TaskEditFieldRenderer } from './task-edit/TaskEditFieldRenderer';
 import { TaskEditViewTab } from './task-edit/TaskEditViewTab';
 import { TaskEditFormTab } from './task-edit/TaskEditFormTab';
 import { TaskEditHeader } from './task-edit/TaskEditHeader';
+import { TaskEditModalErrorBoundary } from './task-edit/TaskEditModalErrorBoundary';
+import { TaskEditOverlayStack } from './task-edit/TaskEditOverlayStack';
 import { TaskEditTabs } from './task-edit/TaskEditTabs';
-import { TaskEditProjectPicker } from './task-edit/TaskEditProjectPicker';
-import { TaskEditAreaPicker } from './task-edit/TaskEditAreaPicker';
-import { TaskEditSectionPicker } from './task-edit/TaskEditSectionPicker';
-import {
-    TaskEditAudioModal,
-    TaskEditImagePreviewModal,
-    TaskEditLinkModal,
-} from './task-edit/TaskEditOverlayModals';
+import { areTaskFieldValuesEqual } from './task-edit/task-edit-modal.helpers';
 import {
     WEEKDAY_ORDER,
     getRecurrenceRuleValue,
     getRecurrenceStrategyValue,
     buildRecurrenceValue,
-    getRecurrenceByDayValue,
     getRecurrenceRRuleValue,
 } from './task-edit/recurrence-utils';
 import { useTaskEditCopilot } from './task-edit/use-task-edit-copilot';
@@ -76,8 +55,6 @@ import {
     getTaskEditorSectionOpenDefaults,
     getInitialWindowWidth,
     getTaskEditTabOffset,
-    isReleasedAudioPlayerError,
-    isValidLinkUri,
     logTaskError,
     logTaskWarn,
     STATUS_OPTIONS,
@@ -88,6 +65,13 @@ import {
     parseTokenList,
     replaceTrailingToken,
 } from './task-edit/task-edit-token-utils';
+import { useTaskEditAttachments } from './task-edit/use-task-edit-attachments';
+import { useTaskEditDates } from './task-edit/use-task-edit-dates';
+import { useTaskEditPreview } from './task-edit/use-task-edit-preview';
+import {
+    type TaskEditTab,
+    useTaskEditState,
+} from './task-edit/use-task-edit-state';
 import { useTaskTokenSuggestions } from './task-edit/use-task-token-suggestions';
 
 
@@ -102,32 +86,6 @@ interface TaskEditModalProps {
     onContextNavigate?: (context: string) => void;
     onTagNavigate?: (tag: string) => void;
 }
-
-type TaskEditTab = 'task' | 'view';
-
-function resolveInitialTaskEditTab(target?: TaskEditTab, currentTask?: Task | null): TaskEditTab {
-    if (target) return target;
-    if (currentTask?.taskMode === 'list') return 'view';
-    return 'view';
-}
-
-function areTaskFieldValuesEqual(left: unknown, right: unknown): boolean {
-    if ((left === '' && right == null) || (right === '' && left == null)) {
-        return true;
-    }
-    if (Array.isArray(left) || Array.isArray(right) || (typeof left === 'object' && left !== null) || (typeof right === 'object' && right !== null)) {
-        return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
-    }
-    return (left ?? null) === (right ?? null);
-}
-
-const getOrdinalTranslationKey = (value: '1' | '2' | '3' | '4' | '-1'): 'first' | 'second' | 'third' | 'fourth' | 'last' => {
-    if (value === '-1') return 'last';
-    if (value === '1') return 'first';
-    if (value === '2') return 'second';
-    if (value === '3') return 'third';
-    return 'fourth';
-};
 
 function TaskEditModalInner({
     visible,
@@ -157,89 +115,86 @@ function TaskEditModalInner({
     const tc = useThemeColors();
     const prioritiesEnabled = settings.features?.priorities === true;
     const timeEstimatesEnabled = settings.features?.timeEstimates === true;
-    const liveTask = useMemo(() => {
-        if (!task?.id) return task ?? null;
-        return tasks.find((item) => item.id === task.id) ?? task;
-    }, [task, tasks]);
-    const [editedTask, setEditedTaskState] = useState<Partial<Task>>({});
-    const isDirtyRef = useRef(false);
-    const baseTaskRef = useRef<Task | null>(null);
-    const setEditedTask = useCallback(
-        (value: React.SetStateAction<Partial<Task>>, markDirty = true) => {
-            if (markDirty) {
-                isDirtyRef.current = true;
-            }
-            setEditedTaskState(value);
-        },
-        []
-    );
-    const [showDatePicker, setShowDatePicker] = useState<'start' | 'start-time' | 'due' | 'due-time' | 'review' | null>(null);
-    const [pendingStartDate, setPendingStartDate] = useState<Date | null>(null);
-    const [pendingDueDate, setPendingDueDate] = useState<Date | null>(null);
-    const [editTab, setEditTab] = useState<TaskEditTab>(() => resolveInitialTaskEditTab(defaultTab, task));
-    const [showDescriptionPreview, setShowDescriptionPreview] = useState(false);
-    const [showAreaPicker, setShowAreaPicker] = useState(false);
-    const [titleDraft, setTitleDraft] = useState('');
-    const titleDraftRef = useRef('');
-    const titleDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const [descriptionDraft, setDescriptionDraft] = useState('');
-    const descriptionDraftRef = useRef('');
-    const descriptionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const [contextInputDraft, setContextInputDraft] = useState('');
-    const [tagInputDraft, setTagInputDraft] = useState('');
-    const [isContextInputFocused, setIsContextInputFocused] = useState(false);
-    const [isTagInputFocused, setIsTagInputFocused] = useState(false);
-    const [linkModalVisible, setLinkModalVisible] = useState(false);
-    const [audioModalVisible, setAudioModalVisible] = useState(false);
-    const [imagePreviewAttachment, setImagePreviewAttachment] = useState<Attachment | null>(null);
-    const [audioAttachment, setAudioAttachment] = useState<Attachment | null>(null);
-    const [audioLoading, setAudioLoading] = useState(false);
-    const audioPlayer = useAudioPlayer(null, { updateInterval: 500 });
-    const audioStatus = useAudioPlayerStatus(audioPlayer);
-    const audioLoadedRef = useRef(false);
-    const audioStoppingRef = useRef(false);
-    const [showProjectPicker, setShowProjectPicker] = useState(false);
-    const [showSectionPicker, setShowSectionPicker] = useState(false);
-    const [linkInput, setLinkInput] = useState('');
-    const [linkInputTouched, setLinkInputTouched] = useState(false);
-    const [customWeekdays, setCustomWeekdays] = useState<RecurrenceWeekday[]>([]);
-    const recurrenceWeekdayButtons = useMemo(
-        () => getLocalizedWeekdayButtons(language, 'narrow'),
-        [language]
-    );
-    const recurrenceWeekdayLabels = useMemo(
-        () => getLocalizedWeekdayLabels(language, 'long'),
-        [language]
-    );
-    const [isAIWorking, setIsAIWorking] = useState(false);
-    const [aiModal, setAiModal] = useState<{ title: string; message?: string; actions: AIResponseAction[] } | null>(null);
+    const resetCopilotStateRef = useRef<() => void>(() => {});
+    const {
+        aiModal,
+        baseTaskRef,
+        contextInputDraft,
+        customWeekdays,
+        descriptionDebounceRef,
+        descriptionDraft,
+        descriptionDraftRef,
+        editTab,
+        editedTask,
+        isAIWorking,
+        isContextInputFocused,
+        isDirtyRef,
+        isTagInputFocused,
+        pendingDueDate,
+        pendingStartDate,
+        setAiModal,
+        setContextInputDraft,
+        setCustomWeekdays,
+        setDescriptionDraft,
+        setEditTab,
+        setEditedTask,
+        setIsAIWorking,
+        setIsContextInputFocused,
+        setIsTagInputFocused,
+        setPendingDueDate,
+        setPendingStartDate,
+        setShowAreaPicker,
+        setShowDatePicker,
+        setShowDescriptionPreview,
+        setShowProjectPicker,
+        setShowSectionPicker,
+        setTagInputDraft,
+        setTitleDraft,
+        showAreaPicker,
+        showDatePicker,
+        showDescriptionPreview,
+        showProjectPicker,
+        showSectionPicker,
+        tagInputDraft,
+        titleDebounceRef,
+        titleDraft,
+        titleDraftRef,
+    } = useTaskEditState({
+        defaultTab,
+        resetCopilotStateRef,
+        task,
+        tasks,
+        visible,
+    });
+    const recurrenceWeekdayButtons = useMemo(() => getLocalizedWeekdayButtons(language, 'narrow'), [language]);
+    const recurrenceWeekdayLabels = useMemo(() => getLocalizedWeekdayLabels(language, 'long'), [language]);
     const aiEnabled = settings.ai?.enabled === true;
     const aiProvider = (settings.ai?.provider ?? 'openai') as AIProviderId;
 
-    const contextOptions = React.useMemo(() => {
-        return Array.from(new Set([
+    const contextOptions = React.useMemo(() => Array.from(new Set([
             ...getUsedTaskTokens(tasks, (item) => item.contexts, { prefix: '@' }),
             ...(editedTask.contexts ?? []),
-        ])).filter(Boolean);
-    }, [editedTask.contexts, tasks]);
-    const tagOptions = React.useMemo(() => {
-        return Array.from(new Set([
+        ])).filter(Boolean), [editedTask.contexts, tasks]);
+    const tagOptions = React.useMemo(() => Array.from(new Set([
             ...getUsedTaskTokens(tasks, (item) => item.tags, { prefix: '#' }),
             ...(editedTask.tags ?? []),
-        ])).filter(Boolean);
-    }, [editedTask.tags, tasks]);
-    const handlePreviewProjectPress = useCallback((projectId: string) => {
-        onClose();
-        onProjectNavigate?.(projectId);
-    }, [onClose, onProjectNavigate]);
-    const handlePreviewContextPress = useCallback((context: string) => {
-        onClose();
-        onContextNavigate?.(context);
-    }, [onClose, onContextNavigate]);
-    const handlePreviewTagPress = useCallback((tag: string) => {
-        onClose();
-        onTagNavigate?.(tag);
-    }, [onClose, onTagNavigate]);
+        ])).filter(Boolean), [editedTask.tags, tasks]);
+    const {
+        handlePreviewContextPress,
+        handlePreviewProjectPress,
+        handlePreviewTagPress,
+        projectContext,
+    } = useTaskEditPreview({
+        editedProjectId: editedTask.projectId,
+        onClose,
+        onContextNavigate,
+        onProjectNavigate,
+        onTagNavigate,
+        projectId: task?.projectId,
+        projects,
+        task,
+        tasks,
+    });
 
     const {
         copilotSuggestion,
@@ -263,6 +218,38 @@ function TaskEditModalInner({
         visible,
         setEditedTask,
     });
+    resetCopilotStateRef.current = resetCopilotState;
+
+    const {
+        addFileAttachment,
+        addImageAttachment,
+        audioAttachment,
+        audioLoading,
+        audioModalVisible,
+        audioStatus,
+        closeAudioModal,
+        closeImagePreview,
+        closeLinkModal,
+        confirmAddLink,
+        downloadAttachment,
+        imagePreviewAttachment,
+        isImageAttachment,
+        linkInput,
+        linkInputTouched,
+        linkModalVisible,
+        openAttachment,
+        removeAttachment,
+        setLinkInput,
+        setLinkInputTouched,
+        setLinkModalVisible,
+        toggleAudioPlayback,
+        visibleAttachments,
+    } = useTaskEditAttachments({
+        editedTask,
+        setEditedTask,
+        t,
+        visible,
+    });
 
     const {
         contextTokenSuggestions,
@@ -278,111 +265,6 @@ function TaskEditModalInner({
         contextInputDraft,
         tagInputDraft,
     });
-
-    useEffect(() => {
-        if (liveTask) {
-            const recurrenceRule = getRecurrenceRuleValue(liveTask.recurrence);
-            const recurrenceStrategy = getRecurrenceStrategyValue(liveTask.recurrence);
-            const byDay = getRecurrenceByDayValue(liveTask.recurrence);
-            const rrule = getRecurrenceRRuleValue(liveTask.recurrence);
-            const normalizedTask: Task = {
-                ...liveTask,
-                recurrence: recurrenceRule
-                    ? { rule: recurrenceRule, strategy: recurrenceStrategy, ...(rrule ? { rrule } : {}), ...(byDay.length ? { byDay } : {}) }
-                    : undefined,
-            };
-            const taskChanged = baseTaskRef.current?.id !== normalizedTask.id;
-            const updatedChanged = baseTaskRef.current?.updatedAt !== normalizedTask.updatedAt;
-            if (taskChanged || (!isDirtyRef.current && updatedChanged)) {
-                setCustomWeekdays(byDay);
-                setEditedTaskState(normalizedTask);
-                baseTaskRef.current = normalizedTask;
-                isDirtyRef.current = false;
-                setShowDescriptionPreview(false);
-                const nextTitle = String(normalizedTask.title ?? '');
-                if (titleDebounceRef.current) {
-                    clearTimeout(titleDebounceRef.current);
-                    titleDebounceRef.current = null;
-                }
-                titleDraftRef.current = nextTitle;
-                setTitleDraft(nextTitle);
-                const nextDescription = String(normalizedTask.description ?? '');
-                descriptionDraftRef.current = nextDescription;
-                setDescriptionDraft(nextDescription);
-                setContextInputDraft((normalizedTask.contexts ?? []).join(', '));
-                setTagInputDraft((normalizedTask.tags ?? []).join(', '));
-                setIsContextInputFocused(false);
-                setIsTagInputFocused(false);
-                setEditTab(resolveInitialTaskEditTab(defaultTab, normalizedTask));
-                resetCopilotState();
-            }
-        } else if (visible) {
-            setEditedTaskState({});
-            baseTaskRef.current = null;
-            isDirtyRef.current = false;
-            setShowDescriptionPreview(false);
-            if (titleDebounceRef.current) {
-                clearTimeout(titleDebounceRef.current);
-                titleDebounceRef.current = null;
-            }
-            titleDraftRef.current = '';
-            setTitleDraft('');
-            descriptionDraftRef.current = '';
-            setDescriptionDraft('');
-            setContextInputDraft('');
-            setTagInputDraft('');
-            setIsContextInputFocused(false);
-            setIsTagInputFocused(false);
-            setEditTab(resolveInitialTaskEditTab(defaultTab, null));
-            setCustomWeekdays([]);
-        }
-    }, [liveTask, defaultTab, visible, resetCopilotState]);
-
-    useEffect(() => {
-        if (!visible) {
-            setAiModal(null);
-        }
-    }, [visible]);
-
-    useEffect(() => {
-        if (!visible) {
-            if (titleDebounceRef.current) {
-                clearTimeout(titleDebounceRef.current);
-                titleDebounceRef.current = null;
-            }
-            if (descriptionDebounceRef.current) {
-                clearTimeout(descriptionDebounceRef.current);
-                descriptionDebounceRef.current = null;
-            }
-        }
-    }, [visible]);
-
-    useEffect(() => {
-        if (!visible || isContextInputFocused) return;
-        const normalized = (editedTask.contexts ?? []).join(', ');
-        if (contextInputDraft !== normalized) {
-            setContextInputDraft(normalized);
-        }
-    }, [contextInputDraft, editedTask.contexts, isContextInputFocused, visible]);
-
-    useEffect(() => {
-        if (!visible || isTagInputFocused) return;
-        const normalized = (editedTask.tags ?? []).join(', ');
-        if (tagInputDraft !== normalized) {
-            setTagInputDraft(normalized);
-        }
-    }, [editedTask.tags, isTagInputFocused, tagInputDraft, visible]);
-
-    useEffect(() => () => {
-        if (titleDebounceRef.current) {
-            clearTimeout(titleDebounceRef.current);
-            titleDebounceRef.current = null;
-        }
-        if (descriptionDebounceRef.current) {
-            clearTimeout(descriptionDebounceRef.current);
-            descriptionDebounceRef.current = null;
-        }
-    }, []);
 
     const closeAIModal = () => setAiModal(null);
     const setTitleImmediate = useCallback((text: string) => {
@@ -405,21 +287,6 @@ function TaskEditModalInner({
             setEditedTask((prev) => ({ ...prev, title: text }));
         }, 250);
     }, [resetCopilotDraft, setEditedTask]);
-
-    const projectContext = useMemo(() => {
-        const projectId = (editedTask.projectId as string | undefined) ?? task?.projectId;
-        if (!projectId) return null;
-        const project = projects.find((p) => p.id === projectId);
-        const projectTasks = tasks
-            .filter((t) => t.projectId === projectId && t.id !== task?.id && !t.deletedAt)
-            .map((t) => `${t.title}${t.status ? ` (${t.status})` : ''}`)
-            .filter(Boolean)
-            .slice(0, 20);
-        return {
-            projectTitle: project?.title || '',
-            projectTasks,
-        };
-    }, [editedTask.projectId, projects, task?.id, task?.projectId, tasks]);
 
     const activeProjectId = editedTask.projectId ?? task?.projectId;
     const projectFilterAreaId =
@@ -630,489 +497,22 @@ function TaskEditModalInner({
         }
     };
 
-    const attachments = (editedTask.attachments || []) as Attachment[];
-    const visibleAttachments = attachments.filter((a) => !a.deletedAt);
-
-    const resolveValidationMessage = (error?: string) => {
-        if (error === 'file_too_large') return t('attachments.fileTooLarge');
-        if (error === 'mime_type_blocked' || error === 'mime_type_not_allowed') return t('attachments.invalidFileType');
-        return t('attachments.fileNotSupported');
-    };
-
-    const addFileAttachment = async () => {
-        const result = await DocumentPicker.getDocumentAsync({
-            copyToCacheDirectory: false,
-            multiple: false,
-        });
-        if (result.canceled) return;
-        const asset = result.assets[0];
-        const size = asset.size;
-        if (typeof size === 'number') {
-            const validation = await validateAttachmentForUpload(
-                {
-                    id: 'pending',
-                    kind: 'file',
-                    title: asset.name || 'file',
-                    uri: asset.uri,
-                    mimeType: asset.mimeType,
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
-                },
-                size
-            );
-            if (!validation.valid) {
-                Alert.alert(t('attachments.title'), resolveValidationMessage(validation.error));
-                return;
-            }
-        }
-        const now = new Date().toISOString();
-        const attachment: Attachment = {
-            id: generateUUID(),
-            kind: 'file',
-            title: asset.name || 'file',
-            uri: asset.uri,
-            mimeType: asset.mimeType,
-            size: asset.size,
-            createdAt: now,
-            updatedAt: now,
-            localStatus: 'available',
-        };
-        const cached = await persistAttachmentLocally(attachment);
-        setEditedTask((prev) => ({ ...prev, attachments: [...(prev.attachments || []), cached] }));
-    };
-
-    const addImageAttachment = async () => {
-        let imagePicker: typeof import('expo-image-picker') | null = null;
-        try {
-            imagePicker = await import('expo-image-picker');
-        } catch (error) {
-            logTaskWarn('Image picker unavailable', error);
-            Alert.alert(t('attachments.photoUnavailableTitle'), t('attachments.photoUnavailableBody'));
-            return;
-        }
-
-        // Android can use the system picker flow without requesting legacy media permissions.
-        // Keep the explicit permission request on iOS where Photos permission is required.
-        if (Platform.OS === 'ios') {
-            const permission = await imagePicker.getMediaLibraryPermissionsAsync();
-            if (!permission.granted) {
-                const requested = await imagePicker.requestMediaLibraryPermissionsAsync();
-                if (!requested.granted) return;
-            }
-        }
-        const result = await imagePicker.launchImageLibraryAsync({
-            mediaTypes: imagePicker.MediaTypeOptions.Images,
-            quality: 0.9,
-            allowsMultipleSelection: false,
-        });
-        if (result.canceled || !result.assets?.length) return;
-        const asset = result.assets[0];
-        const size = (asset as { fileSize?: number }).fileSize ?? (asset as { size?: number }).size;
-        if (typeof size === 'number') {
-            const validation = await validateAttachmentForUpload(
-                {
-                    id: 'pending',
-                    kind: 'file',
-                    title: asset.fileName || asset.uri.split('/').pop() || 'image',
-                    uri: asset.uri,
-                    mimeType: asset.mimeType,
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
-                },
-                size
-            );
-            if (!validation.valid) {
-                Alert.alert(t('attachments.title'), resolveValidationMessage(validation.error));
-                return;
-            }
-        }
-        const now = new Date().toISOString();
-        const attachment: Attachment = {
-            id: generateUUID(),
-            kind: 'file',
-            title: asset.fileName || asset.uri.split('/').pop() || 'image',
-            uri: asset.uri,
-            mimeType: asset.mimeType,
-            size: (asset as { fileSize?: number }).fileSize,
-            createdAt: now,
-            updatedAt: now,
-            localStatus: 'available',
-        };
-        const cached = await persistAttachmentLocally(attachment);
-        setEditedTask((prev) => ({ ...prev, attachments: [...(prev.attachments || []), cached] }));
-    };
-
-    const confirmAddLink = () => {
-        if (!linkInput.trim()) {
-            setLinkInputTouched(true);
-            return;
-        }
-        const normalized = normalizeLinkAttachmentInput(linkInput);
-        if (!normalized.uri || !isValidLinkUri(normalized.uri)) {
-            Alert.alert(t('attachments.title'), t('attachments.invalidLink'));
-            return;
-        }
-        const now = new Date().toISOString();
-        const attachment: Attachment = {
-            id: generateUUID(),
-            kind: normalized.kind,
-            title: normalized.title,
-            uri: normalized.uri,
-            createdAt: now,
-            updatedAt: now,
-        };
-        setEditedTask((prev) => ({ ...prev, attachments: [...(prev.attachments || []), attachment] }));
-        setLinkInput('');
-        setLinkInputTouched(false);
-        setLinkModalVisible(false);
-    };
-
-    const closeLinkModal = useCallback(() => {
-        setLinkModalVisible(false);
-        setLinkInput('');
-        setLinkInputTouched(false);
-    }, []);
-
-    const isAudioAttachment = (attachment: Attachment) => {
-        const mime = attachment.mimeType?.toLowerCase();
-        if (mime?.startsWith('audio/')) return true;
-        return /\.(m4a|aac|mp3|wav|caf|ogg|oga|3gp|3gpp)$/i.test(attachment.uri);
-    };
-
-    const unloadAudio = useCallback(async () => {
-        if (audioStoppingRef.current) return;
-        if (!audioLoadedRef.current) return;
-        audioStoppingRef.current = true;
-        try {
-            await Promise.resolve(audioPlayer.pause());
-        } catch (error) {
-            if (!isReleasedAudioPlayerError(error)) {
-                logTaskWarn('Stop audio failed', error);
-            }
-        } finally {
-            audioLoadedRef.current = false;
-            audioStoppingRef.current = false;
-        }
-    }, [audioPlayer]);
-
-    const normalizeAudioUri = useCallback((uri: string) => {
-        if (!uri) return '';
-        if (uri.startsWith('file://') || uri.startsWith('content://')) return uri;
-        if (uri.startsWith('file:/')) {
-            const stripped = uri.replace(/^file:\//, '/');
-            return `file://${stripped}`;
-        }
-        if (uri.startsWith('/')) return `file://${uri}`;
-        return uri;
-    }, []);
-
-    const openAudioAttachment = useCallback(async (attachment: Attachment) => {
-        setAudioAttachment(attachment);
-        setAudioModalVisible(true);
-        setAudioLoading(true);
-        try {
-            await unloadAudio();
-            await setAudioModeAsync({
-                allowsRecording: false,
-                playsInSilentMode: true,
-                interruptionMode: 'duckOthers',
-                interruptionModeAndroid: 'duckOthers',
-            });
-            const normalizedUri = normalizeAudioUri(attachment.uri);
-            if (normalizedUri) {
-                try {
-                    const info = Paths.info(normalizedUri);
-                    if (info?.exists === false) {
-                        logTaskWarn('Audio attachment missing', new Error(`uri:${normalizedUri}`));
-                        Alert.alert(t('attachments.title'), t('attachments.missing'));
-                        setAudioModalVisible(false);
-                        setAudioAttachment(null);
-                        return;
-                    }
-                    if (info?.isDirectory) {
-                        logTaskWarn('Audio attachment path is directory', new Error(`uri:${normalizedUri}`));
-                        Alert.alert(t('attachments.title'), t('attachments.missing'));
-                        setAudioModalVisible(false);
-                        setAudioAttachment(null);
-                        return;
-                    }
-                } catch (error) {
-                    logTaskWarn('Audio attachment info failed', error);
-                }
-            } else {
-                logTaskWarn('Audio attachment uri missing', new Error('empty-uri'));
-                Alert.alert(t('attachments.title'), t('attachments.missing'));
-                setAudioModalVisible(false);
-                setAudioAttachment(null);
-                return;
-            }
-            audioPlayer.replace({ uri: normalizedUri });
-            audioLoadedRef.current = true;
-            await Promise.resolve(audioPlayer.play());
-        } catch (error) {
-            audioLoadedRef.current = false;
-            logTaskError('Failed to play audio attachment', error);
-            Alert.alert(t('quickAdd.audioErrorTitle'), t('quickAdd.audioErrorBody'));
-            setAudioModalVisible(false);
-            setAudioAttachment(null);
-        } finally {
-            setAudioLoading(false);
-        }
-    }, [audioPlayer, normalizeAudioUri, t, unloadAudio]);
-
-    const closeAudioModal = useCallback(() => {
-        setAudioModalVisible(false);
-        setAudioAttachment(null);
-        setAudioLoading(false);
-        void unloadAudio();
-    }, [unloadAudio]);
-
-    const closeImagePreview = useCallback(() => {
-        setImagePreviewAttachment(null);
-    }, []);
-
-    const toggleAudioPlayback = useCallback(async () => {
-        if (!audioStatus?.isLoaded || !audioLoadedRef.current) return;
-        try {
-            if (audioStatus.playing) {
-                await Promise.resolve(audioPlayer.pause());
-            } else {
-                const duration = Number.isFinite(audioStatus.duration) ? audioStatus.duration : 0;
-                const currentTime = Number.isFinite(audioStatus.currentTime) ? audioStatus.currentTime : 0;
-                const isAtEnd = duration > 0 && currentTime >= Math.max(0, duration - 0.1);
-                if (audioStatus.didJustFinish || isAtEnd) {
-                    await Promise.resolve(audioPlayer.seekTo(0));
-                }
-                await Promise.resolve(audioPlayer.play());
-            }
-        } catch (error) {
-            if (isReleasedAudioPlayerError(error)) {
-                audioLoadedRef.current = false;
-                return;
-            }
-            logTaskWarn('Toggle audio playback failed', error);
-        }
-    }, [audioPlayer, audioStatus]);
-
-    const updateAttachmentState = useCallback((nextAttachment: Attachment) => {
-        setEditedTask((prev) => {
-            const nextAttachments = (prev.attachments || []).map((item) =>
-                item.id === nextAttachment.id ? { ...item, ...nextAttachment } : item
-            );
-            return { ...prev, attachments: nextAttachments };
-        }, false);
-    }, [setEditedTask]);
-
-    const resolveAttachment = useCallback(async (attachment: Attachment): Promise<Attachment | null> => {
-        if (attachment.kind !== 'file') return attachment;
-        const shouldDownload =
-            attachment.cloudKey &&
-            (attachment.localStatus === 'missing' || !attachment.uri);
-        if (shouldDownload && attachment.localStatus !== 'downloading') {
-            updateAttachmentState({ ...attachment, localStatus: 'downloading' });
-        }
-        const resolved = await ensureAttachmentAvailable(attachment);
-        if (resolved) {
-            if (resolved.uri !== attachment.uri || resolved.localStatus !== attachment.localStatus) {
-                updateAttachmentState(resolved);
-            }
-            return resolved;
-        }
-        if (shouldDownload) {
-            updateAttachmentState({ ...attachment, localStatus: 'missing' });
-        }
-        return null;
-    }, [updateAttachmentState]);
-
-    const downloadAttachment = useCallback(async (attachment: Attachment) => {
-        const resolved = await resolveAttachment(attachment);
-        if (!resolved) {
-            const message = attachment.kind === 'file' ? t('attachments.missing') : t('attachments.fileNotSupported');
-            Alert.alert(t('attachments.title'), message);
-        }
-    }, [resolveAttachment, t]);
-
-    const openAttachment = async (attachment: Attachment) => {
-        const resolved = await resolveAttachment(attachment);
-        if (!resolved) {
-            const message = attachment.kind === 'file' ? t('attachments.missing') : t('attachments.fileNotSupported');
-            Alert.alert(t('attachments.title'), message);
-            return;
-        }
-
-        if (resolved.kind === 'link') {
-            Linking.openURL(resolved.uri).catch((error) => logTaskError('Failed to open attachment URL', error));
-            return;
-        }
-        if (isAudioAttachment(resolved)) {
-            openAudioAttachment(resolved).catch((error) => logTaskError('Failed to open audio attachment', error));
-            return;
-        }
-        if (isImageAttachment(resolved)) {
-            setImagePreviewAttachment(resolved);
-            return;
-        }
-        const available = await Sharing.isAvailableAsync().catch((error) => {
-            logTaskWarn('[Sharing] availability check failed', error);
-            return false;
-        });
-        if (available) {
-            Sharing.shareAsync(resolved.uri).catch((error) => logTaskError('Failed to share attachment', error));
-        } else {
-            Linking.openURL(resolved.uri).catch((error) => logTaskError('Failed to open attachment URL', error));
-        }
-    };
-
-    const isImageAttachment = (attachment: Attachment) => {
-        const mime = attachment.mimeType?.toLowerCase();
-        if (mime?.startsWith('image/')) return true;
-        return /\.(png|jpg|jpeg|gif|webp|heic|heif)$/i.test(attachment.uri);
-    };
-
-    useEffect(() => {
-        if (!visible) {
-            closeAudioModal();
-            closeImagePreview();
-        }
-    }, [closeAudioModal, closeImagePreview, visible]);
-
-    useEffect(() => {
-        if (!audioStatus?.isLoaded) {
-            audioLoadedRef.current = false;
-        }
-    }, [audioStatus?.isLoaded]);
-
-    useEffect(() => {
-        return () => {
-            void unloadAudio();
-        };
-    }, [unloadAudio]);
-
-    const removeAttachment = (id: string) => {
-        const now = new Date().toISOString();
-        const next = attachments.map((a) => (a.id === id ? { ...a, deletedAt: now, updatedAt: now } : a));
-        setEditedTask((prev) => ({ ...prev, attachments: next }));
-    };
-
-
-
-    const onDateChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
-        const currentMode = showDatePicker;
-        if (!currentMode) return;
-
-        if (event.type === 'dismissed') {
-            if (currentMode === 'start-time') setPendingStartDate(null);
-            if (currentMode === 'due-time') setPendingDueDate(null);
-            setShowDatePicker(null);
-            return;
-        }
-
-        if (!selectedDate) return;
-
-        if (currentMode === 'start') {
-            const dateOnly = safeFormatDate(selectedDate, 'yyyy-MM-dd');
-            const existing = editedTask.startTime && hasTimeComponent(editedTask.startTime)
-                ? safeParseDate(editedTask.startTime)
-                : null;
-            if (existing) {
-                const combined = new Date(selectedDate);
-                combined.setHours(existing.getHours(), existing.getMinutes(), 0, 0);
-                setPendingStartDate(combined);
-                setEditedTask(prev => ({ ...prev, startTime: combined.toISOString() }));
-            } else {
-                setPendingStartDate(new Date(selectedDate));
-                setEditedTask(prev => ({ ...prev, startTime: dateOnly }));
-            }
-            if (Platform.OS === 'android') setShowDatePicker(null);
-            return;
-        }
-
-        if (currentMode === 'start-time') {
-            const base = pendingStartDate ?? safeParseDate(editedTask.startTime) ?? new Date();
-            const combined = new Date(base);
-            combined.setHours(selectedDate.getHours(), selectedDate.getMinutes(), 0, 0);
-            setEditedTask(prev => ({ ...prev, startTime: combined.toISOString() }));
-            setPendingStartDate(null);
-            if (Platform.OS === 'android') setShowDatePicker(null);
-            return;
-        }
-
-        if (currentMode === 'review') {
-            setEditedTask(prev => ({ ...prev, reviewAt: selectedDate.toISOString() }));
-            if (Platform.OS === 'android') setShowDatePicker(null);
-            return;
-        }
-
-        if (currentMode === 'due') {
-            const dateOnly = safeFormatDate(selectedDate, 'yyyy-MM-dd');
-            const existing = editedTask.dueDate && hasTimeComponent(editedTask.dueDate)
-                ? safeParseDate(editedTask.dueDate)
-                : null;
-            if (existing) {
-                const combined = new Date(selectedDate);
-                combined.setHours(existing.getHours(), existing.getMinutes(), 0, 0);
-                setPendingDueDate(combined);
-                setEditedTask(prev => ({ ...prev, dueDate: combined.toISOString() }));
-            } else {
-                setPendingDueDate(new Date(selectedDate));
-                setEditedTask(prev => ({ ...prev, dueDate: dateOnly }));
-            }
-            if (Platform.OS === 'android') setShowDatePicker(null);
-            return;
-        }
-
-        // due-time (Android) - combine pending date with chosen time.
-        const base = pendingDueDate ?? safeParseDate(editedTask.dueDate) ?? new Date();
-        const combined = new Date(base);
-        combined.setHours(selectedDate.getHours(), selectedDate.getMinutes(), 0, 0);
-        setEditedTask(prev => ({ ...prev, dueDate: combined.toISOString() }));
-        setPendingDueDate(null);
-        if (Platform.OS === 'android') setShowDatePicker(null);
-    };
-
-    const formatDate = (dateStr?: string) => {
-        if (!dateStr) return t('common.notSet');
-        const parsed = safeParseDate(dateStr);
-        if (!parsed) return t('common.notSet');
-        return parsed.toLocaleDateString();
-    };
-
-    const formatStartDateTime = (dateStr?: string) => {
-        if (!dateStr) return t('common.notSet');
-        const parsed = safeParseDate(dateStr);
-        if (!parsed) return t('common.notSet');
-        const hasTime = hasTimeComponent(dateStr);
-        if (!hasTime) return parsed.toLocaleDateString();
-        return parsed.toLocaleString(undefined, {
-            year: 'numeric',
-            month: 'numeric',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-        });
-    };
-
-    const formatDueDate = (dateStr?: string) => {
-        if (!dateStr) return t('common.notSet');
-        const parsed = safeParseDueDate(dateStr);
-        if (!parsed) return t('common.notSet');
-        const hasTime = hasTimeComponent(dateStr);
-        if (!hasTime) return parsed.toLocaleDateString();
-        return parsed.toLocaleString(undefined, {
-            year: 'numeric',
-            month: 'numeric',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-        });
-    };
-
-    const getSafePickerDateValue = (dateStr?: string) => {
-        if (!dateStr) return new Date();
-        const parsed = safeParseDate(dateStr);
-        if (!parsed) return new Date();
-        return parsed;
-    };
+    const {
+        formatDate,
+        formatDueDate,
+        getSafePickerDateValue,
+        onDateChange,
+    } = useTaskEditDates({
+        editedTask,
+        pendingDueDate,
+        pendingStartDate,
+        setEditedTask,
+        setPendingDueDate,
+        setPendingStartDate,
+        setShowDatePicker,
+        showDatePicker,
+        t,
+    });
 
     const formatTimeEstimateLabel = (value: TimeEstimate) => {
         if (value === '5min') return '5m';
@@ -1284,9 +684,10 @@ function TaskEditModalInner({
     );
     const basicFields = useMemo(
         () => filterVisibleFields(orderFields(
-            ['status', ...taskEditorOrder.filter((fieldId) =>
-                !TASK_EDITOR_FIXED_FIELDS.includes(fieldId) && sectionAssignments[fieldId] === 'basic'
-            )]
+            taskEditorOrder.filter((fieldId) => {
+                if (TASK_EDITOR_FIXED_FIELDS.includes(fieldId)) return true;
+                return sectionAssignments[fieldId] === 'basic';
+            })
         )),
         [filterVisibleFields, orderFields, sectionAssignments, taskEditorOrder]
     );
@@ -1339,7 +740,7 @@ function TaskEditModalInner({
         return safeParseDate(editedTask.dueDate ?? task?.dueDate) ?? new Date();
     }, [editedTask.dueDate, task?.dueDate]);
     const monthlyWeekdayCode = WEEKDAY_ORDER[monthlyAnchorDate.getDay()];
-    const monthlyPattern = useMemo(() => {
+    const monthlyPattern = useMemo<'date' | 'custom'>(() => {
         if (recurrenceRuleValue !== 'monthly') return 'date';
         const parsed = parseRRuleString(recurrenceRRuleValue);
         const hasLast = parsed.byDay?.some((day) => String(day).startsWith('-1'));
@@ -1805,810 +1206,83 @@ function TaskEditModalInner({
         writingDirection: resolvedDirection,
         textAlign: resolvedDirection === 'rtl' ? 'right' : 'left',
     } as const;
-    const getStatusChipStyle = (active: boolean) => ([
-        styles.statusChip,
-        { backgroundColor: active ? tc.tint : tc.filterBg, borderColor: active ? tc.tint : tc.border },
-    ]);
-    const getStatusTextStyle = (active: boolean) => ([
-        styles.statusText,
-        { color: active ? '#fff' : tc.secondaryText },
-    ]);
-    const getStatusLabel = (status: TaskStatus) => {
-        const key = `status.${status}` as const;
-        const translated = t(key);
-        return translated === key ? status : translated;
+    const fieldRendererProps = {
+        addFileAttachment,
+        addImageAttachment,
+        applyContextSuggestion,
+        applyTagSuggestion,
+        areas,
+        availableStatusOptions,
+        commitContextDraft,
+        commitTagDraft,
+        contextInputDraft,
+        contextTokenSuggestions,
+        customWeekdays,
+        dailyInterval,
+        descriptionDebounceRef,
+        descriptionDraft,
+        descriptionDraftRef,
+        downloadAttachment,
+        editedTask,
+        formatDate,
+        formatDueDate,
+        frequentContextSuggestions,
+        frequentTagSuggestions,
+        getSafePickerDateValue,
+        handleInputFocus,
+        handleResetChecklist,
+        language,
+        monthlyPattern,
+        onDateChange,
+        openAttachment,
+        openCustomRecurrence,
+        pendingDueDate,
+        pendingStartDate,
+        prioritiesEnabled,
+        priorityOptions,
+        projects,
+        projectSections,
+        recurrenceOptions,
+        recurrenceRRuleValue,
+        recurrenceRuleValue,
+        recurrenceStrategyValue,
+        recurrenceWeekdayButtons,
+        removeAttachment,
+        resetCopilotDraft,
+        selectedContextTokens,
+        selectedTagTokens,
+        setCustomWeekdays,
+        setDescriptionDraft,
+        setEditedTask,
+        setIsContextInputFocused,
+        setIsTagInputFocused,
+        setLinkInputTouched,
+        setLinkModalVisible,
+        setShowAreaPicker,
+        setShowDatePicker,
+        setShowDescriptionPreview,
+        setShowProjectPicker,
+        setShowSectionPicker,
+        showDatePicker,
+        showDescriptionPreview,
+        styles,
+        tagInputDraft,
+        tagTokenSuggestions,
+        task,
+        t,
+        tc,
+        timeEstimateOptions,
+        timeEstimatesEnabled,
+        titleDraft,
+        toggleQuickContextToken,
+        toggleQuickTagToken,
+        updateContextInput,
+        updateTagInput,
+        visibleAttachments,
     };
-    const getQuickTokenChipStyle = (active: boolean) => ([
-        styles.quickTokenChip,
-        { backgroundColor: active ? tc.tint : tc.filterBg, borderColor: active ? tc.tint : tc.border },
-    ]);
-    const getQuickTokenTextStyle = (active: boolean) => ([
-        styles.quickTokenText,
-        { color: active ? '#fff' : tc.secondaryText },
-    ]);
-    const openDatePicker = (mode: NonNullable<typeof showDatePicker>) => {
-        Keyboard.dismiss();
-        setShowDatePicker(mode);
-    };
-    const getDatePickerValue = (mode: NonNullable<typeof showDatePicker>) => {
-        if (mode === 'start') return getSafePickerDateValue(editedTask.startTime);
-        if (mode === 'start-time') return pendingStartDate ?? getSafePickerDateValue(editedTask.startTime);
-        if (mode === 'review') return getSafePickerDateValue(editedTask.reviewAt);
-        if (mode === 'due-time') return pendingDueDate ?? getSafePickerDateValue(editedTask.dueDate);
-        return getSafePickerDateValue(editedTask.dueDate);
-    };
-    const getDatePickerMode = (mode: NonNullable<typeof showDatePicker>) =>
-        mode === 'start-time' || mode === 'due-time' ? 'time' : 'date';
-    const renderInlineIOSDatePicker = (targetModes: Array<NonNullable<typeof showDatePicker>>) => {
-        if (Platform.OS !== 'ios' || !showDatePicker || !targetModes.includes(showDatePicker)) {
-            return null;
-        }
-        return (
-            <View style={{ marginTop: 8 }}>
-                <View style={styles.pickerToolbar}>
-                    <View style={styles.pickerSpacer} />
-                    <Pressable onPress={() => setShowDatePicker(null)} style={styles.pickerDone}>
-                        <Text style={styles.pickerDoneText}>{t('common.done')}</Text>
-                    </Pressable>
-                </View>
-                <DateTimePicker
-                    value={getDatePickerValue(showDatePicker)}
-                    mode={getDatePickerMode(showDatePicker)}
-                    display="spinner"
-                    onChange={onDateChange}
-                />
-            </View>
-        );
-    };
-
-    const renderField = (fieldId: TaskEditorFieldId) => {
-        switch (fieldId) {
-            case 'status':
-                return (
-                    <View style={styles.formGroup}>
-                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.statusLabel')}</Text>
-                        <View style={styles.statusContainerCompact}>
-                            {availableStatusOptions.map(status => (
-                                <TouchableOpacity
-                                    key={status}
-                                    style={[styles.statusChipCompact, ...getStatusChipStyle(editedTask.status === status)]}
-                                    onPress={() => setEditedTask(prev => ({ ...prev, status }))}
-                                >
-                                    <Text style={getStatusTextStyle(editedTask.status === status)}>
-                                        {getStatusLabel(status)}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                    </View>
-                );
-            case 'project':
-                return (
-                    <View style={styles.formGroup}>
-                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.projectLabel')}</Text>
-                        <View style={styles.dateRow}>
-                            <TouchableOpacity
-                                style={[styles.dateBtn, styles.flex1, { backgroundColor: tc.inputBg, borderColor: tc.border }]}
-                                onPress={() => setShowProjectPicker(true)}
-                            >
-                                <Text style={{ color: tc.text }}>
-                                    {projects.find((p) => p.id === editedTask.projectId)?.title || t('taskEdit.noProjectOption')}
-                                </Text>
-                            </TouchableOpacity>
-                            {!!editedTask.projectId && (
-                                <TouchableOpacity
-                                    style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
-                                    onPress={() => setEditedTask(prev => ({ ...prev, projectId: undefined, sectionId: undefined }))}
-                                >
-                                    <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>{t('common.clear')}</Text>
-                                </TouchableOpacity>
-                            )}
-                        </View>
-                    </View>
-                );
-            case 'section': {
-                const projectId = editedTask.projectId ?? task?.projectId;
-                if (!projectId) return null;
-                const section = projectSections.find((item) => item.id === editedTask.sectionId);
-                return (
-                    <View style={styles.formGroup}>
-                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.sectionLabel')}</Text>
-                        <View style={styles.dateRow}>
-                            <TouchableOpacity
-                                style={[styles.dateBtn, styles.flex1, { backgroundColor: tc.inputBg, borderColor: tc.border }]}
-                                onPress={() => setShowSectionPicker(true)}
-                            >
-                                <Text style={{ color: tc.text }}>
-                                    {section?.title || t('taskEdit.noSectionOption')}
-                                </Text>
-                            </TouchableOpacity>
-                            {!!editedTask.sectionId && (
-                                <TouchableOpacity
-                                    style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
-                                    onPress={() => setEditedTask(prev => ({ ...prev, sectionId: undefined }))}
-                                >
-                                    <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>{t('common.clear')}</Text>
-                                </TouchableOpacity>
-                            )}
-                        </View>
-                    </View>
-                );
-            }
-            case 'area':
-                if (editedTask.projectId) return null;
-                return (
-                    <View style={styles.formGroup}>
-                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.areaLabel')}</Text>
-                        <View style={styles.dateRow}>
-                            <TouchableOpacity
-                                style={[styles.dateBtn, styles.flex1, { backgroundColor: tc.inputBg, borderColor: tc.border }]}
-                                onPress={() => setShowAreaPicker(true)}
-                            >
-                                <Text style={{ color: tc.text }}>
-                                    {areas.find((area) => area.id === editedTask.areaId)?.name || t('taskEdit.noAreaOption')}
-                                </Text>
-                            </TouchableOpacity>
-                            {!!editedTask.areaId && (
-                                <TouchableOpacity
-                                    style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
-                                    onPress={() => setEditedTask(prev => ({ ...prev, areaId: undefined }))}
-                                >
-                                    <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>{t('common.clear')}</Text>
-                                </TouchableOpacity>
-                            )}
-                        </View>
-                    </View>
-                );
-            case 'priority':
-                if (!prioritiesEnabled) return null;
-                return (
-                    <View style={styles.formGroup}>
-                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.priorityLabel')}</Text>
-                        <View style={styles.statusContainer}>
-                            <TouchableOpacity
-                                style={getStatusChipStyle(!editedTask.priority)}
-                                onPress={() => setEditedTask(prev => ({ ...prev, priority: undefined }))}
-                            >
-                                <Text style={getStatusTextStyle(!editedTask.priority)}>
-                                    {t('common.none')}
-                                </Text>
-                            </TouchableOpacity>
-                            {priorityOptions.map(priority => (
-                                <TouchableOpacity
-                                    key={priority}
-                                    style={getStatusChipStyle(editedTask.priority === priority)}
-                                    onPress={() => setEditedTask(prev => ({ ...prev, priority }))}
-                                >
-                                    <Text style={getStatusTextStyle(editedTask.priority === priority)}>
-                                        {t(`priority.${priority}`)}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                    </View>
-                );
-            case 'contexts':
-                return (
-                    <View style={styles.formGroup}>
-                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.contextsLabel')}</Text>
-                        <TextInput
-                            style={[styles.input, inputStyle]}
-                            value={contextInputDraft}
-                            onChangeText={updateContextInput}
-                            onFocus={(event) => {
-                                setIsContextInputFocused(true);
-                                handleInputFocus(event.nativeEvent.target);
-                            }}
-                            onBlur={commitContextDraft}
-                            onSubmitEditing={() => {
-                                commitContextDraft();
-                                Keyboard.dismiss();
-                            }}
-                            returnKeyType="done"
-                            blurOnSubmit
-                            placeholder={t('taskEdit.contextsPlaceholder')}
-                            autoCapitalize="none"
-                            placeholderTextColor={tc.secondaryText}
-                            accessibilityLabel={t('taskEdit.contextsLabel')}
-                            accessibilityHint={t('taskEdit.contextsPlaceholder')}
-                        />
-                        {contextTokenSuggestions.length > 0 && (
-                            <View style={[styles.tokenSuggestionsMenu, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
-                                {contextTokenSuggestions.map((token, index) => (
-                                    <TouchableOpacity
-                                        key={token}
-                                        style={[
-                                            styles.tokenSuggestionItem,
-                                            index === contextTokenSuggestions.length - 1 ? styles.tokenSuggestionItemLast : null,
-                                        ]}
-                                        onPress={() => applyContextSuggestion(token)}
-                                    >
-                                        <Text style={[styles.tokenSuggestionText, { color: tc.text }]}>{token}</Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-                        )}
-                        {frequentContextSuggestions.length > 0 && (
-                            <View style={styles.quickTokensRow}>
-                                {frequentContextSuggestions.map((token) => {
-                                    const isActive = selectedContextTokens.has(token);
-                                    return (
-                                        <TouchableOpacity
-                                            key={token}
-                                            style={getQuickTokenChipStyle(isActive)}
-                                            onPress={() => toggleQuickContextToken(token)}
-                                        >
-                                            <Text style={getQuickTokenTextStyle(isActive)}>{token}</Text>
-                                        </TouchableOpacity>
-                                    );
-                                })}
-                            </View>
-                        )}
-                    </View>
-                );
-            case 'tags':
-                return (
-                    <View style={styles.formGroup}>
-                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.tagsLabel')}</Text>
-                        <TextInput
-                            style={[styles.input, inputStyle]}
-                            value={tagInputDraft}
-                            onChangeText={updateTagInput}
-                            onFocus={(event) => {
-                                setIsTagInputFocused(true);
-                                handleInputFocus(event.nativeEvent.target);
-                            }}
-                            onBlur={commitTagDraft}
-                            onSubmitEditing={() => {
-                                commitTagDraft();
-                                Keyboard.dismiss();
-                            }}
-                            returnKeyType="done"
-                            blurOnSubmit
-                            placeholder={t('taskEdit.tagsPlaceholder')}
-                            autoCapitalize="none"
-                            placeholderTextColor={tc.secondaryText}
-                            accessibilityLabel={t('taskEdit.tagsLabel')}
-                            accessibilityHint={t('taskEdit.tagsPlaceholder')}
-                        />
-                        {tagTokenSuggestions.length > 0 && (
-                            <View style={[styles.tokenSuggestionsMenu, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
-                                {tagTokenSuggestions.map((token, index) => (
-                                    <TouchableOpacity
-                                        key={token}
-                                        style={[
-                                            styles.tokenSuggestionItem,
-                                            index === tagTokenSuggestions.length - 1 ? styles.tokenSuggestionItemLast : null,
-                                        ]}
-                                        onPress={() => applyTagSuggestion(token)}
-                                    >
-                                        <Text style={[styles.tokenSuggestionText, { color: tc.text }]}>{token}</Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-                        )}
-                        {frequentTagSuggestions.length > 0 && (
-                            <View style={styles.quickTokensRow}>
-                                {frequentTagSuggestions.map((token) => {
-                                    const isActive = selectedTagTokens.has(token);
-                                    return (
-                                        <TouchableOpacity
-                                            key={token}
-                                            style={getQuickTokenChipStyle(isActive)}
-                                            onPress={() => toggleQuickTagToken(token)}
-                                        >
-                                            <Text style={getQuickTokenTextStyle(isActive)}>{token}</Text>
-                                        </TouchableOpacity>
-                                    );
-                                })}
-                            </View>
-                        )}
-                    </View>
-                );
-            case 'timeEstimate':
-                if (!timeEstimatesEnabled) return null;
-                return (
-                    <View style={styles.formGroup}>
-                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.timeEstimateLabel')}</Text>
-                        <View style={styles.statusContainer}>
-                            {timeEstimateOptions.map(opt => (
-                                <TouchableOpacity
-                                    key={opt.value || 'none'}
-                                    style={getStatusChipStyle(
-                                        editedTask.timeEstimate === opt.value || (!opt.value && !editedTask.timeEstimate)
-                                    )}
-                                    onPress={() => setEditedTask(prev => ({ ...prev, timeEstimate: opt.value || undefined }))}
-                                >
-                                    <Text style={getStatusTextStyle(
-                                        editedTask.timeEstimate === opt.value || (!opt.value && !editedTask.timeEstimate)
-                                    )}>
-                                        {opt.label}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                    </View>
-                );
-            case 'recurrence':
-                return (
-                    <View style={styles.formGroup}>
-                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.recurrenceLabel')}</Text>
-                        <View style={styles.statusContainer}>
-                            {recurrenceOptions.map(opt => (
-                                <TouchableOpacity
-                                    key={opt.value || 'none'}
-                                    style={getStatusChipStyle(
-                                        recurrenceRuleValue === opt.value || (!opt.value && !recurrenceRuleValue)
-                                    )}
-                                    onPress={() => {
-                                        if (opt.value !== 'weekly') {
-                                            setCustomWeekdays([]);
-                                        }
-                                        if (opt.value === 'daily') {
-                                            const parsed = parseRRuleString(recurrenceRRuleValue);
-                                            const interval = parsed.rule === 'daily' && parsed.interval && parsed.interval > 0 ? parsed.interval : 1;
-                                            setEditedTask(prev => ({
-                                                ...prev,
-                                                recurrence: {
-                                                    rule: 'daily',
-                                                    strategy: recurrenceStrategyValue,
-                                                    rrule: buildRRuleString('daily', undefined, interval),
-                                                },
-                                            }));
-                                            return;
-                                        }
-                                        if (opt.value === 'monthly') {
-                                            setEditedTask(prev => ({
-                                                ...prev,
-                                                recurrence: {
-                                                    rule: 'monthly',
-                                                    strategy: recurrenceStrategyValue,
-                                                    rrule: buildRRuleString('monthly'),
-                                                },
-                                            }));
-                                            return;
-                                        }
-                                        setEditedTask(prev => ({
-                                            ...prev,
-                                            recurrence: buildRecurrenceValue(opt.value as RecurrenceRule | '', recurrenceStrategyValue),
-                                        }));
-                                    }}
-                                >
-                                    <Text style={getStatusTextStyle(
-                                        recurrenceRuleValue === opt.value || (!opt.value && !recurrenceRuleValue)
-                                    )}>
-                                        {opt.label}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                        {recurrenceRuleValue === 'weekly' && (
-                            <View style={[styles.weekdayRow, { marginTop: 10 }]}>
-                                {recurrenceWeekdayButtons.map((day) => {
-                                    const active = customWeekdays.includes(day.key);
-                                    return (
-                                        <TouchableOpacity
-                                            key={day.key}
-                                            style={[
-                                                styles.weekdayButton,
-                                                {
-                                                    borderColor: tc.border,
-                                                    backgroundColor: active ? tc.filterBg : tc.cardBg,
-                                                },
-                                            ]}
-                                            onPress={() => {
-                                                const next = active
-                                                    ? customWeekdays.filter((d) => d !== day.key)
-                                                    : [...customWeekdays, day.key];
-                                                setCustomWeekdays(next);
-                                                setEditedTask(prev => ({
-                                                    ...prev,
-                                                    recurrence: {
-                                                        rule: 'weekly',
-                                                        strategy: recurrenceStrategyValue,
-                                                        byDay: next,
-                                                        rrule: buildRRuleString('weekly', next),
-                                                    },
-                                                }));
-                                            }}
-                                        >
-                                            <Text style={[styles.weekdayButtonText, { color: tc.text }]}>{day.label}</Text>
-                                        </TouchableOpacity>
-                                    );
-                                })}
-                            </View>
-                        )}
-                        {recurrenceRuleValue === 'daily' && (
-                            <View style={[styles.customRow, { marginTop: 8, borderColor: tc.border }]}>
-                                <Text style={[styles.modalLabel, { color: tc.secondaryText }]}>{t('recurrence.repeatEvery')}</Text>
-                                <TextInput
-                                    value={String(dailyInterval)}
-                                    onChangeText={(value) => {
-                                        const parsed = Number.parseInt(value, 10);
-                                        const interval = Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 365) : 1;
-                                        setEditedTask(prev => ({
-                                            ...prev,
-                                            recurrence: {
-                                                rule: 'daily',
-                                                strategy: recurrenceStrategyValue,
-                                                rrule: buildRRuleString('daily', undefined, interval),
-                                            },
-                                        }));
-                                    }}
-                                    keyboardType="number-pad"
-                                    style={[styles.customInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-                                    accessibilityLabel={t('recurrence.repeatEvery')}
-                                    accessibilityHint={t('recurrence.dayUnit')}
-                                />
-                                <Text style={[styles.modalLabel, { color: tc.secondaryText }]}>{t('recurrence.dayUnit')}</Text>
-                            </View>
-                        )}
-                        {recurrenceRuleValue === 'monthly' && (
-                            <View style={[styles.statusContainer, { marginTop: 8 }]}>
-                                <TouchableOpacity
-                                    style={getStatusChipStyle(monthlyPattern === 'date')}
-                                    onPress={() => {
-                                        setEditedTask(prev => ({
-                                            ...prev,
-                                            recurrence: {
-                                                rule: 'monthly',
-                                                strategy: recurrenceStrategyValue,
-                                                rrule: buildRRuleString('monthly'),
-                                            },
-                                        }));
-                                    }}
-                                >
-                                    <Text style={getStatusTextStyle(monthlyPattern === 'date')}>
-                                        {t('recurrence.monthlyOnDay')}
-                                    </Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={getStatusChipStyle(monthlyPattern === 'custom')}
-                                    onPress={openCustomRecurrence}
-                                >
-                                    <Text style={getStatusTextStyle(monthlyPattern === 'custom')}>
-                                        {t('recurrence.custom')}
-                                    </Text>
-                                </TouchableOpacity>
-                            </View>
-                        )}
-                        {!!recurrenceRuleValue && (
-                            <View style={[styles.statusContainer, { marginTop: 8 }]}>
-                                <TouchableOpacity
-                                    style={getStatusChipStyle(recurrenceStrategyValue === 'fluid')}
-                                    onPress={() => {
-                                        const nextStrategy: RecurrenceStrategy = recurrenceStrategyValue === 'fluid' ? 'strict' : 'fluid';
-                                        setEditedTask(prev => ({
-                                            ...prev,
-                                            recurrence:
-                                                recurrenceRuleValue === 'weekly' && customWeekdays.length > 0
-                                                    ? {
-                                                        rule: 'weekly',
-                                                        strategy: nextStrategy,
-                                                        byDay: customWeekdays,
-                                                        rrule: buildRRuleString('weekly', customWeekdays),
-                                                    }
-                                                    : recurrenceRuleValue && recurrenceRRuleValue
-                                                        ? { rule: recurrenceRuleValue, strategy: nextStrategy, ...(parseRRuleString(recurrenceRRuleValue).byDay ? { byDay: parseRRuleString(recurrenceRRuleValue).byDay } : {}), rrule: recurrenceRRuleValue }
-                                                        : buildRecurrenceValue(recurrenceRuleValue, nextStrategy),
-                                        }));
-                                    }}
-                                >
-                                    <Text style={getStatusTextStyle(recurrenceStrategyValue === 'fluid')}>
-                                        {t('recurrence.afterCompletion')}
-                                    </Text>
-                                </TouchableOpacity>
-                            </View>
-                        )}
-                    </View>
-                );
-            case 'startTime':
-                return (
-                    <View style={styles.formGroup}>
-                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.startDateLabel')}</Text>
-                        {(() => {
-                            const parsed = editedTask.startTime ? safeParseDate(editedTask.startTime) : null;
-                            const hasTime = hasTimeComponent(editedTask.startTime);
-                            const dateOnly = parsed ? safeFormatDate(parsed, 'yyyy-MM-dd') : '';
-                            const timeOnly = hasTime && parsed ? safeFormatDate(parsed, 'HH:mm') : '';
-                            return (
-                                <View>
-                                    <View style={styles.dateRow}>
-                                        <TouchableOpacity style={[styles.dateBtn, styles.flex1, { backgroundColor: tc.inputBg, borderColor: tc.border }]} onPress={() => openDatePicker('start')}>
-                                            <Text style={{ color: tc.text }}>{formatStartDateTime(editedTask.startTime)}</Text>
-                                        </TouchableOpacity>
-                                        {!!editedTask.startTime && (
-                                            <TouchableOpacity
-                                                style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
-                                                onPress={() => openDatePicker('start-time')}
-                                            >
-                                                <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>
-                                                    {hasTime && timeOnly ? timeOnly : (t('calendar.changeTime') || 'Add time')}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        )}
-                                        {!!editedTask.startTime && (
-                                            <TouchableOpacity
-                                                style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
-                                                onPress={() => setEditedTask(prev => ({ ...prev, startTime: undefined }))}
-                                            >
-                                                <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>{t('common.clear')}</Text>
-                                            </TouchableOpacity>
-                                        )}
-                                    </View>
-                                    {renderInlineIOSDatePicker(['start', 'start-time'])}
-                                </View>
-                            );
-                        })()}
-                    </View>
-                );
-            case 'dueDate':
-                return (
-                    <View style={styles.formGroup}>
-                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.dueDateLabel')}</Text>
-                        {(() => {
-                            const parsed = editedTask.dueDate ? safeParseDate(editedTask.dueDate) : null;
-                            const hasTime = hasTimeComponent(editedTask.dueDate);
-                            const dateOnly = parsed ? safeFormatDate(parsed, 'yyyy-MM-dd') : '';
-                            const timeOnly = hasTime && parsed ? safeFormatDate(parsed, 'HH:mm') : '';
-                            return (
-                                <View>
-                                    <View style={styles.dateRow}>
-                                        <TouchableOpacity style={[styles.dateBtn, styles.flex1, { backgroundColor: tc.inputBg, borderColor: tc.border }]} onPress={() => openDatePicker('due')}>
-                                            <Text style={{ color: tc.text }}>{formatDueDate(editedTask.dueDate)}</Text>
-                                        </TouchableOpacity>
-                                        {!!editedTask.dueDate && (
-                                            <TouchableOpacity
-                                                style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
-                                                onPress={() => openDatePicker('due-time')}
-                                            >
-                                                <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>
-                                                    {hasTime && timeOnly ? timeOnly : (t('calendar.changeTime') || 'Add time')}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        )}
-                                        {!!editedTask.dueDate && (
-                                            <TouchableOpacity
-                                                style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
-                                                onPress={() => setEditedTask(prev => ({ ...prev, dueDate: undefined }))}
-                                            >
-                                                <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>{t('common.clear')}</Text>
-                                            </TouchableOpacity>
-                                        )}
-                                    </View>
-                                    {renderInlineIOSDatePicker(['due', 'due-time'])}
-                                </View>
-                            );
-                        })()}
-                    </View>
-                );
-            case 'reviewAt':
-                return (
-                    <View style={styles.formGroup}>
-                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.reviewDateLabel')}</Text>
-                        <View style={styles.dateRow}>
-                            <TouchableOpacity style={[styles.dateBtn, styles.flex1, { backgroundColor: tc.inputBg, borderColor: tc.border }]} onPress={() => openDatePicker('review')}>
-                                <Text style={{ color: tc.text }}>{formatDate(editedTask.reviewAt)}</Text>
-                            </TouchableOpacity>
-                            {!!editedTask.reviewAt && (
-                                <TouchableOpacity
-                                    style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
-                                    onPress={() => setEditedTask(prev => ({ ...prev, reviewAt: undefined }))}
-                                >
-                                    <Text style={[styles.clearDateText, { color: tc.secondaryText }]}>{t('common.clear')}</Text>
-                                </TouchableOpacity>
-                            )}
-                        </View>
-                        {renderInlineIOSDatePicker(['review'])}
-                    </View>
-                );
-            case 'description':
-                return (
-                    <View style={styles.formGroup}>
-                        <View style={styles.inlineHeader}>
-                            <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.descriptionLabel')}</Text>
-                            <TouchableOpacity onPress={() => setShowDescriptionPreview((v) => !v)}>
-                                <Text style={[styles.inlineAction, { color: tc.tint }]}>
-                                    {showDescriptionPreview ? t('markdown.edit') : t('markdown.preview')}
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-                        {showDescriptionPreview ? (
-                            <View style={[styles.markdownPreview, { backgroundColor: tc.filterBg, borderColor: tc.border }]}>
-                                <MarkdownText markdown={descriptionDraft || ''} tc={tc} direction={resolvedDirection} />
-                            </View>
-                        ) : (
-                            <TextInput
-                                style={[styles.input, styles.textArea, inputStyle, textDirectionStyle]}
-                                value={descriptionDraft}
-                                onFocus={(event) => {
-                                    handleInputFocus(event.nativeEvent.target);
-                                }}
-                                onChangeText={(text) => {
-                                    setDescriptionDraft(text);
-                                    descriptionDraftRef.current = text;
-                                    resetCopilotDraft();
-                                    if (descriptionDebounceRef.current) {
-                                        clearTimeout(descriptionDebounceRef.current);
-                                    }
-                                    descriptionDebounceRef.current = setTimeout(() => {
-                                        setEditedTask(prev => ({ ...prev, description: text }));
-                                    }, 250);
-                                }}
-                                placeholder={t('taskEdit.descriptionPlaceholder')}
-                                multiline
-                                placeholderTextColor={tc.secondaryText}
-                                accessibilityLabel={t('taskEdit.descriptionLabel')}
-                                accessibilityHint={t('taskEdit.descriptionPlaceholder')}
-                            />
-                        )}
-                    </View>
-                );
-            case 'attachments':
-                return (
-                    <View style={styles.formGroup}>
-                        <View style={styles.inlineHeader}>
-                            <Text style={[styles.label, { color: tc.secondaryText }]}>{t('attachments.title')}</Text>
-                            <View style={styles.inlineActions}>
-                                <TouchableOpacity
-                                    onPress={addFileAttachment}
-                                    style={[styles.smallButton, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
-                                >
-                                    <Text style={[styles.smallButtonText, { color: tc.tint }]}>{t('attachments.addFile')}</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    onPress={addImageAttachment}
-                                    style={[styles.smallButton, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
-                                >
-                                    <Text style={[styles.smallButtonText, { color: tc.tint }]}>{t('attachments.addPhoto')}</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    onPress={() => {
-                                        setLinkInputTouched(false);
-                                        setLinkModalVisible(true);
-                                    }}
-                                    style={[styles.smallButton, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
-                                >
-                                    <Text style={[styles.smallButtonText, { color: tc.tint }]}>{t('attachments.addLink')}</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                        {visibleAttachments.length === 0 ? (
-                            <Text style={[styles.helperText, { color: tc.secondaryText }]}>{t('common.none')}</Text>
-                        ) : (
-                            <View style={[styles.attachmentsList, { borderColor: tc.border, backgroundColor: tc.cardBg }]}>
-                                {visibleAttachments.map((attachment) => {
-                                    const displayTitle = getAttachmentDisplayTitle(attachment);
-                                    const isMissing = attachment.kind === 'file'
-                                        && (!attachment.uri || attachment.localStatus === 'missing');
-                                    const canDownload = isMissing && Boolean(attachment.cloudKey);
-                                    const isDownloading = attachment.localStatus === 'downloading';
-                                    return (
-                                        <View key={attachment.id} style={[styles.attachmentRow, { borderBottomColor: tc.border }]}>
-                                            <TouchableOpacity
-                                                style={styles.attachmentTitleWrap}
-                                                onPress={() => openAttachment(attachment)}
-                                                disabled={isDownloading}
-                                            >
-                                                <Text style={[styles.attachmentTitle, { color: tc.tint }]} numberOfLines={1}>
-                                                    {displayTitle}
-                                                </Text>
-                                            </TouchableOpacity>
-                                            {isDownloading ? (
-                                                <Text style={[styles.attachmentStatus, { color: tc.secondaryText }]}>
-                                                    {t('common.loading')}
-                                                </Text>
-                                            ) : canDownload ? (
-                                                <TouchableOpacity onPress={() => downloadAttachment(attachment)}>
-                                                    <Text style={[styles.attachmentDownload, { color: tc.tint }]}>
-                                                        {t('attachments.download')}
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            ) : isMissing ? (
-                                                <Text style={[styles.attachmentStatus, { color: tc.secondaryText }]}>
-                                                    {t('attachments.missing')}
-                                                </Text>
-                                            ) : null}
-                                            <TouchableOpacity onPress={() => removeAttachment(attachment.id)}>
-                                                <Text style={[styles.attachmentRemove, { color: tc.secondaryText }]}>
-                                                    {t('attachments.remove')}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        </View>
-                                    );
-                                })}
-                            </View>
-                        )}
-                    </View>
-                );
-            case 'checklist':
-                return (
-                    <View style={styles.formGroup}>
-                        <Text style={[styles.label, { color: tc.secondaryText }]}>{t('taskEdit.checklist')}</Text>
-                        <View style={[styles.checklistContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
-                            {editedTask.checklist?.map((item, index) => (
-                                <View key={item.id || index} style={[styles.checklistItem, { borderBottomColor: tc.border }]}>
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            const newChecklist = (editedTask.checklist || []).map((item, i) =>
-                                                i === index ? { ...item, isCompleted: !item.isCompleted } : item
-                                            );
-                                            setEditedTask(prev => ({ ...prev, checklist: newChecklist }));
-                                        }}
-                                        style={styles.checkboxTouch}
-                                    >
-                                        <View style={[styles.checkbox, item.isCompleted && styles.checkboxChecked]}>
-                                            {item.isCompleted && <Text style={styles.checkmark}>✓</Text>}
-                                        </View>
-                                    </TouchableOpacity>
-                                    <TextInput
-                                        style={[
-                                            styles.checklistInput,
-                                            textDirectionStyle,
-                                            { color: item.isCompleted ? tc.secondaryText : tc.text },
-                                            item.isCompleted && styles.completedText,
-                                        ]}
-                                        value={item.title}
-                                        onFocus={(event) => {
-                                            handleInputFocus(event.nativeEvent.target);
-                                        }}
-                                        onChangeText={(text) => {
-                                            const newChecklist = (editedTask.checklist || []).map((item, i) =>
-                                                i === index ? { ...item, title: text } : item
-                                            );
-                                            setEditedTask(prev => ({ ...prev, checklist: newChecklist }));
-                                        }}
-                                        placeholder={t('taskEdit.itemNamePlaceholder')}
-                                        placeholderTextColor={tc.secondaryText}
-                                        accessibilityLabel={`${t('taskEdit.checklist')} ${index + 1}`}
-                                        accessibilityHint={t('taskEdit.itemNamePlaceholder')}
-                                    />
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            const newChecklist = (editedTask.checklist || []).filter((_, i) => i !== index);
-                                            setEditedTask(prev => ({ ...prev, checklist: newChecklist }));
-                                        }}
-                                        style={styles.deleteBtn}
-                                    >
-                                        <Text style={[styles.deleteBtnText, { color: tc.secondaryText }]}>×</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            ))}
-                            <TouchableOpacity
-                                style={styles.addChecklistBtn}
-                                onPress={() => {
-                                    const newItem = {
-                                        id: generateUUID(),
-                                        title: '',
-                                        isCompleted: false
-                                    };
-                                    setEditedTask(prev => ({
-                                        ...prev,
-                                        checklist: [...(prev.checklist || []), newItem]
-                                    }));
-                                }}
-                            >
-                                <Text style={styles.addChecklistText}>+ {t('taskEdit.addItem')}</Text>
-                            </TouchableOpacity>
-                            {(editedTask.checklist?.length ?? 0) > 0 && (
-                                <View style={styles.checklistActions}>
-                                    <TouchableOpacity
-                                        style={[styles.checklistActionButton, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
-                                        onPress={handleResetChecklist}
-                                    >
-                                        <Text style={[styles.checklistActionText, { color: tc.secondaryText }]}>
-                                            {t('taskEdit.resetChecklist')}
-                                        </Text>
-                                    </TouchableOpacity>
-                                </View>
-                            )}
-                        </View>
-                    </View>
-                );
-            default:
-                return null;
-        }
-    };
+    const renderField = (fieldId: TaskEditorFieldId) => (
+        <TaskEditFieldRenderer fieldId={fieldId} {...fieldRendererProps} />
+    );
 
     if (!task) return null;
 
@@ -2740,312 +1414,75 @@ function TaskEditModalInner({
                     </Animated.ScrollView>
                 </View>
 
-                <TaskEditLinkModal
-                    visible={linkModalVisible}
-                    t={t}
-                    tc={tc}
+                <TaskEditOverlayStack
+                    aiModal={aiModal}
+                    addArea={addArea}
+                    addProject={addProject}
+                    addSection={addSection}
+                    applyCustomRecurrence={applyCustomRecurrence}
+                    areas={areas}
+                    audioAttachment={audioAttachment}
+                    audioLoading={audioLoading}
+                    audioModalVisible={audioModalVisible}
+                    audioStatus={audioStatus}
+                    closeAIModal={closeAIModal}
+                    closeAudioModal={closeAudioModal}
+                    closeImagePreview={closeImagePreview}
+                    closeLinkModal={closeLinkModal}
+                    confirmAddLink={confirmAddLink}
+                    customInterval={customInterval}
+                    customMode={customMode}
+                    customMonthDay={customMonthDay}
+                    customOrdinal={customOrdinal}
+                    customRecurrenceVisible={customRecurrenceVisible}
+                    customWeekday={customWeekday}
+                    filteredProjectsForPicker={filteredProjectsForPicker}
+                    imagePreviewAttachment={imagePreviewAttachment}
                     linkInput={linkInput}
                     linkInputTouched={linkInputTouched}
-                    onChangeLinkInput={(text) => {
-                        setLinkInput(text);
-                        setLinkInputTouched(true);
-                    }}
-                    onBlurLinkInput={() => setLinkInputTouched(true)}
-                    onClose={closeLinkModal}
-                    onSave={confirmAddLink}
-                />
-                <TaskEditAudioModal
-                    visible={audioModalVisible}
+                    linkModalVisible={linkModalVisible}
+                    projectFilterAreaId={projectFilterAreaId}
+                    projects={projects}
+                    recurrenceWeekdayButtons={recurrenceWeekdayButtons}
+                    recurrenceWeekdayLabels={recurrenceWeekdayLabels}
+                    sectionPickerProjectId={activeProjectId}
+                    sectionPickerSections={projectSections}
+                    setCustomInterval={setCustomInterval}
+                    setCustomMode={setCustomMode}
+                    setCustomMonthDay={setCustomMonthDay}
+                    setCustomOrdinal={setCustomOrdinal}
+                    setCustomRecurrenceVisible={setCustomRecurrenceVisible}
+                    setCustomWeekday={setCustomWeekday}
+                    setEditedTask={setEditedTask}
+                    setLinkInput={setLinkInput}
+                    setLinkInputTouched={setLinkInputTouched}
+                    setShowAreaPicker={setShowAreaPicker}
+                    setShowProjectPicker={setShowProjectPicker}
+                    setShowSectionPicker={setShowSectionPicker}
+                    showAreaPicker={showAreaPicker}
+                    showProjectPicker={showProjectPicker}
+                    showSectionPicker={showSectionPicker}
+                    styles={styles}
                     t={t}
                     tc={tc}
-                    audioTitle={audioAttachment?.title}
-                    audioStatus={audioStatus}
-                    audioLoading={audioLoading}
-                    onTogglePlayback={() => {
-                        void toggleAudioPlayback();
-                    }}
-                    onClose={closeAudioModal}
+                    toggleAudioPlayback={toggleAudioPlayback}
+                    DEFAULT_PROJECT_COLOR={DEFAULT_PROJECT_COLOR}
                 />
-                <TaskEditImagePreviewModal
-                    visible={Boolean(imagePreviewAttachment)}
-                    t={t}
-                    tc={tc}
-                    imagePreviewAttachment={imagePreviewAttachment}
-                    onClose={closeImagePreview}
-                />
-                <Modal
-                    visible={customRecurrenceVisible}
-                    transparent
-                    animationType="fade"
-                    onRequestClose={() => setCustomRecurrenceVisible(false)}
-                >
-                    <Pressable style={styles.overlay} onPress={() => setCustomRecurrenceVisible(false)}>
-                        <Pressable
-                            style={[styles.modalCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
-                            onPress={(event) => event.stopPropagation()}
-                        >
-                            <Text style={[styles.modalTitle, { color: tc.text }]}>{t('recurrence.customTitle')}</Text>
-                            <View style={[styles.customRow, { borderColor: tc.border }]}>
-                                <Text style={[styles.modalLabel, { color: tc.secondaryText }]}>{t('recurrence.repeatEvery')}</Text>
-                                <TextInput
-                                    value={String(customInterval)}
-                                    onChangeText={(value) => {
-                                        const parsed = Number.parseInt(value, 10);
-                                        setCustomInterval(Number.isFinite(parsed) && parsed > 0 ? parsed : 1);
-                                    }}
-                                    keyboardType="number-pad"
-                                    style={[styles.customInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-                                    accessibilityLabel={t('recurrence.repeatEvery')}
-                                    accessibilityHint={t('recurrence.monthUnit')}
-                                />
-                                <Text style={[styles.modalLabel, { color: tc.secondaryText }]}>{t('recurrence.monthUnit')}</Text>
-                            </View>
-                            <View style={{ marginTop: 12 }}>
-                                <Text style={[styles.modalLabel, { color: tc.secondaryText }]}>{t('recurrence.onLabel')}</Text>
-                                <View style={[styles.statusContainer, { marginTop: 8 }]}>
-                                    <TouchableOpacity
-                                        style={getStatusChipStyle(customMode === 'date')}
-                                        onPress={() => setCustomMode('date')}
-                                    >
-                                        <Text style={getStatusTextStyle(customMode === 'date')}>
-                                            {t('recurrence.onDayOfMonth').replace('{day}', String(customMonthDay))}
-                                        </Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        style={getStatusChipStyle(customMode === 'nth')}
-                                        onPress={() => setCustomMode('nth')}
-                                    >
-                                        <Text style={getStatusTextStyle(customMode === 'nth')}>
-                                            {t('recurrence.onNthWeekday')
-                                                .replace('{ordinal}', t(`recurrence.ordinal.${getOrdinalTranslationKey(customOrdinal)}`))
-                                                .replace('{weekday}', recurrenceWeekdayLabels[customWeekday] ?? customWeekday)}
-                                        </Text>
-                                    </TouchableOpacity>
-                                </View>
-                                {customMode === 'nth' && (
-                                    <>
-                                        <View style={[styles.weekdayRow, { marginTop: 10, flexWrap: 'wrap' }]}>
-                                            {(['1', '2', '3', '4', '-1'] as const).map((value) => {
-                                                const label = t(`recurrence.ordinal.${getOrdinalTranslationKey(value)}`);
-                                                return (
-                                                    <TouchableOpacity
-                                                        key={value}
-                                                        style={[
-                                                            styles.ordinalButton,
-                                                            {
-                                                                borderColor: tc.border,
-                                                                backgroundColor: customOrdinal === value ? tc.filterBg : tc.cardBg,
-                                                            },
-                                                        ]}
-                                                        onPress={() => setCustomOrdinal(value)}
-                                                    >
-                                                        <Text style={[styles.weekdayButtonText, { color: tc.text }]}>{label}</Text>
-                                                    </TouchableOpacity>
-                                                );
-                                            })}
-                                        </View>
-                                        <View style={[styles.weekdayRow, { marginTop: 10 }]}>
-                                            {recurrenceWeekdayButtons.map((day) => {
-                                                const active = customWeekday === day.key;
-                                                return (
-                                                    <TouchableOpacity
-                                                        key={day.key}
-                                                        style={[
-                                                            styles.weekdayButton,
-                                                            {
-                                                                borderColor: tc.border,
-                                                                backgroundColor: active ? tc.filterBg : tc.cardBg,
-                                                            },
-                                                        ]}
-                                                        onPress={() => setCustomWeekday(day.key)}
-                                                    >
-                                                        <Text style={[styles.weekdayButtonText, { color: tc.text }]}>{day.label}</Text>
-                                                    </TouchableOpacity>
-                                                );
-                                            })}
-                                        </View>
-                                    </>
-                                )}
-                                {customMode === 'date' && (
-                                    <View style={[styles.customRow, { marginTop: 10 }]}>
-                                        <Text style={[styles.modalLabel, { color: tc.secondaryText }]}>
-                                            {t('recurrence.onDayOfMonth').replace('{day}', '')}
-                                        </Text>
-                                        <TextInput
-                                            value={String(customMonthDay)}
-                                            onChangeText={(value) => {
-                                                const parsed = Number.parseInt(value, 10);
-                                                if (!Number.isFinite(parsed)) {
-                                                    setCustomMonthDay(1);
-                                                } else {
-                                                    setCustomMonthDay(Math.min(Math.max(parsed, 1), 31));
-                                                }
-                                            }}
-                                            keyboardType="number-pad"
-                                            style={[styles.customInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-                                            accessibilityLabel={t('recurrence.onDayOfMonth').replace('{day}', '')}
-                                            accessibilityHint={t('recurrence.monthlyOnDay')}
-                                        />
-                                    </View>
-                                )}
-                            </View>
-                            <View style={styles.modalButtons}>
-                                <TouchableOpacity
-                                    style={styles.modalButton}
-                                    onPress={() => setCustomRecurrenceVisible(false)}
-                                >
-                                    <Text style={[styles.modalButtonText, { color: tc.secondaryText }]}>{t('common.cancel')}</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={styles.modalButton}
-                                    onPress={applyCustomRecurrence}
-                                >
-                                    <Text style={[styles.modalButtonText, { color: tc.tint }]}>{t('common.save')}</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </Pressable>
-                    </Pressable>
-                </Modal>
-
-                <TaskEditProjectPicker
-                    visible={showProjectPicker}
-                    projects={filteredProjectsForPicker}
-                    allProjects={projects}
-                    tc={tc}
-                    t={t}
-                    onClose={() => setShowProjectPicker(false)}
-                    onSelectProject={(projectId) => {
-                        setEditedTask(prev => ({
-                            ...prev,
-                            projectId,
-                            areaId: projectId ? undefined : prev.areaId,
-                            sectionId: projectId && prev.projectId === projectId ? prev.sectionId : undefined,
-                        }));
-                    }}
-                    onCreateProject={(title) => addProject(
-                        title,
-                        DEFAULT_PROJECT_COLOR,
-                        projectFilterAreaId ? { areaId: projectFilterAreaId } : undefined
-                    )}
-                    emptyLabel={projectFilterAreaId ? t('projects.noProjectsInArea') : undefined}
-                    noMatchesLabel={t('common.noMatches')}
-                />
-
-                <TaskEditSectionPicker
-                    visible={showSectionPicker}
-                    sections={projectSections}
-                    projectId={activeProjectId}
-                    tc={tc}
-                    t={t}
-                    onClose={() => setShowSectionPicker(false)}
-                    onSelectSection={(sectionId) => {
-                        setEditedTask(prev => ({ ...prev, sectionId }));
-                    }}
-                    onCreateSection={async (projectId, title) => addSection(projectId, title)}
-                />
-
-                <TaskEditAreaPicker
-                    visible={showAreaPicker}
-                    areas={areas}
-                    tc={tc}
-                    t={t}
-                    onClose={() => setShowAreaPicker(false)}
-                    onSelectArea={(areaId) => {
-                        setEditedTask(prev => ({ ...prev, areaId, projectId: undefined, sectionId: undefined }));
-                    }}
-                    onCreateArea={(name) => addArea(name, { color: DEFAULT_PROJECT_COLOR })}
-                />
-
-                {aiModal && (
-                    <AIResponseModal
-                        visible={Boolean(aiModal)}
-                        title={aiModal.title}
-                        message={aiModal.message}
-                        actions={aiModal.actions}
-                        onClose={closeAIModal}
-                    />
-                )}
             </SafeAreaView>
         </Modal>
     );
 }
 
-type TaskEditModalErrorBoundaryProps = {
-    visible: boolean;
-    resetKey: string;
-    onClose: () => void;
-    children: React.ReactNode;
-};
-
-type TaskEditModalErrorBoundaryState = {
-    hasError: boolean;
-};
-
-class TaskEditModalErrorBoundary extends React.Component<TaskEditModalErrorBoundaryProps, TaskEditModalErrorBoundaryState> {
-    state: TaskEditModalErrorBoundaryState = { hasError: false };
-
-    static getDerivedStateFromError(): TaskEditModalErrorBoundaryState {
-        return { hasError: true };
-    }
-
-    componentDidCatch(error: unknown) {
-        logTaskError('Task edit modal render failed', error);
-    }
-
-    componentDidUpdate(prevProps: TaskEditModalErrorBoundaryProps) {
-        if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
-            this.setState({ hasError: false });
-        }
-    }
-
-    render() {
-        if (!this.state.hasError) return this.props.children;
-
-        return (
-            <Modal
-                visible={this.props.visible}
-                transparent
-                animationType="fade"
-                onRequestClose={this.props.onClose}
-            >
-                <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', padding: 16 }}>
-                    <View style={[styles.modalCard, { backgroundColor: '#111827', borderColor: '#334155' }]}>
-                        <Text style={[styles.modalTitle, { color: '#F8FAFC' }]}>Something went wrong</Text>
-                        <Text style={{ color: '#CBD5E1', marginBottom: 14 }}>The editor encountered an error and was safely closed.</Text>
-                        <TouchableOpacity style={styles.modalButton} onPress={this.props.onClose}>
-                            <Text style={[styles.modalButtonText, { color: '#93C5FD' }]}>Close</Text>
-                        </TouchableOpacity>
-                    </View>
-                </SafeAreaView>
-            </Modal>
-        );
-    }
-}
-
 const areTaskEditModalPropsEqual = (prev: TaskEditModalProps, next: TaskEditModalProps): boolean => (
-    prev.visible === next.visible
-    && prev.task === next.task
-    && prev.onClose === next.onClose
-    && prev.onSave === next.onSave
-    && prev.onFocusMode === next.onFocusMode
-    && prev.defaultTab === next.defaultTab
-    && prev.onProjectNavigate === next.onProjectNavigate
-    && prev.onContextNavigate === next.onContextNavigate
-    && prev.onTagNavigate === next.onTagNavigate
+    prev.visible === next.visible && prev.task === next.task && prev.onClose === next.onClose && prev.onSave === next.onSave
+    && prev.onFocusMode === next.onFocusMode && prev.defaultTab === next.defaultTab
+    && prev.onProjectNavigate === next.onProjectNavigate && prev.onContextNavigate === next.onContextNavigate && prev.onTagNavigate === next.onTagNavigate
 );
 
 const TaskEditModalWithBoundary = (props: TaskEditModalProps) => {
-    const resetKey = `${props.visible ? 'open' : 'closed'}:${props.task?.id ?? 'new'}`;
-    return (
-        <TaskEditModalErrorBoundary
-            visible={props.visible}
-            resetKey={resetKey}
-            onClose={props.onClose}
-        >
-            <TaskEditModalInner {...props} />
-        </TaskEditModalErrorBoundary>
-    );
+    const { t } = useLanguage();
+    const tc = useThemeColors();
+    return <TaskEditModalErrorBoundary onClose={props.onClose} taskId={props.task?.id} t={t} tc={tc}><TaskEditModalInner {...props} /></TaskEditModalErrorBoundary>;
 };
 
 export const TaskEditModal = React.memo(TaskEditModalWithBoundary, areTaskEditModalPropsEqual);
-TaskEditModal.displayName = 'TaskEditModal';

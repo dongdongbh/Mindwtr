@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useWindowVirtualizer } from '@tanstack/react-virtual';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { shallow, useTaskStore, TaskPriority, TimeEstimate, getUsedTaskTokens, matchesHierarchicalToken, safeFormatDate, safeParseDate, safeParseDueDate, isDueForReview, isTaskInActiveProject } from '@mindwtr/core';
 import type { Task, Project } from '@mindwtr/core';
@@ -15,6 +15,21 @@ import { PomodoroPanel } from './PomodoroPanel';
 import { groupTasksByArea, groupTasksByContext, type NextGroupBy, type TaskGroup } from './list/next-grouping';
 
 const AGENDA_VIRTUALIZATION_THRESHOLD = 25;
+
+function getAgendaScrollElement(containerElement: HTMLDivElement | null): HTMLElement | null {
+    if (containerElement) {
+        const closestMainContent = containerElement.closest<HTMLElement>('[data-main-content]');
+        if (closestMainContent) return closestMainContent;
+    }
+    if (typeof document === 'undefined') return null;
+    return document.querySelector<HTMLElement>('[data-main-content]');
+}
+
+function getAgendaScrollMargin(containerElement: HTMLDivElement, scrollElement: HTMLElement) {
+    const containerRect = containerElement.getBoundingClientRect();
+    const scrollRect = scrollElement.getBoundingClientRect();
+    return containerRect.top - scrollRect.top + scrollElement.scrollTop;
+}
 
 function AgendaTaskList({
     tasks,
@@ -38,25 +53,44 @@ function AgendaTaskList({
 }) {
     const [containerElement, setContainerElement] = useState<HTMLDivElement | null>(null);
     const [scrollMargin, setScrollMargin] = useState(0);
-    const shouldVirtualize = !highlightTaskId && tasks.length > AGENDA_VIRTUALIZATION_THRESHOLD;
-    const rowVirtualizer = useWindowVirtualizer({
+    // Desktop views scroll inside the shared main content pane, not the window.
+    const scrollElement = useMemo(
+        () => getAgendaScrollElement(containerElement),
+        [containerElement]
+    );
+    const shouldVirtualize = Boolean(scrollElement) && !highlightTaskId && tasks.length > AGENDA_VIRTUALIZATION_THRESHOLD;
+    const rowVirtualizer = useVirtualizer({
         count: shouldVirtualize ? tasks.length : 0,
+        getScrollElement: () => scrollElement,
         estimateSize: () => (showListDetails ? 96 : 82),
         overscan: 4,
         scrollMargin,
+        getItemKey: (index) => tasks[index]?.id ?? index,
+    });
+
+    const updateScrollMargin = useCallback(() => {
+        if (!containerElement || !scrollElement) return;
+        const nextScrollMargin = getAgendaScrollMargin(containerElement, scrollElement);
+        setScrollMargin((current) => (Math.abs(current - nextScrollMargin) < 1 ? current : nextScrollMargin));
+    }, [containerElement, scrollElement]);
+
+    useLayoutEffect(() => {
+        updateScrollMargin();
     });
 
     useEffect(() => {
-        if (!containerElement || typeof window === 'undefined') return;
-        const updateScrollMargin = () => {
-            const rect = containerElement.getBoundingClientRect();
-            setScrollMargin(rect.top + window.scrollY);
-        };
-        updateScrollMargin();
-        window.requestAnimationFrame(updateScrollMargin);
+        if (!containerElement || !scrollElement || typeof window === 'undefined') return;
         window.addEventListener('resize', updateScrollMargin);
-        return () => window.removeEventListener('resize', updateScrollMargin);
-    }, [containerElement, tasks.length, showListDetails]);
+        const resizeObserver = typeof ResizeObserver === 'function'
+            ? new ResizeObserver(() => updateScrollMargin())
+            : null;
+        resizeObserver?.observe(containerElement);
+        resizeObserver?.observe(scrollElement);
+        return () => {
+            window.removeEventListener('resize', updateScrollMargin);
+            resizeObserver?.disconnect();
+        };
+    }, [containerElement, scrollElement, updateScrollMargin]);
 
     if (!shouldVirtualize) {
         return (
@@ -77,12 +111,12 @@ function AgendaTaskList({
     }
 
     const virtualRows = rowVirtualizer.getVirtualItems();
-        return (
-            <div
-                ref={setContainerElement}
-                className="relative"
-                style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
-            >
+    return (
+        <div
+            ref={setContainerElement}
+            className="relative"
+            style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+        >
             {virtualRows.map((virtualRow) => {
                 const task = tasks[virtualRow.index];
                 if (!task) return null;

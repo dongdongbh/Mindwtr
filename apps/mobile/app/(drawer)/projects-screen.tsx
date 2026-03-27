@@ -1,16 +1,24 @@
-import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, Modal, Alert, Pressable, ScrollView, SectionList, Dimensions, Platform, Keyboard, ActionSheetIOS, Image } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Text, TextInput, TouchableOpacity, Modal, Alert, Pressable, ScrollView, SectionList, Dimensions, Platform, Keyboard, ActionSheetIOS } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { Area, Attachment, DEFAULT_PROJECT_COLOR, generateUUID, getAttachmentDisplayTitle, getUsedTaskTokens, normalizeLinkAttachmentInput, Project, Task, useTaskStore, validateAttachmentForUpload } from '@mindwtr/core';
-import { Trash2 } from 'lucide-react-native';
+import { Area, Attachment, DEFAULT_PROJECT_COLOR, generateUUID, getAttachmentDisplayTitle, normalizeLinkAttachmentInput, Project, Task, useTaskStore, validateAttachmentForUpload } from '@mindwtr/core';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Linking from 'expo-linking';
 import * as Sharing from 'expo-sharing';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
+import { projectsScreenStyles as styles } from '@/app/(drawer)/projects-screen.styles';
+import {
+  formatProjectReviewDate,
+  normalizeProjectTag,
+  resolveAttachmentValidationMessage,
+} from '@/app/(drawer)/projects-screen.utils';
+import { ProjectImagePreviewModal, ProjectLinkModal, ProjectTagPickerModal } from '@/components/projects-screen/ProjectOverlayModals';
+import { ProjectRow } from '@/components/projects-screen/ProjectRow';
 import { TaskEditModal } from '@/components/task-edit-modal';
+import { useProjectFiltering, type ProjectSectionItem } from '@/hooks/use-project-filtering';
 import { TaskList } from '../../components/task-list';
 import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { useLanguage } from '../../contexts/language-context';
@@ -20,10 +28,8 @@ import { ListSectionHeader, defaultListContentStyle } from '@/components/list-la
 import { ensureAttachmentAvailable } from '../../lib/attachment-sync';
 import { AttachmentProgressIndicator } from '../../components/AttachmentProgressIndicator';
 import { logError, logWarn } from '../../lib/app-log';
-import { AREA_FILTER_ALL, AREA_FILTER_NONE, projectMatchesAreaFilter } from '@/lib/area-filter';
+import { AREA_FILTER_ALL, AREA_FILTER_NONE } from '@/lib/area-filter';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
-
-type ProjectSectionItem = { type: 'project'; data: Project };
 
 export default function ProjectsScreen() {
   const { projects, tasks, addProject, updateProject, deleteProject, toggleProjectFocus, addArea, updateArea, deleteArea, reorderAreas, updateTask, setHighlightTask } = useTaskStore();
@@ -78,20 +84,6 @@ export default function ProjectsScreen() {
   const areaListMaxHeight = Math.min(windowHeight * 0.4, 280);
   const areaManagerListMaxHeight = Math.min(windowHeight * 0.45, 320);
   const overlayModalPresentation = Platform.OS === 'ios' ? 'overFullScreen' : 'fullScreen';
-  const resolveValidationMessage = (error?: string) => {
-    if (error === 'file_too_large') return t('attachments.fileTooLarge');
-    if (error === 'mime_type_blocked' || error === 'mime_type_not_allowed') return t('attachments.invalidFileType');
-    return t('attachments.fileNotSupported');
-  };
-
-  const formatReviewDate = (dateStr?: string) => {
-    if (!dateStr) return t('common.notSet');
-    try {
-      return new Date(dateStr).toLocaleDateString();
-    } catch {
-      return dateStr;
-    }
-  };
 
   const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
   const colorDisplayByHex: Record<string, { nameKey: string; swatch: string }> = {
@@ -102,49 +94,23 @@ export default function ProjectsScreen() {
     '#8b5cf6': { nameKey: 'projects.colorPurple', swatch: '🟣' },
     '#ec4899': { nameKey: 'projects.colorPink', swatch: '🩷' },
   };
-
-  const focusedCount = useMemo(() => projects.filter((project) => project.isFocused).length, [projects]);
-  const areaUsage = useMemo(() => {
-    const counts = new Map<string, number>();
-    projects.forEach((project) => {
-      if (project.deletedAt) return;
-      if (!project.areaId) return;
-      counts.set(project.areaId, (counts.get(project.areaId) || 0) + 1);
-    });
-    return counts;
-  }, [projects]);
-
-  const projectTagOptions = useMemo<string[]>(() => {
-    const projectTags = projects.flatMap((item) => item.tagIds || []);
-    return Array.from(new Set([
-      ...getUsedTaskTokens(tasks, (item) => item.tags, { prefix: '#' }),
-      ...projectTags,
-    ])).filter(Boolean);
-  }, [tasks, projects]);
-
-  const tagFilterOptions = useMemo<{ list: string[]; hasNoTags: boolean }>(() => {
-    const tags = new Set<string>();
-    let hasNoTags = false;
-    projects.forEach((project) => {
-      if (project.deletedAt) return;
-      const list = project.tagIds || [];
-      if (list.length === 0) {
-        hasNoTags = true;
-        return;
-      }
-      list.forEach((tag) => tags.add(tag));
-    });
-    return {
-      list: Array.from(tags).sort(),
-      hasNoTags,
-    };
-  }, [projects]);
-
-  const normalizeTag = (value: string) => {
-    const trimmed = value.trim();
-    if (!trimmed) return '';
-    return trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
-  };
+  const {
+    areaUsage,
+    focusedCount,
+    groupedProjects,
+    projectTagOptions,
+    tagFilterOptions,
+  } = useProjectFiltering({
+    projects,
+    tasks,
+    sortedAreas,
+    areaById,
+    selectedTagFilter,
+    selectedAreaFilter,
+    allTagsValue: ALL_TAGS,
+    noTagsValue: NO_TAGS,
+    t,
+  });
 
   const openProject = useCallback((project: Project) => {
     setSelectedProject(project);
@@ -199,7 +165,7 @@ export default function ProjectsScreen() {
 
   const toggleProjectTag = (tag: string) => {
     if (!selectedProject) return;
-    const normalized = normalizeTag(tag);
+    const normalized = normalizeProjectTag(tag);
     if (!normalized) return;
     const current = selectedProject.tagIds || [];
     const exists = current.includes(normalized);
@@ -208,140 +174,21 @@ export default function ProjectsScreen() {
     setSelectedProject({ ...selectedProject, tagIds: next });
   };
 
-  const groupedProjects = useMemo(() => {
-    const visible = projects.filter(p => !p.deletedAt);
-    const sorted = [...visible].sort((a, b) => {
-      const orderA = Number.isFinite(a.order) ? a.order : 0;
-      const orderB = Number.isFinite(b.order) ? b.order : 0;
-      if (orderA !== orderB) return orderA - orderB;
-      return a.title.localeCompare(b.title);
-    });
-    const filteredByTag = sorted.filter((project) => {
-      const tags = project.tagIds || [];
-      if (selectedTagFilter === ALL_TAGS) return true;
-      if (selectedTagFilter === NO_TAGS) return tags.length === 0;
-      return tags.includes(selectedTagFilter);
-    });
-    const filteredByArea = filteredByTag.filter((project) => projectMatchesAreaFilter(project, selectedAreaFilter, areaById));
-
-    const groups = new Map<string, Project[]>();
-    for (const project of filteredByArea) {
-      const areaId = project.areaId && areaById.has(project.areaId) ? project.areaId : 'no-area';
-      if (!groups.has(areaId)) groups.set(areaId, []);
-      groups.get(areaId)!.push(project);
-    }
-
-    const sections = sortedAreas
-      .filter((area) => (groups.get(area.id) || []).length > 0)
-      .map((area) => {
-        const projectItems = (groups.get(area.id) || []).map((project) => ({ type: 'project' as const, data: project }));
-        return { title: area.name, areaId: area.id, data: projectItems };
-      });
-
-    const noAreaProjects = groups.get('no-area') || [];
-    if (noAreaProjects.length > 0) {
-      sections.push({
-        title: t('projects.noArea'),
-        areaId: 'no-area',
-        data: [
-          ...noAreaProjects.map((project) => ({ type: 'project' as const, data: project })),
-        ],
-      });
-    }
-
-    return sections;
-  }, [projects, t, sortedAreas, areaById, selectedTagFilter, selectedAreaFilter, ALL_TAGS, NO_TAGS]);
-
-  const renderProjectRow = (project: Project) => {
-    const projTasks = tasks.filter(t => t.projectId === project.id && t.status !== 'done' && t.status !== 'reference' && !t.deletedAt);
-    const nextAction = projTasks.find((task) => task.status === 'next');
-    const showFocusedWarning = project.isFocused && !nextAction && projTasks.length > 0;
-    const projectColor = project.areaId ? areaById.get(project.areaId)?.color : undefined;
-
-    return (
-      <View style={[
-        styles.projectItem,
-        { backgroundColor: tc.cardBg },
-        project.isFocused && { borderColor: '#F59E0B', borderWidth: 1 },
-      ]}>
-        <TouchableOpacity
-          onPress={() => toggleProjectFocus(project.id)}
-          style={styles.focusButton}
-          disabled={!project.isFocused && focusedCount >= 5}
-        >
-          <Text style={[
-            styles.focusIcon,
-            project.isFocused ? { opacity: 1 } : { opacity: focusedCount >= 5 ? 0.3 : 0.5 }
-          ]}>
-            {project.isFocused ? '⭐' : '☆'}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.projectTouchArea}
-          onPress={() => {
-            openProject(project);
-          }}
-        >
-          <View style={[styles.projectColor, { backgroundColor: projectColor || '#6B7280' }]} />
-          <View style={styles.projectContent}>
-            <View style={styles.projectTitleRow}>
-              <Text style={[styles.projectTitle, { color: tc.text }]}>{project.title}</Text>
-              {project.tagIds?.length ? (
-                <View style={styles.projectTagDots}>
-                  {project.tagIds.slice(0, 4).map((tag: string) => (
-                    <View key={tag} style={[styles.projectTagDot, { backgroundColor: tc.secondaryText }]} />
-                  ))}
-                </View>
-              ) : null}
-            </View>
-            {nextAction ? (
-              <Text style={[styles.projectMeta, { color: tc.secondaryText }]} numberOfLines={1}>
-                ↳ {nextAction.title}
-              </Text>
-            ) : showFocusedWarning ? (
-              <Text style={[styles.projectMeta, { color: '#F59E0B' }]}>
-                ⚠️ No next action
-              </Text>
-            ) : (
-              <Text
-                style={[
-                  styles.projectMeta,
-                  { color: statusPalette[project.status]?.text ?? tc.secondaryText },
-                ]}
-              >
-                {project.status === 'active'
-                  ? t('status.active')
-                  : project.status === 'waiting'
-                    ? t('status.waiting')
-                    : project.status === 'someday'
-                      ? t('status.someday')
-                      : t('status.archived')}
-              </Text>
-            )}
-          </View>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => {
-            Alert.alert(
-              t('projects.title'),
-              t('projects.deleteConfirm'),
-              [
-                { text: t('common.cancel'), style: 'cancel' },
-                { text: t('common.delete'), style: 'destructive', onPress: () => deleteProject(project.id) }
-              ]
-            );
-          }}
-          style={styles.deleteButton}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Trash2 size={18} color={tc.secondaryText} />
-        </TouchableOpacity>
-      </View>
-    );
-  };
-
   const renderSectionItem = ({ item }: { item: ProjectSectionItem }) => {
-    return renderProjectRow(item.data);
+    return (
+      <ProjectRow
+        project={item.data}
+        tasks={tasks}
+        areaById={areaById}
+        tc={tc}
+        focusedCount={focusedCount}
+        statusPalette={statusPalette}
+        t={t}
+        onDeleteProject={deleteProject}
+        onOpenProject={openProject}
+        onToggleProjectFocus={toggleProjectFocus}
+      />
+    );
   };
 
 
@@ -698,7 +545,7 @@ export default function ProjectsScreen() {
                 {
                   text: t('common.save'),
                   onPress: (value?: string) => {
-                    const normalized = normalizeTag(value ?? '');
+                    const normalized = normalizeProjectTag(value ?? '');
                     if (!normalized) return;
                     const next = Array.from(new Set([...(selectedProject.tagIds || []), normalized]));
                     updateProject(selectedProject.id, { tagIds: next });
@@ -869,7 +716,7 @@ export default function ProjectsScreen() {
         size
       );
       if (!validation.valid) {
-        Alert.alert(t('attachments.title'), resolveValidationMessage(validation.error));
+        Alert.alert(t('attachments.title'), resolveAttachmentValidationMessage(validation.error, t));
         return;
       }
     }
@@ -1345,7 +1192,7 @@ export default function ProjectsScreen() {
                         onPress={() => setShowReviewPicker(true)}
                       >
                         <Text style={{ color: tc.text }}>
-                          {formatReviewDate(selectedProject.reviewAt)}
+                          {formatProjectReviewDate(selectedProject.reviewAt, t('common.notSet'))}
                         </Text>
                       </TouchableOpacity>
                       {!!selectedProject.reviewAt && (
@@ -1411,77 +1258,27 @@ export default function ProjectsScreen() {
         onTagNavigate={openContextsScreen}
       />
 
-      <Modal
+      <ProjectLinkModal
         visible={linkModalVisible}
-        transparent
-        animationType="fade"
         presentationStyle={overlayModalPresentation}
-        onRequestClose={() => setLinkModalVisible(false)}
-      >
-        <View style={styles.overlay}>
-          <View style={[styles.linkModalCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
-            <Text style={[styles.linkModalTitle, { color: tc.text }]}>{t('attachments.addLink')}</Text>
-            <TextInput
-              value={linkInput}
-              onChangeText={setLinkInput}
-              placeholder={t('attachments.linkPlaceholder')}
-              placeholderTextColor={tc.secondaryText}
-              style={[styles.linkModalInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <Text style={[styles.linkModalHint, { color: tc.secondaryText }]}>
-              {t('attachments.linkInputHint')}
-            </Text>
-            <View style={styles.linkModalButtons}>
-              <TouchableOpacity
-                onPress={() => {
-                  setLinkModalVisible(false);
-                  setLinkInput('');
-                }}
-                style={styles.linkModalButton}
-              >
-                <Text style={[styles.linkModalButtonText, { color: tc.secondaryText }]}>{t('common.cancel')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={confirmAddProjectLink}
-                disabled={!linkInput.trim()}
-                style={[styles.linkModalButton, !linkInput.trim() && styles.linkModalButtonDisabled]}
-              >
-                <Text style={[styles.linkModalButtonText, { color: tc.tint }]}>{t('common.save')}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-      <Modal
+        tc={tc}
+        t={t}
+        linkInput={linkInput}
+        onChangeLinkInput={setLinkInput}
+        onClose={() => {
+          setLinkModalVisible(false);
+          setLinkInput('');
+        }}
+        onSave={confirmAddProjectLink}
+      />
+      <ProjectImagePreviewModal
         visible={Boolean(imagePreviewAttachment)}
-        transparent
-        animationType="fade"
+        attachment={imagePreviewAttachment}
         presentationStyle={overlayModalPresentation}
-        onRequestClose={() => setImagePreviewAttachment(null)}
-      >
-        <Pressable style={styles.overlay} onPress={() => setImagePreviewAttachment(null)}>
-          <Pressable
-            style={[styles.previewCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
-            onPress={(event) => event.stopPropagation()}
-          >
-            <View style={styles.previewHeader}>
-              <Text style={[styles.previewTitle, { color: tc.text }]} numberOfLines={1}>
-                {imagePreviewAttachment?.title || t('attachments.title')}
-              </Text>
-              <TouchableOpacity onPress={() => setImagePreviewAttachment(null)} style={styles.smallButton}>
-                <Text style={[styles.smallButtonText, { color: tc.secondaryText }]}>{t('common.close')}</Text>
-              </TouchableOpacity>
-            </View>
-            {imagePreviewAttachment?.uri ? (
-              <Image source={{ uri: imagePreviewAttachment.uri }} style={styles.previewImage} resizeMode="contain" />
-            ) : (
-              <Text style={[styles.helperText, { color: tc.secondaryText }]}>{t('attachments.missing')}</Text>
-            )}
-          </Pressable>
-        </Pressable>
-      </Modal>
+        tc={tc}
+        t={t}
+        onClose={() => setImagePreviewAttachment(null)}
+      />
       <Modal
         visible={showAreaPicker}
         transparent
@@ -1677,708 +1474,25 @@ export default function ProjectsScreen() {
           </Pressable>
         </Pressable>
       </Modal>
-      <Modal
+      <ProjectTagPickerModal
         visible={showTagPicker}
-        transparent
-        animationType="fade"
         presentationStyle={overlayModalPresentation}
-        onRequestClose={() => setShowTagPicker(false)}
-      >
-        <Pressable style={styles.overlay} onPress={() => setShowTagPicker(false)}>
-          <Pressable style={[styles.pickerCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]} onPress={(e) => e.stopPropagation()}>
-            <Text style={[styles.linkModalTitle, { color: tc.text }]}>{t('taskEdit.tagsLabel')}</Text>
-            <View style={[styles.tagInputRow, { borderColor: tc.border, backgroundColor: tc.inputBg }]}>
-              <TextInput
-                value={tagDraft}
-                onChangeText={setTagDraft}
-                placeholder={t('taskEdit.tagsLabel')}
-                placeholderTextColor={tc.secondaryText}
-                style={[styles.tagInput, { color: tc.text }]}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              <TouchableOpacity
-                onPress={() => {
-                  const nextTag = normalizeTag(tagDraft);
-                  if (!nextTag) return;
-                  toggleProjectTag(nextTag);
-                  setTagDraft('');
-                }}
-                style={[styles.tagAddButton, { borderColor: tc.border }]}
-              >
-                <Text style={[styles.tagAddButtonText, { color: tc.tint }]}>+</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.tagOptions}>
-              {projectTagOptions.map((tag) => {
-                const active = Boolean(selectedProject?.tagIds?.includes(tag));
-                return (
-                  <TouchableOpacity
-                    key={tag}
-                    onPress={() => toggleProjectTag(tag)}
-                    style={[
-                      styles.tagOption,
-                      { borderColor: tc.border, backgroundColor: active ? tc.filterBg : tc.cardBg },
-                    ]}
-                  >
-                    <Text style={[styles.tagOptionText, { color: tc.text }]}>{tag}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        tc={tc}
+        t={t}
+        tagDraft={tagDraft}
+        projectTagOptions={projectTagOptions}
+        selectedTags={selectedProject?.tagIds || []}
+        onChangeTagDraft={setTagDraft}
+        onAddTag={() => {
+          const nextTag = normalizeProjectTag(tagDraft);
+          if (!nextTag) return;
+          toggleProjectTag(nextTag);
+          setTagDraft('');
+        }}
+        onClose={() => setShowTagPicker(false)}
+        onToggleTag={toggleProjectTag}
+      />
       </View>
     </GestureHandlerRootView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  inputContainer: {
-    padding: 16,
-    gap: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e5e5',
-  },
-  filterSection: {
-    gap: 8,
-  },
-  filterHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  filterToggleText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  tagFilterLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  tagFilterChips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  tagFilterChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  tagFilterText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 16,
-  },
-  colorPicker: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  colorOption: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  colorOptionSelected: {
-    borderColor: '#000',
-  },
-  addButton: {
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  addButtonDisabled: {
-    opacity: 0.5,
-  },
-  addButtonText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  projectItem: {
-    flexDirection: 'row',
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
-    alignItems: 'center',
-  },
-  projectTouchArea: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  projectColor: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginRight: 12,
-  },
-  projectDetailScroll: {
-    paddingBottom: 24,
-  },
-  projectContent: {
-    flex: 1,
-  },
-  sectionBlock: {
-    marginBottom: 12,
-  },
-  projectTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  projectTagDots: {
-    flexDirection: 'row',
-    gap: 4,
-    marginLeft: 6,
-  },
-  projectTagDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 999,
-    opacity: 0.7,
-  },
-  projectTitle: {
-    fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 4,
-  },
-  projectMeta: {
-    fontSize: 12,
-    color: '#666',
-  },
-  deleteButton: {
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyContainer: {
-    padding: 48,
-    alignItems: 'center',
-  },
-  emptyText: {
-    color: '#999',
-    fontSize: 16,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e5e5',
-  },
-  backButton: {
-    padding: 8,
-    width: 60,
-  },
-  backButtonText: {
-    fontSize: 16,
-    color: '#007AFF',
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  sequentialBadge: {
-    backgroundColor: '#DBEAFE',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  sequentialBadgeText: {
-    fontSize: 10,
-    color: '#1D4ED8',
-    fontWeight: '500',
-  },
-  sequentialToggle: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: '#F3F4F6',
-  },
-  sequentialToggleActive: {
-    backgroundColor: '#3B82F6',
-  },
-  sequentialToggleText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#6B7280',
-  },
-  sequentialToggleTextActive: {
-    color: '#FFFFFF',
-  },
-  statusBlock: {
-    borderBottomWidth: 1,
-  },
-  statusActionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    gap: 8,
-  },
-  statusLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  statusPicker: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  statusPickerText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  statusMenu: {
-    marginHorizontal: 16,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  statusMenuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  statusMenuText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 999,
-  },
-  statusButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    marginRight: 8,
-  },
-  statusButtonText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  completeButton: {
-    backgroundColor: '#10B98120',
-  },
-  archiveButton: {
-    backgroundColor: '#6B728020',
-  },
-  reactivateButton: {
-    backgroundColor: '#3B82F620',
-  },
-  completeText: {
-    color: '#10B981',
-  },
-  archiveText: {
-    color: '#6B7280',
-  },
-  reactivateText: {
-    color: '#3B82F6',
-  },
-  notesContainer: {
-    borderBottomWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  notesHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  detailsToggle: {
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginTop: 8,
-    marginBottom: 12,
-  },
-  detailsToggleButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  detailsToggleText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  notesHeader: {
-    paddingVertical: 8,
-  },
-  notesTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  notesInput: {
-    marginTop: 8,
-    borderRadius: 8,
-    padding: 10,
-    minHeight: 100,
-    textAlignVertical: 'top',
-    fontSize: 14,
-    borderWidth: 1,
-  },
-  smallButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  smallButtonText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  markdownPreview: {
-    marginTop: 8,
-    padding: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  attachmentsContainer: {
-    borderBottomWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  attachmentsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  attachmentsTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  attachmentsActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  helperText: {
-    marginTop: 8,
-    fontSize: 13,
-  },
-  attachmentsList: {
-    marginTop: 10,
-    borderWidth: 1,
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  attachmentRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderBottomWidth: 1,
-  },
-  attachmentTitleWrap: {
-    flex: 1,
-    paddingRight: 10,
-  },
-  attachmentTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  attachmentDownload: {
-    fontSize: 12,
-    fontWeight: '600',
-    marginRight: 10,
-  },
-  attachmentStatus: {
-    fontSize: 12,
-    fontWeight: '500',
-    marginRight: 10,
-  },
-  attachmentRemove: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  linkModalCard: {
-    width: '100%',
-    maxWidth: 420,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-  },
-  linkModalTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  linkModalInput: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 16,
-  },
-  linkModalHint: {
-    fontSize: 12,
-    marginTop: 8,
-  },
-  linkModalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 12,
-    marginTop: 14,
-  },
-  previewCard: {
-    width: '100%',
-    maxWidth: 520,
-    borderRadius: 12,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  previewHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  previewTitle: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  previewImage: {
-    width: '100%',
-    height: 360,
-    backgroundColor: '#000',
-  },
-  areaManagerList: {
-    paddingBottom: 8,
-  },
-  areaManagerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  areaSortButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  areaSortButton: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  areaSortText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  areaManagerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-  },
-  areaManagerItem: {
-    flexDirection: 'column',
-  },
-  areaColorPickerRow: {
-    flexDirection: 'row',
-    paddingBottom: 8,
-    paddingLeft: 28,
-    gap: 10,
-    flexWrap: 'wrap',
-  },
-  areaManagerInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  areaManagerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  areaManagerText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  areaOrderButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginRight: 8,
-  },
-  colorToggleButton: {
-    padding: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  areaOrderButton: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  areaOrderButtonDisabled: {
-    opacity: 0.5,
-  },
-  areaOrderText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  areaDeleteButton: {
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-  },
-  areaDeleteButtonDisabled: {
-    opacity: 0.6,
-  },
-  areaDeleteText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  pickerCard: {
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    minWidth: 280,
-    maxWidth: 360,
-  },
-  pickerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-  },
-  pickerRowText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  areaDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 999,
-  },
-  tagInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    marginTop: 10,
-  },
-  tagInput: {
-    flex: 1,
-    paddingVertical: 8,
-    fontSize: 14,
-  },
-  tagAddButton: {
-    borderLeftWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  tagAddButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  tagOptions: {
-    marginTop: 12,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  tagOption: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  tagOptionText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  linkModalButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
-  linkModalButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  linkModalButtonDisabled: {
-    opacity: 0.5,
-  },
-  reviewContainer: {
-    borderBottomWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  reviewLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 6,
-  },
-  reviewButton: {
-    padding: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  clearReviewBtn: {
-    marginTop: 6,
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: '#e5e5e5',
-  },
-  clearReviewText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  focusButton: {
-    padding: 8,
-  },
-  focusIcon: {
-    fontSize: 18,
-  },
-});

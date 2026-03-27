@@ -148,6 +148,7 @@ jobs:
 
       - name: Prepare Google Play release notes
         run: |
+          set -euo pipefail
           VERSION=${{ steps.version.outputs.version }}
           NOTES_FILE="docs/release-notes/google-play/${VERSION}.txt"
           if [ ! -f "$NOTES_FILE" ]; then
@@ -170,6 +171,29 @@ jobs:
             }
             tag != "" { print >> file }
           ' "$NOTES_FILE"
+          python3 - "$OUT_DIR" "$NOTES_FILE" <<'PY'
+          import pathlib
+          import sys
+
+          notes_dir = pathlib.Path(sys.argv[1])
+          notes_file = sys.argv[2]
+          limit = 500
+          violations = []
+
+          for path in sorted(notes_dir.glob("whatsnew-*")):
+              text = path.read_text(encoding="utf-8").strip()
+              length = len(text)
+              print(f"{path.name}: {length}/{limit}")
+              if length > limit:
+                  violations.append((path.name.replace("whatsnew-", "", 1), length))
+
+          if violations:
+              formatted = ", ".join(f"{locale}={length}" for locale, length in violations)
+              raise SystemExit(
+                  f"Google Play release notes exceed {limit} characters: {formatted}. "
+                  f"Shorten {notes_file} before publishing."
+              )
+          PY
           ls -la "$OUT_DIR"
 
       - name: Publish to Google Play Store (Production)

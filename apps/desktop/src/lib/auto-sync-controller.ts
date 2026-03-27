@@ -12,6 +12,7 @@ type DesktopAutoSyncControllerOptions = {
     reportError: (label: string, error: unknown) => void;
     onSyncFailure?: (error: string) => void;
     isRuntimeActive: () => boolean;
+    shouldPauseWindowSync?: () => boolean;
     now?: () => number;
     setTimer?: typeof setTimeout;
     clearTimer?: typeof clearTimeout;
@@ -113,12 +114,14 @@ export const createDesktopAutoSyncController = (
         requestSync,
         handleFocus: () => {
             if (!options.isRuntimeActive()) return;
+            if (options.shouldPauseWindowSync?.()) return;
             if (now() - lastAutoSyncAt > focusMinIntervalMs) {
                 void requestSync().catch((error) => options.reportError('Sync failed', error));
             }
         },
         handleBlur: () => {
             if (!options.isRuntimeActive()) return;
+            if (options.shouldPauseWindowSync?.()) return;
             void requestSync().catch((error) => options.reportError('Sync failed', error));
         },
         handleDataChange: () => {

@@ -211,10 +211,17 @@ Available options include:
 
 ### Merge Strategy
 
-Mindwtr uses **Last-Write-Wins (LWW)** per item:
-- Each task/project has an `updatedAt` timestamp
-- When merging, the newer version of each item wins
-- Soft-deleted items (tombstones) are preserved for proper sync
+Mindwtr uses **revision-aware Last-Write-Wins (LWW)** per item:
+- Each task, project, section, and area carries an `updatedAt` timestamp.
+- When available, revision metadata (`rev` and `revBy`) is used before falling back to plain timestamps.
+- Soft-deleted items (tombstones) are preserved so deletions propagate correctly across devices.
+
+Delete-vs-live conflicts use the **last operation time**, not just the raw `updatedAt`:
+- For deleted items, Mindwtr compares `deletedAt` against the live item's latest update.
+- If the delete and live edit are more than 5 seconds apart, the newer operation wins.
+- Inside that 5-second ambiguity window, Mindwtr prefers higher revision metadata first, then newer timestamps, then `revBy`, and finally a deterministic content signature so both devices converge on the same winner.
+
+Clock-skewed future timestamps are clamped during merge safety checks so a bad device clock does not dominate forever. If both sides are clamped into the future, Mindwtr still preserves their relative ordering instead of treating them as a false tie.
 
 ### Conflict Visibility & Clock Skew
 

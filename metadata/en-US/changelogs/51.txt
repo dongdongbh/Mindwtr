@@ -1,0 +1,4 @@
+- Hardened Android speech-to-text and Whisper/OpenAI transcription loading, with clearer diagnostics when transcription setup fails.
+- Restored the Project field in the mobile task editor and fixed speech-created task updates.
+- Cleared stale sync conflict details after later sync failures so mobile status stays accurate.
+- Improved shared sync reliability with safer merge ordering and stricter cloud and MCP validation.

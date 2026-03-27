@@ -30,12 +30,12 @@ import { taskMatchesAreaFilter } from '@/lib/area-filter';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import { buildCopilotConfig, isAIKeyRequired, loadAIKey } from '../lib/ai-config';
 import { logError } from '../lib/app-log';
-import { getBulkActionFailureMessage } from './task-list-utils';
 import {
   MOBILE_TIME_ESTIMATE_OPTIONS,
   formatTimeEstimateChipLabel,
   matchesSelectedTimeEstimates,
 } from './time-estimate-filter-utils';
+import { useTaskListSelection } from './use-task-list-selection';
 
 export interface TaskListProps {
   statusFilter: TaskStatus | 'all';
@@ -120,13 +120,7 @@ function TaskListComponent({
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [multiSelectedIds, setMultiSelectedIds] = useState<Set<string>>(new Set());
-  const [tagModalVisible, setTagModalVisible] = useState(false);
-  const [tagInput, setTagInput] = useState('');
   const [sortModalVisible, setSortModalVisible] = useState(false);
-  const [bulkActionLoading, setBulkActionLoading] = useState(false);
-  const [bulkActionLabel, setBulkActionLabel] = useState('');
   const [selectedTimeEstimates, setSelectedTimeEstimates] = useState<TimeEstimate[]>([]);
   const [inputSelection, setInputSelection] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
   const [typeaheadOpen, setTypeaheadOpen] = useState(false);
@@ -190,6 +184,31 @@ function TaskListComponent({
       return acc;
     }, {} as Record<string, Task>);
   }, [tasks]);
+  const {
+    bulkActionLabel,
+    bulkActionLoading,
+    exitSelectionMode,
+    handleBatchAddTag,
+    handleBatchDelete,
+    handleBatchMove,
+    hasSelection,
+    multiSelectedIds,
+    selectedIdsArray,
+    selectionMode,
+    setSelectionMode,
+    setTagInput,
+    setTagModalVisible,
+    tagInput,
+    tagModalVisible,
+    toggleMultiSelect,
+  } = useTaskListSelection({
+    batchDeleteTasks,
+    batchMoveTasks,
+    batchUpdateTasks,
+    restoreTask,
+    t,
+    tasksById,
+  });
 
   const sortBy = (settings?.taskSortBy ?? 'default') as TaskSortBy;
   const aiEnabled = settings?.ai?.enabled === true;
@@ -613,108 +632,6 @@ function TaskListComponent({
     setIsModalVisible(false);
     setEditingTask(null);
   }, [updateTask]);
-
-  const selectedIdsArray = useMemo(() => Array.from(multiSelectedIds), [multiSelectedIds]);
-  const hasSelection = selectedIdsArray.length > 0;
-
-  const exitSelectionMode = useCallback(() => {
-    setSelectionMode(false);
-    setMultiSelectedIds(new Set());
-  }, []);
-  const runBulkAction = useCallback(async (label: string, action: () => Promise<void>) => {
-    if (bulkActionLoading) return;
-    setBulkActionLabel(label);
-    setBulkActionLoading(true);
-    try {
-      await action();
-    } catch (error) {
-      void logError(error, { scope: 'tasks', extra: { message: `Bulk action failed: ${label}` } });
-      Alert.alert(
-        t('common.notice'),
-        getBulkActionFailureMessage(error, `${label} failed.`)
-      );
-    } finally {
-      setBulkActionLoading(false);
-      setBulkActionLabel('');
-    }
-  }, [bulkActionLoading, t]);
-
-  const toggleMultiSelect = useCallback((taskId: string) => {
-    if (!selectionMode) setSelectionMode(true);
-    setMultiSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(taskId)) next.delete(taskId);
-      else next.add(taskId);
-      return next;
-    });
-  }, [selectionMode]);
-
-  const handleBatchMove = useCallback(async (newStatus: TaskStatus) => {
-    if (!hasSelection || bulkActionLoading) return;
-    await runBulkAction(t('bulk.moveTo'), async () => {
-      await batchMoveTasks(selectedIdsArray, newStatus);
-      exitSelectionMode();
-      Alert.alert(t('common.done'), `${selectedIdsArray.length} ${t('common.tasks')}`);
-    });
-  }, [batchMoveTasks, selectedIdsArray, hasSelection, exitSelectionMode, t, bulkActionLoading, runBulkAction]);
-
-  const handleBatchDelete = useCallback(async () => {
-    if (!hasSelection || bulkActionLoading) return;
-    Alert.alert(
-      t('bulk.confirmDeleteTitle') || t('common.delete'),
-      t('bulk.confirmDeleteBody') || t('list.confirmBatchDelete'),
-      [
-        { text: t('common.cancel'), style: 'cancel' },
-        {
-          text: t('common.delete'),
-          style: 'destructive',
-          onPress: async () => {
-            const deletedIds = [...selectedIdsArray];
-            await runBulkAction(t('common.delete'), async () => {
-              await batchDeleteTasks(deletedIds);
-              exitSelectionMode();
-              Alert.alert(
-                t('common.done'),
-                `${deletedIds.length} ${t('common.tasks')}`,
-                [
-                  {
-                    text: t('trash.restoreToInbox') === 'trash.restoreToInbox' ? 'Restore' : t('trash.restoreToInbox'),
-                    onPress: () => {
-                      deletedIds.forEach((id) => {
-                        void restoreTask(id);
-                      });
-                    },
-                  },
-                  {
-                    text: t('common.cancel'),
-                    style: 'cancel',
-                  },
-                ]
-              );
-            });
-          },
-        },
-      ]
-    );
-  }, [batchDeleteTasks, selectedIdsArray, hasSelection, exitSelectionMode, t, bulkActionLoading, restoreTask, runBulkAction]);
-
-  const handleBatchAddTag = useCallback(async () => {
-    const input = tagInput.trim();
-    if (!hasSelection || !input || bulkActionLoading) return;
-    const tag = input.startsWith('#') ? input : `#${input}`;
-    await runBulkAction(t('bulk.addTag'), async () => {
-      await batchUpdateTasks(selectedIdsArray.map((id) => {
-        const task = tasksById[id];
-        const existingTags = task?.tags || [];
-        const nextTags = Array.from(new Set([...existingTags, tag]));
-        return { id, updates: { tags: nextTags } };
-      }));
-      setTagInput('');
-      setTagModalVisible(false);
-      exitSelectionMode();
-      Alert.alert(t('common.done'), `${selectedIdsArray.length} ${t('common.tasks')}`);
-    });
-  }, [batchUpdateTasks, selectedIdsArray, tasksById, tagInput, hasSelection, exitSelectionMode, t, bulkActionLoading, runBulkAction]);
 
   const sortOptions: TaskSortBy[] = ['default', 'due', 'start', 'review', 'title', 'created', 'created-desc'];
   const hideStatusBadgeForList = statusFilter === 'next' || statusFilter === 'waiting';

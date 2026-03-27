@@ -4,22 +4,10 @@ import {
     Attachment,
     useTaskStore,
     MergeStats,
-    findDeletedAttachmentsForFileCleanup,
-    findOrphanedAttachments,
-    removeOrphanedAttachmentsFromData,
-    validateAttachmentForUpload,
     webdavGetJson,
     webdavPutJson,
-    webdavGetFile,
-    webdavPutFile,
-    webdavFileExists,
-    webdavMakeDirectory,
-    webdavDeleteFile,
-    cloudGetFile,
-    cloudPutFile,
     cloudGetJson,
     cloudPutJson,
-    cloudDeleteFile,
     flushPendingSave,
     performSyncCycle,
     mergeAppData,
@@ -37,14 +25,10 @@ import {
     CLOCK_SKEW_THRESHOLD_MS,
     appendSyncHistory,
     cloneAppData,
-    createWebdavDownloadBackoff,
-    isWebdavRateLimitedError,
-    getErrorStatus,
     LocalSyncAbort,
     getInMemoryAppDataSnapshot,
     shouldRunAttachmentCleanup,
     createAbortableFetch,
-    normalizeCloudProvider,
     type CloudProvider,
 } from '@mindwtr/core';
 import { isTauriRuntime } from './runtime';
@@ -55,55 +39,73 @@ import { markLocalWrite } from './local-data-watcher';
 import { ExternalCalendarService } from './external-calendar-service';
 import { webStorage } from './storage-adapter-web';
 import {
+    cleanupAttachmentTempFiles,
+    cleanupOrphanedAttachments,
+    type AttachmentCleanupDeps,
+} from './sync-attachment-cleanup';
+import {
+    clearAttachmentSyncState,
+    type AttachmentBackendDeps,
+    type CloudConfig,
+    syncCloudAttachments,
+    syncDropboxAttachments,
+    syncFileAttachments,
+    syncWebdavAttachments as syncAttachments,
+    type WebDavConfig,
+} from './sync-attachment-backends';
+import {
     ensureCloudKitReady,
     readRemoteCloudKit,
     writeRemoteCloudKit,
 } from './cloudkit-sync';
 import {
-    collectAttachmentsById,
     getBaseSyncUrl,
     getCloudBaseUrl,
-    normalizePendingRemoteDeletes,
-    reportProgress,
-    syncBasicRemoteAttachments,
-    validateAttachmentHash,
 } from './sync-attachments';
 import {
-    ATTACHMENTS_DIR_NAME,
-    buildCloudKey,
-    extractExtension,
     getFileSyncDir,
     hashString,
     isSyncFilePath,
-    isTempAttachmentFile,
     normalizeSyncBackend,
-    sleep,
-    stripFileScheme,
     toStableJson,
-    createCooperativeYield,
     yieldToRenderer,
-    writeAttachmentFileSafely,
-    writeFileSafelyAbsolute,
 } from './sync-service-utils';
 import {
-    clearAttachmentValidationFailure,
     clearAttachmentValidationFailures,
     getAttachmentValidationFailureAttempts,
     handleAttachmentValidationFailure,
-    markAttachmentUnrecoverable,
 } from './sync-attachment-validation';
 import type { SyncBackend } from './sync-service-utils';
 import {
-    deleteDropboxFile,
     downloadDropboxAppData,
-    downloadDropboxFile,
     DropboxConflictError,
-    DropboxFileNotFoundError,
     DropboxUnauthorizedError,
     testDropboxAccess,
     uploadDropboxAppData,
-    uploadDropboxFile,
 } from './dropbox-sync';
+import {
+    CLOUD_TOKEN_KEY,
+    CLOUD_URL_KEY,
+    SYNC_BACKEND_KEY,
+    WEBDAV_PASSWORD_KEY,
+    WEBDAV_URL_KEY,
+    WEBDAV_USERNAME_KEY,
+    getCloudConfigLocal,
+    getSyncBackendLocal,
+    getWebDavConfigLocal,
+    readCloudConfig,
+    readCloudProvider,
+    readDropboxAppKey,
+    readSyncBackend,
+    readSyncPath,
+    readWebDavConfig,
+    writeCloudConfig,
+    writeCloudProvider,
+    writeDropboxAppKey,
+    writeSyncBackend,
+    writeSyncPath,
+    writeWebDavConfig,
+} from './sync-service-config';
 
 export type ExternalSyncChangeResolution = 'keep-local' | 'use-external' | 'merge';
 export type { CloudProvider };
@@ -117,34 +119,14 @@ export type ExternalSyncChange = {
     lastSyncAt?: string;
 };
 
-const SYNC_BACKEND_KEY = 'mindwtr-sync-backend';
-const WEBDAV_URL_KEY = 'mindwtr-webdav-url';
-const WEBDAV_USERNAME_KEY = 'mindwtr-webdav-username';
-const WEBDAV_PASSWORD_KEY = 'mindwtr-webdav-password';
-const CLOUD_URL_KEY = 'mindwtr-cloud-url';
-const CLOUD_TOKEN_KEY = 'mindwtr-cloud-token';
-const CLOUD_PROVIDER_KEY = 'mindwtr-cloud-provider';
 const SYNC_FILE_NAME = 'data.json';
 const LEGACY_SYNC_FILE_NAME = 'mindwtr-sync.json';
-const DEFAULT_DROPBOX_APP_KEY = String(import.meta.env.VITE_DROPBOX_APP_KEY || '').trim();
-const WEBDAV_ATTACHMENT_RETRY_OPTIONS = { maxAttempts: 5, baseDelayMs: 2000, maxDelayMs: 60_000 };
 const WEBDAV_READ_RETRY_OPTIONS = {
     maxAttempts: 5,
     baseDelayMs: 2000,
     maxDelayMs: 30_000,
     shouldRetry: isRetryableWebdavReadError,
 };
-const CLOUD_ATTACHMENT_RETRY_OPTIONS = { maxAttempts: 5, baseDelayMs: 2000, maxDelayMs: 60_000 };
-const WEBDAV_ATTACHMENT_MIN_INTERVAL_MS = 400;
-const WEBDAV_ATTACHMENT_COOLDOWN_MS = 60_000;
-const WEBDAV_ATTACHMENT_MAX_DOWNLOADS_PER_SYNC = 10;
-const WEBDAV_ATTACHMENT_MAX_UPLOADS_PER_SYNC = 10;
-const WEBDAV_ATTACHMENT_MISSING_BACKOFF_MS = 15 * 60_000;
-const WEBDAV_ATTACHMENT_ERROR_BACKOFF_MS = 2 * 60_000;
-const webdavDownloadBackoff = createWebdavDownloadBackoff({
-    missingBackoffMs: WEBDAV_ATTACHMENT_MISSING_BACKOFF_MS,
-    errorBackoffMs: WEBDAV_ATTACHMENT_ERROR_BACKOFF_MS,
-});
 type SyncServiceDependencies = {
     isTauriRuntime: () => boolean;
     invoke: <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
@@ -215,18 +197,6 @@ const buildConflictDiagnosticsLogExtra = (stats: MergeStats): Record<string, str
     return extra;
 };
 
-const getWebdavDownloadBackoff = (attachmentId: string): number | null => {
-    return webdavDownloadBackoff.getBlockedUntil(attachmentId);
-};
-
-const setWebdavDownloadBackoff = (attachmentId: string, error: unknown): void => {
-    webdavDownloadBackoff.setFromError(attachmentId, error);
-};
-
-const pruneWebdavDownloadBackoff = (): void => {
-    webdavDownloadBackoff.prune();
-};
-
 const externalCalendarProvider = {
     load: () => ExternalCalendarService.getCalendars(),
     save: (calendars: AppData['settings']['externalCalendars'] | undefined) =>
@@ -264,229 +234,7 @@ const readLocalDataForSync = async (): Promise<AppData> => {
     });
 };
 
-const LOCAL_ATTACHMENTS_DIR = `mindwtr/${ATTACHMENTS_DIR_NAME}`;
-const FILE_BACKEND_VALIDATION_CONFIG = {
-    maxFileSizeBytes: Number.POSITIVE_INFINITY,
-    blockedMimeTypes: [],
-};
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const UPLOAD_TIMEOUT_MS = 120_000;
-
-const cleanupAttachmentTempFiles = async (): Promise<void> => {
-    if (!isTauriRuntimeEnv()) return;
-    try {
-        const { BaseDirectory, readDir, remove } = await import('@tauri-apps/plugin-fs');
-        const entries = await readDir(LOCAL_ATTACHMENTS_DIR, { baseDir: BaseDirectory.Data });
-        for (const entry of entries) {
-            if (!entry.isFile) continue;
-            const name = entry.name;
-            if (!isTempAttachmentFile(name)) continue;
-            try {
-                await remove(`${LOCAL_ATTACHMENTS_DIR}/${name}`, { baseDir: BaseDirectory.Data });
-            } catch (error) {
-                logSyncWarning('Failed to remove temp attachment file', error);
-            }
-        }
-    } catch (error) {
-        logSyncWarning('Failed to scan temp attachment files', error);
-    }
-};
-
-type PendingRemoteAttachmentDeleteEntry = NonNullable<
-    NonNullable<AppData['settings']['attachments']>['pendingRemoteDeletes']
->[number];
-
-const deleteAttachmentFile = async (attachment: Attachment): Promise<void> => {
-    if (!attachment.uri) return;
-    const rawUri = stripFileScheme(attachment.uri);
-    if (/^https?:\/\//i.test(rawUri) || rawUri.startsWith('content://')) return;
-    try {
-        const { remove, BaseDirectory } = await import('@tauri-apps/plugin-fs');
-        const { dataDir } = await import('@tauri-apps/api/path');
-        const baseDataDir = await dataDir();
-        if (rawUri.startsWith(baseDataDir)) {
-            const relative = rawUri.slice(baseDataDir.length).replace(/^[\\/]/, '');
-            await remove(relative, { baseDir: BaseDirectory.Data });
-        } else {
-            await remove(rawUri);
-        }
-    } catch (error) {
-        logSyncWarning(`Failed to delete attachment file ${attachment.title}`, error);
-    }
-};
-
-const cleanupOrphanedAttachments = async (appData: AppData, backend: SyncBackend): Promise<AppData> => {
-    const orphaned = findOrphanedAttachments(appData);
-    const deletedAttachments = findDeletedAttachmentsForFileCleanup(appData);
-    const previousPendingRemoteDeletes = normalizePendingRemoteDeletes(appData.settings.attachments?.pendingRemoteDeletes);
-    const previousPendingByCloudKey = new Map(previousPendingRemoteDeletes.map((item) => [item.cloudKey, item]));
-    const cleanupTargets = new Map<string, Attachment>();
-    const maybeYield = createCooperativeYield(4);
-    for (const attachment of orphaned) cleanupTargets.set(attachment.id, attachment);
-    for (const attachment of deletedAttachments) cleanupTargets.set(attachment.id, attachment);
-    const remoteCleanupTargets = new Map<string, { cloudKey: string; title: string }>();
-    for (const attachment of cleanupTargets.values()) {
-        await maybeYield();
-        if (!attachment.cloudKey) continue;
-        remoteCleanupTargets.set(attachment.cloudKey, {
-            cloudKey: attachment.cloudKey,
-            title: attachment.title || attachment.cloudKey,
-        });
-    }
-    for (const pending of previousPendingRemoteDeletes) {
-        await maybeYield();
-        remoteCleanupTargets.set(pending.cloudKey, {
-            cloudKey: pending.cloudKey,
-            title: pending.title || pending.cloudKey,
-        });
-    }
-    const lastCleanupAt = new Date().toISOString();
-
-    if (cleanupTargets.size === 0 && remoteCleanupTargets.size === 0) {
-        await cleanupAttachmentTempFiles();
-        return {
-            ...appData,
-            settings: {
-                ...appData.settings,
-                attachments: {
-                    ...appData.settings.attachments,
-                    lastCleanupAt,
-                    pendingRemoteDeletes: undefined,
-                },
-            },
-        };
-    }
-
-    let webdavConfig: WebDavConfig | null = null;
-    let cloudConfig: CloudConfig | null = null;
-    let cloudProvider: CloudProvider = 'selfhosted';
-    let dropboxAppKey = '';
-    let dropboxAccessToken: string | null = null;
-    let fileBaseDir: string | null = null;
-
-    if (backend === 'webdav') {
-        webdavConfig = await SyncService.getWebDavConfig();
-    } else if (backend === 'cloud') {
-        cloudProvider = await SyncService.getCloudProvider();
-        if (cloudProvider === 'dropbox') {
-            dropboxAppKey = (await SyncService.getDropboxAppKey()).trim();
-        } else {
-            cloudConfig = await SyncService.getCloudConfig();
-        }
-    } else if (backend === 'file') {
-        const syncPath = await SyncService.getSyncPath();
-        const baseDir = getFileSyncDir(syncPath, SYNC_FILE_NAME, LEGACY_SYNC_FILE_NAME);
-        fileBaseDir = baseDir || null;
-    }
-
-    const fetcher = await getTauriFetch();
-    const dropboxFetcher = fetcher ?? fetch;
-    const webdavPassword = webdavConfig ? await resolveWebdavPassword(webdavConfig) : '';
-    const nextPendingRemoteDeletes = new Map<string, PendingRemoteAttachmentDeleteEntry>();
-    const resolveDropboxAccessToken = async (forceRefresh = false): Promise<string> => {
-        if (!dropboxAppKey) {
-            throw new Error('Dropbox app key is not configured');
-        }
-        if (!dropboxAccessToken || forceRefresh) {
-            dropboxAccessToken = await SyncService.getDropboxAccessToken(dropboxAppKey, { forceRefresh });
-        }
-        return dropboxAccessToken;
-    };
-    const deleteDropboxAttachment = async (cloudKey: string): Promise<void> => {
-        const run = async (forceRefresh: boolean) => {
-            const token = await resolveDropboxAccessToken(forceRefresh);
-            await deleteDropboxFile(token, cloudKey, dropboxFetcher);
-        };
-        try {
-            await run(false);
-        } catch (error) {
-            if (error instanceof DropboxUnauthorizedError) {
-                await run(true);
-                return;
-            }
-            throw error;
-        }
-    };
-
-    for (const attachment of cleanupTargets.values()) {
-        await maybeYield();
-        await deleteAttachmentFile(attachment);
-    }
-
-    const canAttemptRemoteDelete = (
-        (backend === 'webdav' && !!webdavConfig?.url)
-        || (backend === 'cloud' && cloudProvider === 'selfhosted' && !!cloudConfig?.url)
-        || (backend === 'cloud' && cloudProvider === 'dropbox' && !!dropboxAppKey)
-        || (backend === 'file' && !!fileBaseDir)
-    );
-    for (const target of remoteCleanupTargets.values()) {
-        await maybeYield();
-        const existing = previousPendingByCloudKey.get(target.cloudKey);
-        if (!canAttemptRemoteDelete) {
-            nextPendingRemoteDeletes.set(target.cloudKey, {
-                cloudKey: target.cloudKey,
-                title: target.title,
-                attempts: existing?.attempts ?? 0,
-                lastErrorAt: existing?.lastErrorAt,
-            });
-            continue;
-        }
-        try {
-            if (backend === 'webdav' && webdavConfig?.url) {
-                const baseUrl = getBaseSyncUrl(webdavConfig.url);
-                await webdavDeleteFile(`${baseUrl}/${target.cloudKey}`, {
-                    username: webdavConfig.username,
-                    password: webdavPassword,
-                    fetcher,
-                });
-            } else if (backend === 'cloud' && cloudProvider === 'selfhosted' && cloudConfig?.url) {
-                const baseUrl = getCloudBaseUrl(cloudConfig.url);
-                await cloudDeleteFile(`${baseUrl}/${target.cloudKey}`, {
-                    token: cloudConfig.token,
-                    fetcher,
-                });
-            } else if (backend === 'cloud' && cloudProvider === 'dropbox') {
-                await deleteDropboxAttachment(target.cloudKey);
-            } else if (backend === 'file' && fileBaseDir) {
-                const { remove } = await import('@tauri-apps/plugin-fs');
-                const { join } = await import('@tauri-apps/api/path');
-                const targetPath = await join(fileBaseDir, target.cloudKey);
-                await remove(targetPath);
-            }
-        } catch (error) {
-            const status = getErrorStatus(error);
-            if (status === 404 || error instanceof DropboxFileNotFoundError) {
-                logSyncInfo('Remote attachment already missing during cleanup', {
-                    cloudKey: target.cloudKey,
-                });
-                continue;
-            }
-            logSyncWarning(`Failed to delete remote attachment ${target.title}`, error);
-            nextPendingRemoteDeletes.set(target.cloudKey, {
-                cloudKey: target.cloudKey,
-                title: target.title,
-                attempts: (existing?.attempts ?? 0) + 1,
-                lastErrorAt: lastCleanupAt,
-            });
-        }
-    }
-
-    await cleanupAttachmentTempFiles();
-
-    const cleaned = orphaned.length > 0 ? removeOrphanedAttachmentsFromData(appData) : appData;
-    const pendingRemoteDeletes = Array.from(nextPendingRemoteDeletes.values());
-    return {
-        ...cleaned,
-        settings: {
-            ...cleaned.settings,
-            attachments: {
-                ...cleaned.settings.attachments,
-                lastCleanupAt,
-                pendingRemoteDeletes: pendingRemoteDeletes.length > 0 ? pendingRemoteDeletes : undefined,
-            },
-        },
-    };
-};
 
 async function tauriInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
     return syncServiceDependencies.invoke<T>(command, args);
@@ -497,8 +245,6 @@ async function persistLocalDataForSync(data: AppData): Promise<void> {
     await tauriInvoke('save_data', { data });
 }
 
-type WebDavConfig = { url: string; username: string; password?: string; hasPassword?: boolean };
-type CloudConfig = { url: string; token: string };
 const DROPBOX_REDIRECT_URI_FALLBACK = 'http://127.0.0.1:53682/oauth/dropbox/callback';
 const DROPBOX_TEST_TIMEOUT_MS = 15_000;
 
@@ -530,763 +276,35 @@ async function resolveWebdavPassword(config: WebDavConfig): Promise<string> {
     }
 }
 
-async function syncAttachments(
-    appData: AppData,
-    webDavConfig: WebDavConfig,
-    baseSyncUrl: string
-): Promise<AppData | null> {
-    if (!isTauriRuntimeEnv()) return null;
-    if (!webDavConfig.url) return null;
+const attachmentBackendDeps: AttachmentBackendDeps = {
+    getTauriFetch,
+    isTauriRuntimeEnv,
+    logSyncInfo,
+    logSyncWarning,
+    resolveWebdavPassword,
+};
 
-    const fetcher = await getTauriFetch();
-    const { BaseDirectory, exists, mkdir, readFile, writeFile, rename, remove } = await import('@tauri-apps/plugin-fs');
-    const { dataDir, join } = await import('@tauri-apps/api/path');
-    const password = await resolveWebdavPassword(webDavConfig);
+const getAttachmentCleanupDeps = (): AttachmentCleanupDeps => ({
+    getCloudConfig: () => SyncService.getCloudConfig(),
+    getCloudProvider: () => SyncService.getCloudProvider(),
+    getDropboxAccessToken: (clientId, options) => SyncService.getDropboxAccessToken(clientId, options),
+    getDropboxAppKey: () => SyncService.getDropboxAppKey(),
+    getSyncPath: () => SyncService.getSyncPath(),
+    getTauriFetch,
+    getWebDavConfig: () => SyncService.getWebDavConfig(),
+    isTauriRuntimeEnv,
+    logSyncInfo,
+    logSyncWarning,
+    resolveWebdavPassword,
+});
 
-    const attachmentsDirUrl = `${baseSyncUrl}/${ATTACHMENTS_DIR_NAME}`;
-    try {
-        await webdavMakeDirectory(attachmentsDirUrl, {
-            username: webDavConfig.username,
-            password,
-            fetcher,
-        });
-    } catch (error) {
-        logSyncWarning('Failed to ensure WebDAV attachments directory', error);
-    }
-
-    try {
-        await mkdir(LOCAL_ATTACHMENTS_DIR, { baseDir: BaseDirectory.Data, recursive: true });
-    } catch (error) {
-        logSyncWarning('Failed to ensure local attachments directory', error);
-    }
-
-    const baseDataDir = await dataDir();
-    const workingData = cloneAppData(appData);
-
-    const attachmentsById = collectAttachmentsById(workingData);
-
-    pruneWebdavDownloadBackoff();
-
-    logSyncInfo('WebDAV attachment sync start', { count: String(attachmentsById.size) });
-
-    let lastRequestAt = 0;
-    let blockedUntil = 0;
-    const waitForSlot = async (): Promise<void> => {
-        const now = Date.now();
-        if (blockedUntil && now < blockedUntil) {
-            throw new Error(`WebDAV rate limited for ${blockedUntil - now}ms`);
-        }
-        const elapsed = now - lastRequestAt;
-        if (elapsed < WEBDAV_ATTACHMENT_MIN_INTERVAL_MS) {
-            await sleep(WEBDAV_ATTACHMENT_MIN_INTERVAL_MS - elapsed);
-        }
-        lastRequestAt = Date.now();
-    };
-    const handleRateLimit = (error: unknown): boolean => {
-        if (!isWebdavRateLimitedError(error)) return false;
-        blockedUntil = Date.now() + WEBDAV_ATTACHMENT_COOLDOWN_MS;
-        logSyncWarning('WebDAV rate limited; pausing attachment sync', error);
-        return true;
-    };
-
-    const readLocalFile = async (path: string): Promise<Uint8Array> => {
-        if (path.startsWith(baseDataDir)) {
-            const relative = path.slice(baseDataDir.length).replace(/^[\\/]/, '');
-            return await readFile(relative, { baseDir: BaseDirectory.Data });
-        }
-        return await readFile(path);
-    };
-
-    const localFileExists = async (path: string): Promise<boolean> => {
-        try {
-            if (path.startsWith(baseDataDir)) {
-                const relative = path.slice(baseDataDir.length).replace(/^[\\/]/, '');
-                return await exists(relative, { baseDir: BaseDirectory.Data });
-            }
-            return await exists(path);
-        } catch (error) {
-            logSyncWarning('Failed to check attachment file', error);
-            return false;
-        }
-    };
-
-    let didMutate = false;
-    const downloadQueue: Attachment[] = [];
-    let abortedByRateLimit = false;
-    let uploadCount = 0;
-    let uploadLimitLogged = false;
-    const maybeYieldAttachmentLoop = createCooperativeYield(4);
-
-    for (const attachment of attachmentsById.values()) {
-        await maybeYieldAttachmentLoop();
-        if (attachment.kind !== 'file') continue;
-        if (attachment.deletedAt) continue;
-        if (abortedByRateLimit) break;
-
-        const rawUri = attachment.uri ? stripFileScheme(attachment.uri) : '';
-        const isHttp = /^https?:\/\//i.test(rawUri);
-        const localPath = isHttp ? '' : rawUri;
-        const hasLocalPath = Boolean(localPath);
-        const existsLocally = hasLocalPath ? await localFileExists(localPath) : false;
-        logSyncInfo('WebDAV attachment check', {
-            id: attachment.id,
-            title: attachment.title || 'attachment',
-            uri: localPath ? localPath : rawUri,
-            cloud: attachment.cloudKey ? 'set' : 'missing',
-            local: hasLocalPath ? 'true' : 'false',
-            exists: existsLocally ? 'true' : 'false',
-        });
-
-        const nextStatus: Attachment['localStatus'] = existsLocally ? 'available' : 'missing';
-        if (attachment.localStatus !== nextStatus) {
-            attachment.localStatus = nextStatus;
-            didMutate = true;
-        }
-        if (existsLocally) {
-            webdavDownloadBackoff.deleteEntry(attachment.id);
-        }
-
-        if (attachment.cloudKey && existsLocally) {
-            try {
-                const remoteExists = await withRetry(
-                    async () => {
-                        await waitForSlot();
-                        return await webdavFileExists(`${baseSyncUrl}/${attachment.cloudKey}`, {
-                            username: webDavConfig.username,
-                            password,
-                            fetcher,
-                        });
-                    },
-                    WEBDAV_ATTACHMENT_RETRY_OPTIONS
-                );
-                logSyncInfo('WebDAV attachment remote exists', {
-                    id: attachment.id,
-                    exists: remoteExists ? 'true' : 'false',
-                });
-                if (!remoteExists) {
-                    attachment.cloudKey = undefined;
-                    didMutate = true;
-                }
-            } catch (error) {
-                if (handleRateLimit(error)) {
-                    abortedByRateLimit = true;
-                    break;
-                }
-                logSyncWarning('Failed to check WebDAV attachment remote status', error);
-            }
-        }
-
-        if (!attachment.cloudKey && existsLocally) {
-            if (uploadCount >= WEBDAV_ATTACHMENT_MAX_UPLOADS_PER_SYNC) {
-                if (!uploadLimitLogged) {
-                    logSyncInfo('WebDAV attachment upload limit reached', {
-                        limit: String(WEBDAV_ATTACHMENT_MAX_UPLOADS_PER_SYNC),
-                    });
-                    uploadLimitLogged = true;
-                }
-                continue;
-            }
-            uploadCount += 1;
-            const cloudKey = buildCloudKey(attachment);
-            try {
-                const fileData = await readLocalFile(localPath);
-                const validation = await validateAttachmentForUpload(attachment, fileData.length);
-                if (!validation.valid) {
-                    const failure = handleAttachmentValidationFailure(attachment, validation.error);
-                    reportProgress(
-                        attachment.id,
-                        'upload',
-                        0,
-                        attachment.size ?? fileData.length,
-                        'failed',
-                        failure.message
-                    );
-                    if (failure.reachedLimit) {
-                        didMutate = didMutate || failure.mutated;
-                        logSyncWarning(`${failure.message}; marking attachment unrecoverable`);
-                    } else {
-                        logSyncWarning(failure.message);
-                    }
-                    continue;
-                }
-                clearAttachmentValidationFailure(attachment.id);
-                reportProgress(attachment.id, 'upload', 0, fileData.length, 'active');
-                logSyncInfo('WebDAV attachment upload start', {
-                    id: attachment.id,
-                    bytes: String(fileData.length),
-                    cloudKey,
-                });
-                await withRetry(
-                    async () => {
-                        await waitForSlot();
-                        return await webdavPutFile(
-                            `${baseSyncUrl}/${cloudKey}`,
-                            fileData,
-                            attachment.mimeType || 'application/octet-stream',
-                            {
-                                headers: { 'Content-Length': String(fileData.length) },
-                                username: webDavConfig.username,
-                                password,
-                                fetcher,
-                                timeoutMs: UPLOAD_TIMEOUT_MS,
-                            }
-                        );
-                    },
-                    {
-                        ...WEBDAV_ATTACHMENT_RETRY_OPTIONS,
-                        onRetry: (error, attempt, delayMs) => {
-                            logSyncInfo('Retrying WebDAV attachment upload', {
-                                id: attachment.id,
-                                attempt: String(attempt + 1),
-                                delayMs: String(delayMs),
-                                error: sanitizeLogMessage(error instanceof Error ? error.message : String(error)),
-                            });
-                        },
-                    }
-                );
-                attachment.cloudKey = cloudKey;
-                attachment.localStatus = 'available';
-                didMutate = true;
-                reportProgress(attachment.id, 'upload', fileData.length, fileData.length, 'completed');
-                logSyncInfo('WebDAV attachment upload done', {
-                    id: attachment.id,
-                    bytes: String(fileData.length),
-                });
-            } catch (error) {
-                if (handleRateLimit(error)) {
-                    abortedByRateLimit = true;
-                    break;
-                }
-                reportProgress(
-                    attachment.id,
-                    'upload',
-                    0,
-                    attachment.size ?? 0,
-                    'failed',
-                    error instanceof Error ? error.message : String(error)
-                );
-                logSyncWarning(`Failed to upload attachment ${attachment.title}`, error);
-            }
-            continue;
-        }
-
-        if (attachment.cloudKey && !existsLocally) {
-            downloadQueue.push(attachment);
-        }
-    }
-
-    let downloadCount = 0;
-    for (const attachment of downloadQueue) {
-        await maybeYieldAttachmentLoop();
-        if (attachment.kind !== 'file') continue;
-        if (attachment.deletedAt) continue;
-        if (abortedByRateLimit) break;
-        if (!attachment.cloudKey) continue;
-        if (getWebdavDownloadBackoff(attachment.id)) continue;
-        if (downloadCount >= WEBDAV_ATTACHMENT_MAX_DOWNLOADS_PER_SYNC) {
-            logSyncInfo('WebDAV attachment download limit reached', {
-                limit: String(WEBDAV_ATTACHMENT_MAX_DOWNLOADS_PER_SYNC),
-            });
-            break;
-        }
-        downloadCount += 1;
-
-        const cloudKey = attachment.cloudKey;
-        try {
-            const downloadUrl = `${baseSyncUrl}/${cloudKey}`;
-            const fileData = await withRetry(
-                async () => {
-                    await waitForSlot();
-                    return await webdavGetFile(downloadUrl, {
-                        username: webDavConfig.username,
-                        password,
-                        fetcher,
-                        onProgress: (loaded, total) => reportProgress(attachment.id, 'download', loaded, total, 'active'),
-                    });
-                },
-                WEBDAV_ATTACHMENT_RETRY_OPTIONS
-            );
-            const bytes = fileData instanceof ArrayBuffer ? new Uint8Array(fileData) : new Uint8Array(fileData as ArrayBuffer);
-            await validateAttachmentHash(attachment, bytes);
-            const filename = cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.uri)}`;
-            const relativePath = `${LOCAL_ATTACHMENTS_DIR}/${filename}`;
-            await writeAttachmentFileSafely(relativePath, bytes, {
-                baseDir: BaseDirectory.Data,
-                writeFile,
-                rename,
-                remove,
-            });
-            const absolutePath = await join(baseDataDir, relativePath);
-            attachment.uri = absolutePath;
-            if (attachment.localStatus !== 'available') {
-                attachment.localStatus = 'available';
-                didMutate = true;
-            }
-            webdavDownloadBackoff.deleteEntry(attachment.id);
-            reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
-        } catch (error) {
-            if (handleRateLimit(error)) {
-                abortedByRateLimit = true;
-                break;
-            }
-            const status = getErrorStatus(error);
-            if (status === 404 && attachment.cloudKey) {
-                webdavDownloadBackoff.deleteEntry(attachment.id);
-                if (markAttachmentUnrecoverable(attachment)) {
-                    didMutate = true;
-                }
-                logSyncInfo('Cleared missing WebDAV cloud key after 404', {
-                    id: attachment.id,
-                });
-            } else {
-                setWebdavDownloadBackoff(attachment.id, error);
-            }
-            if (status !== 404 && attachment.localStatus !== 'missing') {
-                attachment.localStatus = 'missing';
-                didMutate = true;
-            }
-            reportProgress(
-                attachment.id,
-                'download',
-                0,
-                attachment.size ?? 0,
-                'failed',
-                error instanceof Error ? error.message : String(error)
-            );
-            logSyncWarning(`Failed to download attachment ${attachment.title}`, error);
-        }
-    }
-
-    if (abortedByRateLimit) {
-        logSyncWarning('WebDAV attachment sync aborted due to rate limiting');
-    }
-    logSyncInfo('WebDAV attachment sync done', { mutated: didMutate ? 'true' : 'false' });
-    return didMutate ? workingData : null;
-}
-
-async function syncCloudAttachments(
-    appData: AppData,
-    cloudConfig: CloudConfig,
-    baseSyncUrl: string
-): Promise<boolean> {
-    if (!isTauriRuntimeEnv()) return false;
-    if (!cloudConfig.url) return false;
-
-    const fetcher = await getTauriFetch();
-    const { BaseDirectory, exists, mkdir, readFile, writeFile, rename, remove } = await import('@tauri-apps/plugin-fs');
-    const { dataDir, join } = await import('@tauri-apps/api/path');
-
-    try {
-        await mkdir(LOCAL_ATTACHMENTS_DIR, { baseDir: BaseDirectory.Data, recursive: true });
-    } catch (error) {
-        logSyncWarning('Failed to ensure local attachments directory', error);
-    }
-
-    const baseDataDir = await dataDir();
-
-    const attachmentsById = collectAttachmentsById(appData);
-
-    const readLocalFile = async (path: string): Promise<Uint8Array> => {
-        if (path.startsWith(baseDataDir)) {
-            const relative = path.slice(baseDataDir.length).replace(/^[\\/]/, '');
-            return await readFile(relative, { baseDir: BaseDirectory.Data });
-        }
-        return await readFile(path);
-    };
-
-    const localFileExists = async (path: string): Promise<boolean> => {
-        try {
-            if (path.startsWith(baseDataDir)) {
-                const relative = path.slice(baseDataDir.length).replace(/^[\\/]/, '');
-                return await exists(relative, { baseDir: BaseDirectory.Data });
-            }
-            return await exists(path);
-        } catch (error) {
-            logSyncWarning('Failed to check attachment file', error);
-            return false;
-        }
-    };
-
-    return await syncBasicRemoteAttachments({
-        attachmentsById,
-        localFileExists,
-        onUpload: async (attachment, localPath) => {
-            const cloudKey = buildCloudKey(attachment);
-            const fileData = await readLocalFile(localPath);
-            const validation = await validateAttachmentForUpload(attachment, fileData.length);
-            if (!validation.valid) {
-                const failure = handleAttachmentValidationFailure(attachment, validation.error);
-                reportProgress(
-                    attachment.id,
-                    'upload',
-                    0,
-                    attachment.size ?? fileData.length,
-                    'failed',
-                    failure.message
-                );
-                if (failure.reachedLimit) {
-                    logSyncWarning(`${failure.message}; marking attachment unrecoverable`);
-                } else {
-                    logSyncWarning(failure.message);
-                }
-                return failure.mutated;
-            }
-            clearAttachmentValidationFailure(attachment.id);
-            reportProgress(attachment.id, 'upload', 0, fileData.length, 'active');
-            await withRetry(
-                () => cloudPutFile(
-                    `${baseSyncUrl}/${cloudKey}`,
-                    fileData,
-                    attachment.mimeType || 'application/octet-stream',
-                    {
-                        token: cloudConfig.token,
-                        fetcher,
-                        timeoutMs: UPLOAD_TIMEOUT_MS,
-                        onProgress: (loaded, total) => reportProgress(attachment.id, 'upload', loaded, total, 'active'),
-                    }
-                ),
-                {
-                    ...CLOUD_ATTACHMENT_RETRY_OPTIONS,
-                    onRetry: (error, attempt, delayMs) => {
-                        logSyncInfo('Retrying cloud attachment upload', {
-                            id: attachment.id,
-                            attempt: String(attempt + 1),
-                            delayMs: String(delayMs),
-                            error: sanitizeLogMessage(error instanceof Error ? error.message : String(error)),
-                        });
-                    },
-                }
-            );
-            attachment.cloudKey = cloudKey;
-            attachment.localStatus = 'available';
-            reportProgress(attachment.id, 'upload', fileData.length, fileData.length, 'completed');
-            return true;
-        },
-        onUploadError: (attachment, error) => {
-            reportProgress(
-                attachment.id,
-                'upload',
-                0,
-                attachment.size ?? 0,
-                'failed',
-                error instanceof Error ? error.message : String(error)
-            );
-            logSyncWarning(`Failed to upload attachment ${attachment.title}`, error);
-        },
-        onDownload: async (attachment) => {
-            if (!attachment.cloudKey) return false;
-            const downloadUrl = `${baseSyncUrl}/${attachment.cloudKey}`;
-            const fileData = await withRetry(() =>
-                cloudGetFile(downloadUrl, {
-                    token: cloudConfig.token,
-                    fetcher,
-                    onProgress: (loaded, total) => reportProgress(attachment.id, 'download', loaded, total, 'active'),
-                })
-            );
-            const bytes = fileData instanceof ArrayBuffer ? new Uint8Array(fileData) : new Uint8Array(fileData as ArrayBuffer);
-            await validateAttachmentHash(attachment, bytes);
-            const filename = attachment.cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.uri)}`;
-            const relativePath = `${LOCAL_ATTACHMENTS_DIR}/${filename}`;
-            await writeAttachmentFileSafely(relativePath, bytes, {
-                baseDir: BaseDirectory.Data,
-                writeFile,
-                rename,
-                remove,
-            });
-            const absolutePath = await join(baseDataDir, relativePath);
-            attachment.uri = absolutePath;
-            const statusChanged = attachment.localStatus !== 'available';
-            if (statusChanged) {
-                attachment.localStatus = 'available';
-            }
-            reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
-            return statusChanged;
-        },
-        onDownloadError: (attachment, error) => {
-            reportProgress(
-                attachment.id,
-                'download',
-                0,
-                attachment.size ?? 0,
-                'failed',
-                error instanceof Error ? error.message : String(error)
-            );
-            logSyncWarning(`Failed to download attachment ${attachment.title}`, error);
-        },
-    });
-}
-
-async function syncDropboxAttachments(
-    appData: AppData,
-    resolveAccessToken: (forceRefresh?: boolean) => Promise<string>
-): Promise<boolean> {
-    if (!isTauriRuntimeEnv()) return false;
-
-    const fetcher = await getTauriFetch();
-    const dropboxFetcher = fetcher ?? fetch;
-    const { BaseDirectory, exists, mkdir, readFile, writeFile, rename, remove } = await import('@tauri-apps/plugin-fs');
-    const { dataDir, join } = await import('@tauri-apps/api/path');
-
-    try {
-        await mkdir(LOCAL_ATTACHMENTS_DIR, { baseDir: BaseDirectory.Data, recursive: true });
-    } catch (error) {
-        logSyncWarning('Failed to ensure local attachments directory', error);
-    }
-
-    const baseDataDir = await dataDir();
-    const attachmentsById = collectAttachmentsById(appData);
-
-    const withDropboxAccess = async <T>(operation: (accessToken: string) => Promise<T>): Promise<T> => {
-        try {
-            const token = await resolveAccessToken(false);
-            return await operation(token);
-        } catch (error) {
-            if (error instanceof DropboxUnauthorizedError) {
-                const refreshed = await resolveAccessToken(true);
-                return await operation(refreshed);
-            }
-            throw error;
-        }
-    };
-
-    const readLocalFile = async (path: string): Promise<Uint8Array> => {
-        if (path.startsWith(baseDataDir)) {
-            const relative = path.slice(baseDataDir.length).replace(/^[\\/]/, '');
-            return await readFile(relative, { baseDir: BaseDirectory.Data });
-        }
-        return await readFile(path);
-    };
-
-    const localFileExists = async (path: string): Promise<boolean> => {
-        try {
-            if (path.startsWith(baseDataDir)) {
-                const relative = path.slice(baseDataDir.length).replace(/^[\\/]/, '');
-                return await exists(relative, { baseDir: BaseDirectory.Data });
-            }
-            return await exists(path);
-        } catch (error) {
-            logSyncWarning('Failed to check attachment file', error);
-            return false;
-        }
-    };
-
-    return await syncBasicRemoteAttachments({
-        attachmentsById,
-        localFileExists,
-        onUpload: async (attachment, localPath) => {
-            const cloudKey = buildCloudKey(attachment);
-            const fileData = await readLocalFile(localPath);
-            const validation = await validateAttachmentForUpload(attachment, fileData.length);
-            if (!validation.valid) {
-                const failure = handleAttachmentValidationFailure(attachment, validation.error);
-                reportProgress(
-                    attachment.id,
-                    'upload',
-                    0,
-                    attachment.size ?? fileData.length,
-                    'failed',
-                    failure.message
-                );
-                if (failure.reachedLimit) {
-                    logSyncWarning(`${failure.message}; marking attachment unrecoverable`);
-                } else {
-                    logSyncWarning(failure.message);
-                }
-                return failure.mutated;
-            }
-            clearAttachmentValidationFailure(attachment.id);
-            reportProgress(attachment.id, 'upload', 0, fileData.length, 'active');
-            await withRetry(
-                () => withDropboxAccess((token) =>
-                    uploadDropboxFile(
-                        token,
-                        cloudKey,
-                        fileData,
-                        attachment.mimeType || 'application/octet-stream',
-                        dropboxFetcher
-                    )
-                ),
-                {
-                    ...CLOUD_ATTACHMENT_RETRY_OPTIONS,
-                    onRetry: (error, attempt, delayMs) => {
-                        logSyncInfo('Retrying Dropbox attachment upload', {
-                            id: attachment.id,
-                            attempt: String(attempt + 1),
-                            delayMs: String(delayMs),
-                            error: sanitizeLogMessage(error instanceof Error ? error.message : String(error)),
-                        });
-                    },
-                }
-            );
-            attachment.cloudKey = cloudKey;
-            attachment.localStatus = 'available';
-            reportProgress(attachment.id, 'upload', fileData.length, fileData.length, 'completed');
-            return true;
-        },
-        onUploadError: (attachment, error) => {
-            reportProgress(
-                attachment.id,
-                'upload',
-                0,
-                attachment.size ?? 0,
-                'failed',
-                error instanceof Error ? error.message : String(error)
-            );
-            logSyncWarning(`Failed to upload attachment ${attachment.title}`, error);
-        },
-        onDownload: async (attachment) => {
-            if (!attachment.cloudKey) return false;
-            reportProgress(attachment.id, 'download', 0, attachment.size ?? 0, 'active');
-            let fileData: ArrayBuffer;
-            try {
-                fileData = await withRetry(() =>
-                    withDropboxAccess((token) => downloadDropboxFile(token, attachment.cloudKey!, dropboxFetcher))
-                );
-            } catch (error) {
-                if (error instanceof DropboxFileNotFoundError) {
-                    return markAttachmentUnrecoverable(attachment);
-                }
-                throw error;
-            }
-            const bytes = fileData instanceof ArrayBuffer ? new Uint8Array(fileData) : new Uint8Array(fileData as ArrayBuffer);
-            await validateAttachmentHash(attachment, bytes);
-            const filename = attachment.cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.uri)}`;
-            const relativePath = `${LOCAL_ATTACHMENTS_DIR}/${filename}`;
-            await writeAttachmentFileSafely(relativePath, bytes, {
-                baseDir: BaseDirectory.Data,
-                writeFile,
-                rename,
-                remove,
-            });
-            const absolutePath = await join(baseDataDir, relativePath);
-            attachment.uri = absolutePath;
-            const statusChanged = attachment.localStatus !== 'available';
-            if (statusChanged) {
-                attachment.localStatus = 'available';
-            }
-            reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
-            return statusChanged;
-        },
-        onDownloadError: (attachment, error) => {
-            reportProgress(
-                attachment.id,
-                'download',
-                0,
-                attachment.size ?? 0,
-                'failed',
-                error instanceof Error ? error.message : String(error)
-            );
-            logSyncWarning(`Failed to download attachment ${attachment.title}`, error);
-        },
-    });
-}
-
-async function syncFileAttachments(
-    appData: AppData,
-    baseSyncDir: string
-): Promise<boolean> {
-    if (!isTauriRuntimeEnv()) return false;
-    if (!baseSyncDir) return false;
-
-    const { BaseDirectory, exists, mkdir, readFile, writeFile, rename, remove } = await import('@tauri-apps/plugin-fs');
-    const { dataDir, join } = await import('@tauri-apps/api/path');
-
-    const attachmentsDir = await join(baseSyncDir, ATTACHMENTS_DIR_NAME);
-    try {
-        await mkdir(attachmentsDir, { recursive: true });
-    } catch (error) {
-        logSyncWarning('Failed to ensure sync attachments directory', error);
-    }
-
-    try {
-        await mkdir(LOCAL_ATTACHMENTS_DIR, { baseDir: BaseDirectory.Data, recursive: true });
-    } catch (error) {
-        logSyncWarning('Failed to ensure local attachments directory', error);
-    }
-
-    const baseDataDir = await dataDir();
-
-    const attachmentsById = collectAttachmentsById(appData);
-
-    const readLocalFile = async (path: string): Promise<Uint8Array> => {
-        if (path.startsWith(baseDataDir)) {
-            const relative = path.slice(baseDataDir.length).replace(/^[\\/]/, '');
-            return await readFile(relative, { baseDir: BaseDirectory.Data });
-        }
-        return await readFile(path);
-    };
-
-    const localFileExists = async (path: string): Promise<boolean> => {
-        try {
-            if (path.startsWith(baseDataDir)) {
-                const relative = path.slice(baseDataDir.length).replace(/^[\\/]/, '');
-                return await exists(relative, { baseDir: BaseDirectory.Data });
-            }
-            return await exists(path);
-        } catch (error) {
-            logSyncWarning('Failed to check attachment file', error);
-            return false;
-        }
-    };
-
-    return await syncBasicRemoteAttachments({
-        attachmentsById,
-        localFileExists,
-        onUpload: async (attachment, localPath) => {
-            const cloudKey = buildCloudKey(attachment);
-            const fileData = await readLocalFile(localPath);
-            const validation = await validateAttachmentForUpload(attachment, fileData.length, FILE_BACKEND_VALIDATION_CONFIG);
-            if (!validation.valid) {
-                const failure = handleAttachmentValidationFailure(attachment, validation.error);
-                if (failure.reachedLimit) {
-                    logSyncWarning(`${failure.message}; marking attachment unrecoverable`);
-                } else {
-                    logSyncWarning(failure.message);
-                }
-                return failure.mutated;
-            }
-            clearAttachmentValidationFailure(attachment.id);
-            const targetPath = await join(baseSyncDir, cloudKey);
-            await writeFileSafelyAbsolute(targetPath, fileData, {
-                writeFile,
-                rename,
-                remove,
-            });
-            attachment.cloudKey = cloudKey;
-            attachment.localStatus = 'available';
-            return true;
-        },
-        onUploadError: (attachment, error) => {
-            logSyncWarning(`Failed to copy attachment ${attachment.title} to sync folder`, error);
-        },
-        onDownload: async (attachment) => {
-            if (!attachment.cloudKey) return false;
-            const sourcePath = await join(baseSyncDir, attachment.cloudKey);
-            const hasRemote = await exists(sourcePath);
-            if (!hasRemote) return false;
-            const fileData = await readFile(sourcePath);
-            await validateAttachmentHash(attachment, fileData);
-            const filename = attachment.cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.uri)}`;
-            const relativePath = `${LOCAL_ATTACHMENTS_DIR}/${filename}`;
-            await writeAttachmentFileSafely(relativePath, fileData, {
-                baseDir: BaseDirectory.Data,
-                writeFile,
-                rename,
-                remove,
-            });
-            const absolutePath = await join(baseDataDir, relativePath);
-            attachment.uri = absolutePath;
-            const statusChanged = attachment.localStatus !== 'available';
-            if (statusChanged) {
-                attachment.localStatus = 'available';
-            }
-            return statusChanged;
-        },
-        onDownloadError: (attachment, error) => {
-            logSyncWarning(`Failed to copy attachment ${attachment.title} from sync folder`, error);
-        },
-    });
-}
+const getSyncConfigDeps = () => ({
+    isTauriRuntimeEnv,
+    maybeMigrateLegacyLocalStorageToConfig: () => SyncService.maybeMigrateLegacyLocalStorageToConfig(),
+    reportError,
+    startFileWatcher: () => SyncService.startFileWatcher(),
+    tauriInvoke,
+});
 
 export class SyncService {
     private static didMigrate = false;
@@ -1376,7 +394,7 @@ export class SyncService {
         SyncService.externalSyncTimer = null;
         SyncService.pendingExternalSyncChange = null;
         SyncService.externalSyncChangeListeners.clear();
-        webdavDownloadBackoff.clear();
+        clearAttachmentSyncState();
         clearAttachmentValidationFailures();
     }
 
@@ -1385,75 +403,13 @@ export class SyncService {
         SyncService.syncListeners.forEach((listener) => listener(SyncService.syncStatus));
     }
 
-    private static getSyncBackendLocal(): SyncBackend {
-        return normalizeSyncBackend(localStorage.getItem(SYNC_BACKEND_KEY));
-    }
-
-    private static setSyncBackendLocal(backend: SyncBackend) {
-        localStorage.setItem(SYNC_BACKEND_KEY, backend);
-    }
-
-    private static getWebDavConfigLocal(): WebDavConfig {
-        return {
-            url: localStorage.getItem(WEBDAV_URL_KEY) || '',
-            username: localStorage.getItem(WEBDAV_USERNAME_KEY) || '',
-            password: '',
-            hasPassword: false,
-        };
-    }
-
-    private static setWebDavConfigLocal(config: { url: string; username?: string; password?: string }) {
-        localStorage.setItem(WEBDAV_URL_KEY, config.url);
-        localStorage.setItem(WEBDAV_USERNAME_KEY, config.username || '');
-    }
-
-    private static getCloudConfigLocal(): CloudConfig {
-        const sessionToken = sessionStorage.getItem(CLOUD_TOKEN_KEY) || '';
-        const legacyLocalToken = localStorage.getItem(CLOUD_TOKEN_KEY) || '';
-        const token = sessionToken || legacyLocalToken;
-        if (!sessionToken && legacyLocalToken) {
-            sessionStorage.setItem(CLOUD_TOKEN_KEY, legacyLocalToken);
-            localStorage.removeItem(CLOUD_TOKEN_KEY);
-        }
-        return {
-            url: localStorage.getItem(CLOUD_URL_KEY) || '',
-            token,
-        };
-    }
-
-    private static setCloudConfigLocal(config: { url: string; token?: string }) {
-        localStorage.setItem(CLOUD_URL_KEY, config.url);
-        if (config.token) {
-            sessionStorage.setItem(CLOUD_TOKEN_KEY, config.token);
-        } else {
-            sessionStorage.removeItem(CLOUD_TOKEN_KEY);
-        }
-        localStorage.removeItem(CLOUD_TOKEN_KEY);
-    }
-
-    private static getCloudProviderLocal(): CloudProvider {
-        return normalizeCloudProvider(localStorage.getItem(CLOUD_PROVIDER_KEY));
-    }
-
-    private static setCloudProviderLocal(provider: CloudProvider) {
-        localStorage.setItem(CLOUD_PROVIDER_KEY, normalizeCloudProvider(provider));
-    }
-
-    private static getDropboxAppKeyLocal(): string {
-        return DEFAULT_DROPBOX_APP_KEY;
-    }
-
-    private static setDropboxAppKeyLocal(_value: string) {
-        // Dropbox app key is provided via build env (VITE_DROPBOX_APP_KEY).
-    }
-
-    private static async maybeMigrateLegacyLocalStorageToConfig() {
+    static async maybeMigrateLegacyLocalStorageToConfig() {
         if (!isTauriRuntimeEnv() || SyncService.didMigrate) return;
         SyncService.didMigrate = true;
 
-        const legacyBackend = localStorage.getItem(SYNC_BACKEND_KEY);
-        const legacyWebdav = SyncService.getWebDavConfigLocal();
-        const legacyCloud = SyncService.getCloudConfigLocal();
+        const legacyBackend = getSyncBackendLocal();
+        const legacyWebdav = getWebDavConfigLocal();
+        const legacyCloud = getCloudConfigLocal();
         const hasLegacyBackend = legacyBackend === 'webdav' || legacyBackend === 'cloud';
         const hasLegacyWebdav = Boolean(legacyWebdav.url);
         const hasLegacyCloud = Boolean(legacyCloud.url || legacyCloud.token);
@@ -1498,57 +454,19 @@ export class SyncService {
     }
 
     static async getSyncBackend(): Promise<SyncBackend> {
-        if (!isTauriRuntimeEnv()) return SyncService.getSyncBackendLocal();
-        await SyncService.maybeMigrateLegacyLocalStorageToConfig();
-        try {
-            const backend = await tauriInvoke<string>('get_sync_backend');
-            return normalizeSyncBackend(backend);
-        } catch (error) {
-            reportError('Failed to get sync backend', error);
-            return 'off';
-        }
+        return readSyncBackend(getSyncConfigDeps());
     }
 
     static async setSyncBackend(backend: SyncBackend): Promise<void> {
-        if (!isTauriRuntimeEnv()) {
-            SyncService.setSyncBackendLocal(backend);
-            return;
-        }
-        try {
-            await tauriInvoke('set_sync_backend', { backend });
-            await SyncService.startFileWatcher();
-        } catch (error) {
-            reportError('Failed to set sync backend', error);
-        }
+        return writeSyncBackend(backend, getSyncConfigDeps());
     }
 
     static async getWebDavConfig(options?: { silent?: boolean }): Promise<WebDavConfig> {
-        if (!isTauriRuntimeEnv()) return SyncService.getWebDavConfigLocal();
-        await SyncService.maybeMigrateLegacyLocalStorageToConfig();
-        try {
-            return await tauriInvoke<WebDavConfig>('get_webdav_config');
-        } catch (error) {
-            if (!options?.silent) {
-                reportError('Failed to get WebDAV config', error);
-            }
-            return { url: '', username: '', hasPassword: false };
-        }
+        return readWebDavConfig(getSyncConfigDeps(), options);
     }
 
     static async setWebDavConfig(config: { url: string; username?: string; password?: string }): Promise<void> {
-        if (!isTauriRuntimeEnv()) {
-            SyncService.setWebDavConfigLocal(config);
-            return;
-        }
-        try {
-            await tauriInvoke('set_webdav_config', {
-                url: config.url,
-                username: config.username || '',
-                password: config.password || '',
-            });
-        } catch (error) {
-            reportError('Failed to set WebDAV config', error);
-        }
+        return writeWebDavConfig(config, getSyncConfigDeps());
     }
 
     static async testWebDavConnection(config: { url: string; username?: string; password?: string; hasPassword?: boolean }): Promise<void> {
@@ -1572,47 +490,27 @@ export class SyncService {
     }
 
     static async getCloudConfig(options?: { silent?: boolean }): Promise<CloudConfig> {
-        if (!isTauriRuntimeEnv()) return SyncService.getCloudConfigLocal();
-        await SyncService.maybeMigrateLegacyLocalStorageToConfig();
-        try {
-            return await tauriInvoke<CloudConfig>('get_cloud_config');
-        } catch (error) {
-            if (!options?.silent) {
-                reportError('Failed to get Self-Hosted config', error);
-            }
-            return { url: '', token: '' };
-        }
+        return readCloudConfig(getSyncConfigDeps(), options);
     }
 
     static async setCloudConfig(config: { url: string; token?: string }): Promise<void> {
-        if (!isTauriRuntimeEnv()) {
-            SyncService.setCloudConfigLocal(config);
-            return;
-        }
-        try {
-            await tauriInvoke('set_cloud_config', {
-                url: config.url,
-                token: config.token || '',
-            });
-        } catch (error) {
-            reportError('Failed to set Self-Hosted config', error);
-        }
+        return writeCloudConfig(config, getSyncConfigDeps());
     }
 
     static async getCloudProvider(): Promise<CloudProvider> {
-        return SyncService.getCloudProviderLocal();
+        return readCloudProvider();
     }
 
     static async setCloudProvider(provider: CloudProvider): Promise<void> {
-        SyncService.setCloudProviderLocal(provider);
+        return writeCloudProvider(provider);
     }
 
     static async getDropboxAppKey(): Promise<string> {
-        return SyncService.getDropboxAppKeyLocal();
+        return readDropboxAppKey();
     }
 
     static async setDropboxAppKey(value: string): Promise<void> {
-        SyncService.setDropboxAppKeyLocal(value);
+        return writeDropboxAppKey(value);
     }
 
     static async getDropboxRedirectUri(): Promise<string> {
@@ -1701,31 +599,14 @@ export class SyncService {
      * Get the currently configured sync path from the backend
      */
     static async getSyncPath(): Promise<string> {
-        if (!isTauriRuntimeEnv()) return '';
-        try {
-            return await tauriInvoke<string>('get_sync_path');
-        } catch (error) {
-            reportError('Failed to get sync path', error);
-            return '';
-        }
+        return readSyncPath(getSyncConfigDeps());
     }
 
     /**
      * Set the sync path in the backend
      */
     static async setSyncPath(path: string): Promise<{ success: boolean; path: string; error?: string }> {
-        if (!isTauriRuntimeEnv()) return { success: false, path: '', error: 'Desktop runtime is required for file sync.' };
-        try {
-            const result = await tauriInvoke<{ success: boolean; path: string }>('set_sync_path', { syncPath: path });
-            if (result?.success) {
-                await SyncService.startFileWatcher();
-            }
-            return result;
-        } catch (error) {
-            reportError('Failed to set sync path', error);
-            const message = error instanceof Error ? error.message : String(error);
-            return { success: false, path: '', error: message };
-        }
+        return writeSyncPath(path, getSyncConfigDeps());
     }
 
     private static async markSyncWrite(data: AppData) {
@@ -1936,7 +817,7 @@ export class SyncService {
         if (!isTauriRuntimeEnv()) return;
         const backend = await SyncService.getSyncBackend();
         const data = await tauriInvoke<AppData>('get_data');
-        const cleaned = await cleanupOrphanedAttachments(data, backend);
+        const cleaned = await cleanupOrphanedAttachments(data, backend, getAttachmentCleanupDeps());
         await persistLocalDataForSync(cleaned);
         await useTaskStore.getState().fetchData({ silent: true });
     }
@@ -2130,20 +1011,20 @@ export class SyncService {
                     if (backend === 'webdav' && webdavConfig?.url) {
                         ensureNetworkStillAvailable();
                         const baseUrl = getBaseSyncUrl(webdavConfig.url);
-                        const syncedData = await syncAttachments(localData, webdavConfig, baseUrl);
+                        const syncedData = await syncAttachments(localData, webdavConfig, baseUrl, attachmentBackendDeps);
                         preMutated = syncedData !== null;
                         if (syncedData) {
                             preSyncedLocalData = syncedData;
                         }
                     } else if (backend === 'file' && fileBaseDir) {
-                        preMutated = await syncFileAttachments(localData, fileBaseDir);
+                        preMutated = await syncFileAttachments(localData, fileBaseDir, attachmentBackendDeps);
                     } else if (backend === 'cloud' && cloudProvider === 'selfhosted' && cloudConfig?.url) {
                         ensureNetworkStillAvailable();
                         const baseUrl = getCloudBaseUrl(cloudConfig.url);
-                        preMutated = await syncCloudAttachments(localData, cloudConfig, baseUrl);
+                        preMutated = await syncCloudAttachments(localData, cloudConfig, baseUrl, attachmentBackendDeps);
                     } else if (backend === 'cloud' && cloudProvider === 'dropbox') {
                         ensureNetworkStillAvailable();
-                        preMutated = await syncDropboxAttachments(localData, resolveDropboxAccessToken);
+                        preMutated = await syncDropboxAttachments(localData, resolveDropboxAccessToken, attachmentBackendDeps);
                     }
                     if (preMutated) {
                         preSyncedLocalData = preSyncedLocalData ?? localData;
@@ -2407,13 +1288,13 @@ export class SyncService {
                         const baseUrl = config.url ? getBaseSyncUrl(config.url) : '';
                         if (baseUrl) {
                             await applyAttachmentSyncMutation((candidateData) =>
-                                syncAttachments(candidateData, config, baseUrl)
+                                syncAttachments(candidateData, config, baseUrl, attachmentBackendDeps)
                             );
                         }
                     } else if (backend === 'file') {
                         if (fileBaseDir) {
                             await applyAttachmentSyncMutation((candidateData) =>
-                                syncFileAttachments(candidateData, fileBaseDir)
+                                syncFileAttachments(candidateData, fileBaseDir, attachmentBackendDeps)
                             );
                         }
                     } else if (backend === 'cloud') {
@@ -2423,12 +1304,12 @@ export class SyncService {
                             const baseUrl = config.url ? getCloudBaseUrl(config.url) : '';
                             if (baseUrl) {
                                 await applyAttachmentSyncMutation((candidateData) =>
-                                    syncCloudAttachments(candidateData, config, baseUrl)
+                                    syncCloudAttachments(candidateData, config, baseUrl, attachmentBackendDeps)
                                 );
                             }
                         } else if (cloudProvider === 'dropbox') {
                             await applyAttachmentSyncMutation((candidateData) =>
-                                syncDropboxAttachments(candidateData, resolveDropboxAccessToken)
+                                syncDropboxAttachments(candidateData, resolveDropboxAccessToken, attachmentBackendDeps)
                             );
                         }
                     }
@@ -2440,14 +1321,14 @@ export class SyncService {
                 }
             }
 
-            await cleanupAttachmentTempFiles();
+            await cleanupAttachmentTempFiles(getAttachmentCleanupDeps());
 
             if (isTauriRuntimeEnv() && shouldRunAttachmentCleanup(mergedData.settings.attachments?.lastCleanupAt, CLEANUP_INTERVAL_MS)) {
                 setStep('attachments_cleanup');
                 await yieldToRenderer();
                 ensureLocalSnapshotFresh();
                 ensureNetworkStillAvailable();
-                mergedData = await cleanupOrphanedAttachments(mergedData, backend);
+                mergedData = await cleanupOrphanedAttachments(mergedData, backend, getAttachmentCleanupDeps());
                 await persistLocalDataWithTracking(mergedData);
             }
 
@@ -2482,13 +1363,19 @@ export class SyncService {
             }
             logSyncWarning('Sync failed', error);
             const now = new Date().toISOString();
-            const logPath = await logSyncError(error, {
-                backend,
-                step,
-                url: syncUrl,
-            });
-            const logHint = logPath ? ` (log: ${logPath})` : '';
             const safeMessage = sanitizeLogMessage(String(error));
+            let logHint = '';
+            try {
+                const logPath = await logSyncError(error, {
+                    backend,
+                    step,
+                    url: syncUrl,
+                });
+                logHint = logPath ? ` (log: ${logPath})` : '';
+            } catch (logError) {
+                logSyncWarning('Failed to write sync error log', logError);
+            }
+            const finalErrorMessage = `${safeMessage}${logHint}`;
             const nextHistory = appendSyncHistory(useTaskStore.getState().settings, {
                 at: now,
                 status: 'error',
@@ -2499,35 +1386,39 @@ export class SyncService {
                 maxClockSkewMs: 0,
                 timestampAdjustments: 0,
                 details: step,
-                error: `${safeMessage}${logHint}`,
+                error: finalErrorMessage,
             });
-            useTaskStore.getState().setError(`${safeMessage}${logHint}`);
+            useTaskStore.getState().setError(finalErrorMessage);
             try {
                 await useTaskStore.getState().fetchData({ silent: true });
                 await useTaskStore.getState().updateSettings({
                     lastSyncAt: now,
                     lastSyncStatus: 'error',
-                    lastSyncError: `${safeMessage}${logHint}`,
+                    lastSyncError: finalErrorMessage,
                     lastSyncHistory: nextHistory,
                 });
             } catch (e) {
                 logSyncWarning('Failed to persist sync error', e);
             }
-            return { success: false, error: `${safeMessage}${logHint}` };
+            return { success: false, error: finalErrorMessage };
         });
 
-        const result = await resultPromise;
-        requestAbortController.abort();
+        let result: { success: boolean; stats?: MergeStats; error?: string };
         try {
-            const releaseNetworkListener = removeNetworkListener as (() => void) | null;
-            if (typeof releaseNetworkListener === 'function') {
-                releaseNetworkListener();
+            result = await resultPromise;
+        } finally {
+            requestAbortController.abort();
+            try {
+                const releaseNetworkListener = removeNetworkListener as (() => void) | null;
+                if (typeof releaseNetworkListener === 'function') {
+                    releaseNetworkListener();
+                }
+                removeNetworkListener = null;
+            } catch (error) {
+                logSyncWarning('Failed to unsubscribe network listener after sync', error);
             }
-            removeNetworkListener = null;
-        } catch (error) {
-            logSyncWarning('Failed to unsubscribe network listener after sync', error);
+            SyncService.syncInFlight = null;
         }
-        SyncService.syncInFlight = null;
         SyncService.updateSyncStatus({
             inFlight: false,
             step: null,
@@ -2574,7 +1465,7 @@ export const __syncServiceTestUtils = {
         await persistLocalDataForSync(data);
     },
     clearWebdavDownloadBackoff() {
-        webdavDownloadBackoff.clear();
+        clearAttachmentSyncState();
     },
     clearAttachmentValidationFailures() {
         clearAttachmentValidationFailures();

@@ -95,6 +95,7 @@ const parseInputStatus = (value: string | undefined): Task['status'] | undefined
 };
 
 const MAX_TASK_TITLE_LENGTH = 500;
+const MAX_TASK_QUICK_ADD_LENGTH = 2000;
 const MAX_AREA_NAME_LENGTH = 200;
 const PROJECT_STATUS_SET = new Set<CoreProject['status']>(['active', 'someday', 'waiting', 'archived']);
 
@@ -117,6 +118,9 @@ const validateAddTaskInput = (input: AddTaskInput): void => {
   }
   if (hasTitle && input.title!.trim().length > MAX_TASK_TITLE_LENGTH) {
     throw new Error(`Task title too long (max ${MAX_TASK_TITLE_LENGTH} characters)`);
+  }
+  if (hasQuickAdd && input.quickAdd!.trim().length > MAX_TASK_QUICK_ADD_LENGTH) {
+    throw new Error(`Quick-add input too long (max ${MAX_TASK_QUICK_ADD_LENGTH} characters)`);
   }
 };
 

@@ -6,7 +6,7 @@ Tauri v2 desktop app for the Mindwtr productivity system.
 
 ### GTD Workflow
 - **Inbox Processing** - Guided clarify workflow with 2-minute rule
-- **Context Filtering** - Hierarchical contexts (@work/meetings)
+- **Context Filtering** - Slash-delimited contexts with parent matching (@work/meetings)
 - **Weekly Review** - Step-by-step GTD review wizard
 - **Board View** - Kanban-style drag-and-drop
 - **Calendar View** - Time-based task planning
@@ -34,7 +34,7 @@ Tauri v2 desktop app for the Mindwtr productivity system.
 | Inbox         | Capture and process incoming items |
 | Next Actions  | Context-filtered actionable tasks  |
 | Projects      | Multi-step outcomes with areas     |
-| Contexts      | Hierarchical context filtering     |
+| Contexts      | Slash-delimited context filtering with parent matching |
 | Waiting For   | Delegated items                    |
 | Someday/Maybe | Deferred ideas                     |
 | Calendar      | Time-based view                    |

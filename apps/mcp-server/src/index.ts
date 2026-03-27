@@ -24,6 +24,7 @@ const writeLog = (entry: LogEntry) => {
 };
 
 const MAX_TASK_TITLE_LENGTH = 500;
+const MAX_TASK_QUICK_ADD_LENGTH = 2000;
 
 const logError = (message: string, error?: unknown) => {
   const context: Record<string, unknown> = {};
@@ -173,6 +174,9 @@ const validateAddTask = (data: z.infer<typeof addTaskSchema>) => {
   }
   if (hasTitle && data.title!.trim().length > MAX_TASK_TITLE_LENGTH) {
     throw new Error(`Task title too long (max ${MAX_TASK_TITLE_LENGTH} characters)`);
+  }
+  if (hasQuickAdd && data.quickAdd!.trim().length > MAX_TASK_QUICK_ADD_LENGTH) {
+    throw new Error(`Quick-add input too long (max ${MAX_TASK_QUICK_ADD_LENGTH} characters)`);
   }
 };
 

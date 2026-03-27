@@ -144,6 +144,36 @@ describe('mcp server index', () => {
     expect(result?.content[0]?.text).toContain('Task title too long');
   });
 
+  test('validates add_task quickAdd length', async () => {
+    const { server, tools } = createMockServer();
+    registerMindwtrTools(server, createMockService(), false);
+    const addHandler = tools.get('mindwtr_add_task')?.handler;
+    expect(addHandler).toBeTruthy();
+    const longQuickAdd = `Task ${'x'.repeat(1997)}`;
+    const result = await addHandler?.({ quickAdd: longQuickAdd });
+    expect(result?.isError).toBe(true);
+    expect(result?.content[0]?.text).toContain('Quick-add input too long');
+  });
+
+  test('accepts padded quickAdd input when trimmed length is within the limit', async () => {
+    const { server, tools } = createMockServer();
+    let receivedInput: any = null;
+    registerMindwtrTools(server, {
+      ...createMockService(),
+      addTask: async (input: any) => {
+        receivedInput = input;
+        return { id: 't1' };
+      },
+    }, false);
+    const addHandler = tools.get('mindwtr_add_task')?.handler;
+    expect(addHandler).toBeTruthy();
+    const paddedQuickAdd = `   ${'x'.repeat(1998)}   `;
+    const result = await addHandler?.({ quickAdd: paddedQuickAdd });
+
+    expect(result?.isError).not.toBe(true);
+    expect(receivedInput?.quickAdd).toBe(paddedQuickAdd);
+  });
+
   test('wraps service exceptions in MCP error response format', async () => {
     const { server, tools } = createMockServer();
     const failingService = {

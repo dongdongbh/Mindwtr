@@ -1,6 +1,6 @@
 [package]
 name = "mindwtr"
-version = "0.7.6"
+version = "0.7.7"
 description = "A complete Getting Things Done (GTD) productivity system - Mind Like Water"
 authors = ["DongDong"]
 license = "AGPL-3.0-only"

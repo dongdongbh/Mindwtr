@@ -129,6 +129,33 @@ describe('TaskEditModal', () => {
     }).not.toThrow();
   });
 
+  it('passes the project field to the mobile form tab', () => {
+    let tree: renderer.ReactTestRenderer;
+
+    act(() => {
+      tree = renderer.create(
+        <TaskEditModal
+          visible
+          task={{
+            id: 't1',
+            title: 'Test task',
+            status: 'inbox',
+            tags: [],
+            contexts: [],
+            createdAt: '2025-01-01T00:00:00.000Z',
+            updatedAt: '2025-01-01T00:00:00.000Z',
+          }}
+          onClose={vi.fn()}
+          onSave={vi.fn()}
+        />
+      );
+    });
+
+    const formTab = tree!.root.find((node) => Array.isArray(node.props.basicFields));
+
+    expect(formTab.props.basicFields).toContain('project');
+  });
+
   it('closes immediately when there are no pending changes', () => {
     const onClose = vi.fn();
     let tree: renderer.ReactTestRenderer;
