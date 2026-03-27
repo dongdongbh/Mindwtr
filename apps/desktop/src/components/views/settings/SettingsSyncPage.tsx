@@ -47,6 +47,7 @@ type Labels = {
     cloudProvider: string;
     cloudProviderSelfHosted: string;
     cloudProviderDropbox: string;
+    cloudProviderCloudkit: string;
     dropboxAppKey: string;
     dropboxAppKeyHint: string;
     dropboxRedirectUri: string;
@@ -379,29 +380,20 @@ export function SettingsSyncPage({
                                 {t.syncBackendWebdav}
                             </button>
                             <button
-                                onClick={() => onSetSyncBackend('cloud')}
+                                onClick={() => {
+                                    if (syncBackend !== 'cloud' && syncBackend !== 'cloudkit') {
+                                        onSetSyncBackend('cloud');
+                                    }
+                                }}
                                 className={cn(
                                     "px-3 py-1.5 rounded-md text-sm font-medium transition-colors border",
-                                    syncBackend === 'cloud'
+                                    syncBackend === 'cloud' || syncBackend === 'cloudkit'
                                         ? "bg-primary/10 text-primary border-primary ring-1 ring-primary"
                                         : "bg-muted/50 text-muted-foreground border-border hover:bg-muted hover:text-foreground",
                                 )}
                             >
                                 {t.syncBackendCloud}
                             </button>
-                            {isMacOS && (
-                                <button
-                                    onClick={() => onSetSyncBackend('cloudkit')}
-                                    className={cn(
-                                        "px-3 py-1.5 rounded-md text-sm font-medium transition-colors border",
-                                        syncBackend === 'cloudkit'
-                                            ? "bg-primary/10 text-primary border-primary ring-1 ring-primary"
-                                            : "bg-muted/50 text-muted-foreground border-border hover:bg-muted hover:text-foreground",
-                                    )}
-                                >
-                                    {t.syncBackendCloudkit}
-                                </button>
-                            )}
                         </div>
                     </div>
 
@@ -516,16 +508,19 @@ export function SettingsSyncPage({
                         </div>
                     )}
 
-                    {syncBackend === 'cloud' && (
+                    {(syncBackend === 'cloud' || syncBackend === 'cloudkit') && (
                         <div className="space-y-4">
                             <div className="flex items-center justify-between gap-4">
                                 <span className="text-sm font-medium">{t.cloudProvider}</span>
                                 <div className="flex gap-2">
                                     <button
-                                        onClick={() => onCloudProviderChange('selfhosted')}
+                                        onClick={() => {
+                                            onSetSyncBackend('cloud');
+                                            onCloudProviderChange('selfhosted');
+                                        }}
                                         className={cn(
                                             "px-3 py-1.5 rounded-md text-sm font-medium transition-colors border",
-                                            cloudProvider === 'selfhosted'
+                                            syncBackend === 'cloud' && cloudProvider === 'selfhosted'
                                                 ? "bg-primary/10 text-primary border-primary ring-1 ring-primary"
                                                 : "bg-muted/50 text-muted-foreground border-border hover:bg-muted hover:text-foreground",
                                         )}
@@ -533,20 +528,36 @@ export function SettingsSyncPage({
                                         {t.cloudProviderSelfHosted}
                                     </button>
                                     <button
-                                        onClick={() => onCloudProviderChange('dropbox')}
+                                        onClick={() => {
+                                            onSetSyncBackend('cloud');
+                                            onCloudProviderChange('dropbox');
+                                        }}
                                         className={cn(
                                             "px-3 py-1.5 rounded-md text-sm font-medium transition-colors border",
-                                            cloudProvider === 'dropbox'
+                                            syncBackend === 'cloud' && cloudProvider === 'dropbox'
                                                 ? "bg-primary/10 text-primary border-primary ring-1 ring-primary"
                                                 : "bg-muted/50 text-muted-foreground border-border hover:bg-muted hover:text-foreground",
                                         )}
                                     >
                                         {t.cloudProviderDropbox}
                                     </button>
+                                    {isMacOS && (
+                                        <button
+                                            onClick={() => onSetSyncBackend('cloudkit')}
+                                            className={cn(
+                                                "px-3 py-1.5 rounded-md text-sm font-medium transition-colors border",
+                                                syncBackend === 'cloudkit'
+                                                    ? "bg-primary/10 text-primary border-primary ring-1 ring-primary"
+                                                    : "bg-muted/50 text-muted-foreground border-border hover:bg-muted hover:text-foreground",
+                                            )}
+                                        >
+                                            {t.cloudProviderCloudkit}
+                                        </button>
+                                    )}
                                 </div>
                             </div>
 
-                            {cloudProvider === 'selfhosted' && (
+                            {syncBackend === 'cloud' && cloudProvider === 'selfhosted' && (
                                 <div className="space-y-3">
                                     <div className="flex flex-col gap-2">
                                         <label className="text-sm font-medium">{t.cloudUrl}</label>
@@ -588,7 +599,7 @@ export function SettingsSyncPage({
                                 </div>
                             )}
 
-                            {cloudProvider === 'dropbox' && (
+                            {syncBackend === 'cloud' && cloudProvider === 'dropbox' && (
                                 <div className="space-y-3">
                                     <div className="flex flex-col gap-2">
                                         <label className="text-sm font-medium">{t.dropboxAppKey}</label>
