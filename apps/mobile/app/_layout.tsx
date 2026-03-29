@@ -207,6 +207,8 @@ function RootLayoutContent() {
   const syncPending = useRef(false);
   const backgroundSyncPending = useRef(false);
   const isActive = useRef(true);
+  const routerRef = useRef(router);
+  const tRef = useRef(t);
   const loadAttempts = useRef(0);
   const lastHandledCaptureUrl = useRef<string | null>(null);
   const lastSyncErrorShown = useRef<string | null>(null);
@@ -234,6 +236,14 @@ function RootLayoutContent() {
   }, []);
 
   useEffect(() => {
+    routerRef.current = router;
+  }, [router]);
+
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
+
+  useEffect(() => {
     if (Platform.OS !== 'android' || isExpoGo) return;
     SplashScreen.setOptions({ duration: 0, fade: false });
   }, [isExpoGo]);
@@ -252,6 +262,7 @@ function RootLayoutContent() {
     return syncCadenceRef.current;
   }, []);
 
+  // Keep auto-sync stable across router/i18n updates so lifecycle listeners do not reinitialize.
   const runSync = useCallback((minIntervalMs?: number) => {
     const effectiveMinIntervalMs = typeof minIntervalMs === 'number'
       ? minIntervalMs
@@ -289,17 +300,18 @@ function RootLayoutContent() {
         const nowMs = Date.now();
         const shouldShow = result.error !== lastSyncErrorShown.current && nowMs - lastSyncErrorAt.current > 10 * 60 * 1000;
         if (shouldShow) {
+          const translate = tRef.current;
           lastSyncErrorShown.current = result.error;
           lastSyncErrorAt.current = nowMs;
-          const syncFailedTitle = t('settings.lastSyncError') === 'settings.lastSyncError' ? 'Sync failed' : t('settings.lastSyncError');
-          const closeLabel = t('common.close') === 'common.close' ? 'Close' : t('common.close');
-          const settingsLabel = t('settings.title') === 'settings.title' ? 'Settings' : t('settings.title');
+          const syncFailedTitle = translate('settings.lastSyncError') === 'settings.lastSyncError' ? 'Sync failed' : translate('settings.lastSyncError');
+          const closeLabel = translate('common.close') === 'common.close' ? 'Close' : translate('common.close');
+          const settingsLabel = translate('settings.title') === 'settings.title' ? 'Settings' : translate('settings.title');
           Alert.alert(
             syncFailedTitle,
             result.error,
             [
               { text: closeLabel, style: 'cancel' },
-              { text: settingsLabel, onPress: () => router.push('/settings') },
+              { text: settingsLabel, onPress: () => routerRef.current.push('/settings') },
             ]
           );
           void logWarn('Auto-sync failed', {
@@ -320,7 +332,7 @@ function RootLayoutContent() {
         runSync(syncCadenceRef.current.minIntervalMs);
       }
     });
-  }, [router, t]);
+  }, []);
 
   useEffect(() => {
     setNotificationOpenHandler((payload) => {

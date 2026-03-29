@@ -240,17 +240,23 @@ function mergeEntitiesWithStats<T extends MergeableEntity>(
         const comparableIncomingItem = normalizeForComparison ? normalizeForComparison(normalizedIncomingItem) : normalizedIncomingItem;
         const localComparableSignature = toComparableSignature(comparableLocalItem);
         const incomingComparableSignature = toComparableSignature(comparableIncomingItem);
+        const comparableContentMatches = localComparableSignature === incomingComparableSignature;
+        const revisionOnlyDrift = hasRevision
+            && revDiff !== 0
+            && localDeleted === incomingDeleted
+            && comparableContentMatches;
         const shouldCheckContentDiff = hasRevision
             ? revDiff === 0 && localDeleted === incomingDeleted
             : localDeleted === incomingDeleted;
-        const contentDiff = shouldCheckContentDiff ? localComparableSignature !== incomingComparableSignature : false;
+        const contentDiff = shouldCheckContentDiff ? !comparableContentMatches : false;
+        const meaningfulRevisionDiff = hasRevision && revDiff !== 0 && !revisionOnlyDrift;
         const conflictReasons: ConflictReason[] = [];
         if (localDeleted !== incomingDeleted) conflictReasons.push('deleteState');
-        if (hasRevision && revDiff !== 0) conflictReasons.push('revision');
+        if (meaningfulRevisionDiff) conflictReasons.push('revision');
         if (contentDiff) conflictReasons.push('content');
 
         const differs = hasRevision
-            ? revDiff !== 0 || localDeleted !== incomingDeleted || contentDiff
+            ? meaningfulRevisionDiff || localDeleted !== incomingDeleted || contentDiff
             : localDeleted !== incomingDeleted || contentDiff;
 
         if (differs) {

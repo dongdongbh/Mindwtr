@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback, type ReactNode } from 'react
 import { ErrorBoundary } from '../ErrorBoundary';
 import { useTaskStore, Attachment, Task, type Project, type Section, generateUUID, parseQuickAdd } from '@mindwtr/core';
 import { ChevronDown, ChevronRight, FileText, Folder, Pencil, Plus, Trash2 } from 'lucide-react';
-import { DndContext, PointerSensor, useSensor, useSensors, closestCenter, type DragEndEvent } from '@dnd-kit/core';
+import { DndContext, PointerSensor, MeasuringStrategy, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { useLanguage } from '../../contexts/language-context';
 import { PromptModal } from '../PromptModal';
@@ -34,6 +34,14 @@ import { useProjectAttachmentActions } from './projects/useProjectAttachmentActi
 import { SectionDropZone, getSectionContainerId, getSectionIdFromContainer, NO_SECTION_CONTAINER } from './projects/section-dnd';
 import { useProjectSectionActions } from './projects/useProjectSectionActions';
 import { useProjectsViewStore } from './projects/useProjectsViewStore';
+import { projectTaskCollisionDetection } from './projects/project-task-dnd';
+
+const projectTaskDndMeasuring = {
+    droppable: {
+        strategy: MeasuringStrategy.WhileDragging,
+        frequency: 16,
+    },
+} as const;
 
 export function ProjectsView() {
     const perf = usePerformanceMonitor('ProjectsView');
@@ -628,7 +636,8 @@ export function ProjectsView() {
     const tasksContent = (
         <DndContext
             sensors={taskSensors}
-            collisionDetection={closestCenter}
+            collisionDetection={projectTaskCollisionDetection}
+            measuring={projectTaskDndMeasuring}
             onDragEnd={handleTaskDragEnd}
         >
             {renderProjectSections(renderSortableTasks)}

@@ -68,6 +68,30 @@ describe('performSyncCycle', () => {
         expect(result.stats.sections.conflicts).toBe(0);
     });
 
+    it('returns success when only revision number differs', async () => {
+        const now = '2026-03-28T00:00:00.000Z';
+        const result = await performSyncCycle({
+            readLocal: async () => mockAppData([{
+                ...createMockTask('task-1', now),
+                rev: 9,
+                revBy: 'device-local',
+            }]),
+            readRemote: async () => mockAppData([{
+                ...createMockTask('task-1', now),
+                rev: 4,
+                revBy: 'device-remote',
+            }]),
+            writeLocal: async () => undefined,
+            writeRemote: async () => undefined,
+        });
+
+        expect(result.status).toBe('success');
+        expect(result.data.tasks).toHaveLength(1);
+        expect(result.data.tasks[0].rev).toBe(9);
+        expect(result.data.tasks[0].revBy).toBe('device-local');
+        expect(result.stats.tasks.conflicts).toBe(0);
+    });
+
     it('returns success when local defaults differ from omitted legacy fields', async () => {
         const now = '2026-03-07T00:00:00.000Z';
         const localTask = {

@@ -23,6 +23,7 @@ import { WeekdaySelector } from './TaskForm/WeekdaySelector';
 import { AttachmentsField } from './TaskForm/AttachmentsField';
 import { ChecklistField } from './TaskForm/ChecklistField';
 import { normalizeDateInputValue } from './task-item-helpers';
+import { AutosizeTextarea } from '../ui/AutosizeTextarea';
 
 export type MonthlyRecurrenceInfo = {
     pattern: 'date' | 'custom';
@@ -221,11 +222,17 @@ export function TaskItemFieldRenderer({
                             </ReactMarkdown>
                         </div>
                     ) : (
-                        <textarea
+                        <AutosizeTextarea
                             aria-label={t('task.aria.description')}
                             value={editDescription}
                             onChange={(e) => setEditDescription(e.target.value)}
-                            className={cn("text-xs bg-muted/50 border border-border rounded px-2 py-1 min-h-[60px] resize-y", isRtl && "text-right")}
+                            minHeight={112}
+                            focusedMinHeight={208}
+                            maxHeight={480}
+                            className={cn(
+                                "w-full text-sm leading-6 bg-muted/50 border border-border rounded px-3 py-2 resize-none transition-[border-color,box-shadow] focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40",
+                                isRtl && "text-right"
+                            )}
                             placeholder={t('taskEdit.descriptionPlaceholder')}
                             dir={resolvedDirection}
                         />

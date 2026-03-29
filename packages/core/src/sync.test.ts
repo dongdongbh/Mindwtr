@@ -749,6 +749,27 @@ describe('Sync Logic', () => {
             expect(result.stats.tasks.conflictIds).toHaveLength(0);
         });
 
+        it('does not count conflict when only revision number differs', () => {
+            const localTask = {
+                ...createMockTask('1', '2023-01-02T00:05:00.000Z'),
+                rev: 7,
+                revBy: 'device-a',
+            } satisfies Task;
+            const incomingTask = {
+                ...createMockTask('1', '2023-01-02T00:05:00.000Z'),
+                rev: 4,
+                revBy: 'device-z',
+            } satisfies Task;
+
+            const result = mergeAppDataWithStats(mockAppData([localTask]), mockAppData([incomingTask]));
+
+            expect(result.data.tasks).toHaveLength(1);
+            expect(result.data.tasks[0].rev).toBe(7);
+            expect(result.data.tasks[0].revBy).toBe('device-a');
+            expect(result.stats.tasks.conflicts).toBe(0);
+            expect(result.stats.tasks.conflictIds).toHaveLength(0);
+        });
+
         it('counts conflict when revBy differs and content differs', () => {
             const localTask = {
                 ...createMockTask('1', '2023-01-02T00:05:00.000Z'),
@@ -1254,6 +1275,7 @@ describe('Sync Logic', () => {
                     ...createMockTask('revision-conflict', now),
                     rev: 2,
                     revBy: 'device-local',
+                    title: 'Local title',
                 },
             ]);
             const incoming = mockAppData([
@@ -1265,6 +1287,7 @@ describe('Sync Logic', () => {
                     ...createMockTask('revision-conflict', now),
                     rev: 1,
                     revBy: 'device-remote',
+                    title: 'Incoming title',
                 },
             ]);
 
@@ -1286,7 +1309,7 @@ describe('Sync Logic', () => {
                 winner: 'local',
                 diffKeys: [],
             });
-            expect(revisionSample?.localComparableHash).toBe(revisionSample?.incomingComparableHash);
+            expect(revisionSample?.localComparableHash).not.toBe(revisionSample?.incomingComparableHash);
         });
 
         it('does not count conflict when only timestamp differs for legacy items', () => {
