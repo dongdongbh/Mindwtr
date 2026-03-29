@@ -75,6 +75,26 @@ static char *ck_success_json(void) {
     return strdup("{\"ok\":true}");
 }
 
+/// CloudKit server-side error code for queries against a record type that does
+/// not yet exist in the container schema.  Observed in the NSUnderlyingError of
+/// CKErrorServerRejectedRequest when querying a Development-environment
+/// container before any records of that type have been saved.
+/// Apple does not publish this constant; it was determined empirically and is
+/// stable across macOS 13–15 and iOS 16–18.
+static const NSInteger kCKServerErrorUnknownRecordType = 2003;
+
+/// Locale-independent check for "unknown record type" inside a
+/// CKErrorServerRejectedRequest.  Inspects the NSUnderlyingError code rather
+/// than localizedDescription so this works on non-English systems.
+static BOOL ck_is_unknown_record_type(NSError *error) {
+    NSError *underlying = error.userInfo[NSUnderlyingErrorKey];
+    if ([underlying isKindOfClass:[NSError class]] &&
+        underlying.code == kCKServerErrorUnknownRecordType) {
+        return YES;
+    }
+    return NO;
+}
+
 // ---------------------------------------------------------------------------
 // MARK: - Field specs (mirrors CloudKitRecordMapper.swift exactly)
 // ---------------------------------------------------------------------------
@@ -472,7 +492,21 @@ char *mindwtr_cloudkit_fetch_all_records(const char *record_type_cstr) {
 
             long waited = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, kTimeoutSec * NSEC_PER_SEC));
             if (waited != 0) return ck_copy_json(@{@"error": @"fetch-timeout"});
-            if (batchError) return ck_error_json(batchError);
+            if (batchError) {
+                // Record type not yet created in CloudKit schema — treat as empty.
+                // The type is auto-created on first save in the Development environment.
+                // CKErrorUnknownItem: record type unknown to the client framework.
+                // CKErrorServerRejectedRequest: server rejects the query because the
+                //   record type doesn't exist in the schema yet. We check the
+                //   underlying server error code (2003 = "UNKNOWN_RECORD_TYPE") which
+                //   is locale-independent, unlike localizedDescription.
+                if (batchError.code == CKErrorUnknownItem ||
+                    (batchError.code == CKErrorServerRejectedRequest &&
+                     ck_is_unknown_record_type(batchError))) {
+                    return strdup("[]");
+                }
+                return ck_error_json(batchError);
+            }
 
             for (CKRecord *r in batchRecords) {
                 [allResults addObject:ck_json_from_record(r)];

@@ -346,7 +346,15 @@ final class CloudKitSyncManager {
 
     // MARK: - Full Fetch
 
+    /// CloudKit server error code for queries against a record type that does
+    /// not yet exist in the container schema (Development environment).
+    /// Not published by Apple; determined empirically, stable across iOS 16-18.
+    private static let ckServerErrorUnknownRecordType = 2003
+
     /// Fetches all records of a given type from the custom zone.
+    /// Returns an empty array when the record type does not exist yet in the
+    /// CloudKit schema (first sync). The subsequent write phase auto-creates
+    /// the record type in the Development environment.
     func fetchAllRecords(recordType: String) async throws -> [CKRecord] {
         var allRecords: [CKRecord] = []
         var cursor: CKQueryOperation.Cursor?
@@ -356,9 +364,14 @@ final class CloudKitSyncManager {
         initialOp.zoneID = zoneID
         initialOp.qualityOfService = .userInitiated
 
-        let firstResult = try await runQueryOperation(initialOp)
-        allRecords.append(contentsOf: firstResult.records)
-        cursor = firstResult.cursor
+        do {
+            let firstResult = try await runQueryOperation(initialOp)
+            allRecords.append(contentsOf: firstResult.records)
+            cursor = firstResult.cursor
+        } catch {
+            if Self.isUnknownRecordTypeError(error) { return [] }
+            throw error
+        }
 
         while let nextCursor = cursor {
             let continueOp = CKQueryOperation(cursor: nextCursor)
@@ -370,6 +383,22 @@ final class CloudKitSyncManager {
         }
 
         return allRecords
+    }
+
+    /// Locale-independent check for a missing record type.
+    /// CKErrorUnknownItem: client framework doesn't recognize the type.
+    /// CKErrorServerRejectedRequest with underlying code 2003: server rejects
+    /// the query because the type doesn't exist in the schema yet.
+    private static func isUnknownRecordTypeError(_ error: Error) -> Bool {
+        if let ckError = error as? CKError {
+            if ckError.code == .unknownItem { return true }
+            if ckError.code == .serverRejectedRequest,
+               let underlying = ckError.userInfo[NSUnderlyingErrorKey] as? NSError,
+               underlying.code == ckServerErrorUnknownRecordType {
+                return true
+            }
+        }
+        return false
     }
 
     private func runQueryOperation(_ op: CKQueryOperation) async throws -> (records: [CKRecord], cursor: CKQueryOperation.Cursor?) {
