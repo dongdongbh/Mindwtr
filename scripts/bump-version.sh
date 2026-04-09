@@ -91,6 +91,16 @@ echo "Updating lockfile..."
 bun install
 
 echo ""
+echo "Validating desktop package.json/package-lock sync..."
+if ! node scripts/ci/check-package-lock-sync.js apps/desktop/package.json apps/desktop/package-lock.json; then
+    echo ""
+    echo "Desktop package-lock.json does not match apps/desktop/package.json."
+    echo "Repair it before tagging with:"
+    echo "  npm install --package-lock-only --prefix apps/desktop --legacy-peer-deps --workspaces=false"
+    exit 1
+fi
+
+echo ""
 echo "Validating desktop package-lock metadata..."
 if ! python3 scripts/ci/repair-package-lock.py --check apps/desktop/package-lock.json; then
     echo ""
