@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { sortTasks, getStatusColor, getTaskAgeLabel, rescheduleTask, extractWaitingPerson } from './task-utils';
+import { sortTasks, getStatusColor, getTaskAgeLabel, rescheduleTask, extractWaitingPerson, getWaitingPerson } from './task-utils';
 import { Task } from './types';
 
 describe('task-utils', () => {
@@ -108,6 +108,25 @@ describe('task-utils', () => {
 
         it('returns null when no waiting person line exists', () => {
             expect(extractWaitingPerson('No delegation info here')).toBeNull();
+        });
+    });
+
+    describe('getWaitingPerson', () => {
+        it('prefers assignedTo when present', () => {
+            expect(getWaitingPerson({
+                assignedTo: 'Alex',
+                description: 'Waiting for: Jordan',
+            })).toBe('Alex');
+        });
+
+        it('falls back to the legacy description line', () => {
+            expect(getWaitingPerson({
+                description: 'Need follow-up\nWaiting for: Jordan',
+            })).toBe('Jordan');
+        });
+
+        it('returns null when no waiting person is available', () => {
+            expect(getWaitingPerson({ description: 'No delegation info here' })).toBeNull();
         });
     });
 });

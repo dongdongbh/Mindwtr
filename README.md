@@ -360,11 +360,10 @@ You can help in several ways:
 
 ## Roadmap
 
-- 🤖 Add to F-Droid
-- ☁️ Expand native iCloud/CloudKit sync to macOS desktop
+- 🤖 Add to F-Droid ([#219](https://github.com/dongdongbh/Mindwtr/issues/219))
 - 🗣️ iOS Reminders Inbox import (Siri capture -> Mindwtr Inbox)
-- ✉️ Email to Inbox
-- 🕒 Natural language input using `chrono-node`
+- ✉️ Email to Inbox ([#35](https://github.com/dongdongbh/Mindwtr/issues/35))
+- 🗓️ One-way Mindwtr -> external calendar export/sync ([#361](https://github.com/dongdongbh/Mindwtr/issues/361))
 
 ## Documentation
 

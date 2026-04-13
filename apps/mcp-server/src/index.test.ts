@@ -156,6 +156,60 @@ describe('mcp server index', () => {
     expect(result?.content[0]?.text).toContain('Quick-add input too long');
   });
 
+  test('validates add_task rejects blank token values', async () => {
+    const { server, tools } = createMockServer();
+    registerMindwtrTools(server, createMockService(), false);
+    const addHandler = tools.get('mindwtr_add_task')?.handler;
+    expect(addHandler).toBeTruthy();
+    const result = await addHandler?.({ title: 'Task', contexts: ['   '] });
+    expect(result?.isError).toBe(true);
+    expect(result?.content[0]?.text).toContain('Context values must be non-empty strings');
+  });
+
+  test('validates update_task rejects overlong token values', async () => {
+    const { server, tools } = createMockServer();
+    registerMindwtrTools(server, createMockService(), false);
+    const updateHandler = tools.get('mindwtr_update_task')?.handler;
+    expect(updateHandler).toBeTruthy();
+    const result = await updateHandler?.({ id: 't1', tags: [`#${'x'.repeat(500)}`] });
+    expect(result?.isError).toBe(true);
+    expect(result?.content[0]?.text).toContain('Tag values must be at most 500 characters');
+  });
+
+  test('normalizes task token values before delegating to the service', async () => {
+    const { server, tools } = createMockServer();
+    let receivedInput: any = null;
+    registerMindwtrTools(server, {
+      ...createMockService(),
+      addTask: async (input: any) => {
+        receivedInput = input;
+        return { id: 't1' };
+      },
+      updateTask: async (input: any) => {
+        receivedInput = input;
+        return { id: 't1' };
+      },
+    }, false);
+
+    const addHandler = tools.get('mindwtr_add_task')?.handler;
+    const updateHandler = tools.get('mindwtr_update_task')?.handler;
+    expect(addHandler).toBeTruthy();
+    expect(updateHandler).toBeTruthy();
+
+    await addHandler?.({ title: 'Task', contexts: [' @home '], tags: [' #urgent '] });
+    expect(receivedInput).toMatchObject({
+      contexts: ['@home'],
+      tags: ['#urgent'],
+    });
+
+    await updateHandler?.({ id: 't1', contexts: [' @desk '], tags: [' #ops '] });
+    expect(receivedInput).toMatchObject({
+      id: 't1',
+      contexts: ['@desk'],
+      tags: ['#ops'],
+    });
+  });
+
   test('accepts padded quickAdd input when trimmed length is within the limit', async () => {
     const { server, tools } = createMockServer();
     let receivedInput: any = null;

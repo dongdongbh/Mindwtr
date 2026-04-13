@@ -10,6 +10,13 @@ import {
 import { closeDb, openMindwtrDb, type DbOptions } from './db.js';
 import { ValidationError } from './errors.js';
 import {
+  MAX_AREA_NAME_LENGTH,
+  MAX_TASK_QUICK_ADD_LENGTH,
+  MAX_TASK_TITLE_LENGTH,
+  normalizeNullableTaskTokens,
+  normalizeOptionalTaskTokens,
+} from './input-validation.js';
+import {
   getTask,
   getProject,
   listAreas,
@@ -95,9 +102,6 @@ const parseInputStatus = (value: string | undefined): Task['status'] | undefined
   return normalized;
 };
 
-const MAX_TASK_TITLE_LENGTH = 500;
-const MAX_TASK_QUICK_ADD_LENGTH = 2000;
-const MAX_AREA_NAME_LENGTH = 200;
 const PROJECT_STATUS_SET = new Set<CoreProject['status']>(['active', 'someday', 'waiting', 'archived']);
 
 const parseProjectStatus = (value: string | undefined): CoreProject['status'] | undefined => {
@@ -108,7 +112,7 @@ const parseProjectStatus = (value: string | undefined): CoreProject['status'] | 
   return value as CoreProject['status'];
 };
 
-const validateAddTaskInput = (input: AddTaskInput): void => {
+const validateAddTaskInput = (input: AddTaskInput): AddTaskInput => {
   const hasTitle = typeof input.title === 'string' && input.title.trim().length > 0;
   const hasQuickAdd = typeof input.quickAdd === 'string' && input.quickAdd.trim().length > 0;
   if (!hasTitle && !hasQuickAdd) {
@@ -123,6 +127,11 @@ const validateAddTaskInput = (input: AddTaskInput): void => {
   if (hasQuickAdd && input.quickAdd!.trim().length > MAX_TASK_QUICK_ADD_LENGTH) {
     throw new ValidationError(`Quick-add input too long (max ${MAX_TASK_QUICK_ADD_LENGTH} characters)`);
   }
+  return {
+    ...input,
+    contexts: normalizeOptionalTaskTokens('contexts', input.contexts),
+    tags: normalizeOptionalTaskTokens('tags', input.tags),
+  };
 };
 
 const buildTaskUpdates = (input: UpdateTaskInput): Partial<Task> => {
@@ -132,8 +141,8 @@ const buildTaskUpdates = (input: UpdateTaskInput): Partial<Task> => {
   if (input.projectId !== undefined) updates.projectId = input.projectId ?? undefined;
   if (input.dueDate !== undefined) updates.dueDate = input.dueDate ?? undefined;
   if (input.startTime !== undefined) updates.startTime = input.startTime ?? undefined;
-  if (input.contexts !== undefined) updates.contexts = input.contexts ?? [];
-  if (input.tags !== undefined) updates.tags = input.tags ?? [];
+  if (input.contexts !== undefined) updates.contexts = normalizeNullableTaskTokens('contexts', input.contexts) ?? [];
+  if (input.tags !== undefined) updates.tags = normalizeNullableTaskTokens('tags', input.tags) ?? [];
   if (input.description !== undefined) updates.description = input.description ?? undefined;
   if (input.priority !== undefined) updates.priority = input.priority ?? undefined;
   if (input.timeEstimate !== undefined) updates.timeEstimate = input.timeEstimate ?? undefined;
@@ -231,40 +240,40 @@ export const createService = (options: DbOptions, deps: ServiceDeps = defaultSer
     getTask: async (input) => withDb((db) => deps.getTask(db, input)),
     getProject: async (input) => withDb((db) => deps.getProject(db, input)),
     addTask: async (input) => {
-      validateAddTaskInput(input);
+      const normalizedInput = validateAddTaskInput(input);
       return await deps.runCoreService(options, async (core) => {
-        if (input.quickAdd) {
+        if (normalizedInput.quickAdd) {
           const projects = await withDb((db) => deps.listProjects(db));
-          const quick = deps.parseQuickAdd(input.quickAdd, projects as CoreProject[]);
-          const title = input.title ?? quick.title ?? input.quickAdd;
-          const status = parseInputStatus(input.status);
+          const quick = deps.parseQuickAdd(normalizedInput.quickAdd, projects as CoreProject[]);
+          const title = normalizedInput.title ?? quick.title ?? normalizedInput.quickAdd;
+          const status = parseInputStatus(normalizedInput.status);
           const props = filterUndefined({
             ...quick.props,
             status: status ?? quick.props.status,
-            projectId: input.projectId ?? quick.props.projectId,
-            dueDate: input.dueDate ?? quick.props.dueDate,
-            startTime: input.startTime ?? quick.props.startTime,
-            contexts: input.contexts ?? quick.props.contexts,
-            tags: input.tags ?? quick.props.tags,
-            description: input.description ?? quick.props.description,
-            priority: input.priority ?? quick.props.priority,
-            timeEstimate: input.timeEstimate ?? quick.props.timeEstimate,
+            projectId: normalizedInput.projectId ?? quick.props.projectId,
+            dueDate: normalizedInput.dueDate ?? quick.props.dueDate,
+            startTime: normalizedInput.startTime ?? quick.props.startTime,
+            contexts: normalizedInput.contexts ?? quick.props.contexts,
+            tags: normalizedInput.tags ?? quick.props.tags,
+            description: normalizedInput.description ?? quick.props.description,
+            priority: normalizedInput.priority ?? quick.props.priority,
+            timeEstimate: normalizedInput.timeEstimate ?? quick.props.timeEstimate,
           });
           return core.addTask({ title, props });
         }
-        const status = parseInputStatus(input.status);
+        const status = parseInputStatus(normalizedInput.status);
         return core.addTask({
-          title: input.title ?? '',
+          title: normalizedInput.title ?? '',
           props: filterUndefined({
             status,
-            projectId: input.projectId,
-            dueDate: input.dueDate,
-            startTime: input.startTime,
-            contexts: input.contexts,
-            tags: input.tags,
-            description: input.description,
-            priority: input.priority,
-            timeEstimate: input.timeEstimate,
+            projectId: normalizedInput.projectId,
+            dueDate: normalizedInput.dueDate,
+            startTime: normalizedInput.startTime,
+            contexts: normalizedInput.contexts,
+            tags: normalizedInput.tags,
+            description: normalizedInput.description,
+            priority: normalizedInput.priority,
+            timeEstimate: normalizedInput.timeEstimate,
           }),
         });
       });

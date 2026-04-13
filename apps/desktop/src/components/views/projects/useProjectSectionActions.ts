@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import type { Project, Section } from '@mindwtr/core';
-import { isTauriRuntime } from '../../../lib/runtime';
+import type { ConfirmationRequestOptions } from '../../../hooks/useConfirmDialog';
 
 type UseProjectSectionActionsParams = {
     t: (key: string) => string;
@@ -14,6 +14,7 @@ type UseProjectSectionActionsParams = {
     setSectionTaskTargetId: (value: string | null) => void;
     setSectionTaskDraft: (value: string) => void;
     setShowSectionTaskPrompt: (value: boolean) => void;
+    requestConfirmation: (options: ConfirmationRequestOptions) => Promise<boolean>;
 };
 
 export function useProjectSectionActions({
@@ -28,6 +29,7 @@ export function useProjectSectionActions({
     setSectionTaskTargetId,
     setSectionTaskDraft,
     setShowSectionTaskPrompt,
+    requestConfirmation,
 }: UseProjectSectionActionsParams) {
     const handleAddSection = useCallback(() => {
         if (!selectedProject) return;
@@ -43,18 +45,16 @@ export function useProjectSectionActions({
     }, [setEditingSectionId, setSectionDraft, setShowSectionPrompt]);
 
     const handleDeleteSection = useCallback(async (section: Section) => {
-        const confirmed = isTauriRuntime()
-            ? await import('@tauri-apps/plugin-dialog').then(({ confirm }) =>
-                confirm(t('projects.deleteSectionConfirm'), {
-                    title: t('projects.sectionsLabel'),
-                    kind: 'warning',
-                }),
-            )
-            : window.confirm(t('projects.deleteSectionConfirm'));
+        const confirmed = await requestConfirmation({
+            title: t('projects.sectionsLabel'),
+            description: t('projects.deleteSectionConfirm'),
+            confirmLabel: t('common.delete') || 'Delete',
+            cancelLabel: t('common.cancel') || 'Cancel',
+        });
         if (confirmed) {
             deleteSection(section.id);
         }
-    }, [deleteSection, t]);
+    }, [deleteSection, requestConfirmation, t]);
 
     const handleToggleSection = useCallback((section: Section) => {
         updateSection(section.id, { isCollapsed: !section.isCollapsed });

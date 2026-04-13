@@ -3,10 +3,6 @@ import { renderHook, act } from '@testing-library/react';
 import type { Project, Section } from '@mindwtr/core';
 import { useProjectSectionActions } from './useProjectSectionActions';
 
-vi.mock('../../../lib/runtime', () => ({
-    isTauriRuntime: () => false,
-}));
-
 const baseSection: Section = {
     id: 'section-1',
     projectId: 'project-1',
@@ -28,14 +24,10 @@ const baseProject: Project = {
 };
 
 describe('useProjectSectionActions', () => {
-    const originalConfirm = window.confirm;
-
     beforeEach(() => {
-        window.confirm = vi.fn(() => true);
     });
 
     afterEach(() => {
-        window.confirm = originalConfirm;
         vi.restoreAllMocks();
     });
 
@@ -52,6 +44,7 @@ describe('useProjectSectionActions', () => {
             setSectionTaskTargetId: vi.fn(),
             setSectionTaskDraft: vi.fn(),
             setShowSectionTaskPrompt: vi.fn(),
+            requestConfirmation: vi.fn(async () => true),
             ...overrides,
         };
 
@@ -60,14 +53,19 @@ describe('useProjectSectionActions', () => {
     };
 
     it('does not delete section when confirmation is cancelled', async () => {
-        (window.confirm as unknown as ReturnType<typeof vi.fn>).mockReturnValue(false);
-        const { hook, params } = setup();
+        const requestConfirmation = vi.fn(async () => false);
+        const { hook, params } = setup({ requestConfirmation });
 
         await act(async () => {
             await hook.result.current.handleDeleteSection(baseSection);
         });
 
-        expect(window.confirm).toHaveBeenCalledWith('projects.deleteSectionConfirm');
+        expect(requestConfirmation).toHaveBeenCalledWith({
+            title: 'projects.sectionsLabel',
+            description: 'projects.deleteSectionConfirm',
+            confirmLabel: 'common.delete',
+            cancelLabel: 'common.cancel',
+        });
         expect(params.deleteSection).not.toHaveBeenCalled();
     });
 

@@ -136,6 +136,16 @@ describe('cloud server utils', () => {
         expect(response.headers.get('Access-Control-Allow-Methods')).toBe('GET,PUT,POST,PATCH,DELETE,OPTIONS');
     });
 
+    test('includes a request id in internal server error responses', async () => {
+        const response = __cloudTestUtils.createInternalServerErrorResponse('Internal server error', 'req-test-123');
+
+        expect(response.status).toBe(500);
+        expect(response.headers.get('X-Request-Id')).toBe('req-test-123');
+        const body = await response.json();
+        expect(body.error).toBe('Internal server error');
+        expect(body.requestId).toBe('req-test-123');
+    });
+
     test('rejects invalid task status and timestamps in app data', () => {
         const invalidStatus = __cloudTestUtils.validateAppData({
             tasks: [{
@@ -592,6 +602,55 @@ describe('cloud server api', () => {
         expect((await invalidAction.json()).error).toBe('Invalid task id');
     });
 
+    test('paginates /v1/search results for both tasks and projects', async () => {
+        const iso = '2026-01-01T00:00:00.000Z';
+        const seedResponse = await fetch(`${baseUrl}/v1/data`, {
+            method: 'PUT',
+            headers: {
+                ...authHeaders,
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                tasks: [
+                    { id: 'task-1', title: 'Alpha Task 1', status: 'inbox', createdAt: iso, updatedAt: iso },
+                    { id: 'task-2', title: 'Alpha Task 2', status: 'inbox', createdAt: iso, updatedAt: iso },
+                    { id: 'task-3', title: 'Alpha Task 3', status: 'inbox', createdAt: iso, updatedAt: iso },
+                ],
+                projects: [
+                    { id: 'project-1', title: 'Alpha Project 1', status: 'active', createdAt: iso, updatedAt: iso },
+                    { id: 'project-2', title: 'Alpha Project 2', status: 'active', createdAt: iso, updatedAt: iso },
+                    { id: 'project-3', title: 'Alpha Project 3', status: 'active', createdAt: iso, updatedAt: iso },
+                ],
+                sections: [],
+                areas: [],
+                settings: {},
+            }),
+        });
+        expect(seedResponse.status).toBe(200);
+
+        const response = await fetch(`${baseUrl}/v1/search?query=Alpha&limit=2&offset=1`, {
+            headers: authHeaders,
+        });
+        expect(response.status).toBe(200);
+
+        const body = await response.json();
+        expect(body.limit).toBe(2);
+        expect(body.offset).toBe(1);
+        expect(body.taskTotal).toBe(3);
+        expect(body.projectTotal).toBe(3);
+        expect((body.tasks as Array<{ id: string }>).map((task) => task.id)).toEqual(['task-2', 'task-3']);
+        expect((body.projects as Array<{ id: string }>).map((project) => project.id)).toEqual(['project-2', 'project-3']);
+    });
+
+    test('rejects invalid /v1/search pagination parameters', async () => {
+        const response = await fetch(`${baseUrl}/v1/search?query=Alpha&limit=0`, {
+            headers: authHeaders,
+        });
+
+        expect(response.status).toBe(400);
+        expect((await response.json()).error).toBe('Invalid limit');
+    });
+
     test('rejects reserved fields on task patch', async () => {
         const createResponse = await fetch(`${baseUrl}/v1/tasks`, {
             method: 'POST',
@@ -768,6 +827,24 @@ describe('cloud server api', () => {
         expect((await putResponse.json()).error).toBe('Blocked attachment content type: application/x-msdownload');
 
         const getResponse = await fetch(`${baseUrl}/v1/attachments/folder/file.exe`, {
+            headers: authHeaders,
+        });
+        expect(getResponse.status).toBe(404);
+    });
+
+    test('rejects attachment uploads with executable file signatures even when content-type is benign', async () => {
+        const putResponse = await fetch(`${baseUrl}/v1/attachments/folder/file.png`, {
+            method: 'PUT',
+            headers: {
+                ...authHeaders,
+                'content-type': 'image/png',
+            },
+            body: new Uint8Array([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00]),
+        });
+        expect(putResponse.status).toBe(400);
+        expect((await putResponse.json()).error).toBe('Blocked executable attachment signature: windows-pe');
+
+        const getResponse = await fetch(`${baseUrl}/v1/attachments/folder/file.png`, {
             headers: authHeaders,
         });
         expect(getResponse.status).toBe(404);
@@ -1030,7 +1107,7 @@ describe('cloud server api', () => {
         expect((persisted.projects as Array<{ id: string }>).some((project) => project.id === 'broken-project')).toBe(true);
     });
 
-    test('prefers delete over a nearby live update during /v1/data merge', async () => {
+    test('prefers the live task over a nearby stale delete during /v1/data merge', async () => {
         const base = { projects: [], sections: [], areas: [], settings: {} };
         const taskId = 'merge-race-live-wins';
 
@@ -1080,11 +1157,11 @@ describe('cloud server api', () => {
         const body = await getResponse.json();
         const mergedTask = (body.tasks as Array<{ id: string; updatedAt: string; deletedAt?: string }>).find((task) => task.id === taskId);
         expect(mergedTask).toBeTruthy();
-        expect(mergedTask?.deletedAt).toBe('2026-01-01T00:00:00.000Z');
-        expect(mergedTask?.updatedAt).toBe('2026-01-01T00:00:00.000Z');
+        expect(mergedTask?.deletedAt).toBeUndefined();
+        expect(mergedTask?.updatedAt).toBe('2026-01-01T00:00:00.100Z');
     });
 
-    test('keeps the delete when the live update is only slightly older during /v1/data merge', async () => {
+    test('prefers the live task when the delete is only slightly newer during /v1/data merge', async () => {
         const base = { projects: [], sections: [], areas: [], settings: {} };
         const taskId = 'merge-race-delete-wins';
 
@@ -1134,7 +1211,7 @@ describe('cloud server api', () => {
         const body = await getResponse.json();
         const mergedTask = (body.tasks as Array<{ id: string; updatedAt: string; deletedAt?: string }>).find((task) => task.id === taskId);
         expect(mergedTask).toBeTruthy();
-        expect(mergedTask?.deletedAt).toBe('2026-01-01T00:00:00.100Z');
-        expect(mergedTask?.updatedAt).toBe('2026-01-01T00:00:00.100Z');
+        expect(mergedTask?.deletedAt).toBeUndefined();
+        expect(mergedTask?.updatedAt).toBe('2026-01-01T00:00:00.000Z');
     });
 });

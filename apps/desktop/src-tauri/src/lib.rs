@@ -156,6 +156,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   title TEXT NOT NULL,
   status TEXT NOT NULL,
   priority TEXT,
+  energyLevel TEXT,
+  assignedTo TEXT,
   taskMode TEXT,
   startTime TEXT,
   dueDate TEXT,

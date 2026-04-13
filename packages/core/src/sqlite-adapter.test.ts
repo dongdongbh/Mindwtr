@@ -569,6 +569,8 @@ describeSqlite('SqliteAdapter', () => {
         const areaColumnNames = areaColumns.map((col) => col.name);
         expect(areaColumnNames).toContain('rev');
         expect(areaColumnNames).toContain('revBy');
+        expect(areaColumns.find((col) => col.name === 'createdAt')?.notnull).toBe(1);
+        expect(areaColumns.find((col) => col.name === 'updatedAt')?.notnull).toBe(1);
     });
 
     it('rejects invalid task status values at the database layer', async () => {

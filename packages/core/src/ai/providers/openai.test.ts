@@ -57,4 +57,30 @@ describe('openai provider auth behavior', () => {
         const headers = (requestInit?.headers ?? {}) as Record<string, string>;
         expect(headers.Authorization).toBeUndefined();
     });
+
+    it('surfaces custom endpoint auth errors without implying official OpenAI auth', async () => {
+        const fetchMock = vi.fn(async () =>
+            new Response(
+                JSON.stringify({
+                    error: {
+                        message: 'invalid token',
+                    },
+                }),
+                { status: 401, headers: { 'Content-Type': 'application/json' } },
+            ));
+        globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+        const provider = createOpenAIProvider({
+            provider: 'openai',
+            endpoint: 'https://glm.example.com/v1/chat/completions',
+            apiKey: 'bad-token',
+            model: 'GLM-4.7',
+        });
+
+        await expect(
+            provider.clarifyTask({
+                title: 'Plan trip',
+            }),
+        ).rejects.toThrow('OpenAI-compatible endpoint rejected the request. Check the custom base URL, API key, and model.');
+    });
 });

@@ -1,4 +1,4 @@
-import { useTaskStore } from '@mindwtr/core';
+import { getBreadcrumbs, sanitizeForLog, sanitizeLogContext, sanitizeUrl, useTaskStore } from '@mindwtr/core';
 
 type ExpoDirectory = {
   exists: boolean;
@@ -13,9 +13,18 @@ type ExpoFile = {
   create: (options: { intermediates?: boolean; overwrite?: boolean }) => void;
   delete: () => void;
   info?: () => { exists?: boolean; size?: number };
+  open?: () => ExpoFileHandle;
+  size?: number;
   write: (content: string, options?: { encoding?: string }) => void;
   text: () => Promise<string>;
   uri: string;
+};
+
+type ExpoFileHandle = {
+  close: () => void;
+  offset: number | null;
+  size: number | null;
+  writeBytes: (bytes: Uint8Array) => void;
 };
 
 type ExpoFileSystemModule = {
@@ -30,6 +39,7 @@ let LOG_DIR: ExpoDirectory | null = null;
 let LOG_FILE: ExpoFile | null = null;
 let LOG_DIR_URI: string | null = null;
 let LOG_FILE_URI: string | null = null;
+let logWriteCount = 0;
 
 const getExpoFileSystem = async (): Promise<ExpoFileSystemModule | null> => {
   if (expoFileSystemModule !== undefined) return expoFileSystemModule;
@@ -64,32 +74,10 @@ const ensureLogTargets = async (): Promise<void> => {
     LOG_FILE_URI = null;
   }
 };
-const MAX_LOG_CHARS = 200_000;
-const SENSITIVE_KEYS = [
-  'token',
-  'access_token',
-  'password',
-  'pass',
-  'apikey',
-  'api_key',
-  'key',
-  'secret',
-  'auth',
-  'authorization',
-  'username',
-  'user',
-  'session',
-  'cookie',
-];
-
-const AI_KEY_PATTERNS = [
-  /sk-[A-Za-z0-9]{10,}/g,
-  /sk-ant-[A-Za-z0-9]{10,}/g,
-  /rk-[A-Za-z0-9]{10,}/g,
-  /AIza[0-9A-Za-z\-_]{10,}/g,
-];
-
-const ICS_URL_PATTERN = /\b(?:https?|webcal|webcals):\/\/[^\s'")]+/gi;
+const MAX_LOG_FILE_BYTES = 500_000;
+const ROTATED_LOG_RETAIN_CHARS = 250_000;
+const LOG_ROTATION_CHECK_INTERVAL = 50;
+const UTF8_ENCODING = 'utf8';
 
 type LogEntry = {
   ts: string;
@@ -100,59 +88,8 @@ type LogEntry = {
   context?: Record<string, string>;
 };
 
-function redactSensitiveText(value: string): string {
-  let result = value;
-  result = result.replace(/(Authorization:\s*)(Basic|Bearer)\s+[A-Za-z0-9+\/=._-]+/gi, '$1$2 [redacted]');
-  result = result.replace(
-    /(password|pass|token|access_token|api_key|apikey|authorization|username|user|secret|session|cookie)=([^\s&]+)/gi,
-    '$1=[redacted]'
-  );
-  for (const pattern of AI_KEY_PATTERNS) {
-    result = result.replace(pattern, '[redacted]');
-  }
-  result = result.replace(ICS_URL_PATTERN, (match) => sanitizeUrl(match) ?? match);
-  return result;
-}
-
 export function sanitizeLogMessage(value: string): string {
-  return redactSensitiveText(value);
-}
-
-function sanitizeContext(context?: Record<string, string>): Record<string, string> | undefined {
-  if (!context) return undefined;
-  const sanitized: Record<string, string> = {};
-  for (const [key, value] of Object.entries(context)) {
-    const keyLower = key.toLowerCase();
-    if (SENSITIVE_KEYS.some((s) => keyLower.includes(s))) {
-      sanitized[key] = '[redacted]';
-    } else {
-      sanitized[key] = redactSensitiveText(String(value));
-    }
-  }
-  return sanitized;
-}
-
-function sanitizeUrl(raw?: string): string | undefined {
-  if (!raw) return undefined;
-  try {
-    const parsed = new URL(raw);
-    const scheme = parsed.protocol.replace(':', '').toLowerCase();
-    if (scheme === 'webcal' || scheme === 'webcals' || parsed.pathname.toLowerCase().includes('.ics')) {
-      return '[redacted-ics-url]';
-    }
-    parsed.username = '';
-    parsed.password = '';
-    const params = parsed.searchParams;
-    for (const key of params.keys()) {
-      const keyLower = key.toLowerCase();
-      if (SENSITIVE_KEYS.some((s) => keyLower.includes(s))) {
-        params.set(key, 'redacted');
-      }
-    }
-    return parsed.toString();
-  } catch {
-    return raw;
-  }
+  return sanitizeForLog(value);
 }
 
 async function ensureLogDir(): Promise<void> {
@@ -217,6 +154,43 @@ function isLoggingEnabled(): boolean {
   return useTaskStore.getState().settings.diagnostics?.loggingEnabled === true;
 }
 
+function getFileSize(file: ExpoFile | null): number {
+  if (!file) return 0;
+  try {
+    const info = file.info?.();
+    if (typeof info?.size === 'number') return info.size;
+  } catch {
+  }
+  return typeof file.size === 'number' ? file.size : 0;
+}
+
+async function rotateLogIfNeeded(force = false): Promise<void> {
+  if (!LOG_FILE || !fileExists(LOG_FILE)) return;
+  if (!force && logWriteCount > 0 && logWriteCount % LOG_ROTATION_CHECK_INTERVAL !== 0) return;
+  if (getFileSize(LOG_FILE) <= MAX_LOG_FILE_BYTES) return;
+  const current = await LOG_FILE.text().catch(() => '');
+  const next = current.slice(-ROTATED_LOG_RETAIN_CHARS);
+  LOG_FILE.write(next, { encoding: UTF8_ENCODING });
+}
+
+function appendWithFileHandle(line: string): boolean {
+  if (!LOG_FILE || typeof LOG_FILE.open !== 'function') return false;
+  let handle: ExpoFileHandle | null = null;
+  try {
+    handle = LOG_FILE.open();
+    handle.offset = handle.size ?? 0;
+    handle.writeBytes(new TextEncoder().encode(line));
+    return true;
+  } catch {
+    return false;
+  } finally {
+    try {
+      handle?.close();
+    } catch {
+    }
+  }
+}
+
 async function appendLogLine(entry: LogEntry, options?: { force?: boolean }): Promise<string | null> {
   if (!options?.force && !isLoggingEnabled()) return null;
   try {
@@ -224,12 +198,19 @@ async function appendLogLine(entry: LogEntry, options?: { force?: boolean }): Pr
     if (!await ensureLogFile()) return null;
     if (!LOG_FILE) return null;
     const line = `${JSON.stringify(entry)}\n`;
+    await rotateLogIfNeeded();
+    if (appendWithFileHandle(line)) {
+      logWriteCount += 1;
+      await rotateLogIfNeeded(true);
+      return LOG_FILE.uri;
+    }
     const current = fileExists(LOG_FILE) ? await LOG_FILE.text().catch(() => '') : '';
     let next = current + line;
-    if (next.length > MAX_LOG_CHARS) {
-      next = next.slice(-MAX_LOG_CHARS);
+    if (next.length > MAX_LOG_FILE_BYTES) {
+      next = next.slice(-ROTATED_LOG_RETAIN_CHARS);
     }
-    LOG_FILE.write(next, { encoding: 'utf8' });
+    LOG_FILE.write(next, { encoding: UTF8_ENCODING });
+    logWriteCount += 1;
     return LOG_FILE.uri;
   } catch (error) {
     return null;
@@ -260,6 +241,7 @@ export async function clearLog(): Promise<void> {
   try {
     if (fileExists(LOG_FILE)) {
       LOG_FILE.delete();
+      logWriteCount = 0;
       return;
     }
     const fs = await getExpoFileSystem();
@@ -275,13 +257,16 @@ export async function clearLog(): Promise<void> {
 
 export async function logError(
   error: unknown,
-  context: { scope: string; url?: string; extra?: Record<string, string> }
+  context: { scope: string; url?: string; extra?: Record<string, unknown>; force?: boolean; message?: string }
 ): Promise<string | null> {
-  const rawMessage = error instanceof Error ? error.message : String(error);
+  const rawMessage = context.message ?? (error instanceof Error ? error.message : String(error));
   const rawStack = error instanceof Error ? error.stack : undefined;
-  const message = redactSensitiveText(rawMessage);
-  const stack = rawStack ? redactSensitiveText(rawStack) : undefined;
-  const extra = { ...(context.extra ?? {}) };
+  const message = sanitizeForLog(rawMessage);
+  const stack = rawStack ? sanitizeForLog(rawStack) : undefined;
+  const extra: Record<string, unknown> = {
+    ...(context.extra ?? {}),
+    ...(getBreadcrumbs().length > 0 ? { breadcrumbs: getBreadcrumbs().join(';') } : {}),
+  };
   if (context.url) {
     const sanitizedUrl = sanitizeUrl(context.url);
     if (sanitizedUrl) {
@@ -295,36 +280,36 @@ export async function logError(
     scope: context.scope,
     message,
     stack,
-    context: Object.keys(extra).length ? sanitizeContext(extra) : undefined,
-  });
+    context: sanitizeLogContext(extra),
+  }, { force: context.force });
 }
 
 export async function logInfo(
   message: string,
-  context?: { scope?: string; extra?: Record<string, string>; force?: boolean }
+  context?: { scope?: string; extra?: Record<string, unknown>; force?: boolean }
 ): Promise<string | null> {
-  const safeMessage = redactSensitiveText(message);
+  const safeMessage = sanitizeForLog(message);
   return appendLogLine({
     ts: new Date().toISOString(),
     level: 'info',
     scope: context?.scope ?? 'info',
     message: safeMessage,
-    context: sanitizeContext(context?.extra),
+    context: sanitizeLogContext(context?.extra),
   }, { force: context?.force });
 }
 
 export async function logWarn(
   message: string,
-  context?: { scope?: string; extra?: Record<string, string> }
+  context?: { scope?: string; extra?: Record<string, unknown>; force?: boolean }
 ): Promise<string | null> {
-  const safeMessage = redactSensitiveText(message);
+  const safeMessage = sanitizeForLog(message);
   return appendLogLine({
     ts: new Date().toISOString(),
     level: 'warn',
     scope: context?.scope ?? 'warn',
     message: safeMessage,
-    context: sanitizeContext(context?.extra),
-  });
+    context: sanitizeLogContext(context?.extra),
+  }, { force: context?.force });
 }
 
 export async function logSyncError(

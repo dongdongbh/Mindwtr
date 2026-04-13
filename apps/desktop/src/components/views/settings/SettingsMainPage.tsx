@@ -6,6 +6,7 @@ import {
 
 type ThemeMode = 'system' | 'light' | 'dark' | 'eink' | 'nord' | 'sepia';
 type DensityMode = 'comfortable' | 'compact';
+type TextSizeMode = 'default' | 'large' | 'extra-large';
 type WeekStart = 'sunday' | 'monday';
 type DateFormatSetting = 'system' | 'dmy' | 'mdy' | 'ymd';
 type TimeFormatSetting = 'system' | '12h' | '24h';
@@ -20,6 +21,11 @@ type Labels = {
     densityDesc: string;
     densityComfortable: string;
     densityCompact: string;
+    textSize: string;
+    textSizeDesc: string;
+    textSizeDefault: string;
+    textSizeLarge: string;
+    textSizeExtraLarge: string;
     system: string;
     light: string;
     dark: string;
@@ -67,6 +73,8 @@ type SettingsMainPageProps = {
     onThemeChange: (mode: ThemeMode) => void;
     densityMode: DensityMode;
     onDensityChange: (mode: DensityMode) => void;
+    textSizeMode: TextSizeMode;
+    onTextSizeChange: (mode: TextSizeMode) => void;
     language: Language;
     onLanguageChange: (lang: Language) => void;
     weekStart: WeekStart;
@@ -150,6 +158,8 @@ export function SettingsMainPage({
     onThemeChange,
     densityMode,
     onDensityChange,
+    textSizeMode,
+    onTextSizeChange,
     language,
     onLanguageChange,
     weekStart,
@@ -214,6 +224,17 @@ export function SettingsMainPage({
                     >
                         <option value="comfortable">{t.densityComfortable}</option>
                         <option value="compact">{t.densityCompact}</option>
+                    </select>
+                </SettingsRow>
+                <SettingsRow title={t.textSize} description={t.textSizeDesc}>
+                    <select
+                        value={textSizeMode}
+                        onChange={(e) => onTextSizeChange(e.target.value as TextSizeMode)}
+                        className={selectCls}
+                    >
+                        <option value="default">{t.textSizeDefault}</option>
+                        <option value="large">{t.textSizeLarge}</option>
+                        <option value="extra-large">{t.textSizeExtraLarge}</option>
                     </select>
                 </SettingsRow>
             </SettingsCard>

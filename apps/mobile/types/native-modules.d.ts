@@ -28,7 +28,7 @@ declare module 'expo-audio' {
   export interface AudioPlayer {
     play(): Promise<void> | void;
     pause(): Promise<void> | void;
-    replace(source: AudioSource): void;
+    replace(source: AudioSource | null): void;
     seekTo(positionSeconds: number): Promise<void> | void;
   }
 

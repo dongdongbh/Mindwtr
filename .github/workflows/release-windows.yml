@@ -37,8 +37,8 @@ env:
 jobs:
   standalone:
     runs-on: windows-latest
-    name: Windows Build (Standalone)
-    timeout-minutes: 90
+    name: Windows Release
+    timeout-minutes: 120
     env:
       VITE_DROPBOX_APP_KEY: ${{ vars.VITE_DROPBOX_APP_KEY || secrets.VITE_DROPBOX_APP_KEY }}
 
@@ -125,23 +125,6 @@ jobs:
           }
           Compress-Archive -Path "$portableDir\*" -DestinationPath $zipPath
 
-      - name: Prepare MS Store inputs
-        shell: pwsh
-        run: |
-          $buildDir = "apps/desktop/src-tauri/target/release"
-          $iconDir = "apps/desktop/src-tauri/icons"
-          $outDir = "msstore-inputs"
-          Remove-Item -Recurse -Force $outDir -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path "$outDir\Assets" | Out-Null
-
-          Copy-Item "$buildDir/mindwtr.exe" -Destination "$outDir\mindwtr.exe"
-          if (Test-Path "$buildDir/WebView2Loader.dll") {
-            Copy-Item "$buildDir/WebView2Loader.dll" -Destination "$outDir"
-          }
-          Copy-Item "$iconDir/Square44x44Logo.png" "$outDir\Assets\StoreLogo.png"
-          Copy-Item "$iconDir/Square150x150Logo.png" "$outDir\Assets\Square150x150Logo.png"
-          Copy-Item "$iconDir/Square44x44Logo.png" "$outDir\Assets\Square44x44Logo.png"
-
       - name: Collect Windows artifacts
         shell: pwsh
         run: |
@@ -163,45 +146,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 28
 
-      - name: Upload MS Store inputs
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: windows-msstore-inputs
-          path: msstore-inputs/*
-          if-no-files-found: error
-          retention-days: 7
-
-  msstore:
-    needs: standalone
-    if: startsWith(github.ref, 'refs/tags/') || inputs.run_msstore
-    runs-on: windows-latest
-    name: Windows Publish (MS Store)
-    timeout-minutes: 60
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-
-      - name: Download MS Store inputs
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
-        with:
-          name: windows-msstore-inputs
-          path: msstore-inputs
-
-      - name: Resolve version
-        id: version
-        shell: pwsh
-        run: |
-          $env:GITHUB_EVENT_INPUTS_TAG = "${{ github.event.inputs.tag }}"
-          $lines = & scripts/ci/resolve-release-version.ps1 -InputTag "${{ inputs.tag }}"
-          foreach ($line in $lines) {
-            $line >> $env:GITHUB_OUTPUT
-          }
-          $tag = (($lines | Where-Object { $_ -like 'tag=*' }) -replace '^tag=', '')
-          $version = (($lines | Where-Object { $_ -like 'version=*' }) -replace '^version=', '')
-          $msixVersion = ($version.Split('.') + @('0','0','0','0'))[0..3] -join '.'
-          echo "msix_version=$msixVersion" >> $env:GITHUB_OUTPUT
-
       - name: Ensure MakeAppx is available
+        if: startsWith(github.ref, 'refs/tags/') || inputs.run_msstore
         shell: pwsh
         run: |
           $makeappx = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits" -Recurse -Filter "makeappx.exe" -ErrorAction SilentlyContinue |
@@ -218,22 +164,25 @@ jobs:
           Write-Error "makeappx.exe not found and winget is unavailable."
 
       - name: Create MSIX layout
+        if: startsWith(github.ref, 'refs/tags/') || inputs.run_msstore
         shell: pwsh
         run: |
-          $inputDir = "msstore-inputs"
+          $buildDir = "apps/desktop/src-tauri/target/release"
+          $iconDir = "apps/desktop/src-tauri/icons"
           $outDir = "msix-staging"
           Remove-Item -Recurse -Force $outDir -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $outDir | Out-Null
           New-Item -ItemType Directory -Force -Path "$outDir\Assets" | Out-Null
-          Copy-Item "$inputDir\mindwtr.exe" -Destination "$outDir\mindwtr.exe"
-          if (Test-Path "$inputDir\WebView2Loader.dll") {
-            Copy-Item "$inputDir\WebView2Loader.dll" -Destination "$outDir"
+          Copy-Item "$buildDir/mindwtr.exe" -Destination "$outDir\mindwtr.exe"
+          if (Test-Path "$buildDir/WebView2Loader.dll") {
+            Copy-Item "$buildDir/WebView2Loader.dll" -Destination "$outDir"
           }
-          Copy-Item "$inputDir\Assets\StoreLogo.png" "$outDir\Assets\StoreLogo.png"
-          Copy-Item "$inputDir\Assets\Square150x150Logo.png" "$outDir\Assets\Square150x150Logo.png"
-          Copy-Item "$inputDir\Assets\Square44x44Logo.png" "$outDir\Assets\Square44x44Logo.png"
+          Copy-Item "$iconDir/Square44x44Logo.png" "$outDir\Assets\StoreLogo.png"
+          Copy-Item "$iconDir/Square150x150Logo.png" "$outDir\Assets\Square150x150Logo.png"
+          Copy-Item "$iconDir/Square44x44Logo.png" "$outDir\Assets\Square44x44Logo.png"
 
       - name: Generate AppxManifest.xml
+        if: startsWith(github.ref, 'refs/tags/') || inputs.run_msstore
         shell: pwsh
         run: |
           $manifest = @"
@@ -273,6 +222,7 @@ jobs:
           $manifest | Out-File -FilePath "msix-staging\AppxManifest.xml" -Encoding UTF8
 
       - name: Build MSIX package
+        if: startsWith(github.ref, 'refs/tags/') || inputs.run_msstore
         shell: pwsh
         run: |
           $msixPath = "mindwtr_${{ steps.version.outputs.version }}_x64.msix"
@@ -285,6 +235,7 @@ jobs:
           & $makeappx pack /d msix-staging /p $msixPath /o
 
       - name: Validate Microsoft Store secrets
+        if: startsWith(github.ref, 'refs/tags/') || inputs.run_msstore
         shell: pwsh
         env:
           MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
@@ -300,6 +251,7 @@ jobs:
           }
 
       - name: Check Microsoft Store submission status
+        if: startsWith(github.ref, 'refs/tags/') || inputs.run_msstore
         id: msstore_status
         shell: pwsh
         env:
@@ -373,7 +325,7 @@ jobs:
           "skip=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Publish to Microsoft Store (metadata + package)
-        if: steps.msstore_status.outputs.skip != 'true' && env.MSSTORE_SKIP_PUBLISH != 'true'
+        if: (startsWith(github.ref, 'refs/tags/') || inputs.run_msstore) && steps.msstore_status.outputs.skip != 'true' && env.MSSTORE_SKIP_PUBLISH != 'true'
         timeout-minutes: 40
         shell: pwsh
         env:
@@ -468,6 +420,40 @@ jobs:
             throw "Retry loop exhausted unexpectedly for $Method $Uri."
           }
 
+          function Get-PartnerCenterApplication {
+            $appsResponse = Invoke-RestMethodWithRetry -Method Get `
+              -Uri 'https://manage.devcenter.microsoft.com/v1.0/my/applications' `
+              -Headers $headers
+            $matchedApp = $appsResponse.value | Where-Object {
+              $_.id -eq $env:MS_STORE_APP_ID -or
+              ($_.applicationId -and $_.applicationId -eq $env:MS_STORE_APP_ID) -or
+              ($_ | ConvertTo-Json -Depth 5 | Select-String -Pattern $env:MS_STORE_APP_ID -Quiet)
+            } | Select-Object -First 1
+            if (-not $matchedApp) {
+              Write-Host "Available apps:"
+              $appsResponse.value | ForEach-Object { Write-Host "  ID=$($_.id)  primaryName=$($_.primaryName)" }
+              throw "Could not find app matching MS_STORE_APP_ID='$($env:MS_STORE_APP_ID)'."
+            }
+            return $matchedApp
+          }
+
+          function Get-PendingSubmissionFromStore {
+            param([string]$ApplicationId)
+            $appSnapshot = Get-PartnerCenterApplication
+            $pending = $null
+            if ($appSnapshot.PSObject.Properties.Name -contains 'pendingApplicationSubmission') {
+              $pending = $appSnapshot.pendingApplicationSubmission
+            }
+            if (-not $pending) {
+              return $null
+            }
+            $pendingId = $pending.id
+            Write-Warning "Found pending submission $pendingId after ambiguous create attempt. Reusing it."
+            return Invoke-RestMethodWithRetry -Method Get `
+              -Uri "https://manage.devcenter.microsoft.com/v1.0/my/applications/$ApplicationId/submissions/$pendingId" `
+              -Headers $headers
+          }
+
           $tokenBody = @{
             grant_type    = 'client_credentials'
             resource      = 'https://manage.devcenter.microsoft.com'
@@ -489,19 +475,7 @@ jobs:
           }
 
           Write-Host "Looking up application..."
-          $appsResponse = Invoke-RestMethodWithRetry -Method Get `
-            -Uri 'https://manage.devcenter.microsoft.com/v1.0/my/applications' `
-            -Headers $headers
-          $app = $appsResponse.value | Where-Object {
-            $_.id -eq $env:MS_STORE_APP_ID -or
-            ($_.applicationId -and $_.applicationId -eq $env:MS_STORE_APP_ID) -or
-            ($_ | ConvertTo-Json -Depth 5 | Select-String -Pattern $env:MS_STORE_APP_ID -Quiet)
-          } | Select-Object -First 1
-          if (-not $app) {
-            Write-Host "Available apps:"
-            $appsResponse.value | ForEach-Object { Write-Host "  ID=$($_.id)  primaryName=$($_.primaryName)" }
-            throw "Could not find app matching MS_STORE_APP_ID='$($env:MS_STORE_APP_ID)'."
-          }
+          $app = Get-PartnerCenterApplication
           $applicationId = $app.id
           Write-Host "Found application: $($app.primaryName) (ID: $applicationId)"
 
@@ -528,9 +502,50 @@ jobs:
           }
 
           Write-Host "Creating new submission..."
-          $submission = Invoke-RestMethodWithRetry -Method Post `
-            -Uri "https://manage.devcenter.microsoft.com/v1.0/my/applications/$applicationId/submissions" `
-            -Headers $headers
+          $submission = $null
+          for ($createAttempt = 1; $createAttempt -le 3 -and -not $submission; $createAttempt++) {
+            try {
+              $submission = Invoke-RestMethodWithRetry -Method Post `
+                -Uri "https://manage.devcenter.microsoft.com/v1.0/my/applications/$applicationId/submissions" `
+                -Headers $headers `
+                -MaxAttempts 1
+            } catch {
+              $errText = $_.Exception.Message
+              $statusCode = Get-HttpStatusCodeFromError -ErrorRecord $_
+              $retryable = Test-IsRetryableHttpFailure -ErrorRecord $_
+
+              try {
+                $submission = Get-PendingSubmissionFromStore -ApplicationId $applicationId
+              } catch {
+                Write-Warning "Failed to inspect pending submissions after create attempt ${createAttempt}: $($_.Exception.Message)"
+              }
+
+              if ($submission) {
+                break
+              }
+
+              if (& $isStoreBusy $errText) {
+                Write-Warning "Microsoft Store rejected new submission creation because another submission is still being processed. Skipping publish."
+                exit 0
+              }
+
+              if ($retryable -and $createAttempt -lt 3) {
+                $delaySeconds = [Math]::Min(60, [int]([Math]::Pow(2, $createAttempt - 1) * 5))
+                if ($null -ne $statusCode) {
+                  Write-Warning "Submission creation returned HTTP $statusCode on attempt $createAttempt/3. Retrying after checking store state in $delaySeconds seconds..."
+                } else {
+                  Write-Warning "Submission creation failed on attempt $createAttempt/3. Retrying after checking store state in $delaySeconds seconds..."
+                }
+                Start-Sleep -Seconds $delaySeconds
+                continue
+              }
+
+              throw
+            }
+          }
+          if (-not $submission) {
+            throw "Failed to create or recover a Microsoft Store submission."
+          }
           $submissionId = $submission.id
           $fileUploadUrl = $submission.fileUploadUrl
           Write-Host "Created submission $submissionId"

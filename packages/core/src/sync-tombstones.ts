@@ -1,4 +1,4 @@
-import type { AppData, Attachment, Project, Task } from './types';
+import type { AppData, Attachment, Area, Project, Section, Task } from './types';
 
 const DEFAULT_TOMBSTONE_RETENTION_DAYS = 90;
 const MIN_TOMBSTONE_RETENTION_DAYS = 1;
@@ -44,17 +44,31 @@ export const purgeExpiredTombstones = (
 ): {
     data: AppData;
     removedTaskTombstones: number;
+    removedProjectTombstones: number;
+    removedSectionTombstones: number;
+    removedAreaTombstones: number;
     removedAttachmentTombstones: number;
     removedPendingRemoteDeletes: number;
 } => {
     const nowMs = Date.parse(nowIso);
     if (!Number.isFinite(nowMs)) {
-        return { data, removedTaskTombstones: 0, removedAttachmentTombstones: 0, removedPendingRemoteDeletes: 0 };
+        return {
+            data,
+            removedTaskTombstones: 0,
+            removedProjectTombstones: 0,
+            removedSectionTombstones: 0,
+            removedAreaTombstones: 0,
+            removedAttachmentTombstones: 0,
+            removedPendingRemoteDeletes: 0,
+        };
     }
     const keepDays = resolveTombstoneRetentionDays(retentionDays);
     const cutoffMs = nowMs - keepDays * 24 * 60 * 60 * 1000;
 
     let removedTaskTombstones = 0;
+    let removedProjectTombstones = 0;
+    let removedSectionTombstones = 0;
+    let removedAreaTombstones = 0;
     let removedAttachmentTombstones = 0;
     const nextTasks: Task[] = [];
     for (const task of data.tasks) {
@@ -72,11 +86,35 @@ export const purgeExpiredTombstones = (
         nextTasks.push(task);
     }
 
-    const nextProjects: Project[] = data.projects.map((project) => {
+    const nextProjects: Project[] = [];
+    for (const project of data.projects) {
+        const deletedMs = parseTimestampOrInfinity(project.deletedAt);
+        if (project.deletedAt && deletedMs <= cutoffMs) {
+            removedProjectTombstones += 1;
+            continue;
+        }
         const pruned = pruneAttachmentTombstones(project.attachments, cutoffMs);
         removedAttachmentTombstones += pruned.removed;
-        return pruned.removed > 0 ? { ...project, attachments: pruned.next } : project;
-    });
+        nextProjects.push(pruned.removed > 0 ? { ...project, attachments: pruned.next } : project);
+    }
+    const nextSections: Section[] = [];
+    for (const section of data.sections) {
+        const deletedMs = parseTimestampOrInfinity(section.deletedAt);
+        if (section.deletedAt && deletedMs <= cutoffMs) {
+            removedSectionTombstones += 1;
+            continue;
+        }
+        nextSections.push(section);
+    }
+    const nextAreas: Area[] = [];
+    for (const area of data.areas) {
+        const deletedMs = parseTimestampOrInfinity(area.deletedAt);
+        if (area.deletedAt && deletedMs <= cutoffMs) {
+            removedAreaTombstones += 1;
+            continue;
+        }
+        nextAreas.push(area);
+    }
     const previousPendingRemoteDeletes = data.settings.attachments?.pendingRemoteDeletes;
     let removedPendingRemoteDeletes = 0;
     const nextPendingRemoteDeletes = previousPendingRemoteDeletes?.filter((entry) => {
@@ -106,9 +144,14 @@ export const purgeExpiredTombstones = (
             ...data,
             tasks: nextTasks,
             projects: nextProjects,
+            sections: nextSections,
+            areas: nextAreas,
             settings: nextSettings,
         },
         removedTaskTombstones,
+        removedProjectTombstones,
+        removedSectionTombstones,
+        removedAreaTombstones,
         removedAttachmentTombstones,
         removedPendingRemoteDeletes,
     };

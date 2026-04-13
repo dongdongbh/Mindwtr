@@ -1,7 +1,11 @@
-import { ArrowRight, BookOpen, CheckCircle, Clock, Trash2, User, X } from 'lucide-react';
-import { DEFAULT_PROJECT_COLOR, type Area, type Project, type Task } from '@mindwtr/core';
+import { ArrowRight, BookOpen, CheckCircle, ClipboardList, Clock, Trash2, User, X } from 'lucide-react';
+import { DEFAULT_PROJECT_COLOR, type Area, type Project, type Task, type TaskPriority } from '@mindwtr/core';
 
 import { cn } from '../lib/utils';
+import {
+    InboxProcessingScheduleFields,
+    type InboxProcessingScheduleFieldsControls,
+} from './InboxProcessingScheduleFields';
 import { ProjectSelector } from './ui/ProjectSelector';
 
 type QuickActionabilityChoice = 'actionable' | 'trash' | 'someday' | 'reference';
@@ -28,11 +32,7 @@ type InboxProcessingQuickPanelProps = {
     executionChoice: QuickExecutionChoice;
     setExecutionChoice: (value: QuickExecutionChoice) => void;
     showScheduleFields: boolean;
-    scheduleDate: string;
-    scheduleTimeDraft: string;
-    setScheduleDate: (value: string) => void;
-    setScheduleTimeDraft: (value: string) => void;
-    onScheduleTimeCommit: () => void;
+    scheduleFields: InboxProcessingScheduleFieldsControls;
     delegateWho: string;
     setDelegateWho: (value: string) => void;
     delegateFollowUp: string;
@@ -40,6 +40,15 @@ type InboxProcessingQuickPanelProps = {
     onSendDelegateRequest: () => void;
     selectedContexts: string[];
     selectedTags: string[];
+    selectedEnergyLevel?: Task['energyLevel'];
+    setSelectedEnergyLevel: (value: Task['energyLevel']) => void;
+    selectedAssignedTo: string;
+    setSelectedAssignedTo: (value: string) => void;
+    showEnergyLevelField: boolean;
+    showAssignedToField: boolean;
+    prioritiesEnabled: boolean;
+    selectedPriority?: TaskPriority;
+    setSelectedPriority: (value: TaskPriority | undefined) => void;
     onContextsInputChange: (value: string) => void;
     onTagsInputChange: (value: string) => void;
     toggleContext: (ctx: string) => void;
@@ -68,6 +77,9 @@ export type {
     QuickTwoMinuteChoice,
 };
 
+const PRIORITY_OPTIONS: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
+const ENERGY_LEVEL_OPTIONS: Array<NonNullable<Task['energyLevel']>> = ['low', 'medium', 'high'];
+
 export function InboxProcessingQuickPanel({
     t,
     processingTask,
@@ -88,11 +100,7 @@ export function InboxProcessingQuickPanel({
     executionChoice,
     setExecutionChoice,
     showScheduleFields,
-    scheduleDate,
-    scheduleTimeDraft,
-    setScheduleDate,
-    setScheduleTimeDraft,
-    onScheduleTimeCommit,
+    scheduleFields,
     delegateWho,
     setDelegateWho,
     delegateFollowUp,
@@ -100,6 +108,15 @@ export function InboxProcessingQuickPanel({
     onSendDelegateRequest,
     selectedContexts,
     selectedTags,
+    selectedEnergyLevel,
+    setSelectedEnergyLevel,
+    selectedAssignedTo,
+    setSelectedAssignedTo,
+    showEnergyLevelField,
+    showAssignedToField,
+    prioritiesEnabled,
+    selectedPriority,
+    setSelectedPriority,
     onContextsInputChange,
     onTagsInputChange,
     toggleContext,
@@ -130,7 +147,10 @@ export function InboxProcessingQuickPanel({
         <div className="bg-card border border-border rounded-xl animate-in fade-in overflow-hidden">
             <div className="flex items-center justify-between gap-3 px-5 py-3.5">
                 <div className="flex items-center gap-2.5 min-w-0">
-                    <h3 className="font-semibold text-[15px] truncate">📋 {t('process.title')}</h3>
+                    <h3 className="font-semibold text-[15px] truncate inline-flex items-center gap-2">
+                        <ClipboardList className="w-4 h-4 text-muted-foreground shrink-0" aria-hidden="true" />
+                        <span className="truncate">{t('process.title')}</span>
+                    </h3>
                     <span className="text-[11px] font-medium text-primary bg-primary/10 px-2.5 py-0.5 rounded-full shrink-0">
                         {remainingCount} {t('process.remaining')}
                     </span>
@@ -315,28 +335,11 @@ export function InboxProcessingQuickPanel({
                 {showDecisionFields ? (
                     <>
                         {showScheduleFields ? (
-                            <div className="space-y-2">
-                                <label className="text-[11px] text-muted-foreground font-medium">{t('taskEdit.startDateLabel')}</label>
-                                <div className="flex items-center gap-2">
-                                    <input
-                                        type="date"
-                                        aria-label={t('taskEdit.startDateLabel')}
-                                        value={scheduleDate}
-                                        onChange={(event) => setScheduleDate(event.target.value)}
-                                        className="flex-1 text-sm bg-muted/50 border border-border rounded px-3 py-2 text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none"
-                                    />
-                                    <input
-                                        type="text"
-                                        aria-label={t('task.aria.startTime')}
-                                        value={scheduleTimeDraft}
-                                        inputMode="numeric"
-                                        placeholder="HH:MM"
-                                        onChange={(event) => setScheduleTimeDraft(event.target.value)}
-                                        onBlur={onScheduleTimeCommit}
-                                        className="w-28 text-sm bg-muted/50 border border-border rounded px-3 py-2 text-foreground focus:ring-2 focus:ring-primary/40 focus:outline-none"
-                                    />
-                                </div>
-                            </div>
+                            <InboxProcessingScheduleFields
+                                t={t}
+                                fields={scheduleFields}
+                                variant="quick"
+                            />
                         ) : null}
 
                         <div className="space-y-3">
@@ -558,6 +561,67 @@ export function InboxProcessingQuickPanel({
                                 ) : null}
                             </div>
                         </div>
+
+                        {prioritiesEnabled ? (
+                            <div className="space-y-2">
+                                <label className="text-[11px] text-muted-foreground font-medium">{t('taskEdit.priorityLabel')}</label>
+                                <div className="flex flex-wrap gap-2">
+                                    {PRIORITY_OPTIONS.map((priority) => {
+                                        const isSelected = selectedPriority === priority;
+                                        return (
+                                            <button
+                                                key={priority}
+                                                type="button"
+                                                onClick={() => setSelectedPriority(isSelected ? undefined : priority)}
+                                                className={cn(
+                                                    'px-2.5 py-1 rounded-full text-xs font-medium transition-colors border',
+                                                    isSelected
+                                                        ? 'bg-primary text-primary-foreground border-primary'
+                                                        : 'bg-muted/40 border-border hover:bg-muted/70'
+                                                )}
+                                            >
+                                                {t(`priority.${priority}`)}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        ) : null}
+
+                        {showEnergyLevelField || showAssignedToField ? (
+                            <div className="grid gap-3 md:grid-cols-2">
+                                {showEnergyLevelField ? (
+                                    <div className="space-y-2">
+                                        <label className="text-[11px] text-muted-foreground font-medium">{t('taskEdit.energyLevel')}</label>
+                                        <select
+                                            aria-label={t('taskEdit.energyLevel')}
+                                            value={selectedEnergyLevel ?? ''}
+                                            onChange={(event) => setSelectedEnergyLevel((event.target.value || undefined) as Task['energyLevel'])}
+                                            className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
+                                        >
+                                            <option value="">{t('common.none')}</option>
+                                            {ENERGY_LEVEL_OPTIONS.map((energyLevel) => (
+                                                <option key={energyLevel} value={energyLevel}>
+                                                    {t(`energyLevel.${energyLevel}`)}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                ) : null}
+                                {showAssignedToField ? (
+                                    <div className="space-y-2">
+                                        <label className="text-[11px] text-muted-foreground font-medium">{t('taskEdit.assignedTo')}</label>
+                                        <input
+                                            aria-label={t('taskEdit.assignedTo')}
+                                            value={selectedAssignedTo}
+                                            onChange={(event) => setSelectedAssignedTo(event.target.value)}
+                                            placeholder={t('taskEdit.assignedToPlaceholder')}
+                                            className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
+                                        />
+                                    </div>
+                                ) : null}
+                            </div>
+                        ) : null}
                     </>
                 ) : null}
 
@@ -571,7 +635,6 @@ export function InboxProcessingQuickPanel({
                     <button
                         type="button"
                         onClick={() => {
-                            onScheduleTimeCommit();
                             void onSubmit();
                         }}
                         className="flex items-center gap-2 bg-primary text-primary-foreground px-6 py-2 rounded-lg text-sm font-semibold hover:bg-primary/90 transition-colors shrink-0"

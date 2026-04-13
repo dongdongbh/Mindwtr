@@ -15,6 +15,7 @@ import { loadAIKey, saveAIKey } from '../../../lib/ai-config';
 import { reportError } from '../../../lib/report-error';
 import { logWarn } from '../../../lib/app-log';
 import { markSettingsOpenTrace, measureSettingsOpenStep } from '../../../lib/settings-open-diagnostics';
+import { useUiStore } from '../../../store/ui-store';
 import {
     DEFAULT_WHISPER_MODEL,
     GEMINI_SPEECH_MODELS,
@@ -41,6 +42,7 @@ export function useAiSettings({ isTauri, settings, updateSettings, showSaved, en
     const [speechDownloadError, setSpeechDownloadError] = useState<string | null>(null);
     const [speechOfflinePath, setSpeechOfflinePath] = useState<string | null>(null);
     const [speechOfflineSize, setSpeechOfflineSize] = useState<number | null>(null);
+    const showToast = useUiStore((state) => state.showToast);
 
     const aiProvider = (settings?.ai?.provider ?? 'openai') as AIProviderId;
     const aiEnabled = settings?.ai?.enabled === true;
@@ -291,8 +293,9 @@ export function useAiSettings({ isTauri, settings, updateSettings, showSaved, en
             const message = error instanceof Error ? error.message : String(error);
             setSpeechDownloadError(message);
             setSpeechDownloadState('error');
+            showToast(`Offline model download failed: ${message}`, 'error', 6000);
         }
-    }, [isTauri, resolveWhisperPath, speechModel, updateSpeechSettings]);
+    }, [isTauri, resolveWhisperPath, showToast, speechModel, updateSpeechSettings]);
 
     const handleDeleteWhisperModel = useCallback(async () => {
         if (!speechOfflinePath) {
@@ -305,14 +308,16 @@ export function useAiSettings({ isTauri, settings, updateSettings, showSaved, en
             setSpeechOfflinePath(null);
             updateSpeechSettings({ offlineModelPath: undefined });
         } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
             void logWarn('Whisper model delete failed', {
                 scope: 'ai',
-                extra: { error: error instanceof Error ? error.message : String(error) },
+                extra: { error: message },
             });
-            setSpeechDownloadError(error instanceof Error ? error.message : String(error));
+            setSpeechDownloadError(message);
             setSpeechDownloadState('error');
+            showToast(`Offline model delete failed: ${message}`, 'error', 6000);
         }
-    }, [speechOfflinePath, updateSpeechSettings]);
+    }, [showToast, speechOfflinePath, updateSpeechSettings]);
 
     return {
         aiEnabled,

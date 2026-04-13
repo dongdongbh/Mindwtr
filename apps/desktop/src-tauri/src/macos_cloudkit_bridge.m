@@ -118,6 +118,8 @@ static const MWFieldSpec kTaskFields[] = {
     {"title",          "title",           MWFieldKindString},
     {"status",         "status",          MWFieldKindString},
     {"priority",       "priority",        MWFieldKindString},
+    {"energyLevel",    "energyLevel",     MWFieldKindString},
+    {"assignedTo",     "assignedTo",      MWFieldKindString},
     {"taskMode",       "taskMode",        MWFieldKindString},
     {"startTime",      "startTime",       MWFieldKindDate},
     {"dueDate",        "dueDate",         MWFieldKindDate},

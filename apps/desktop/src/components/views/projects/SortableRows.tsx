@@ -1,4 +1,4 @@
-import { type Area, type Project, type Task } from '@mindwtr/core';
+import { type Area, type Project, type StoreActionResult, type Task } from '@mindwtr/core';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, Trash2 } from 'lucide-react';
@@ -8,8 +8,8 @@ import { AreaColorPicker } from './AreaColorPicker';
 type AreaRowProps = {
     area: Area;
     onDelete: (areaId: string) => void;
-    onUpdateName: (areaId: string, name: string) => Promise<void> | void;
-    onUpdateColor: (areaId: string, color: string) => Promise<void> | void;
+    onUpdateName: (areaId: string, name: string) => Promise<StoreActionResult> | void;
+    onUpdateColor: (areaId: string, color: string) => Promise<StoreActionResult> | void;
     t: (key: string) => string;
 };
 

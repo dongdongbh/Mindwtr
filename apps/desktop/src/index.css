@@ -2,6 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Z-INDEX SCALE
+ *   z-10  — inline overlays anchored to a relative parent (action buttons, floating labels)
+ *   z-20  — popovers and dropdowns (AreaSelector, ProjectSelector, SectionSelector)
+ *   z-50  — modals, global search, toast host, skip-link
+ *   z-70  — modal-over-modal (ExpandedMarkdownEditor opened from another modal)
+ * New overlays should pick from this scale, not invent new values.
+ *
+ * MODAL BACKDROP
+ *   Use bg-black/50 for modal backdrops. Do not pick new opacities.
+ */
+
 @layer base {
   :root {
     color-scheme: light;
@@ -14,7 +26,7 @@
     --popover: 0 0% 100%;
     --popover-foreground: 222.2 84% 4.9%;
 
-    --primary: 222.2 47.4% 11.2%;
+    --primary: 217 91% 50%;
     --primary-foreground: 210 40% 98%;
 
     --secondary: 210 40% 96.1%;
@@ -31,7 +43,7 @@
 
     --border: 240 5.9% 85%;
     --input: 240 5.9% 85%;
-    --ring: 222.2 84% 4.9%;
+    --ring: 217 91% 50%;
 
     --status-inbox: 217 91% 60%;
     --status-next: 142 70% 40%;
@@ -56,6 +68,7 @@
     --badge-info-fg: 220 10% 30%;
 
     --radius: 0.5rem;
+    --mindwtr-text-scale: 1;
   }
 
   .dark {
@@ -251,15 +264,55 @@
     @apply border-border;
   }
 
+  /*
+   * Default keyboard-only focus ring. Mouse clicks don't trigger :focus-visible,
+   * so this is invisible to pointer users but ensures every interactive element
+   * is discoverable via Tab. Components can override by styling :focus-visible
+   * locally — the !important is avoided so overrides stay easy.
+   */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
   html {
-    font-size: 16px;
+    font-size: calc(16px * var(--mindwtr-text-scale));
     /* Ensure consistent sizing on WebKitGTK */
+  }
+
+  html[data-text-size='default'] {
+    --mindwtr-text-scale: 1;
+  }
+
+  html[data-text-size='large'] {
+    --mindwtr-text-scale: 1.125;
+  }
+
+  html[data-text-size='extra-large'] {
+    --mindwtr-text-scale: 1.25;
   }
 
   html,
   body,
   #root {
     height: 100%;
+  }
+
+  html[data-text-size] .text-\[10px\] {
+    font-size: calc(10px * var(--mindwtr-text-scale));
+  }
+
+  html[data-text-size] .text-\[11px\] {
+    font-size: calc(11px * var(--mindwtr-text-scale));
+  }
+
+  html[data-text-size] .text-\[13px\] {
+    font-size: calc(13px * var(--mindwtr-text-scale));
+  }
+
+  html[data-text-size] .text-\[15px\] {
+    font-size: calc(15px * var(--mindwtr-text-scale));
   }
 
   body {

@@ -4,6 +4,9 @@ import { logError } from './app-log';
 
 type ReportErrorOptions = {
     category?: 'network' | 'validation' | 'permissions' | 'storage' | 'sync' | 'unknown';
+    extra?: Record<string, unknown>;
+    scope?: string;
+    step?: string;
     toast?: boolean;
 };
 
@@ -15,5 +18,9 @@ export const reportError = (label: string, error: unknown, options?: ReportError
     if (options?.toast !== false) {
         useUiStore.getState().showToast(fullMessage, 'error');
     }
-    void logError(error, { scope: 'ui', step: label });
+    void logError(error, {
+        scope: options?.scope ?? 'ui',
+        step: options?.step ?? label,
+        extra: options?.extra,
+    });
 };

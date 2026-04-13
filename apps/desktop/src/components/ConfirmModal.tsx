@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { Button } from './ui/Button';
 
 interface ConfirmModalProps {
     isOpen: boolean;
@@ -100,21 +101,12 @@ export function ConfirmModal({
                     )}
                 </div>
                 <div className="p-4 flex justify-end gap-2">
-                    <button
-                        type="button"
-                        onClick={onCancel}
-                        className="px-3 py-1.5 rounded-md text-sm bg-muted hover:bg-muted/80"
-                    >
+                    <Button variant="secondary" onClick={onCancel}>
                         {cancelLabel}
-                    </button>
-                    <button
-                        ref={confirmRef}
-                        type="button"
-                        onClick={onConfirm}
-                        className="px-3 py-1.5 rounded-md text-sm bg-primary text-primary-foreground hover:bg-primary/90"
-                    >
+                    </Button>
+                    <Button ref={confirmRef} onClick={onConfirm}>
                         {confirmLabel}
-                    </button>
+                    </Button>
                 </div>
             </div>
         </div>

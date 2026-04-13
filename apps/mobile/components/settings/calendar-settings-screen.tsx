@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { generateUUID, type ExternalCalendarSubscription, useTaskStore } from '@mindwtr/core';
@@ -16,6 +16,7 @@ import {
     type SystemCalendarInfo,
     type SystemCalendarPermissionStatus,
 } from '@/lib/external-calendar';
+import { useToast } from '@/contexts/toast-context';
 import { maskCalendarUrl } from '@/lib/settings-utils';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 
@@ -25,6 +26,7 @@ import { styles } from './settings.styles';
 
 export function CalendarSettingsScreen() {
     const tc = useThemeColors();
+    const { showToast } = useToast();
     const { isChineseLanguage, localize, t } = useSettingsLocalization();
     const { settings, updateSettings } = useTaskStore();
     const scrollContentStyle = useSettingsScrollContent();
@@ -77,10 +79,16 @@ export function CalendarSettingsScreen() {
             });
         } catch (error) {
             console.error(error);
+            showToast({
+                title: localize('Error', '错误'),
+                message: localize('Failed to load device calendar settings', '加载系统日历设置失败'),
+                tone: 'warning',
+                durationMs: 4200,
+            });
         } finally {
             setIsSystemCalendarLoading(false);
         }
-    }, []);
+    }, [localize, showToast]);
 
     useEffect(() => {
         void loadSystemCalendarState();
@@ -102,13 +110,19 @@ export function CalendarSettingsScreen() {
                 setExternalCalendars(stored);
             } catch (error) {
                 console.error(error);
+                showToast({
+                    title: localize('Error', '错误'),
+                    message: localize('Failed to load saved calendars', '加载已保存的日历失败'),
+                    tone: 'warning',
+                    durationMs: 4200,
+                });
             }
         };
         void load();
         return () => {
             cancelled = true;
         };
-    }, [settings.externalCalendars]);
+    }, [localize, settings.externalCalendars, showToast]);
 
     const persistSystemCalendarState = async (next: {
         enabled?: boolean;
@@ -185,13 +199,18 @@ export function CalendarSettingsScreen() {
             const rangeStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
             const rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
             const { events } = await fetchExternalCalendarEvents(rangeStart, rangeEnd);
-            Alert.alert(
-                localize('Success', '成功'),
-                isChineseLanguage ? `已加载 ${events.length} 个日程` : `Loaded ${events.length} events`
-            );
+            showToast({
+                title: localize('Success', '成功'),
+                message: isChineseLanguage ? `已加载 ${events.length} 个日程` : `Loaded ${events.length} events`,
+                tone: 'success',
+            });
         } catch (error) {
             console.error(error);
-            Alert.alert(localize('Error', '错误'), localize('Failed to load events', '加载失败'));
+            showToast({
+                title: localize('Error', '错误'),
+                message: localize('Failed to load events', '加载失败'),
+                tone: 'warning',
+            });
         }
     };
 

@@ -68,9 +68,9 @@ describe('widget-data', () => {
             ...baseData,
             tasks: [
                 {
-                    id: 'inbox-due',
-                    title: 'Inbox due today',
-                    status: 'inbox',
+                    id: 'next-due',
+                    title: 'Next due today',
+                    status: 'next',
                     dueDate: '2000-01-01',
                     tags: [],
                     contexts: [],
@@ -99,10 +99,10 @@ describe('widget-data', () => {
             ],
         };
         const payload = buildWidgetPayload(data, 'en');
-        expect(payload.items.map((item) => item.id)).toEqual(['inbox-due', 'next-now']);
+        expect(payload.items.map((item) => item.id)).toEqual(['next-due', 'next-now']);
     });
 
-    it('keeps focused tasks even when start time is in the future', () => {
+    it('keeps future-start tasks out of the widget payload even when focused', () => {
         const created = new Date().toISOString();
         const future = '2999-01-01T09:00:00.000Z';
         const data: AppData = {
@@ -133,7 +133,7 @@ describe('widget-data', () => {
             ],
         };
         const payload = buildWidgetPayload(data, 'en');
-        expect(payload.items.map((item) => item.id)).toEqual(['focus-future']);
+        expect(payload.items).toHaveLength(0);
     });
 
     it('orders focused tasks using task sort setting before taking top three', () => {

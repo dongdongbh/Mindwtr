@@ -1,11 +1,12 @@
 import { Directory, File, Paths } from 'expo-file-system';
-import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import { AudioPcmStreamAdapter } from 'whisper.rn/realtime-transcription/adapters/AudioPcmStreamAdapter.js';
-import { RealtimeTranscriber, type RealtimeTranscriberEvent } from 'whisper.rn/realtime-transcription/index.js';
 import type { AudioCaptureMode, AudioFieldStrategy } from '@mindwtr/core';
 import { logInfo, logWarn } from './app-log';
-import { buildMultipartAudioPart } from './speech-to-text.helpers';
+import {
+  buildMultipartAudioPart,
+  normalizeAudioUri,
+  normalizeAudioUriForFileRead,
+} from './speech-to-text.helpers';
 
 type SpeechProvider = 'openai' | 'gemini' | 'whisper';
 
@@ -50,9 +51,12 @@ const OPENAI_TRANSCRIBE_URL = 'https://api.openai.com/v1/audio/transcriptions';
 const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
-const IS_EXPO_GO = Constants.appOwnership === 'expo';
 const WHISPER_ANDROID_MAX_THREADS = 1;
 const WHISPER_ANDROID_N_PROCESSORS = 1;
+
+type ExpoConstantsLike = {
+  appOwnership?: string | null;
+};
 
 type WhisperContextLike = {
   transcribe: (uri: string, options?: Record<string, unknown>) => { promise: Promise<unknown> };
@@ -62,10 +66,48 @@ type WhisperContextLike = {
   ) => { stop: () => Promise<void>; promise: Promise<unknown> };
 };
 
+type WhisperRealtimeEventLike = {
+  data?: unknown;
+  sliceIndex?: number;
+};
+
+type AudioPcmStreamAdapterLike = object;
+
+type AudioPcmStreamAdapterConstructor = new () => AudioPcmStreamAdapterLike;
+
+type RealtimeTranscriberLike = {
+  start: () => Promise<void>;
+  stop: () => Promise<void>;
+  release: () => Promise<void>;
+};
+
+type RealtimeTranscriberConstructor = new (
+  dependencies: {
+    whisperContext: WhisperContextLike;
+    audioStream: AudioPcmStreamAdapterLike;
+    fs: RNFSModule;
+  },
+  options: Record<string, unknown>,
+  handlers: {
+    onBeginTranscribe?: () => Promise<boolean>;
+    onTranscribe?: (event: WhisperRealtimeEventLike) => void;
+    onError?: (error: string) => void;
+    onStatusChange?: (isActive: boolean) => void;
+  }
+) => RealtimeTranscriberLike;
+
 let whisperContextCache: { modelPath: string; context: WhisperContextLike } | null = null;
 let whisperNativeLogEnabled = false;
 type WhisperModule = typeof import('whisper.rn');
 let whisperModuleCache: WhisperModule | null = null;
+let expoConstantsCache: ExpoConstantsLike | null | undefined;
+let whisperRealtimeModuleCache:
+  | {
+    AudioPcmStreamAdapter: AudioPcmStreamAdapterConstructor;
+    RealtimeTranscriber: RealtimeTranscriberConstructor;
+  }
+  | null
+  | undefined;
 
 type RNFSModule = typeof import('react-native-fs');
 let rnfsModuleCache: RNFSModule | null | undefined;
@@ -125,6 +167,55 @@ const getWhisperModule = () => {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Whisper module unavailable: ${message}`);
+  }
+};
+
+const getExpoConstants = (): ExpoConstantsLike | null => {
+  if (expoConstantsCache !== undefined) return expoConstantsCache;
+  try {
+    // Delay loading expo-constants so non-Expo test environments can import this module.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const mod = require('expo-constants') as { default?: ExpoConstantsLike } | undefined;
+    expoConstantsCache = mod?.default ?? null;
+    return expoConstantsCache;
+  } catch {
+    expoConstantsCache = null;
+    return null;
+  }
+};
+
+const isExpoGo = (): boolean => getExpoConstants()?.appOwnership === 'expo';
+
+const getWhisperRealtimeModule = () => {
+  if (whisperRealtimeModuleCache !== undefined) return whisperRealtimeModuleCache;
+  try {
+    const localRequire = typeof require === 'function' ? require : null;
+    if (!localRequire) {
+      whisperRealtimeModuleCache = null;
+      return null;
+    }
+    // Delay loading Whisper realtime modules so generic task-edit tests can import this file
+    // without a native audio stream implementation in the environment.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const adapterModule = localRequire(
+      'whisper.rn/realtime-transcription/adapters/AudioPcmStreamAdapter.js'
+    ) as { AudioPcmStreamAdapter?: AudioPcmStreamAdapterConstructor } | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const realtimeModule = localRequire(
+      'whisper.rn/realtime-transcription/index.js'
+    ) as { RealtimeTranscriber?: RealtimeTranscriberConstructor } | undefined;
+    if (!adapterModule?.AudioPcmStreamAdapter || !realtimeModule?.RealtimeTranscriber) {
+      whisperRealtimeModuleCache = null;
+      return null;
+    }
+    whisperRealtimeModuleCache = {
+      AudioPcmStreamAdapter: adapterModule.AudioPcmStreamAdapter,
+      RealtimeTranscriber: realtimeModule.RealtimeTranscriber,
+    };
+    return whisperRealtimeModuleCache;
+  } catch {
+    whisperRealtimeModuleCache = null;
+    return null;
   }
 };
 
@@ -300,10 +391,12 @@ const buildOpenAIMultipartPayload = async (
   fileName?: string;
   meta: Record<string, string>;
 }> => {
-  const file = new File(audioUri);
-  const name = file.name || `audio${getExtension(audioUri)}`;
-  const type = file.type || getMimeType(audioUri);
-  const uriScheme = audioUri.split(':')[0] || 'unknown';
+  const uploadUri = normalizeAudioUri(audioUri);
+  const fileReadUri = normalizeAudioUriForFileRead(audioUri);
+  const file = new File(fileReadUri);
+  const name = file.name || `audio${getExtension(uploadUri)}`;
+  const type = file.type || getMimeType(uploadUri);
+  const uriScheme = uploadUri.split(':')[0] || 'unknown';
   const baseMeta = {
     strategy,
     uriScheme,
@@ -311,7 +404,7 @@ const buildOpenAIMultipartPayload = async (
     mimeType: type,
     fileExists: String(Boolean(file.exists)),
     fileSize: String(typeof file.size === 'number' ? file.size : 0),
-    expoGo: String(IS_EXPO_GO),
+    expoGo: String(isExpoGo()),
   };
 
   if (strategy === 'blob') {
@@ -324,7 +417,7 @@ const buildOpenAIMultipartPayload = async (
       );
     }
     const { part, fileName } = buildMultipartAudioPart({
-      uri: audioUri,
+      uri: uploadUri,
       name,
       type,
       bytes,
@@ -343,7 +436,7 @@ const buildOpenAIMultipartPayload = async (
   }
 
   return {
-    part: { uri: audioUri, name, type },
+    part: { uri: uploadUri, name, type },
     meta: baseMeta,
   };
 };
@@ -353,7 +446,7 @@ const transcribeOpenAI = async (audioUri: string, config: SpeechToTextConfig) =>
     throw new Error('OpenAI API key missing');
   }
   const language = resolveLanguage(config.language);
-  const strategies: OpenAIUploadStrategy[] = IS_EXPO_GO ? ['uri', 'blob'] : ['blob', 'uri'];
+  const strategies: OpenAIUploadStrategy[] = isExpoGo() ? ['uri', 'blob'] : ['blob', 'uri'];
   let lastError: unknown = null;
 
   for (let index = 0; index < strategies.length; index += 1) {
@@ -420,7 +513,7 @@ const transcribeOpenAI = async (audioUri: string, config: SpeechToTextConfig) =>
           language,
           attempt: String(index + 1),
           strategy,
-          expoGo: String(IS_EXPO_GO),
+          expoGo: String(isExpoGo()),
           audioUri,
           error: message,
         },
@@ -431,7 +524,7 @@ const transcribeOpenAI = async (audioUri: string, config: SpeechToTextConfig) =>
           extra: {
             currentStrategy: strategy,
             nextStrategy: strategies[index + 1],
-            expoGo: String(IS_EXPO_GO),
+            expoGo: String(isExpoGo()),
           },
         });
       }
@@ -566,10 +659,12 @@ const requestGemini = async (audioUri: string, config: SpeechToTextConfig, promp
     now,
     timeZone: config.timeZone,
   });
-  const file = new File(audioUri);
+  const normalizedUri = normalizeAudioUri(audioUri);
+  const fileReadUri = normalizeAudioUriForFileRead(audioUri);
+  const file = new File(fileReadUri);
   const bytes = await file.bytes();
   const base64Audio = bytesToBase64(bytes);
-  const mimeType = getMimeType(audioUri);
+  const mimeType = getMimeType(normalizedUri);
   const url = `${GEMINI_BASE_URL}/${config.model}:generateContent`;
   const body = {
     contents: [
@@ -1005,8 +1100,12 @@ export const startWhisperRealtimeCapture = async (
   audioOutputPath: string,
   config: SpeechToTextConfig
 ): Promise<WhisperRealtimeHandle> => {
-  if (IS_EXPO_GO) {
+  if (isExpoGo()) {
     throw new Error('On-device Whisper requires a dev build or production build (not Expo Go).');
+  }
+  const whisperRealtime = getWhisperRealtimeModule();
+  if (!whisperRealtime) {
+    throw new Error('Whisper realtime transcription requires native audio stream modules.');
   }
   const RNFS = getRNFSModule();
   if (!RNFS) {
@@ -1043,7 +1142,7 @@ export const startWhisperRealtimeCapture = async (
     },
   });
 
-  const audioStream = new AudioPcmStreamAdapter();
+  const audioStream = new whisperRealtime.AudioPcmStreamAdapter();
   const enableRealtimeTranscript = Platform.OS !== 'android';
   const transcriptBySlice = new Map<number, string>();
   let completed = false;
@@ -1089,13 +1188,13 @@ export const startWhisperRealtimeCapture = async (
     resolveResult({ transcript: text });
   };
 
-  const realtime = new RealtimeTranscriber(
+  const realtime = new whisperRealtime.RealtimeTranscriber(
     { whisperContext: context, audioStream, fs: RNFS },
     options,
     {
       onBeginTranscribe: enableRealtimeTranscript ? undefined : async () => false,
       onTranscribe: enableRealtimeTranscript
-        ? (event: RealtimeTranscriberEvent) => {
+        ? (event: WhisperRealtimeEventLike) => {
           if (completed) return;
           const nextText = extractWhisperText(event.data ?? {}).trim();
           if (!nextText) return;
@@ -1163,14 +1262,14 @@ export const preloadWhisperContext = async (config: {
   model?: string;
   modelPath?: string;
 }): Promise<void> => {
-  if (IS_EXPO_GO) return;
+  if (isExpoGo()) return;
   const resolved = ensureWhisperModelPathForConfig(config.model, config.modelPath);
   if (!resolved.exists) return;
   await getWhisperContext(resolved.path, config.model);
 };
 
 const transcribeWhisper = async (audioUri: string, config: SpeechToTextConfig) => {
-  if (IS_EXPO_GO) {
+  if (isExpoGo()) {
     throw new Error('On-device Whisper requires a dev build or production build (not Expo Go).');
   }
   const resolved = ensureWhisperModelPathForConfig(config.model, config.modelPath);

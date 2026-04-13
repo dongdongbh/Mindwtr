@@ -1,16 +1,23 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Maximize2, X } from 'lucide-react';
 import {
+    applyMarkdownToolbarAction,
     buildRRuleString,
+    continueMarkdownOnEnter,
     hasTimeComponent,
     parseRRuleString,
     resolveAutoTextDirection,
     safeFormatDate,
     safeParseDate,
     type Attachment,
+    type MarkdownSelection,
+    type MarkdownToolbarActionId,
+    type MarkdownToolbarResult,
     type RecurrenceRule,
     type RecurrenceStrategy,
     type Task,
     type TaskEditorFieldId,
+    type TaskEnergyLevel,
     type TaskPriority,
     type TaskStatus,
     type TimeEstimate,
@@ -19,6 +26,8 @@ import {
 import { cn } from '../../lib/utils';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ExpandedMarkdownEditor } from '../ExpandedMarkdownEditor';
+import { MarkdownFormatToolbar } from '../MarkdownFormatToolbar';
 import { WeekdaySelector } from './TaskForm/WeekdaySelector';
 import { AttachmentsField } from './TaskForm/AttachmentsField';
 import { ChecklistField } from './TaskForm/ChecklistField';
@@ -43,6 +52,8 @@ export type TaskItemFieldRendererData = {
     editReviewAt: string;
     editStatus: TaskStatus;
     editPriority: TaskPriority | '';
+    editEnergyLevel: NonNullable<TaskEnergyLevel> | '';
+    editAssignedTo: string;
     editRecurrence: RecurrenceRule | '';
     editRecurrenceStrategy: RecurrenceStrategy;
     editRecurrenceRRule: string;
@@ -67,6 +78,8 @@ export type TaskItemFieldRendererHandlers = {
     setEditReviewAt: (value: string) => void;
     setEditStatus: (value: TaskStatus) => void;
     setEditPriority: (value: TaskPriority | '') => void;
+    setEditEnergyLevel: (value: NonNullable<TaskEnergyLevel> | '') => void;
+    setEditAssignedTo: (value: string) => void;
     setEditRecurrence: (value: RecurrenceRule | '') => void;
     setEditRecurrenceStrategy: (value: RecurrenceStrategy) => void;
     setEditRecurrenceRRule: (value: string) => void;
@@ -102,6 +115,8 @@ export function TaskItemFieldRenderer({
         editReviewAt,
         editStatus,
         editPriority,
+        editEnergyLevel,
+        editAssignedTo,
         editRecurrence,
         editRecurrenceStrategy,
         editRecurrenceRRule,
@@ -115,12 +130,28 @@ export function TaskItemFieldRenderer({
     } = data;
 
     const [reviewTimeDraft, setReviewTimeDraft] = useState('');
+    const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+    const descriptionTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const descriptionSelectionRef = useRef<MarkdownSelection>({
+        start: editDescription.length,
+        end: editDescription.length,
+    });
+    const descriptionUndoRef = useRef<Array<{ value: string; selection: MarkdownSelection }>>([]);
+    const [descriptionUndoDepth, setDescriptionUndoDepth] = useState(0);
     useEffect(() => {
         const parsed = editReviewAt ? safeParseDate(editReviewAt) : null;
         const hasTime = hasTimeComponent(editReviewAt);
         const next = hasTime && parsed ? safeFormatDate(parsed, 'HH:mm') : '';
         setReviewTimeDraft(next);
     }, [editReviewAt]);
+    useEffect(() => {
+        descriptionSelectionRef.current = {
+            start: editDescription.length,
+            end: editDescription.length,
+        };
+        descriptionUndoRef.current = [];
+        setDescriptionUndoDepth(0);
+    }, [taskId]);
     const {
         toggleDescriptionPreview,
         setEditDescription,
@@ -133,6 +164,8 @@ export function TaskItemFieldRenderer({
         setEditReviewAt,
         setEditStatus,
         setEditPriority,
+        setEditEnergyLevel,
+        setEditAssignedTo,
         setEditRecurrence,
         setEditRecurrenceStrategy,
         setEditRecurrenceRRule,
@@ -146,6 +179,138 @@ export function TaskItemFieldRenderer({
 
     const resolvedDirection = resolveAutoTextDirection([task.title, editDescription].filter(Boolean).join(' '), language);
     const isRtl = resolvedDirection === 'rtl';
+    const pushDescriptionUndoEntry = (value: string, selection: MarkdownSelection) => {
+        const previousEntry = descriptionUndoRef.current[descriptionUndoRef.current.length - 1];
+        if (
+            previousEntry
+            && previousEntry.value === value
+            && previousEntry.selection.start === selection.start
+            && previousEntry.selection.end === selection.end
+        ) {
+            return;
+        }
+        const nextUndoEntries = [...descriptionUndoRef.current, { value, selection }];
+        descriptionUndoRef.current = nextUndoEntries.length > 100
+            ? nextUndoEntries.slice(nextUndoEntries.length - 100)
+            : nextUndoEntries;
+        setDescriptionUndoDepth(descriptionUndoRef.current.length);
+    };
+    const applyDescriptionValue = (
+        value: string,
+        options?: {
+            nextSelection?: MarkdownSelection;
+            recordUndo?: boolean;
+            baseSelection?: MarkdownSelection;
+        },
+    ) => {
+        if ((options?.recordUndo ?? true) && value !== editDescription) {
+            pushDescriptionUndoEntry(editDescription, options?.baseSelection ?? descriptionSelectionRef.current);
+        }
+        setEditDescription(value);
+        if (options?.nextSelection) {
+            descriptionSelectionRef.current = options.nextSelection;
+        }
+    };
+    const handleDescriptionUndo = () => {
+        const previousEntry = descriptionUndoRef.current[descriptionUndoRef.current.length - 1];
+        if (!previousEntry) return undefined;
+        descriptionUndoRef.current = descriptionUndoRef.current.slice(0, -1);
+        setDescriptionUndoDepth(descriptionUndoRef.current.length);
+        applyDescriptionValue(previousEntry.value, {
+            nextSelection: previousEntry.selection,
+            recordUndo: false,
+        });
+        return previousEntry.selection;
+    };
+    const handleDescriptionApplyAction = (actionId: MarkdownToolbarActionId, selection: MarkdownSelection): MarkdownToolbarResult => {
+        const next = applyMarkdownToolbarAction(editDescription, selection, actionId);
+        applyDescriptionValue(next.value, {
+            baseSelection: selection,
+            nextSelection: next.selection,
+        });
+        return next;
+    };
+    const handleDescriptionKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+        const lowerKey = event.key.toLowerCase();
+        if ((event.metaKey || event.ctrlKey) && !event.altKey) {
+            if (lowerKey !== 'z') return;
+            if (descriptionUndoRef.current.length === 0) return;
+            event.preventDefault();
+            handleDescriptionUndo();
+            return;
+        }
+
+        if (event.key !== 'Enter' || event.shiftKey || event.altKey) return;
+        const currentValue = event.currentTarget.value;
+        const selection = {
+            start: event.currentTarget.selectionStart ?? currentValue.length,
+            end: event.currentTarget.selectionEnd ?? currentValue.length,
+        };
+        const next = continueMarkdownOnEnter(currentValue, selection);
+        if (!next) return;
+
+        event.preventDefault();
+        applyDescriptionValue(next.value, {
+            baseSelection: selection,
+            nextSelection: next.selection,
+        });
+        descriptionSelectionRef.current = next.selection;
+        requestAnimationFrame(() => {
+            descriptionTextareaRef.current?.focus();
+            descriptionTextareaRef.current?.setSelectionRange(next.selection.start, next.selection.end);
+        });
+    };
+    const clearText = t('common.clear') === 'common.clear' ? 'Clear' : t('common.clear');
+    const dateInputClassName = 'min-w-0 flex-1 text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground';
+    const timeInputClassName = 'w-24 shrink-0 text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground';
+    const renderClearButton = (label: string, onClear: () => void, isVisible: boolean) => {
+        if (!isVisible) {
+            return <span aria-hidden="true" className="h-7 w-7 shrink-0" />;
+        }
+
+        return (
+            <button
+                type="button"
+                onClick={onClear}
+                className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                aria-label={`${clearText} ${label}`}
+            >
+                <X className="h-4 w-4" />
+            </button>
+        );
+    };
+    const renderDateField = ({
+        label,
+        dateAriaLabel,
+        dateValue,
+        onDateChange,
+        timeInput,
+        onClear,
+        hasValue,
+    }: {
+        label: string;
+        dateAriaLabel: string;
+        dateValue: string;
+        onDateChange: (value: string) => void;
+        timeInput: ReactNode;
+        onClear: () => void;
+        hasValue: boolean;
+    }) => (
+        <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted-foreground font-medium">{label}</label>
+            <div className="flex w-full max-w-[min(22rem,100%)] items-center gap-2">
+                <input
+                    type="date"
+                    aria-label={dateAriaLabel}
+                    value={dateValue}
+                    onChange={(event) => onDateChange(event.target.value)}
+                    className={dateInputClassName}
+                />
+                {timeInput}
+                {renderClearButton(label, onClear, hasValue)}
+            </div>
+        </div>
+    );
 
     switch (fieldId) {
         case 'description':
@@ -153,13 +318,23 @@ export function TaskItemFieldRenderer({
                 <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between">
                         <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.descriptionLabel')}</label>
-                        <button
-                            type="button"
-                            onClick={toggleDescriptionPreview}
-                            className="text-xs px-2 py-1 rounded bg-muted/50 hover:bg-muted transition-colors text-muted-foreground"
-                        >
-                            {showDescriptionPreview ? t('markdown.edit') : t('markdown.preview')}
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={toggleDescriptionPreview}
+                                className="text-xs px-2 py-1 rounded bg-muted/50 hover:bg-muted transition-colors text-muted-foreground"
+                            >
+                                {showDescriptionPreview ? t('markdown.edit') : t('markdown.preview')}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setDescriptionExpanded(true)}
+                                className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                aria-label={t('markdown.expand')}
+                            >
+                                <Maximize2 className="h-4 w-4" />
+                            </button>
+                        </div>
                     </div>
                     {showDescriptionPreview ? (
                         <div className={cn("text-xs bg-muted/30 border border-border rounded px-2 py-2", isRtl && "text-right")} dir={resolvedDirection}>
@@ -222,21 +397,63 @@ export function TaskItemFieldRenderer({
                             </ReactMarkdown>
                         </div>
                     ) : (
-                        <AutosizeTextarea
-                            aria-label={t('task.aria.description')}
-                            value={editDescription}
-                            onChange={(e) => setEditDescription(e.target.value)}
-                            minHeight={112}
-                            focusedMinHeight={208}
-                            maxHeight={480}
-                            className={cn(
-                                "w-full text-sm leading-6 bg-muted/50 border border-border rounded px-3 py-2 resize-none transition-[border-color,box-shadow] focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40",
-                                isRtl && "text-right"
-                            )}
-                            placeholder={t('taskEdit.descriptionPlaceholder')}
-                            dir={resolvedDirection}
-                        />
+                        <div className="flex flex-col gap-2">
+                            <MarkdownFormatToolbar
+                                textareaRef={descriptionTextareaRef}
+                                t={t}
+                                canUndo={descriptionUndoDepth > 0}
+                                onUndo={handleDescriptionUndo}
+                                onApplyAction={handleDescriptionApplyAction}
+                            />
+                            <AutosizeTextarea
+                                ref={descriptionTextareaRef}
+                                aria-label={t('task.aria.description')}
+                                value={editDescription}
+                                onChange={(event) => {
+                                    applyDescriptionValue(event.target.value);
+                                    descriptionSelectionRef.current = {
+                                        start: event.currentTarget.selectionStart ?? event.currentTarget.value.length,
+                                        end: event.currentTarget.selectionEnd ?? event.currentTarget.value.length,
+                                    };
+                                }}
+                                onSelect={(event) => {
+                                    descriptionSelectionRef.current = {
+                                        start: event.currentTarget.selectionStart ?? event.currentTarget.value.length,
+                                        end: event.currentTarget.selectionEnd ?? event.currentTarget.value.length,
+                                    };
+                                }}
+                                onKeyDown={handleDescriptionKeyDown}
+                                minHeight={112}
+                                focusedMinHeight={208}
+                                maxHeight={480}
+                                className={cn(
+                                    "w-full text-sm leading-6 bg-muted/50 border border-border rounded px-3 py-2 resize-none transition-[border-color,box-shadow] focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40",
+                                    isRtl && "text-right"
+                                )}
+                                placeholder={t('taskEdit.descriptionPlaceholder')}
+                                dir={resolvedDirection}
+                            />
+                        </div>
                     )}
+                    <ExpandedMarkdownEditor
+                        isOpen={descriptionExpanded}
+                        onClose={() => setDescriptionExpanded(false)}
+                        value={editDescription}
+                        onChange={applyDescriptionValue}
+                        title={t('taskEdit.descriptionLabel')}
+                        headerTitle={task.title?.trim() || t('taskEdit.descriptionLabel')}
+                        placeholder={t('taskEdit.descriptionPlaceholder')}
+                        t={t}
+                        initialMode="edit"
+                        direction={resolvedDirection}
+                        canUndo={descriptionUndoDepth > 0}
+                        onUndo={handleDescriptionUndo}
+                        onApplyAction={handleDescriptionApplyAction}
+                        onSelectionChange={(selection) => {
+                            descriptionSelectionRef.current = selection;
+                        }}
+                        onEditorKeyDown={handleDescriptionKeyDown}
+                    />
                 </div>
             );
         case 'attachments':
@@ -278,27 +495,23 @@ export function TaskItemFieldRenderer({
                     const datePart = dateValue || safeFormatDate(new Date(), 'yyyy-MM-dd');
                     setEditStartTime(`${datePart}T${value}`);
                 };
-                return (
-                    <div className="flex flex-col gap-1">
-                        <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.startDateLabel')}</label>
-                        <div className="flex items-center gap-2">
-                            <input
-                                type="date"
-                                aria-label={t('task.aria.startDate')}
-                                value={dateValue}
-                                onChange={(e) => handleDateChange(e.target.value)}
-                                className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
-                            />
-                            <input
-                                type="time"
-                                aria-label={t('task.aria.startTime')}
-                                value={timeValue}
-                                onChange={(e) => handleTimeChange(e.target.value)}
-                                className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
-                            />
-                        </div>
-                    </div>
-                );
+                return renderDateField({
+                    label: t('taskEdit.startDateLabel'),
+                    dateAriaLabel: t('task.aria.startDate'),
+                    dateValue,
+                    onDateChange: handleDateChange,
+                    timeInput: (
+                        <input
+                            type="time"
+                            aria-label={t('task.aria.startTime')}
+                            value={timeValue}
+                            onChange={(event) => handleTimeChange(event.target.value)}
+                            className={timeInputClassName}
+                        />
+                    ),
+                    onClear: () => setEditStartTime(''),
+                    hasValue: Boolean(editStartTime),
+                });
             }
         case 'dueDate':
             {
@@ -327,27 +540,23 @@ export function TaskItemFieldRenderer({
                     const datePart = dateValue || safeFormatDate(new Date(), 'yyyy-MM-dd');
                     setEditDueDate(`${datePart}T${value}`);
                 };
-                return (
-                    <div className="flex flex-col gap-1">
-                        <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.dueDateLabel')}</label>
-                        <div className="flex items-center gap-2">
-                            <input
-                                type="date"
-                                aria-label={t('task.aria.dueDate')}
-                                value={dateValue}
-                                onChange={(e) => handleDateChange(e.target.value)}
-                                className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
-                            />
-                            <input
-                                type="time"
-                                aria-label={t('task.aria.dueTime')}
-                                value={timeValue}
-                                onChange={(e) => handleTimeChange(e.target.value)}
-                                className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
-                            />
-                        </div>
-                    </div>
-                );
+                return renderDateField({
+                    label: t('taskEdit.dueDateLabel'),
+                    dateAriaLabel: t('task.aria.dueDate'),
+                    dateValue,
+                    onDateChange: handleDateChange,
+                    timeInput: (
+                        <input
+                            type="time"
+                            aria-label={t('task.aria.dueTime')}
+                            value={timeValue}
+                            onChange={(event) => handleTimeChange(event.target.value)}
+                            className={timeInputClassName}
+                        />
+                    ),
+                    onClear: () => setEditDueDate(''),
+                    hasValue: Boolean(editDueDate),
+                });
             }
         case 'reviewAt':
             {
@@ -401,38 +610,34 @@ export function TaskItemFieldRenderer({
                     const datePart = dateValue || safeFormatDate(new Date(), 'yyyy-MM-dd');
                     setEditReviewAt(`${datePart}T${value}`);
                 };
-                return (
-                    <div className="flex flex-col gap-1">
-                        <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.reviewDateLabel')}</label>
-                        <div className="flex items-center gap-2">
-                            <input
-                                type="date"
-                                aria-label={t('task.aria.reviewDate')}
-                                value={dateValue}
-                                onChange={(e) => handleDateChange(e.target.value)}
-                                className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
-                            />
-                            <input
-                                type="text"
-                                aria-label={t('task.aria.reviewTime')}
-                                value={reviewTimeDraft}
-                                inputMode="numeric"
-                                placeholder="HH:MM"
-                                onChange={(e) => setReviewTimeDraft(e.target.value)}
-                                onBlur={() => {
-                                    const normalized = normalizeTimeInput(reviewTimeDraft);
-                                    if (normalized === null) {
-                                        setReviewTimeDraft(timeValue);
-                                        return;
-                                    }
-                                    setReviewTimeDraft(normalized);
-                                    handleTimeChange(normalized);
-                                }}
-                                className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
-                            />
-                        </div>
-                    </div>
-                );
+                return renderDateField({
+                    label: t('taskEdit.reviewDateLabel'),
+                    dateAriaLabel: t('task.aria.reviewDate'),
+                    dateValue,
+                    onDateChange: handleDateChange,
+                    timeInput: (
+                        <input
+                            type="text"
+                            aria-label={t('task.aria.reviewTime')}
+                            value={reviewTimeDraft}
+                            inputMode="numeric"
+                            placeholder="HH:MM"
+                            onChange={(event) => setReviewTimeDraft(event.target.value)}
+                            onBlur={() => {
+                                const normalized = normalizeTimeInput(reviewTimeDraft);
+                                if (normalized === null) {
+                                    setReviewTimeDraft(timeValue);
+                                    return;
+                                }
+                                setReviewTimeDraft(normalized);
+                                handleTimeChange(normalized);
+                            }}
+                            className={timeInputClassName}
+                        />
+                    ),
+                    onClear: () => setEditReviewAt(''),
+                    hasValue: Boolean(editReviewAt),
+                });
             }
         case 'status':
             return (
@@ -472,6 +677,37 @@ export function TaskItemFieldRenderer({
                         <option value="high">{t('priority.high')}</option>
                         <option value="urgent">{t('priority.urgent')}</option>
                     </select>
+                </div>
+            );
+        case 'energyLevel':
+            return (
+                <div className="flex flex-col gap-1">
+                    <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.energyLevel')}</label>
+                    <select
+                        value={editEnergyLevel}
+                        aria-label={t('taskEdit.energyLevel')}
+                        onChange={(e) => setEditEnergyLevel(e.target.value as TaskEnergyLevel | '')}
+                        className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
+                    >
+                        <option value="">{t('common.none')}</option>
+                        <option value="low">{t('energyLevel.low')}</option>
+                        <option value="medium">{t('energyLevel.medium')}</option>
+                        <option value="high">{t('energyLevel.high')}</option>
+                    </select>
+                </div>
+            );
+        case 'assignedTo':
+            return (
+                <div className="flex flex-col gap-1">
+                    <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.assignedTo')}</label>
+                    <input
+                        type="text"
+                        value={editAssignedTo}
+                        aria-label={t('taskEdit.assignedTo')}
+                        onChange={(event) => setEditAssignedTo(event.target.value)}
+                        placeholder={t('taskEdit.assignedToPlaceholder')}
+                        className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
+                    />
                 </div>
             );
         case 'recurrence':

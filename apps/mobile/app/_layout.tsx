@@ -3,7 +3,7 @@ import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } fro
 import * as Application from 'expo-application';
 import Constants from 'expo-constants';
 import * as Linking from 'expo-linking';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, usePathname, useRouter } from 'expo-router';
 import 'react-native-reanimated';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState, useRef, useCallback } from 'react';
@@ -12,13 +12,18 @@ import { Alert, AppState, AppStateStatus, Platform, SafeAreaView, StatusBar, Tex
 import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { QuickCaptureProvider, type QuickCaptureOptions } from '../contexts/quick-capture-context';
+import { ToastProvider, useToast } from '../contexts/toast-context';
 
 import { ThemeProvider, useTheme } from '../contexts/theme-context';
 import { LanguageProvider, useLanguage } from '../contexts/language-context';
 import {
+  addBreadcrumb,
+  consoleLogger,
   configureDateFormatting,
   DEFAULT_PROJECT_COLOR,
   setStorageAdapter,
+  setLogger,
+  SQLITE_SCHEMA_VERSION,
   useTaskStore,
   flushPendingSave,
   isSupportedLanguage,
@@ -33,17 +38,17 @@ import {
   stopMobileNotifications,
 } from '../lib/notification-service';
 import { abortMobileSync, performMobileSync } from '../lib/sync-service';
-import { coerceSupportedBackend, isLikelyOfflineSyncError, resolveBackend, type SyncBackend } from '../lib/sync-service-utils';
+import { classifySyncFailure, coerceSupportedBackend, isLikelyOfflineSyncError, resolveBackend, type SyncBackend } from '../lib/sync-service-utils';
 import { SYNC_BACKEND_KEY } from '../lib/sync-constants';
 import { isCloudKitAvailable, subscribeToCloudKitChanges } from '../lib/cloudkit-sync';
 import { updateMobileWidgetFromStore } from '../lib/widget-service';
 import { markStartupPhase, measureStartupPhase } from '../lib/startup-profiler';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { verifyPolyfills } from '../utils/verify-polyfills';
-import { logError, logWarn, setupGlobalErrorLogging } from '../lib/app-log';
+import { logError, logInfo, logWarn, setupGlobalErrorLogging } from '../lib/app-log';
 import { useMobileAreaFilter } from '../hooks/use-mobile-area-filter';
 import { useThemeColors } from '../hooks/use-theme-colors';
-import { parseShortcutCaptureUrl, type ShortcutCapturePayload } from '../lib/capture-deeplink';
+import { isShortcutCaptureUrl, parseShortcutCaptureUrl, type ShortcutCapturePayload } from '../lib/capture-deeplink';
 
 type AutoSyncCadence = {
   minIntervalMs: number;
@@ -72,6 +77,53 @@ const AUTO_SYNC_CADENCE_OFF: AutoSyncCadence = {
   foregroundMinIntervalMs: 60_000,
 };
 const ANALYTICS_DISTINCT_ID_KEY = 'mindwtr-analytics-distinct-id';
+let coreLoggerBridgeInstalled = false;
+
+const buildCoreLogExtra = (payload: {
+  category?: string;
+  context?: Record<string, unknown>;
+  error?: unknown;
+}): Record<string, unknown> | undefined => {
+  const extra: Record<string, unknown> = {
+    ...(payload.context ?? {}),
+  };
+  if (payload.category) {
+    extra.category = payload.category;
+  }
+  if (payload.error) {
+    extra.error = payload.error instanceof Error ? payload.error.message : String(payload.error);
+    if (payload.error instanceof Error && payload.error.name) {
+      extra.errorName = payload.error.name;
+    }
+    if (payload.error instanceof Error && payload.error.stack) {
+      extra.errorStack = payload.error.stack;
+    }
+  }
+  return Object.keys(extra).length > 0 ? extra : undefined;
+};
+
+const installCoreLoggerBridge = () => {
+  if (coreLoggerBridgeInstalled) return;
+  coreLoggerBridgeInstalled = true;
+  setLogger((payload) => {
+    consoleLogger(payload);
+    const scope = payload.scope ?? 'core';
+    const extra = buildCoreLogExtra(payload);
+    if (payload.level === 'error') {
+      void logError(payload.error ?? payload.message, {
+        scope,
+        extra,
+        message: payload.message,
+      });
+      return;
+    }
+    if (payload.level === 'warn') {
+      void logWarn(payload.message, { scope, extra });
+      return;
+    }
+    void logInfo(payload.message, { scope, extra });
+  });
+};
 
 type MobileExtraConfig = {
   isFossBuild?: boolean | string;
@@ -147,6 +199,19 @@ const getDeviceLocale = (): string => {
   }
 };
 
+const getStartupLoggingReason = (loggingEnabled: boolean): string =>
+  loggingEnabled ? 'user-enabled' : 'startup-force';
+
+const getViewBreadcrumb = (pathname: string | null): string | null => {
+  const trimmed = String(pathname || '').trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.replace(/^\/+|\/+$/g, '');
+  if (!normalized) return 'view:root';
+  const segments = normalized.split('/').filter(Boolean);
+  const view = segments[segments.length - 1] || 'root';
+  return `view:${view}`;
+};
+
 const normalizeShortcutTags = (tags: string[]): string[] => {
   const normalized: string[] = [];
   const seen = new Set<string>();
@@ -168,6 +233,8 @@ const logAppError = (error: unknown) => {
   void logError(error, { scope: 'app' });
 };
 
+installCoreLoggerBridge();
+
 try {
   setStorageAdapter(mobileStorage);
 } catch (e) {
@@ -180,11 +247,25 @@ void SplashScreen.preventAutoHideAsync().catch(() => {});
 markStartupPhase('js.root_layout.module_loaded');
 
 function RootLayoutContent() {
+  const tc = useThemeColors();
+
+  return (
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: tc.bg }}>
+      <ToastProvider>
+        <RootLayoutContentInner />
+      </ToastProvider>
+    </GestureHandlerRootView>
+  );
+}
+
+function RootLayoutContentInner() {
   const router = useRouter();
+  const pathname = usePathname();
   const incomingUrl = Linking.useURL();
   const { isDark, isReady: themeReady } = useTheme();
   const tc = useThemeColors();
-  const { language, setLanguage, isReady: languageReady, t } = useLanguage();
+  const { language, setLanguage, t, isReady: languageReady } = useLanguage();
+  const { showToast } = useToast();
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
   const extraConfig = Constants.expoConfig?.extra as MobileExtraConfig | undefined;
   const isFossBuild = parseBool(extraConfig?.isFossBuild);
@@ -207,18 +288,39 @@ function RootLayoutContent() {
   const syncPending = useRef(false);
   const backgroundSyncPending = useRef(false);
   const isActive = useRef(true);
-  const routerRef = useRef(router);
-  const tRef = useRef(t);
   const loadAttempts = useRef(0);
   const lastHandledCaptureUrl = useRef<string | null>(null);
-  const lastSyncErrorShown = useRef<string | null>(null);
-  const lastSyncErrorAt = useRef(0);
+  const lastLoggedAutoSyncError = useRef<string | null>(null);
+  const lastLoggedAutoSyncErrorAt = useRef(0);
+  const notificationPermissionWarningShown = useRef(false);
+  const startupContextLogged = useRef(false);
   const syncCadenceRef = useRef<AutoSyncCadence>(AUTO_SYNC_CADENCE_REMOTE);
   const syncBackendCacheRef = useRef<{ backend: SyncBackend; readAt: number }>({
     backend: 'off',
     readAt: 0,
   });
+  const routerRef = useRef(router);
+  const showToastRef = useRef(showToast);
+  const mobileUiCopyRef = useRef({
+    syncIssueTitle: 'Sync issue',
+    syncIssueGenericMessage: 'Background sync failed. Open Data & Sync to review the connection and retry.',
+    syncIssueAuthMessage: 'Background sync needs updated credentials. Open Data & Sync to re-authenticate and retry.',
+    syncIssuePermissionMessage: 'Background sync cannot write to the selected file or folder. Re-select the sync location in Data & Sync.',
+    syncIssueRateLimitedMessage: 'Background sync is being rate limited. Mindwtr will retry shortly; review Data & Sync if it keeps happening.',
+    syncIssueMisconfiguredMessage: 'Background sync is missing required sync settings. Open Data & Sync to finish setup.',
+    syncIssueConflictMessage: 'Background sync hit a sync conflict or stale remote state. Open Data & Sync to review and retry.',
+    notificationsDisabledTitle: 'Notifications disabled',
+    notificationsDisabledMessage: 'Mindwtr can no longer schedule reminders until notification access is restored.',
+    shareUnavailableTitle: 'Share unavailable',
+    shareUnavailableMessage: 'Mindwtr could not read text or a URL from the shared item.',
+    shortcutUnavailableTitle: 'Capture shortcut unavailable',
+    shortcutUnavailableMessage: 'Mindwtr could not read a task title from that shortcut link.',
+    openActionLabel: 'Open',
+  });
   const { selectedAreaIdForNewTasks } = useMobileAreaFilter();
+  const localize = useCallback((english: string, chinese: string) => (
+    language.startsWith('zh') ? chinese : english
+  ), [language]);
   const buildQuickCaptureInitialProps = useCallback((initialProps?: QuickCaptureOptions['initialProps']) => {
     const nextInitialProps = initialProps ? { ...initialProps } : {};
     if (!nextInitialProps.projectId && !nextInitialProps.areaId && selectedAreaIdForNewTasks) {
@@ -240,8 +342,60 @@ function RootLayoutContent() {
   }, [router]);
 
   useEffect(() => {
-    tRef.current = t;
-  }, [t]);
+    showToastRef.current = showToast;
+  }, [showToast]);
+
+  useEffect(() => {
+    mobileUiCopyRef.current = {
+      syncIssueTitle: localize('Sync issue', '同步异常'),
+      syncIssueGenericMessage: localize(
+        'Background sync failed. Open Data & Sync to review the connection and retry.',
+        '后台同步失败。请打开“数据与同步”检查连接并重试。'
+      ),
+      syncIssueAuthMessage: localize(
+        'Background sync needs updated credentials. Open Data & Sync to re-authenticate and retry.',
+        '后台同步需要更新凭据。请打开“数据与同步”重新验证并重试。'
+      ),
+      syncIssuePermissionMessage: localize(
+        'Background sync cannot write to the selected file or folder. Re-select the sync location in Data & Sync.',
+        '后台同步无法写入当前选择的文件或文件夹。请在“数据与同步”中重新选择同步位置。'
+      ),
+      syncIssueRateLimitedMessage: localize(
+        'Background sync is being rate limited. Mindwtr will retry shortly; review Data & Sync if it keeps happening.',
+        '后台同步正在被限流。Mindwtr 将稍后重试；如果持续发生，请检查“数据与同步”。'
+      ),
+      syncIssueMisconfiguredMessage: localize(
+        'Background sync is missing required sync settings. Open Data & Sync to finish setup.',
+        '后台同步缺少必要的同步设置。请打开“数据与同步”完成配置。'
+      ),
+      syncIssueConflictMessage: localize(
+        'Background sync hit a sync conflict or stale remote state. Open Data & Sync to review and retry.',
+        '后台同步遇到冲突或远端状态已过期。请打开“数据与同步”检查后重试。'
+      ),
+      notificationsDisabledTitle: localize('Notifications disabled', '通知已禁用'),
+      notificationsDisabledMessage: localize(
+        'Mindwtr can no longer schedule reminders until notification access is restored.',
+        '在恢复通知权限之前，Mindwtr 无法继续安排提醒。'
+      ),
+      shareUnavailableTitle: localize('Share unavailable', '分享不可用'),
+      shareUnavailableMessage: localize(
+        'Mindwtr could not read text or a URL from the shared item.',
+        'Mindwtr 无法从分享内容中读取文本或链接。'
+      ),
+      shortcutUnavailableTitle: localize('Capture shortcut unavailable', '快捷捕获不可用'),
+      shortcutUnavailableMessage: localize(
+        'Mindwtr could not read a task title from that shortcut link.',
+        'Mindwtr 无法从该快捷方式链接中读取任务标题。'
+      ),
+      openActionLabel: localize('Open', '打开'),
+    };
+  }, [localize, t]);
+
+  useEffect(() => {
+    const breadcrumb = getViewBreadcrumb(pathname);
+    if (!breadcrumb) return;
+    addBreadcrumb(breadcrumb);
+  }, [pathname]);
 
   useEffect(() => {
     if (Platform.OS !== 'android' || isExpoGo) return;
@@ -299,25 +453,41 @@ function RootLayoutContent() {
           return;
         }
         const nowMs = Date.now();
-        const shouldShow = result.error !== lastSyncErrorShown.current && nowMs - lastSyncErrorAt.current > 10 * 60 * 1000;
-        if (shouldShow) {
-          const translate = tRef.current;
-          lastSyncErrorShown.current = result.error;
-          lastSyncErrorAt.current = nowMs;
-          const syncFailedTitle = translate('settings.lastSyncError') === 'settings.lastSyncError' ? 'Sync failed' : translate('settings.lastSyncError');
-          const closeLabel = translate('common.close') === 'common.close' ? 'Close' : translate('common.close');
-          const settingsLabel = translate('settings.title') === 'settings.title' ? 'Settings' : translate('settings.title');
-          Alert.alert(
-            syncFailedTitle,
-            result.error,
-            [
-              { text: closeLabel, style: 'cancel' },
-              { text: settingsLabel, onPress: () => routerRef.current.push('/settings') },
-            ]
-          );
+        const shouldLog = result.error !== lastLoggedAutoSyncError.current
+          || nowMs - lastLoggedAutoSyncErrorAt.current > 10 * 60 * 1000;
+        if (shouldLog) {
+          lastLoggedAutoSyncError.current = result.error;
+          lastLoggedAutoSyncErrorAt.current = nowMs;
           void logWarn('Auto-sync failed', {
             scope: 'sync',
             extra: { error: result.error },
+          });
+          const uiCopy = mobileUiCopyRef.current;
+          const syncIssueMessage = (() => {
+            switch (classifySyncFailure(result.error)) {
+              case 'auth':
+                return uiCopy.syncIssueAuthMessage;
+              case 'permission':
+                return uiCopy.syncIssuePermissionMessage;
+              case 'rateLimited':
+                return uiCopy.syncIssueRateLimitedMessage;
+              case 'misconfigured':
+                return uiCopy.syncIssueMisconfiguredMessage;
+              case 'conflict':
+                return uiCopy.syncIssueConflictMessage;
+              default:
+                return uiCopy.syncIssueGenericMessage;
+            }
+          })();
+          showToastRef.current({
+            title: uiCopy.syncIssueTitle,
+            message: syncIssueMessage,
+            tone: 'warning',
+            durationMs: 5200,
+            actionLabel: uiCopy.openActionLabel,
+            onAction: () => {
+              routerRef.current.push({ pathname: '/settings', params: { settingsScreen: 'sync' } } as never);
+            },
           });
         }
       }
@@ -464,24 +634,43 @@ function RootLayoutContent() {
       } as never);
     } else {
       void logError(new Error('Share intent payload missing text'), { scope: 'share-intent' });
-      router.replace('/capture-modal' as never);
+      const uiCopy = mobileUiCopyRef.current;
+      showToast({
+        title: uiCopy.shareUnavailableTitle,
+        message: uiCopy.shareUnavailableMessage,
+        tone: 'warning',
+      });
     }
     resetShareIntent();
-  }, [hasShareIntent, resetShareIntent, router, shareIntent?.text, shareIntent?.webUrl]);
+  }, [hasShareIntent, resetShareIntent, router, shareIntent?.text, shareIntent?.webUrl, showToast]);
 
   useEffect(() => {
     if (!dataReady) return;
     if (!incomingUrl) return;
     if (lastHandledCaptureUrl.current === incomingUrl) return;
     const payload = parseShortcutCaptureUrl(incomingUrl);
-    if (!payload) return;
+    if (!payload) {
+      if (!isShortcutCaptureUrl(incomingUrl)) return;
+      lastHandledCaptureUrl.current = incomingUrl;
+      void logWarn('Invalid shortcut capture URL', {
+        scope: 'shortcuts',
+        extra: { url: incomingUrl },
+      });
+      const uiCopy = mobileUiCopyRef.current;
+      showToast({
+        title: uiCopy.shortcutUnavailableTitle,
+        message: uiCopy.shortcutUnavailableMessage,
+        tone: 'warning',
+      });
+      return;
+    }
 
     lastHandledCaptureUrl.current = incomingUrl;
     void captureFromShortcut(payload).catch((error) => {
       lastHandledCaptureUrl.current = null;
       void logError(error, { scope: 'shortcuts', extra: { url: incomingUrl } });
     });
-  }, [captureFromShortcut, dataReady, incomingUrl]);
+  }, [captureFromShortcut, dataReady, incomingUrl, showToast]);
 
   // Sync on foreground/background transitions
   useEffect(() => {
@@ -492,14 +681,19 @@ function RootLayoutContent() {
       const nextInactiveOrBackground = nextAppState === 'inactive' || nextAppState === 'background';
       if (wasInactiveOrBackground && nextAppState === 'active') {
         // Coming back to foreground - sync to get latest data
-        void refreshSyncCadence()
-          .then((cadence) => {
-            const now = Date.now();
-            if (now - lastAutoSyncAt.current > cadence.foregroundMinIntervalMs) {
-              requestSync(0);
-            }
-          })
-          .catch(logAppError);
+        if (backgroundSyncPending.current) {
+          backgroundSyncPending.current = false;
+          requestSync(0);
+        } else {
+          void refreshSyncCadence()
+            .then((cadence) => {
+              const now = Date.now();
+              if (now - lastAutoSyncAt.current > cadence.foregroundMinIntervalMs) {
+                requestSync(0);
+              }
+            })
+            .catch(logAppError);
+        }
         updateMobileWidgetFromStore().catch(logAppError);
         if (widgetRefreshTimer.current) {
           clearTimeout(widgetRefreshTimer.current);
@@ -514,8 +708,23 @@ function RootLayoutContent() {
               if (!isActive.current) return;
               if (!permission.granted) {
                 stopMobileNotifications().catch(logAppError);
+                if (!notificationPermissionWarningShown.current) {
+                  notificationPermissionWarningShown.current = true;
+                  const uiCopy = mobileUiCopyRef.current;
+                  showToastRef.current({
+                    title: uiCopy.notificationsDisabledTitle,
+                    message: uiCopy.notificationsDisabledMessage,
+                    tone: 'warning',
+                    durationMs: 5200,
+                    actionLabel: uiCopy.openActionLabel,
+                    onAction: () => {
+                      routerRef.current.push({ pathname: '/settings', params: { settingsScreen: 'notifications' } } as never);
+                    },
+                  });
+                }
                 return;
               }
+              notificationPermissionWarningShown.current = false;
               startMobileNotifications().catch(logAppError);
             })
             .catch(logAppError);
@@ -527,14 +736,12 @@ function RootLayoutContent() {
           clearTimeout(syncDebounceTimer.current);
           syncDebounceTimer.current = null;
         }
+        if (syncThrottleTimer.current) {
+          clearTimeout(syncThrottleTimer.current);
+          syncThrottleTimer.current = null;
+        }
         abortMobileSync();
         requestSync(0);
-      }
-      if (wasInactiveOrBackground && nextAppState === 'active') {
-        if (backgroundSyncPending.current) {
-          backgroundSyncPending.current = false;
-          requestSync(0);
-        }
       }
       appState.current = nextAppState;
     };
@@ -606,6 +813,28 @@ function RootLayoutContent() {
         if (cancelled) return;
         setDataReady(true);
         markStartupPhase('js.store.fetch_data.applied');
+        if (!startupContextLogged.current) {
+          startupContextLogged.current = true;
+          const rawBackend = await AsyncStorage.getItem(SYNC_BACKEND_KEY);
+          const syncBackend = coerceSupportedBackend(resolveBackend(rawBackend), supportsNativeICloudSync());
+          const channel = await getMobileAnalyticsChannel(isFossBuild).catch(() => Platform.OS || 'mobile');
+          void logInfo('App started', {
+            scope: 'startup',
+            force: true,
+            extra: {
+              version: appVersion,
+              platform: Platform.OS,
+              osMajor: getMobileOsMajor(),
+              locale: getDeviceLocale(),
+              channel,
+              syncBackend,
+              schemaVersion: String(SQLITE_SCHEMA_VERSION),
+              deviceClass: getMobileDeviceClass(),
+              buildType: isFossBuild ? 'foss' : 'standard',
+              loggingReason: getStartupLoggingReason(store.settings.diagnostics?.loggingEnabled === true),
+            },
+          });
+        }
         if (!isFossBuild && !isExpoGo && !__DEV__ && analyticsHeartbeatUrl) {
           try {
             const [distinctId, channel] = await Promise.all([
@@ -751,67 +980,66 @@ function RootLayoutContent() {
     );
   }
 
-  if (!isShellReady) {
+  // Avoid mounting task screens against the empty default store before local hydration finishes.
+  if (!isFirstPaintReady) {
     return null;
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1, backgroundColor: tc.bg }}>
-      <QuickCaptureProvider
-        value={{
-          openQuickCapture: (options?: QuickCaptureOptions) => {
-            const params = new URLSearchParams();
-            if (options?.initialValue) {
-              params.set('initialValue', options.initialValue);
-            }
-            const initialProps = buildQuickCaptureInitialProps(options?.initialProps);
-            if (initialProps) {
-              params.set('initialProps', encodeURIComponent(JSON.stringify(initialProps)));
-            }
-            const query = params.toString();
-            router.push((query ? `/capture-modal?${query}` : '/capture-modal') as never);
-          },
-        }}
-      >
-        <NavigationThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
-          <Stack>
-            <Stack.Screen name="index" options={{ headerShown: false, animation: 'none' }} />
-            <Stack.Screen name="(drawer)" options={{ headerShown: false, animation: 'none' }} />
-            <Stack.Screen
-              name="daily-review"
-              options={{
-                headerShown: false,
-              }}
-            />
-            <Stack.Screen
-              name="global-search"
-              options={{
-                headerShown: false,
-                presentation: 'modal',
-                animation: 'slide_from_bottom'
-              }}
-            />
-            <Stack.Screen
-              name="capture-modal"
-              options={{
-                headerShown: false,
-                presentation: 'modal',
-                animation: 'slide_from_bottom'
-              }}
-            />
-            <Stack.Screen
-              name="check-focus"
-              options={{
-                headerShown: false,
-              }}
-            />
-          </Stack>
-          <StatusBar
-            barStyle={isDark ? 'light-content' : 'dark-content'}
+    <QuickCaptureProvider
+      value={{
+        openQuickCapture: (options?: QuickCaptureOptions) => {
+          const params = new URLSearchParams();
+          if (options?.initialValue) {
+            params.set('initialValue', options.initialValue);
+          }
+          const initialProps = buildQuickCaptureInitialProps(options?.initialProps);
+          if (initialProps) {
+            params.set('initialProps', encodeURIComponent(JSON.stringify(initialProps)));
+          }
+          const query = params.toString();
+          router.push((query ? `/capture-modal?${query}` : '/capture-modal') as never);
+        },
+      }}
+    >
+      <NavigationThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
+        <Stack>
+          <Stack.Screen name="index" options={{ headerShown: false, animation: 'none' }} />
+          <Stack.Screen name="(drawer)" options={{ headerShown: false, animation: 'none' }} />
+          <Stack.Screen
+            name="daily-review"
+            options={{
+              headerShown: false,
+            }}
           />
-        </NavigationThemeProvider>
-      </QuickCaptureProvider>
-    </GestureHandlerRootView>
+          <Stack.Screen
+            name="global-search"
+            options={{
+              headerShown: false,
+              presentation: 'modal',
+              animation: 'slide_from_bottom'
+            }}
+          />
+          <Stack.Screen
+            name="capture-modal"
+            options={{
+              headerShown: false,
+              presentation: 'modal',
+              animation: 'slide_from_bottom'
+            }}
+          />
+          <Stack.Screen
+            name="check-focus"
+            options={{
+              headerShown: false,
+            }}
+          />
+        </Stack>
+        <StatusBar
+          barStyle={isDark ? 'light-content' : 'dark-content'}
+        />
+      </NavigationThemeProvider>
+    </QuickCaptureProvider>
   );
 }
 

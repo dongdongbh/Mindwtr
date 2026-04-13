@@ -2,12 +2,15 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, TouchableOpacity, Modal, ScrollView, TextInput, Platform, Alert, Share, ActivityIndicator, Dimensions, type TextStyle } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { X } from 'lucide-react-native';
 
-import { DEFAULT_PROJECT_COLOR, collectTaskTokenUsage, useTaskStore, createAIProvider, safeFormatDate, safeParseDate, resolveAutoTextDirection, type Task, type AIProviderId } from '@mindwtr/core';
+import { addBreadcrumb, DEFAULT_PROJECT_COLOR, collectTaskTokenUsage, useTaskStore, createAIProvider, safeFormatDate, safeParseDate, resolveAutoTextDirection, type Task, type AIProviderId, type TaskPriority } from '@mindwtr/core';
 
 import { AIResponseModal, type AIResponseAction } from './ai-response-modal';
 import { useLanguage } from '../contexts/language-context';
 import { useTheme } from '../contexts/theme-context';
+import { useToast } from '../contexts/toast-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { buildAIConfig, isAIKeyRequired, loadAIKey } from '../lib/ai-config';
 import { logWarn } from '../lib/app-log';
@@ -19,10 +22,13 @@ type InboxProcessingModalProps = {
 };
 
 const MAX_TOKEN_SUGGESTIONS = 6;
+const PRIORITY_OPTIONS: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
 
 export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalProps) {
   const { tasks, projects, areas, settings, updateTask, deleteTask, addProject } = useTaskStore();
   const { t, language } = useLanguage();
+  const { showToast } = useToast();
+  const router = useRouter();
   const { isDark } = useTheme();
   const tc = useThemeColors();
   const insets = useSafeAreaInsets();
@@ -54,6 +60,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
   const contextStepEnabled = inboxProcessing.contextStepEnabled !== false;
   const scheduleEnabled = inboxProcessing.scheduleEnabled === true;
   const referenceEnabled = inboxProcessing.referenceEnabled === true;
+  const prioritiesEnabled = settings?.features?.priorities !== false;
 
   const aiEnabled = settings?.ai?.enabled === true;
   const aiProvider = (settings?.ai?.provider ?? 'openai') as AIProviderId;
@@ -87,6 +94,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
     writingDirection: resolvedTitleDirection,
     textAlign: resolvedTitleDirection === 'rtl' ? 'right' : 'left',
   }), [resolvedTitleDirection]);
+  const openSettingsLabel = language.startsWith('zh') ? '打开' : 'Open';
   const headerStyle = [styles.processingHeader, {
     borderBottomColor: tc.border,
     paddingTop: Math.max(insets.top, 10),
@@ -95,6 +103,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
 
   const [selectedContexts, setSelectedContexts] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [selectedPriority, setSelectedPriority] = useState<TaskPriority | undefined>(undefined);
   const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
   const contextSuggestionPool = useMemo(() => {
     return collectTaskTokenUsage(tasks, (task) => task.contexts, { prefix: '@' })
@@ -186,6 +195,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
     setShowDelegateDatePicker(false);
     setSelectedContexts([]);
     setSelectedTags([]);
+    setSelectedPriority(undefined);
     setNewContext('');
     setProjectSearch('');
     setSelectedProjectId(null);
@@ -205,11 +215,15 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
     resetProcessingState();
     onClose();
   };
+  const isDelegateConfirmationDisabled = executionChoice === 'delegate' && delegateWho.trim().length === 0;
 
   useEffect(() => {
     if (!visible) {
       hasInitialized.current = false;
       return;
+    }
+    if (inboxTasks.length > 0) {
+      addBreadcrumb('inbox:start');
     }
     if (hasInitialized.current) return;
     hasInitialized.current = true;
@@ -230,6 +244,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
     setShowDelegateDatePicker(false);
     setSelectedContexts(firstTask?.contexts ?? []);
     setSelectedTags(firstTask?.tags ?? []);
+    setSelectedPriority(firstTask?.priority);
     setNewContext('');
     setProjectSearch('');
     setSelectedProjectId(firstTask?.projectId ?? null);
@@ -248,6 +263,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
   useEffect(() => {
     if (!visible) return;
     if (processingQueue.length === 0) {
+      addBreadcrumb('inbox:done');
       handleClose();
       return;
     }
@@ -264,6 +280,8 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
       setDelegateFollowUpDate(null);
       setShowDelegateDatePicker(false);
       setSelectedContexts(nextTask?.contexts ?? []);
+      setSelectedTags(nextTask?.tags ?? []);
+      setSelectedPriority(nextTask?.priority);
       setNewContext('');
       setProjectSearch('');
       setSelectedProjectId(nextTask?.projectId ?? null);
@@ -295,6 +313,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
     setDelegateFollowUpDate(null);
     setSelectedContexts(nextTask?.contexts ?? []);
     setSelectedTags(nextTask?.tags ?? []);
+    setSelectedPriority(nextTask?.priority);
     setNewContext('');
     setProjectSearch('');
     setSelectedProjectId(nextTask?.projectId ?? null);
@@ -331,6 +350,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
       projectId: selectedProjectId ?? undefined,
       contexts: selectedContexts,
       tags: selectedTags,
+      ...(prioritiesEnabled ? { priority: selectedPriority ?? undefined } : {}),
       ...(scheduleEnabled ? { startTime: pendingStartDate ? pendingStartDate.toISOString() : undefined } : {}),
     });
     setSkippedIds((prev) => {
@@ -374,15 +394,13 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
   const handleConfirmWaitingMobile = () => {
     if (currentTask) {
       const who = delegateWho.trim();
-      const baseDescription = processingDescription.trim() || currentTask.description || '';
-      const waitingLine = who ? `Waiting for: ${who}` : '';
-      const nextDescription = [baseDescription, waitingLine]
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .join('\n');
+      if (!who) {
+        return;
+      }
       const updates: Partial<Task> = {
         status: 'waiting',
-        description: nextDescription.length > 0 ? nextDescription : undefined,
+        assignedTo: who,
+        ...(prioritiesEnabled ? { priority: selectedPriority ?? undefined } : {}),
       };
       if (delegateFollowUpDate) {
         updates.reviewAt = delegateFollowUpDate.toISOString();
@@ -411,7 +429,11 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
     const body = bodyParts.join('\n');
     const subject = `Delegation: ${title}`;
     await Share.share({ message: body, title: subject }).catch(() => {
-      Alert.alert(t('common.notice'), t('process.delegateSendError'));
+      showToast({
+        title: t('common.notice'),
+        message: t('process.delegateSendError'),
+        tone: 'warning',
+      });
     });
   };
 
@@ -479,6 +501,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
       projectId: projectId ?? undefined,
       contexts: selectedContexts,
       tags: selectedTags,
+      ...(prioritiesEnabled ? { priority: selectedPriority ?? undefined } : {}),
       startTime: scheduleEnabled && pendingStartDate ? pendingStartDate.toISOString() : undefined,
     });
     setPendingStartDate(null);
@@ -488,12 +511,30 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
   const handleAIClarifyInbox = async () => {
     if (!currentTask) return;
     if (!aiEnabled) {
-      Alert.alert(t('ai.errorTitle'), t('ai.disabledBody'));
+      showToast({
+        title: t('ai.errorTitle'),
+        message: t('ai.disabledBody'),
+        tone: 'warning',
+        durationMs: 5200,
+        actionLabel: openSettingsLabel,
+        onAction: () => {
+          router.push({ pathname: '/settings', params: { settingsScreen: 'ai' } });
+        },
+      });
       return;
     }
     const apiKey = await loadAIKey(aiProvider);
     if (isAIKeyRequired(settings) && !apiKey) {
-      Alert.alert(t('ai.errorTitle'), t('ai.missingKeyBody'));
+      showToast({
+        title: t('ai.errorTitle'),
+        message: t('ai.missingKeyBody'),
+        tone: 'warning',
+        durationMs: 5200,
+        actionLabel: openSettingsLabel,
+        onAction: () => {
+          router.push({ pathname: '/settings', params: { settingsScreen: 'ai' } });
+        },
+      });
       return;
     }
     setIsAIWorking(true);
@@ -571,8 +612,11 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
             <TouchableOpacity
               style={[styles.headerActionButton, styles.headerActionButtonLeft]}
               onPress={handleClose}
+              accessibilityRole="button"
+              accessibilityLabel={t('common.close')}
+              hitSlop={8}
             >
-              <Text style={[styles.headerClose, { color: tc.text }]}>✕</Text>
+              <X size={22} color={tc.text} strokeWidth={2} />
             </TouchableOpacity>
             <View style={styles.progressContainer}>
               <Text style={[styles.progressText, { color: tc.secondaryText }]}>
@@ -648,6 +692,38 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
                   <Text style={styles.selectedTokenText}>{tag} x</Text>
                 </TouchableOpacity>
               ))}
+            </View>
+          </View>
+        )}
+        {prioritiesEnabled && (
+          <View style={styles.prioritySection}>
+            <Text style={[styles.tokenSectionTitle, { color: tc.secondaryText }]}>{t('taskEdit.priorityLabel')}</Text>
+            <View style={styles.tokenChipWrap}>
+              {PRIORITY_OPTIONS.map((priority) => {
+                const isSelected = selectedPriority === priority;
+                return (
+                  <TouchableOpacity
+                    key={priority}
+                    style={[
+                      styles.priorityChip,
+                      {
+                        borderColor: isSelected ? tc.tint : tc.border,
+                        backgroundColor: isSelected ? tc.tint : tc.filterBg,
+                      },
+                    ]}
+                    onPress={() => setSelectedPriority(isSelected ? undefined : priority)}
+                  >
+                    <Text
+                      style={[
+                        styles.priorityChipText,
+                        { color: isSelected ? tc.onTint : tc.text },
+                      ]}
+                    >
+                      {t(`priority.${priority}`)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
         )}
@@ -795,8 +871,11 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
             <TouchableOpacity
               style={[styles.headerActionButton, styles.headerActionButtonLeft]}
               onPress={handleClose}
+              accessibilityRole="button"
+              accessibilityLabel={t('common.close')}
+              hitSlop={8}
             >
-              <Text style={[styles.headerClose, { color: tc.text }]}>✕</Text>
+              <X size={22} color={tc.text} strokeWidth={2} />
             </TouchableOpacity>
             <View style={styles.progressContainer}>
               <Text style={[styles.progressText, { color: tc.secondaryText }]}>
@@ -1190,7 +1269,12 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
             </ScrollView>
             <View style={[styles.bottomActionBar, { borderTopColor: tc.border, paddingBottom: Math.max(insets.bottom, 10) }]}>
               <TouchableOpacity
-                style={[styles.bottomNextButton, { backgroundColor: tc.tint }]}
+                style={[
+                  styles.bottomNextButton,
+                  { backgroundColor: tc.tint },
+                  isDelegateConfirmationDisabled && { opacity: 0.5 },
+                ]}
+                disabled={isDelegateConfirmationDisabled}
                 onPress={handleNextTask}
               >
                 <Text style={styles.bottomNextButtonText}>

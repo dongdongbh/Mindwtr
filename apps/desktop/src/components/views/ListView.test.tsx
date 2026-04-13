@@ -138,6 +138,40 @@ describe('ListView', () => {
     });
   });
 
+  it('does not scroll back to the selected row after a background refresh', async () => {
+    const scrollIntoViewMock = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoViewMock,
+    });
+
+    useTaskStore.setState({
+      tasks: [makeTask('1'), makeTask('2')],
+      lastDataChangeAt: 1,
+    });
+
+    const { queryByText } = renderListView();
+
+    await waitFor(() => {
+      expect(queryByText('Task 2')).toBeInTheDocument();
+    });
+
+    scrollIntoViewMock.mockClear();
+
+    act(() => {
+      useTaskStore.setState({
+        tasks: [makeTask('1'), makeTask('2'), makeTask('3')],
+        lastDataChangeAt: 2,
+      });
+    });
+
+    await waitFor(() => {
+      expect(queryByText('Task 3')).toBeInTheDocument();
+    });
+
+    expect(scrollIntoViewMock).not.toHaveBeenCalled();
+  });
+
   it('shows an error toast when loading archived tasks fails', () => {
     const showToast = vi.fn();
 

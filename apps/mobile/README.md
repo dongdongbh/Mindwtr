@@ -12,7 +12,7 @@ React Native mobile app for the Mindwtr productivity system.
 - **Smart Tags** - Frequent and recommended context tags
 - **Quick Status** - Instant status change via status badge tap
 - **Auto-Archive** - Automatically archive completed tasks
-- **Android Widget** - Home screen focus/next widget (adaptive, 3x3 default)
+- **Android Widget** - Home screen focus/next widget (adaptive, 2x2 default)
 - **iOS Widget** - Home screen focus/next widget with quick capture
 - **iOS Quick Actions** - Long-press app icon shortcuts for Add task, Focus, Calendar
 - **AI Assistant (Optional)** - Clarify, break down, and review with BYOK AI

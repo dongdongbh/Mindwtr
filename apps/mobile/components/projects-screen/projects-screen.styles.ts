@@ -644,7 +644,4 @@ export const projectsScreenStyles = StyleSheet.create({
     focusButton: {
         padding: 8,
     },
-    focusIcon: {
-        fontSize: 18,
-    },
 });

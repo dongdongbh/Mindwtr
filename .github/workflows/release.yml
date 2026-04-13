@@ -923,7 +923,7 @@ jobs:
           exit 1
 
   update-aur-source:
-    needs: [release, update-aur]
+    needs: release
     runs-on: ubuntu-latest
     name: Update AUR (mindwtr)
     timeout-minutes: 60

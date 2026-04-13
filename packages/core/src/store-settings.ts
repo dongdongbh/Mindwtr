@@ -26,6 +26,13 @@ const TOMBSTONE_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const TASK_EDITOR_DEFAULTS_VERSION = 4;
 const TASK_EDITOR_ALWAYS_VISIBLE: TaskEditorFieldId[] = ['status', 'project', 'description', 'checklist', 'contexts'];
 const STORAGE_TIMEOUT_MS = 15_000;
+const getFetchDataErrorMessage = (error: unknown): string => {
+    const detail = error instanceof Error ? error.message : String(error ?? '');
+    const trimmed = detail.trim();
+    if (!trimmed) return 'Failed to fetch data';
+    if (/timed out/i.test(trimmed)) return 'Storage request timed out. Try again.';
+    return `Failed to fetch data: ${trimmed}`;
+};
 const NON_MUTATING_SETTINGS_KEYS = new Set<keyof AppData['settings']>([
     'lastSyncAt',
     'lastSyncStatus',
@@ -579,13 +586,22 @@ export const createSettingsActions = ({
                 );
                 allTasks = cleanup.data.tasks;
                 allProjects = cleanup.data.projects;
-                if (cleanup.removedTaskTombstones > 0 || cleanup.removedAttachmentTombstones > 0) {
+                if (
+                    cleanup.removedTaskTombstones > 0
+                    || cleanup.removedProjectTombstones > 0
+                    || cleanup.removedSectionTombstones > 0
+                    || cleanup.removedAreaTombstones > 0
+                    || cleanup.removedAttachmentTombstones > 0
+                ) {
                     didTombstoneCleanup = true;
                     logWarn('Purged expired tombstones during data fetch', {
                         scope: 'store',
                         category: 'storage',
                         context: {
                             removedTaskTombstones: cleanup.removedTaskTombstones,
+                            removedProjectTombstones: cleanup.removedProjectTombstones,
+                            removedSectionTombstones: cleanup.removedSectionTombstones,
+                            removedAreaTombstones: cleanup.removedAreaTombstones,
                             removedAttachmentTombstones: cleanup.removedAttachmentTombstones,
                         },
                     });
@@ -660,7 +676,7 @@ export const createSettingsActions = ({
             markCoreStartupPhase('core.fetch_data.end');
         } catch (err) {
             markCoreStartupPhase('core.fetch_data.error');
-            set({ error: 'Failed to fetch data', isLoading: false });
+            set({ error: getFetchDataErrorMessage(err), isLoading: false });
         }
     },
 

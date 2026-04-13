@@ -6,6 +6,7 @@ import { reportError } from '../../../lib/report-error';
 import type { Language } from '../../../contexts/language-context';
 import {
     DEFAULT_TASK_EDITOR_ORDER,
+    DEFAULT_TASK_EDITOR_VISIBLE,
     DEFAULT_TASK_EDITOR_SECTION_BY_FIELD,
     DEFAULT_TASK_EDITOR_SECTION_OPEN,
     TASK_EDITOR_FIXED_FIELDS,
@@ -53,6 +54,8 @@ type Labels = {
     taskEditorFieldSection: string;
     taskEditorFieldArea: string;
     taskEditorFieldPriority: string;
+    taskEditorFieldEnergyLevel: string;
+    taskEditorFieldAssignedTo: string;
     taskEditorFieldContexts: string;
     taskEditorFieldDescription: string;
     taskEditorFieldTags: string;
@@ -128,18 +131,7 @@ export function SettingsGtdPage({
     }
 
     const defaultTaskEditorOrder = DEFAULT_TASK_EDITOR_ORDER;
-    const defaultVisibleFields = new Set<TaskEditorFieldId>([
-        'status',
-        'project',
-        'section',
-        'area',
-        'description',
-        'checklist',
-        'contexts',
-        'dueDate',
-        'priority',
-        'timeEstimate',
-    ]);
+    const defaultVisibleFields = new Set<TaskEditorFieldId>(DEFAULT_TASK_EDITOR_VISIBLE);
     const defaultTaskEditorHidden = defaultTaskEditorOrder.filter(
         (fieldId) => !defaultVisibleFields.has(fieldId) || featureHiddenFields.has(fieldId)
     );
@@ -177,6 +169,10 @@ export function SettingsGtdPage({
                 return t.taskEditorFieldArea;
             case 'priority':
                 return t.taskEditorFieldPriority;
+            case 'energyLevel':
+                return t.taskEditorFieldEnergyLevel;
+            case 'assignedTo':
+                return t.taskEditorFieldAssignedTo;
             case 'contexts':
                 return t.taskEditorFieldContexts;
             case 'description':

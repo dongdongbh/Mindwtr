@@ -82,6 +82,9 @@ jobs:
       - name: Cloud app tests
         run: bun run --filter mindwtr-cloud test
 
+      - name: MCP server tests
+        run: bun run --filter mindwtr-mcp-server test
+
   # Desktop app build and tests (Tauri)
   desktop:
     runs-on: ubuntu-latest

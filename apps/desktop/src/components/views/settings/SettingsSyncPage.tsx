@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { AppData } from '@mindwtr/core';
 import { safeFormatDate } from '@mindwtr/core';
-import { Info, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Info, RefreshCw, Trash2 } from 'lucide-react';
 
 import { cn } from '../../../lib/utils';
 import { ConfirmModal } from '../../ConfirmModal';
@@ -511,13 +511,16 @@ export function SettingsSyncPage({
                                 {webdavTestState !== 'idle' && (
                                     <span
                                         className={cn(
-                                            "inline-flex items-center rounded-md border px-2 py-1 text-xs",
+                                            "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs",
                                             webdavTestState === 'success'
                                                 ? "border-emerald-600/40 text-emerald-500"
                                                 : "border-destructive/40 text-destructive"
                                         )}
                                     >
-                                        {webdavTestState === 'success' ? `✓ ${t.dropboxTestReachable}` : `! ${t.dropboxTestFailed}`}
+                                        {webdavTestState === 'success'
+                                            ? <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+                                            : <AlertCircle className="w-3.5 h-3.5" aria-hidden="true" />}
+                                        {webdavTestState === 'success' ? t.dropboxTestReachable : t.dropboxTestFailed}
                                     </span>
                                 )}
                             </div>
@@ -582,7 +585,7 @@ export function SettingsSyncPage({
                                             type="text"
                                             value={cloudUrl}
                                             onChange={(e) => onCloudUrlChange(e.target.value)}
-                                            placeholder="https://example.com/v1/data"
+                                            placeholder="https://example.com"
                                             className={cn(
                                                 "bg-muted p-2 rounded text-sm font-mono border focus:outline-none focus:ring-2 focus:ring-primary",
                                                 cloudUrlError ? "border-destructive" : "border-border",
@@ -656,13 +659,16 @@ export function SettingsSyncPage({
                                         {dropboxTestState !== 'idle' && (
                                             <span
                                                 className={cn(
-                                                    "inline-flex items-center rounded-md border px-2 py-1 text-xs",
+                                                    "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs",
                                                     dropboxTestState === 'success'
                                                         ? "border-emerald-600/40 text-emerald-500"
                                                         : "border-destructive/40 text-destructive"
                                                 )}
                                             >
-                                                {dropboxTestState === 'success' ? `✓ ${t.dropboxTestReachable}` : `! ${t.dropboxTestFailed}`}
+                                                {dropboxTestState === 'success'
+                                                    ? <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+                                                    : <AlertCircle className="w-3.5 h-3.5" aria-hidden="true" />}
+                                                {dropboxTestState === 'success' ? t.dropboxTestReachable : t.dropboxTestFailed}
                                             </span>
                                         )}
                                     </div>

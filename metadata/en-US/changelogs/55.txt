@@ -1,0 +1,3 @@
+- Added energy level and assignee fields, plus richer inbox processing with safer delegation.
+- Focus lists now use collapsible sections, a stricter Today rule, and a cleaner Inbox view.
+- Android task widgets size more reliably, and sync cleanup is safer around deletes and areas.

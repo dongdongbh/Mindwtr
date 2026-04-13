@@ -1,7 +1,12 @@
-import { ArrowRight, BookOpen, CheckCircle, ChevronLeft, Clock, Trash2, User, X } from 'lucide-react';
-import { DEFAULT_PROJECT_COLOR, type Area, type Project, type Task } from '@mindwtr/core';
+import { memo } from 'react';
+import { ArrowRight, BookOpen, CheckCircle, ChevronLeft, ClipboardList, Clock, Trash2, User, X } from 'lucide-react';
+import { DEFAULT_PROJECT_COLOR, type Area, type Project, type Task, type TaskPriority } from '@mindwtr/core';
 
 import { cn } from '../lib/utils';
+import {
+    InboxProcessingScheduleFields,
+    type InboxProcessingScheduleFieldsControls,
+} from './InboxProcessingScheduleFields';
 import { ProjectSelector } from './ui/ProjectSelector';
 
 export type ProcessingStep = 'refine' | 'actionable' | 'projectcheck' | 'twomin' | 'decide' | 'context' | 'project' | 'delegate';
@@ -41,6 +46,15 @@ type InboxProcessingWizardProps = {
     handleConfirmWaiting: () => void;
     selectedContexts: string[];
     selectedTags: string[];
+    selectedEnergyLevel?: Task['energyLevel'];
+    setSelectedEnergyLevel: (value: Task['energyLevel']) => void;
+    selectedAssignedTo: string;
+    setSelectedAssignedTo: (value: string) => void;
+    showEnergyLevelField: boolean;
+    showAssignedToField: boolean;
+    prioritiesEnabled: boolean;
+    selectedPriority?: TaskPriority;
+    setSelectedPriority: (value: TaskPriority | undefined) => void;
     allContexts: string[];
     customContext: string;
     setCustomContext: (value: string) => void;
@@ -75,15 +89,14 @@ type InboxProcessingWizardProps = {
     setSelectedProjectId: (value: string | null) => void;
     selectedAreaId: string | null;
     setSelectedAreaId: (value: string | null) => void;
-    scheduleDate: string;
-    scheduleTimeDraft: string;
-    setScheduleDate: (value: string) => void;
-    setScheduleTimeDraft: (value: string) => void;
-    onScheduleTimeCommit: () => void;
     showScheduleFields: boolean;
+    scheduleFields: InboxProcessingScheduleFieldsControls;
 };
 
-export function InboxProcessingWizard({
+const PRIORITY_OPTIONS: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
+const ENERGY_LEVEL_OPTIONS: Array<NonNullable<Task['energyLevel']>> = ['low', 'medium', 'high'];
+
+export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     t,
     isProcessing,
     processingTask,
@@ -118,6 +131,15 @@ export function InboxProcessingWizard({
     handleConfirmWaiting,
     selectedContexts,
     selectedTags,
+    selectedEnergyLevel,
+    setSelectedEnergyLevel,
+    selectedAssignedTo,
+    setSelectedAssignedTo,
+    showEnergyLevelField,
+    showAssignedToField,
+    prioritiesEnabled,
+    selectedPriority,
+    setSelectedPriority,
     allContexts,
     customContext,
     setCustomContext,
@@ -152,12 +174,8 @@ export function InboxProcessingWizard({
     setSelectedProjectId,
     selectedAreaId,
     setSelectedAreaId,
-    scheduleDate,
-    scheduleTimeDraft,
-    setScheduleDate,
-    setScheduleTimeDraft,
-    onScheduleTimeCommit,
     showScheduleFields,
+    scheduleFields,
 }: InboxProcessingWizardProps) {
     if (!isProcessing || !processingTask) return null;
 
@@ -191,7 +209,10 @@ export function InboxProcessingWizard({
                             <ChevronLeft className="w-4 h-4" />
                         </button>
                     )}
-                    <h3 className="font-semibold text-[15px]">📋 {t('process.title')}</h3>
+                    <h3 className="font-semibold text-[15px] inline-flex items-center gap-2">
+                        <ClipboardList className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
+                        {t('process.title')}
+                    </h3>
                     <span className="text-[11px] font-medium text-primary bg-primary/10 px-2.5 py-0.5 rounded-full">
                         {remainingCount} {t('process.remaining')}
                     </span>
@@ -441,26 +462,11 @@ export function InboxProcessingWizard({
                         {t('process.nextStepDesc')}
                     </p>
                     {showScheduleFields && (
-                        <div className="space-y-1">
-                            <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.startDateLabel')}</label>
-                            <div className="flex items-center gap-2">
-                                <input
-                                    type="date"
-                                    value={scheduleDate}
-                                    onChange={(e) => setScheduleDate(e.target.value)}
-                                    className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
-                                />
-                                <input
-                                    type="text"
-                                    value={scheduleTimeDraft}
-                                    inputMode="numeric"
-                                    placeholder="HH:MM"
-                                    onChange={(e) => setScheduleTimeDraft(e.target.value)}
-                                    onBlur={onScheduleTimeCommit}
-                                    className="text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
-                                />
-                            </div>
-                        </div>
+                        <InboxProcessingScheduleFields
+                            t={t}
+                            fields={scheduleFields}
+                            variant="guided"
+                        />
                     )}
                     <div className="flex gap-3">
                         <button
@@ -660,6 +666,72 @@ export function InboxProcessingWizard({
                         )}
                     </div>
 
+                    {prioritiesEnabled && (
+                        <div className="space-y-2">
+                            <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">
+                                {t('taskEdit.priorityLabel')}
+                            </div>
+                            <div className="flex flex-wrap gap-2 justify-center">
+                                {PRIORITY_OPTIONS.map((priority) => {
+                                    const isSelected = selectedPriority === priority;
+                                    return (
+                                        <button
+                                            key={priority}
+                                            onClick={() => setSelectedPriority(isSelected ? undefined : priority)}
+                                            className={cn(
+                                                'px-4 py-2 rounded-full text-sm font-medium transition-colors',
+                                                isSelected
+                                                    ? 'bg-primary text-primary-foreground'
+                                                    : 'bg-muted hover:bg-muted/80'
+                                            )}
+                                        >
+                                            {t(`priority.${priority}`)}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
+                    {(showEnergyLevelField || showAssignedToField) && (
+                        <div className="grid gap-3 md:grid-cols-2">
+                            {showEnergyLevelField && (
+                                <div className="space-y-2">
+                                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">
+                                        {t('taskEdit.energyLevel')}
+                                    </div>
+                                    <select
+                                        aria-label={t('taskEdit.energyLevel')}
+                                        value={selectedEnergyLevel ?? ''}
+                                        onChange={(event) => setSelectedEnergyLevel((event.target.value || undefined) as Task['energyLevel'])}
+                                        className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
+                                    >
+                                        <option value="">{t('common.none')}</option>
+                                        {ENERGY_LEVEL_OPTIONS.map((energyLevel) => (
+                                            <option key={energyLevel} value={energyLevel}>
+                                                {t(`energyLevel.${energyLevel}`)}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+                            {showAssignedToField && (
+                                <div className="space-y-2">
+                                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">
+                                        {t('taskEdit.assignedTo')}
+                                    </div>
+                                    <input
+                                        aria-label={t('taskEdit.assignedTo')}
+                                        value={selectedAssignedTo}
+                                        onChange={(event) => setSelectedAssignedTo(event.target.value)}
+                                        placeholder={t('taskEdit.assignedToPlaceholder')}
+                                        className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     <button
                         onClick={handleConfirmContexts}
                         className="w-full py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90"
@@ -829,4 +901,6 @@ export function InboxProcessingWizard({
             </div>
         </div>
     );
-}
+});
+
+InboxProcessingWizard.displayName = 'InboxProcessingWizard';

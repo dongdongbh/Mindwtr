@@ -45,6 +45,10 @@ type TaskItemEditState = {
     setEditTimeEstimate: (value: TimeEstimate | '') => void;
     editPriority: TaskPriority | '';
     setEditPriority: (value: TaskPriority | '') => void;
+    editEnergyLevel: NonNullable<Task['energyLevel']> | '';
+    setEditEnergyLevel: (value: NonNullable<Task['energyLevel']> | '') => void;
+    editAssignedTo: string;
+    setEditAssignedTo: (value: string) => void;
     editReviewAt: string;
     setEditReviewAt: (value: string) => void;
     showDescriptionPreview: boolean;
@@ -79,6 +83,8 @@ export function useTaskItemEditState({
     );
     const [editTimeEstimate, setEditTimeEstimate] = useState<TimeEstimate | ''>(task.timeEstimate || '');
     const [editPriority, setEditPriority] = useState<TaskPriority | ''>(task.priority || '');
+    const [editEnergyLevel, setEditEnergyLevel] = useState<NonNullable<Task['energyLevel']> | ''>(task.energyLevel || '');
+    const [editAssignedTo, setEditAssignedTo] = useState(task.assignedTo || '');
     const [editReviewAt, setEditReviewAt] = useState(toDateTimeLocalValue(task.reviewAt));
 
     const resetEditState = useCallback(() => {
@@ -98,6 +104,8 @@ export function useTaskItemEditState({
         setEditRecurrenceRRule(getRecurrenceRRuleValue(task.recurrence));
         setEditTimeEstimate(task.timeEstimate || '');
         setEditPriority(task.priority || '');
+        setEditEnergyLevel(task.energyLevel || '');
+        setEditAssignedTo(task.assignedTo || '');
         setEditReviewAt(toDateTimeLocalValue(task.reviewAt));
         resetAttachmentState(task.attachments);
         setShowDescriptionPreview(false);
@@ -136,6 +144,10 @@ export function useTaskItemEditState({
         setEditTimeEstimate,
         editPriority,
         setEditPriority,
+        editEnergyLevel,
+        setEditEnergyLevel,
+        editAssignedTo,
+        setEditAssignedTo,
         editReviewAt,
         setEditReviewAt,
         showDescriptionPreview,

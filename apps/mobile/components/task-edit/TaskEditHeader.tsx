@@ -51,55 +51,57 @@ export function TaskEditHeader({
         </View>
       </View>
 
-      <Modal
-        visible={menuVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setMenuVisible(false)}
-      >
-        <Pressable style={styles.menuOverlay} onPress={() => setMenuVisible(false)}>
-          <View style={[styles.menuCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
-            <Pressable
-              style={styles.menuItem}
-              onPress={() => {
-                setMenuVisible(false);
-                onShare();
-              }}
-            >
-              <Text style={[styles.menuItemText, { color: tc.text }]}>{t('common.share')}</Text>
-            </Pressable>
-            <Pressable
-              style={styles.menuItem}
-              onPress={() => {
-                setMenuVisible(false);
-                onDuplicate();
-              }}
-            >
-              <Text style={[styles.menuItemText, { color: tc.text }]}>{t('taskEdit.duplicateTask')}</Text>
-            </Pressable>
-            {showConvertToReference && onConvertToReference && (
+      {menuVisible ? (
+        <Modal
+          visible
+          transparent
+          animationType="fade"
+          onRequestClose={() => setMenuVisible(false)}
+        >
+          <Pressable style={styles.menuOverlay} onPress={() => setMenuVisible(false)}>
+            <View style={[styles.menuCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
               <Pressable
                 style={styles.menuItem}
                 onPress={() => {
                   setMenuVisible(false);
-                  onConvertToReference();
+                  onShare();
                 }}
               >
-                <Text style={[styles.menuItemText, { color: tc.text }]}>{t('task.convertToReference')}</Text>
+                <Text style={[styles.menuItemText, { color: tc.text }]}>{t('common.share')}</Text>
               </Pressable>
-            )}
-            <Pressable
-              style={styles.menuItem}
-              onPress={() => {
-                setMenuVisible(false);
-                onDelete();
-              }}
-            >
-              <Text style={[styles.menuItemText, { color: '#EF4444' }]}>{t('common.delete')}</Text>
-            </Pressable>
-          </View>
-        </Pressable>
-      </Modal>
+              <Pressable
+                style={styles.menuItem}
+                onPress={() => {
+                  setMenuVisible(false);
+                  onDuplicate();
+                }}
+              >
+                <Text style={[styles.menuItemText, { color: tc.text }]}>{t('taskEdit.duplicateTask')}</Text>
+              </Pressable>
+              {showConvertToReference && onConvertToReference && (
+                <Pressable
+                  style={styles.menuItem}
+                  onPress={() => {
+                    setMenuVisible(false);
+                    onConvertToReference();
+                  }}
+                >
+                  <Text style={[styles.menuItemText, { color: tc.text }]}>{t('task.convertToReference')}</Text>
+                </Pressable>
+              )}
+              <Pressable
+                style={styles.menuItem}
+                onPress={() => {
+                  setMenuVisible(false);
+                  onDelete();
+                }}
+              >
+                <Text style={[styles.menuItemText, { color: '#EF4444' }]}>{t('common.delete')}</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Modal>
+      ) : null}
     </>
   );
 }

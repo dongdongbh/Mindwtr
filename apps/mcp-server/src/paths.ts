@@ -1,9 +1,11 @@
 import { existsSync } from 'fs';
 import { homedir } from 'os';
-import { join, resolve } from 'path';
+import { dirname, join, resolve } from 'path';
 
 const APP_ID = 'tech.dongdongbh.mindwtr';
 const APP_DIR = 'mindwtr';
+const DB_FILE_NAME = 'mindwtr.db';
+const DATA_FILE_NAME = 'data.json';
 
 function getLinuxConfigHome() {
   return process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
@@ -19,6 +21,10 @@ function getWindowsAppDataHome() {
 
 function getMacAppSupportHome() {
   return join(homedir(), 'Library', 'Application Support');
+}
+
+function getMacSandboxAppSupportHome() {
+  return join(homedir(), 'Library', 'Containers', APP_ID, 'Data', 'Library', 'Application Support');
 }
 
 function getConfigHome(): string {
@@ -42,18 +48,49 @@ function firstExisting(paths: string[]): string | null {
   return null;
 }
 
-export function resolveMindwtrDbPath(overridePath?: string): string {
+function getExplicitDbPath(overridePath?: string): string | null {
   const explicit = overridePath || process.env.MINDWTR_DB_PATH || process.env.MINDWTR_DB;
-  if (explicit) return resolve(explicit);
+  return explicit ? resolve(explicit) : null;
+}
 
+function dedupe(paths: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(paths.filter((value): value is string => typeof value === 'string' && value.length > 0)));
+}
+
+function getDefaultStorageDirs(): string[] {
   const configHome = getConfigHome();
   const dataHome = getDataHome();
-  const candidates = [
-    join(dataHome, APP_DIR, 'mindwtr.db'),
-    join(configHome, APP_DIR, 'mindwtr.db'),
-    join(dataHome, APP_ID, 'mindwtr.db'),
-    join(configHome, APP_ID, 'mindwtr.db'),
+  const dirs = [
+    join(dataHome, APP_DIR),
+    join(configHome, APP_DIR),
+    join(dataHome, APP_ID),
+    join(configHome, APP_ID),
   ];
+
+  if (process.platform === 'darwin') {
+    const sandboxHome = getMacSandboxAppSupportHome();
+    dirs.push(join(sandboxHome, APP_DIR));
+    dirs.push(join(sandboxHome, APP_ID));
+  }
+
+  return dedupe(dirs);
+}
+
+export function resolveMindwtrDataJsonPath(overridePath?: string): string {
+  const explicitDbPath = getExplicitDbPath(overridePath);
+  const explicitDataPath = explicitDbPath ? join(dirname(explicitDbPath), DATA_FILE_NAME) : null;
+  const candidates = dedupe([
+    explicitDataPath,
+    ...getDefaultStorageDirs().map((dir) => join(dir, DATA_FILE_NAME)),
+  ]);
+
+  return firstExisting(candidates) || explicitDataPath || candidates[0];
+}
+
+export function resolveMindwtrDbPath(overridePath?: string): string {
+  const explicitDbPath = getExplicitDbPath(overridePath);
+  if (explicitDbPath) return explicitDbPath;
+  const candidates = getDefaultStorageDirs().map((dir) => join(dir, DB_FILE_NAME));
 
   return firstExisting(candidates) || candidates[0];
 }

@@ -1,4 +1,4 @@
-- Added optional project due dates and review scheduling so projects show up at the right time.
-- iOS widgets now size task lists adaptively and avoid redundant legacy payload writes.
-- File sync on iOS now preserves folder bookmarks more reliably after reselecting locations.
-- Cloud provider settings group iCloud more clearly, while sync and attachment handling are more reliable overall.
+- Quick capture now understands natural language dates like tomorrow and next Friday.
+- Mobile feedback is calmer with queued toasts, larger action targets, and fewer blocking alerts.
+- Sync and cloud handling are more reliable, with safer attachment uploads and clearer server request IDs.
+- Focus and settings flows are steadier with prioritized focus tasks and more consistent error toasts.

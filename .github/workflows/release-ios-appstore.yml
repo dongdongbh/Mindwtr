@@ -54,6 +54,7 @@ jobs:
       EXPECTED_TEAM_ID: 5X9JC5PL7T
       EXPECTED_BUNDLE_ID: tech.dongdongbh.mindwtr
       EXPECTED_WIDGET_BUNDLE_ID: tech.dongdongbh.mindwtr.MindwtrWidgets
+      EXPECTED_SHARE_EXTENSION_BUNDLE_ID: tech.dongdongbh.mindwtr.share-extension
       EXPECTED_APP_GROUP: group.tech.dongdongbh.mindwtr
       EXPECTED_ICLOUD_CONTAINER: iCloud.tech.dongdongbh.mindwtr
       ANALYTICS_HEARTBEAT_URL: ${{ secrets.ANALYTICS_HEARTBEAT_URL }}
@@ -128,13 +129,14 @@ jobs:
           IOS_DISTRIBUTION_CERT_PWD: ${{ secrets.IOS_DISTRIBUTION_CERT_PWD }}
           IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
           IOS_WIDGET_PROVISIONING_PROFILE: ${{ secrets.IOS_WIDGET_PROVISIONING_PROFILE }}
+          IOS_SHARE_EXTENSION_PROVISIONING_PROFILE: ${{ secrets.IOS_SHARE_EXTENSION_PROVISIONING_PROFILE }}
           IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
           IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
           IOS_ASC_PRIVATE_KEY: ${{ secrets.IOS_ASC_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           missing=0
-          for key in IOS_DISTRIBUTION_CERT IOS_DISTRIBUTION_CERT_PWD IOS_PROVISIONING_PROFILE; do
+          for key in IOS_DISTRIBUTION_CERT IOS_DISTRIBUTION_CERT_PWD IOS_PROVISIONING_PROFILE IOS_SHARE_EXTENSION_PROVISIONING_PROFILE; do
             if [ -z "${!key:-}" ]; then
               echo "::error::Missing required secret: $key"
               missing=1
@@ -309,6 +311,7 @@ jobs:
         env:
           IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
           IOS_WIDGET_PROVISIONING_PROFILE: ${{ secrets.IOS_WIDGET_PROVISIONING_PROFILE }}
+          IOS_SHARE_EXTENSION_PROVISIONING_PROFILE: ${{ secrets.IOS_SHARE_EXTENSION_PROVISIONING_PROFILE }}
         run: |
           set -euo pipefail
 
@@ -334,6 +337,8 @@ jobs:
           APP_PROFILE_PLIST="$RUNNER_TEMP/mindwtr-ios-app-profile.plist"
           WIDGET_PROFILE_PATH="$RUNNER_TEMP/mindwtr-ios-widget.mobileprovision"
           WIDGET_PROFILE_PLIST="$RUNNER_TEMP/mindwtr-ios-widget-profile.plist"
+          SHARE_EXTENSION_PROFILE_PATH="$RUNNER_TEMP/mindwtr-ios-share-extension.mobileprovision"
+          SHARE_EXTENSION_PROFILE_PLIST="$RUNNER_TEMP/mindwtr-ios-share-extension-profile.plist"
 
           bash scripts/ci/decode-base64-to-file.sh "$IOS_PROVISIONING_PROFILE" "$APP_PROFILE_PATH"
           security cms -D -i "$APP_PROFILE_PATH" > "$APP_PROFILE_PLIST"
@@ -343,6 +348,8 @@ jobs:
             cp "$APP_PROFILE_PATH" "$WIDGET_PROFILE_PATH"
           fi
           security cms -D -i "$WIDGET_PROFILE_PATH" > "$WIDGET_PROFILE_PLIST"
+          bash scripts/ci/decode-base64-to-file.sh "$IOS_SHARE_EXTENSION_PROVISIONING_PROFILE" "$SHARE_EXTENSION_PROFILE_PATH"
+          security cms -D -i "$SHARE_EXTENSION_PROFILE_PATH" > "$SHARE_EXTENSION_PROFILE_PLIST"
 
           APP_PROFILE_UUID="$(profile_field "$APP_PROFILE_PLIST" "UUID")"
           APP_PROFILE_NAME="$(profile_field "$APP_PROFILE_PLIST" "Name")"
@@ -391,15 +398,34 @@ jobs:
             exit 1
           fi
 
+          SHARE_EXTENSION_PROFILE_UUID="$(profile_field "$SHARE_EXTENSION_PROFILE_PLIST" "UUID")"
+          SHARE_EXTENSION_PROFILE_NAME="$(profile_field "$SHARE_EXTENSION_PROFILE_PLIST" "Name")"
+          SHARE_EXTENSION_PROFILE_TEAM_ID="$(profile_field "$SHARE_EXTENSION_PROFILE_PLIST" "TeamIdentifier:0")"
+          SHARE_EXTENSION_PROFILE_APP_ID="$(profile_field "$SHARE_EXTENSION_PROFILE_PLIST" "Entitlements:application-identifier")"
+          SHARE_EXTENSION_PROFILE_GROUPS="$(profile_field "$SHARE_EXTENSION_PROFILE_PLIST" "Entitlements:com.apple.security.application-groups")"
+
+          if [ "$SHARE_EXTENSION_PROFILE_TEAM_ID" != "$EXPECTED_TEAM_ID" ]; then
+            echo "::error::Share extension profile TeamIdentifier (${SHARE_EXTENSION_PROFILE_TEAM_ID}) does not match expected team (${EXPECTED_TEAM_ID})."
+            exit 1
+          fi
+          verify_profile_bundle "$SHARE_EXTENSION_PROFILE_APP_ID" "$EXPECTED_SHARE_EXTENSION_BUNDLE_ID" "Share extension profile"
+          if ! printf '%s\n' "$SHARE_EXTENSION_PROFILE_GROUPS" | grep -Fq "$EXPECTED_APP_GROUP"; then
+            echo "::error::Share extension profile (${SHARE_EXTENSION_PROFILE_NAME}) is missing App Group ${EXPECTED_APP_GROUP}. Recreate the extension profile with App Groups enabled and re-upload IOS_SHARE_EXTENSION_PROVISIONING_PROFILE."
+            exit 1
+          fi
+
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           cp "$APP_PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/$APP_PROFILE_UUID.mobileprovision"
           cp "$WIDGET_PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/$WIDGET_PROFILE_UUID.mobileprovision"
+          cp "$SHARE_EXTENSION_PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/$SHARE_EXTENSION_PROFILE_UUID.mobileprovision"
 
           echo "APP_PROFILE_UUID=$APP_PROFILE_UUID" >> "$GITHUB_ENV"
           echo "APP_PROFILE_NAME=$APP_PROFILE_NAME" >> "$GITHUB_ENV"
           echo "APP_PROFILE_TEAM_ID=$APP_PROFILE_TEAM_ID" >> "$GITHUB_ENV"
           echo "WIDGET_PROFILE_UUID=$WIDGET_PROFILE_UUID" >> "$GITHUB_ENV"
           echo "WIDGET_PROFILE_NAME=$WIDGET_PROFILE_NAME" >> "$GITHUB_ENV"
+          echo "SHARE_EXTENSION_PROFILE_UUID=$SHARE_EXTENSION_PROFILE_UUID" >> "$GITHUB_ENV"
+          echo "SHARE_EXTENSION_PROFILE_NAME=$SHARE_EXTENSION_PROFILE_NAME" >> "$GITHUB_ENV"
 
       - name: Generate iOS native project if missing
         run: |
@@ -475,6 +501,8 @@ jobs:
               printf '        <string>%s</string>\n' "$APP_PROFILE_NAME"
               printf '        <key>%s</key>\n' "$EXPECTED_WIDGET_BUNDLE_ID"
               printf '        <string>%s</string>\n' "$WIDGET_PROFILE_NAME"
+              printf '        <key>%s</key>\n' "$EXPECTED_SHARE_EXTENSION_BUNDLE_ID"
+              printf '        <string>%s</string>\n' "$SHARE_EXTENSION_PROFILE_NAME"
               printf '%s\n' '    </dict>'
               printf '%s\n' '    <key>stripSwiftSymbols</key>'
               printf '%s\n' '    <true/>'
@@ -500,6 +528,7 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :provisioningProfiles dict" "$EXPORT_OPTIONS_PATH"
           /usr/libexec/PlistBuddy -c "Add :provisioningProfiles:$EXPECTED_BUNDLE_ID string $APP_PROFILE_NAME" "$EXPORT_OPTIONS_PATH"
           /usr/libexec/PlistBuddy -c "Add :provisioningProfiles:$EXPECTED_WIDGET_BUNDLE_ID string $WIDGET_PROFILE_NAME" "$EXPORT_OPTIONS_PATH"
+          /usr/libexec/PlistBuddy -c "Add :provisioningProfiles:$EXPECTED_SHARE_EXTENSION_BUNDLE_ID string $SHARE_EXTENSION_PROFILE_NAME" "$EXPORT_OPTIONS_PATH"
 
           echo "EXPORT_OPTIONS_PATH=$EXPORT_OPTIONS_PATH" >> "$GITHUB_ENV"
 
@@ -519,6 +548,11 @@ jobs:
               bundle: ENV.fetch('EXPECTED_WIDGET_BUNDLE_ID'),
               profile_name: ENV.fetch('WIDGET_PROFILE_NAME'),
               profile_uuid: ENV.fetch('WIDGET_PROFILE_UUID')
+            },
+            'ShareExtension' => {
+              bundle: ENV.fetch('EXPECTED_SHARE_EXTENSION_BUNDLE_ID'),
+              profile_name: ENV.fetch('SHARE_EXTENSION_PROFILE_NAME'),
+              profile_uuid: ENV.fetch('SHARE_EXTENSION_PROFILE_UUID')
             }
           }
           team_id = ENV.fetch('EXPECTED_TEAM_ID')
@@ -803,12 +837,14 @@ jobs:
 
           EFFECTIVE_SUBMIT_FOR_REVIEW="${REQUESTED_SUBMIT_FOR_REVIEW:-false}"
           REQUESTED_SUBMIT_FOR_REVIEW="$EFFECTIVE_SUBMIT_FOR_REVIEW"
+          APPSTORE_UPLOAD_DISABLED="false"
           if [ "$REQUESTED_SUBMIT_FOR_REVIEW" != "true" ]; then
             REQUESTED_SUBMIT_FOR_REVIEW="false"
             EFFECTIVE_SUBMIT_FOR_REVIEW="false"
             echo "Review submission disabled by input; checking App Store review state for TestFlight external routing."
           fi
           echo "ENABLE_TESTFLIGHT_EXTERNAL_RELEASE=false" >> "$GITHUB_ENV"
+          echo "SKIP_APPSTORE_UPLOAD=false" >> "$GITHUB_ENV"
 
           if [ -z "${IOS_ASC_KEY_ID:-}" ] || [ -z "${IOS_ASC_ISSUER_ID:-}" ] || [ -z "${IOS_ASC_PRIVATE_KEY:-}" ]; then
             echo "::warning::App Store Connect API secrets are missing. Disabling review submission and TestFlight external routing."
@@ -872,13 +908,40 @@ jobs:
           ACTIVE_REVIEW_VERSION="$(jq -r '.data[0].attributes.versionString // empty' "$REVIEW_JSON_FILE")"
           ACTIVE_REVIEW_STATE="$(jq -r '.data[0].attributes.appStoreState // empty' "$REVIEW_JSON_FILE")"
           if [ -n "${ACTIVE_REVIEW_ID}" ]; then
-            echo "::warning::Found existing iOS App Store submission in state ${ACTIVE_REVIEW_STATE:-unknown} (version ${ACTIVE_REVIEW_VERSION:-unknown}). Upload will proceed, but review submission is disabled."
+            echo "::warning::Found existing iOS App Store submission in state ${ACTIVE_REVIEW_STATE:-unknown} (version ${ACTIVE_REVIEW_VERSION:-unknown}). Upload will continue for TestFlight using version ${APP_VERSION} with build ${APP_BUILD_NUMBER}, and review submission is disabled."
             echo "EFFECTIVE_SUBMIT_FOR_REVIEW=false" >> "$GITHUB_ENV"
             echo "ENABLE_TESTFLIGHT_EXTERNAL_RELEASE=true" >> "$GITHUB_ENV"
             exit 0
           fi
 
-          if [ "$REQUESTED_SUBMIT_FOR_REVIEW" = "true" ]; then
+          if [ -n "${APP_VERSION:-}" ]; then
+            TARGET_VERSION_JSON_FILE="$RUNNER_TEMP/asc-target-version.json"
+            if api_get "$TARGET_VERSION_JSON_FILE" -G \
+              -H "Authorization: Bearer ${ASC_TOKEN}" \
+              --data-urlencode "filter[versionString]=${APP_VERSION}" \
+              --data-urlencode "filter[platform]=IOS" \
+              --data-urlencode "limit=1" \
+              "https://api.appstoreconnect.apple.com/v1/apps/${APPSTORE_APP_ID_RESOLVED}/appStoreVersions"; then
+              TARGET_VERSION_ID="$(jq -r '.data[0].id // empty' "$TARGET_VERSION_JSON_FILE")"
+              TARGET_VERSION_STATE="$(jq -r '.data[0].attributes.appStoreState // empty' "$TARGET_VERSION_JSON_FILE")"
+              if [ -n "${TARGET_VERSION_ID}" ] && [ "${TARGET_VERSION_STATE:-}" = "PREPARE_FOR_SUBMISSION" ]; then
+                echo "::notice::Found existing iOS App Store version ${APP_VERSION} in state ${TARGET_VERSION_STATE:-unknown}. Reusing the existing version record for upload."
+                echo "SKIP_APP_VERSION_UPDATE_FOR_UPLOAD=true" >> "$GITHUB_ENV"
+              elif [ -n "${TARGET_VERSION_ID}" ]; then
+                echo "::warning::Existing iOS App Store version ${APP_VERSION} is not editable (state ${TARGET_VERSION_STATE:-unknown}). Skipping App Store Connect publish for this run."
+                echo "EFFECTIVE_SUBMIT_FOR_REVIEW=false" >> "$GITHUB_ENV"
+                echo "SKIP_METADATA_FOR_UPLOAD=true" >> "$GITHUB_ENV"
+                echo "SKIP_APPSTORE_UPLOAD=true" >> "$GITHUB_ENV"
+                APPSTORE_UPLOAD_DISABLED="true"
+              fi
+            else
+              echo "::warning::Target-version lookup failed. Upload will continue and may attempt to create version ${APP_VERSION}."
+            fi
+          fi
+
+          if [ "${APPSTORE_UPLOAD_DISABLED}" = "true" ]; then
+            echo "App Store Connect upload disabled because version ${APP_VERSION} is already in a non-editable state."
+          elif [ "$REQUESTED_SUBMIT_FOR_REVIEW" = "true" ]; then
             echo "EFFECTIVE_SUBMIT_FOR_REVIEW=true" >> "$GITHUB_ENV"
             echo "No active App Store review submission found; review submission remains enabled."
           else
@@ -887,13 +950,15 @@ jobs:
           fi
 
       - name: Upload IPA to App Store Connect
-        if: ${{ inputs.upload }}
+        if: ${{ inputs.upload && env.SKIP_APPSTORE_UPLOAD != 'true' }}
         timeout-minutes: 30
         env:
           IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
           IOS_ASC_ISSUER_ID: ${{ secrets.IOS_ASC_ISSUER_ID }}
           IOS_ASC_PRIVATE_KEY: ${{ secrets.IOS_ASC_PRIVATE_KEY }}
           SUBMIT_FOR_REVIEW: ${{ env.EFFECTIVE_SUBMIT_FOR_REVIEW || 'false' }}
+          SKIP_APP_VERSION_UPDATE: ${{ env.SKIP_APP_VERSION_UPDATE_FOR_UPLOAD || 'false' }}
+          SKIP_METADATA: ${{ env.SKIP_METADATA_FOR_UPLOAD || 'false' }}
           FASTLANE_SKIP_UPDATE_CHECK: "1"
           FASTLANE_HIDE_CHANGELOG: "1"
           FASTLANE_OPT_OUT_USAGE: "1"
@@ -901,6 +966,8 @@ jobs:
         run: |
           set -euo pipefail
 
+          ASC_KEY_ID_CLEAN="$(printf '%s' "$IOS_ASC_KEY_ID" | tr -d '\r\n\t ')"
+          ASC_ISSUER_ID_CLEAN="$(printf '%s' "$IOS_ASC_ISSUER_ID" | tr -d '\r\n\t ')"
           ASC_KEY_PATH="$RUNNER_TEMP/ios-asc-key-fastlane.p8"
           bash scripts/ci/write-asc-private-key.sh "$IOS_ASC_PRIVATE_KEY" "$ASC_KEY_PATH"
 
@@ -911,31 +978,36 @@ jobs:
 
           platform :ios do
             lane :upload_app_store do
+              deliver_options = {
+                app_identifier: ENV.fetch("EXPECTED_BUNDLE_ID"),
+                app_version: ENV.fetch("APP_VERSION"),
+                ipa: ENV.fetch("IPA_PATH"),
+                metadata_path: ENV.fetch("FASTLANE_METADATA_PATH"),
+                skip_metadata: ENV.fetch("SKIP_METADATA", "false") == "true",
+                skip_screenshots: true,
+                skip_app_version_update: ENV.fetch("SKIP_APP_VERSION_UPDATE", "false") == "true",
+                force: true,
+                run_precheck_before_submit: false,
+                submit_for_review: ENV.fetch("SUBMIT_FOR_REVIEW", "false") == "true",
+                automatic_release: true
+              }
               api_key = app_store_connect_api_key(
-                key_id: ENV.fetch("IOS_ASC_KEY_ID"),
-                issuer_id: ENV.fetch("IOS_ASC_ISSUER_ID"),
+                key_id: ENV.fetch("FASTLANE_ASC_KEY_ID"),
+                issuer_id: ENV.fetch("FASTLANE_ASC_ISSUER_ID"),
                 key_filepath: ENV.fetch("ASC_KEY_PATH"),
                 duration: 1200,
                 in_house: false
               )
 
-              deliver(
-                api_key: api_key,
-                ipa: ENV.fetch("IPA_PATH"),
-                app_version: ENV.fetch("APP_VERSION"),
-                metadata_path: ENV.fetch("FASTLANE_METADATA_PATH"),
-                skip_screenshots: true,
-                skip_app_version_update: false,
-                force: true,
-                run_precheck_before_submit: false,
-                submit_for_review: ENV.fetch("SUBMIT_FOR_REVIEW", "false") == "true",
-                automatic_release: true
-              )
+              deliver(deliver_options.merge(api_key: api_key))
             end
           end
           EOF
 
-          ASC_KEY_PATH="$ASC_KEY_PATH" fastlane ios upload_app_store
+          FASTLANE_ASC_KEY_ID="$ASC_KEY_ID_CLEAN" \
+          FASTLANE_ASC_ISSUER_ID="$ASC_ISSUER_ID_CLEAN" \
+          ASC_KEY_PATH="$ASC_KEY_PATH" \
+          fastlane ios upload_app_store
 
       - name: Distribute upload to TestFlight external group
         if: ${{ inputs.upload }}
@@ -951,6 +1023,11 @@ jobs:
           CI: "true"
         run: |
           set -euo pipefail
+
+          if [ "${ENABLE_TESTFLIGHT_EXTERNAL_RELEASE:-false}" != "true" ]; then
+            echo "TestFlight external distribution not enabled for this run; skipping."
+            exit 0
+          fi
 
           ASC_KEY_PATH="$RUNNER_TEMP/ios-asc-key-fastlane-testflight.p8"
           bash scripts/ci/write-asc-private-key.sh "$IOS_ASC_PRIVATE_KEY" "$ASC_KEY_PATH"

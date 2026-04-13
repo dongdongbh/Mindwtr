@@ -24,21 +24,22 @@ beforeEach(() => {
     act(() => {
         useObsidianStore.setState((state) => ({
             ...state,
-                config: {
-                    vaultPath: null,
-                    vaultName: '',
-                    scanFolders: ['/'],
-                    inboxFile: 'Mindwtr/Inbox.md',
-                    taskNotesIncludeArchived: false,
-                    newTaskFormat: 'auto',
-                    lastScannedAt: null,
-                    enabled: false,
-                },
-                tasks: [],
-                scannedFileCount: 0,
-                scannedRelativePaths: [],
-                importMode: 'inline',
-                hasScannedThisSession: true,
+            config: {
+                vaultPath: null,
+                vaultName: '',
+                scanFolders: ['/'],
+                inboxFile: 'Mindwtr/Inbox.md',
+                taskNotesIncludeArchived: false,
+                newTaskFormat: 'auto',
+                lastScannedAt: null,
+                enabled: false,
+            },
+            tasks: [],
+            scannedFileCount: 0,
+            scannedRelativePaths: [],
+            taskNotesDetectedPaths: [],
+            importMode: 'inline',
+            hasScannedThisSession: true,
             hasVaultMarker: null,
             isInitialized: true,
             isLoadingConfig: false,
@@ -82,6 +83,7 @@ describe('ObsidianView', () => {
                     enabled: true,
                 },
                 scannedFileCount: 3,
+                taskNotesDetectedPaths: [],
                 importMode: 'inline',
                 isWatching: true,
                 tasks: [{
@@ -131,6 +133,7 @@ describe('ObsidianView', () => {
                     lastScannedAt: null,
                     enabled: true,
                 },
+                taskNotesDetectedPaths: [],
                 importMode: 'inline',
                 hasScannedThisSession: false,
                 rescan,
@@ -159,6 +162,10 @@ describe('ObsidianView', () => {
                     enabled: true,
                 },
                 scannedFileCount: 1,
+                taskNotesDetectedPaths: [
+                    'TaskNotes/Archive/Old task.md',
+                    'TaskNotes/Review quarterly report.md',
+                ],
                 importMode: 'tasknotes',
                 tasks: [{
                     id: 'obsidian-tasknotes-1',
@@ -200,5 +207,8 @@ describe('ObsidianView', () => {
         expect(getByText('@office')).toBeInTheDocument();
         expect(getByText(/120m/)).toBeInTheDocument();
         expect(getByText(/Creates a new TaskNotes file in/)).toBeInTheDocument();
+        expect(getByText('TaskNotes mode is active')).toBeInTheDocument();
+        expect(getByText('TaskNotes/Archive/Old task.md')).toBeInTheDocument();
+        expect(getAllByText('TaskNotes/Review quarterly report.md').length).toBeGreaterThan(0);
     });
 });

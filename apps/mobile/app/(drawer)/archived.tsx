@@ -8,6 +8,7 @@ import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { useThemeColors, ThemeColors } from '@/hooks/use-theme-colors';
 import { taskMatchesAreaFilter } from '@/lib/area-filter';
 import { Swipeable, GestureHandlerRootView } from 'react-native-gesture-handler';
+import { Archive } from 'lucide-react-native';
 import { useEffect, useRef } from 'react';
 
 function ArchivedTaskItem({
@@ -158,7 +159,7 @@ export default function ArchivedScreen() {
                         ))
                     ) : (
                         <View style={styles.emptyState}>
-                            <Text style={styles.emptyIcon}>📦</Text>
+                            <Archive size={48} color={tc.secondaryText} strokeWidth={1.5} style={styles.emptyIcon} />
                             <Text style={[styles.emptyTitle, { color: tc.text }]}>
                                 {t('archived.empty') || 'No archived tasks'}
                             </Text>
@@ -230,7 +231,6 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24,
     },
     emptyIcon: {
-        fontSize: 48,
         marginBottom: 16,
     },
     emptyTitle: {

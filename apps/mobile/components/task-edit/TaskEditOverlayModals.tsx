@@ -111,7 +111,10 @@ type TaskEditAudioModalProps = {
     audioTitle?: string;
     audioStatus?: AudioStatusLike;
     audioLoading: boolean;
+    audioTranscribing: boolean;
+    audioTranscriptionError?: string | null;
     onTogglePlayback: () => void;
+    onRetryTranscription: () => void;
     onClose: () => void;
 };
 
@@ -122,46 +125,72 @@ export const TaskEditAudioModal = ({
     audioTitle,
     audioStatus,
     audioLoading,
+    audioTranscribing,
+    audioTranscriptionError,
     onTogglePlayback,
+    onRetryTranscription,
     onClose,
-}: TaskEditAudioModalProps) => (
-    <Modal
-        visible={visible}
-        transparent
-        animationType="fade"
-        onRequestClose={onClose}
-    >
-        <Pressable style={styles.overlay} onPress={onClose}>
-            <Pressable
-                style={[styles.modalCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
-                onPress={(event) => event.stopPropagation()}
-            >
-                <Text style={[styles.modalTitle, { color: tc.text }]}>
-                    {audioTitle || t('quickAdd.audioNoteTitle')}
-                </Text>
-                <Text style={[styles.modalLabel, { color: tc.secondaryText }]}>
-                    {audioStatus?.isLoaded
-                        ? `${formatAudioTimestamp((audioStatus.currentTime ?? 0) * 1000)} / ${formatAudioTimestamp((audioStatus.duration ?? 0) * 1000)}`
-                        : t('audio.loading')}
-                </Text>
-                <View style={styles.modalButtons}>
-                    <TouchableOpacity
-                        onPress={onTogglePlayback}
-                        disabled={audioLoading || !audioStatus?.isLoaded}
-                        style={[styles.modalButton, (audioLoading || !audioStatus?.isLoaded) && styles.modalButtonDisabled]}
-                    >
-                        <Text style={[styles.modalButtonText, { color: tc.tint }]}>
-                            {audioStatus?.isLoaded && audioStatus.playing ? t('common.pause') : t('common.play')}
+}: TaskEditAudioModalProps) => {
+    const resolveText = (key: string, fallback: string) => {
+        const translated = t(key);
+        return translated === key ? fallback : translated;
+    };
+
+    return (
+        <Modal
+            visible={visible}
+            transparent
+            animationType="fade"
+            onRequestClose={onClose}
+        >
+            <Pressable style={styles.overlay} onPress={onClose}>
+                <Pressable
+                    style={[styles.modalCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
+                    onPress={(event) => event.stopPropagation()}
+                >
+                    <Text style={[styles.modalTitle, { color: tc.text }]}>
+                        {audioTitle || t('quickAdd.audioNoteTitle')}
+                    </Text>
+                    <Text style={[styles.modalLabel, { color: tc.secondaryText }]}>
+                        {audioStatus?.isLoaded
+                            ? `${formatAudioTimestamp((audioStatus.currentTime ?? 0) * 1000)} / ${formatAudioTimestamp((audioStatus.duration ?? 0) * 1000)}`
+                            : t('audio.loading')}
+                    </Text>
+                    {audioTranscriptionError ? (
+                        <Text style={[styles.validationText, { color: tc.danger }]}>
+                            {audioTranscriptionError}
                         </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={onClose} style={styles.modalButton}>
-                        <Text style={[styles.modalButtonText, { color: tc.secondaryText }]}>{t('common.close')}</Text>
-                    </TouchableOpacity>
-                </View>
+                    ) : null}
+                    <View style={styles.modalButtons}>
+                        <TouchableOpacity
+                            onPress={onTogglePlayback}
+                            disabled={audioLoading || !audioStatus?.isLoaded || audioTranscribing}
+                            style={[styles.modalButton, (audioLoading || !audioStatus?.isLoaded || audioTranscribing) && styles.modalButtonDisabled]}
+                        >
+                            <Text style={[styles.modalButtonText, { color: tc.tint }]}>
+                                {audioStatus?.isLoaded && audioStatus.playing ? t('common.pause') : t('common.play')}
+                            </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            onPress={onRetryTranscription}
+                            disabled={audioTranscribing}
+                            style={[styles.modalButton, audioTranscribing && styles.modalButtonDisabled]}
+                        >
+                            <Text style={[styles.modalButtonText, { color: tc.tint }]}>
+                                {audioTranscribing
+                                    ? resolveText('attachments.transcribing', 'Transcribing...')
+                                    : resolveText('attachments.retryTranscription', 'Re-transcribe')}
+                            </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={onClose} style={styles.modalButton}>
+                            <Text style={[styles.modalButtonText, { color: tc.secondaryText }]}>{t('common.close')}</Text>
+                        </TouchableOpacity>
+                    </View>
+                </Pressable>
             </Pressable>
-        </Pressable>
-    </Modal>
-);
+        </Modal>
+    );
+};
 
 type TaskEditImagePreviewModalProps = {
     visible: boolean;

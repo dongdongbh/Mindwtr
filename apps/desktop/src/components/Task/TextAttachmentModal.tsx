@@ -21,7 +21,7 @@ export function TextAttachmentModal({
 }: TextAttachmentModalProps) {
     if (!attachment) return null;
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
             <div className="w-full max-w-3xl rounded-lg border border-border bg-card p-4 shadow-xl">
                 <div className="flex items-center justify-between">
                     <div className="text-sm font-medium">{attachment.title || t('attachments.open')}</div>

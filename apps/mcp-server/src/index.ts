@@ -4,6 +4,12 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import * as z from 'zod';
 
 import { getMindwtrToolErrorCode, ReadOnlyError, ValidationError } from './errors.js';
+import {
+  MAX_TASK_QUICK_ADD_LENGTH,
+  MAX_TASK_TITLE_LENGTH,
+  normalizeNullableTaskTokens,
+  normalizeOptionalTaskTokens,
+} from './input-validation.js';
 import { createService, type MindwtrService } from './service.js';
 
 type LogLevel = 'info' | 'error';
@@ -23,9 +29,6 @@ const writeLog = (entry: LogEntry) => {
     process.stdout.write(line);
   }
 };
-
-const MAX_TASK_TITLE_LENGTH = 500;
-const MAX_TASK_QUICK_ADD_LENGTH = 2000;
 
 const logError = (message: string, error?: unknown) => {
   const context: Record<string, unknown> = {};
@@ -123,6 +126,7 @@ export const resolveServerModeFlags = (flags: Record<string, string | boolean>) 
 const taskStatusSchema = z.enum(['inbox', 'next', 'waiting', 'someday', 'reference', 'done', 'archived']);
 const taskStatusOrAllSchema = z.enum(['inbox', 'next', 'waiting', 'someday', 'reference', 'done', 'archived', 'all']);
 const projectStatusSchema = z.enum(['active', 'someday', 'waiting', 'archived']);
+const taskTokenSchema = z.string().trim().min(1).max(MAX_TASK_TITLE_LENGTH);
 const isoDateLikeSchema = z
   .string()
   .regex(
@@ -151,13 +155,15 @@ const addTaskSchema = z.object({
   projectId: z.string().optional().describe('Project ID to assign the task to'),
   dueDate: isoDateLikeSchema.optional().describe('Due date in ISO format'),
   startTime: isoDateLikeSchema.optional().describe('Start time in ISO format'),
-  contexts: z.array(z.string()).optional().describe('Context tags (e.g. ["@home", "@work"])'),
-  tags: z.array(z.string()).optional().describe('Tags (e.g. ["#urgent", "#personal"])'),
+  contexts: z.array(taskTokenSchema).optional().describe('Context tags (e.g. ["@home", "@work"])'),
+  tags: z.array(taskTokenSchema).optional().describe('Tags (e.g. ["#urgent", "#personal"])'),
   description: z.string().optional().describe('Task description/notes'),
   priority: z.string().optional().describe('Priority level'),
+  energyLevel: z.enum(['low', 'medium', 'high']).optional().describe('Energy level: low, medium, high'),
+  assignedTo: z.string().optional().describe('Person this task is assigned to or waiting for'),
   timeEstimate: z.string().optional().describe('Time estimate (e.g. "30m", "2h")'),
 });
-const validateAddTask = (data: z.infer<typeof addTaskSchema>) => {
+const normalizeAddTaskInput = (data: z.infer<typeof addTaskSchema>) => {
   const hasTitle = typeof data.title === 'string' && data.title.trim().length > 0;
   const hasQuickAdd = typeof data.quickAdd === 'string' && data.quickAdd.trim().length > 0;
   if (!hasTitle && !hasQuickAdd) {
@@ -172,6 +178,11 @@ const validateAddTask = (data: z.infer<typeof addTaskSchema>) => {
   if (hasQuickAdd && data.quickAdd!.trim().length > MAX_TASK_QUICK_ADD_LENGTH) {
     throw new ValidationError(`Quick-add input too long (max ${MAX_TASK_QUICK_ADD_LENGTH} characters)`);
   }
+  return {
+    ...data,
+    contexts: normalizeOptionalTaskTokens('contexts', data.contexts),
+    tags: normalizeOptionalTaskTokens('tags', data.tags),
+  };
 };
 
 const completeTaskSchema = z.object({
@@ -184,13 +195,21 @@ const updateTaskSchema = z.object({
   projectId: z.string().nullable().optional(),
   dueDate: isoDateLikeSchema.nullable().optional(),
   startTime: isoDateLikeSchema.nullable().optional(),
-  contexts: z.array(z.string()).nullable().optional(),
-  tags: z.array(z.string()).nullable().optional(),
+  contexts: z.array(taskTokenSchema).nullable().optional(),
+  tags: z.array(taskTokenSchema).nullable().optional(),
   description: z.string().nullable().optional(),
   priority: z.string().nullable().optional(),
+  energyLevel: z.enum(['low', 'medium', 'high']).nullable().optional(),
+  assignedTo: z.string().nullable().optional(),
   timeEstimate: z.string().nullable().optional(),
   reviewAt: isoDateLikeSchema.nullable().optional(),
   isFocusedToday: z.boolean().optional(),
+});
+
+const normalizeUpdateTaskInput = (data: z.infer<typeof updateTaskSchema>) => ({
+  ...data,
+  contexts: normalizeNullableTaskTokens('contexts', data.contexts),
+  tags: normalizeNullableTaskTokens('tags', data.tags),
 });
 
 const deleteTaskSchema = z.object({
@@ -254,6 +273,14 @@ const deleteAreaSchema = z.object({
 });
 
 export const registerMindwtrTools = (server: McpServer, service: MindwtrService, readonly: boolean) => {
+  const withReadonlyMcpErrorHandling = <TInput>(
+    scope: string,
+    handler: (input: TInput) => Promise<McpToolResponse>,
+  ) => withMcpErrorHandling(scope, async (input: TInput) => {
+    if (readonly) throw new ReadOnlyError();
+    return await handler(input);
+  });
+
   server.registerTool(
     'mindwtr_list_tasks',
     {
@@ -310,11 +337,10 @@ export const registerMindwtrTools = (server: McpServer, service: MindwtrService,
       description: 'Add a task to the local Mindwtr SQLite database.',
       inputSchema: addTaskSchema,
     },
-    withMcpErrorHandling('mindwtr_add_task', async (input) => {
-      if (readonly) throw new ReadOnlyError();
-      validateAddTask(input);
+    withReadonlyMcpErrorHandling('mindwtr_add_task', async (input) => {
+      const normalizedInput = normalizeAddTaskInput(input);
       const task = await service.addTask({
-        ...input,
+        ...normalizedInput,
       });
       return createMcpTextResponse({ task });
     }),
@@ -326,10 +352,9 @@ export const registerMindwtrTools = (server: McpServer, service: MindwtrService,
       description: 'Update a task in the local Mindwtr SQLite database.',
       inputSchema: updateTaskSchema,
     },
-    withMcpErrorHandling('mindwtr_update_task', async (input) => {
-      if (readonly) throw new ReadOnlyError();
+    withReadonlyMcpErrorHandling('mindwtr_update_task', async (input) => {
       const task = await service.updateTask({
-        ...input,
+        ...normalizeUpdateTaskInput(input),
       });
       return createMcpTextResponse({ task });
     }),
@@ -341,8 +366,7 @@ export const registerMindwtrTools = (server: McpServer, service: MindwtrService,
       description: 'Mark a task as done in the local Mindwtr SQLite database.',
       inputSchema: completeTaskSchema,
     },
-    withMcpErrorHandling('mindwtr_complete_task', async (input) => {
-      if (readonly) throw new ReadOnlyError();
+    withReadonlyMcpErrorHandling('mindwtr_complete_task', async (input) => {
       const task = await service.completeTask(input.id);
       return createMcpTextResponse({ task });
     }),
@@ -354,8 +378,7 @@ export const registerMindwtrTools = (server: McpServer, service: MindwtrService,
       description: 'Soft-delete a task in the local Mindwtr SQLite database.',
       inputSchema: deleteTaskSchema,
     },
-    withMcpErrorHandling('mindwtr_delete_task', async (input) => {
-      if (readonly) throw new ReadOnlyError();
+    withReadonlyMcpErrorHandling('mindwtr_delete_task', async (input) => {
       const task = await service.deleteTask(input.id);
       return createMcpTextResponse({ task });
     }),
@@ -379,8 +402,7 @@ export const registerMindwtrTools = (server: McpServer, service: MindwtrService,
       description: 'Restore a soft-deleted task in the local Mindwtr SQLite database.',
       inputSchema: restoreTaskSchema,
     },
-    withMcpErrorHandling('mindwtr_restore_task', async (input) => {
-      if (readonly) throw new ReadOnlyError();
+    withReadonlyMcpErrorHandling('mindwtr_restore_task', async (input) => {
       const task = await service.restoreTask(input.id);
       return createMcpTextResponse({ task });
     }),
@@ -392,8 +414,7 @@ export const registerMindwtrTools = (server: McpServer, service: MindwtrService,
       description: 'Add a project to the local Mindwtr SQLite database.',
       inputSchema: addProjectSchema,
     },
-    withMcpErrorHandling('mindwtr_add_project', async (input) => {
-      if (readonly) throw new ReadOnlyError();
+    withReadonlyMcpErrorHandling('mindwtr_add_project', async (input) => {
       const project = await service.addProject(input);
       return createMcpTextResponse({ project });
     }),
@@ -405,8 +426,7 @@ export const registerMindwtrTools = (server: McpServer, service: MindwtrService,
       description: 'Update a project in the local Mindwtr SQLite database.',
       inputSchema: updateProjectSchema,
     },
-    withMcpErrorHandling('mindwtr_update_project', async (input) => {
-      if (readonly) throw new ReadOnlyError();
+    withReadonlyMcpErrorHandling('mindwtr_update_project', async (input) => {
       const project = await service.updateProject(input);
       return createMcpTextResponse({ project });
     }),
@@ -418,8 +438,7 @@ export const registerMindwtrTools = (server: McpServer, service: MindwtrService,
       description: 'Soft-delete a project in the local Mindwtr SQLite database.',
       inputSchema: deleteProjectSchema,
     },
-    withMcpErrorHandling('mindwtr_delete_project', async (input) => {
-      if (readonly) throw new ReadOnlyError();
+    withReadonlyMcpErrorHandling('mindwtr_delete_project', async (input) => {
       const project = await service.deleteProject(input.id);
       return createMcpTextResponse({ project });
     }),
@@ -431,8 +450,7 @@ export const registerMindwtrTools = (server: McpServer, service: MindwtrService,
       description: 'Add an area to the local Mindwtr SQLite database.',
       inputSchema: addAreaSchema,
     },
-    withMcpErrorHandling('mindwtr_add_area', async (input) => {
-      if (readonly) throw new ReadOnlyError();
+    withReadonlyMcpErrorHandling('mindwtr_add_area', async (input) => {
       const area = await service.addArea(input);
       return createMcpTextResponse({ area });
     }),
@@ -444,8 +462,7 @@ export const registerMindwtrTools = (server: McpServer, service: MindwtrService,
       description: 'Update an area in the local Mindwtr SQLite database.',
       inputSchema: updateAreaSchema,
     },
-    withMcpErrorHandling('mindwtr_update_area', async (input) => {
-      if (readonly) throw new ReadOnlyError();
+    withReadonlyMcpErrorHandling('mindwtr_update_area', async (input) => {
       const area = await service.updateArea(input);
       return createMcpTextResponse({ area });
     }),
@@ -457,8 +474,7 @@ export const registerMindwtrTools = (server: McpServer, service: MindwtrService,
       description: 'Soft-delete an area in the local Mindwtr SQLite database.',
       inputSchema: deleteAreaSchema,
     },
-    withMcpErrorHandling('mindwtr_delete_area', async (input) => {
-      if (readonly) throw new ReadOnlyError();
+    withReadonlyMcpErrorHandling('mindwtr_delete_area', async (input) => {
       const area = await service.deleteArea(input.id);
       return createMcpTextResponse({ area });
     }),

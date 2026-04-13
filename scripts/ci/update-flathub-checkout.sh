@@ -23,6 +23,7 @@ required_paths=(
   "apps/desktop/package.json"
   "apps/desktop/package-lock.json"
   "packages/core/package.json"
+  "packages/core/package-lock.json"
   "apps/desktop/src-tauri/Cargo.lock"
   "apps/desktop/src-tauri/linux/Mindwtr.metainfo.xml"
   "apps/desktop/src-tauri/linux/tech.dongdongbh.mindwtr.desktop"
@@ -110,16 +111,33 @@ trap cleanup EXIT
 
 git -C "${repo_root}" worktree add --force --detach "${worktree_dir}" "${upstream_commit}" >/dev/null
 
+node "${repo_root}/scripts/ci/check-package-lock-sync.js" \
+  "${worktree_dir}/apps/desktop/package.json" \
+  "${worktree_dir}/apps/desktop/package-lock.json"
+
+node "${repo_root}/scripts/ci/check-package-lock-sync.js" \
+  "${worktree_dir}/packages/core/package.json" \
+  "${worktree_dir}/packages/core/package-lock.json"
+
 python3 "${repo_root}/scripts/ci/repair-package-lock.py" \
   --check \
   "${worktree_dir}/apps/desktop/package-lock.json"
+
+python3 "${repo_root}/scripts/ci/repair-package-lock.py" \
+  --check \
+  "${worktree_dir}/packages/core/package-lock.json"
 
 python3 "${tools_dir}/cargo/flatpak-cargo-generator.py" \
   "${worktree_dir}/apps/desktop/src-tauri/Cargo.lock" \
   -o "${cargo_sources_path}"
 
+# Recursive mode walks base.parent, so this synthetic root path makes the
+# generator scan both workspace lockfiles from the checkout root.
 "${node_generator}" npm \
-  "${worktree_dir}/apps/desktop/package-lock.json" \
+  "${worktree_dir}/package-lock.json" \
+  -r \
+  -R "apps/desktop/package-lock.json" \
+  -R "packages/core/package-lock.json" \
   -o "${node_sources_path}"
 
 echo "Updated Flathub checkout in ${flathub_dir} for ${ref} (${upstream_commit})"

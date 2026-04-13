@@ -73,6 +73,7 @@ import { useAiSettings } from "./settings/useAiSettings";
 import { useCalendarSettings } from "./settings/useCalendarSettings";
 import { useObsidianSettings } from "./settings/useObsidianSettings";
 import { useSyncSettings } from "./settings/useSyncSettings";
+import { useConfirmDialog } from "../../hooks/useConfirmDialog";
 import { usePerformanceMonitor } from "../../hooks/usePerformanceMonitor";
 import { checkBudget } from "../../config/performanceBudgets";
 import {
@@ -84,9 +85,11 @@ import {
   type DesktopThemeMode,
 } from "../../lib/theme";
 import { type GlobalQuickAddShortcutSetting } from "../../lib/global-quick-add-shortcut";
+import { coerceDesktopTextSize, type DesktopTextSizeMode } from "../../lib/text-size";
 
 type ThemeMode = DesktopThemeMode;
 type DensityMode = "comfortable" | "compact";
+type TextSizeMode = DesktopTextSizeMode;
 type SettingsPage =
   | "main"
   | "gtd"
@@ -238,6 +241,7 @@ export function SettingsView() {
   const densityMode = (
     settings?.appearance?.density === "compact" ? "compact" : "comfortable"
   ) as DensityMode;
+  const textSizeMode = coerceDesktopTextSize(settings?.appearance?.textSize);
   const dateFormat = normalizeDateFormatSetting(settings?.dateFormat);
   const timeFormat = normalizeTimeFormatSetting(settings?.timeFormat);
   const [saved, setSaved] = useState(false);
@@ -269,6 +273,7 @@ export function SettingsView() {
   const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
   const [linuxDistro, setLinuxDistro] = useState<LinuxDistroInfo | null>(null);
   const [hasUpdateBadge, setHasUpdateBadge] = useState(false);
+  const { requestConfirmation, confirmModal } = useConfirmDialog();
 
   const showSaved = useCallback(() => {
     setSaved(true);
@@ -376,6 +381,11 @@ export function SettingsView() {
     const translated = translate(key);
     return translated === key ? "Select Obsidian vault" : translated;
   }, [translate]);
+  const cancelLabel = useMemo(() => {
+    const key = "common.cancel";
+    const translated = translate(key);
+    return translated === key ? "Cancel" : translated;
+  }, [translate]);
 
   // Heavy settings hooks are only needed when their page is active.
   const [isCleaningAttachments, setIsCleaningAttachments] = useState(false);
@@ -395,6 +405,16 @@ export function SettingsView() {
     );
     return result;
   }, [language, translate]);
+  const requestSettingsConfirmation = useCallback(
+    ({ title, message }: { title: string; message: string }) =>
+      requestConfirmation({
+        title,
+        description: message,
+        confirmLabel: "Continue",
+        cancelLabel,
+      }),
+    [cancelLabel, requestConfirmation],
+  );
 
   useLayoutEffect(() => {
     markSettingsOpenTrace("settings-view-layout-effect", { page });
@@ -568,6 +588,17 @@ export function SettingsView() {
     })
       .then(showSaved)
       .catch((error) => reportError("Failed to update density", error));
+  };
+
+  const saveTextSizePreference = (mode: TextSizeMode) => {
+    updateSettings({
+      appearance: {
+        ...(settings?.appearance ?? {}),
+        textSize: mode,
+      },
+    })
+      .then(showSaved)
+      .catch((error) => reportError("Failed to update text size", error));
   };
 
   const saveLanguagePreference = (lang: Language) => {
@@ -1104,6 +1135,7 @@ export function SettingsView() {
         keywords: [
           t.appearance,
           t.density,
+          t.textSize,
           t.language,
           t.weekStart,
           t.dateFormat,
@@ -1112,6 +1144,8 @@ export function SettingsView() {
           t.closeBehavior,
           t.showTray,
           "theme",
+          "font size",
+          "text size",
           "dark mode",
           "light mode",
         ],
@@ -1257,6 +1291,7 @@ export function SettingsView() {
     isTauri,
     showSaved,
     selectSyncFolderTitle,
+    requestConfirmation: requestSettingsConfirmation,
   });
   const {
     obsidianVaultPath,
@@ -1330,6 +1365,8 @@ export function SettingsView() {
           onThemeChange={saveThemePreference}
           densityMode={densityMode}
           onDensityChange={saveDensityPreference}
+          textSizeMode={textSizeMode}
+          onTextSizeChange={saveTextSizePreference}
           language={language}
           onLanguageChange={saveLanguagePreference}
           weekStart={weekStart}
@@ -1648,6 +1685,7 @@ export function SettingsView() {
           }}
           onDownload={handleDownloadUpdate}
         />
+        {confirmModal}
       </div>
     </ErrorBoundary>
   );

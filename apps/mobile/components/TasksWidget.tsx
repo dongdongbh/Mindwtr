@@ -2,11 +2,26 @@ import React from 'react';
 import { FlexWidget, TextWidget } from 'react-native-android-widget';
 
 import type { TasksWidgetPayload } from '../lib/widget-data';
+import type { AndroidWidgetLayoutMode } from '../lib/widget-layout';
 
 const TASK_ITEM_FONT_SIZE = 13;
+const COMPACT_TASK_ITEM_FONT_SIZE = 12;
 
-export function buildTasksWidgetTree(payload: TasksWidgetPayload) {
+export function buildTasksWidgetTree(
+    payload: TasksWidgetPayload,
+    options?: { layoutMode?: AndroidWidgetLayoutMode },
+) {
     const { headerTitle, subtitle, items, emptyMessage, captureLabel, focusUri, quickCaptureUri, palette } = payload;
+    const layoutMode = options?.layoutMode ?? 'standard';
+    const isCompact = layoutMode === 'compact';
+    const rootPadding = isCompact ? 10 : 12;
+    const taskFontSize = isCompact ? COMPACT_TASK_ITEM_FONT_SIZE : TASK_ITEM_FONT_SIZE;
+    const taskMarginTop = isCompact ? 3 : 4;
+    const firstTaskMarginTop = isCompact ? 6 : 7;
+    const buttonMarginTop = isCompact ? 6 : 8;
+    const buttonFontSize = isCompact ? 10 : 11;
+    const buttonPaddingVertical = isCompact ? 4 : 5;
+    const buttonPaddingHorizontal = isCompact ? 8 : 9;
     const contentChildren: React.ReactElement[] = [
         React.createElement(TextWidget, {
             key: 'header',
@@ -21,6 +36,8 @@ export function buildTasksWidgetTree(payload: TasksWidgetPayload) {
             key: 'subtitle',
             text: subtitle,
             style: { color: palette.mutedText, fontSize: 10, marginTop: 2 },
+            maxLines: 1,
+            truncate: 'END',
             clickAction: 'OPEN_URI',
             clickActionData: { uri: focusUri },
         }),
@@ -34,8 +51,8 @@ export function buildTasksWidgetTree(payload: TasksWidgetPayload) {
                     text: `• ${item.title}`,
                     style: {
                         color: palette.text,
-                        fontSize: TASK_ITEM_FONT_SIZE,
-                        marginTop: index === 0 ? 7 : 4,
+                        fontSize: taskFontSize,
+                        marginTop: index === 0 ? firstTaskMarginTop : taskMarginTop,
                     },
                     maxLines: 1,
                     truncate: 'END',
@@ -66,9 +83,8 @@ export function buildTasksWidgetTree(payload: TasksWidgetPayload) {
             style: {
                 width: 'match_parent',
                 height: 'match_parent',
-                padding: 12,
+                padding: rootPadding,
                 backgroundColor: palette.background,
-                justifyContent: 'space-between',
             },
         },
         React.createElement(
@@ -77,22 +93,27 @@ export function buildTasksWidgetTree(payload: TasksWidgetPayload) {
                 key: 'content',
                 style: {
                     width: 'match_parent',
-                    flex: 1,
                 },
             },
             ...contentChildren
         ),
+        React.createElement(FlexWidget, {
+            key: 'spacer',
+            style: {
+                flex: 1,
+            },
+        }),
         React.createElement(TextWidget, {
             key: 'capture-bottom',
             text: captureLabel,
             style: {
                 color: palette.onAccent,
-                fontSize: 11,
+                fontSize: buttonFontSize,
                 fontWeight: '600',
                 backgroundColor: palette.accent,
-                paddingVertical: 5,
-                paddingHorizontal: 9,
-                marginTop: 8,
+                paddingVertical: buttonPaddingVertical,
+                paddingHorizontal: buttonPaddingHorizontal,
+                marginTop: buttonMarginTop,
                 borderRadius: 999,
                 textAlign: 'center',
             },

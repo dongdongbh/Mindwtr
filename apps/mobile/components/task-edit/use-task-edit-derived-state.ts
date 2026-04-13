@@ -32,12 +32,14 @@ import {
 const DEFAULT_TIME_ESTIMATE_PRESETS: TimeEstimate[] = ['10min', '30min', '1hr', '2hr', '3hr', '4hr', '4hr+'];
 const ALL_TIME_ESTIMATES: TimeEstimate[] = ['5min', '10min', '15min', '30min', '1hr', '2hr', '3hr', '4hr', '4hr+'];
 const PRIORITY_OPTIONS: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
+const ENERGY_LEVEL_OPTIONS: Array<NonNullable<Task['energyLevel']>> = ['low', 'medium', 'high'];
 const REFERENCE_HIDDEN_FIELDS = new Set<TaskEditorFieldId>([
     'startTime',
     'dueDate',
     'reviewAt',
     'recurrence',
     'priority',
+    'energyLevel',
     'timeEstimate',
     'checklist',
 ]);
@@ -205,6 +207,10 @@ export function useTaskEditDerivedState({
             case 'priority':
                 if (!prioritiesEnabled) return false;
                 return Boolean(editedTask.priority ?? task?.priority);
+            case 'energyLevel':
+                return Boolean(editedTask.energyLevel ?? task?.energyLevel);
+            case 'assignedTo':
+                return Boolean(String(editedTask.assignedTo ?? task?.assignedTo ?? '').trim());
             case 'contexts':
                 return Boolean(contextInputDraft.trim());
             case 'description':
@@ -232,9 +238,11 @@ export function useTaskEditDerivedState({
     }, [
         contextInputDraft,
         descriptionDraft,
+        editedTask.assignedTo,
         editedTask.areaId,
         editedTask.checklist,
         editedTask.dueDate,
+        editedTask.energyLevel,
         editedTask.priority,
         editedTask.projectId,
         editedTask.recurrence,
@@ -245,9 +253,11 @@ export function useTaskEditDerivedState({
         editedTask.timeEstimate,
         prioritiesEnabled,
         tagInputDraft,
+        task?.assignedTo,
         task?.areaId,
         task?.checklist,
         task?.dueDate,
+        task?.energyLevel,
         task?.priority,
         task?.projectId,
         task?.recurrence,
@@ -309,6 +319,7 @@ export function useTaskEditDerivedState({
         basicFields,
         dailyInterval,
         detailsFields,
+        energyLevelOptions: ENERGY_LEVEL_OPTIONS,
         filteredProjectsForPicker,
         formatTimeEstimateLabel,
         monthlyAnchorDate,

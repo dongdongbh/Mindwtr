@@ -31,13 +31,22 @@ if (pkg.dependencies && pkg.dependencies['@mindwtr/core'] === 'workspace:*') {
   changes.push('rewrote @mindwtr/core to file:../../packages/core for npm compatibility');
 }
 
+if (!pkg.expo || typeof pkg.expo !== 'object' || Array.isArray(pkg.expo)) {
+  pkg.expo = {};
+}
+if (!pkg.expo.autolinking || typeof pkg.expo.autolinking !== 'object' || Array.isArray(pkg.expo.autolinking)) {
+  pkg.expo.autolinking = {};
+}
+const existingExclude = Array.isArray(pkg.expo.autolinking.exclude)
+  ? pkg.expo.autolinking.exclude.filter((value) => typeof value === 'string')
+  : [];
+if (!existingExclude.includes('play-store-updates')) {
+  pkg.expo.autolinking.exclude = [...existingExclude, 'play-store-updates'];
+  changed = true;
+  changes.push('excluded play-store-updates from Expo autolinking for F-Droid builds');
+}
+
 if (enableExpoBuildFromSource) {
-  if (!pkg.expo || typeof pkg.expo !== 'object' || Array.isArray(pkg.expo)) {
-    pkg.expo = {};
-  }
-  if (!pkg.expo.autolinking || typeof pkg.expo.autolinking !== 'object' || Array.isArray(pkg.expo.autolinking)) {
-    pkg.expo.autolinking = {};
-  }
   if (
     !pkg.expo.autolinking.android ||
     typeof pkg.expo.autolinking.android !== 'object' ||

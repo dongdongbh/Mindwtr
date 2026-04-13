@@ -6,9 +6,12 @@ type AudioAttachmentModalProps = {
     audioSource: string | null;
     audioRef: RefObject<HTMLAudioElement | null>;
     audioError: string | null;
+    audioTranscribing: boolean;
+    audioTranscriptionError: string | null;
     onClose: () => void;
     onAudioError: () => void;
     onOpenExternally: () => void;
+    onRetryTranscription: () => void;
     t: (key: string) => string;
 };
 
@@ -17,12 +20,19 @@ export function AudioAttachmentModal({
     audioSource,
     audioRef,
     audioError,
+    audioTranscribing,
+    audioTranscriptionError,
     onClose,
     onAudioError,
     onOpenExternally,
+    onRetryTranscription,
     t,
 }: AudioAttachmentModalProps) {
     if (!attachment || !audioSource) return null;
+    const resolveText = (key: string, fallback: string) => {
+        const translated = t(key);
+        return translated === key ? fallback : translated;
+    };
     return (
         <div
             className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
@@ -60,6 +70,18 @@ export function AudioAttachmentModal({
                     className="w-full"
                     onError={onAudioError}
                 />
+                <div className="flex items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={onRetryTranscription}
+                        disabled={audioTranscribing}
+                        className="text-xs px-3 py-1.5 rounded-md border border-border bg-muted/50 text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {audioTranscribing
+                            ? resolveText('attachments.transcribing', 'Transcribing...')
+                            : resolveText('attachments.retryTranscription', 'Re-transcribe')}
+                    </button>
+                </div>
                 {audioError ? (
                     <div className="flex items-center justify-between text-xs text-red-500" role="alert" aria-live="assertive">
                         <span>{audioError}</span>
@@ -70,6 +92,11 @@ export function AudioAttachmentModal({
                         >
                             {t('attachments.open')}
                         </button>
+                    </div>
+                ) : null}
+                {audioTranscriptionError ? (
+                    <div className="text-xs text-red-500" role="alert" aria-live="assertive">
+                        {audioTranscriptionError}
                     </div>
                 ) : null}
             </div>

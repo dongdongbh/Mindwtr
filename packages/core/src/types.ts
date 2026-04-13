@@ -3,6 +3,7 @@ import type { ExternalCalendarSubscription } from './ics';
 export type TaskStatus = 'inbox' | 'next' | 'waiting' | 'someday' | 'reference' | 'done' | 'archived';
 
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
+export type TaskEnergyLevel = 'low' | 'medium' | 'high';
 
 export type TimeEstimate = '5min' | '10min' | '15min' | '30min' | '1hr' | '2hr' | '3hr' | '4hr' | '4hr+';
 
@@ -41,6 +42,8 @@ export type TaskEditorFieldId =
     | 'section'
     | 'area'
     | 'priority'
+    | 'energyLevel'
+    | 'assignedTo'
     | 'contexts'
     | 'tags'
     | 'timeEstimate'
@@ -145,6 +148,8 @@ export interface Task {
     title: string;
     status: TaskStatus;
     priority?: TaskPriority;
+    energyLevel?: TaskEnergyLevel;
+    assignedTo?: string;
     taskMode?: TaskMode; // 'list' for checklist-first tasks
     startTime?: string; // ISO date string
     dueDate?: string; // ISO date string
@@ -233,6 +238,7 @@ export interface AppData {
         };
         appearance?: {
             density?: 'comfortable' | 'compact';
+            textSize?: 'default' | 'large' | 'extra-large';
         };
         theme?: 'light' | 'dark' | 'system' | 'eink' | 'nord' | 'sepia' | 'material3-light' | 'material3-dark' | 'oled';
         language?: 'en' | 'zh' | 'zh-Hant' | 'es' | 'hi' | 'ar' | 'de' | 'ru' | 'ja' | 'fr' | 'pt' | 'pl' | 'ko' | 'it' | 'tr' | 'nl' | 'system';

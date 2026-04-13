@@ -12,7 +12,11 @@ interface KeybindingHelpModalProps {
     t: (key: string) => string;
 }
 
-type HelpItem = { keys: string; labelKey: string };
+type HelpItem = {
+    keys: string;
+    labelKey: string;
+    fallbackLabel?: string;
+};
 
 export function KeybindingHelpModal({
     style,
@@ -52,6 +56,8 @@ export function KeybindingHelpModal({
         { keys: 'gb', labelKey: 'keybindings.goBoard' },
         { keys: 'gd', labelKey: 'keybindings.goDone' },
         { keys: 'ga', labelKey: 'keybindings.goArchived' },
+        { keys: 'a1-a9', labelKey: 'keybindings.switchArea', fallbackLabel: 'Switch to Area 1-9' },
+        { keys: 'a0', labelKey: 'keybindings.clearAreaFilter', fallbackLabel: 'Clear area filter' },
     ];
 
     const vimList: HelpItem[] = [
@@ -96,6 +102,11 @@ export function KeybindingHelpModal({
 
     const globalItems = style === 'emacs' ? emacsGlobal : vimGlobal;
     const listItems = style === 'emacs' ? emacsList : vimList;
+    const resolveItemLabel = (item: HelpItem) => {
+        const translated = t(item.labelKey);
+        if (translated !== item.labelKey) return translated;
+        return item.fallbackLabel ?? translated;
+    };
 
     return (
         <div
@@ -134,7 +145,7 @@ export function KeybindingHelpModal({
                             {globalItems.map((item, index) => (
                                 <div key={`${item.labelKey}-${index}`} className="flex items-center justify-between bg-muted/30 rounded-md px-3 py-2">
                                     <code className="text-xs bg-muted px-2 py-0.5 rounded">{item.keys}</code>
-                                    <span className="text-sm">{t(item.labelKey)}</span>
+                                    <span className="text-sm">{resolveItemLabel(item)}</span>
                                 </div>
                             ))}
                         </div>
@@ -146,7 +157,7 @@ export function KeybindingHelpModal({
                             {listItems.map((item) => (
                                 <div key={item.keys} className="flex items-center justify-between bg-muted/30 rounded-md px-3 py-2">
                                     <code className="text-xs bg-muted px-2 py-0.5 rounded">{item.keys}</code>
-                                    <span className="text-sm">{t(item.labelKey)}</span>
+                                    <span className="text-sm">{resolveItemLabel(item)}</span>
                                 </div>
                             ))}
                         </div>

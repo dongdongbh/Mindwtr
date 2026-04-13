@@ -14,6 +14,7 @@ export type LogPayload = LogMeta & {
 };
 
 export type Logger = (payload: LogPayload) => void;
+export { sanitizeForLog, sanitizeLogContext, sanitizeLogMessage, sanitizeUrl } from './log-sanitize';
 
 const normalizeError = (error: unknown): Record<string, unknown> | undefined => {
     if (!error) return undefined;
@@ -27,22 +28,27 @@ const normalizeError = (error: unknown): Record<string, unknown> | undefined => 
     return { error };
 };
 
-let logger: Logger = (payload) => {
+import { sanitizeForLog, sanitizeLogContext } from './log-sanitize';
+
+export const consoleLogger: Logger = (payload) => {
     const { level, message, error, ...rest } = payload;
     const entry = {
-        ...rest,
-        ...(error ? { error: normalizeError(error) } : {}),
+        ...sanitizeLogContext(rest as Record<string, unknown>),
+        ...(error ? { error: sanitizeLogContext(normalizeError(error)) } : {}),
     };
+    const safeMessage = sanitizeForLog(message);
     if (level === 'error') {
-        console.error(message, entry);
+        console.error(safeMessage, entry);
         return;
     }
     if (level === 'warn') {
-        console.warn(message, entry);
+        console.warn(safeMessage, entry);
         return;
     }
-    console.info(message, entry);
+    console.info(safeMessage, entry);
 };
+
+let logger: Logger = consoleLogger;
 
 export const setLogger = (next: Logger) => {
     logger = next;

@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { AppData, Attachment, MergeStats, createSyncOrchestrator, useTaskStore, webdavGetJson, webdavPutJson, cloudGetJson, cloudPutJson, flushPendingSave, performSyncCycle, findOrphanedAttachments, removeOrphanedAttachmentsFromData, removeAttachmentsByIdFromData, webdavDeleteFile, cloudDeleteFile, CLOCK_SKEW_THRESHOLD_MS, appendSyncHistory, withRetry, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeWebdavUrl, normalizeCloudUrl, sanitizeAppDataForRemote, areSyncPayloadsEqual, assertNoPendingAttachmentUploads, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, mergeAppData, cloneAppData, LocalSyncAbort, getInMemoryAppDataSnapshot, shouldRunAttachmentCleanup, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type CloudProvider } from '@mindwtr/core';
+import { AppData, Attachment, MergeStats, createSyncOrchestrator, useTaskStore, webdavGetJson, webdavPutJson, cloudGetJson, cloudPutJson, flushPendingSave, performSyncCycle, findOrphanedAttachments, removeOrphanedAttachmentsFromData, removeAttachmentsByIdFromData, webdavDeleteFile, cloudDeleteFile, CLOCK_SKEW_THRESHOLD_MS, appendSyncHistory, withRetry, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeWebdavUrl, normalizeCloudUrl, sanitizeAppDataForRemote, areSyncPayloadsEqual, assertNoPendingAttachmentUploads, findPendingAttachmentUploads, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, mergeAppData, cloneAppData, LocalSyncAbort, getInMemoryAppDataSnapshot, shouldRunAttachmentCleanup, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type CloudProvider } from '@mindwtr/core';
 import { mobileStorage } from './storage-adapter';
 import { logInfo, logSyncError, logWarn, sanitizeLogMessage } from './app-log';
 import { readSyncFile, resolveSyncFileUri, writeSyncFile } from './storage-file';
@@ -589,6 +589,43 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
         return data;
       };
 
+      const prepareRemoteWriteData = async (data: AppData): Promise<AppData> => {
+        const pendingUploads = findPendingAttachmentUploads(data);
+        if (pendingUploads.length === 0) {
+          return data;
+        }
+
+        step = 'attachments_finalize';
+        logSyncInfo('Sync step', { step });
+        logSyncInfo('Attachment final sync start', {
+          backend,
+          pending: String(pendingUploads.length),
+        });
+
+        if (backend === 'webdav' && webdavConfig?.url) {
+          await ensureNetworkStillAvailable();
+          const baseSyncUrl = getBaseSyncUrl(webdavConfig.url);
+          await syncWebdavAttachments(data, webdavConfig, baseSyncUrl);
+        } else if (backend === 'cloud' && cloudProvider === CLOUD_PROVIDER_SELF_HOSTED && cloudConfig?.url) {
+          await ensureNetworkStillAvailable();
+          const baseSyncUrl = getCloudBaseUrl(cloudConfig.url);
+          await syncCloudAttachments(data, cloudConfig, baseSyncUrl);
+        } else if (backend === 'cloud' && cloudProvider === CLOUD_PROVIDER_DROPBOX) {
+          await ensureNetworkStillAvailable();
+          await syncDropboxAttachments(data, dropboxClientId, fetchWithAbort);
+        } else if (backend === 'file' && fileSyncPath) {
+          await syncFileAttachments(data, fileSyncPath);
+        }
+
+        const remainingUploads = findPendingAttachmentUploads(data);
+        logSyncInfo('Attachment final sync done', {
+          backend,
+          pending: String(remainingUploads.length),
+        });
+
+        return data;
+      };
+
       const writeRemoteDataByBackend = async (data: AppData): Promise<void> => {
         await ensureNetworkStillAvailable();
         assertNoPendingAttachmentUploads(data);
@@ -684,6 +721,7 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
           await mobileStorage.saveData(data);
           wroteLocal = true;
         },
+        prepareRemoteWrite: prepareRemoteWriteData,
         writeRemote: async (data) => {
           ensureLocalSnapshotFresh();
           await writeRemoteDataByBackend(data);

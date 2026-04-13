@@ -1,0 +1,15 @@
+<en-US>
+Quick capture now understands natural language dates like tomorrow.
+Mobile toasts queue cleanly, sync guidance is clearer, and non-critical alerts interrupt less.
+Android widgets fit narrow layouts better, and sync/cloud uploads fail more safely.
+</en-US>
+<zh-CN>
+快速收集现已支持“明天”等自然语言日期。
+移动端 Toast 会更有序地排队显示，同步提示更清晰，非关键提醒更少打断操作。
+Android 小组件在窄尺寸下显示更合适，同步与云端上传失败时也更安全。
+</zh-CN>
+<es-ES>
+La captura rapida ahora entiende fechas naturales como manana.
+Los toasts moviles se ordenan mejor, la guia de sync es mas clara y las alertas no criticas interrumpen menos.
+Los widgets de Android encajan mejor en espacios estrechos y los uploads/sync fallan de forma mas segura.
+</es-ES>

@@ -12,7 +12,38 @@ const createMockDb = (
             all: (...params: any[]) => {
                 calls.push({ sql, params });
                 if (sql.startsWith('PRAGMA table_info(tasks)')) {
-                    return [{ name: 'id' }, { name: 'title' }, { name: 'updatedAt' }, { name: 'status' }];
+                    return [
+                        { name: 'id' },
+                        { name: 'title' },
+                        { name: 'status' },
+                        { name: 'priority' },
+                        { name: 'energyLevel' },
+                        { name: 'assignedTo' },
+                        { name: 'taskMode' },
+                        { name: 'startTime' },
+                        { name: 'dueDate' },
+                        { name: 'recurrence' },
+                        { name: 'pushCount' },
+                        { name: 'tags' },
+                        { name: 'contexts' },
+                        { name: 'checklist' },
+                        { name: 'description' },
+                        { name: 'textDirection' },
+                        { name: 'attachments' },
+                        { name: 'location' },
+                        { name: 'projectId' },
+                        { name: 'sectionId' },
+                        { name: 'areaId' },
+                        { name: 'orderNum' },
+                        { name: 'isFocusedToday' },
+                        { name: 'timeEstimate' },
+                        { name: 'reviewAt' },
+                        { name: 'completedAt' },
+                        { name: 'createdAt' },
+                        { name: 'updatedAt' },
+                        { name: 'deletedAt' },
+                        { name: 'purgedAt' },
+                    ];
                 }
                 if (sql.includes("FROM sqlite_master")) {
                     return options.hasTasksFts ? [{ name: 'tasks_fts' }] : [];
@@ -107,6 +138,36 @@ describe('mcp queries', () => {
         expect(pragmaCalls).toHaveLength(1);
     });
 
+    test('listTasks exposes sectionId, areaId, textDirection, and location fields', () => {
+        const now = '2026-02-01T00:00:00.000Z';
+        const { db } = createMockDb([
+            {
+                id: 't1',
+                title: 'Task',
+                status: 'inbox',
+                textDirection: 'rtl',
+                location: 'Office',
+                projectId: 'p1',
+                sectionId: 's1',
+                areaId: 'a1',
+                createdAt: now,
+                updatedAt: now,
+                isFocusedToday: 0,
+            },
+        ]);
+
+        const tasks = listTasks(db, { includeDeleted: false });
+
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0]).toMatchObject({
+            textDirection: 'rtl',
+            location: 'Office',
+            projectId: 'p1',
+            sectionId: 's1',
+            areaId: 'a1',
+        });
+    });
+
     test('addTask quickAdd uses lightweight project lookup', () => {
         const now = '2026-02-01T00:00:00.000Z';
         const { db, calls } = createMockDb([{ id: 'p1', title: 'Home', createdAt: now, updatedAt: now }]);
@@ -186,5 +247,55 @@ describe('mcp queries', () => {
 
         const rollbackCount = calls.filter((call) => call.sql === 'ROLLBACK').length;
         expect(rollbackCount).toBe(1);
+    });
+
+    test('updates energyLevel and assignedTo when provided', () => {
+        const now = '2026-02-01T00:00:00.000Z';
+        const { db, calls } = createMockDb([
+            {
+                id: 't1',
+                title: 'Task',
+                status: 'inbox',
+                createdAt: now,
+                updatedAt: now,
+                isFocusedToday: 0,
+            },
+        ]);
+
+        updateTask(db, { id: 't1', energyLevel: 'high', assignedTo: 'Alex' });
+
+        const updateCall = calls.find((call) => call.sql.includes('UPDATE tasks'));
+        expect(updateCall).toBeTruthy();
+        expect(updateCall?.params[0]).toMatchObject({
+            energyLevel: 'high',
+            assignedTo: 'Alex',
+        });
+    });
+
+    test('maps area, section, text direction, and location fields from task rows', () => {
+        const now = '2026-02-01T00:00:00.000Z';
+        const { db } = createMockDb([
+            {
+                id: 't1',
+                title: 'Task',
+                status: 'inbox',
+                textDirection: 'rtl',
+                location: 'Office',
+                projectId: 'p1',
+                sectionId: 's1',
+                areaId: 'a1',
+                createdAt: now,
+                updatedAt: now,
+                isFocusedToday: 0,
+            },
+        ]);
+
+        const [task] = listTasks(db, { includeDeleted: false });
+
+        expect(task.textDirection).toBe('rtl');
+        expect(task.location).toBe('Office');
+        expect(task.projectId).toBe('p1');
+        expect(task.sectionId).toBe('s1');
+        expect(task.areaId).toBe('a1');
     });
 });

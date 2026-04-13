@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DropboxConflictError, uploadDropboxAppData } from './dropbox-sync';
+import { DropboxConflictError, uploadDropboxAppData, uploadDropboxFile } from './dropbox-sync';
 
 const buildResponse = (
     status: number,
@@ -36,5 +36,17 @@ describe('desktop dropbox-sync conflict parsing', () => {
         await expect(uploadDropboxAppData('token', appData, 'rev-1', fetcher as typeof fetch))
             .rejects
             .toThrow('Dropbox upload failed: HTTP 409');
+    });
+
+    it('uploads attachment files as binary octet-stream regardless of source mime type', async () => {
+        let requestInit: RequestInit | undefined;
+        const fetcher = async (_input: RequestInfo | URL, init?: RequestInit) => {
+            requestInit = init;
+            return buildResponse(200, '{"rev":"rev-file"}');
+        };
+
+        await uploadDropboxFile('token', 'attachments/a.wav', new Uint8Array([1, 2, 3]), 'audio/wav', fetcher as typeof fetch);
+
+        expect((requestInit?.headers as Record<string, string>)['Content-Type']).toBe('application/octet-stream');
     });
 });

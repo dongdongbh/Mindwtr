@@ -14,6 +14,7 @@ type Labels = {
     aiModel: string;
     aiBaseUrl: string;
     aiBaseUrlHint: string;
+    aiBaseUrlModelHint: string;
     aiCopilotModel: string;
     aiCopilotHint: string;
     aiConsentTitle: string;
@@ -61,6 +62,21 @@ type Labels = {
     speechFieldSmart: string;
     speechFieldTitle: string;
     speechFieldDescription: string;
+};
+
+const looksLikeOfficialOpenAIModel = (model: string, knownModels: string[]): boolean => {
+    const trimmed = model.trim();
+    if (!trimmed) return true;
+    const lower = trimmed.toLowerCase();
+    if (knownModels.some((option) => option.toLowerCase() === lower)) return true;
+    return lower.startsWith('gpt-')
+        || lower.startsWith('chatgpt-')
+        || /^o[134](?:$|-)/.test(lower)
+        || lower.startsWith('omni-moderation-')
+        || lower.startsWith('text-embedding-')
+        || lower.startsWith('text-moderation-')
+        || lower.startsWith('tts-')
+        || lower.startsWith('whisper-');
 };
 
 type ThinkingOption = { value: number; label: string };
@@ -147,6 +163,9 @@ export function SettingsAiPage({
             ? t.aiProviderAnthropic
             : t.aiProviderOpenAI;
     const aiConsentDescription = t.aiConsentDescription.replace('{provider}', selectedProviderLabel);
+    const showCustomBaseUrlModelHint = aiProvider === 'openai'
+        && !aiBaseUrl.trim()
+        && !looksLikeOfficialOpenAIModel(aiModel, aiModelOptions);
     const handleAiToggle = () => {
         if (aiEnabled) {
             onUpdateAISettings({ enabled: false });
@@ -276,6 +295,9 @@ export function SettingsAiPage({
                                         spellCheck={false}
                                     />
                                     <div className="text-xs text-muted-foreground">{t.aiBaseUrlHint}</div>
+                                    {showCustomBaseUrlModelHint && (
+                                        <div className="text-xs text-amber-600">{t.aiBaseUrlModelHint}</div>
+                                    )}
                                 </div>
                             )}
 

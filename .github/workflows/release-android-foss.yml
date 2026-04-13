@@ -57,13 +57,35 @@ jobs:
         run: bash scripts/ci/setup-android-sdk.sh
 
       - name: Install core dependencies
-        run: npm ci --workspaces=false --legacy-peer-deps --no-audit --no-fund --prefix packages/core
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if npm ci --workspaces=false --legacy-peer-deps --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=30000 --prefix packages/core; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            echo "Retrying core dependency install after transient npm failure (attempt ${attempt}/3)." >&2
+            sleep $((attempt * 5))
+          done
 
       - name: Prepare FOSS dependency manifest
         run: bash apps/mobile/scripts/fdroid_prep.sh
 
       - name: Install mobile dependencies
-        run: npm ci --workspaces=false --legacy-peer-deps --no-audit --no-fund --prefix apps/mobile
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if npm ci --workspaces=false --legacy-peer-deps --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=30000 --prefix apps/mobile; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            echo "Retrying mobile dependency install after transient npm failure (attempt ${attempt}/3)." >&2
+            sleep $((attempt * 5))
+          done
 
       - name: Resolve version
         id: version

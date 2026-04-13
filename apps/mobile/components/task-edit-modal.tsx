@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { View, Modal, ScrollView, Share, Alert, Animated, Keyboard } from 'react-native';
+import { View, Modal, ScrollView, Share, Alert, Animated, Keyboard, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
     Task,
@@ -23,10 +23,14 @@ import {
 } from '@mindwtr/core';
 import { useLanguage } from '../contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { useToast } from '@/contexts/toast-context';
 import { buildAIConfig, isAIKeyRequired, loadAIKey } from '../lib/ai-config';
 import type { AIResponseAction } from './ai-response-modal';
+import { ExpandedMarkdownEditor } from './expanded-markdown-editor';
+import { KeyboardAccessoryHost } from './keyboard-accessory-host';
 import { styles } from './task-edit/task-edit-modal.styles';
 import { TaskEditFieldRenderer } from './task-edit/TaskEditFieldRenderer';
+import { useTaskDescriptionEditor } from './task-edit/use-task-description-editor';
 import { TaskEditViewTab } from './task-edit/TaskEditViewTab';
 import { TaskEditFormTab } from './task-edit/TaskEditFormTab';
 import { TaskEditHeader } from './task-edit/TaskEditHeader';
@@ -86,6 +90,7 @@ function TaskEditModalInner({
     onContextNavigate,
     onTagNavigate,
 }: TaskEditModalProps) {
+    const { showToast } = useToast();
     const {
         tasks,
         projects,
@@ -101,8 +106,8 @@ function TaskEditModalInner({
     } = useTaskStore();
     const { t, language } = useLanguage();
     const tc = useThemeColors();
-    const prioritiesEnabled = settings.features?.priorities === true;
-    const timeEstimatesEnabled = settings.features?.timeEstimates === true;
+    const prioritiesEnabled = settings.features?.priorities !== false;
+    const timeEstimatesEnabled = settings.features?.timeEstimates !== false;
     const resetCopilotStateRef = useRef<() => void>(() => {});
     const {
         aiModal,
@@ -213,6 +218,8 @@ function TaskEditModalInner({
         addImageAttachment,
         audioAttachment,
         audioLoading,
+        audioTranscribing,
+        audioTranscriptionError,
         audioModalVisible,
         audioStatus,
         closeAudioModal,
@@ -227,6 +234,7 @@ function TaskEditModalInner({
         linkModalVisible,
         openAttachment,
         removeAttachment,
+        retryAudioTranscription,
         setLinkInput,
         setLinkInputTouched,
         setLinkModalVisible,
@@ -287,6 +295,7 @@ function TaskEditModalInner({
         monthlyPattern,
         monthlyWeekdayCode,
         organizationFields,
+        energyLevelOptions,
         priorityOptions,
         projectFilterAreaId,
         projectSections,
@@ -346,7 +355,12 @@ function TaskEditModalInner({
         const rawTitle = String(titleDraftRef.current ?? '');
         const { title: parsedTitle, props: parsedProps, projectTitle, invalidDateCommands } = parseQuickAdd(rawTitle, projects, new Date(), areas);
         if (invalidDateCommands && invalidDateCommands.length > 0) {
-            Alert.alert(t('common.notice'), `${t('quickAdd.invalidDateCommand')}: ${invalidDateCommands.join(', ')}`);
+            showToast({
+                title: t('common.notice'),
+                message: `${t('quickAdd.invalidDateCommand')}: ${invalidDateCommands.join(', ')}`,
+                tone: 'warning',
+                durationMs: 4200,
+            });
             return;
         }
         const existingProjectId = editedTask.projectId ?? task?.projectId;
@@ -722,10 +736,12 @@ function TaskEditModalInner({
     const scrollX = useRef(new Animated.Value(0)).current;
     const scrollRef = useRef<ScrollView | null>(null);
     const [scrollTaskFormToEnd, setScrollTaskFormToEnd] = useState<((targetInput?: number | string) => void) | null>(null);
+    const [isMarkdownOverlayOpen, setIsMarkdownOverlayOpen] = useState(false);
     const registerScrollTaskFormToEnd = useCallback((handler: ((targetInput?: number | string) => void) | null) => {
         setScrollTaskFormToEnd(() => handler);
     }, []);
     const lastFocusedInputRef = useRef<number | string | undefined>(undefined);
+    const pendingScrollTaskFormTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const scrollToTab = useCallback((mode: TaskEditTab, animated = true) => {
         const node = scrollRef.current as unknown as {
@@ -741,25 +757,42 @@ function TaskEditModalInner({
         });
     }, [containerWidth, scrollX]);
     const alignPagerToActiveTab = useCallback(() => {
+        if (isMarkdownOverlayOpen) return;
         if (!visible || !containerWidth) return;
         requestAnimationFrame(() => {
             scrollToTab(editTab, false);
         });
-    }, [containerWidth, editTab, scrollToTab, visible]);
+    }, [containerWidth, editTab, isMarkdownOverlayOpen, scrollToTab, visible]);
     useEffect(() => {
+        if (isMarkdownOverlayOpen) return;
         if (!visible || !containerWidth) return;
         scrollToTab(editTab, false);
-    }, [containerWidth, editTab, scrollToTab, task?.id, visible]);
+    }, [containerWidth, editTab, isMarkdownOverlayOpen, scrollToTab, task?.id, visible]);
 
     useEffect(() => {
+        if (isMarkdownOverlayOpen) return;
         if (!visible || !containerWidth) return;
         const alignmentTimer = setTimeout(() => {
             scrollToTab(editTab, false);
         }, 90);
         return () => clearTimeout(alignmentTimer);
-    }, [containerWidth, editTab, scrollToTab, task?.id, visible]);
+    }, [containerWidth, editTab, isMarkdownOverlayOpen, scrollToTab, task?.id, visible]);
+
+    useEffect(() => () => {
+        if (pendingScrollTaskFormTimerRef.current) {
+            clearTimeout(pendingScrollTaskFormTimerRef.current);
+            pendingScrollTaskFormTimerRef.current = null;
+        }
+    }, []);
 
     useEffect(() => {
+        if (!visible) {
+            setIsMarkdownOverlayOpen(false);
+        }
+    }, [visible]);
+
+    useEffect(() => {
+        if (isMarkdownOverlayOpen) return;
         if (!visible) return;
         if (typeof Keyboard?.addListener !== 'function') return;
         const handleKeyboardShow = () => {
@@ -777,14 +810,34 @@ function TaskEditModalInner({
             showListener.remove();
             hideListener.remove();
         };
-    }, [alignPagerToActiveTab, scrollTaskFormToEnd, visible]);
+    }, [alignPagerToActiveTab, isMarkdownOverlayOpen, scrollTaskFormToEnd, visible]);
 
     const handleInputFocus = useCallback((targetInput?: number | string) => {
+        if (pendingScrollTaskFormTimerRef.current) {
+            clearTimeout(pendingScrollTaskFormTimerRef.current);
+            pendingScrollTaskFormTimerRef.current = null;
+        }
         lastFocusedInputRef.current = targetInput;
-        setTimeout(() => {
+        if (targetInput === undefined) {
+            return;
+        }
+        pendingScrollTaskFormTimerRef.current = setTimeout(() => {
             scrollTaskFormToEnd?.(targetInput);
+            pendingScrollTaskFormTimerRef.current = null;
         }, 140);
     }, [scrollTaskFormToEnd]);
+
+    const descriptionEditor = useTaskDescriptionEditor({
+        task,
+        descriptionDraft,
+        descriptionDraftRef,
+        setDescriptionDraft,
+        descriptionDebounceRef,
+        setEditedTask,
+        resetCopilotDraft,
+        onMarkdownOverlayVisibilityChange: setIsMarkdownOverlayOpen,
+        onInputFocusTracked: handleInputFocus,
+    });
 
     const handleTabPress = (mode: TaskEditTab) => {
         setModeTab(mode);
@@ -1002,9 +1055,17 @@ function TaskEditModalInner({
         contextTokenSuggestions,
         customWeekdays,
         dailyInterval,
-        descriptionDebounceRef,
         descriptionDraft,
-        descriptionDraftRef,
+        descriptionInputRef: descriptionEditor.descriptionInputRef,
+        descriptionSelection: descriptionEditor.descriptionSelection,
+        setDescriptionSelection: descriptionEditor.setDescriptionSelection,
+        descriptionUndoDepth: descriptionEditor.descriptionUndoDepth,
+        isDescriptionInputFocused: descriptionEditor.isDescriptionInputFocused,
+        setIsDescriptionInputFocused: descriptionEditor.setIsDescriptionInputFocused,
+        handleDescriptionChange: descriptionEditor.handleDescriptionChange,
+        handleDescriptionUndo: descriptionEditor.handleDescriptionUndo,
+        handleDescriptionApplyAction: descriptionEditor.handleDescriptionApplyAction,
+        openDescriptionExpandedEditor: descriptionEditor.openDescriptionExpandedEditor,
         downloadAttachment,
         editedTask,
         formatDate,
@@ -1022,6 +1083,7 @@ function TaskEditModalInner({
         pendingDueDate,
         pendingStartDate,
         prioritiesEnabled,
+        energyLevelOptions,
         priorityOptions,
         projects,
         projectSections,
@@ -1031,11 +1093,9 @@ function TaskEditModalInner({
         recurrenceStrategyValue,
         recurrenceWeekdayButtons,
         removeAttachment,
-        resetCopilotDraft,
         selectedContextTokens,
         selectedTagTokens,
         setCustomWeekdays,
-        setDescriptionDraft,
         setEditedTask,
         setIsContextInputFocused,
         setIsTagInputFocused,
@@ -1070,189 +1130,216 @@ function TaskEditModalInner({
     if (!task) return null;
 
     return (
+        <>
         <Modal
             visible={visible}
             animationType="slide"
-            presentationStyle="pageSheet"
+            presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
             allowSwipeDismissal
             onRequestClose={handleAttemptClose}
         >
-            <SafeAreaView
-                style={[styles.container, { backgroundColor: tc.bg }]}
-                edges={['top']}
-            >
-                <TaskEditHeader
-                    title={String(titleDraft || editedTask.title || '').trim() || t('taskEdit.title')}
-                    onDone={handleDone}
-                    onShare={handleShare}
-                    onDuplicate={handleDuplicateTask}
-                    onDelete={handleDeleteTask}
-                    onConvertToReference={handleConvertToReference}
-                    showConvertToReference={!isReference}
-                />
-
-                <TaskEditTabs
-                    editTab={editTab}
-                    onTabPress={handleTabPress}
-                    scrollX={scrollX}
-                    containerWidth={containerWidth}
-                />
-
-                <View
-                    style={styles.tabContent}
-                    onLayout={(event) => {
-                        const nextWidth = Math.round(event.nativeEvent.layout.width);
-                        if (nextWidth > 0 && nextWidth !== containerWidth) {
-                            setContainerWidth(nextWidth);
-                        }
-                    }}
+            <KeyboardAccessoryHost>
+                <SafeAreaView
+                    style={[styles.container, { backgroundColor: tc.bg }]}
+                    edges={['top']}
                 >
-                    <Animated.ScrollView
-                        ref={scrollRef}
-                        horizontal
-                        pagingEnabled
-                        scrollEnabled
-                        scrollEventThrottle={16}
-                        showsHorizontalScrollIndicator={false}
-                        directionalLockEnabled
-                        onScroll={Animated.event(
-                            [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-                            { useNativeDriver: true }
-                        )}
-                        onMomentumScrollEnd={(event) => {
-                            if (!containerWidth) return;
-                            const offsetX = event.nativeEvent.contentOffset.x;
-                            const target = offsetX >= containerWidth * 0.5 ? 'view' : 'task';
-                            setModeTab(target);
-                            const targetX = getTaskEditTabOffset(target, containerWidth);
-                            if (Math.abs(offsetX - targetX) > 1) {
-                                scrollToTab(target, false);
+                    <TaskEditHeader
+                        title={String(titleDraft || editedTask.title || '').trim() || t('taskEdit.title')}
+                        onDone={handleDone}
+                        onShare={handleShare}
+                        onDuplicate={handleDuplicateTask}
+                        onDelete={handleDeleteTask}
+                        onConvertToReference={handleConvertToReference}
+                        showConvertToReference={!isReference}
+                    />
+
+                    <TaskEditTabs
+                        editTab={editTab}
+                        onTabPress={handleTabPress}
+                        scrollX={scrollX}
+                        containerWidth={containerWidth}
+                    />
+
+                    <View
+                        style={styles.tabContent}
+                        onLayout={(event) => {
+                            const nextWidth = Math.round(event.nativeEvent.layout.width);
+                            if (nextWidth > 0 && nextWidth !== containerWidth) {
+                                setContainerWidth(nextWidth);
                             }
                         }}
                     >
-                        <TaskEditFormTab
-                            t={t}
-                            tc={tc}
-                            styles={styles}
-                            inputStyle={inputStyle}
-                            editedTask={editedTask}
-                            setEditedTask={setEditedTask}
-                            aiEnabled={aiEnabled}
-                            isAIWorking={isAIWorking}
-                            handleAIClarify={handleAIClarify}
-                            handleAIBreakdown={handleAIBreakdown}
-                            copilotSuggestion={copilotSuggestion}
-                            copilotApplied={copilotApplied}
-                            applyCopilotSuggestion={applyCopilotSuggestion}
-                            copilotContext={copilotContext}
-                            copilotEstimate={copilotEstimate}
-                            copilotTags={copilotTags}
-                            timeEstimatesEnabled={timeEstimatesEnabled}
-                            renderField={renderField}
-                            basicFields={basicFields}
-                            schedulingFields={schedulingFields}
-                            organizationFields={organizationFields}
-                            detailsFields={detailsFields}
-                            sectionOpenDefaults={sectionOpenDefaults}
-                            showDatePicker={showDatePicker}
-                            pendingStartDate={pendingStartDate}
-                            pendingDueDate={pendingDueDate}
-                            getSafePickerDateValue={getSafePickerDateValue}
-                            onDateChange={onDateChange}
-                            containerWidth={containerWidth}
-                            textDirectionStyle={textDirectionStyle}
-                            titleDraft={titleDraft}
-                            onTitleDraftChange={handleTitleDraftChange}
-                            registerScrollToEnd={registerScrollTaskFormToEnd}
-                            formResetKey={`${task.id}:${visible ? 'open' : 'closed'}`}
-                        />
-                        <View style={[styles.tabPage, { width: containerWidth || '100%' }]}>
-                            <TaskEditViewTab
+                        <Animated.ScrollView
+                            ref={scrollRef}
+                            horizontal
+                            pagingEnabled
+                            scrollEnabled={!isMarkdownOverlayOpen}
+                            scrollEventThrottle={16}
+                            showsHorizontalScrollIndicator={false}
+                            directionalLockEnabled
+                            onScroll={Animated.event(
+                                [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+                                { useNativeDriver: true }
+                            )}
+                            onMomentumScrollEnd={(event) => {
+                                if (!containerWidth) return;
+                                const offsetX = event.nativeEvent.contentOffset.x;
+                                const target = offsetX >= containerWidth * 0.5 ? 'view' : 'task';
+                                setModeTab(target);
+                                const targetX = getTaskEditTabOffset(target, containerWidth);
+                                if (Math.abs(offsetX - targetX) > 1) {
+                                    scrollToTab(target, false);
+                                }
+                            }}
+                        >
+                            <TaskEditFormTab
                                 t={t}
                                 tc={tc}
                                 styles={styles}
-                                mergedTask={mergedTask}
-                                projects={projects}
-                                sections={projectSections}
-                                areas={areas}
-                                prioritiesEnabled={prioritiesEnabled}
+                                inputStyle={inputStyle}
+                                editedTask={editedTask}
+                                setEditedTask={setEditedTask}
+                                aiEnabled={aiEnabled}
+                                isAIWorking={isAIWorking}
+                                handleAIClarify={handleAIClarify}
+                                handleAIBreakdown={handleAIBreakdown}
+                                copilotSuggestion={copilotSuggestion}
+                                copilotApplied={copilotApplied}
+                                applyCopilotSuggestion={applyCopilotSuggestion}
+                                copilotContext={copilotContext}
+                                copilotEstimate={copilotEstimate}
+                                copilotTags={copilotTags}
                                 timeEstimatesEnabled={timeEstimatesEnabled}
-                                formatTimeEstimateLabel={formatTimeEstimateLabel}
-                                formatDate={formatDate}
-                                formatDueDate={formatDueDate}
-                                getRecurrenceRuleValue={getRecurrenceRuleValue}
-                                getRecurrenceStrategyValue={getRecurrenceStrategyValue}
-                                applyChecklistUpdate={applyChecklistUpdate}
-                                visibleAttachments={visibleAttachments}
-                                openAttachment={openAttachment}
-                                isImageAttachment={isImageAttachment}
+                                renderField={renderField}
+                                basicFields={basicFields}
+                                schedulingFields={schedulingFields}
+                                organizationFields={organizationFields}
+                                detailsFields={detailsFields}
+                                sectionOpenDefaults={sectionOpenDefaults}
+                                showDatePicker={showDatePicker}
+                                pendingStartDate={pendingStartDate}
+                                pendingDueDate={pendingDueDate}
+                                getSafePickerDateValue={getSafePickerDateValue}
+                                onDateChange={onDateChange}
+                                containerWidth={containerWidth}
                                 textDirectionStyle={textDirectionStyle}
-                                resolvedDirection={resolvedDirection}
-                                nestedScrollEnabled
-                                onProjectPress={onProjectNavigate ? handlePreviewProjectPress : undefined}
-                                onContextPress={onContextNavigate ? handlePreviewContextPress : undefined}
-                                onTagPress={onTagNavigate ? handlePreviewTagPress : undefined}
+                                titleDraft={titleDraft}
+                                onTitleDraftChange={handleTitleDraftChange}
+                                registerScrollToEnd={registerScrollTaskFormToEnd}
+                                formResetKey={`${task.id}:${visible ? 'open' : 'closed'}`}
+                                suspendKeyboardHandling={isMarkdownOverlayOpen}
                             />
-                        </View>
-                    </Animated.ScrollView>
-                </View>
+                            <View style={[styles.tabPage, { width: containerWidth || '100%' }]}>
+                                <TaskEditViewTab
+                                    t={t}
+                                    tc={tc}
+                                    styles={styles}
+                                    mergedTask={mergedTask}
+                                    projects={projects}
+                                    sections={projectSections}
+                                    areas={areas}
+                                    prioritiesEnabled={prioritiesEnabled}
+                                    timeEstimatesEnabled={timeEstimatesEnabled}
+                                    formatTimeEstimateLabel={formatTimeEstimateLabel}
+                                    formatDate={formatDate}
+                                    formatDueDate={formatDueDate}
+                                    getRecurrenceRuleValue={getRecurrenceRuleValue}
+                                    getRecurrenceStrategyValue={getRecurrenceStrategyValue}
+                                    applyChecklistUpdate={applyChecklistUpdate}
+                                    visibleAttachments={visibleAttachments}
+                                    openAttachment={openAttachment}
+                                    isImageAttachment={isImageAttachment}
+                                    textDirectionStyle={textDirectionStyle}
+                                    resolvedDirection={resolvedDirection}
+                                    nestedScrollEnabled
+                                    onProjectPress={onProjectNavigate ? handlePreviewProjectPress : undefined}
+                                    onContextPress={onContextNavigate ? handlePreviewContextPress : undefined}
+                                    onTagPress={onTagNavigate ? handlePreviewTagPress : undefined}
+                                />
+                            </View>
+                        </Animated.ScrollView>
+                    </View>
 
-                <TaskEditOverlayStack
-                    aiModal={aiModal}
-                    addArea={addArea}
-                    addProject={addProject}
-                    addSection={addSection}
-                    applyCustomRecurrence={applyCustomRecurrence}
-                    areas={areas}
-                    audioAttachment={audioAttachment}
-                    audioLoading={audioLoading}
-                    audioModalVisible={audioModalVisible}
-                    audioStatus={audioStatus}
-                    closeAIModal={closeAIModal}
-                    closeAudioModal={closeAudioModal}
-                    closeImagePreview={closeImagePreview}
-                    closeLinkModal={closeLinkModal}
-                    confirmAddLink={confirmAddLink}
-                    customInterval={customInterval}
-                    customMode={customMode}
-                    customMonthDay={customMonthDay}
-                    customOrdinal={customOrdinal}
-                    customRecurrenceVisible={customRecurrenceVisible}
-                    customWeekday={customWeekday}
-                    filteredProjectsForPicker={filteredProjectsForPicker}
-                    imagePreviewAttachment={imagePreviewAttachment}
-                    linkInput={linkInput}
-                    linkInputTouched={linkInputTouched}
-                    linkModalVisible={linkModalVisible}
-                    projectFilterAreaId={projectFilterAreaId}
-                    projects={projects}
-                    recurrenceWeekdayButtons={recurrenceWeekdayButtons}
-                    recurrenceWeekdayLabels={recurrenceWeekdayLabels}
-                    sectionPickerProjectId={activeProjectId}
-                    sectionPickerSections={projectSections}
-                    setCustomInterval={setCustomInterval}
-                    setCustomMode={setCustomMode}
-                    setCustomMonthDay={setCustomMonthDay}
-                    setCustomOrdinal={setCustomOrdinal}
-                    setCustomRecurrenceVisible={setCustomRecurrenceVisible}
-                    setCustomWeekday={setCustomWeekday}
-                    setEditedTask={setEditedTask}
-                    setLinkInput={setLinkInput}
-                    setLinkInputTouched={setLinkInputTouched}
-                    setShowAreaPicker={setShowAreaPicker}
-                    setShowProjectPicker={setShowProjectPicker}
-                    setShowSectionPicker={setShowSectionPicker}
-                    showAreaPicker={showAreaPicker}
-                    showProjectPicker={showProjectPicker}
-                    showSectionPicker={showSectionPicker}
-                    styles={styles}
-                    t={t}
-                    tc={tc}
-                    toggleAudioPlayback={toggleAudioPlayback}
-                    DEFAULT_PROJECT_COLOR={DEFAULT_PROJECT_COLOR}
-                />
-            </SafeAreaView>
+                    <TaskEditOverlayStack
+                        aiModal={aiModal}
+                        addArea={addArea}
+                        addProject={addProject}
+                        addSection={addSection}
+                        applyCustomRecurrence={applyCustomRecurrence}
+                        areas={areas}
+                        audioAttachment={audioAttachment}
+                        audioLoading={audioLoading}
+                        audioTranscribing={audioTranscribing}
+                        audioTranscriptionError={audioTranscriptionError}
+                        audioModalVisible={audioModalVisible}
+                        audioStatus={audioStatus}
+                        closeAIModal={closeAIModal}
+                        closeAudioModal={closeAudioModal}
+                        closeImagePreview={closeImagePreview}
+                        closeLinkModal={closeLinkModal}
+                        confirmAddLink={confirmAddLink}
+                        customInterval={customInterval}
+                        customMode={customMode}
+                        customMonthDay={customMonthDay}
+                        customOrdinal={customOrdinal}
+                        customRecurrenceVisible={customRecurrenceVisible}
+                        customWeekday={customWeekday}
+                        filteredProjectsForPicker={filteredProjectsForPicker}
+                        imagePreviewAttachment={imagePreviewAttachment}
+                        linkInput={linkInput}
+                        linkInputTouched={linkInputTouched}
+                        linkModalVisible={linkModalVisible}
+                        projectFilterAreaId={projectFilterAreaId}
+                        projects={projects}
+                        recurrenceWeekdayButtons={recurrenceWeekdayButtons}
+                        recurrenceWeekdayLabels={recurrenceWeekdayLabels}
+                        sectionPickerProjectId={activeProjectId}
+                        sectionPickerSections={projectSections}
+                        setCustomInterval={setCustomInterval}
+                        setCustomMode={setCustomMode}
+                        setCustomMonthDay={setCustomMonthDay}
+                        setCustomOrdinal={setCustomOrdinal}
+                        setCustomRecurrenceVisible={setCustomRecurrenceVisible}
+                        setCustomWeekday={setCustomWeekday}
+                        setEditedTask={setEditedTask}
+                        setLinkInput={setLinkInput}
+                        setLinkInputTouched={setLinkInputTouched}
+                        setShowAreaPicker={setShowAreaPicker}
+                        setShowProjectPicker={setShowProjectPicker}
+                        setShowSectionPicker={setShowSectionPicker}
+                        showAreaPicker={showAreaPicker}
+                        showProjectPicker={showProjectPicker}
+                        showSectionPicker={showSectionPicker}
+                        styles={styles}
+                        t={t}
+                        tc={tc}
+                        retryAudioTranscription={retryAudioTranscription}
+                        toggleAudioPlayback={toggleAudioPlayback}
+                        DEFAULT_PROJECT_COLOR={DEFAULT_PROJECT_COLOR}
+                    />
+                </SafeAreaView>
+            </KeyboardAccessoryHost>
         </Modal>
+        {visible ? (
+            <ExpandedMarkdownEditor
+                isOpen={descriptionEditor.descriptionExpanded}
+                onClose={descriptionEditor.closeDescriptionExpandedEditor}
+                value={descriptionDraft}
+                onChange={descriptionEditor.handleDescriptionChange}
+                title={t('taskEdit.descriptionLabel')}
+                headerTitle={titleDraft.trim() || task?.title?.trim() || t('taskEdit.descriptionLabel')}
+                placeholder={t('taskEdit.descriptionPlaceholder')}
+                t={t}
+                initialMode="edit"
+                direction={resolvedDirection}
+                selection={descriptionEditor.descriptionSelection}
+                onSelectionChange={descriptionEditor.setDescriptionSelection}
+                canUndo={descriptionEditor.descriptionUndoDepth > 0}
+                onUndo={descriptionEditor.handleDescriptionUndo}
+                onApplyAction={descriptionEditor.handleDescriptionApplyAction}
+            />
+        ) : null}
+        </>
     );
 }
 

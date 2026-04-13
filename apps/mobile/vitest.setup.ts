@@ -1,4 +1,5 @@
 import { vi } from 'vitest';
+import React from 'react';
 
 // Minimal globals for Expo modules in node test env.
 const testGlobal = globalThis as typeof globalThis & {
@@ -116,3 +117,32 @@ vi.mock('expo-file-system/legacy', () => ({
   copyAsync: vi.fn().mockResolvedValue(undefined),
   moveAsync: vi.fn().mockResolvedValue(undefined),
 }));
+
+vi.mock('@expo/vector-icons', () => {
+  const Icon = (props: any) => React.createElement('Icon', props, props.children);
+  return {
+    Ionicons: Icon,
+    AntDesign: Icon,
+    Entypo: Icon,
+    EvilIcons: Icon,
+    Feather: Icon,
+    FontAwesome: Icon,
+    FontAwesome5: Icon,
+    FontAwesome6: Icon,
+    Foundation: Icon,
+    MaterialCommunityIcons: Icon,
+    MaterialIcons: Icon,
+    Octicons: Icon,
+    SimpleLineIcons: Icon,
+    Zocial: Icon,
+  };
+});
+
+vi.mock('lucide-react-native', () => {
+  return new Proxy(
+    {},
+    {
+      get: () => (props: any) => React.createElement('Icon', props, props.children),
+    },
+  );
+});

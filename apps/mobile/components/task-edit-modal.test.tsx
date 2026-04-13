@@ -34,6 +34,13 @@ vi.mock('../contexts/language-context', () => ({
   useLanguage: () => ({ t: (key: string) => key }),
 }));
 
+vi.mock('../contexts/toast-context', () => ({
+  useToast: () => ({
+    showToast: vi.fn(),
+    dismissToast: vi.fn(),
+  }),
+}));
+
 vi.mock('@/hooks/use-theme-colors', () => ({
   useThemeColors: () => ({
     bg: '#000',

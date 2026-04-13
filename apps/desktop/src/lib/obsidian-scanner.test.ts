@@ -52,6 +52,12 @@ describe('scanObsidianVault', () => {
         expect(result.scannedFileCount).toBe(12);
         expect(result.scannedRelativePaths).toHaveLength(12);
         expect(result.importMode).toBe('tasknotes');
+        expect(result.taskNotesDetectedPaths).toEqual([
+            'TaskNotes/Archive/Old task.md',
+            'TaskNotes/Boolean status.md',
+            'TaskNotes/Buy groceries.md',
+            'TaskNotes/Review quarterly report.md',
+        ]);
         expect(result.tasks).toHaveLength(3);
         expect(result.warnings).toEqual([]);
         expect(result.tasks.map((task) => task.source.relativeFilePath)).not.toContain('.trash/Deleted.md');
@@ -73,6 +79,7 @@ describe('scanObsidianVault', () => {
         expect(result.scannedFileCount).toBe(2);
         expect(result.tasks).toHaveLength(6);
         expect(result.importMode).toBe('inline');
+        expect(result.taskNotesDetectedPaths).toEqual([]);
         expect(result.warnings).toEqual([]);
         expect([...new Set(result.tasks.map((task) => task.source.relativeFilePath))]).toEqual([
             'Projects/Alpha.md',
@@ -95,9 +102,11 @@ describe('scanObsidianVault', () => {
         expect(hiddenResult.scannedFileCount).toBe(2);
         expect(hiddenResult.tasks).toHaveLength(6);
         expect(hiddenResult.importMode).toBe('inline');
+        expect(hiddenResult.taskNotesDetectedPaths).toEqual([]);
         expect(hiddenResult.warnings).toEqual(['Skipped invalid scan folder: .obsidian']);
         expect(singleFileResult.scannedFileCount).toBe(1);
         expect(singleFileResult.importMode).toBe('inline');
+        expect(singleFileResult.taskNotesDetectedPaths).toEqual([]);
         expect(singleFileResult.tasks.map((task) => task.text)).toEqual([
             'Buy groceries #errands',
             'Pay rent [[Bills]]',
@@ -133,6 +142,7 @@ describe('scanObsidianVault', () => {
         expect(result.scannedFileCount).toBe(0);
         expect(result.tasks).toHaveLength(0);
         expect(result.importMode).toBe('inline');
+        expect(result.taskNotesDetectedPaths).toEqual([]);
         expect(result.warnings).toEqual(['Skipped large Markdown file: Huge.md']);
     });
 
@@ -166,6 +176,7 @@ describe('scanObsidianVault', () => {
 
         expect(result.warnings).toHaveLength(MAX_OBSIDIAN_SCAN_WARNINGS);
         expect(result.importMode).toBe('inline');
+        expect(result.taskNotesDetectedPaths).toEqual([]);
         expect(result.warnings[0]).toBe('Skipped large Markdown file: Huge-0.md');
         expect(result.warnings[result.warnings.length - 1]).toBe(
             `Skipped large Markdown file: Huge-${MAX_OBSIDIAN_SCAN_WARNINGS - 1}.md`
@@ -197,6 +208,12 @@ describe('scanObsidianVault', () => {
         }, nodeFsDeps);
 
         expect(result.importMode).toBe('tasknotes');
+        expect(result.taskNotesDetectedPaths).toEqual([
+            'TaskNotes/Archive/Old task.md',
+            'TaskNotes/Boolean status.md',
+            'TaskNotes/Buy groceries.md',
+            'TaskNotes/Review quarterly report.md',
+        ]);
         expect(result.tasks.map((task) => task.text)).toEqual([
             'Archived task',
             'Close support thread',

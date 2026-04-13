@@ -11,6 +11,7 @@ import { ListBulkActions } from './list/ListBulkActions';
 import { PromptModal } from '../PromptModal';
 import { cn } from '../../lib/utils';
 import { resolveAreaFilter, taskMatchesAreaFilter } from '../../lib/area-filter';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 
 interface SearchViewProps {
     savedSearchId: string;
@@ -41,6 +42,7 @@ export function SearchView({ savedSearchId, onDelete }: SearchViewProps) {
     const [contextPromptOpen, setContextPromptOpen] = useState(false);
     const [contextPromptMode, setContextPromptMode] = useState<'add' | 'remove'>('add');
     const [contextPromptIds, setContextPromptIds] = useState<string[]>([]);
+    const { requestConfirmation, confirmModal } = useConfirmDialog();
 
     const savedSearch = settings?.savedSearches?.find(s => s.id === savedSearchId);
     const query = savedSearch?.query || '';
@@ -107,11 +109,16 @@ export function SearchView({ savedSearchId, onDelete }: SearchViewProps) {
 
     const handleBatchDelete = useCallback(async () => {
         if (selectedIdsArray.length === 0) return;
-        const confirmMessage = t('list.confirmBatchDelete') || 'Delete selected tasks?';
-        if (!window.confirm(confirmMessage)) return;
+        const confirmed = await requestConfirmation({
+            title: t('common.delete') || 'Delete',
+            description: t('list.confirmBatchDelete') || 'Delete selected tasks?',
+            confirmLabel: t('common.delete') || 'Delete',
+            cancelLabel: t('common.cancel') || 'Cancel',
+        });
+        if (!confirmed) return;
         await batchDeleteTasks(selectedIdsArray);
         exitSelectionMode();
-    }, [batchDeleteTasks, selectedIdsArray, exitSelectionMode, t]);
+    }, [batchDeleteTasks, exitSelectionMode, requestConfirmation, selectedIdsArray, t]);
 
     const handleBatchAddTag = useCallback(() => {
         if (selectedIdsArray.length === 0) return;
@@ -135,13 +142,18 @@ export function SearchView({ savedSearchId, onDelete }: SearchViewProps) {
 
     const handleDelete = useCallback(async () => {
         if (!savedSearch) return;
-        const confirmed = window.confirm(t('search.deleteConfirm') || `Delete "${savedSearch.name}"?`);
+        const confirmed = await requestConfirmation({
+            title: t('common.delete') || 'Delete',
+            description: t('search.deleteConfirm') || `Delete "${savedSearch.name}"?`,
+            confirmLabel: t('common.delete') || 'Delete',
+            cancelLabel: t('common.cancel') || 'Cancel',
+        });
         if (!confirmed) return;
 
         const updated = (settings?.savedSearches || []).filter(s => s.id !== savedSearchId);
         await updateSettings({ savedSearches: updated });
         onDelete?.();
-    }, [savedSearch, savedSearchId, settings?.savedSearches, updateSettings, onDelete, t]);
+    }, [onDelete, requestConfirmation, savedSearch, savedSearchId, settings?.savedSearches, t, updateSettings]);
 
     return (
         <ErrorBoundary>
@@ -263,6 +275,7 @@ export function SearchView({ savedSearchId, onDelete }: SearchViewProps) {
                     exitSelectionMode();
                 }}
             />
+            {confirmModal}
         </ErrorBoundary>
     );
 }

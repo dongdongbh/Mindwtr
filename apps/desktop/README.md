@@ -124,7 +124,7 @@ Configure sync in Settings:
 
 - **File Sync** - Dropbox, Google Drive, Syncthing, etc.
 - **WebDAV** - Nextcloud, ownCloud, self-hosted servers
-- **Cloud** - Self-hosted cloud backend (see `../../docs/cloud-sync.md`)
+- **Cloud** - Self-hosted cloud backend (see `../../wiki/Cloud-Sync.md`)
 - **External Calendars (ICS)** - View-only calendar overlay
 
 Sync recommendation:

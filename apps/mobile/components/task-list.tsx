@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { View, TextInput, FlatList, StyleSheet, TouchableOpacity, Text, RefreshControl, ScrollView, Modal, Pressable, Alert, ActivityIndicator, Keyboard } from 'react-native';
+import { View, TextInput, FlatList, StyleSheet, TouchableOpacity, Text, RefreshControl, ScrollView, Modal, Pressable, ActivityIndicator, Keyboard } from 'react-native';
 import { router } from 'expo-router';
 import {
   useTaskStore,
@@ -14,6 +14,7 @@ import {
   type AIProviderId,
   type TaskSortBy,
   DEFAULT_PROJECT_COLOR,
+  getTranslationsSync,
   shallow,
 } from '@mindwtr/core';
 
@@ -26,6 +27,7 @@ import { useLanguage } from '../contexts/language-context';
 
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
+import { useToast } from '@/contexts/toast-context';
 import { taskMatchesAreaFilter } from '@/lib/area-filter';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import { buildCopilotConfig, isAIKeyRequired, loadAIKey } from '../lib/ai-config';
@@ -48,6 +50,7 @@ export interface TaskListProps {
   showSort?: boolean;
   showQuickAddHelp?: boolean;
   emptyText?: string;
+  emptyHint?: string;
   headerAccessory?: React.ReactNode;
   enableCopilot?: boolean;
   defaultEditTab?: 'task' | 'view';
@@ -66,13 +69,15 @@ function TaskListComponent({
   showSort = true,
   showQuickAddHelp = true,
   emptyText,
+  emptyHint,
   headerAccessory,
   enableCopilot = true,
   defaultEditTab,
   contentPaddingBottom,
 }: TaskListProps) {
   const { isDark } = useTheme();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const { showToast } = useToast();
   const {
     tasks,
     projects,
@@ -128,6 +133,9 @@ function TaskListComponent({
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copilotAbortRef = useRef<AbortController | null>(null);
   const copilotRequestIdRef = useRef(0);
+  const restoreActionLabel = getTranslationsSync(language)['trash.restoreToInbox']
+    || getTranslationsSync('en')['trash.restoreToInbox']
+    || 'Restore';
 
   // Dynamic colors based on theme
   const themeColors = useThemeColors();
@@ -205,6 +213,7 @@ function TaskListComponent({
     batchDeleteTasks,
     batchMoveTasks,
     batchUpdateTasks,
+    restoreActionLabel,
     restoreTask,
     t,
     tasksById,
@@ -214,16 +223,17 @@ function TaskListComponent({
   const aiEnabled = settings?.ai?.enabled === true;
   const aiProvider = (settings?.ai?.provider ?? 'openai') as AIProviderId;
   const keyRequired = isAIKeyRequired(settings);
-  const timeEstimatesEnabled = settings?.features?.timeEstimates === true;
+  const timeEstimatesEnabled = settings?.features?.timeEstimates !== false;
+  const showTimeEstimateFilters = timeEstimatesEnabled && statusFilter !== 'inbox';
   const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
-  const hasActiveTimeEstimateFilters = timeEstimatesEnabled && selectedTimeEstimates.length > 0;
+  const hasActiveTimeEstimateFilters = showTimeEstimateFilters && selectedTimeEstimates.length > 0;
   const { areaById, resolvedAreaFilter, selectedAreaIdForNewTasks } = useMobileAreaFilter();
 
   useEffect(() => {
-    if (!timeEstimatesEnabled && selectedTimeEstimates.length > 0) {
+    if (!showTimeEstimateFilters && selectedTimeEstimates.length > 0) {
       setSelectedTimeEstimates([]);
     }
-  }, [selectedTimeEstimates.length, timeEstimatesEnabled]);
+  }, [selectedTimeEstimates.length, showTimeEstimateFilters]);
 
   const toggleTimeEstimate = useCallback((estimate: TimeEstimate) => {
     setSelectedTimeEstimates((prev) => (
@@ -246,12 +256,12 @@ function TaskListComponent({
         const start = safeParseDate(t.startTime);
         if (start && start > now) return false;
       }
-      if (timeEstimatesEnabled && !matchesSelectedTimeEstimates(t, selectedTimeEstimates)) return false;
+      if (showTimeEstimateFilters && !matchesSelectedTimeEstimates(t, selectedTimeEstimates)) return false;
       if (!taskMatchesAreaFilter(t, resolvedAreaFilter, projectById, areaById)) return false;
       return matchesStatus && matchesProject;
     });
     return filtered;
-  }, [tasks, statusFilter, projectId, selectedTimeEstimates, timeEstimatesEnabled, resolvedAreaFilter, projectById, areaById]);
+  }, [tasks, statusFilter, projectId, selectedTimeEstimates, showTimeEstimateFilters, resolvedAreaFilter, projectById, areaById]);
 
   const orderedTasks = useMemo(() => {
     return sortTasksBy(filteredTasks, sortBy);
@@ -473,8 +483,14 @@ function TaskListComponent({
   useEffect(() => {
     loadAIKey(aiProvider).then(setAiKey).catch((error) => {
       void logError(error, { scope: 'ai', extra: { message: 'Failed to load AI key' } });
+      showToast({
+        title: t('ai.errorTitle'),
+        message: t('ai.disabledBody'),
+        tone: 'warning',
+        durationMs: 4200,
+      });
     });
-  }, [aiProvider]);
+  }, [aiProvider, showToast, t]);
 
   useEffect(() => {
     if (!enableCopilot || !aiEnabled || (keyRequired && !aiKey)) {
@@ -558,7 +574,12 @@ function TaskListComponent({
 
     const { title: parsedTitle, props, projectTitle, invalidDateCommands } = parseQuickAdd(newTaskTitle, projects, new Date(), areas);
     if (invalidDateCommands && invalidDateCommands.length > 0) {
-      Alert.alert(t('common.notice'), `${t('quickAdd.invalidDateCommand')}: ${invalidDateCommands.join(', ')}`);
+      showToast({
+        title: t('common.notice'),
+        message: `${t('quickAdd.invalidDateCommand')}: ${invalidDateCommands.join(', ')}`,
+        tone: 'warning',
+        durationMs: 4200,
+      });
       return;
     }
     const finalTitle = parsedTitle || newTaskTitle;
@@ -635,6 +656,7 @@ function TaskListComponent({
 
   const sortOptions: TaskSortBy[] = ['default', 'due', 'start', 'review', 'title', 'created', 'created-desc'];
   const hideStatusBadgeForList = statusFilter === 'next' || statusFilter === 'waiting';
+  const hideChecklistProgressForList = statusFilter === 'inbox';
 
   const renderTask = useCallback(({ item }: { item: Task }) => (
     <ErrorBoundary>
@@ -650,6 +672,7 @@ function TaskListComponent({
         onDelete={() => deleteTask(item.id)}
         isHighlighted={item.id === highlightTaskId}
         hideStatusBadge={hideStatusBadgeForList}
+        hideChecklistProgress={hideChecklistProgressForList}
         onProjectPress={projectId ? undefined : openProjectScreen}
         onContextPress={openContextsScreen}
         onTagPress={openContextsScreen}
@@ -663,6 +686,7 @@ function TaskListComponent({
     isDark,
     multiSelectedIds,
     selectionMode,
+    hideChecklistProgressForList,
     hideStatusBadgeForList,
     themeColorsMemo,
     toggleMultiSelect,
@@ -740,7 +764,7 @@ function TaskListComponent({
         <View style={styles.headerAccessoryRow}>{headerAccessory}</View>
       ) : null}
 
-      {timeEstimatesEnabled && (
+      {showTimeEstimateFilters && (
         <View style={[styles.filterSection, { borderBottomColor: themeColorsMemo.border, backgroundColor: themeColorsMemo.cardBg }]}>
           <Text style={[styles.filterLabel, { color: themeColorsMemo.secondaryText }]}>
             {t('filters.timeEstimate')}
@@ -950,9 +974,11 @@ function TaskListComponent({
           {listItems.length === 0 ? (
             <ListEmptyState
               message={emptyMessage}
+              hint={emptyHint}
               backgroundColor={themeColors.cardBg}
               borderColor={themeColors.border}
               textColor={themeColors.text}
+              mutedTextColor={themeColors.secondaryText}
             />
           ) : (
             listItems.map((item) => (
@@ -983,9 +1009,11 @@ function TaskListComponent({
           ListEmptyComponent={
             <ListEmptyState
               message={emptyMessage}
+              hint={emptyHint}
               backgroundColor={themeColors.cardBg}
               borderColor={themeColors.border}
               textColor={themeColors.text}
+              mutedTextColor={themeColors.secondaryText}
             />
           }
         />

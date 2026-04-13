@@ -3,6 +3,7 @@ import {
     areSyncPayloadsEqual,
     assertNoPendingAttachmentUploads,
     findPendingAttachmentUploads,
+    normalizeCloudUrl,
     sanitizeAppDataForRemote,
 } from './sync-helpers';
 import type { AppData, Attachment } from './types';
@@ -38,6 +39,23 @@ const createData = (attachments: Attachment[]): AppData => ({
     settings: {},
 });
 
+describe('sync-helpers normalizeCloudUrl', () => {
+    it('appends /v1/data to a bare self-hosted base URL', () => {
+        expect(normalizeCloudUrl('https://example.com')).toBe('https://example.com/v1/data');
+        expect(normalizeCloudUrl('https://example.com/mindwtr/')).toBe('https://example.com/mindwtr/v1/data');
+    });
+
+    it('appends /data when the versioned API base is already provided', () => {
+        expect(normalizeCloudUrl('https://example.com/v1')).toBe('https://example.com/v1/data');
+        expect(normalizeCloudUrl('https://example.com/api/v2/')).toBe('https://example.com/api/v2/data');
+    });
+
+    it('preserves full data endpoints for compatibility', () => {
+        expect(normalizeCloudUrl('https://example.com/v1/data')).toBe('https://example.com/v1/data');
+        expect(normalizeCloudUrl('https://example.com/data/')).toBe('https://example.com/data');
+    });
+});
+
 describe('sync-helpers pending attachment uploads', () => {
     it('detects file attachments with local uri and missing cloud key', () => {
         const data = createData([fileAttachment()]);
@@ -67,6 +85,13 @@ describe('sync-helpers pending attachment uploads', () => {
                 updatedAt: now,
             },
         ]);
+
+        expect(findPendingAttachmentUploads(data)).toHaveLength(0);
+    });
+
+    it('ignores attachments whose parent task is deleted', () => {
+        const data = createData([fileAttachment()]);
+        data.tasks[0].deletedAt = now;
 
         expect(findPendingAttachmentUploads(data)).toHaveLength(0);
     });
@@ -127,7 +152,7 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
                     preferences: now,
                 },
                 theme: 'dark',
-                appearance: { density: 'compact' },
+                appearance: { density: 'compact', textSize: 'large' },
                 keybindingStyle: 'emacs',
                 globalQuickAddShortcut: 'ctrl+alt+m',
                 language: 'zh',
@@ -153,7 +178,7 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
         expect(sanitized.settings.syncPreferences).toEqual(data.settings.syncPreferences);
         expect(sanitized.settings.syncPreferencesUpdatedAt).toEqual(data.settings.syncPreferencesUpdatedAt);
         expect(sanitized.settings.theme).toBe('dark');
-        expect(sanitized.settings.appearance).toEqual({ density: 'compact' });
+        expect(sanitized.settings.appearance).toEqual({ density: 'compact', textSize: 'large' });
         expect(sanitized.settings.keybindingStyle).toBe('emacs');
         expect(sanitized.settings.externalCalendars).toEqual(data.settings.externalCalendars);
 
@@ -240,6 +265,20 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
         expect(attachment?.deletedAt).toBeDefined();
         expect(attachment?.uri).toBe('');
         expect(attachment?.cloudKey).toBeUndefined();
+    });
+
+    it('tombstones local-only file attachments on deleted tasks before remote sync', () => {
+        const data = createData([fileAttachment({ id: 'deleted-parent-attachment' })]);
+        data.tasks[0].deletedAt = now;
+
+        const sanitized = sanitizeAppDataForRemote(data);
+        const attachment = sanitized.tasks[0]?.attachments?.[0];
+
+        expect(attachment).toBeDefined();
+        expect(attachment?.deletedAt).toBe(now);
+        expect(attachment?.uri).toBe('');
+        expect(attachment?.cloudKey).toBeUndefined();
+        expect(attachment?.localStatus).toBeUndefined();
     });
 });
 

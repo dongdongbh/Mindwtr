@@ -3,22 +3,27 @@ import { StyleSheet, Text, View } from 'react-native';
 
 export interface ListEmptyStateProps {
   message: string;
+  hint?: string;
   backgroundColor: string;
   borderColor: string;
   textColor: string;
+  mutedTextColor?: string;
 }
 
 export function ListEmptyState({
   message,
+  hint,
   backgroundColor,
   borderColor,
   textColor,
+  mutedTextColor,
 }: ListEmptyStateProps) {
+  const accessibilityLabel = hint ? `${message}. ${hint}` : message;
   return (
     <View
       style={[styles.container, { backgroundColor, borderColor }]}
       accessible
-      accessibilityLabel={message}
+      accessibilityLabel={accessibilityLabel}
     >
       <Text
         style={[styles.text, { color: textColor }]}
@@ -27,6 +32,14 @@ export function ListEmptyState({
       >
         {message}
       </Text>
+      {hint ? (
+        <Text
+          style={[styles.hint, { color: mutedTextColor ?? textColor }]}
+          accessibilityRole="text"
+        >
+          {hint}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -43,5 +56,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  hint: {
+    marginTop: 8,
+    fontSize: 13,
+    fontWeight: '400',
+    textAlign: 'center',
+    opacity: 0.8,
   },
 });

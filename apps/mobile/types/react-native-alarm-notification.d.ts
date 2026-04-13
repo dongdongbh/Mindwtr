@@ -4,6 +4,7 @@ declare module 'react-native-alarm-notification' {
   const ReactNativeAlarmNotification: {
     parseDate: (date: Date) => string;
     scheduleAlarm: (details: AlarmDetails) => Promise<{ id?: number | string }>;
+    sendNotification?: (details: AlarmDetails) => void;
     deleteAlarm: (id: number) => void;
     deleteRepeatingAlarm: (id: number) => void;
     stopAlarmSound: () => void;

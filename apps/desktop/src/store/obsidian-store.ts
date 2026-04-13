@@ -25,6 +25,7 @@ type ObsidianStoreState = {
     tasks: ObsidianTask[];
     scannedFileCount: number;
     scannedRelativePaths: string[];
+    taskNotesDetectedPaths: string[];
     warnings: string[];
     importMode: ObsidianImportMode;
     hasScannedThisSession: boolean;
@@ -94,6 +95,7 @@ export const useObsidianStore = createWithEqualityFn<ObsidianStoreState>()((set,
     tasks: [],
     scannedFileCount: 0,
     scannedRelativePaths: [],
+    taskNotesDetectedPaths: [],
     warnings: [],
     importMode: 'inline',
     hasScannedThisSession: false,
@@ -123,6 +125,7 @@ export const useObsidianStore = createWithEqualityFn<ObsidianStoreState>()((set,
                         tasks: [],
                         scannedFileCount: 0,
                         scannedRelativePaths: [],
+                        taskNotesDetectedPaths: [],
                         importMode: 'inline',
                         hasScannedThisSession: false,
                     }),
@@ -158,6 +161,7 @@ export const useObsidianStore = createWithEqualityFn<ObsidianStoreState>()((set,
                     tasks: [],
                     scannedFileCount: 0,
                     scannedRelativePaths: [],
+                    taskNotesDetectedPaths: [],
                     importMode: 'inline',
                 }
                 : {}),
@@ -167,6 +171,7 @@ export const useObsidianStore = createWithEqualityFn<ObsidianStoreState>()((set,
                 tasks: [],
                 scannedFileCount: 0,
                 scannedRelativePaths: [],
+                taskNotesDetectedPaths: [],
                 warnings: [],
                 importMode: 'inline',
                 hasScannedThisSession: false,
@@ -201,6 +206,7 @@ export const useObsidianStore = createWithEqualityFn<ObsidianStoreState>()((set,
             tasks: [],
             scannedFileCount: 0,
             scannedRelativePaths: [],
+            taskNotesDetectedPaths: [],
             warnings: [],
             importMode: 'inline',
             hasScannedThisSession: false,
@@ -225,6 +231,7 @@ export const useObsidianStore = createWithEqualityFn<ObsidianStoreState>()((set,
                 tasks: [],
                 scannedFileCount: 0,
                 scannedRelativePaths: [],
+                taskNotesDetectedPaths: [],
                 warnings: [],
                 importMode: 'inline',
                 hasScannedThisSession: false,
@@ -245,6 +252,7 @@ export const useObsidianStore = createWithEqualityFn<ObsidianStoreState>()((set,
                 tasks: result.tasks,
                 scannedFileCount: result.scannedFileCount,
                 scannedRelativePaths: result.scannedRelativePaths,
+                taskNotesDetectedPaths: result.taskNotesDetectedPaths,
                 warnings: result.warnings,
                 importMode: result.importMode,
                 hasScannedThisSession: true,
@@ -336,19 +344,17 @@ export const useObsidianStore = createWithEqualityFn<ObsidianStoreState>()((set,
         const deletedSet = new Set(deleted);
         let nextTasks = get().tasks.filter((task) => !deletedSet.has(task.source.relativeFilePath));
         const nextRelativePaths = new Set(get().scannedRelativePaths);
+        const currentTaskNotesDetectedPaths = new Set(get().taskNotesDetectedPaths);
+        const nextTaskNotesDetectedPaths = new Set(currentTaskNotesDetectedPaths);
         const warnings: string[] = [];
         const currentImportMode = get().importMode;
-        const currentTaskNotesPaths = new Set(
-            get().tasks
-                .filter((task) => task.format === 'tasknotes')
-                .map((task) => task.source.relativeFilePath)
-        );
         let touchedExistingTaskNotesFile = false;
         let shouldRescan = false;
 
         for (const deletedPath of deleted) {
             nextRelativePaths.delete(deletedPath);
-            if (currentTaskNotesPaths.has(deletedPath)) {
+            nextTaskNotesDetectedPaths.delete(deletedPath);
+            if (currentTaskNotesDetectedPaths.has(deletedPath)) {
                 touchedExistingTaskNotesFile = true;
             }
         }
@@ -361,6 +367,7 @@ export const useObsidianStore = createWithEqualityFn<ObsidianStoreState>()((set,
 
                 nextTasks = nextTasks.filter((task) => task.source.relativeFilePath !== changedPath);
                 nextRelativePaths.delete(changedPath);
+                nextTaskNotesDetectedPaths.delete(changedPath);
 
                 if (currentImportMode === 'inline' && fileResult.detectedTaskNotes) {
                     shouldRescan = true;
@@ -368,8 +375,12 @@ export const useObsidianStore = createWithEqualityFn<ObsidianStoreState>()((set,
                     break;
                 }
 
-                if (currentImportMode === 'tasknotes' && currentTaskNotesPaths.has(changedPath) && !fileResult.detectedTaskNotes) {
+                if (currentImportMode === 'tasknotes' && currentTaskNotesDetectedPaths.has(changedPath) && !fileResult.detectedTaskNotes) {
                     touchedExistingTaskNotesFile = true;
+                }
+
+                if (fileResult.detectedTaskNotes) {
+                    nextTaskNotesDetectedPaths.add(fileResult.relativeFilePath);
                 }
 
                 if (fileResult.isTracked) {
@@ -389,8 +400,7 @@ export const useObsidianStore = createWithEqualityFn<ObsidianStoreState>()((set,
         }
 
         if (!shouldRescan && currentImportMode === 'tasknotes' && touchedExistingTaskNotesFile) {
-            const hasRemainingTaskNotes = nextTasks.some((task) => task.format === 'tasknotes');
-            if (!hasRemainingTaskNotes) {
+            if (nextTaskNotesDetectedPaths.size === 0) {
                 shouldRescan = true;
             }
         }
@@ -414,6 +424,7 @@ export const useObsidianStore = createWithEqualityFn<ObsidianStoreState>()((set,
             tasks: sortObsidianTasks(nextTasks),
             scannedFileCount: nextRelativePaths.size,
             scannedRelativePaths: [...nextRelativePaths].sort((left, right) => left.localeCompare(right)),
+            taskNotesDetectedPaths: [...nextTaskNotesDetectedPaths].sort((left, right) => left.localeCompare(right)),
             warnings,
             error: null,
         });

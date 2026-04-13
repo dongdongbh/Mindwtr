@@ -524,6 +524,7 @@ jobs:
 
           EFFECTIVE_SUBMIT_FOR_REVIEW="${REQUESTED_SUBMIT_FOR_REVIEW:-true}"
           REQUESTED_SUBMIT_FOR_REVIEW="$EFFECTIVE_SUBMIT_FOR_REVIEW"
+          APPSTORE_UPLOAD_DISABLED="false"
           if [ "$REQUESTED_SUBMIT_FOR_REVIEW" != "true" ]; then
             REQUESTED_SUBMIT_FOR_REVIEW="false"
             EFFECTIVE_SUBMIT_FOR_REVIEW="false"
@@ -531,6 +532,7 @@ jobs:
           fi
           echo "ENABLE_TESTFLIGHT_EXTERNAL_RELEASE=false" >> "$GITHUB_ENV"
           echo "SKIP_APP_VERSION_UPDATE_FOR_UPLOAD=false" >> "$GITHUB_ENV"
+          echo "SKIP_APPSTORE_UPLOAD=false" >> "$GITHUB_ENV"
 
           if [ -z "${IOS_ASC_KEY_ID:-}" ] || [ -z "${IOS_ASC_ISSUER_ID:-}" ] || [ -z "${IOS_ASC_PRIVATE_KEY:-}" ]; then
             echo "::warning::App Store Connect API secrets are missing. Disabling review submission and TestFlight external routing."
@@ -592,7 +594,7 @@ jobs:
           ACTIVE_REVIEW_VERSION="$(jq -r '.data[0].attributes.versionString // empty' "$REVIEW_JSON_FILE")"
           ACTIVE_REVIEW_STATE="$(jq -r '.data[0].attributes.appStoreState // empty' "$REVIEW_JSON_FILE")"
           if [ -n "${ACTIVE_REVIEW_ID}" ]; then
-            echo "::warning::Found existing macOS App Store submission in state ${ACTIVE_REVIEW_STATE:-unknown} (version ${ACTIVE_REVIEW_VERSION:-unknown}). Upload will proceed, but review submission is disabled."
+            echo "::warning::Found existing macOS App Store submission in state ${ACTIVE_REVIEW_STATE:-unknown} (version ${ACTIVE_REVIEW_VERSION:-unknown}). Upload will continue for TestFlight using version ${APP_VERSION} with build ${APP_BUILD_NUMBER}, and review submission is disabled."
             echo "EFFECTIVE_SUBMIT_FOR_REVIEW=false" >> "$GITHUB_ENV"
             echo "ENABLE_TESTFLIGHT_EXTERNAL_RELEASE=true" >> "$GITHUB_ENV"
             echo "SKIP_APP_VERSION_UPDATE_FOR_UPLOAD=true" >> "$GITHUB_ENV"
@@ -600,7 +602,34 @@ jobs:
             exit 0
           fi
 
-          if [ "$REQUESTED_SUBMIT_FOR_REVIEW" = "true" ]; then
+          if [ -n "${APP_VERSION:-}" ]; then
+            TARGET_VERSION_JSON_FILE="$RUNNER_TEMP/asc-target-version.json"
+            if api_get "$TARGET_VERSION_JSON_FILE" -G \
+              -H "Authorization: Bearer ${ASC_TOKEN}" \
+              --data-urlencode "filter[versionString]=${APP_VERSION}" \
+              --data-urlencode "filter[platform]=MAC_OS" \
+              --data-urlencode "limit=1" \
+              "https://api.appstoreconnect.apple.com/v1/apps/${APPSTORE_APP_ID_RESOLVED}/appStoreVersions"; then
+              TARGET_VERSION_ID="$(jq -r '.data[0].id // empty' "$TARGET_VERSION_JSON_FILE")"
+              TARGET_VERSION_STATE="$(jq -r '.data[0].attributes.appStoreState // empty' "$TARGET_VERSION_JSON_FILE")"
+              if [ -n "${TARGET_VERSION_ID}" ] && [ "${TARGET_VERSION_STATE:-}" = "PREPARE_FOR_SUBMISSION" ]; then
+                echo "::notice::Found existing macOS App Store version ${APP_VERSION} in state ${TARGET_VERSION_STATE:-unknown}. Reusing the existing version record for upload."
+                echo "SKIP_APP_VERSION_UPDATE_FOR_UPLOAD=true" >> "$GITHUB_ENV"
+              elif [ -n "${TARGET_VERSION_ID}" ]; then
+                echo "::warning::Existing macOS App Store version ${APP_VERSION} is not editable (state ${TARGET_VERSION_STATE:-unknown}). Skipping App Store Connect publish for this run."
+                echo "EFFECTIVE_SUBMIT_FOR_REVIEW=false" >> "$GITHUB_ENV"
+                echo "SKIP_METADATA_FOR_UPLOAD=true" >> "$GITHUB_ENV"
+                echo "SKIP_APPSTORE_UPLOAD=true" >> "$GITHUB_ENV"
+                APPSTORE_UPLOAD_DISABLED="true"
+              fi
+            else
+              echo "::warning::Target-version lookup failed. Upload will continue and may attempt to create version ${APP_VERSION}."
+            fi
+          fi
+
+          if [ "${APPSTORE_UPLOAD_DISABLED}" = "true" ]; then
+            echo "App Store Connect upload disabled because version ${APP_VERSION} is already in a non-editable state."
+          elif [ "$REQUESTED_SUBMIT_FOR_REVIEW" = "true" ]; then
             echo "EFFECTIVE_SUBMIT_FOR_REVIEW=true" >> "$GITHUB_ENV"
             echo "No active App Store review submission found; review submission remains enabled."
           else
@@ -609,7 +638,7 @@ jobs:
           fi
 
       - name: Upload package to App Store Connect
-        if: ${{ inputs.upload }}
+        if: ${{ inputs.upload && env.SKIP_APPSTORE_UPLOAD != 'true' }}
         timeout-minutes: 30
         env:
           IOS_ASC_KEY_ID: ${{ secrets.IOS_ASC_KEY_ID }}
@@ -630,6 +659,8 @@ jobs:
             exit 1
           fi
 
+          ASC_KEY_ID_CLEAN="$(printf '%s' "$IOS_ASC_KEY_ID" | tr -d '\r\n\t ')"
+          ASC_ISSUER_ID_CLEAN="$(printf '%s' "$IOS_ASC_ISSUER_ID" | tr -d '\r\n\t ')"
           ASC_KEY_PATH="$RUNNER_TEMP/macos-asc-key-fastlane.p8"
           bash scripts/ci/write-asc-private-key.sh "$IOS_ASC_PRIVATE_KEY" "$ASC_KEY_PATH"
 
@@ -640,16 +671,9 @@ jobs:
 
           platform :mac do
             lane :upload_app_store do
-              api_key = app_store_connect_api_key(
-                key_id: ENV.fetch("IOS_ASC_KEY_ID"),
-                issuer_id: ENV.fetch("IOS_ASC_ISSUER_ID"),
-                key_filepath: ENV.fetch("ASC_KEY_PATH"),
-                duration: 1200,
-                in_house: false
-              )
-
-              deliver(
-                api_key: api_key,
+              deliver_options = {
+                app_identifier: ENV.fetch("EXPECTED_BUNDLE_ID"),
+                app_version: ENV.fetch("APP_VERSION"),
                 platform: "osx",
                 pkg: ENV.fetch("PKG_PATH"),
                 metadata_path: ENV.fetch("FASTLANE_METADATA_PATH"),
@@ -660,12 +684,24 @@ jobs:
                 run_precheck_before_submit: false,
                 submit_for_review: ENV.fetch("SUBMIT_FOR_REVIEW", "false") == "true",
                 automatic_release: true
+              }
+              api_key = app_store_connect_api_key(
+                key_id: ENV.fetch("FASTLANE_ASC_KEY_ID"),
+                issuer_id: ENV.fetch("FASTLANE_ASC_ISSUER_ID"),
+                key_filepath: ENV.fetch("ASC_KEY_PATH"),
+                duration: 1200,
+                in_house: false
               )
+
+              deliver(deliver_options.merge(api_key: api_key))
             end
           end
           EOF
 
-          ASC_KEY_PATH="$ASC_KEY_PATH" fastlane mac upload_app_store
+          FASTLANE_ASC_KEY_ID="$ASC_KEY_ID_CLEAN" \
+          FASTLANE_ASC_ISSUER_ID="$ASC_ISSUER_ID_CLEAN" \
+          ASC_KEY_PATH="$ASC_KEY_PATH" \
+          fastlane mac upload_app_store
 
       - name: Distribute upload to TestFlight external group
         if: ${{ inputs.upload }}
@@ -681,6 +717,11 @@ jobs:
           CI: "true"
         run: |
           set -euo pipefail
+
+          if [ "${ENABLE_TESTFLIGHT_EXTERNAL_RELEASE:-false}" != "true" ]; then
+            echo "TestFlight external distribution not enabled for this run; skipping."
+            exit 0
+          fi
 
           ASC_KEY_PATH="$RUNNER_TEMP/macos-asc-key-fastlane-testflight.p8"
           bash scripts/ci/write-asc-private-key.sh "$IOS_ASC_PRIVATE_KEY" "$ASC_KEY_PATH"

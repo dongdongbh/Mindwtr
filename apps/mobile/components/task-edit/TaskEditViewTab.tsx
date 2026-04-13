@@ -1,5 +1,6 @@
 import React from 'react';
 import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { CheckSquare, Square } from 'lucide-react-native';
 import { getAttachmentDisplayTitle } from '@mindwtr/core';
 import type {
   Attachment,
@@ -132,6 +133,9 @@ export function TaskEditViewTab({
   const statusLabel = mergedTask.status ? (t(`status.${mergedTask.status}`) || mergedTask.status) : undefined;
   const isReference = mergedTask.status === 'reference';
   const priorityLabel = mergedTask.priority ? (t(`priority.${mergedTask.priority}`) || mergedTask.priority) : undefined;
+  const energyLevelLabel = mergedTask.energyLevel
+    ? (t(`energyLevel.${mergedTask.energyLevel}`) || mergedTask.energyLevel)
+    : undefined;
   const timeEstimateLabel = mergedTask.timeEstimate
     ? (formatTimeEstimateLabel(mergedTask.timeEstimate as TimeEstimate) || String(mergedTask.timeEstimate))
     : undefined;
@@ -150,6 +154,8 @@ export function TaskEditViewTab({
     >
       {renderViewRow(t('taskEdit.statusLabel'), statusLabel)}
       {!isReference && prioritiesEnabled ? renderViewRow(t('taskEdit.priorityLabel'), priorityLabel) : null}
+      {!isReference ? renderViewRow(t('taskEdit.energyLevel'), energyLevelLabel) : null}
+      {renderViewRow(t('taskEdit.assignedTo'), mergedTask.assignedTo)}
       {renderViewRow(
         t('taskEdit.projectLabel'),
         project?.title,
@@ -199,10 +205,15 @@ export function TaskEditViewTab({
                   );
                   applyChecklistUpdate(nextChecklist);
                 }}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: item.isCompleted }}
+                accessibilityLabel={item.title}
               >
-                <Text style={[styles.viewChecklistMarker, { color: item.isCompleted ? tc.tint : tc.secondaryText }]}>
-                  {item.isCompleted ? '✓' : '○'}
-                </Text>
+                {item.isCompleted ? (
+                  <CheckSquare size={18} color={tc.tint} strokeWidth={2} />
+                ) : (
+                  <Square size={18} color={tc.secondaryText} strokeWidth={2} />
+                )}
                 <Text style={[styles.viewChecklistText, textDirectionStyle, { color: tc.text }]}>{item.title}</Text>
               </TouchableOpacity>
             ))}

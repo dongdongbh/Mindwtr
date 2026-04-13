@@ -27,7 +27,7 @@ concurrency:
 jobs:
   linux:
     runs-on: ubuntu-22.04
-    name: Linux Build + Snap + AUR
+    name: Linux Build + Snap
     timeout-minutes: 90
     env:
       VITE_DROPBOX_APP_KEY: ${{ vars.VITE_DROPBOX_APP_KEY || secrets.VITE_DROPBOX_APP_KEY }}

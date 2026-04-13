@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -13,12 +12,14 @@ import { Check, ChevronDown } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useLanguage } from '../contexts/language-context';
+import { useToast } from '../contexts/toast-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { AREA_FILTER_ALL, AREA_FILTER_NONE } from '@/lib/area-filter';
 
 export function MobileAreaSwitcher() {
   const { t } = useLanguage();
+  const { showToast } = useToast();
   const tc = useThemeColors();
   const insets = useSafeAreaInsets();
   const {
@@ -56,11 +57,13 @@ export function MobileAreaSwitcher() {
     }
     if (staleFilterAlertShown.current) return;
     staleFilterAlertShown.current = true;
-    Alert.alert(
-      t('projects.areaFilter'),
-      t('projects.deletedAreaFilterResetAlert'),
-    );
-  }, [didResetDeletedAreaFilter, t]);
+    showToast({
+      title: t('projects.areaFilter'),
+      message: t('projects.deletedAreaFilterResetAlert'),
+      tone: 'info',
+      durationMs: 4200,
+    });
+  }, [didResetDeletedAreaFilter, showToast, t]);
 
   return (
     <>

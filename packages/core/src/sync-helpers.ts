@@ -18,7 +18,17 @@ export const normalizeWebdavUrl = (rawUrl: string): string => {
 
 export const normalizeCloudUrl = (rawUrl: string): string => {
     const trimmed = rawUrl.replace(/\/+$/, '');
-    return trimmed.toLowerCase().endsWith('/data') ? trimmed : `${trimmed}/data`;
+    const lower = trimmed.toLowerCase();
+
+    if (lower.endsWith('/v1/data') || lower.endsWith('/data')) {
+        return trimmed;
+    }
+
+    if (/\/v\d+$/i.test(trimmed)) {
+        return `${trimmed}/data`;
+    }
+
+    return `${trimmed}/v1/data`;
 };
 
 const isLocalAttachmentUri = (uri: string): boolean => {
@@ -55,10 +65,12 @@ export const findPendingAttachmentUploads = (data: AppData): PendingAttachmentUp
     const pending: PendingAttachmentUpload[] = [];
 
     for (const task of data.tasks) {
+        if (task.deletedAt) continue;
         pending.push(...collectPendingUploads('task', task.id, task.attachments));
     }
 
     for (const project of data.projects) {
+        if (project.deletedAt) continue;
         pending.push(...collectPendingUploads('project', project.id, project.attachments));
     }
 
@@ -83,14 +95,14 @@ export const sanitizeAppDataForRemote = (data: AppData): AppData => {
     const hasNonEmptyValue = (value: unknown): boolean => (
         typeof value === 'string' && value.trim().length > 0
     );
-    const sanitizeAttachments = (attachments?: Attachment[]): Attachment[] | undefined => {
+    const sanitizeAttachments = (attachments?: Attachment[], ownerDeleted = false): Attachment[] | undefined => {
         if (!attachments) return attachments;
         return attachments.map((attachment) => {
             if (attachment.kind !== 'file') return attachment;
+            const hasUri = hasNonEmptyValue(attachment.uri);
+            const hasCloudKey = hasNonEmptyValue(attachment.cloudKey);
             if (!attachment.deletedAt) {
-                const hasUri = hasNonEmptyValue(attachment.uri);
-                const hasCloudKey = hasNonEmptyValue(attachment.cloudKey);
-                if (!hasUri && !hasCloudKey) {
+                if ((ownerDeleted && !hasCloudKey) || (!hasUri && !hasCloudKey)) {
                     const nowIso = new Date().toISOString();
                     const fallbackUpdatedAt = hasNonEmptyValue(attachment.updatedAt)
                         ? attachment.updatedAt
@@ -162,11 +174,11 @@ export const sanitizeAppDataForRemote = (data: AppData): AppData => {
         ...data,
         tasks: data.tasks.map((task) => ({
             ...task,
-            attachments: sanitizeAttachments(task.attachments),
+            attachments: sanitizeAttachments(task.attachments, Boolean(task.deletedAt)),
         })),
         projects: data.projects.map((project) => ({
             ...project,
-            attachments: sanitizeAttachments(project.attachments),
+            attachments: sanitizeAttachments(project.attachments, Boolean(project.deletedAt)),
         })),
         settings: sanitizeSettingsForRemote(data.settings),
     };

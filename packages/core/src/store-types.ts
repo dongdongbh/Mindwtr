@@ -75,9 +75,9 @@ export interface TaskStore {
     /** Add a new project */
     addProject: (title: string, color: string, initialProps?: Partial<Project>) => Promise<Project | null>;
     /** Update a project */
-    updateProject: (id: string, updates: Partial<Project>) => Promise<void>;
+    updateProject: (id: string, updates: Partial<Project>) => Promise<StoreActionResult>;
     /** Delete a project */
-    deleteProject: (id: string) => Promise<void>;
+    deleteProject: (id: string) => Promise<StoreActionResult>;
     /** Restore a soft-deleted project and its cascaded children */
     restoreProject: (id: string) => Promise<StoreActionResult>;
     /** Duplicate a project with its sections/tasks (fresh task state) */
@@ -89,17 +89,17 @@ export interface TaskStore {
     /** Add a new section within a project */
     addSection: (projectId: string, title: string, initialProps?: Partial<Section>) => Promise<Section | null>;
     /** Update a section */
-    updateSection: (id: string, updates: Partial<Section>) => Promise<void>;
+    updateSection: (id: string, updates: Partial<Section>) => Promise<StoreActionResult>;
     /** Delete a section and clear sectionId on child tasks */
-    deleteSection: (id: string) => Promise<void>;
+    deleteSection: (id: string) => Promise<StoreActionResult>;
 
     // Area Actions
     /** Add a new area */
     addArea: (name: string, initialProps?: Partial<Area>) => Promise<Area | null>;
     /** Update an area */
-    updateArea: (id: string, updates: Partial<Area>) => Promise<void>;
+    updateArea: (id: string, updates: Partial<Area>) => Promise<StoreActionResult>;
     /** Delete an area and clear areaId on child projects/tasks */
-    deleteArea: (id: string) => Promise<void>;
+    deleteArea: (id: string) => Promise<StoreActionResult>;
     /** Restore a soft-deleted area */
     restoreArea: (id: string) => Promise<StoreActionResult>;
     /** Reorder areas by id list */

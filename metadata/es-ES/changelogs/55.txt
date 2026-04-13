@@ -1,0 +1,3 @@
+- Agregamos nivel de energia y responsable, con un procesamiento del inbox mas completo y delegacion mas segura.
+- Las listas de foco ahora usan secciones plegables, una regla de Hoy mas estricta y un Inbox mas limpio.
+- Los widgets de Android se ajustan mejor y el sync es mas seguro al limpiar areas y resolver borrados.

@@ -1,0 +1,3 @@
+- Quick capture now understands natural language dates like tomorrow.
+- Mobile toasts queue cleanly, sync guidance is clearer, and non-critical alerts interrupt less.
+- Android widgets fit narrow layouts better, and sync/cloud uploads fail more safely.

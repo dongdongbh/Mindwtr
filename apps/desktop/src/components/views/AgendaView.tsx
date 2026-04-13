@@ -2,11 +2,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'reac
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { shallow, useTaskStore, TaskPriority, TimeEstimate, getUsedTaskTokens, matchesHierarchicalToken, safeFormatDate, safeParseDate, safeParseDueDate, isDueForReview, isTaskInActiveProject } from '@mindwtr/core';
-import type { Task, Project } from '@mindwtr/core';
+import type { Task, Project, TaskEnergyLevel } from '@mindwtr/core';
 import { useLanguage } from '../../contexts/language-context';
 import { cn } from '../../lib/utils';
 import { useUiStore } from '../../store/ui-store';
-import { Clock, Star, Calendar, ArrowRight, Filter, Folder, List, ChevronDown, type LucideIcon } from 'lucide-react';
+import { Clock, Star, Calendar, ArrowRight, Filter, Folder, List, ChevronDown, ChevronRight, CheckCircle2, type LucideIcon } from 'lucide-react';
 import { usePerformanceMonitor } from '../../hooks/usePerformanceMonitor';
 import { checkBudget } from '../../config/performanceBudgets';
 import { TaskItem } from '../TaskItem';
@@ -174,12 +174,18 @@ export function AgendaView() {
     }));
     const [selectedTokens, setSelectedTokens] = useState<string[]>([]);
     const [selectedPriorities, setSelectedPriorities] = useState<TaskPriority[]>([]);
+    const [selectedEnergyLevels, setSelectedEnergyLevels] = useState<TaskEnergyLevel[]>([]);
     const [selectedTimeEstimates, setSelectedTimeEstimates] = useState<TimeEstimate[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [filtersOpen, setFiltersOpen] = useState(false);
     const [top3Only, setTop3Only] = useState(false);
-    const prioritiesEnabled = settings?.features?.priorities === true;
-    const timeEstimatesEnabled = settings?.features?.timeEstimates === true;
+    const [expandedSections, setExpandedSections] = useState({
+        schedule: true,
+        nextActions: true,
+        reviewDue: true,
+    });
+    const prioritiesEnabled = settings?.features?.priorities !== false;
+    const timeEstimatesEnabled = settings?.features?.timeEstimates !== false;
     const pomodoroEnabled = settings?.features?.pomodoro === true;
     const activePriorities = prioritiesEnabled ? selectedPriorities : [];
     const activeTimeEstimates = timeEstimatesEnabled ? selectedTimeEstimates : [];
@@ -212,6 +218,7 @@ export function AgendaView() {
         };
     }, [tasks, projectMap, resolvedAreaFilter, areaById]);
     const priorityOptions: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
+    const energyLevelOptions: TaskEnergyLevel[] = ['low', 'medium', 'high'];
     const timeEstimateOptions: TimeEstimate[] = ['5min', '10min', '15min', '30min', '1hr', '2hr', '3hr', '4hr', '4hr+'];
     const formatEstimate = (estimate: TimeEstimate) => {
         if (estimate.endsWith('min')) return estimate.replace('min', 'm');
@@ -228,9 +235,10 @@ export function AgendaView() {
             if (!matchesAll) return false;
         }
         if (activePriorities.length > 0 && (!task.priority || !activePriorities.includes(task.priority))) return false;
+        if (selectedEnergyLevels.length > 0 && (!task.energyLevel || !selectedEnergyLevels.includes(task.energyLevel))) return false;
         if (activeTimeEstimates.length > 0 && (!task.timeEstimate || !activeTimeEstimates.includes(task.timeEstimate))) return false;
         return true;
-    }, [selectedTokens, activePriorities, activeTimeEstimates]);
+    }, [selectedTokens, activePriorities, selectedEnergyLevels, activeTimeEstimates]);
     const normalizedSearchQuery = searchQuery.trim().toLowerCase();
     const matchesSearchQuery = useCallback((title: string) => {
         if (!normalizedSearchQuery) return true;
@@ -282,7 +290,12 @@ export function AgendaView() {
                 return a.title.localeCompare(b.title);
             });
     }, [projects, matchesSearchQuery, resolvedAreaFilter, areaById]);
-    const hasFilters = selectedTokens.length > 0 || activePriorities.length > 0 || activeTimeEstimates.length > 0;
+    const hasFilters = (
+        selectedTokens.length > 0
+        || activePriorities.length > 0
+        || selectedEnergyLevels.length > 0
+        || activeTimeEstimates.length > 0
+    );
     const hasTaskFilters = hasFilters || Boolean(normalizedSearchQuery);
     const showFiltersPanel = filtersOpen || hasFilters;
     const toggleTokenFilter = (token: string) => {
@@ -295,6 +308,11 @@ export function AgendaView() {
             prev.includes(priority) ? prev.filter((item) => item !== priority) : [...prev, priority]
         );
     };
+    const toggleEnergyFilter = (energyLevel: TaskEnergyLevel) => {
+        setSelectedEnergyLevels((prev) =>
+            prev.includes(energyLevel) ? prev.filter((item) => item !== energyLevel) : [...prev, energyLevel]
+        );
+    };
     const toggleTimeFilter = (estimate: TimeEstimate) => {
         setSelectedTimeEstimates((prev) =>
             prev.includes(estimate) ? prev.filter((item) => item !== estimate) : [...prev, estimate]
@@ -303,6 +321,7 @@ export function AgendaView() {
     const clearFilters = () => {
         setSelectedTokens([]);
         setSelectedPriorities([]);
+        setSelectedEnergyLevels([]);
         setSelectedTimeEstimates([]);
     };
     useEffect(() => {
@@ -368,6 +387,7 @@ export function AgendaView() {
     // Categorize tasks
     const sections = useMemo(() => {
         const now = new Date();
+        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
         const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
         const isDeferred = (task: Task) => {
             const start = safeParseDate(task.startTime);
@@ -428,13 +448,17 @@ export function AgendaView() {
         };
         const schedule = filteredActiveTasks.filter((task) => {
             if (task.isFocusedToday) return false;
-            if (task.status === 'waiting') return false;
+            if (task.status !== 'next') return false;
             if (isSequentialBlocked(task)) return false;
             const dueDate = safeParseDueDate(task.dueDate);
             const startDate = safeParseDate(task.startTime);
-            const startReady = !startDate || startDate <= endOfToday;
-            return Boolean(startReady && dueDate && dueDate <= endOfToday)
-                || Boolean(startReady && startDate && startDate <= endOfToday);
+            const startsToday = Boolean(
+                startDate
+                && startDate >= startOfToday
+                && startDate <= endOfToday
+            );
+            return Boolean(dueDate && dueDate <= endOfToday)
+                || startsToday;
         });
         const scheduleIds = new Set(schedule.map((task) => task.id));
         const nextActions = filteredActiveTasks.filter((task) => {
@@ -542,28 +566,87 @@ export function AgendaView() {
         };
     }, [focusedCount, handleToggleFocus, t]);
 
-    const Section = ({ title, icon: Icon, tasks, color }: {
+    const toggleSection = useCallback((sectionKey: keyof typeof expandedSections) => {
+        setExpandedSections((current) => ({
+            ...current,
+            [sectionKey]: !current[sectionKey],
+        }));
+    }, []);
+
+    const SectionToggle = ({
+        title,
+        icon: Icon,
+        color,
+        count,
+        expanded,
+        onToggle,
+        controlsId,
+    }: {
+        title: string;
+        icon: LucideIcon;
+        color: string;
+        count: number;
+        expanded: boolean;
+        onToggle: () => void;
+        controlsId: string;
+    }) => (
+        <h3>
+            <button
+                type="button"
+                onClick={onToggle}
+                aria-expanded={expanded}
+                aria-controls={controlsId}
+                className={cn(
+                    "w-full flex items-center gap-2 text-left font-semibold transition-colors",
+                    "focus:outline-none focus:ring-2 focus:ring-primary/30 rounded-md",
+                    color
+                )}
+            >
+                {expanded ? (
+                    <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                ) : (
+                    <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                )}
+                <Icon className="w-5 h-5" />
+                <span>{title}</span>
+                <span className="text-muted-foreground font-normal">({count})</span>
+            </button>
+        </h3>
+    );
+
+    const Section = ({ sectionKey, title, icon: Icon, tasks, color }: {
+        sectionKey: keyof typeof expandedSections;
         title: string;
         icon: LucideIcon;
         tasks: Task[];
         color: string;
     }) => {
         if (tasks.length === 0) return null;
+        const expanded = expandedSections[sectionKey];
+        const controlsId = `agenda-section-${sectionKey}`;
 
         return (
             <div className="space-y-3">
-                <h3 className={cn("font-semibold flex items-center gap-2", color)}>
-                    <Icon className="w-5 h-5" />
-                    {title}
-                    <span className="text-muted-foreground font-normal">({tasks.length})</span>
-                </h3>
-                <AgendaTaskList
-                    tasks={tasks}
-                    projectMap={projectMap}
-                    buildFocusToggle={buildFocusToggle}
-                    showListDetails={showListDetails}
-                    highlightTaskId={highlightTaskId}
+                <SectionToggle
+                    title={title}
+                    icon={Icon}
+                    color={color}
+                    count={tasks.length}
+                    expanded={expanded}
+                    onToggle={() => toggleSection(sectionKey)}
+                    controlsId={controlsId}
                 />
+                {expanded ? (
+                    <div id={controlsId}>
+                        <AgendaTaskList
+                            tasks={tasks}
+                            projectMap={projectMap}
+                            buildFocusToggle={buildFocusToggle}
+                            showListDetails={showListDetails}
+                            highlightTaskId={highlightTaskId}
+                        />
+                    </div>
+                ) : null}
             </div>
         );
     };
@@ -777,6 +860,30 @@ export function AgendaView() {
                                 </div>
                             </div>
                         )}
+                        <div className="space-y-2">
+                            <div className="text-xs text-muted-foreground uppercase tracking-wide">{t('taskEdit.energyLevel')}</div>
+                            <div className="flex flex-wrap gap-2">
+                                {energyLevelOptions.map((energyLevel) => {
+                                    const isActive = selectedEnergyLevels.includes(energyLevel);
+                                    return (
+                                        <button
+                                            key={energyLevel}
+                                            type="button"
+                                            onClick={() => toggleEnergyFilter(energyLevel)}
+                                            aria-pressed={isActive}
+                                            className={cn(
+                                                "px-3 py-1.5 rounded-full text-xs font-medium transition-colors",
+                                                isActive
+                                                    ? "bg-primary text-primary-foreground"
+                                                    : "bg-muted hover:bg-muted/80 text-muted-foreground"
+                                            )}
+                                        >
+                                            {t(`energyLevel.${energyLevel}`)}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
                         {timeEstimatesEnabled && (
                             <div className="space-y-2">
                                 <div className="text-xs text-muted-foreground uppercase tracking-wide">{t('filters.timeEstimate')}</div>
@@ -869,6 +976,7 @@ export function AgendaView() {
                     {/* Other Sections */}
                     <div className="space-y-6">
                         <Section
+                            sectionKey="schedule"
                             title={t('focus.schedule') || t('agenda.dueToday')}
                             icon={Calendar}
                             tasks={sections.schedule}
@@ -877,6 +985,7 @@ export function AgendaView() {
 
                         {nextGroupBy === 'none' ? (
                             <Section
+                                sectionKey="nextActions"
                                 title={t('agenda.nextActions')}
                                 icon={ArrowRight}
                                 tasks={sections.nextActions}
@@ -884,40 +993,47 @@ export function AgendaView() {
                             />
                         ) : (
                             <div className="space-y-3">
-                                <h3 className="font-semibold flex items-center gap-2 text-blue-600">
-                                    <ArrowRight className="w-5 h-5" />
-                                    {t('agenda.nextActions')}
-                                    <span className="text-muted-foreground font-normal">({sections.nextActions.length})</span>
-                                </h3>
-                                <div className="space-y-2">
-                                    {nextActionGroups.map((group) => (
-                                        <div key={group.id} className="rounded-md border border-border/40 bg-card/30">
-                                            <div className={cn(
-                                                'px-3 py-2 text-xs font-semibold uppercase tracking-wide border-b border-border/30',
-                                                group.muted ? 'text-muted-foreground' : 'text-foreground/90',
-                                            )}>
-                                                <span className="inline-flex items-center gap-1.5">
-                                                    {group.dotColor && (
-                                                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: group.dotColor }} aria-hidden="true" />
-                                                    )}
-                                                    <span>{group.title}</span>
-                                                </span>
-                                                <span className="ml-2 text-muted-foreground">{group.tasks.length}</span>
+                                <SectionToggle
+                                    title={t('agenda.nextActions')}
+                                    icon={ArrowRight}
+                                    color="text-blue-600"
+                                    count={sections.nextActions.length}
+                                    expanded={expandedSections.nextActions}
+                                    onToggle={() => toggleSection('nextActions')}
+                                    controlsId="agenda-section-nextActions"
+                                />
+                                {expandedSections.nextActions ? (
+                                    <div id="agenda-section-nextActions" className="space-y-2">
+                                        {nextActionGroups.map((group) => (
+                                            <div key={group.id} className="rounded-md border border-border/40 bg-card/30">
+                                                <div className={cn(
+                                                    'px-3 py-2 text-xs font-semibold uppercase tracking-wide border-b border-border/30',
+                                                    group.muted ? 'text-muted-foreground' : 'text-foreground/90',
+                                                )}>
+                                                    <span className="inline-flex items-center gap-1.5">
+                                                        {group.dotColor && (
+                                                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: group.dotColor }} aria-hidden="true" />
+                                                        )}
+                                                        <span>{group.title}</span>
+                                                    </span>
+                                                    <span className="ml-2 text-muted-foreground">{group.tasks.length}</span>
+                                                </div>
+                                                <AgendaTaskList
+                                                    tasks={group.tasks}
+                                                    projectMap={projectMap}
+                                                    buildFocusToggle={buildFocusToggle}
+                                                    showListDetails={showListDetails}
+                                                    highlightTaskId={highlightTaskId}
+                                                />
                                             </div>
-                                            <AgendaTaskList
-                                                tasks={group.tasks}
-                                                projectMap={projectMap}
-                                                buildFocusToggle={buildFocusToggle}
-                                                showListDetails={showListDetails}
-                                                highlightTaskId={highlightTaskId}
-                                            />
-                                        </div>
-                                    ))}
-                                </div>
+                                        ))}
+                                    </div>
+                                ) : null}
                             </div>
                         )}
 
                         <Section
+                            sectionKey="reviewDue"
                             title={t('agenda.reviewDue') || 'Review Due'}
                             icon={Clock}
                             tasks={sections.reviewDue}
@@ -935,10 +1051,10 @@ export function AgendaView() {
             )}
 
             {visibleActive === 0 && (
-                <div className="text-center py-12 text-muted-foreground">
-                    <p className="text-4xl mb-4">✨</p>
-                    <p className="text-lg font-medium">{t('agenda.allClear')}</p>
-                    <p>{hasTaskFilters ? t('filters.noMatch') : t('agenda.noTasks')}</p>
+                <div className="text-center py-12 text-muted-foreground flex flex-col items-center gap-2">
+                    <CheckCircle2 className="w-10 h-10 text-emerald-500/80" aria-hidden="true" strokeWidth={1.5} />
+                    <p className="text-lg font-medium text-foreground">{t('agenda.allClear')}</p>
+                    <p className="text-sm">{hasTaskFilters ? t('filters.noMatch') : t('agenda.noTasks')}</p>
                 </div>
             )}
             </div>

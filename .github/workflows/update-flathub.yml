@@ -137,27 +137,13 @@ jobs:
             --check \
             "$worktree_dir/apps/desktop/package-lock.json"
 
-          python3 - "$worktree_dir/apps/desktop/package-lock.json" "$GITHUB_WORKSPACE/flathub/tech.dongdongbh.mindwtr.node-sources.json" <<'PY'
+          python3 - "$GITHUB_WORKSPACE/flathub/tech.dongdongbh.mindwtr.node-sources.json" "$worktree_dir/apps/desktop/package-lock.json" "$worktree_dir/packages/core/package-lock.json" <<'PY'
           import json
           import pathlib
           import sys
 
-          lock_path = pathlib.Path(sys.argv[1])
-          node_sources_path = pathlib.Path(sys.argv[2])
-
-          lock = json.loads(lock_path.read_text())
+          node_sources_path = pathlib.Path(sys.argv[1])
           node_sources = json.loads(node_sources_path.read_text())
-
-          expected_urls = {
-              meta["resolved"]
-              for package_path, meta in lock.get("packages", {}).items()
-              if isinstance(meta, dict)
-              and package_path.startswith("node_modules/")
-              and not meta.get("link")
-              and "version" in meta
-              and isinstance(meta.get("resolved"), str)
-              and meta["resolved"].startswith("https://registry.npmjs.org/")
-          }
 
           source_urls = {
               entry["url"]
@@ -167,18 +153,39 @@ jobs:
               and isinstance(entry.get("url"), str)
           }
 
-          missing_urls = sorted(expected_urls - source_urls)
-          if missing_urls:
-              preview = "\n".join(f"  - {url}" for url in missing_urls[:20])
-              suffix = "" if len(missing_urls) <= 20 else f"\n  ... and {len(missing_urls) - 20} more"
-              raise SystemExit(
-                  f"Generated Flathub node sources are missing {len(missing_urls)} npm tarball URLs required by apps/desktop/package-lock.json:\n"
-                  + preview
-                  + suffix
+          total_expected_urls = 0
+
+          for lock_arg in sys.argv[2:]:
+              lock_path = pathlib.Path(lock_arg)
+              lock = json.loads(lock_path.read_text())
+              expected_urls = {
+                  meta["resolved"]
+                  for package_path, meta in lock.get("packages", {}).items()
+                  if isinstance(meta, dict)
+                  and package_path.startswith("node_modules/")
+                  and not meta.get("link")
+                  and "version" in meta
+                  and isinstance(meta.get("resolved"), str)
+                  and meta["resolved"].startswith("https://registry.npmjs.org/")
+              }
+
+              missing_urls = sorted(expected_urls - source_urls)
+              if missing_urls:
+                  preview = "\n".join(f"  - {url}" for url in missing_urls[:20])
+                  suffix = "" if len(missing_urls) <= 20 else f"\n  ... and {len(missing_urls) - 20} more"
+                  raise SystemExit(
+                      f"Generated Flathub node sources are missing {len(missing_urls)} npm tarball URLs required by {lock_path}:\n"
+                      + preview
+                      + suffix
+                  )
+
+              total_expected_urls += len(expected_urls)
+              print(
+                  f"Validated Flathub node sources coverage for {len(expected_urls)} npm tarball URLs in {lock_path}"
               )
 
           print(
-              f"Validated Flathub node sources coverage for {len(expected_urls)} npm tarball URLs in {lock_path}"
+              f"Validated Flathub node sources coverage across {len(sys.argv) - 2} lockfiles ({total_expected_urls} URLs before dedupe)"
           )
           PY
 

@@ -19,6 +19,7 @@ import {
 } from '@mindwtr/core';
 
 import { loadAIKey, saveAIKey } from '@/lib/ai-config';
+import { useToast } from '@/contexts/toast-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { logSettingsError, logSettingsWarn } from '@/lib/settings-utils';
 
@@ -37,6 +38,7 @@ import { styles } from './settings.styles';
 
 export function AISettingsScreen() {
     const tc = useThemeColors();
+    const { showToast } = useToast();
     const { localize, t } = useSettingsLocalization();
     const scrollContentStyleWithKeyboard = useSettingsScrollContent(140);
     const { settings, updateSettings } = useTaskStore();
@@ -421,7 +423,12 @@ export function AISettingsScreen() {
             );
             setWhisperDownloadError(message);
             setWhisperDownloadState('error');
-            Alert.alert(t('settings.speechOfflineDownloadError'), message);
+            showToast({
+                title: t('settings.speechOfflineDownloadError'),
+                message,
+                tone: 'warning',
+                durationMs: 5200,
+            });
             return;
         }
         setWhisperDownloadError('');
@@ -501,7 +508,12 @@ export function AISettingsScreen() {
             setWhisperDownloadError(message);
             setWhisperDownloadState('error');
             logSettingsWarn('Whisper model download failed', error);
-            Alert.alert(t('settings.speechOfflineDownloadError'), message);
+            showToast({
+                title: t('settings.speechOfflineDownloadError'),
+                message,
+                tone: 'warning',
+                durationMs: 5200,
+            });
         }
     };
 
@@ -523,7 +535,12 @@ export function AISettingsScreen() {
             updateSpeechSettings({ offlineModelPath: undefined });
         } catch (error) {
             logSettingsWarn('Whisper model delete failed', error);
-            Alert.alert(t('settings.speechOfflineDeleteError'), t('settings.speechOfflineDeleteErrorBody'));
+            showToast({
+                title: t('settings.speechOfflineDeleteError'),
+                message: t('settings.speechOfflineDeleteErrorBody'),
+                tone: 'warning',
+                durationMs: 4200,
+            });
         }
     };
 

@@ -2,7 +2,7 @@ import React from 'react';
 import { Image, Modal, Pressable, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { type Attachment } from '@mindwtr/core';
 
-import { projectsScreenStyles as styles } from '@/app/(drawer)/projects-screen.styles';
+import { projectsScreenStyles as styles } from '@/components/projects-screen/projects-screen.styles';
 
 type ThemeColors = {
     border: string;

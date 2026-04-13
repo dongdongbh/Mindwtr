@@ -51,13 +51,17 @@ export const hashString = async (value: string): Promise<string> => {
         }
     }
 
+    return fallbackHashString(value);
+};
+
+export const fallbackHashString = (value: string): string => {
     // Legacy fallback for runtimes without Web Crypto or node:crypto.
     let hash = 0;
     for (let i = 0; i < value.length; i += 1) {
         hash = Math.imul(31, hash) + value.charCodeAt(i);
         hash |= 0;
     }
-    return hash.toString(16);
+    return (hash >>> 0).toString(16);
 };
 
 export const sleep = (ms: number) => new Promise<void>((resolve) => {

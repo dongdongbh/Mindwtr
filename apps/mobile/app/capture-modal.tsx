@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { createAIProvider, getUsedTaskTokens, parseQuickAdd, type Task, type TimeEstimate, type AIProviderId, useTaskStore } from '@mindwtr/core';
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { useToast } from '@/contexts/toast-context';
 import { useLanguage } from '../contexts/language-context';
 import { buildCopilotConfig, isAIKeyRequired, loadAIKey } from '../lib/ai-config';
 import { logError } from '../lib/app-log';
@@ -12,6 +13,7 @@ export default function CaptureScreen() {
   const router = useRouter();
   const { addTask, projects, tasks, settings, areas } = useTaskStore();
   const tc = useThemeColors();
+  const { showToast } = useToast();
   const { t } = useLanguage();
   const initialText = typeof params.text === 'string' ? decodeURIComponent(params.text) : '';
   const [value, setValue] = useState(initialText);
@@ -39,13 +41,19 @@ export default function CaptureScreen() {
   const aiEnabled = settings.ai?.enabled === true;
   const aiProvider = (settings.ai?.provider ?? 'openai') as AIProviderId;
   const keyRequired = isAIKeyRequired(settings);
-  const timeEstimatesEnabled = settings.features?.timeEstimates === true;
+  const timeEstimatesEnabled = settings.features?.timeEstimates !== false;
 
   useEffect(() => {
     loadAIKey(aiProvider).then(setAiKey).catch((error) => {
       void logError(error, { scope: 'ai', extra: { message: 'Failed to load AI key' } });
+      showToast({
+        title: t('ai.errorTitle'),
+        message: t('ai.disabledBody'),
+        tone: 'warning',
+        durationMs: 4200,
+      });
     });
-  }, [aiProvider]);
+  }, [aiProvider, showToast, t]);
 
   const contextOptions = React.useMemo(() => {
     return getUsedTaskTokens(tasks, (task) => task.contexts, { prefix: '@' });
@@ -132,17 +140,34 @@ export default function CaptureScreen() {
 
   const placeholderColor = tc.secondaryText;
 
+  const handleCancel = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/inbox');
+    }
+  };
+
   const handleSave = () => {
     if (!value.trim()) return;
-    const { title, props, invalidDateCommands } = parseQuickAdd(value, projects, new Date(), areas);
+    const { title, props, invalidDateCommands, detectedDate } = parseQuickAdd(value, projects, new Date(), areas);
     if (invalidDateCommands && invalidDateCommands.length > 0) {
-      Alert.alert(t('common.notice'), `${t('quickAdd.invalidDateCommand')}: ${invalidDateCommands.join(', ')}`);
+      showToast({
+        title: t('common.notice'),
+        message: `${t('quickAdd.invalidDateCommand')}: ${invalidDateCommands.join(', ')}`,
+        tone: 'warning',
+        durationMs: 4200,
+      });
       return;
     }
-    const finalTitle = title || value;
+    const shouldApplyDetectedDate = Boolean(detectedDate?.date && !props.dueDate);
+    const finalTitle = shouldApplyDetectedDate && detectedDate ? detectedDate.titleWithoutDate : (title || value);
     if (!finalTitle.trim()) return;
     const initialProps: Partial<Task> = { status: 'inbox', ...props };
     if (!props.status) initialProps.status = 'inbox';
+    if (shouldApplyDetectedDate && detectedDate) {
+      initialProps.dueDate = detectedDate.date;
+    }
     if (copilotContext) {
       const nextContexts = Array.from(new Set([...(initialProps.contexts ?? []), copilotContext]));
       initialProps.contexts = nextContexts;
@@ -216,7 +241,7 @@ export default function CaptureScreen() {
           <Text style={[styles.help, { color: tc.secondaryText }]}>{t('quickAdd.help')}</Text>
         )}
         <View style={styles.actions}>
-          <TouchableOpacity onPress={() => router.back()} style={[styles.button, styles.cancel, { backgroundColor: tc.inputBg }]}>
+          <TouchableOpacity onPress={handleCancel} style={[styles.button, styles.cancel, { backgroundColor: tc.inputBg }]}>
             <Text style={{ color: tc.text }}>{t('common.cancel')}</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={handleSave} style={[styles.button, styles.save]}>

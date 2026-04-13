@@ -432,12 +432,6 @@ Mindwtr sends push notifications to keep you on track.
 - **Start time alerts** — Reminds you when it's time to begin
 - **Recurring task reminders** — Notifications for recurring items
 
-### Snooze
-
-When a notification appears, you can snooze it directly:
-- Tap **Snooze** to be reminded later
-- Choose from preset intervals (5 min, 15 min, 1 hour, etc.)
-
 Tap the notification body to jump directly to the **Review** screen.
 
 ### Permissions

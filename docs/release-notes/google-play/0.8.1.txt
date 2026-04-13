@@ -1,0 +1,15 @@
+<en-US>
+Added energy level and assignee fields plus richer inbox processing with safer delegation.
+Focus lists now use collapsible sections, a stricter Today rule, and a cleaner Inbox view.
+Android task widgets size more reliably, and sync cleanup is safer around deletes and areas.
+</en-US>
+<zh-CN>
+新增能量等级与负责人字段，并扩展了收集箱整理流程，委派更可靠。
+专注列表现已支持折叠分组、更严格的“今天”规则，以及更简洁的收集箱视图。
+Android 小组件尺寸适配更稳定，同步在删除冲突与区域清理上也更安全。
+</zh-CN>
+<es-ES>
+Agregamos nivel de energia y responsable, con un procesamiento del inbox mas completo y delegacion mas segura.
+Las listas de foco ahora usan secciones plegables, una regla de Hoy mas estricta y un Inbox mas limpio.
+Los widgets de Android se ajustan mejor y el sync es mas seguro al limpiar areas y resolver borrados.
+</es-ES>

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Task, TaskStatus } from '@mindwtr/core';
 import { useTheme } from '../../contexts/theme-context';
 import { useLanguage } from '../../contexts/language-context';
-import { Folder } from 'lucide-react-native';
+import { Folder, Lightbulb } from 'lucide-react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -161,9 +161,9 @@ export function SomedayView() {
           ))
         ) : deferredProjects.length === 0 ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>💭</Text>
-            <Text style={styles.emptyTitle}>{t('someday.empty')}</Text>
-            <Text style={styles.emptyText}>
+            <Lightbulb size={48} color={tc.secondaryText} strokeWidth={1.5} style={styles.emptyIcon} />
+            <Text style={[styles.emptyTitle, { color: tc.text }]}>{t('someday.empty')}</Text>
+            <Text style={[styles.emptyText, { color: tc.secondaryText }]}>
               {t('someday.emptyHint')}
             </Text>
           </View>
@@ -268,7 +268,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   emptyIcon: {
-    fontSize: 64,
     marginBottom: 16,
   },
   emptyTitle: {

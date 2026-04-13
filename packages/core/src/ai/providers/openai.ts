@@ -12,7 +12,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const resolveTimeoutMs = (value?: number) =>
     typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : DEFAULT_TIMEOUT_MS;
 
-async function buildOpenAIError(response: Response): Promise<Error> {
+async function buildOpenAIError(response: Response, usingOfficialOpenAI: boolean): Promise<Error> {
     const status = response.status;
     let message = '';
     let code = '';
@@ -36,16 +36,24 @@ async function buildOpenAIError(response: Response): Promise<Error> {
     }
 
     if (status === 401) {
-        return new Error('OpenAI API key is invalid or missing.');
+        return usingOfficialOpenAI
+            ? new Error('OpenAI API key is invalid or missing.')
+            : new Error('OpenAI-compatible endpoint rejected the request. Check the custom base URL, API key, and model.');
     }
     if (status === 403) {
-        return new Error('OpenAI access denied for this model or key.');
+        return usingOfficialOpenAI
+            ? new Error('OpenAI access denied for this model or key.')
+            : new Error('OpenAI-compatible endpoint denied access. Check the API key and model permissions.');
     }
     if (status === 404) {
-        return new Error('OpenAI model not found or unavailable for this key.');
+        return usingOfficialOpenAI
+            ? new Error('OpenAI model not found or unavailable for this key.')
+            : new Error('OpenAI-compatible endpoint or model not found. Check the custom base URL and model.');
     }
     if (status === 429) {
-        return new Error('OpenAI rate limit or quota exceeded. Please try again later.');
+        return usingOfficialOpenAI
+            ? new Error('OpenAI rate limit or quota exceeded. Please try again later.')
+            : new Error('OpenAI-compatible endpoint rate limit or quota exceeded. Please try again later.');
     }
 
     const parts = [
@@ -60,8 +68,9 @@ async function buildOpenAIError(response: Response): Promise<Error> {
 
 async function requestOpenAI(config: AIProviderConfig, prompt: { system: string; user: string }, options?: AIRequestOptions) {
     const url = config.endpoint || OPENAI_BASE_URL;
+    const usingOfficialOpenAI = url === OPENAI_BASE_URL;
     const apiKey = String(config.apiKey || '').trim();
-    if (!apiKey && url === OPENAI_BASE_URL) {
+    if (!apiKey && usingOfficialOpenAI) {
         throw new Error('OpenAI API key is required.');
     }
     const reasoningEffort = config.model.startsWith('gpt-5') && config.reasoningEffort
@@ -115,7 +124,7 @@ async function requestOpenAI(config: AIProviderConfig, prompt: { system: string;
                 await sleep(400 * Math.pow(2, attempt));
                 continue;
             }
-            throw await buildOpenAIError(response);
+            throw await buildOpenAIError(response, usingOfficialOpenAI);
         }
         break;
     }

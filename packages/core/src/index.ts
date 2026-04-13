@@ -49,6 +49,7 @@ export * from './ai-config';
 export * from './sqlite-schema';
 export * from './sqlite-adapter';
 export * from './logger';
+export * from './log-breadcrumbs';
 export * from './pomodoro';
 export * from './color-constants';
 export * from './analytics-heartbeat';

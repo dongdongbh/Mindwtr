@@ -1,5 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode, useContext } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { AlertTriangle } from 'lucide-react-native';
 import { resolveThemeColors } from '@/hooks/use-theme-colors';
 import { logError } from '@/lib/app-log';
 import { LanguageContext } from '@/contexts/language-context';
@@ -27,7 +28,7 @@ function ErrorFallback({ error, onRetry }: { error: Error | null; onRetry: () =>
     const t = (key: string) => languageContext?.t(key) ?? FALLBACK_ERROR_STRINGS[key] ?? key;
     return (
         <View style={[styles.container, { backgroundColor: tc.bg }]}>
-            <Text style={styles.emoji}>💥</Text>
+            <AlertTriangle size={56} color={tc.danger} style={styles.icon} strokeWidth={1.5} />
             <Text style={[styles.title, { color: tc.text }]}>{t('errorBoundary.title')}</Text>
             <Text style={[styles.message, { color: tc.secondaryText }]}>
                 {t('errorBoundary.message')}
@@ -81,8 +82,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         padding: 24,
     },
-    emoji: {
-        fontSize: 64,
+    icon: {
         marginBottom: 16,
     },
     title: {

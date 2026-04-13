@@ -1,8 +1,5 @@
-import { existsSync } from 'fs';
-
 import type { Area, Project, Task } from './queries.js';
-import type { DbOptions } from './db.js';
-import { resolveMindwtrDbPath } from './paths.js';
+import { ensureMindwtrDbPath, type DbOptions } from './db.js';
 
 type CoreStore = {
   getState: () => {
@@ -10,17 +7,22 @@ type CoreStore = {
     _allProjects: Project[];
     _allAreas: Area[];
     fetchData: () => Promise<void>;
-    addTask: (title: string, initialProps?: Partial<Task>) => Promise<void>;
-    updateTask: (id: string, updates: Partial<Task>) => Promise<void>;
-    deleteTask: (id: string) => Promise<void>;
-    restoreTask: (id: string) => Promise<void>;
+    addTask: (title: string, initialProps?: Partial<Task>) => Promise<CoreActionResult>;
+    updateTask: (id: string, updates: Partial<Task>) => Promise<CoreActionResult>;
+    deleteTask: (id: string) => Promise<CoreActionResult>;
+    restoreTask: (id: string) => Promise<CoreActionResult>;
     addProject: (title: string, color: string, initialProps?: Partial<Project>) => Promise<Project | null>;
-    updateProject: (id: string, updates: Partial<Project>) => Promise<void>;
-    deleteProject: (id: string) => Promise<void>;
+    updateProject: (id: string, updates: Partial<Project>) => Promise<CoreActionResult>;
+    deleteProject: (id: string) => Promise<CoreActionResult>;
     addArea: (name: string, initialProps?: Partial<Area>) => Promise<Area | null>;
-    updateArea: (id: string, updates: Partial<Area>) => Promise<void>;
-    deleteArea: (id: string) => Promise<void>;
+    updateArea: (id: string, updates: Partial<Area>) => Promise<CoreActionResult>;
+    deleteArea: (id: string) => Promise<CoreActionResult>;
   };
+};
+
+type CoreActionResult = {
+  success: boolean;
+  error?: string;
 };
 
 type CoreModule = {
@@ -118,6 +120,11 @@ const runSerialized = async <T>(fn: () => Promise<T>): Promise<T> => {
 };
 
 const getErrorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+const ensureActionSucceeded = (action: string, result: CoreActionResult) => {
+  if (!result.success) {
+    throw new Error(result.error || `Failed to ${action}.`);
+  }
+};
 
 const isDuplicateColumnError = (error: unknown): boolean => {
   const message = getErrorMessage(error).toLowerCase();
@@ -125,20 +132,13 @@ const isDuplicateColumnError = (error: unknown): boolean => {
 };
 
 const ensureCoreReady = async (options: DbOptions) => {
-  const resolvedPath = resolveMindwtrDbPath(options.dbPath);
+  const resolvedPath = await ensureMindwtrDbPath(options);
   if (coreReady && coreDbPath === resolvedPath && coreReadonly === Boolean(options.readonly)) {
     return coreReady;
   }
 
   coreDbPath = resolvedPath;
   coreReadonly = Boolean(options.readonly);
-  if (!existsSync(coreDbPath)) {
-    throw new Error(
-      `Mindwtr database not found at: ${coreDbPath}\n` +
-      `Please ensure the Mindwtr app has been run at least once to create the database, ` +
-      `or specify a custom path using --db /path/to/mindwtr.db or MINDWTR_DB_PATH environment variable.`
-    );
-  }
   coreReady = (async () => {
     const core = await loadCoreModules();
     const { client } = await createSqliteClient(coreDbPath!, coreReadonly);
@@ -171,7 +171,7 @@ const ensureCoreReady = async (options: DbOptions) => {
         const state = core.useTaskStore.getState();
         await state.fetchData();
         const before = new Set(state._allTasks.map((t) => t.id));
-        await state.addTask(title, props);
+        ensureActionSucceeded('create task', await state.addTask(title, props));
         await core.flushPendingSave();
         const after = core.useTaskStore.getState()._allTasks;
         const created = after.find((t) => !before.has(t.id));
@@ -181,7 +181,7 @@ const ensureCoreReady = async (options: DbOptions) => {
       updateTask: async ({ id, updates }) => {
         const state = core.useTaskStore.getState();
         await state.fetchData();
-        await state.updateTask(id, updates);
+        ensureActionSucceeded('update task', await state.updateTask(id, updates));
         await core.flushPendingSave();
         const updated = core.useTaskStore.getState()._allTasks.find((t) => t.id === id);
         if (!updated) throw new Error(`Task not found after update: ${id}`);
@@ -190,7 +190,7 @@ const ensureCoreReady = async (options: DbOptions) => {
       completeTask: async (id) => {
         const state = core.useTaskStore.getState();
         await state.fetchData();
-        await state.updateTask(id, { status: 'done' } as Partial<Task>);
+        ensureActionSucceeded('complete task', await state.updateTask(id, { status: 'done' } as Partial<Task>));
         await core.flushPendingSave();
         const updated = core.useTaskStore.getState()._allTasks.find((t) => t.id === id);
         if (!updated) throw new Error(`Task not found after complete: ${id}`);
@@ -199,7 +199,7 @@ const ensureCoreReady = async (options: DbOptions) => {
       deleteTask: async (id) => {
         const state = core.useTaskStore.getState();
         await state.fetchData();
-        await state.deleteTask(id);
+        ensureActionSucceeded('delete task', await state.deleteTask(id));
         await core.flushPendingSave();
         const updated = core.useTaskStore.getState()._allTasks.find((t) => t.id === id);
         if (!updated) throw new Error(`Task not found after delete: ${id}`);
@@ -208,7 +208,7 @@ const ensureCoreReady = async (options: DbOptions) => {
       restoreTask: async (id) => {
         const state = core.useTaskStore.getState();
         await state.fetchData();
-        await state.restoreTask(id);
+        ensureActionSucceeded('restore task', await state.restoreTask(id));
         await core.flushPendingSave();
         const updated = core.useTaskStore.getState()._allTasks.find((t) => t.id === id);
         if (!updated) throw new Error(`Task not found after restore: ${id}`);
@@ -227,7 +227,7 @@ const ensureCoreReady = async (options: DbOptions) => {
       updateProject: async ({ id, updates }) => {
         const state = core.useTaskStore.getState();
         await state.fetchData();
-        await state.updateProject(id, updates);
+        ensureActionSucceeded('update project', await state.updateProject(id, updates));
         await core.flushPendingSave();
         const updated = core.useTaskStore.getState()._allProjects.find((project) => project.id === id);
         if (!updated) throw new Error(`Project not found after update: ${id}`);
@@ -236,7 +236,7 @@ const ensureCoreReady = async (options: DbOptions) => {
       deleteProject: async (id) => {
         const state = core.useTaskStore.getState();
         await state.fetchData();
-        await state.deleteProject(id);
+        ensureActionSucceeded('delete project', await state.deleteProject(id));
         await core.flushPendingSave();
         const updated = core.useTaskStore.getState()._allProjects.find((project) => project.id === id);
         if (!updated) throw new Error(`Project not found after delete: ${id}`);
@@ -255,7 +255,7 @@ const ensureCoreReady = async (options: DbOptions) => {
       updateArea: async ({ id, updates }) => {
         const state = core.useTaskStore.getState();
         await state.fetchData();
-        await state.updateArea(id, updates);
+        ensureActionSucceeded('update area', await state.updateArea(id, updates));
         await core.flushPendingSave();
         const updated = core.useTaskStore.getState()._allAreas.find((area) => area.id === id);
         if (!updated) throw new Error(`Area not found after update: ${id}`);
@@ -264,7 +264,7 @@ const ensureCoreReady = async (options: DbOptions) => {
       deleteArea: async (id) => {
         const state = core.useTaskStore.getState();
         await state.fetchData();
-        await state.deleteArea(id);
+        ensureActionSucceeded('delete area', await state.deleteArea(id));
         await core.flushPendingSave();
         const updated = core.useTaskStore.getState()._allAreas.find((area) => area.id === id);
         if (!updated) throw new Error(`Area not found after delete: ${id}`);

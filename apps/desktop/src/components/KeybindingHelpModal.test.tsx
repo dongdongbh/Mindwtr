@@ -26,6 +26,8 @@ describe('KeybindingHelpModal', () => {
         expect(getByText('Ctrl+Shift+C / Cmd+Shift+C')).toBeInTheDocument();
         expect(getByText('F11')).toBeInTheDocument();
         expect(getByText('gi')).toBeInTheDocument();
+        expect(getByText('a1-a9')).toBeInTheDocument();
+        expect(getByText('a0')).toBeInTheDocument();
         expect(getByText('dd')).toBeInTheDocument();
         expect(queryByText('Alt-i')).not.toBeInTheDocument();
     });

@@ -22,7 +22,7 @@ import { PromptModal } from '../../PromptModal';
 import { cn } from '../../../lib/utils';
 import { useLanguage } from '../../../contexts/language-context';
 import { buildAIConfig, isAIKeyRequired, loadAIKey } from '../../../lib/ai-config';
-import { fetchExternalCalendarEvents } from '../../../lib/external-calendar-events';
+import { fetchExternalCalendarEvents, summarizeExternalCalendarWarnings } from '../../../lib/external-calendar-events';
 
 type ReviewStep = 'inbox' | 'ai' | 'calendar' | 'waiting' | 'contexts' | 'projects' | 'someday' | 'completed';
 type CalendarReviewEntry = {
@@ -209,9 +209,10 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                 const rangeEnd = new Date(rangeStart);
                 rangeEnd.setDate(rangeEnd.getDate() + 7);
                 rangeEnd.setMilliseconds(-1);
-                const { events } = await fetchExternalCalendarEvents(rangeStart, rangeEnd);
+                const { events, warnings } = await fetchExternalCalendarEvents(rangeStart, rangeEnd);
                 if (cancelled) return;
                 setExternalCalendarEvents(events);
+                setExternalCalendarError(summarizeExternalCalendarWarnings(warnings));
             } catch (error) {
                 if (cancelled) return;
                 setExternalCalendarError(error instanceof Error ? error.message : String(error));
@@ -614,7 +615,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                                                     )}
                                                     aria-pressed={aiSelectedIds.has(suggestion.id)}
                                                 >
-                                                    {aiSelectedIds.has(suggestion.id) ? '✓' : ''}
+                                                    {aiSelectedIds.has(suggestion.id) ? <Check className="h-3 w-3" strokeWidth={3} /> : null}
                                                 </button>
                                             ) : (
                                                 <span className="mt-1 h-4 w-4 rounded border border-border/50" />

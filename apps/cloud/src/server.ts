@@ -69,6 +69,37 @@ import {
 
 const normalizeAttachmentContentType = (value: string | null): string => value?.split(';', 1)[0]?.trim().toLowerCase() || '';
 
+const getBlockedAttachmentSignature = (bytes: Uint8Array): string | null => {
+    if (bytes.length >= 2 && bytes[0] === 0x4d && bytes[1] === 0x5a) {
+        return 'windows-pe';
+    }
+    if (bytes.length >= 4) {
+        if (bytes[0] === 0x7f && bytes[1] === 0x45 && bytes[2] === 0x4c && bytes[3] === 0x46) {
+            return 'elf';
+        }
+        const signature = `${bytes[0].toString(16).padStart(2, '0')}${bytes[1].toString(16).padStart(2, '0')}`
+            + `${bytes[2].toString(16).padStart(2, '0')}${bytes[3].toString(16).padStart(2, '0')}`;
+        if (signature === 'feedface' || signature === 'feedfacf' || signature === 'cefaedfe' || signature === 'cffaedfe') {
+            return 'mach-o';
+        }
+    }
+    return null;
+};
+
+const generateRequestId = (): string => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    return `req-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const createInternalServerErrorResponse = (message: string, requestId: string): Response => (
+    jsonResponse(
+        { error: message, requestId },
+        { status: 500, headers: { 'X-Request-Id': requestId } },
+    )
+);
+
 type RateLimitState = {
     count: number;
     resetAt: number;
@@ -119,6 +150,7 @@ export const __cloudTestUtils = {
     isPathWithinRoot,
     pathContainsSymlink,
     createWriteLockRunner,
+    createInternalServerErrorResponse,
 };
 
 type CloudServerOptions = {
@@ -272,6 +304,7 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
         hostname: host,
         port,
         async fetch(req) {
+            const requestId = generateRequestId();
             const requestAbortController = new AbortController();
             const requestTimeout = setTimeout(() => {
                 requestAbortController.abort(createRequestAbortError('Request timed out', 408));
@@ -536,11 +569,22 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                     if (req.method === 'GET' && pathname === '/v1/search') {
                         throwIfRequestAborted(requestAbortController.signal);
                         const query = url.searchParams.get('query') || '';
+                        const pagination = parsePagination(url.searchParams);
+                        if ('error' in pagination) return errorResponse(pagination.error, 400);
                         const data = loadAppData(filePath);
                         const tasks = data.tasks.filter((t) => !t.deletedAt);
                         const projects = data.projects.filter((p: any) => !p.deletedAt);
                         const results = searchAll(tasks, projects, query);
-                        return jsonResponse(results);
+                        const taskTotal = results.tasks.length;
+                        const projectTotal = results.projects.length;
+                        return jsonResponse({
+                            tasks: results.tasks.slice(pagination.offset, pagination.offset + pagination.limit),
+                            projects: results.projects.slice(pagination.offset, pagination.offset + pagination.limit),
+                            taskTotal,
+                            projectTotal,
+                            limit: pagination.limit,
+                            offset: pagination.offset,
+                        });
                     }
 
                     if (pathname.startsWith('/v1/tasks') || pathname === '/v1/projects' || pathname === '/v1/search') {
@@ -656,6 +700,10 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                         if (isBodyReadError(body)) {
                             return errorResponse(body.__mindwtrError.message, body.__mindwtrError.status);
                         }
+                        const blockedSignature = getBlockedAttachmentSignature(body);
+                        if (blockedSignature) {
+                            return errorResponse(`Blocked executable attachment signature: ${blockedSignature}`, 400);
+                        }
                         throwIfRequestAborted(requestAbortController.signal);
                         const wrote = writeAttachmentFileSafely(rootRealPath, filePath, body);
                         if (!wrote) return errorResponse('Invalid attachment path', 400);
@@ -689,12 +737,15 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                 if (error && typeof error === 'object' && 'code' in error) {
                     const code = (error as any).code;
                     if (code === 'EACCES') {
-                        logError('permission denied writing cloud data', error);
-                        return errorResponse('Cloud data directory is not writable. Check volume permissions.', 500);
+                        logError(`permission denied writing cloud data (requestId=${requestId})`, error);
+                        return createInternalServerErrorResponse(
+                            'Cloud data directory is not writable. Check volume permissions.',
+                            requestId,
+                        );
                     }
                 }
-                logError('request failed', error);
-                return errorResponse('Internal server error', 500);
+                logError(`request failed (requestId=${requestId})`, error);
+                return createInternalServerErrorResponse('Internal server error', requestId);
             } finally {
                 clearTimeout(requestTimeout);
             }

@@ -154,6 +154,7 @@ export function buildWidgetPayload(
     const tasks = data.tasks || [];
     const projects = data.projects || [];
     const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
     const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
     const palette = resolveWidgetPalette(
         typeof data.settings?.theme === 'string' ? data.settings.theme : undefined,
@@ -182,13 +183,16 @@ export function buildWidgetPayload(
     };
 
     const scheduleTasks = activeTasks.filter((task) => {
+        if (task.status !== 'next') return false;
         if (isSequentialBlocked(task)) return false;
         const due = safeParseDueDate(task.dueDate);
         const start = safeParseDate(task.startTime);
-        const startReady = !start || start <= endOfToday;
-        return Boolean(task.isFocusedToday)
-            || (startReady && Boolean(due && due <= endOfToday))
-            || (startReady && Boolean(start && start <= endOfToday));
+        const startsToday = Boolean(
+            start
+            && start >= startOfToday
+            && start <= endOfToday
+        );
+        return Boolean(due && due <= endOfToday) || startsToday;
     });
 
     const scheduleTaskIds = new Set(scheduleTasks.map((task) => task.id));

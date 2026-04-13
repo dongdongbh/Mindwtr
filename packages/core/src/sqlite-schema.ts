@@ -1,3 +1,5 @@
+export const SQLITE_SCHEMA_VERSION = 2;
+
 export const SQLITE_BASE_SCHEMA = `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
@@ -7,6 +9,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   title TEXT NOT NULL,
   status TEXT NOT NULL,
   priority TEXT,
+  energyLevel TEXT,
+  assignedTo TEXT,
   taskMode TEXT,
   startTime TEXT,
   dueDate TEXT,
@@ -65,8 +69,8 @@ CREATE TABLE IF NOT EXISTS areas (
   orderNum INTEGER NOT NULL,
   rev INTEGER,
   revBy TEXT,
-  createdAt TEXT,
-  updatedAt TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
   deletedAt TEXT
 );
 

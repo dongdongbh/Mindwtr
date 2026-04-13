@@ -77,8 +77,8 @@ export function GtdSettingsScreen({
     const autoArchiveDays = Number.isFinite(settings.gtd?.autoArchiveDays)
         ? Math.max(0, Math.floor(settings.gtd?.autoArchiveDays as number))
         : 7;
-    const prioritiesEnabled = settings.features?.priorities === true;
-    const timeEstimatesEnabled = settings.features?.timeEstimates === true;
+    const prioritiesEnabled = settings.features?.priorities !== false;
+    const timeEstimatesEnabled = settings.features?.timeEstimates !== false;
     const pomodoroEnabled = settings.features?.pomodoro === true;
 
     useEffect(() => {
@@ -541,6 +541,10 @@ export function GtdSettingsScreen({
                 return t('taskEdit.areaLabel');
             case 'priority':
                 return t('taskEdit.priorityLabel');
+            case 'energyLevel':
+                return t('taskEdit.energyLevel');
+            case 'assignedTo':
+                return t('taskEdit.assignedTo');
             case 'contexts':
                 return t('taskEdit.contextsLabel');
             case 'description':

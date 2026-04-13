@@ -6,6 +6,7 @@ import React, { useRef, useState, useEffect, useMemo, useCallback, type ReactNod
 import { ArrowRight, Check, RotateCcw, Trash2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { ThemeColors } from '../hooks/use-theme-colors';
+import { useToast } from '../contexts/toast-context';
 
 export interface SwipeableTaskItemProps {
     task: Task;
@@ -26,6 +27,7 @@ export interface SwipeableTaskItemProps {
     showFocusToggle?: boolean;
     hideStatusBadge?: boolean;
     disableSwipe?: boolean;
+    hideChecklistProgress?: boolean;
     onProjectPress?: (projectId: string) => void;
     onContextPress?: (context: string) => void;
     onTagPress?: (tag: string) => void;
@@ -56,6 +58,7 @@ export function SwipeableTaskItem({
     showFocusToggle = false,
     hideStatusBadge = false,
     disableSwipe = false,
+    hideChecklistProgress = false,
     onProjectPress,
     onContextPress,
     onTagPress,
@@ -63,6 +66,7 @@ export function SwipeableTaskItem({
     const swipeableRef = useRef<Swipeable>(null);
     const ignorePressUntil = useRef<number>(0);
     const { t, language } = useLanguage();
+    const { showToast } = useToast();
     const {
         updateTask,
         projects,
@@ -74,7 +78,7 @@ export function SwipeableTaskItem({
         projects: state.projects,
         areas: state.areas,
         focusedCount: state.getDerivedState().focusedCount,
-        timeEstimatesEnabled: state.settings?.features?.timeEstimates === true,
+        timeEstimatesEnabled: state.settings?.features?.timeEstimates !== false,
     }), shallow);
     const canShowFocusToggle = showFocusToggle
         && task.status !== 'done'
@@ -88,7 +92,11 @@ export function SwipeableTaskItem({
             return;
         }
         if (focusedCount >= 3) {
-            Alert.alert(t('digest.focus') || 'Focus', t('agenda.maxFocusItems') || 'Max 3 focus items.');
+            showToast({
+                title: t('digest.focus') || 'Focus',
+                message: t('agenda.maxFocusItems') || 'Max 3 focus items.',
+                tone: 'warning',
+            });
             return;
         }
         const updates: Partial<Task> = {
@@ -555,7 +563,7 @@ export function SwipeableTaskItem({
                                 {metaParts}
                             </View>
                         )}
-                        {checklistProgress && (
+                        {!hideChecklistProgress && checklistProgress && (
                             <Pressable
                                 onPress={() => setShowChecklist((v) => !v)}
                                 style={styles.checklistRow}

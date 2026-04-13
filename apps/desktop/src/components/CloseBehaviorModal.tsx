@@ -1,4 +1,4 @@
-import { cn } from '../lib/utils';
+import { Button } from './ui/Button';
 
 type CloseBehaviorModalProps = {
     isOpen: boolean;
@@ -49,27 +49,15 @@ export function CloseBehaviorModal({
                     </label>
                 </div>
                 <div className="p-6 border-t border-border flex flex-wrap gap-3 justify-end">
-                    <button
-                        onClick={onCancel}
-                        className="px-4 py-2 rounded-md text-sm font-medium bg-muted hover:bg-muted/80 transition-colors"
-                    >
+                    <Button variant="secondary" size="lg" onClick={onCancel}>
                         {cancelLabel}
-                    </button>
-                    <button
-                        onClick={onStay}
-                        className="px-4 py-2 rounded-md text-sm font-medium bg-muted/50 hover:bg-muted transition-colors"
-                    >
+                    </Button>
+                    <Button variant="ghost" size="lg" onClick={onStay}>
                         {stayLabel}
-                    </button>
-                    <button
-                        onClick={onQuit}
-                        className={cn(
-                            "px-4 py-2 rounded-md text-sm font-medium transition-colors",
-                            "bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                        )}
-                    >
+                    </Button>
+                    <Button variant="destructive" size="lg" onClick={onQuit}>
                         {quitLabel}
-                    </button>
+                    </Button>
                 </div>
             </div>
         </div>

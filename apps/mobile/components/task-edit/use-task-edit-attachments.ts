@@ -2,8 +2,11 @@ import React from 'react';
 import { Alert, Platform } from 'react-native';
 import type { Attachment, Task } from '@mindwtr/core';
 import {
+    DEFAULT_PROJECT_COLOR,
+    buildTaskUpdatesFromSpeechResult,
     generateUUID,
     normalizeLinkAttachmentInput,
+    useTaskStore,
     validateAttachmentForUpload,
 } from '@mindwtr/core';
 import * as DocumentPicker from 'expo-document-picker';
@@ -13,6 +16,9 @@ import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-au
 import { Paths } from 'expo-file-system';
 
 import { ensureAttachmentAvailable, persistAttachmentLocally } from '../../lib/attachment-sync';
+import { loadAIKey } from '../../lib/ai-config';
+import { ensureWhisperModelPathForConfig, processAudioCapture } from '../../lib/speech-to-text';
+import { normalizeAudioUri } from '../../lib/speech-to-text.helpers';
 import {
     isReleasedAudioPlayerError,
     isValidLinkUri,
@@ -39,6 +45,8 @@ export function useTaskEditAttachments({
     const [imagePreviewAttachment, setImagePreviewAttachment] = React.useState<Attachment | null>(null);
     const [audioAttachment, setAudioAttachment] = React.useState<Attachment | null>(null);
     const [audioLoading, setAudioLoading] = React.useState(false);
+    const [audioTranscribing, setAudioTranscribing] = React.useState(false);
+    const [audioTranscriptionError, setAudioTranscriptionError] = React.useState<string | null>(null);
     const [linkInput, setLinkInput] = React.useState('');
     const [linkInputTouched, setLinkInputTouched] = React.useState(false);
 
@@ -60,6 +68,10 @@ export function useTaskEditAttachments({
         if (error === 'file_too_large') return t('attachments.fileTooLarge');
         if (error === 'mime_type_blocked' || error === 'mime_type_not_allowed') return t('attachments.invalidFileType');
         return t('attachments.fileNotSupported');
+    }, [t]);
+    const resolveText = React.useCallback((key: string, fallback: string) => {
+        const translated = t(key);
+        return translated === key ? fallback : translated;
     }, [t]);
 
     const addFileAttachment = React.useCallback(async () => {
@@ -206,6 +218,7 @@ export function useTaskEditAttachments({
         audioStoppingRef.current = true;
         try {
             await Promise.resolve(audioPlayer.pause());
+            audioPlayer.replace(null);
         } catch (error) {
             if (!isReleasedAudioPlayerError(error)) {
                 logTaskWarn('Stop audio failed', error);
@@ -216,21 +229,11 @@ export function useTaskEditAttachments({
         }
     }, [audioPlayer]);
 
-    const normalizeAudioUri = React.useCallback((uri: string) => {
-        if (!uri) return '';
-        if (uri.startsWith('file://') || uri.startsWith('content://')) return uri;
-        if (uri.startsWith('file:/')) {
-            const stripped = uri.replace(/^file:\//, '/');
-            return `file://${stripped}`;
-        }
-        if (uri.startsWith('/')) return `file://${uri}`;
-        return uri;
-    }, []);
-
     const openAudioAttachment = React.useCallback(async (attachment: Attachment) => {
         setAudioAttachment(attachment);
         setAudioModalVisible(true);
         setAudioLoading(true);
+        setAudioTranscriptionError(null);
         try {
             await unloadAudio();
             await setAudioModeAsync({
@@ -279,12 +282,14 @@ export function useTaskEditAttachments({
         } finally {
             setAudioLoading(false);
         }
-    }, [audioPlayer, normalizeAudioUri, t, unloadAudio]);
+    }, [audioPlayer, t, unloadAudio]);
 
     const closeAudioModal = React.useCallback(() => {
         setAudioModalVisible(false);
         setAudioAttachment(null);
         setAudioLoading(false);
+        setAudioTranscribing(false);
+        setAudioTranscriptionError(null);
         void unloadAudio();
     }, [unloadAudio]);
 
@@ -314,6 +319,93 @@ export function useTaskEditAttachments({
             logTaskWarn('Toggle audio playback failed', error);
         }
     }, [audioPlayer, audioStatus]);
+
+    const retryAudioTranscription = React.useCallback(async () => {
+        const currentAttachment = audioAttachment;
+        const taskId = editedTask.id;
+        if (!currentAttachment || currentAttachment.kind !== 'file' || !currentAttachment.uri || !taskId || audioTranscribing) {
+            return;
+        }
+
+        setAudioTranscribing(true);
+        setAudioTranscriptionError(null);
+        try {
+            await unloadAudio();
+            const {
+                tasks: currentTasks,
+                projects: currentProjects,
+                addProject: addProjectNow,
+                updateTask: updateTaskNow,
+                settings: currentSettings,
+            } = useTaskStore.getState();
+            const existing = currentTasks.find((task) => task.id === taskId);
+            if (!existing) {
+                throw new Error(resolveText('attachments.transcriptionFailed', 'Transcription failed. Please try again.'));
+            }
+
+            const speech = currentSettings.ai?.speechToText;
+            if (!speech?.enabled) {
+                throw new Error(resolveText('attachments.transcriptionUnavailable', 'Speech-to-text is not ready. Check your AI settings and try again.'));
+            }
+
+            const provider = speech.provider ?? 'gemini';
+            const model = speech.model ?? (provider === 'openai' ? 'gpt-4o-transcribe' : provider === 'gemini' ? 'gemini-2.5-flash' : 'whisper-tiny');
+            const apiKey = provider === 'whisper' ? '' : await loadAIKey(provider).catch(() => '');
+            const modelPath = provider === 'whisper' ? speech.offlineModelPath : undefined;
+            const whisperResolved = provider === 'whisper'
+                ? ensureWhisperModelPathForConfig(model, modelPath)
+                : null;
+            const whisperModelReady = provider === 'whisper' ? Boolean(whisperResolved?.exists) : false;
+            const resolvedModelPath = provider === 'whisper'
+                ? (whisperResolved?.exists ? whisperResolved.path : modelPath)
+                : undefined;
+            const speechReady = provider === 'whisper' ? whisperModelReady : Boolean(apiKey);
+            if (!speechReady) {
+                throw new Error(resolveText('attachments.transcriptionUnavailable', 'Speech-to-text is not ready. Check your AI settings and try again.'));
+            }
+
+            const timeZone = typeof Intl === 'object' && typeof Intl.DateTimeFormat === 'function'
+                ? Intl.DateTimeFormat().resolvedOptions().timeZone
+                : undefined;
+            const result = await processAudioCapture(normalizeAudioUri(currentAttachment.uri), {
+                provider,
+                apiKey,
+                model,
+                modelPath: resolvedModelPath,
+                language: speech.language,
+                mode: speech.mode ?? 'smart_parse',
+                fieldStrategy: speech.fieldStrategy ?? 'smart',
+                parseModel: provider === 'openai' && currentSettings.ai?.provider === 'openai' ? currentSettings.ai?.model : undefined,
+                now: new Date(),
+                timeZone,
+            });
+
+            const { updates, suggestedProjectTitle } = buildTaskUpdatesFromSpeechResult(existing, result, currentSettings);
+            if (suggestedProjectTitle && !existing.projectId) {
+                const match = currentProjects.find((project) => project.title.toLowerCase() === suggestedProjectTitle.toLowerCase());
+                if (match) {
+                    updates.projectId = match.id;
+                } else {
+                    const created = await addProjectNow(suggestedProjectTitle, DEFAULT_PROJECT_COLOR);
+                    if (!created) {
+                        throw new Error(resolveText('attachments.transcriptionFailed', 'Transcription failed. Please try again.'));
+                    }
+                    updates.projectId = created.id;
+                }
+            }
+
+            if (Object.keys(updates).length > 0) {
+                await updateTaskNow(taskId, updates);
+                setEditedTask((prev) => ({ ...prev, ...updates }), false);
+            }
+            closeAudioModal();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            setAudioTranscriptionError(message || resolveText('attachments.transcriptionFailed', 'Transcription failed. Please try again.'));
+        } finally {
+            setAudioTranscribing(false);
+        }
+    }, [audioAttachment, audioTranscribing, closeAudioModal, editedTask.id, resolveText, setEditedTask, unloadAudio]);
 
     const updateAttachmentState = React.useCallback((nextAttachment: Attachment) => {
         setEditedTask((prev) => {
@@ -420,6 +512,8 @@ export function useTaskEditAttachments({
         attachments,
         audioAttachment,
         audioLoading,
+        audioTranscribing,
+        audioTranscriptionError,
         audioModalVisible,
         audioStatus,
         closeAudioModal,
@@ -434,6 +528,7 @@ export function useTaskEditAttachments({
         linkModalVisible,
         openAttachment,
         removeAttachment,
+        retryAudioTranscription,
         setAudioModalVisible,
         setImagePreviewAttachment,
         setLinkInput,

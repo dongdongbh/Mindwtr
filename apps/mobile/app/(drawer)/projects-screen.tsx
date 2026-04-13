@@ -2,26 +2,31 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Modal, Alert, Pressable, ScrollView, SectionList, Dimensions, Platform, Keyboard, ActionSheetIOS } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { AREA_PRESET_COLORS, Area, Attachment, DEFAULT_PROJECT_COLOR, generateUUID, getAttachmentDisplayTitle, normalizeLinkAttachmentInput, Project, safeParseDate, Task, useTaskStore, validateAttachmentForUpload } from '@mindwtr/core';
+import { Ionicons } from '@expo/vector-icons';
+import { AREA_PRESET_COLORS, Area, Attachment, DEFAULT_PROJECT_COLOR, generateUUID, getAttachmentDisplayTitle, normalizeLinkAttachmentInput, Project, resolveAutoTextDirection, safeParseDate, Task, type MarkdownSelection, type MarkdownToolbarActionId, type MarkdownToolbarResult, applyMarkdownToolbarAction, continueMarkdownOnTextChange, useTaskStore, validateAttachmentForUpload } from '@mindwtr/core';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Linking from 'expo-linking';
 import * as Sharing from 'expo-sharing';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import { projectsScreenStyles as styles } from '@/app/(drawer)/projects-screen.styles';
+import { projectsScreenStyles as styles } from '@/components/projects-screen/projects-screen.styles';
 import {
   formatProjectDate,
   normalizeProjectTag,
   resolveAttachmentValidationMessage,
-} from '@/app/(drawer)/projects-screen.utils';
+} from '@/components/projects-screen/projects-screen.utils';
 import { ProjectImagePreviewModal, ProjectLinkModal, ProjectTagPickerModal } from '@/components/projects-screen/ProjectOverlayModals';
 import { ProjectRow } from '@/components/projects-screen/ProjectRow';
 import { TaskEditModal } from '@/components/task-edit-modal';
 import { useProjectFiltering, type ProjectSectionItem } from '@/hooks/use-project-filtering';
+import { ExpandedMarkdownEditor } from '../../components/expanded-markdown-editor';
+import { KeyboardAccessoryHost } from '../../components/keyboard-accessory-host';
+import { MarkdownFormatToolbar } from '../../components/markdown-format-toolbar';
 import { TaskList } from '../../components/task-list';
 import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { useLanguage } from '../../contexts/language-context';
+import { useToast } from '../../contexts/toast-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { MarkdownText } from '../../components/markdown-text';
 import { ListSectionHeader, defaultListContentStyle } from '@/components/list-layout';
@@ -31,9 +36,14 @@ import { logError, logWarn } from '../../lib/app-log';
 import { AREA_FILTER_ALL, AREA_FILTER_NONE } from '@/lib/area-filter';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 
+const selectionsEqual = (left: MarkdownSelection, right: MarkdownSelection) => (
+  left.start === right.start && left.end === right.end
+);
+
 export default function ProjectsScreen() {
   const { projects, tasks, addProject, updateProject, deleteProject, toggleProjectFocus, addArea, updateArea, deleteArea, reorderAreas, updateTask, setHighlightTask } = useTaskStore();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const { showToast } = useToast();
   const tc = useThemeColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -47,6 +57,7 @@ export default function ProjectsScreen() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [notesExpanded, setNotesExpanded] = useState(false);
   const [showNotesPreview, setShowNotesPreview] = useState(false);
+  const [notesFullscreen, setNotesFullscreen] = useState(false);
   const [showProjectMeta, setShowProjectMeta] = useState(false);
   const [showDueDatePicker, setShowDueDatePicker] = useState(false);
   const [showReviewPicker, setShowReviewPicker] = useState(false);
@@ -62,6 +73,7 @@ export default function ProjectsScreen() {
   const [expandedAreaColorId, setExpandedAreaColorId] = useState<string | null>(null);
   const { projectId, taskId } = useLocalSearchParams<{ projectId?: string; taskId?: string }>();
   const lastOpenedTaskIdRef = useRef<string | null>(null);
+  const selectedProjectNotesRef = useRef('');
   const ALL_TAGS = '__all__';
   const NO_TAGS = '__none__';
   const ALL_AREAS = AREA_FILTER_ALL;
@@ -80,6 +92,13 @@ export default function ProjectsScreen() {
   }, []);
   const [showTagFilter, setShowTagFilter] = useState(false);
   const [tagDraft, setTagDraft] = useState('');
+  const selectedProjectNotesInputRef = useRef<TextInput | null>(null);
+  const selectedProjectNotesUndoRef = useRef<Array<{ value: string; selection: MarkdownSelection }>>([]);
+  const [selectedProjectNotesUndoDepth, setSelectedProjectNotesUndoDepth] = useState(0);
+  const [isSelectedProjectNotesFocused, setIsSelectedProjectNotesFocused] = useState(false);
+  const [selectedProjectNotesSelection, setSelectedProjectNotesSelection] = useState({ start: 0, end: 0 });
+  const selectedProjectNotesSelectionRef = useRef<MarkdownSelection>({ start: 0, end: 0 });
+  const pendingSelectedProjectNotesSelectionRef = useRef<MarkdownSelection | null>(null);
   const windowHeight = Dimensions.get('window').height;
   const pickerCardMaxHeight = Math.min(windowHeight * 0.8, 560);
   const areaListMaxHeight = Math.min(windowHeight * 0.4, 280);
@@ -117,6 +136,7 @@ export default function ProjectsScreen() {
     setSelectedProject(project);
     setNotesExpanded(false);
     setShowNotesPreview(false);
+    setNotesFullscreen(false);
     setShowProjectMeta(false);
     setShowDueDatePicker(false);
     setShowReviewPicker(false);
@@ -143,6 +163,17 @@ export default function ProjectsScreen() {
     setHighlightTask(task.id);
     setEditingTask(task);
   }, [taskId, projectId, selectedProject, tasks, setHighlightTask]);
+
+  useEffect(() => {
+    selectedProjectNotesRef.current = selectedProject?.supportNotes || '';
+    const selectionEnd = (selectedProject?.supportNotes || '').length;
+    selectedProjectNotesUndoRef.current = [];
+    setSelectedProjectNotesUndoDepth(0);
+    setIsSelectedProjectNotesFocused(false);
+    pendingSelectedProjectNotesSelectionRef.current = null;
+    selectedProjectNotesSelectionRef.current = { start: selectionEnd, end: selectionEnd };
+    setSelectedProjectNotesSelection({ start: selectionEnd, end: selectionEnd });
+  }, [selectedProject]);
 
   const sortAreasByName = () => {
     const reordered = [...sortedAreas]
@@ -193,6 +224,129 @@ export default function ProjectsScreen() {
     );
   };
 
+  const selectedProjectNotes = selectedProject?.supportNotes || '';
+  const selectedProjectNotesDirection = selectedProject
+    ? resolveAutoTextDirection(`${selectedProject.title ?? ''}\n${selectedProjectNotes}`.trim(), language)
+    : 'ltr';
+  const selectedProjectNotesTextDirectionStyle = {
+    writingDirection: selectedProjectNotesDirection,
+    textAlign: selectedProjectNotesDirection === 'rtl' ? 'right' : 'left',
+  } as const;
+  const pushSelectedProjectNotesUndoEntry = useCallback((value: string, selection: MarkdownSelection) => {
+    const previousEntry = selectedProjectNotesUndoRef.current[selectedProjectNotesUndoRef.current.length - 1];
+    if (
+      previousEntry
+      && previousEntry.value === value
+      && previousEntry.selection.start === selection.start
+      && previousEntry.selection.end === selection.end
+    ) {
+      return;
+    }
+    const nextUndoEntries = [...selectedProjectNotesUndoRef.current, { value, selection }];
+    selectedProjectNotesUndoRef.current = nextUndoEntries.length > 100
+      ? nextUndoEntries.slice(nextUndoEntries.length - 100)
+      : nextUndoEntries;
+    setSelectedProjectNotesUndoDepth(selectedProjectNotesUndoRef.current.length);
+  }, []);
+  const applySelectedProjectNotesValue = useCallback((
+    text: string,
+    options?: {
+      nextSelection?: MarkdownSelection;
+      recordUndo?: boolean;
+      baseSelection?: MarkdownSelection;
+    },
+  ) => {
+    if (!selectedProject) return;
+    if ((options?.recordUndo ?? true) && text !== selectedProjectNotes) {
+      pushSelectedProjectNotesUndoEntry(selectedProjectNotes, options?.baseSelection ?? selectedProjectNotesSelectionRef.current);
+    }
+    selectedProjectNotesRef.current = text;
+    setSelectedProject({ ...selectedProject, supportNotes: text });
+    if (options?.nextSelection) {
+      selectedProjectNotesSelectionRef.current = options.nextSelection;
+      setSelectedProjectNotesSelection(options.nextSelection);
+    }
+  }, [pushSelectedProjectNotesUndoEntry, selectedProject, selectedProjectNotes]);
+  const restoreSelectedProjectNotesSelection = useCallback((selection: MarkdownSelection) => {
+    pendingSelectedProjectNotesSelectionRef.current = selection;
+    const applySelection = () => {
+      selectedProjectNotesInputRef.current?.setNativeProps?.({ selection });
+    };
+    requestAnimationFrame(applySelection);
+    setTimeout(() => {
+      applySelection();
+      if (
+        pendingSelectedProjectNotesSelectionRef.current
+        && selectionsEqual(pendingSelectedProjectNotesSelectionRef.current, selection)
+      ) {
+        pendingSelectedProjectNotesSelectionRef.current = null;
+      }
+    }, 40);
+  }, []);
+  const handleSelectedProjectNotesChange = useCallback((text: string) => {
+    const continued = continueMarkdownOnTextChange(
+      selectedProjectNotesRef.current,
+      text,
+      selectedProjectNotesSelectionRef.current,
+    );
+    if (continued) {
+      applySelectedProjectNotesValue(continued.value, {
+        baseSelection: selectedProjectNotesSelectionRef.current,
+        nextSelection: continued.selection,
+      });
+      restoreSelectedProjectNotesSelection(continued.selection);
+      return;
+    }
+    applySelectedProjectNotesValue(text);
+  }, [applySelectedProjectNotesValue, restoreSelectedProjectNotesSelection]);
+  useEffect(() => {
+    selectedProjectNotesSelectionRef.current = selectedProjectNotesSelection;
+  }, [selectedProjectNotesSelection]);
+  const handleSelectedProjectNotesSelectionChange = useCallback((selection: MarkdownSelection) => {
+    const pendingSelection = pendingSelectedProjectNotesSelectionRef.current;
+    if (pendingSelection) {
+      if (!selectionsEqual(pendingSelection, selection)) {
+        return;
+      }
+      pendingSelectedProjectNotesSelectionRef.current = null;
+    }
+    selectedProjectNotesSelectionRef.current = selection;
+    setSelectedProjectNotesSelection(selection);
+  }, []);
+  useEffect(() => {
+    setSelectedProjectNotesSelection((prev) => {
+      const nextStart = Math.min(prev.start, selectedProjectNotes.length);
+      const nextEnd = Math.min(prev.end, selectedProjectNotes.length);
+      if (nextStart === prev.start && nextEnd === prev.end) {
+        return prev;
+      }
+      return { start: nextStart, end: nextEnd };
+    });
+  }, [selectedProjectNotes.length]);
+  const handleSelectedProjectNotesUndo = useCallback(() => {
+    const previousEntry = selectedProjectNotesUndoRef.current[selectedProjectNotesUndoRef.current.length - 1];
+    if (!previousEntry) return undefined;
+    selectedProjectNotesUndoRef.current = selectedProjectNotesUndoRef.current.slice(0, -1);
+    setSelectedProjectNotesUndoDepth(selectedProjectNotesUndoRef.current.length);
+    applySelectedProjectNotesValue(previousEntry.value, {
+      nextSelection: previousEntry.selection,
+      recordUndo: false,
+    });
+    return previousEntry.selection;
+  }, [applySelectedProjectNotesValue]);
+  const handleSelectedProjectNotesApplyAction = useCallback((actionId: MarkdownToolbarActionId, selection: MarkdownSelection): MarkdownToolbarResult => {
+    const next = applyMarkdownToolbarAction(selectedProjectNotesRef.current, selection, actionId);
+    applySelectedProjectNotesValue(next.value, {
+      baseSelection: selection,
+      nextSelection: next.selection,
+    });
+    return next;
+  }, [applySelectedProjectNotesValue, selectedProjectNotesRef]);
+  const commitSelectedProjectNotes = () => {
+    if (!selectedProject) return;
+    updateProject(selectedProject.id, { supportNotes: selectedProjectNotesRef.current });
+  };
+
 
   const handleAddProject = () => {
     if (newProjectTitle.trim()) {
@@ -234,6 +388,7 @@ export default function ProjectsScreen() {
     setSelectedProject(null);
     setNotesExpanded(false);
     setShowNotesPreview(false);
+    setNotesFullscreen(false);
     setShowProjectMeta(false);
     setShowReviewPicker(false);
     setShowStatusMenu(false);
@@ -428,7 +583,11 @@ export default function ProjectsScreen() {
             }
             if (manageIndex === 2) {
               if (sortedAreas.length === 0) {
-                Alert.alert(t('common.notice') || 'Notice', t('projects.noArea'));
+                showToast({
+                  title: t('common.notice') || 'Notice',
+                  message: t('projects.noArea'),
+                  tone: 'warning',
+                });
                 return;
               }
               ActionSheetIOS.showActionSheetWithOptions(
@@ -456,7 +615,11 @@ export default function ProjectsScreen() {
             }
             const deletableAreas = sortedAreas.filter((area) => (areaUsage.get(area.id) || 0) === 0);
             if (deletableAreas.length === 0) {
-              Alert.alert(t('common.notice') || 'Notice', t('projects.areaInUse') || 'Area has projects.');
+              showToast({
+                title: t('common.notice') || 'Notice',
+                message: t('projects.areaInUse') || 'Area has projects.',
+                tone: 'warning',
+              });
               return;
             }
             ActionSheetIOS.showActionSheetWithOptions(
@@ -901,12 +1064,13 @@ export default function ProjectsScreen() {
         allowSwipeDismissal
         onRequestClose={closeProjectDetail}
       >
-                <SafeAreaView
-                  style={{ flex: 1, backgroundColor: tc.bg }}
-                  edges={['left', 'right', 'bottom']}
-                >
-                  {selectedProject ? (
-                    <>
+                <KeyboardAccessoryHost>
+                  <SafeAreaView
+                    style={{ flex: 1, backgroundColor: tc.bg }}
+                    edges={['left', 'right', 'bottom']}
+                  >
+                    {selectedProject ? (
+                      <>
                 <View style={modalHeaderStyle}>
                   <TouchableOpacity onPress={closeProjectDetail} style={styles.backButton} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                     <Text style={[styles.backButtonText, { color: tc.tint }]}>{t('common.back') || 'Back'}</Text>
@@ -1072,7 +1236,7 @@ export default function ProjectsScreen() {
                     <View style={[styles.notesContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                       <View style={styles.notesHeaderRow}>
                         <TouchableOpacity
-                          style={styles.notesHeader}
+                          style={[styles.notesHeader, { flex: 1 }]}
                           onPress={() => {
                             setNotesExpanded(!notesExpanded);
                             if (notesExpanded) setShowNotesPreview(false);
@@ -1083,31 +1247,65 @@ export default function ProjectsScreen() {
                           </Text>
                         </TouchableOpacity>
                         {notesExpanded && (
-                          <TouchableOpacity
-                            onPress={() => setShowNotesPreview((v) => !v)}
-                            style={[styles.smallButton, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
-                          >
-                            <Text style={[styles.smallButtonText, { color: tc.tint }]}>
-                              {showNotesPreview ? t('markdown.edit') : t('markdown.preview')}
-                            </Text>
-                          </TouchableOpacity>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <TouchableOpacity
+                              onPress={() => setShowNotesPreview((v) => !v)}
+                              style={[styles.smallButton, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
+                            >
+                              <Text style={[styles.smallButtonText, { color: tc.tint }]}>
+                                {showNotesPreview ? t('markdown.edit') : t('markdown.preview')}
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => setNotesFullscreen(true)}
+                              accessibilityRole="button"
+                              accessibilityLabel={t('markdown.expand')}
+                              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            >
+                              <Ionicons name="expand-outline" size={20} color={tc.tint} />
+                            </TouchableOpacity>
+                          </View>
                         )}
                       </View>
                       {notesExpanded && (
                         showNotesPreview ? (
                           <View style={[styles.markdownPreview, { borderColor: tc.border, backgroundColor: tc.filterBg }]}>
-                            <MarkdownText markdown={selectedProject.supportNotes || ''} tc={tc} />
+                            <MarkdownText markdown={selectedProjectNotes} tc={tc} direction={selectedProjectNotesDirection} />
                           </View>
                         ) : (
-                          <TextInput
-                            style={[styles.notesInput, { color: tc.text, backgroundColor: tc.inputBg, borderColor: tc.border }]}
-                            multiline
-                            placeholder={t('projects.notesPlaceholder')}
-                            placeholderTextColor={tc.secondaryText}
-                            value={selectedProject.supportNotes || ''}
-                            onChangeText={(text) => setSelectedProject({ ...selectedProject, supportNotes: text })}
-                            onEndEditing={() => updateProject(selectedProject.id, { supportNotes: selectedProject.supportNotes })}
-                          />
+                          <>
+                            <MarkdownFormatToolbar
+                              selection={selectedProjectNotesSelection}
+                              onSelectionChange={handleSelectedProjectNotesSelectionChange}
+                              inputRef={selectedProjectNotesInputRef}
+                              t={t}
+                              tc={tc}
+                              visible={isSelectedProjectNotesFocused}
+                              canUndo={selectedProjectNotesUndoDepth > 0}
+                              onUndo={handleSelectedProjectNotesUndo}
+                              onApplyAction={handleSelectedProjectNotesApplyAction}
+                            />
+                            <TextInput
+                              ref={selectedProjectNotesInputRef}
+                              style={[
+                                styles.notesInput,
+                                selectedProjectNotesTextDirectionStyle,
+                                { color: tc.text, backgroundColor: tc.inputBg, borderColor: tc.border },
+                              ]}
+                              multiline
+                              placeholder={t('projects.notesPlaceholder')}
+                              placeholderTextColor={tc.secondaryText}
+                              value={selectedProjectNotes}
+                              onFocus={() => setIsSelectedProjectNotesFocused(true)}
+                              onBlur={() => setIsSelectedProjectNotesFocused(false)}
+                              onChangeText={handleSelectedProjectNotesChange}
+                              onSelectionChange={(event) => {
+                                handleSelectedProjectNotesSelectionChange(event.nativeEvent.selection);
+                              }}
+                              selection={selectedProjectNotesSelection}
+                              onEndEditing={commitSelectedProjectNotes}
+                            />
+                          </>
                         )
                       )}
                     </View>
@@ -1282,9 +1480,28 @@ export default function ProjectsScreen() {
                   showSort={false}
                 />
                 </ScrollView>
-                </>
-                  ) : null}
-                </SafeAreaView>
+                <ExpandedMarkdownEditor
+                  isOpen={notesFullscreen}
+                  onClose={() => setNotesFullscreen(false)}
+                  value={selectedProjectNotes}
+                  onChange={handleSelectedProjectNotesChange}
+                  onCommit={commitSelectedProjectNotes}
+                  title={t('project.notes')}
+                  headerTitle={selectedProject.title || t('project.notes')}
+                  placeholder={t('projects.notesPlaceholder')}
+                  t={t}
+                  initialMode="edit"
+                  direction={selectedProjectNotesDirection}
+                  selection={selectedProjectNotesSelection}
+                  onSelectionChange={handleSelectedProjectNotesSelectionChange}
+                  canUndo={selectedProjectNotesUndoDepth > 0}
+                  onUndo={handleSelectedProjectNotesUndo}
+                  onApplyAction={handleSelectedProjectNotesApplyAction}
+                />
+                      </>
+                    ) : null}
+                  </SafeAreaView>
+                </KeyboardAccessoryHost>
       </Modal>
 
       <TaskEditModal
@@ -1434,7 +1651,11 @@ export default function ProjectsScreen() {
                               disabled={inUse}
                               onPress={() => {
                                 if (inUse) {
-                                  Alert.alert(t('common.notice') || 'Notice', t('projects.areaInUse') || 'Area has projects.');
+                                  showToast({
+                                    title: t('common.notice') || 'Notice',
+                                    message: t('projects.areaInUse') || 'Area has projects.',
+                                    tone: 'warning',
+                                  });
                                   return;
                                 }
                                 deleteArea(area.id);

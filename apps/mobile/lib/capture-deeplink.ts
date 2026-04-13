@@ -17,18 +17,21 @@ const normalizeRouteFromUrl = (url: URL): string => {
     return route.toLowerCase();
 };
 
-export function parseShortcutCaptureUrl(rawUrl: string): ShortcutCapturePayload | null {
-    if (typeof rawUrl !== 'string' || !rawUrl.trim()) return null;
+export function isShortcutCaptureUrl(rawUrl: string): boolean {
+    if (typeof rawUrl !== 'string' || !rawUrl.trim()) return false;
 
-    let parsed: URL;
     try {
-        parsed = new URL(rawUrl);
+        const parsed = new URL(rawUrl);
+        return (parsed.protocol || '').toLowerCase() === 'mindwtr:' && normalizeRouteFromUrl(parsed) === 'capture';
     } catch {
-        return null;
+        return false;
     }
+}
 
-    if ((parsed.protocol || '').toLowerCase() !== 'mindwtr:') return null;
-    if (normalizeRouteFromUrl(parsed) !== 'capture') return null;
+export function parseShortcutCaptureUrl(rawUrl: string): ShortcutCapturePayload | null {
+    if (!isShortcutCaptureUrl(rawUrl)) return null;
+
+    const parsed = new URL(rawUrl);
 
     const title = trimOrUndefined(parsed.searchParams.get('title')) ?? trimOrUndefined(parsed.searchParams.get('text'));
     if (!title) return null;

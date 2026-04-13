@@ -144,15 +144,13 @@ export async function uploadDropboxFile(
     accessToken: string,
     path: string,
     content: ArrayBuffer | Uint8Array,
-    contentType = 'application/octet-stream',
+    _contentType = 'application/octet-stream',
     fetcher: typeof fetch = fetch
 ): Promise<{ rev: string | null }> {
     const sourceBytes = content instanceof Uint8Array ? content : new Uint8Array(content);
     const bytes = new Uint8Array(sourceBytes.length);
     bytes.set(sourceBytes);
-    const requestBody: BodyInit = new Blob([bytes], {
-        type: contentType || 'application/octet-stream',
-    });
+    const requestBody = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
     const response = await fetcher(UPLOAD_ENDPOINT, {
         method: 'POST',
         headers: {
@@ -163,7 +161,7 @@ export async function uploadDropboxFile(
                 mute: true,
                 strict_conflict: false,
             }),
-            'Content-Type': contentType,
+            'Content-Type': 'application/octet-stream',
         },
         body: requestBody,
     });

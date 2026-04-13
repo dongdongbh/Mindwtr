@@ -7,8 +7,10 @@ import type { DerivedState, SaveBaseState } from './store-types';
 
 type EntityWithId = { id: string };
 
-const projectOrderCache = new WeakMap<Task[], Map<string, number>>();
-const reservedProjectOrders = new WeakMap<Task[], Map<string, number>>();
+let projectOrderCacheRef: Task[] | null = null;
+let projectOrderCacheValue: Map<string, number> | null = null;
+let reservedProjectOrdersRef: Task[] | null = null;
+let reservedProjectOrdersValue: Map<string, number> | null = null;
 
 export const normalizeRevision = (value?: number): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
 
@@ -298,8 +300,9 @@ export const getTaskOrder = (task: Pick<Task, 'order' | 'orderNum'>): number | u
 };
 
 const getProjectOrderIndex = (tasks: Task[]): Map<string, number> => {
-    const cached = projectOrderCache.get(tasks);
-    if (cached) return cached;
+    if (projectOrderCacheRef === tasks && projectOrderCacheValue) {
+        return projectOrderCacheValue;
+    }
     const nextCache = new Map<string, number>();
     for (const task of tasks) {
         if (task.deletedAt || !task.projectId) continue;
@@ -309,7 +312,12 @@ const getProjectOrderIndex = (tasks: Task[]): Map<string, number> => {
             nextCache.set(task.projectId, order);
         }
     }
-    projectOrderCache.set(tasks, nextCache);
+    projectOrderCacheRef = tasks;
+    projectOrderCacheValue = nextCache;
+    if (reservedProjectOrdersRef !== tasks) {
+        reservedProjectOrdersRef = tasks;
+        reservedProjectOrdersValue = null;
+    }
     return nextCache;
 };
 
@@ -326,8 +334,11 @@ export const reserveNextProjectOrder = (
     tasks: Task[]
 ): number | undefined => {
     if (!projectId) return undefined;
-    const snapshotReservations = reservedProjectOrders.get(tasks) ?? new Map<string, number>();
-    reservedProjectOrders.set(tasks, snapshotReservations);
+    if (reservedProjectOrdersRef !== tasks || !reservedProjectOrdersValue) {
+        reservedProjectOrdersRef = tasks;
+        reservedProjectOrdersValue = new Map<string, number>();
+    }
+    const snapshotReservations = reservedProjectOrdersValue;
     const reserved = snapshotReservations.get(projectId);
     if (typeof reserved === 'number') {
         snapshotReservations.set(projectId, reserved + 1);

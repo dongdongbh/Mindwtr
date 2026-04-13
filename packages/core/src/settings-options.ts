@@ -8,6 +8,7 @@ type WeekStartValue = NonNullable<AppData['settings']['weekStart']>;
 type TimeFormatValue = NonNullable<AppData['settings']['timeFormat']>;
 type KeybindingStyleValue = NonNullable<AppData['settings']['keybindingStyle']>;
 type DensityValue = NonNullable<NonNullable<AppData['settings']['appearance']>['density']>;
+type TextSizeValue = NonNullable<NonNullable<AppData['settings']['appearance']>['textSize']>;
 type SpeechToTextSettings = NonNullable<NonNullable<AppData['settings']['ai']>['speechToText']>;
 type SpeechToTextProviderValue = NonNullable<SpeechToTextSettings['provider']>;
 type SpeechToTextModeValue = NonNullable<SpeechToTextSettings['mode']>;
@@ -44,6 +45,12 @@ const KEYBINDING_STYLE_VALUE_FLAGS: Record<KeybindingStyleValue, true> = {
 const DENSITY_VALUE_FLAGS: Record<DensityValue, true> = {
     comfortable: true,
     compact: true,
+};
+
+const TEXT_SIZE_VALUE_FLAGS: Record<TextSizeValue, true> = {
+    default: true,
+    large: true,
+    'extra-large': true,
 };
 
 const AI_PROVIDER_VALUE_FLAGS: Record<AIProviderId, true> = {
@@ -92,6 +99,9 @@ export const SETTINGS_KEYBINDING_STYLE_VALUE_SET = new Set<KeybindingStyleValue>
 
 export const SETTINGS_DENSITY_VALUES = Object.keys(DENSITY_VALUE_FLAGS) as DensityValue[];
 export const SETTINGS_DENSITY_VALUE_SET = new Set<DensityValue>(SETTINGS_DENSITY_VALUES);
+
+export const SETTINGS_TEXT_SIZE_VALUES = Object.keys(TEXT_SIZE_VALUE_FLAGS) as TextSizeValue[];
+export const SETTINGS_TEXT_SIZE_VALUE_SET = new Set<TextSizeValue>(SETTINGS_TEXT_SIZE_VALUES);
 
 export const AI_PROVIDER_VALUES = Object.keys(AI_PROVIDER_VALUE_FLAGS) as AIProviderId[];
 export const AI_PROVIDER_VALUE_SET = new Set<AIProviderId>(AI_PROVIDER_VALUES);

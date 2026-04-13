@@ -1,6 +1,6 @@
 import { BaseDirectory, mkdir, remove, writeTextFile } from '@tauri-apps/plugin-fs';
 import { dataDir, join } from '@tauri-apps/api/path';
-import { useTaskStore } from '@mindwtr/core';
+import { getBreadcrumbs, sanitizeForLog, sanitizeLogContext, sanitizeUrl, useTaskStore } from '@mindwtr/core';
 import { isTauriRuntime } from './runtime';
 
 const LOG_DIR = 'mindwtr/logs';
@@ -22,85 +22,8 @@ type AppendLogOptions = {
     force?: boolean;
 };
 
-const SENSITIVE_KEYS = [
-    'token',
-    'access_token',
-    'password',
-    'pass',
-    'apikey',
-    'api_key',
-    'key',
-    'secret',
-    'auth',
-    'authorization',
-    'username',
-    'user',
-    'session',
-    'cookie',
-];
-
-const AI_KEY_PATTERNS = [
-    /sk-[A-Za-z0-9]{10,}/g,
-    /sk-ant-[A-Za-z0-9]{10,}/g,
-    /rk-[A-Za-z0-9]{10,}/g,
-    /AIza[0-9A-Za-z\-_]{10,}/g,
-];
-
-const ICS_URL_PATTERN = new RegExp('\\b(?:https?|webcal|webcals)://[^\\s\'")]+', 'gi');
-
-function redactSensitiveText(value: string): string {
-    let result = value;
-    result = result.replace(/(Authorization:\s*)(Basic|Bearer)\s+[A-Za-z0-9+/=._-]+/gi, '$1$2 [redacted]');
-    result = result.replace(
-        /(password|pass|token|access_token|api_key|apikey|authorization|username|user|secret|session|cookie)=([^\s&]+)/gi,
-        '$1=[redacted]'
-    );
-    for (const pattern of AI_KEY_PATTERNS) {
-        result = result.replace(pattern, '[redacted]');
-    }
-    result = result.replace(ICS_URL_PATTERN, (match) => sanitizeUrl(match) ?? match);
-    return result;
-}
-
 export function sanitizeLogMessage(value: string): string {
-    return redactSensitiveText(value);
-}
-
-function sanitizeContext(context?: Record<string, string>): Record<string, string> | undefined {
-    if (!context) return undefined;
-    const sanitized: Record<string, string> = {};
-    for (const [key, value] of Object.entries(context)) {
-        const keyLower = key.toLowerCase();
-        if (SENSITIVE_KEYS.some((s) => keyLower.includes(s))) {
-            sanitized[key] = '[redacted]';
-        } else {
-            sanitized[key] = redactSensitiveText(String(value));
-        }
-    }
-    return sanitized;
-}
-
-function sanitizeUrl(raw?: string): string | undefined {
-    if (!raw) return undefined;
-    try {
-        const parsed = new URL(raw);
-        const scheme = parsed.protocol.replace(':', '').toLowerCase();
-        if (scheme === 'webcal' || scheme === 'webcals' || parsed.pathname.toLowerCase().includes('.ics')) {
-            return '[redacted-ics-url]';
-        }
-        parsed.username = '';
-        parsed.password = '';
-        const params = parsed.searchParams;
-        for (const key of params.keys()) {
-            const keyLower = key.toLowerCase();
-            if (SENSITIVE_KEYS.some((s) => keyLower.includes(s))) {
-                params.set(key, 'redacted');
-            }
-        }
-        return parsed.toString();
-    } catch {
-        return raw;
-    }
+    return sanitizeForLog(value);
 }
 
 async function ensureLogDir(): Promise<void> {
@@ -166,13 +89,16 @@ export async function clearLog(): Promise<void> {
 
 export async function logError(
     error: unknown,
-    context: { scope: string; step?: string; url?: string; extra?: Record<string, string> }
+    context: { scope: string; step?: string; url?: string; extra?: Record<string, unknown>; force?: boolean; message?: string }
 ): Promise<string | null> {
-    if (!isLoggingEnabled()) return null;
-    const rawMessage = error instanceof Error ? error.message : String(error);
+    const rawMessage = context.message ?? (error instanceof Error ? error.message : String(error));
     const rawStack = error instanceof Error ? error.stack : undefined;
-    const message = redactSensitiveText(rawMessage);
-    const stack = rawStack ? redactSensitiveText(rawStack) : undefined;
+    const message = sanitizeForLog(rawMessage);
+    const stack = rawStack ? sanitizeForLog(rawStack) : undefined;
+    const extra = {
+        ...(context.extra ?? {}),
+        ...(getBreadcrumbs().length > 0 ? { breadcrumbs: getBreadcrumbs().join(';') } : {}),
+    };
 
     return appendLogLine({
         ts: new Date().toISOString(),
@@ -182,38 +108,36 @@ export async function logError(
         step: context.step,
         url: sanitizeUrl(context.url),
         stack,
-        context: sanitizeContext(context.extra),
-    });
+        context: sanitizeLogContext(extra),
+    }, { force: context.force });
 }
 
 export async function logInfo(
     message: string,
-    context?: { scope?: string; extra?: Record<string, string> }
+    context?: { scope?: string; extra?: Record<string, unknown>; force?: boolean }
 ): Promise<string | null> {
-    if (!isLoggingEnabled()) return null;
-    const safeMessage = redactSensitiveText(message);
+    const safeMessage = sanitizeForLog(message);
     return appendLogLine({
         ts: new Date().toISOString(),
         level: 'info',
         scope: context?.scope ?? 'info',
         message: safeMessage,
-        context: sanitizeContext(context?.extra),
-    });
+        context: sanitizeLogContext(context?.extra),
+    }, { force: context?.force });
 }
 
 export async function logWarn(
     message: string,
-    context?: { scope?: string; extra?: Record<string, string> }
+    context?: { scope?: string; extra?: Record<string, unknown>; force?: boolean }
 ): Promise<string | null> {
-    if (!isLoggingEnabled()) return null;
-    const safeMessage = redactSensitiveText(message);
+    const safeMessage = sanitizeForLog(message);
     return appendLogLine({
         ts: new Date().toISOString(),
         level: 'warn',
         scope: context?.scope ?? 'warn',
         message: safeMessage,
-        context: sanitizeContext(context?.extra),
-    });
+        context: sanitizeLogContext(context?.extra),
+    }, { force: context?.force });
 }
 
 export async function logSyncError(

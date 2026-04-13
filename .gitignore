@@ -86,6 +86,11 @@ aur/src/
 # Agent files
 AGENTS.md
 .codex/
+.agents/
+.claude/
+.gemini/
+.kiro/
+skills-lock.json
 
 # CI artifacts
 scripts/ci/__pycache__/

@@ -38,16 +38,22 @@ let pendingSaves: PendingSave[] = [];
 let pendingVersion = 0;
 let savedVersion = 0;
 let saveInFlight: Promise<void> | null = null;
+let errorAutoClearTimer: ReturnType<typeof setTimeout> | null = null;
 const MAX_PENDING_SAVES = 100;
 const MAX_SAVE_RETRY_ATTEMPTS = 5;
 const INITIAL_SAVE_RETRY_DELAY_MS = 250;
 const MAX_SAVE_RETRY_DELAY_MS = 4000;
+const ERROR_AUTO_CLEAR_MS = 10_000;
+const SAVE_QUEUE_OVERFLOW_ERROR_PREFIX = 'Save queue overflow:';
 const hasPendingSaveWork = (): boolean => pendingSaves.length > 0 || saveInFlight !== null;
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const getSaveRetryDelayMs = (attempt: number): number => {
     const cappedAttempt = Math.max(0, attempt - 1);
     return Math.min(MAX_SAVE_RETRY_DELAY_MS, INITIAL_SAVE_RETRY_DELAY_MS * (2 ** cappedAttempt));
 };
+const isPersistentStoreError = (error: string | null | undefined): boolean => (
+    typeof error === 'string' && error.startsWith(SAVE_QUEUE_OVERFLOW_ERROR_PREFIX)
+);
 const getSaveQueueOverflowMessage = ({
     droppedCount,
     droppedFromVersion,
@@ -91,6 +97,11 @@ const enforcePendingSaveCap = () => {
             keptToVersion: keptLastVersion,
         },
     });
+    try {
+        useTaskStore.getState().setError(message);
+    } catch {
+        // Ignore if the store is not initialized yet.
+    }
     const callbacks = dropped
         .flatMap((item) => item.onErrorCallbacks)
         .filter((callback): callback is (msg: string) => void => typeof callback === 'function');
@@ -134,6 +145,25 @@ const toSaveErrorMessage = (error: unknown): string => {
     return trimmed.toLowerCase().startsWith('failed to save data')
         ? trimmed
         : `Failed to save data: ${trimmed}`;
+};
+
+const scheduleErrorAutoClear = (error: string | null) => {
+    if (errorAutoClearTimer) {
+        clearTimeout(errorAutoClearTimer);
+        errorAutoClearTimer = null;
+    }
+    if (!error || isPersistentStoreError(error)) return;
+    errorAutoClearTimer = setTimeout(() => {
+        errorAutoClearTimer = null;
+        try {
+            const state = useTaskStore.getState();
+            if (state.error === error) {
+                state.setError(null);
+            }
+        } catch {
+            // Ignore if the store is not initialized yet.
+        }
+    }, ERROR_AUTO_CLEAR_MS);
 };
 
 /**
@@ -275,43 +305,65 @@ export const flushPendingSave = async (): Promise<void> => {
     }
 };
 
-export const useTaskStore = createWithEqualityFn<TaskStore>()((set, get) => ({
-    tasks: [],
-    projects: [],
-    sections: [],
-    areas: [],
-    settings: {},
-    isLoading: false,
-    error: null,
-    editLockCount: 0,
-    lastDataChangeAt: 0,
-    highlightTaskId: null,
-    highlightTaskAt: null,
-    // Internal: full data including tombstones
-    _allTasks: [],
-    _allProjects: [],
-    _allSections: [],
-    _allAreas: [],
-    setError: (error: string | null) => set({ error }),
-    lockEditing: () => set((state) => ({ editLockCount: state.editLockCount + 1 })),
-    unlockEditing: () => set((state) => ({ editLockCount: Math.max(0, state.editLockCount - 1) })),
-    ...createSettingsActions({
-        set,
-        get,
-        debouncedSave,
-        flushPendingSave,
-        hasPendingSaveWork,
-        getStorage: () => storage,
-    }),
-    ...createTaskActions({
-        set,
-        get,
-        debouncedSave,
-        getStorage: () => storage,
-    }),
-    ...createProjectActions({
-        set,
-        get,
-        debouncedSave,
-    }),
-}));
+export const useTaskStore = createWithEqualityFn<TaskStore>()((rawSet, get) => {
+    const set: typeof rawSet = (partial) => rawSet((state) => {
+        let nextState = typeof partial === 'function' ? partial(state) : partial;
+        if (
+            nextState &&
+            nextState !== state &&
+            typeof nextState === 'object' &&
+            Object.prototype.hasOwnProperty.call(nextState, 'error')
+        ) {
+            const currentError = state.error;
+            const nextError = (nextState as Partial<TaskStore>).error ?? null;
+            if (isPersistentStoreError(currentError) && nextError && !isPersistentStoreError(nextError)) {
+                const { error: _ignored, ...rest } = nextState as Partial<TaskStore>;
+                nextState = rest as Partial<TaskStore>;
+            } else {
+                scheduleErrorAutoClear(nextError);
+            }
+        }
+        return nextState as Partial<TaskStore> | TaskStore;
+    });
+
+    return {
+        tasks: [],
+        projects: [],
+        sections: [],
+        areas: [],
+        settings: {},
+        isLoading: false,
+        error: null,
+        editLockCount: 0,
+        lastDataChangeAt: 0,
+        highlightTaskId: null,
+        highlightTaskAt: null,
+        // Internal: full data including tombstones
+        _allTasks: [],
+        _allProjects: [],
+        _allSections: [],
+        _allAreas: [],
+        setError: (error: string | null) => set({ error }),
+        lockEditing: () => set((state) => ({ editLockCount: state.editLockCount + 1 })),
+        unlockEditing: () => set((state) => ({ editLockCount: Math.max(0, state.editLockCount - 1) })),
+        ...createSettingsActions({
+            set,
+            get,
+            debouncedSave,
+            flushPendingSave,
+            hasPendingSaveWork,
+            getStorage: () => storage,
+        }),
+        ...createTaskActions({
+            set,
+            get,
+            debouncedSave,
+            getStorage: () => storage,
+        }),
+        ...createProjectActions({
+            set,
+            get,
+            debouncedSave,
+        }),
+    };
+});

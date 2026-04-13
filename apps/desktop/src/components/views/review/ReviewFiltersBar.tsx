@@ -22,23 +22,31 @@ export function ReviewFiltersBar({
         count: number,
     ) => {
         const isActive = filterStatus === status;
+        const activeFilterStyle = isActive
+            ? {
+                backgroundColor: 'hsl(var(--primary))',
+                borderColor: 'hsl(var(--primary))',
+                color: 'hsl(var(--primary-foreground))',
+            }
+            : undefined;
 
         return (
             <button
                 key={status}
                 onClick={() => onSelect(status)}
                 aria-label={`${label} (${count})`}
+                style={activeFilterStyle}
                 className={cn(
                     "inline-flex items-center gap-1 px-3 py-1.5 text-sm rounded-full border transition-colors whitespace-nowrap shrink-0",
                     isActive
-                        ? "bg-primary text-primary-foreground border-primary"
+                        ? "bg-primary border-primary"
                         : "bg-muted/50 text-muted-foreground border-border hover:bg-muted hover:text-foreground"
                 )}
             >
                 <span>{label}</span>
                 <span className={cn(
                     "tabular-nums",
-                    isActive ? "text-primary-foreground" : "text-muted-foreground"
+                    !isActive && "text-muted-foreground"
                 )}>
                     ({count})
                 </span>

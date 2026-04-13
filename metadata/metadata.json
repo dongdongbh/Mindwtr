@@ -30,7 +30,7 @@
           "完全离线可用，无需互联网连接",
           "完全开源，安全透明"
         ],
-        "ReleaseNotes": "• 新增项目可选截止日期，让项目规划与复查时间更清晰。\n• 项目侧边栏现在支持单击切换、分离归档项目，并改进日历与复查计数对比度。\n• 新增可配置的行内任务编辑分区，并默认折叠 Obsidian 集成设置。\n• 桌面端同步与存储更稳健，带来更安全的文件写入、更清晰的 keyring 回退提示，以及更一致的搜索与可见性行为。",
+        "ReleaseNotes": "• 桌面端快速收集现已支持“明天”等自然语言日期解析。\n• 桌面同步现在会保留排队中的重试、恢复 Dropbox 自动同步，并在刷新时更稳定地保留滚动位置。\n• 确认对话框以及项目拖拽、日历和同步错误都会更清晰地显示出来，不再被重渲染吞掉。\n• 自托管云端错误更清晰，危险上传会被更安全地拦截，500 错误也会附带请求 ID。",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -82,7 +82,7 @@
           "No internet connection required to function",
           "Open source and transparent"
         ],
-        "ReleaseNotes": "• Added optional project due dates so planning and review can happen at the right time.\n• The Projects sidebar now switches with a single click, separates archived projects, and improves calendar and review contrast.\n• Added configurable inline task editor sections and kept the Obsidian integration collapsed by default.\n• Hardened desktop sync and storage with safer file writes, clearer keyring fallback warnings, and more consistent search and task visibility.",
+        "ReleaseNotes": "• Added natural-language date parsing to desktop quick capture so inbox entry can understand phrases like tomorrow.\n• Desktop sync now preserves queued reruns, restores Dropbox autosync, and keeps scroll position steadier during refreshes.\n• Confirmation dialogs and project, calendar, and sync failures surface more clearly instead of disappearing in rerenders.\n• Self-hosted cloud errors are clearer with safer upload blocking and request IDs on 500 responses.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -130,7 +130,7 @@
           "No requiere conexión a internet para funcionar",
           "Código abierto y transparente"
         ],
-        "ReleaseNotes": "• Agregamos fechas objetivo opcionales para proyectos y asi planificar y revisar en el momento adecuado.\n• La barra lateral de proyectos ahora cambia con un solo clic, separa los proyectos archivados y mejora el contraste en calendario y revision.\n• Agregamos secciones configurables en el editor inline de tareas y dejamos la integracion de Obsidian colapsada por defecto.\n• Reforzamos el sync y el almacenamiento en escritorio con escrituras mas seguras, avisos mas claros sobre fallback del keyring y una visibilidad de busqueda y tareas mas consistente.",
+        "ReleaseNotes": "• Agregamos fechas en lenguaje natural para la captura rapida de escritorio, con frases como manana.\n• El sync de escritorio ahora conserva reintentos en cola, recupera el autosync de Dropbox y mantiene mejor el scroll durante refrescos.\n• Los dialogos de confirmacion y los errores de proyectos, calendario y sync se muestran con mas claridad.\n• Los errores de nube autohospedada son mas claros, con uploads bloqueados de forma mas segura e IDs de solicitud en errores 500.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",

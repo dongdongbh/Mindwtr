@@ -18,4 +18,5 @@ USER bun
 RUN bun install
 
 EXPOSE 8787/tcp
+HEALTHCHECK --interval=1m30s --timeout=10s --start-period=30s --retries=3 CMD curl -fsS http://localhost:8787/health >/dev/null || exit 1
 ENTRYPOINT ["bun", "run", "--filter", "mindwtr-cloud", "start", "--", "--host", "0.0.0.0", "--port", "8787"]

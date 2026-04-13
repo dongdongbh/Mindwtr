@@ -41,6 +41,16 @@ const buildParams = (overrides: Partial<Parameters<typeof useTaskItemFieldLayout
 });
 
 describe('useTaskItemFieldLayout', () => {
+    it('shows priority and time estimate by default when they are enabled and not explicitly hidden', () => {
+        const { result } = renderHook(() => useTaskItemFieldLayout(buildParams({
+            editPriority: '',
+            editTimeEstimate: '',
+        })));
+
+        expect(result.current.organizationFields).toContain('priority');
+        expect(result.current.organizationFields).toContain('timeEstimate');
+    });
+
     it('hides action-only fields while a task is being edited as reference', () => {
         const { result } = renderHook(() => useTaskItemFieldLayout(buildParams({
             editStatus: 'reference',

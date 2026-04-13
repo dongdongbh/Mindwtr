@@ -51,6 +51,30 @@
   <url type="bugtracker">https://github.com/dongdongbh/Mindwtr/issues</url>
   <url type="vcs-browser">https://github.com/dongdongbh/Mindwtr</url>
   <releases>
+    <release version="0.8.2" date="2026-04-11">
+      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v0.8.2</url>
+      <description translate="no">
+        <p>Mindwtr 0.8.2 sharpens desktop capture, error handling, and sync recovery for Linux desktop users.</p>
+        <ul>
+          <li>Added natural-language date parsing for quick inbox capture so entries like tomorrow resolve while you type.</li>
+          <li>Kept desktop sync steadier by preserving queued reruns, restoring Dropbox autosync, and keeping scroll position stable during refreshes.</li>
+          <li>Surfaced confirmation, project-drag, calendar, and sync failures more clearly instead of letting them disappear during rerenders.</li>
+          <li>Improved self-hosted cloud diagnostics with safer upload blocking and request IDs on 500 responses.</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.8.1" date="2026-04-09">
+      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v0.8.1</url>
+      <description translate="no">
+        <p>Mindwtr 0.8.1 refines desktop planning, inbox processing, and sync reliability for Linux desktop users.</p>
+        <ul>
+          <li>Added adjustable desktop text size controls for more comfortable reading across large and small displays.</li>
+          <li>Expanded desktop inbox processing with priority, energy, and assignee fields that respect editor layout settings.</li>
+          <li>Improved calendar and Today behavior with clearer selected-day external events and stricter next-action scheduling rules.</li>
+          <li>Hardened desktop sync and storage with safer area merge handling and faster task metadata filtering.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.8.0" date="2026-04-05">
       <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v0.8.0</url>
       <description translate="no">

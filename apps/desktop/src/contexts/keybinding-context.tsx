@@ -11,6 +11,7 @@ import {
     matchesGlobalQuickAddShortcut,
     normalizeGlobalQuickAddShortcut,
 } from '../lib/global-quick-add-shortcut';
+import { AREA_FILTER_ALL } from '../lib/area-filter';
 
 export type KeybindingStyle = 'vim' | 'emacs';
 
@@ -115,8 +116,9 @@ export function KeybindingProvider({
     const isTest = import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test';
     const isWindows = typeof navigator !== 'undefined' && /win/i.test(navigator.userAgent);
     const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.userAgent);
-    const { settings, updateSettings } = useTaskStore(
+    const { areas, settings, updateSettings } = useTaskStore(
         (state) => ({
+            areas: state.areas,
             settings: state.settings,
             updateSettings: state.updateSettings,
         }),
@@ -143,6 +145,10 @@ export function KeybindingProvider({
         }),
         [isMac, isWindows, settings.globalQuickAddShortcut]
     );
+    const sortedAreas = useMemo(
+        () => [...areas].sort((a, b) => a.order - b.order),
+        [areas],
+    );
 
     const isSidebarCollapsed = settings.sidebarCollapsed ?? false;
     const toggleSidebar = useCallback(() => {
@@ -156,6 +162,31 @@ export function KeybindingProvider({
         updateSettings({ appearance: { density: nextDensity } })
             .catch((error) => reportError('Failed to update density', error));
     }, [settings.appearance?.density, updateSettings]);
+    const applyAreaFilterShortcut = useCallback((key: string): boolean => {
+        if (key === '0') {
+            updateSettings({
+                filters: {
+                    ...(useTaskStore.getState().settings?.filters ?? {}),
+                    areaId: AREA_FILTER_ALL,
+                },
+            }).catch((error) => reportError('Failed to update area filter', error));
+            return true;
+        }
+
+        if (!/^[1-9]$/.test(key)) return false;
+
+        const areaIndex = Number(key) - 1;
+        const targetArea = sortedAreas[areaIndex];
+        if (!targetArea) return false;
+
+        updateSettings({
+            filters: {
+                ...(useTaskStore.getState().settings?.filters ?? {}),
+                areaId: targetArea.id,
+            },
+        }).catch((error) => reportError('Failed to update area filter', error));
+        return true;
+    }, [sortedAreas, updateSettings]);
 
     const scopeRef = useRef<TaskListScope | null>(null);
     const pendingRef = useRef<{ key: string | null; timestamp: number }>({ key: null, timestamp: 0 });
@@ -436,6 +467,8 @@ export function KeybindingProvider({
                     } else if (vimGoMap[e.key]) {
                         onNavigate(vimGoMap[e.key]);
                     }
+                } else if (pending === 'a') {
+                    applyAreaFilterShortcut(e.key);
                 } else if (pending === 'd') {
                     if (e.key === 'd') {
                         scope?.deleteSelected();
@@ -497,6 +530,7 @@ export function KeybindingProvider({
                     setIsHelpOpen(true);
                     break;
                 case 'g':
+                case 'a':
                 case 'd':
                     e.preventDefault();
                     pendingRef.current = { key: e.key, timestamp: now };
@@ -684,6 +718,7 @@ export function KeybindingProvider({
         toggleDensity,
         currentView,
         getActiveScope,
+        applyAreaFilterShortcut,
     ]);
 
     useEffect(() => {

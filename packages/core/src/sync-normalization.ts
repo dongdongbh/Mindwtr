@@ -1,4 +1,4 @@
-import type { AppData, Project, Task } from './types';
+import type { AppData, Area, Project, Task } from './types';
 import { normalizeTaskForLoad } from './task-status';
 import {
     AI_PROVIDER_VALUE_SET,
@@ -6,6 +6,7 @@ import {
     SETTINGS_DENSITY_VALUE_SET,
     SETTINGS_KEYBINDING_STYLE_VALUE_SET,
     SETTINGS_LANGUAGE_VALUE_SET,
+    SETTINGS_TEXT_SIZE_VALUE_SET,
     SETTINGS_THEME_VALUE_SET,
     SETTINGS_TIME_FORMAT_VALUE_SET,
     SETTINGS_WEEK_START_VALUE_SET,
@@ -103,6 +104,25 @@ export const normalizeProjectForSyncMerge = (project: Project): Project => {
         reviewAt: normalizeOptionalString(project.reviewAt),
         areaId: normalizeOptionalString(project.areaId),
         areaTitle: normalizeOptionalString(project.areaTitle),
+    };
+};
+
+export type SyncMergeArea = Omit<Area, 'order'> & {
+    order?: number;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export const normalizeAreaForSyncMerge = (area: Area, nowIso: string): SyncMergeArea => {
+    const createdAt = normalizeOptionalString(area.createdAt) ?? normalizeOptionalString(area.updatedAt) ?? nowIso;
+    const updatedAt = normalizeOptionalString(area.updatedAt) ?? normalizeOptionalString(area.createdAt) ?? nowIso;
+    return {
+        ...area,
+        color: normalizeOptionalString(area.color),
+        icon: normalizeOptionalString(area.icon),
+        order: Number.isFinite(area.order) ? area.order : undefined,
+        createdAt,
+        updatedAt,
     };
 };
 
@@ -457,16 +477,45 @@ export const sanitizeMergedSettingsForSync = (
                 ? globalThis.structuredClone(localSettings.appearance)
                 : JSON.parse(JSON.stringify(localSettings.appearance)))
             : undefined;
-    } else if (next.appearance?.density !== undefined && !SETTINGS_DENSITY_VALUE_SET.has(next.appearance.density)) {
-        next.appearance = {
-            ...(localSettings.appearance
-                ? (typeof globalThis.structuredClone === 'function'
-                    ? globalThis.structuredClone(localSettings.appearance)
-                    : JSON.parse(JSON.stringify(localSettings.appearance)))
-                : {}),
-            ...next.appearance,
-            density: localSettings.appearance?.density,
-        };
+    } else if (next.appearance) {
+        const fallbackAppearance = localSettings.appearance
+            ? (typeof globalThis.structuredClone === 'function'
+                ? globalThis.structuredClone(localSettings.appearance)
+                : JSON.parse(JSON.stringify(localSettings.appearance)))
+            : {};
+        let didSanitizeAppearance = false;
+
+        if (next.appearance.density !== undefined && !SETTINGS_DENSITY_VALUE_SET.has(next.appearance.density)) {
+            next.appearance = {
+                ...fallbackAppearance,
+                ...next.appearance,
+                density: localSettings.appearance?.density,
+            };
+            didSanitizeAppearance = true;
+        }
+        const sanitizedAppearance = next.appearance;
+        if (
+            sanitizedAppearance
+            && sanitizedAppearance.textSize !== undefined
+            && !SETTINGS_TEXT_SIZE_VALUE_SET.has(sanitizedAppearance.textSize)
+        ) {
+            next.appearance = {
+                ...fallbackAppearance,
+                ...sanitizedAppearance,
+                textSize: localSettings.appearance?.textSize,
+            };
+            didSanitizeAppearance = true;
+        }
+
+        const finalAppearance = next.appearance;
+        if (
+            didSanitizeAppearance
+            && finalAppearance
+            && finalAppearance.density === undefined
+            && finalAppearance.textSize === undefined
+        ) {
+            next.appearance = Object.keys(fallbackAppearance).length > 0 ? next.appearance : undefined;
+        }
     }
 
     if (next.ai?.enabled !== undefined && typeof next.ai.enabled !== 'boolean') {

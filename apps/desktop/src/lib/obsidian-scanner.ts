@@ -23,6 +23,7 @@ export type ObsidianScanResult = {
     tasks: ObsidianTask[];
     scannedFileCount: number;
     scannedRelativePaths: string[];
+    taskNotesDetectedPaths: string[];
     warnings: string[];
     importMode: ObsidianImportMode;
 };
@@ -397,7 +398,14 @@ export async function scanObsidianVault(
     const config = normalizeObsidianConfig(rawConfig);
     const vaultPath = config.vaultPath;
     if (!config.enabled || !vaultPath) {
-        return { tasks: [], scannedFileCount: 0, scannedRelativePaths: [], warnings: [], importMode: 'inline' };
+        return {
+            tasks: [],
+            scannedFileCount: 0,
+            scannedRelativePaths: [],
+            taskNotesDetectedPaths: [],
+            warnings: [],
+            importMode: 'inline',
+        };
     }
 
     const inlineTasks: ObsidianTask[] = [];
@@ -406,6 +414,7 @@ export async function scanObsidianVault(
     const seenFiles = new Set<string>();
     const visitedDirectories = new Set<string>();
     const scannedRelativePaths: string[] = [];
+    const taskNotesDetectedPaths = new Set<string>();
     let scannedFileCount = 0;
     let detectedTaskNotes = false;
 
@@ -427,6 +436,7 @@ export async function scanObsidianVault(
         scannedRelativePaths.push(normalizedRelativePath);
         detectedTaskNotes = detectedTaskNotes || fileResult.detectedTaskNotes;
         if (fileResult.detectedTaskNotes) {
+            taskNotesDetectedPaths.add(normalizedRelativePath);
             taskNotesTasks.push(...fileResult.tasks);
         } else {
             inlineTasks.push(...fileResult.tasks);
@@ -496,6 +506,7 @@ export async function scanObsidianVault(
         tasks: sortObsidianTasks(detectedTaskNotes ? taskNotesTasks : inlineTasks),
         scannedFileCount,
         scannedRelativePaths: [...scannedRelativePaths].sort((left, right) => left.localeCompare(right)),
+        taskNotesDetectedPaths: [...taskNotesDetectedPaths].sort((left, right) => left.localeCompare(right)),
         warnings,
         importMode: detectedTaskNotes ? 'tasknotes' : 'inline',
     };

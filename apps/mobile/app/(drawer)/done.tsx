@@ -10,8 +10,12 @@ export default function DoneScreen() {
   const insets = useSafeAreaInsets();
   const { t } = useLanguage();
   const title = t('nav.done') || t('list.done') || 'Done';
-  const emptyLabel = t('list.noTasks');
-  const emptyText = emptyLabel === 'list.noTasks' ? 'No done tasks yet.' : emptyLabel;
+  const emptyLabel = t('list.done');
+  const emptyText = emptyLabel === 'list.done' ? 'Done' : emptyLabel;
+  const hintLabel = t('done.emptyHint');
+  const emptyHint = hintLabel === 'done.emptyHint'
+    ? 'Completed tasks land here — a running log of what you finished.'
+    : hintLabel;
   const navBarInset = Platform.OS === 'android' && insets.bottom >= 24 ? insets.bottom : 0;
 
   return (
@@ -20,6 +24,7 @@ export default function DoneScreen() {
         statusFilter="done"
         title={title}
         emptyText={emptyText}
+        emptyHint={emptyHint}
         allowAdd={false}
         showQuickAddHelp={false}
         defaultEditTab="view"

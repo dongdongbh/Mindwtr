@@ -1,6 +1,8 @@
 import { Component, ErrorInfo, ReactNode } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import { logError } from '../lib/app-log';
 import { useLanguage } from '../contexts/language-context';
+import { Button } from './ui/Button';
 
 interface Props {
     children: ReactNode;
@@ -43,7 +45,7 @@ class BaseErrorBoundary extends Component<Props, State> {
             return (
                 <div className="min-h-screen flex items-center justify-center bg-background" role="alert" aria-live="assertive">
                     <div className="max-w-md p-8 text-center space-y-4">
-                        <div className="text-6xl">💥</div>
+                        <AlertTriangle className="w-14 h-14 mx-auto text-destructive" aria-hidden="true" strokeWidth={1.5} />
                         <h1 className="text-2xl font-bold text-foreground">{this.props.strings?.title ?? 'Something went wrong'}</h1>
                         <p className="text-muted-foreground">
                             {this.props.strings?.message ?? 'The app encountered an unexpected error.'}
@@ -53,12 +55,9 @@ class BaseErrorBoundary extends Component<Props, State> {
                                 {this.state.error?.message}
                             </p>
                         </div>
-                        <button
-                            onClick={() => window.location.reload()}
-                            className="bg-primary text-primary-foreground px-6 py-2 rounded-lg font-medium hover:bg-primary/90"
-                        >
+                        <Button size="lg" onClick={() => window.location.reload()}>
                             {this.props.strings?.retry ?? 'Try again'}
-                        </button>
+                        </Button>
                     </div>
                 </div>
             );

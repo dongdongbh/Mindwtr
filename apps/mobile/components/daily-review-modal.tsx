@@ -3,6 +3,7 @@ import { View, Text, Modal, TouchableOpacity, ScrollView, StyleSheet, Platform }
 import { router } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { X, Calendar as CalendarIcon, Target, Inbox, Clock, Sparkles, Star, CheckCircle2, Play } from 'lucide-react-native';
 
 import {
     useTaskStore,
@@ -284,7 +285,10 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                 const totalToday = overdueTasks.length + dueTodayTasks.length;
                 return (
                     <View style={styles.stepContent}>
-                        <Text style={[styles.stepTitle, { color: tc.text }]}>📅 {t('dailyReview.todayStep')}</Text>
+                        <View style={styles.stepTitleRow}>
+                            <CalendarIcon size={22} color={tc.text} strokeWidth={2} />
+                            <Text style={[styles.stepTitleInline, { color: tc.text }]}>{t('dailyReview.todayStep')}</Text>
+                        </View>
                         <View style={[styles.infoBox, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                             <Text style={[styles.infoText, { color: tc.text }]}>
                                 <Text style={{ fontWeight: '700' }}>{totalToday}</Text> {t('common.tasks')}
@@ -307,7 +311,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                         </View>
                         {topTasks.length === 0 ? (
                             <View style={styles.emptyState}>
-                                <Text style={styles.emptyIcon}>✨</Text>
+                                <Sparkles size={48} color={tc.secondaryText} strokeWidth={1.5} style={styles.emptyIcon} />
                                 <Text style={[styles.emptyText, { color: tc.secondaryText }]}>{t('agenda.noTasks')}</Text>
                             </View>
                         ) : (
@@ -319,7 +323,10 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
             case 'focus':
                 return (
                     <View style={styles.stepContent}>
-                        <Text style={[styles.stepTitle, { color: tc.text }]}>🎯 {t('dailyReview.focusStep')}</Text>
+                        <View style={styles.stepTitleRow}>
+                            <Target size={22} color={tc.text} strokeWidth={2} />
+                            <Text style={[styles.stepTitleInline, { color: tc.text }]}>{t('dailyReview.focusStep')}</Text>
+                        </View>
                         <View style={[styles.infoBox, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                             <Text style={[styles.infoText, { color: tc.text }]}>
                                 <Text style={{ fontWeight: '700' }}>{focusedTasks.length}</Text> / 3
@@ -328,7 +335,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                         </View>
                         {focusCandidates.length === 0 ? (
                             <View style={styles.emptyState}>
-                                <Text style={styles.emptyIcon}>⭐</Text>
+                                <Star size={48} color={tc.secondaryText} strokeWidth={1.5} style={styles.emptyIcon} />
                                 <Text style={[styles.emptyText, { color: tc.secondaryText }]}>{t('agenda.focusHint')}</Text>
                             </View>
                         ) : (
@@ -339,7 +346,10 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
             case 'inbox':
                 return (
                     <View style={styles.stepContent}>
-                        <Text style={[styles.stepTitle, { color: tc.text }]}>📥 {t('dailyReview.inboxStep')}</Text>
+                        <View style={styles.stepTitleRow}>
+                            <Inbox size={22} color={tc.text} strokeWidth={2} />
+                            <Text style={[styles.stepTitleInline, { color: tc.text }]}>{t('dailyReview.inboxStep')}</Text>
+                        </View>
                         <View style={[styles.infoBox, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                             <Text style={[styles.infoText, { color: tc.text }]}>
                                 <Text style={{ fontWeight: '700' }}>{inboxTasks.length}</Text> {t('common.tasks')}
@@ -351,15 +361,18 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                                 style={[styles.processButton, { backgroundColor: tc.tint }]}
                                 onPress={() => setShowInboxProcessing(true)}
                                 hitSlop={8}
+                                accessibilityRole="button"
+                                accessibilityLabel={t('inbox.processButton')}
                             >
+                                <Play size={14} color="#FFFFFF" strokeWidth={2.5} fill="#FFFFFF" />
                                 <Text style={styles.processButtonText}>
-                                    ▷ {t('inbox.processButton')}
+                                    {t('inbox.processButton')}
                                 </Text>
                             </TouchableOpacity>
                         )}
                         {inboxTasks.length === 0 ? (
                             <View style={styles.emptyState}>
-                                <Text style={styles.emptyIcon}>✅</Text>
+                                <CheckCircle2 size={48} color={tc.secondaryText} strokeWidth={1.5} style={styles.emptyIcon} />
                                 <Text style={[styles.emptyText, { color: tc.secondaryText }]}>{t('review.inboxEmpty')}</Text>
                             </View>
                         ) : (
@@ -370,7 +383,10 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
             case 'waiting':
                 return (
                     <View style={styles.stepContent}>
-                        <Text style={[styles.stepTitle, { color: tc.text }]}>⏳ {t('dailyReview.waitingStep')}</Text>
+                        <View style={styles.stepTitleRow}>
+                            <Clock size={22} color={tc.text} strokeWidth={2} />
+                            <Text style={[styles.stepTitleInline, { color: tc.text }]}>{t('dailyReview.waitingStep')}</Text>
+                        </View>
                         <View style={[styles.infoBox, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                             <Text style={[styles.infoText, { color: tc.text }]}>
                                 <Text style={{ fontWeight: '700' }}>{waitingTasks.length}</Text> {t('common.tasks')}
@@ -379,7 +395,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                         </View>
                         {waitingTasks.length === 0 ? (
                             <View style={styles.emptyState}>
-                                <Text style={styles.emptyIcon}>✅</Text>
+                                <CheckCircle2 size={48} color={tc.secondaryText} strokeWidth={1.5} style={styles.emptyIcon} />
                                 <Text style={[styles.emptyText, { color: tc.secondaryText }]}>{t('review.waitingEmpty')}</Text>
                             </View>
                         ) : (
@@ -390,7 +406,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
             case 'complete':
                 return (
                     <View style={styles.centerContent}>
-                        <Text style={styles.bigIcon}>✅</Text>
+                        <CheckCircle2 size={56} color={tc.tint} strokeWidth={1.5} style={styles.bigIcon} />
                         <Text style={[styles.heading, { color: tc.text }]}>{t('dailyReview.completeTitle')}</Text>
                         <Text style={[styles.description, { color: tc.secondaryText }]}>{t('dailyReview.completeDesc')}</Text>
                         <TouchableOpacity style={[styles.primaryButton, { backgroundColor: tc.tint }]} onPress={onClose}>
@@ -409,8 +425,14 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
         >
             <SafeAreaView style={[styles.modalContainer, { backgroundColor: tc.bg }]} edges={['top']}>
                 <View style={[styles.header, { borderBottomColor: tc.border }]}>
-                    <TouchableOpacity onPress={onClose}>
-                        <Text style={[styles.closeButton, { color: tc.text }]}>✕</Text>
+                    <TouchableOpacity
+                        onPress={onClose}
+                        style={styles.closeButton}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('common.close')}
+                        hitSlop={8}
+                    >
+                        <X size={22} color={tc.text} strokeWidth={2} />
                     </TouchableOpacity>
                     <View style={styles.headerCenter}>
                         <Text style={[styles.headerTitle, { color: tc.text }]}>{t('dailyReview.title')}</Text>
@@ -512,10 +534,10 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
     },
     closeButton: {
-        fontSize: 22,
-        fontWeight: '300',
         width: 28,
-        textAlign: 'left',
+        height: 28,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     headerCenter: {
         alignItems: 'center',
@@ -548,7 +570,6 @@ const styles = StyleSheet.create({
         gap: 14,
     },
     bigIcon: {
-        fontSize: 56,
         marginBottom: 6,
     },
     heading: {
@@ -577,7 +598,12 @@ const styles = StyleSheet.create({
         flex: 1,
         gap: 14,
     },
-    stepTitle: {
+    stepTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    stepTitleInline: {
         fontSize: 18,
         fontWeight: '800',
     },
@@ -628,6 +654,9 @@ const styles = StyleSheet.create({
         borderRadius: 999,
         paddingHorizontal: 14,
         paddingVertical: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
     },
     processButtonText: {
         color: '#FFFFFF',
@@ -659,7 +688,7 @@ const styles = StyleSheet.create({
         gap: 10,
     },
     emptyIcon: {
-        fontSize: 40,
+        opacity: 0.9,
     },
     emptyText: {
         fontSize: 14,

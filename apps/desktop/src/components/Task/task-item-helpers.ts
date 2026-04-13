@@ -18,6 +18,8 @@ export const DEFAULT_TASK_EDITOR_ORDER: TaskEditorFieldId[] = [
     'section',
     'area',
     'priority',
+    'energyLevel',
+    'assignedTo',
     'contexts',
     'description',
     'tags',
@@ -30,15 +32,24 @@ export const DEFAULT_TASK_EDITOR_ORDER: TaskEditorFieldId[] = [
     'checklist',
 ];
 
-export const DEFAULT_TASK_EDITOR_HIDDEN: TaskEditorFieldId[] = [
+export const DEFAULT_TASK_EDITOR_VISIBLE: TaskEditorFieldId[] = [
+    'status',
+    'project',
+    'section',
+    'area',
+    'description',
+    'checklist',
+    'energyLevel',
+    'assignedTo',
+    'contexts',
+    'dueDate',
     'priority',
-    'tags',
     'timeEstimate',
-    'recurrence',
-    'startTime',
-    'reviewAt',
-    'attachments',
 ];
+
+export const DEFAULT_TASK_EDITOR_HIDDEN: TaskEditorFieldId[] = DEFAULT_TASK_EDITOR_ORDER.filter(
+    (fieldId) => !DEFAULT_TASK_EDITOR_VISIBLE.includes(fieldId)
+);
 
 export const TASK_EDITOR_FIXED_FIELDS: TaskEditorFieldId[] = ['status', 'project', 'section', 'area'];
 
@@ -50,6 +61,8 @@ export const DEFAULT_TASK_EDITOR_SECTION_BY_FIELD: Record<TaskEditorFieldId, Tas
     section: 'basic',
     area: 'basic',
     priority: 'organization',
+    energyLevel: 'organization',
+    assignedTo: 'organization',
     contexts: 'organization',
     tags: 'organization',
     timeEstimate: 'organization',

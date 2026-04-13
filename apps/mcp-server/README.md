@@ -17,6 +17,12 @@ Default database locations:
 - macOS: `~/Library/Application Support/mindwtr/mindwtr.db`
 - Windows: `%APPDATA%\mindwtr\mindwtr.db`
 
+Additional macOS path for sandboxed builds:
+- `~/Library/Containers/tech.dongdongbh.mindwtr/Data/Library/Application Support/mindwtr/mindwtr.db`
+
+If `mindwtr.db` is missing but `data.json` exists in the same desktop data folder, the MCP server will bootstrap a fresh SQLite database from that local data snapshot on first start.
+Desktop Settings → Sync → Local Data shows the exact storage location used by the app.
+
 You can override with:
 - `--db /path/to/mindwtr.db`
 - `MINDWTR_DB_PATH=/path/to/mindwtr.db`

@@ -83,6 +83,7 @@ export type SyncCycleIO = {
     readLocal: () => Promise<AppData>;
     readRemote: () => Promise<AppData | null | undefined>;
     writeLocal: (data: AppData) => Promise<void>;
+    prepareRemoteWrite?: (data: AppData) => Promise<AppData | void>;
     writeRemote: (data: AppData) => Promise<void>;
     historyContext?: {
         backend?: SyncHistoryEntry['backend'];

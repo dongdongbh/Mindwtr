@@ -406,12 +406,6 @@ export const styles = StyleSheet.create({
         gap: 8,
         paddingVertical: 6,
     },
-    viewChecklistMarker: {
-        fontSize: 20,
-        width: 26,
-        height: 26,
-        textAlign: 'center',
-    },
     viewChecklistText: {
         fontSize: 14,
         flex: 1,

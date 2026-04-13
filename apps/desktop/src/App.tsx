@@ -7,12 +7,11 @@ const ObsidianView = lazy(() => import('./components/views/ObsidianView').then((
 import { ContextsView } from './components/views/ContextsView';
 import { ProjectsView as ProjectsViewEager } from './components/views/ProjectsView';
 const ReviewView = lazy(() => import('./components/views/ReviewView').then((m) => ({ default: m.ReviewView })));
-import { TutorialView } from './components/views/TutorialView';
 import { ArchiveView } from './components/views/ArchiveView';
 import { TrashView } from './components/views/TrashView';
 import { AgendaView } from './components/views/AgendaView';
 import { SearchView } from './components/views/SearchView';
-import { useTaskStore, configureDateFormatting, flushPendingSave, isSupportedLanguage } from '@mindwtr/core';
+import { addBreadcrumb, useTaskStore, configureDateFormatting, flushPendingSave, isSupportedLanguage } from '@mindwtr/core';
 import { GlobalSearch } from './components/GlobalSearch';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useLanguage } from './contexts/language-context';
@@ -26,6 +25,7 @@ import * as LocalDataWatcher from './lib/local-data-watcher';
 import { isFlatpakRuntime, isTauriRuntime } from './lib/runtime';
 import { logError } from './lib/app-log';
 import { createDesktopAutoSyncController } from './lib/auto-sync-controller';
+import { canDesktopAutoSync } from './lib/desktop-auto-sync-eligibility';
 import { beginSettingsOpenTrace, markSettingsOpenTrace, wrapSettingsOpenImport } from './lib/settings-open-diagnostics';
 import {
     THEME_STORAGE_KEY,
@@ -35,6 +35,12 @@ import {
     watchNativeSystemThemePreference,
     watchSystemThemePreference,
 } from './lib/theme';
+import {
+    DEFAULT_DESKTOP_TEXT_SIZE_MODE,
+    TEXT_SIZE_STORAGE_KEY,
+    applyDesktopTextSize,
+    coerceDesktopTextSize,
+} from './lib/text-size';
 import { useUiStore } from './store/ui-store';
 import { useObsidianStore } from './store/obsidian-store';
 
@@ -57,6 +63,7 @@ function App() {
     const closeBehavior = useTaskStore((state) => state.settings?.window?.closeBehavior ?? 'ask');
     const showTray = useTaskStore((state) => state.settings?.window?.showTray);
     const settingsTheme = useTaskStore((state) => state.settings?.theme);
+    const settingsTextSize = useTaskStore((state) => state.settings?.appearance?.textSize);
     const settingsLanguage = useTaskStore((state) => state.settings?.language);
     const settingsDateFormat = useTaskStore((state) => state.settings?.dateFormat);
     const settingsTimeFormat = useTaskStore((state) => state.settings?.timeFormat);
@@ -71,7 +78,9 @@ function App() {
     const [closePromptRemember, setClosePromptRemember] = useState(false);
     const [externalSyncChange, setExternalSyncChange] = useState<ExternalSyncChange | null>(null);
     const [resolvingExternalSync, setResolvingExternalSync] = useState(false);
+    const [hasHydratedSettings, setHasHydratedSettings] = useState(false);
     const closePromptRememberRef = useRef(false);
+    const lastViewBreadcrumbRef = useRef<string | null>(null);
     const isObsidianEnabled = useObsidianStore((state) => state.config.enabled);
     const obsidianVaultPath = useObsidianStore((state) => state.config.vaultPath);
     const startObsidianWatcher = useObsidianStore((state) => state.startWatcher);
@@ -133,6 +142,17 @@ function App() {
     }, [settingsTheme]);
 
     useEffect(() => {
+        if (!hasHydratedSettings) return;
+        const normalizedTextSize = coerceDesktopTextSize(settingsTextSize);
+        if (normalizedTextSize === DEFAULT_DESKTOP_TEXT_SIZE_MODE) {
+            localStorage.removeItem(TEXT_SIZE_STORAGE_KEY);
+        } else {
+            localStorage.setItem(TEXT_SIZE_STORAGE_KEY, normalizedTextSize);
+        }
+        applyDesktopTextSize(normalizedTextSize);
+    }, [hasHydratedSettings, settingsTextSize]);
+
+    useEffect(() => {
         const normalizedTheme = mapSyncedThemeToDesktop(settingsTheme);
         if (normalizedTheme !== 'system') return;
 
@@ -167,6 +187,13 @@ function App() {
         if (settingsLanguage === language) return;
         setLanguage(settingsLanguage);
     }, [settingsLanguage, language, setLanguage]);
+
+    useEffect(() => {
+        const next = `view:${currentView}`;
+        if (lastViewBreadcrumbRef.current === next) return;
+        lastViewBreadcrumbRef.current = next;
+        addBreadcrumb(next);
+    }, [currentView]);
 
     useEffect(() => {
         const systemLocale = (() => {
@@ -204,7 +231,13 @@ function App() {
 
     useEffect(() => {
         if (import.meta.env.MODE === 'test' || import.meta.env.VITEST || process.env.NODE_ENV === 'test') return;
-        fetchData();
+        let cancelled = false;
+        fetchData()
+            .finally(() => {
+                if (!cancelled) {
+                    setHasHydratedSettings(true);
+                }
+            });
         useObsidianStore.getState().loadConfig().catch((error) => reportError('Obsidian init failed', error));
         const unsubscribeExternalSync = SyncService.subscribeExternalSyncChange(setExternalSyncChange);
 
@@ -260,24 +293,6 @@ function App() {
 
         isActiveRef.current = true;
 
-        const canSync = async () => {
-            const backend = await SyncService.getSyncBackend();
-            if (backend === 'off') return false;
-            if (backend === 'file') {
-                const path = await SyncService.getSyncPath();
-                return Boolean(path);
-            }
-            if (backend === 'webdav') {
-                const { url } = await SyncService.getWebDavConfig();
-                return Boolean(url);
-            }
-            if (backend === 'cloud') {
-                const { url } = await SyncService.getCloudConfig();
-                return Boolean(url);
-            }
-            return false;
-        };
-
         const performSync = async () => {
             return SyncService.performSync();
         };
@@ -296,7 +311,7 @@ function App() {
         };
 
         const autoSyncController = createDesktopAutoSyncController({
-            canSync,
+            canSync: () => canDesktopAutoSync(SyncService),
             performSync,
             flushPendingSave,
             reportError,
@@ -326,6 +341,7 @@ function App() {
         autoSyncController.scheduleInitialSync();
 
         return () => {
+            cancelled = true;
             disposed = true;
             isActiveRef.current = false;
             window.removeEventListener('beforeunload', handleUnload);
@@ -503,8 +519,6 @@ function App() {
                 return <ContextsView />;
             case 'review':
                 return <ReviewView />;
-            case 'tutorial':
-                return <TutorialView />;
             case 'settings':
                 return <SettingsView />;
             case 'archived':

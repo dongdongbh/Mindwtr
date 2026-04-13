@@ -1,7 +1,7 @@
-import React, { memo, useState, useMemo, useDeferredValue, useEffect, useRef, useCallback } from 'react';
+import React, { memo, useState, useMemo, useDeferredValue, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { AlertTriangle, Folder } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { shallow, useTaskStore, TaskPriority, TimeEstimate, DEFAULT_AREA_COLOR, sortTasksBy, parseQuickAdd, matchesHierarchicalToken, safeParseDate, isTaskInActiveProject, extractWaitingPerson } from '@mindwtr/core';
+import { shallow, useTaskStore, TaskPriority, TimeEstimate, DEFAULT_AREA_COLOR, sortTasksBy, parseQuickAdd, matchesHierarchicalToken, safeParseDate, isTaskInActiveProject, getWaitingPerson } from '@mindwtr/core';
 import type { StoreActionResult, Task, TaskStatus } from '@mindwtr/core';
 import type { TaskSortBy } from '@mindwtr/core';
 import { TaskItem } from '../TaskItem';
@@ -158,11 +158,13 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
     const [selectedWaitingPerson, setSelectedWaitingPerson] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
     const lastFilterKeyRef = useRef<string>('');
+    const pendingSelectionScrollRef = useRef(false);
     const addInputRef = useRef<HTMLInputElement>(null);
     const viewFilterInputRef = useRef<HTMLInputElement>(null);
     const listScrollRef = useRef<HTMLDivElement>(null);
-    const prioritiesEnabled = settings?.features?.priorities === true;
-    const timeEstimatesEnabled = settings?.features?.timeEstimates === true;
+    const [selectionScrollVersion, setSelectionScrollVersion] = useState(0);
+    const prioritiesEnabled = settings?.features?.priorities !== false;
+    const timeEstimatesEnabled = settings?.features?.timeEstimates !== false;
     const undoNotificationsEnabled = settings?.undoNotificationsEnabled !== false;
     const showQuickDone = statusFilter !== 'done' && statusFilter !== 'archived';
     const readOnly = statusFilter === 'done';
@@ -188,6 +190,11 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
     const exitSelectionMode = useCallback(() => {
         setSelectionMode(false);
         setMultiSelectedIds(new Set());
+    }, []);
+
+    const requestSelectionScroll = useCallback(() => {
+        pendingSelectionScrollRef.current = true;
+        setSelectionScrollVersion((current) => current + 1);
     }, []);
 
     const [isProcessing, setIsProcessing] = useState(false);
@@ -314,7 +321,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             if (task.deletedAt || task.status !== 'waiting') continue;
             if (!isTaskInActiveProject(task, projectMap)) continue;
             if (!taskMatchesAreaFilter(task, resolvedAreaFilter, projectMap, areaById)) continue;
-            const person = extractWaitingPerson(task.description);
+            const person = getWaitingPerson(task);
             if (!person) continue;
             const key = person.toLowerCase();
             if (!people.has(key)) people.set(key, person);
@@ -440,7 +447,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                     && (!t.timeEstimate || !deferredFilterInputs.activeTimeEstimates.includes(t.timeEstimate))
                 ) return false;
                 if (deferredFilterInputs.statusFilter === 'waiting' && deferredFilterInputs.selectedWaitingPerson) {
-                    const person = extractWaitingPerson(t.description);
+                    const person = getWaitingPerson(t);
                     if (!person || person.toLowerCase() !== deferredFilterInputs.selectedWaitingPerson.toLowerCase()) return false;
                 }
                 if (showViewFilterInput && normalizedSearchQuery && !t.title.toLowerCase().includes(normalizedSearchQuery)) {
@@ -543,6 +550,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
         ].join('::');
         if (lastFilterKeyRef.current !== filterKey) {
             lastFilterKeyRef.current = filterKey;
+            requestSelectionScroll();
             setSelectedIndex(0);
             exitSelectionMode();
             return;
@@ -554,18 +562,8 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             return;
         }
         if (selectedIndex >= filteredTasks.length) {
+            requestSelectionScroll();
             setSelectedIndex(filteredTasks.length - 1);
-            return;
-        }
-        const task = filteredTasks[selectedIndex];
-        if (!task) return;
-        const el = document.querySelector(`[data-task-id="${task.id}"]`) as HTMLElement | null;
-        if (el && typeof (el as any).scrollIntoView === 'function') {
-            el.scrollIntoView({ block: 'nearest' });
-            return;
-        }
-        if (shouldVirtualize && listScrollRef.current) {
-            rowVirtualizer.scrollToIndex(selectedIndex, { align: 'auto' });
         }
     }, [
         statusFilter,
@@ -579,9 +577,23 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
         exitSelectionMode,
         filteredTasks,
         selectedIndex,
-        shouldVirtualize,
-        rowVirtualizer,
+        requestSelectionScroll,
     ]);
+
+    useLayoutEffect(() => {
+        if (!pendingSelectionScrollRef.current) return;
+        pendingSelectionScrollRef.current = false;
+        const task = filteredTasks[selectedIndex];
+        if (!task) return;
+        if (shouldVirtualize && listScrollRef.current) {
+            rowVirtualizer.scrollToIndex(selectedIndex, { align: 'auto' });
+            return;
+        }
+        const el = document.querySelector(`[data-task-id="${task.id}"]`) as HTMLElement | null;
+        if (el && typeof (el as any).scrollIntoView === 'function') {
+            el.scrollIntoView({ block: 'nearest' });
+        }
+    }, [filteredTasks, selectedIndex, selectionScrollVersion, shouldVirtualize, rowVirtualizer]);
 
     useEffect(() => {
         if (!highlightTaskId) return;
@@ -601,22 +613,26 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
 
     const selectNext = useCallback(() => {
         if (filteredTasks.length === 0) return;
+        requestSelectionScroll();
         setSelectedIndex((i) => Math.min(i + 1, filteredTasks.length - 1));
-    }, [filteredTasks.length]);
+    }, [filteredTasks.length, requestSelectionScroll]);
 
     const selectPrev = useCallback(() => {
+        requestSelectionScroll();
         setSelectedIndex((i) => Math.max(i - 1, 0));
-    }, []);
+    }, [requestSelectionScroll]);
 
     const selectFirst = useCallback(() => {
+        requestSelectionScroll();
         setSelectedIndex(0);
-    }, []);
+    }, [requestSelectionScroll]);
 
     const selectLast = useCallback(() => {
         if (filteredTasks.length > 0) {
+            requestSelectionScroll();
             setSelectedIndex(filteredTasks.length - 1);
         }
-    }, [filteredTasks.length]);
+    }, [filteredTasks.length, requestSelectionScroll]);
 
     const editSelected = useCallback(() => {
         const task = filteredTasks[selectedIndex];
@@ -941,11 +957,16 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                     body: resolveText('someday.emptyHint', 'Store ideas for later.'),
                     action: t('nav.addTask') || 'Add task',
                 };
+            case 'reference':
+                return {
+                    title: resolveText('reference.empty', t('list.reference') || 'Reference'),
+                    body: resolveText('reference.emptyHint', 'Reference holds info you might want later — no action required.'),
+                    action: t('nav.addTask') || 'Add task',
+                };
             case 'done':
                 return {
                     title: t('list.done') || 'Done',
-                    body: resolveText('list.noTasks', 'Completed tasks will show here.'),
-                    action: t('nav.addTask') || 'Add task',
+                    body: resolveText('done.emptyHint', 'Completed tasks land here — a running log of what you finished.'),
                 };
             default:
                 return {

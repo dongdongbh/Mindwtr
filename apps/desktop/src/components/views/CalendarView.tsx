@@ -5,11 +5,12 @@ import { shallow, safeFormatDate, safeParseDate, safeParseDueDate, type External
 import { useLanguage } from '../../contexts/language-context';
 import { cn } from '../../lib/utils';
 import { reportError } from '../../lib/report-error';
+import { logError } from '../../lib/app-log';
 import { usePerformanceMonitor } from '../../hooks/usePerformanceMonitor';
 import { checkBudget } from '../../config/performanceBudgets';
 import { TaskItem } from '../TaskItem';
 import { resolveAreaFilter, taskMatchesAreaFilter } from '../../lib/area-filter';
-import { fetchExternalCalendarEvents } from '../../lib/external-calendar-events';
+import { fetchExternalCalendarEvents, summarizeExternalCalendarWarnings } from '../../lib/external-calendar-events';
 import { getCalendarMonthNames, getCalendarWeekdayHeaders, resolveCalendarLocale } from './calendar-locale';
 
 const dayKey = (date: Date) => format(date, 'yyyy-MM-dd');
@@ -36,7 +37,7 @@ export function CalendarView() {
         },
         [t]
     );
-    const timeEstimatesEnabled = settings?.features?.timeEstimates === true;
+    const timeEstimatesEnabled = settings?.features?.timeEstimates !== false;
     const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
     const resolvedAreaFilter = useMemo(
         () => resolveAreaFilter(settings?.filters?.areaId, areas),
@@ -90,38 +91,37 @@ export function CalendarView() {
         return true;
     };
 
-    const deadlinesByDay = useMemo(() => {
-        const map = new Map<string, Task[]>();
+    const calendarTaskData = useMemo(() => {
+        const visibleTasks: Task[] = [];
+        const deadlinesByDay = new Map<string, Task[]>();
+        const scheduledByDay = new Map<string, Task[]>();
         for (const task of tasks) {
             if (!isCalendarTaskVisible(task)) continue;
-            if (!task.dueDate) continue;
-            const dueDate = safeParseDueDate(task.dueDate);
-            if (!dueDate) continue;
-            const key = dayKey(dueDate);
-            const existing = map.get(key);
-            if (existing) existing.push(task);
-            else map.set(key, [task]);
+            visibleTasks.push(task);
+            if (task.dueDate) {
+                const dueDate = safeParseDueDate(task.dueDate);
+                if (dueDate) {
+                    const dueKey = dayKey(dueDate);
+                    const existingDue = deadlinesByDay.get(dueKey);
+                    if (existingDue) existingDue.push(task);
+                    else deadlinesByDay.set(dueKey, [task]);
+                }
+            }
+            if (task.startTime) {
+                const startTime = safeParseDate(task.startTime);
+                if (startTime) {
+                    const startKey = dayKey(startTime);
+                    const existingStart = scheduledByDay.get(startKey);
+                    if (existingStart) existingStart.push(task);
+                    else scheduledByDay.set(startKey, [task]);
+                }
+            }
         }
-        return map;
+        return { visibleTasks, deadlinesByDay, scheduledByDay };
     }, [tasks, projectMap, resolvedAreaFilter, areaById, normalizedViewFilterQuery]);
 
-    const scheduledByDay = useMemo(() => {
-        const map = new Map<string, Task[]>();
-        for (const task of tasks) {
-            if (!isCalendarTaskVisible(task)) continue;
-            if (!task.startTime) continue;
-            const startTime = safeParseDate(task.startTime);
-            if (!startTime) continue;
-            const key = dayKey(startTime);
-            const existing = map.get(key);
-            if (existing) existing.push(task);
-            else map.set(key, [task]);
-        }
-        return map;
-    }, [tasks, projectMap, resolvedAreaFilter, areaById, normalizedViewFilterQuery]);
-
-    const getDeadlinesForDay = (date: Date) => deadlinesByDay.get(dayKey(date)) ?? [];
-    const getScheduledForDay = (date: Date) => scheduledByDay.get(dayKey(date)) ?? [];
+    const getDeadlinesForDay = (date: Date) => calendarTaskData.deadlinesByDay.get(dayKey(date)) ?? [];
+    const getScheduledForDay = (date: Date) => calendarTaskData.scheduledByDay.get(dayKey(date)) ?? [];
     const [openTaskId, setOpenTaskId] = useState<string | null>(null);
     const openTask = openTaskId ? tasks.find((task) => task.id === openTaskId) ?? null : null;
     const openProject = openTask?.projectId ? projectMap.get(openTask.projectId) : undefined;
@@ -133,16 +133,32 @@ export function CalendarView() {
             .catch((error) => reportError('Failed to mark task done', error));
     }, [updateTask]);
 
-    const getExternalEventsForDay = (date: Date) => {
-        const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
-        const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1, 0, 0, 0, 0);
-        return externalEvents.filter((event) => {
+    const externalEventsByDay = useMemo(() => {
+        const nextMap = new Map<string, ExternalCalendarEvent[]>();
+        for (const event of externalEvents) {
             const start = safeParseDate(event.start);
             const end = safeParseDate(event.end);
-            if (!start || !end) return false;
-            return start.getTime() < dayEnd.getTime() && end.getTime() > dayStart.getTime();
-        });
-    };
+            if (!start || !end) continue;
+
+            const lastMoment = new Date(Math.max(start.getTime(), end.getTime() - 1));
+            const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+            const lastDay = new Date(lastMoment.getFullYear(), lastMoment.getMonth(), lastMoment.getDate());
+
+            while (cursor.getTime() <= lastDay.getTime()) {
+                const key = dayKey(cursor);
+                const existing = nextMap.get(key);
+                if (existing) existing.push(event);
+                else nextMap.set(key, [event]);
+                cursor.setDate(cursor.getDate() + 1);
+            }
+        }
+        return nextMap;
+    }, [externalEvents]);
+
+    const getExternalEventsForDay = useCallback(
+        (date: Date) => externalEventsByDay.get(dayKey(date)) ?? [],
+        [externalEventsByDay]
+    );
 
     const timeEstimateToMinutes = (estimate: any): number => {
         if (!timeEstimatesEnabled) return 30;
@@ -271,14 +287,18 @@ export function CalendarView() {
             try {
                 const rangeStart = startOfMonth(currentMonth);
                 const rangeEnd = endOfMonth(currentMonth);
-                const { calendars, events } = await fetchExternalCalendarEvents(rangeStart, rangeEnd);
+                const { calendars, events, warnings } = await fetchExternalCalendarEvents(rangeStart, rangeEnd);
                 if (cancelled) return;
                 setExternalCalendars(calendars);
                 setExternalEvents(events);
+                setExternalError(summarizeExternalCalendarWarnings(warnings));
             } catch (error) {
                 if (cancelled) return;
-                reportError('Failed to load external calendars', error);
-                setExternalError(String(error));
+                const message = error instanceof Error && error.message.trim()
+                    ? error.message.trim()
+                    : 'Failed to load external calendars.';
+                void logError(error, { scope: 'calendar', step: 'loadExternalCalendars' });
+                setExternalError(message);
                 setExternalEvents([]);
             } finally {
                 if (!cancelled) {
@@ -299,14 +319,13 @@ export function CalendarView() {
         const query = scheduleQuery.trim().toLowerCase();
         if (!query) return [];
 
-        return tasks
+        return calendarTaskData.visibleTasks
             .filter((task) => {
-                if (!isCalendarTaskVisible(task)) return false;
                 if (task.status !== 'next') return false;
                 return task.title.toLowerCase().includes(query);
             })
             .slice(0, 12);
-    }, [tasks, scheduleQuery, selectedDate, projectMap, normalizedViewFilterQuery]);
+    }, [calendarTaskData.visibleTasks, scheduleQuery, selectedDate]);
 
     useEffect(() => {
         if (!selectedDate) return;
@@ -425,6 +444,7 @@ export function CalendarView() {
         setScheduleError(null);
         setCurrentMonth((prev) => addMonths(prev, 1));
     };
+    const selectedExternalEvents = selectedDate ? getExternalEventsForDay(selectedDate) : [];
 
     return (
         <ErrorBoundary>
@@ -483,6 +503,12 @@ export function CalendarView() {
                 />
             </div>
 
+            {externalError && (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
+                    {externalError}
+                </div>
+            )}
+
             <div ref={calendarBodyRef} className="space-y-6">
                 <div className="grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden shadow-sm">
                     {weekdayHeaders.map((day) => (
@@ -497,6 +523,12 @@ export function CalendarView() {
                         const taskCount = new Set([...deadlines, ...scheduled].map((t) => t.id)).size;
                         const eventCount = getExternalEventsForDay(day).length;
                         const isSelected = selectedDate && isSameDay(day, selectedDate);
+                        const todayMarkerStyle = isToday(day)
+                            ? {
+                                backgroundColor: 'hsl(var(--primary))',
+                                color: 'hsl(var(--primary-foreground))',
+                            }
+                            : undefined;
 
                         return (
                             <div
@@ -512,12 +544,8 @@ export function CalendarView() {
                                 <div className="flex justify-between items-start">
                                     <div className={cn(
                                         "text-sm font-medium w-6 h-6 flex items-center justify-center rounded-full mb-1",
-                                        isToday(day) && "bg-primary text-primary-foreground"
-                                    )}>
-                                        <span className={cn(
-                                            "tabular-nums leading-none",
-                                            isToday(day) && "text-primary-foreground"
-                                        )}>
+                                    )} style={todayMarkerStyle}>
+                                        <span className="tabular-nums leading-none">
                                             {format(day, 'd')}
                                         </span>
                                     </div>
@@ -639,10 +667,7 @@ export function CalendarView() {
                                 {isExternalLoading && (
                                     <div className="text-sm text-muted-foreground">Loading…</div>
                                 )}
-                                {externalError && (
-                                    <div className="text-sm text-red-400">{externalError}</div>
-                                )}
-                                {getExternalEventsForDay(selectedDate).map((event) => {
+                                {selectedExternalEvents.map((event) => {
                                     const start = safeParseDate(event.start);
                                     const end = safeParseDate(event.end);
                                     const timeLabel = event.allDay
@@ -659,7 +684,7 @@ export function CalendarView() {
                                         </div>
                                     );
                                 })}
-                                {!isExternalLoading && !externalError && getExternalEventsForDay(selectedDate).length === 0 && (
+                                {!isExternalLoading && !externalError && selectedExternalEvents.length === 0 && (
                                     <div className="text-sm text-muted-foreground">{t('calendar.noTasks')}</div>
                                 )}
                             </div>
@@ -780,7 +805,7 @@ export function CalendarView() {
                 </div>
             )}
             {openTask && (
-                <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
+                <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
                     <div
                         className="absolute inset-0"
                         onClick={() => setOpenTaskId(null)}

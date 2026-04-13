@@ -80,6 +80,13 @@ vi.mock('expo-haptics', () => ({
   notificationAsync: hapticsMocks.notificationAsync,
 }));
 
+vi.mock('../contexts/toast-context', () => ({
+  useToast: () => ({
+    showToast: vi.fn(),
+    dismissToast: vi.fn(),
+  }),
+}));
+
 vi.mock('lucide-react-native', () => ({
   ArrowRight: (props: any) => React.createElement('ArrowRight', props),
   Check: (props: any) => React.createElement('Check', props),
@@ -334,5 +341,45 @@ describe('SwipeableTaskItem', () => {
     expect(onDelete).toHaveBeenCalledTimes(1);
     expect(updateTask).not.toHaveBeenCalled();
     vi.useRealTimers();
+  });
+
+  it('hides checklist progress when requested by the list view', () => {
+    const task = {
+      id: 'task-1',
+      title: 'Plan move',
+      status: 'inbox',
+      checklist: [{ id: 'item-1', title: 'Book van', isCompleted: false }],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    } as any;
+    getChecklistProgress.mockReturnValue({
+      completed: 0,
+      total: 1,
+      percent: 0,
+    });
+
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(
+        <SwipeableTaskItem
+          task={task}
+          isDark={false}
+          tc={{
+            taskItemBg: '#111111',
+            border: '#222222',
+            text: '#ffffff',
+            secondaryText: '#999999',
+            tint: '#3b82f6',
+            warning: '#f59e0b',
+          } as any}
+          onPress={vi.fn()}
+          onStatusChange={vi.fn()}
+          onDelete={vi.fn()}
+          hideChecklistProgress
+        />
+      );
+    });
+
+    expect(() => tree.root.find((node) => node.props.accessibilityLabel === 'checklist.progress')).toThrow();
   });
 });

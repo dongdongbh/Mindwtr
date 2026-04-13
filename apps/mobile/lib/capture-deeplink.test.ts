@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseShortcutCaptureUrl } from './capture-deeplink';
+import { isShortcutCaptureUrl, parseShortcutCaptureUrl } from './capture-deeplink';
 
 describe('capture-deeplink', () => {
     it('parses capture URLs with title, note, project, and tags', () => {
@@ -34,5 +34,12 @@ describe('capture-deeplink', () => {
             title: 'Task',
             tags: ['alpha', 'beta'],
         });
+    });
+
+    it('detects capture routes even when the payload is invalid', () => {
+        expect(isShortcutCaptureUrl('mindwtr://capture?title=')).toBe(true);
+        expect(isShortcutCaptureUrl('mindwtr:///capture?note=Missing%20title')).toBe(true);
+        expect(isShortcutCaptureUrl('mindwtr://focus')).toBe(false);
+        expect(isShortcutCaptureUrl('https://mindwtr.app/capture?title=Test')).toBe(false);
     });
 });

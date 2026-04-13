@@ -2,7 +2,7 @@
   "name": "mobile",
   "license": "AGPL-3.0-only",
   "main": "index.js",
-  "version": "0.8.0",
+  "version": "0.8.2",
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
@@ -87,7 +87,7 @@
     "eslint-config-expo": "~10.0.0",
     "react-test-renderer": "19.1.0",
     "typescript": "~5.9.2",
-    "vitest": "^2.1.8"
+    "vitest": "^3.2.4"
   },
   "expo": {
     "install": {

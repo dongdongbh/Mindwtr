@@ -56,7 +56,9 @@ jobs:
       - name: Audit Rust dependencies
         run: |
           set -euo pipefail
-          if ! cargo audit --deny warnings --file apps/desktop/src-tauri/Cargo.lock; then
+          # Temporary ignore for a new rand advisory that is currently only
+          # reachable through upstream Tauri/wry transitive dependencies.
+          if ! cargo audit --deny warnings --ignore RUSTSEC-2026-0097 --file apps/desktop/src-tauri/Cargo.lock; then
             echo "cargo audit reported vulnerabilities or warnings, or failed." >&2
             exit 1
           fi

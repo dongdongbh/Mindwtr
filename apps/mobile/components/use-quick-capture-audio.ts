@@ -4,9 +4,9 @@ import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, 
 import { Directory, File, Paths } from 'expo-file-system';
 import {
   DEFAULT_PROJECT_COLOR,
+  buildTaskUpdatesFromSpeechResult,
   generateUUID,
   safeFormatDate,
-  safeParseDate,
   type AppData,
   type Attachment,
   type Task,
@@ -14,6 +14,7 @@ import {
 } from '@mindwtr/core';
 import { loadAIKey } from '../lib/ai-config';
 import { persistAttachmentLocally } from '../lib/attachment-sync';
+import { useToast } from '../contexts/toast-context';
 import {
   ensureWhisperModelPathForConfig,
   preloadWhisperContext,
@@ -67,6 +68,7 @@ export function useQuickCaptureAudio({
   updateSpeechSettings,
   visible,
 }: UseQuickCaptureAudioParams) {
+  const { showToast } = useToast();
   const [recording, setRecording] = useState<RecordingState | null>(null);
   const [recordingBusy, setRecordingBusy] = useState(false);
   const [recordingReady, setRecordingReady] = useState(false);
@@ -165,89 +167,15 @@ export function useQuickCaptureAudio({
     const existing = currentTasks.find((task) => task.id === taskId);
     if (!existing) return;
 
-    const updates: Partial<Task> = {};
-    const mode = currentSettings.ai?.speechToText?.mode ?? 'smart_parse';
-    const fieldStrategy = currentSettings.ai?.speechToText?.fieldStrategy ?? 'smart';
-    const transcript = result.transcript?.trim();
-
-    if (mode === 'transcribe_only') {
-      if (transcript) {
-        if (fieldStrategy === 'description_only') {
-          updates.description = transcript;
-        } else if (fieldStrategy === 'title_only') {
-          updates.title = transcript;
-        } else {
-          const wordCount = transcript.split(/\s+/).filter(Boolean).length;
-          if (wordCount <= 15) {
-            updates.title = transcript;
-          } else {
-            updates.description = transcript;
-          }
-        }
-      }
-    } else {
-      if (result.title && result.title.trim()) updates.title = result.title.trim();
-      if (result.description !== undefined && result.description !== null) {
-        const desc = result.description.trim();
-        updates.description = desc ? desc : undefined;
-      }
-      if (!updates.title && transcript) {
-        if (fieldStrategy === 'description_only') {
-          updates.description = transcript;
-        } else if (fieldStrategy === 'title_only') {
-          updates.title = transcript;
-        } else {
-          const wordCount = transcript.split(/\s+/).filter(Boolean).length;
-          if (wordCount <= 15) {
-            updates.title = transcript;
-          } else {
-            const words = transcript.split(/\s+/).filter(Boolean);
-            updates.title = `${words.slice(0, 7).join(' ')}...`;
-            if (!updates.description) {
-              updates.description = transcript;
-            }
-          }
-        }
-      }
-    }
-
-    if (result.dueDate) {
-      const parsed = safeParseDate(result.dueDate);
-      if (parsed) updates.dueDate = parsed.toISOString();
-    }
-    if (result.startTime) {
-      const parsed = safeParseDate(result.startTime);
-      if (parsed) updates.startTime = parsed.toISOString();
-    }
-
-    const normalizeList = (items: string[] | null | undefined, prefix: string) => {
-      if (!Array.isArray(items)) return [];
-      return items
-        .map((item) => item.trim())
-        .filter(Boolean)
-        .map((item) => (item.startsWith(prefix) ? item : `${prefix}${item}`));
-    };
-
-    const nextTags = normalizeList(result.tags ?? [], '#');
-    const nextContexts = normalizeList(result.contexts ?? [], '@');
-    if (nextTags.length) {
-      updates.tags = Array.from(new Set([...(existing.tags ?? []), ...nextTags]));
-    }
-    if (nextContexts.length) {
-      updates.contexts = Array.from(new Set([...(existing.contexts ?? []), ...nextContexts]));
-    }
-
-    if (result.projectTitle && !existing.projectId) {
-      const trimmed = typeof result.projectTitle === 'string' ? result.projectTitle.trim() : '';
-      if (trimmed) {
-        const match = currentProjects.find((project) => project.title.toLowerCase() === trimmed.toLowerCase());
-        if (match) {
-          updates.projectId = match.id;
-        } else {
-          const created = await addProjectNow(trimmed, DEFAULT_PROJECT_COLOR);
-          if (!created) return;
-          updates.projectId = created.id;
-        }
+    const { updates, suggestedProjectTitle } = buildTaskUpdatesFromSpeechResult(existing, result, currentSettings);
+    if (suggestedProjectTitle && !existing.projectId) {
+      const match = currentProjects.find((project) => project.title.toLowerCase() === suggestedProjectTitle.toLowerCase());
+      if (match) {
+        updates.projectId = match.id;
+      } else {
+        const created = await addProjectNow(suggestedProjectTitle, DEFAULT_PROJECT_COLOR);
+        if (!created) return;
+        updates.projectId = created.id;
       }
     }
 
@@ -435,7 +363,12 @@ export function useQuickCaptureAudio({
         if (attachment) attachments.push(attachment);
         const { title, props, invalidDateCommands } = await buildTaskProps(displayTitle, { attachments });
         if (invalidDateCommands && invalidDateCommands.length > 0) {
-          Alert.alert(t('common.notice'), `${t('quickAdd.invalidDateCommand')}: ${invalidDateCommands.join(', ')}`);
+          showToast({
+            title: t('common.notice'),
+            message: `${t('quickAdd.invalidDateCommand')}: ${invalidDateCommands.join(', ')}`,
+            tone: 'warning',
+            durationMs: 4200,
+          });
           return;
         }
         if (!title.trim()) return;
@@ -578,7 +511,12 @@ export function useQuickCaptureAudio({
       if (attachment) attachments.push(attachment);
       const { title, props, invalidDateCommands } = await buildTaskProps(displayTitle, { attachments });
       if (invalidDateCommands && invalidDateCommands.length > 0) {
-        Alert.alert(t('common.notice'), `${t('quickAdd.invalidDateCommand')}: ${invalidDateCommands.join(', ')}`);
+        showToast({
+          title: t('common.notice'),
+          message: `${t('quickAdd.invalidDateCommand')}: ${invalidDateCommands.join(', ')}`,
+          tone: 'warning',
+          durationMs: 4200,
+        });
         return;
       }
       if (!title.trim()) return;
@@ -636,6 +574,7 @@ export function useQuickCaptureAudio({
     resolveWhisperModel,
     safeDeleteFile,
     settings,
+    showToast,
     stripFileScheme,
     t,
   ]);

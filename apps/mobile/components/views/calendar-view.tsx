@@ -13,6 +13,7 @@ import {
   useTaskStore,
 } from '@mindwtr/core';
 import { useTheme } from '../../contexts/theme-context';
+import { useToast } from '../../contexts/toast-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { taskMatchesAreaFilter } from '@/lib/area-filter';
@@ -55,6 +56,7 @@ const SNAP_MINUTES = 5;
 export function CalendarView() {
   const { tasks, projects, updateTask, deleteTask, settings } = useTaskStore();
   const { isDark } = useTheme();
+  const { showToast } = useToast();
   const tc = useThemeColors();
   const toRgba = (hex: string, alpha: number) => {
     const normalized = hex.replace('#', '');
@@ -70,7 +72,7 @@ export function CalendarView() {
   const { t, language } = useLanguage();
   const localize = (enText: string, zhText?: string) =>
     (language === 'zh' || language === 'zh-Hant') && zhText ? zhText : translateText(enText, language);
-  const timeEstimatesEnabled = useTaskStore((state) => state.settings?.features?.timeEstimates === true);
+  const timeEstimatesEnabled = useTaskStore((state) => state.settings?.features?.timeEstimates !== false);
   const today = new Date();
   const [currentMonth, setCurrentMonth] = useState(today.getMonth());
   const [currentYear, setCurrentYear] = useState(today.getFullYear());
@@ -336,10 +338,12 @@ export function CalendarView() {
     const durationMinutes = timeEstimateToMinutes(task.timeEstimate);
     const slot = findFreeSlotForDay(selectedDate, durationMinutes, taskId);
     if (!slot) {
-      Alert.alert(
-        localize('No free time', '没有空闲时间'),
-        localize('There is not enough free time on this day to schedule the task.', '这一天没有足够的空闲时间来安排该任务。')
-      );
+      showToast({
+        title: localize('No free time', '没有空闲时间'),
+        message: localize('There is not enough free time on this day to schedule the task.', '这一天没有足够的空闲时间来安排该任务。'),
+        tone: 'info',
+        durationMs: 4200,
+      });
       return;
     }
 
@@ -396,10 +400,12 @@ export function CalendarView() {
     const nextStart = new Date(dayStartMs + startMinutes * 60 * 1000);
     const ok = isSlotFreeForDay(day, nextStart, durationMinutes, taskId);
     if (!ok) {
-      Alert.alert(
-        localize('Time conflict', '时间冲突'),
-        localize('That time overlaps with an event. Please choose a free slot.', '该时间段与日程冲突，请选择空闲时间。')
-      );
+      showToast({
+        title: localize('Time conflict', '时间冲突'),
+        message: localize('That time overlaps with an event. Please choose a free slot.', '该时间段与日程冲突，请选择空闲时间。'),
+        tone: 'warning',
+        durationMs: 4200,
+      });
       return;
     }
     updateTask(taskId, { startTime: nextStart.toISOString() }).catch(logCalendarError);

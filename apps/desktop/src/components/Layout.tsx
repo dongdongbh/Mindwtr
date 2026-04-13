@@ -7,7 +7,7 @@ import {
     Layers,
     Tag,
     CheckCircle2,
-    HelpCircle,
+    ChevronDown,
     Folder,
     Settings,
     Target,
@@ -48,9 +48,33 @@ type NavItem = {
 };
 
 type NavSection = {
+    key: string;
     label: string;
     items: NavItem[];
 };
+
+const SECTION_COLLAPSE_STORAGE_KEY = 'mindwtr:sidebar:collapsedSections';
+
+function loadCollapsedSections(): Set<string> {
+    if (typeof window === 'undefined') return new Set();
+    try {
+        const raw = window.localStorage.getItem(SECTION_COLLAPSE_STORAGE_KEY);
+        if (!raw) return new Set();
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? new Set(parsed.filter((v): v is string => typeof v === 'string')) : new Set();
+    } catch {
+        return new Set();
+    }
+}
+
+function saveCollapsedSections(keys: Set<string>) {
+    if (typeof window === 'undefined') return;
+    try {
+        window.localStorage.setItem(SECTION_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(keys)));
+    } catch {
+        // storage unavailable — fall back to in-memory only
+    }
+}
 
 export function Layout({ children, currentView, onViewChange }: LayoutProps) {
     const { tasks, projects, areas, settings, updateSettings, error, setError } = useTaskStore((state) => ({
@@ -77,6 +101,7 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
     ), []);
     const lastSyncAt = settings?.lastSyncAt;
     const lastSyncStatus = settings?.lastSyncStatus;
+    const lastSyncError = settings?.lastSyncError?.trim();
 
     // Compute sync freshness bucket on a 60-second timer instead of every render
     // to prevent idle re-render flicker from Date.now() changing each frame.
@@ -112,7 +137,9 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
     const fullSyncTimestamp = lastSyncAt ? safeFormatDate(lastSyncAt, 'PPpp', lastSyncAt) : t('settings.lastSyncNever');
     const syncTooltip = !isOnline
         ? (t('common.offline') || 'Offline')
-        : `${tOrFallback('settings.lastSync', 'Last sync')}: ${fullSyncTimestamp}`;
+        : lastSyncStatus === 'error' && lastSyncError
+            ? `${tOrFallback('settings.lastSyncError', 'Sync failed')}: ${lastSyncError}\n${tOrFallback('settings.lastSync', 'Last sync')}: ${fullSyncTimestamp}`
+            : `${tOrFallback('settings.lastSync', 'Last sync')}: ${fullSyncTimestamp}`;
     const formatCompactSyncTime = useCallback((iso: string) => {
         const date = new Date(iso);
         if (Number.isNaN(date.getTime())) return iso;
@@ -164,7 +191,6 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
         'contexts',
         'search',
         'agenda',
-        'tutorial',
         'obsidian',
     ]);
     const isWideView = wideViews.has(currentView);
@@ -179,6 +205,7 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
 
     const navSections = useMemo<NavSection[]>(() => ([
         {
+            key: 'focus',
             label: t('nav.sectionFocus') || 'Focus',
             items: [
                 { id: 'inbox', labelKey: 'nav.inbox', icon: Inbox, count: inboxCount },
@@ -186,6 +213,7 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
             ],
         },
         {
+            key: 'lists',
             label: t('nav.sectionLists') || 'Lists',
             items: [
                 { id: 'projects', labelKey: 'nav.projects', icon: Folder },
@@ -195,6 +223,7 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
             ],
         },
         {
+            key: 'organize',
             label: t('nav.sectionOrganize') || 'Organize',
             items: [
                 { id: 'calendar', labelKey: 'nav.calendar', icon: Calendar },
@@ -204,10 +233,10 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
                     ? [{ id: 'obsidian', labelKey: 'nav.obsidian', fallbackLabel: 'Obsidian', icon: BookOpen }]
                     : []),
                 { id: 'board', labelKey: 'nav.board', icon: Layers },
-                { id: 'tutorial', labelKey: 'nav.tutorial', icon: HelpCircle },
             ],
         },
         {
+            key: 'archive',
             label: t('nav.sectionArchive') || 'Archive',
             items: [
                 { id: 'done', labelKey: 'nav.done', icon: CheckSquare },
@@ -216,6 +245,33 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
             ],
         },
     ]), [inboxCount, isObsidianEnabled, t]);
+
+    const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => loadCollapsedSections());
+
+    useEffect(() => {
+        saveCollapsedSections(collapsedSections);
+    }, [collapsedSections]);
+
+    // Auto-expand the section containing the active view so it's never hidden.
+    useEffect(() => {
+        const activeSection = navSections.find((section) => section.items.some((item) => item.id === currentView));
+        if (!activeSection) return;
+        setCollapsedSections((prev) => {
+            if (!prev.has(activeSection.key)) return prev;
+            const next = new Set(prev);
+            next.delete(activeSection.key);
+            return next;
+        });
+    }, [currentView, navSections]);
+
+    const toggleSection = useCallback((key: string) => {
+        setCollapsedSections((prev) => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+        });
+    }, []);
 
     const triggerSearch = () => {
         window.dispatchEvent(new CustomEvent('mindwtr:open-search'));
@@ -343,13 +399,29 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
                     )}
 
                     <nav className="space-y-4 pb-4" data-sidebar-nav>
-                        {navSections.map((section) => (
-                            <div key={section.label} className="space-y-0.5">
+                        {navSections.map((section) => {
+                            const isSectionCollapsed = !isCollapsed && collapsedSections.has(section.key);
+                            const sectionId = `sidebar-section-${section.key}`;
+                            return (
+                            <div key={section.key} className="space-y-0.5">
                                 {!isCollapsed && (
-                                    <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                                        {section.label}
-                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => toggleSection(section.key)}
+                                        aria-expanded={!isSectionCollapsed}
+                                        aria-controls={sectionId}
+                                        className="group w-full flex items-center gap-1 px-3 pt-2 pb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded cursor-pointer"
+                                    >
+                                        <ChevronDown
+                                            className={cn(
+                                                "w-3 h-3 transition-transform duration-150",
+                                                isSectionCollapsed && "-rotate-90"
+                                            )}
+                                        />
+                                        <span>{section.label}</span>
+                                    </button>
                                 )}
+                                <div id={sectionId} className={cn("space-y-0.5", isSectionCollapsed && "hidden")}>
                                 {section.items.map((item) => (
                                     <button
                                         key={item.id}
@@ -382,8 +454,10 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
                                         )}
                                     </button>
                                 ))}
+                                </div>
                             </div>
-                        ))}
+                            );
+                        })}
                     </nav>
                 </div>
 

@@ -109,6 +109,8 @@ enum CloudKitRecordMapper {
         FieldSpec(jsKey: "title", ckKey: "title", kind: .string),
         FieldSpec(jsKey: "status", ckKey: "status", kind: .string),
         FieldSpec(jsKey: "priority", ckKey: "priority", kind: .string),
+        FieldSpec(jsKey: "energyLevel", ckKey: "energyLevel", kind: .string),
+        FieldSpec(jsKey: "assignedTo", ckKey: "assignedTo", kind: .string),
         FieldSpec(jsKey: "taskMode", ckKey: "taskMode", kind: .string),
         FieldSpec(jsKey: "startTime", ckKey: "startTime", kind: .date),
         FieldSpec(jsKey: "dueDate", ckKey: "dueDate", kind: .date),

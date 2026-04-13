@@ -174,6 +174,12 @@ For advanced users, Mindwtr includes a simple sync server (`apps/cloud`) that ca
 - **Docker setup**: [[Docker Deployment]]
 - **Operations guide**: [[Cloud Deployment]]
 
+Important client note:
+
+- **HTTPS is required for Mindwtr Cloud on normal device URLs.** `http://localhost` is allowed for local development, but a LAN URL such as `http://192.168.x.x` is not supported for Cloud sync clients.
+- If you are self-hosting on your local network, put the cloud server behind HTTPS with a reverse proxy such as `caddy`, `nginx`, or `traefik`.
+- If you specifically need plain HTTP on a private LAN, use **WebDAV** instead. Mindwtr allows HTTP for WebDAV on localhost/private IP ranges.
+
 ### 5. Dropbox OAuth Sync
 
 Mindwtr also supports direct Dropbox sync in supported desktop/mobile builds.

@@ -7,12 +7,14 @@
     "packages/*"
   ],
   "overrides": {
+    "@xmldom/xmldom": "0.8.12",
     "esbuild": "0.25.12",
     "minimatch": "10.2.3",
+    "lodash-es": "4.18.1",
     "rollup": "4.59.0",
     "brace-expansion": "5.0.5",
-    "hono": "4.12.8",
-    "@hono/node-server": "1.19.11",
+    "hono": "4.12.12",
+    "@hono/node-server": "1.19.14",
     "express-rate-limit": "8.3.1",
     "flatted": "3.4.2",
     "node-forge": "1.4.0",
@@ -20,6 +22,7 @@
     "picomatch": "4.0.4",
     "tar": "7.5.11",
     "undici": "6.24.1",
+    "vite": "7.3.2",
     "yaml": "2.8.3",
     "@eslint/eslintrc": {
       "ajv": "6.14.0"
@@ -34,6 +37,7 @@
     }
   },
   "resolutions": {
+    "@xmldom/xmldom": "0.8.12",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "expo-constants": "18.0.13",
@@ -42,17 +46,18 @@
     "brace-expansion": "5.0.5",
     "@isaacs/brace-expansion": "5.0.1",
     "esbuild": "0.25.12",
-    "hono": "4.12.8",
-    "@hono/node-server": "1.19.11",
+    "hono": "4.12.12",
+    "@hono/node-server": "1.19.14",
     "express-rate-limit": "8.3.1",
     "flatted": "3.4.2",
-    "lodash-es": "4.17.23",
+    "lodash-es": "4.18.1",
     "node-forge": "1.4.0",
     "path-to-regexp": "8.4.0",
     "picomatch": "4.0.4",
     "qs": "6.15.0",
     "tar": "7.5.11",
     "undici": "6.24.1",
+    "vite": "7.3.2",
     "yaml": "2.8.3"
   },
   "scripts": {
@@ -73,7 +78,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",
-    "@vitest/coverage-v8": "^2.1.8",
+    "@vitest/coverage-v8": "^3.2.4",
     "eslint": "^9.39.1"
   },
   "dependencies": {
@@ -135,5 +140,5 @@
     "webidl-conversions": "^8.0.0",
     "whatwg-url-without-unicode": "^8.0.0-3"
   },
-  "version": "0.8.0"
+  "version": "0.8.2"
 }

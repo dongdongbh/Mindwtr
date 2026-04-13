@@ -90,10 +90,13 @@ pub(crate) fn open_sqlite(app: &tauri::AppHandle) -> Result<Connection, String> 
         .map_err(|e| e.to_string())?;
     conn.execute_batch(SQLITE_SCHEMA)
         .map_err(|e| e.to_string())?;
+    ensure_column(&conn, "tasks", "energyLevel", "TEXT")?;
+    ensure_column(&conn, "tasks", "assignedTo", "TEXT")?;
     ensure_tasks_purged_at_column(&conn)?;
     ensure_tasks_order_column(&conn)?;
     ensure_tasks_area_column(&conn)?;
     ensure_tasks_section_column(&conn)?;
+    ensure_tasks_organization_indexes(&conn)?;
     ensure_projects_order_column(&conn)?;
     ensure_projects_due_date_column(&conn)?;
     ensure_projects_area_order_index(&conn)?;
@@ -325,6 +328,20 @@ fn ensure_tasks_section_column(conn: &Connection) -> Result<(), String> {
     }
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_tasks_section_id ON tasks(sectionId)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn ensure_tasks_organization_indexes(conn: &Connection) -> Result<(), String> {
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_energyLevel ON tasks(energyLevel)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_assignedTo ON tasks(assignedTo)",
         [],
     )
     .map_err(|e| e.to_string())?;
@@ -586,6 +603,16 @@ fn row_to_task_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Error> 
     if let Ok(val) = row.get::<_, Option<String>>("priority") {
         if let Some(v) = val {
             map.insert("priority".to_string(), Value::String(v));
+        }
+    }
+    if let Ok(val) = row.get::<_, Option<String>>("energyLevel") {
+        if let Some(v) = val {
+            map.insert("energyLevel".to_string(), Value::String(v));
+        }
+    }
+    if let Ok(val) = row.get::<_, Option<String>>("assignedTo") {
+        if let Some(v) = val {
+            map.insert("assignedTo".to_string(), Value::String(v));
         }
     }
     if let Ok(val) = row.get::<_, Option<String>>("taskMode") {
@@ -873,12 +900,14 @@ fn migrate_json_to_sqlite(conn: &mut Connection, data: &Value) -> Result<(), Str
         let checklist_json = json_str(task.get("checklist"));
         let attachments_json = json_str(task.get("attachments"));
         tx.execute(
-            "INSERT OR REPLACE INTO tasks (id, title, status, priority, taskMode, startTime, dueDate, recurrence, pushCount, tags, contexts, checklist, description, attachments, location, projectId, sectionId, areaId, orderNum, isFocusedToday, timeEstimate, reviewAt, completedAt, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
+            "INSERT OR REPLACE INTO tasks (id, title, status, priority, energyLevel, assignedTo, taskMode, startTime, dueDate, recurrence, pushCount, tags, contexts, checklist, description, attachments, location, projectId, sectionId, areaId, orderNum, isFocusedToday, timeEstimate, reviewAt, completedAt, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)",
             params![
                 task.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
                 task.get("title").and_then(|v| v.as_str()).unwrap_or_default(),
                 task.get("status").and_then(|v| v.as_str()).unwrap_or("inbox"),
                 task.get("priority").and_then(|v| v.as_str()),
+                task.get("energyLevel").and_then(|v| v.as_str()),
+                task.get("assignedTo").and_then(|v| v.as_str()),
                 task.get("taskMode").and_then(|v| v.as_str()),
                 task.get("startTime").and_then(|v| v.as_str()),
                 task.get("dueDate").and_then(|v| v.as_str()),
@@ -1703,6 +1732,36 @@ mod tests {
             .map(|row| row.expect("index row"))
             .collect();
         assert!(index_names.iter().any(|name| name == "idx_projects_dueDate"));
+    }
+
+    #[test]
+    fn ensure_tasks_organization_indexes_create_energy_and_assignee_indexes() {
+        let conn = Connection::open_in_memory().expect("should open in-memory db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE tasks (
+              id TEXT PRIMARY KEY,
+              title TEXT NOT NULL,
+              status TEXT NOT NULL,
+              energyLevel TEXT,
+              assignedTo TEXT
+            );
+            "#,
+        )
+        .expect("should create tasks table");
+
+        ensure_tasks_organization_indexes(&conn).expect("should create task organization indexes");
+
+        let mut stmt = conn
+            .prepare("PRAGMA index_list(tasks)")
+            .expect("should inspect task indexes");
+        let index_names: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("should read task indexes")
+            .map(|row| row.expect("index row"))
+            .collect();
+        assert!(index_names.iter().any(|name| name == "idx_tasks_energyLevel"));
+        assert!(index_names.iter().any(|name| name == "idx_tasks_assignedTo"));
     }
 }
 

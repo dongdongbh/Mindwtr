@@ -10,7 +10,7 @@
 
 *GTD 新手？可阅读 [15 分钟入门 GTD](https://hamberg.no/gtd)。*
 
-[立即安装](#安装) · [快速开始](https://github.com/dongdongbh/Mindwtr/wiki/Getting-Started) · [数据与同步](https://github.com/dongdongbh/Mindwtr/wiki/Data-and-Sync)
+[立即安装](#安装) · [快速开始](https://github.com/dongdongbh/Mindwtr/wiki/Getting-Started) · [数据与同步](https://github.com/dongdongbh/Mindwtr/wiki/Data-and-Sync) · [云同步](https://github.com/dongdongbh/Mindwtr/wiki/Cloud-Sync) · [MCP 服务器](https://github.com/dongdongbh/Mindwtr/wiki/MCP-Server)
 
 [![CI](https://github.com/dongdongbh/Mindwtr/actions/workflows/ci.yml/badge.svg)](https://github.com/dongdongbh/Mindwtr/actions/workflows/ci.yml)
 [![GitHub license](https://img.shields.io/github/license/dongdongbh/Mindwtr?color=brightgreen)](LICENSE)
@@ -86,7 +86,7 @@ Mindwtr 面向想要完整 GTD 且不被平台锁定的用户。下面是与主�
 
 说明：`✅` = 支持，`❌` = 不支持，`⚠️` = 部分或受限支持。
 
-*以上信息基于 2026 年 2 月 25 日官方产品页面/文档整理。如有变更，欢迎附来源提交 issue/PR。*
+*以上信息基于公开产品页面/文档整理。如有变更，欢迎附来源提交 issue/PR。*
 
 ## 理念
 
@@ -102,7 +102,8 @@ Mindwtr **默认简单，需要时也足够强大**。我们专注于降低认�
 
 - 覆盖完整 GTD 流程：收集、澄清、组织、回顾、执行。
 - 聚焦视图整合时间日程与下一步行动。
-- 本地优先数据模型，支持灵活同步方案。
+- 本地优先数据模型；在受支持的 Apple 构建中提供原生 iCloud / CloudKit 同步，也支持文件同步、WebDAV、Dropbox 与自托管云方案。
+- 项目支持分区与领域，适合更复杂的多步骤规划。
 - 桌面端支持 Obsidian 仓库任务导入与笔记深度链接。
 - 可选 AI Copilot（BYOK + 本地/自托管兼容模型）。
 - 桌面端、移动端与 PWA 全平台可用。
@@ -114,7 +115,7 @@ Mindwtr **默认简单，需要时也足够强大**。我们专注于降低认�
 ### GTD 工作流
 - **收集** - 随时快速添加任务（全局快捷键、托盘、分享、语音）
 - **澄清** - 2 分钟法则引导的收件箱处理
-- **组织** - 项目、情境与状态清单
+- **组织** - 项目、分区、情境与状态清单
 - **回顾** - 带提醒的每周回顾向导
 - **执行** - 基于情境筛选的下一步行动
 - **AI 辅助（可选）** - 使用自带密钥的 AI 完成澄清、拆解与回顾（OpenAI、Gemini、Claude，或本地/自托管 OpenAI 兼容 LLM）
@@ -122,7 +123,7 @@ Mindwtr **默认简单，需要时也足够强大**。我们专注于降低认�
 ### 视图
 - 📥 **收件箱** - 任务收集区与处理向导
 - 🎯 **聚焦** - 日程（时间维度）+ 下一步行动合并视图
-- 📁 **项目** - 带领域的多步骤成果
+- 📁 **项目** - 支持分区与领域的多步骤成果
 - 🏷️ **情境** - 支持父级匹配的斜杠式情境（@work/meetings）
 - ⏳ **等待中** - 委派事项
 - 💭 **将来/也许** - 延后想法
@@ -149,8 +150,11 @@ Mindwtr **默认简单，需要时也足够强大**。我们专注于降低认�
 
 ### 数据与同步
 - 🔄 **同步选项** - 支持后端与配置方式请见 [数据与同步 Wiki](https://github.com/dongdongbh/Mindwtr/wiki/Data-and-Sync)
+- 🍎 **原生 iCloud / CloudKit 同步** - 在受支持的 iPhone、iPad 与 macOS 构建中提供 Apple 平台专属结构化同步
 - ☁️ **Dropbox OAuth 同步（可选）** - 在支持的非 FOSS 构建中提供原生 Dropbox App Folder 同步
 - 📤 **导出/备份** - 导出 JSON 数据
+- ♻️ **从备份恢复** - 先创建恢复快照，再用已验证的 Mindwtr 备份替换本地数据
+- 📥 **Todoist CSV/ZIP 导入** - 将 Todoist 导出导入到 Mindwtr 的项目与收件箱
 - 🔗 **Obsidian 集成** - 桌面端导入 Vault 中的任务，并可深度链接回源笔记
 - 🗓️ **外部日历（系统日历 + ICS）** - 移动端读取系统日历；桌面端支持 ICS 订阅
 
@@ -256,6 +260,12 @@ scoop bucket add mindwtr https://github.com/dongdongbh/homebrew-mindwtr
 scoop install mindwtr
 ```
 
+**便携版 ZIP（无需管理员权限）：**
+
+- 从 [GitHub Releases](https://github.com/dongdongbh/Mindwtr/releases) 下载 `*_portable.zip` 资源。
+- 解压到可写目录，并将 `portable.txt` 与 `mindwtr.exe` 放在同一目录。
+- Mindwtr 会将数据保存在解压目录下的 `profile/` 中。
+
 **其他方式：** 从 [GitHub Releases](https://github.com/dongdongbh/Mindwtr/releases) 获取 `.exe`。
 
 ### 桌面端（macOS）
@@ -336,11 +346,10 @@ Mindwtr 的发展离不开用户与贡献者的支持，感谢大家一起把它
 
 ## 路线图
 
-- 📦 上架 Flathub
-- 🤖 上架 F-Droid
-- ☁️ 原生 iCloud / CloudKit 同步（Apple 生态）
+- 🤖 上架 F-Droid（[#219](https://github.com/dongdongbh/Mindwtr/issues/219)）
 - 🗣️ iOS 提醒事项收件箱导入（Siri 收集 -> Mindwtr 收件箱）
-- ✉️ 邮件添加到收件箱
+- ✉️ 邮件添加到收件箱（[#35](https://github.com/dongdongbh/Mindwtr/issues/35)）
+- 🗓️ Mindwtr 单向导出/同步到外部日历（[#361](https://github.com/dongdongbh/Mindwtr/issues/361)）
 
 ## 文档
 

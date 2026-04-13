@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  classifySyncFailure,
   getSyncConflictCount,
   getSyncMaxClockSkewMs,
   getSyncTimestampAdjustments,
@@ -118,6 +119,17 @@ describe('mobile sync-service test utils', () => {
     expect(isLikelyOfflineSyncError('request failed: ECONNRESET')).toBe(true);
     expect(isLikelyOfflineSyncError('AxiosError: connect ETIMEDOUT')).toBe(true);
     expect(isLikelyOfflineSyncError('WebDAV unauthorized (401). Check folder URL')).toBe(false);
+  });
+
+  it('classifies auth and permission sync failures for actionable messaging', () => {
+    expect(classifySyncFailure('WebDAV unauthorized (401). Check folder URL, username, and app password.')).toBe('auth');
+    expect(classifySyncFailure("Sync file is not writable. Re-select the sync folder in Settings -> Data & Sync, then sync again.")).toBe('permission');
+  });
+
+  it('classifies rate-limited, misconfigured, and conflict sync failures', () => {
+    expect(classifySyncFailure('WebDAV rate limited. Sync paused briefly; try again in about a minute.')).toBe('rateLimited');
+    expect(classifySyncFailure('WebDAV folder URL is not configured. Save WebDAV settings first.')).toBe('misconfigured');
+    expect(classifySyncFailure('Sync conflict detected: stale remote state')).toBe('conflict');
   });
 
   it('summarizes merge stats across all synced entity types', () => {

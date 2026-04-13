@@ -264,7 +264,9 @@ describe('mobile sync-service runtime', () => {
     coreMocks.performSyncCycle.mockImplementation(async (io: any) => {
       const local = await io.readLocal();
       const remote = await io.readRemote();
-      const data = remote ?? local;
+      let data = remote ?? local;
+      const prepared = await io.prepareRemoteWrite?.(data);
+      data = prepared ?? data;
       await io.writeLocal(data);
       await io.writeRemote(data);
       return { status: 'success', stats: emptyStats, data };
@@ -356,6 +358,81 @@ describe('mobile sync-service runtime', () => {
     expect(result).toEqual({ success: true, skipped: 'requeued' });
     expect(storeStateRef.current.updateSettings).not.toHaveBeenCalled();
     expect(logMocks.logSyncError).not.toHaveBeenCalled();
+  });
+
+  it('runs a final attachment sync pass before writing remote data when uploads are still pending', async () => {
+    const localData = {
+      tasks: [
+        {
+          id: 'task-1',
+          title: 'Task',
+          status: 'inbox',
+          tags: [],
+          contexts: [],
+          attachments: [
+            {
+              id: 'att-1',
+              kind: 'file',
+              title: 'doc.txt',
+              uri: 'file:///local/doc.txt',
+              createdAt: '2026-01-01T00:00:00.000Z',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+            },
+          ],
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+      projects: [],
+      sections: [],
+      areas: [],
+      settings: {},
+    };
+    const events: string[] = [];
+    let attachmentSyncCalls = 0;
+
+    storageMocks.getData.mockResolvedValue(localData);
+    coreMocks.webdavGetJson.mockResolvedValue(null);
+    coreMocks.webdavPutJson.mockImplementation(async () => {
+      events.push('write-remote');
+    });
+    attachmentSyncMocks.syncWebdavAttachments.mockImplementation(async (data: any) => {
+      attachmentSyncCalls += 1;
+      events.push(`sync:${attachmentSyncCalls}`);
+      if (attachmentSyncCalls === 1) {
+        return false;
+      }
+      data.tasks[0].attachments[0].cloudKey = 'attachments/att-1.txt';
+      data.tasks[0].attachments[0].localStatus = 'available';
+      return true;
+    });
+
+    const result = await syncServiceModule.performMobileSync();
+
+    expect(result).toEqual({ success: true, stats: emptyStats });
+    expect(attachmentSyncMocks.syncWebdavAttachments).toHaveBeenCalledTimes(3);
+    expect(events.indexOf('sync:2')).toBeGreaterThan(events.indexOf('sync:1'));
+    expect(events.indexOf('write-remote')).toBeGreaterThan(events.indexOf('sync:2'));
+    expect(coreMocks.webdavPutJson).toHaveBeenCalledWith(
+      'https://sync.example.com/data.json',
+      expect.objectContaining({
+        tasks: [
+          expect.objectContaining({
+            attachments: [
+              expect.objectContaining({
+                id: 'att-1',
+                cloudKey: 'attachments/att-1.txt',
+                uri: '',
+              }),
+            ],
+          }),
+        ],
+      }),
+      expect.objectContaining({
+        username: 'user',
+        password: 'pass',
+      }),
+    );
   });
 
   it('clears stale sync stats when a sync error occurs after prior conflicts', async () => {

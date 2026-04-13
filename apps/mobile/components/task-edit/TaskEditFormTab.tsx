@@ -55,6 +55,7 @@ type TaskEditFormTabProps = {
     onTitleDraftChange: (text: string) => void;
     registerScrollToEnd?: (handler: ((targetInput?: number | string) => void) | null) => void;
     formResetKey?: string;
+    suspendKeyboardHandling?: boolean;
 };
 
 export function TaskEditFormTab({
@@ -92,6 +93,7 @@ export function TaskEditFormTab({
     onTitleDraftChange,
     registerScrollToEnd,
     formResetKey,
+    suspendKeyboardHandling = false,
 }: TaskEditFormTabProps) {
     const [titleFocused, setTitleFocused] = React.useState(false);
     const formScrollRef = React.useRef<ScrollView | null>(null);
@@ -99,6 +101,7 @@ export function TaskEditFormTab({
     const keyboardTopRef = React.useRef(Dimensions.get('window').height);
 
     React.useEffect(() => {
+        if (suspendKeyboardHandling) return;
         if (typeof Keyboard?.addListener !== 'function') return;
         const updateKeyboardTop = (event: { endCoordinates?: { screenY?: number; height?: number } }) => {
             const windowHeight = Dimensions.get('window').height;
@@ -124,7 +127,7 @@ export function TaskEditFormTab({
             changeListener.remove();
             hideListener.remove();
         };
-    }, []);
+    }, [suspendKeyboardHandling]);
 
     const scrollDownForKeyboard = React.useCallback((amount = 180) => {
         const nextOffset = Math.max(0, formScrollOffsetRef.current + amount);
@@ -184,11 +187,15 @@ export function TaskEditFormTab({
 
     React.useEffect(() => {
         if (!registerScrollToEnd) return;
+        if (suspendKeyboardHandling) {
+            registerScrollToEnd(null);
+            return;
+        }
         registerScrollToEnd((targetInput) => {
             ensureInputVisible(targetInput);
         });
         return () => registerScrollToEnd(null);
-    }, [ensureInputVisible, registerScrollToEnd]);
+    }, [ensureInputVisible, registerScrollToEnd, suspendKeyboardHandling]);
     const countFilledFields = (fieldIds: TaskEditorFieldId[]): number => {
         return fieldIds.filter((fieldId) => {
             switch (fieldId) {
@@ -204,6 +211,10 @@ export function TaskEditFormTab({
                     return (editedTask.tags?.length ?? 0) > 0;
                 case 'priority':
                     return Boolean(editedTask.priority);
+                case 'energyLevel':
+                    return Boolean(editedTask.energyLevel);
+                case 'assignedTo':
+                    return Boolean(String(editedTask.assignedTo ?? '').trim());
                 case 'timeEstimate':
                     return Boolean(editedTask.timeEstimate);
                 case 'description':
@@ -221,7 +232,7 @@ export function TaskEditFormTab({
     return (
         <View style={[styles.tabPage, { width: containerWidth || '100%' }]}>
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={suspendKeyboardHandling ? undefined : (Platform.OS === 'ios' ? 'padding' : 'height')}
                 style={{ flex: 1 }}
                 keyboardVerticalOffset={0}
             >
@@ -230,6 +241,7 @@ export function TaskEditFormTab({
                     style={styles.content}
                     contentContainerStyle={styles.contentContainer}
                     keyboardShouldPersistTaps="handled"
+                    scrollEnabled={!suspendKeyboardHandling}
                     onScroll={(event) => {
                         formScrollOffsetRef.current = event.nativeEvent.contentOffset.y;
                     }}

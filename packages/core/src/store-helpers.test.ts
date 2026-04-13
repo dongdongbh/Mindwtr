@@ -44,4 +44,16 @@ describe('getNextProjectOrder', () => {
         expect(reserveNextProjectOrder('project-2', tasks)).toBe(0);
         expect(reserveNextProjectOrder('project-2', tasks)).toBe(1);
     });
+
+    it('does not carry reserved orders across new task snapshots', () => {
+        const tasks = [
+            createTask('t1', 'project-1', 0),
+            createTask('t2', 'project-1', 1),
+        ];
+
+        expect(reserveNextProjectOrder('project-1', tasks)).toBe(2);
+
+        const refreshedTasks = tasks.map((task) => ({ ...task }));
+        expect(reserveNextProjectOrder('project-1', refreshedTasks)).toBe(2);
+    });
 });

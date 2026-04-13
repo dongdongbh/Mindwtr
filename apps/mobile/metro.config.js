@@ -13,6 +13,15 @@ const projectReactNativeRoot = path.resolve(projectNodeModulesRoot, 'react-nativ
 const zustandRoot = fs.existsSync(path.resolve(projectNodeModulesRoot, 'zustand'))
     ? path.resolve(projectNodeModulesRoot, 'zustand')
     : path.resolve(coreNodeModulesRoot, 'zustand');
+const resolveFromProjectNodeModules = (moduleName) => {
+    try {
+        return require.resolve(moduleName, {
+            paths: [projectNodeModulesRoot],
+        });
+    } catch {
+        return null;
+    }
+};
 
 const config = getDefaultConfig(projectRoot);
 
@@ -113,6 +122,24 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
             };
         } catch {
             // Fall through to Metro default resolver.
+        }
+    }
+
+    // Force Expo packages to resolve from app-local node_modules.
+    // In this monorepo we can have duplicate workspace copies, and Metro occasionally
+    // mis-resolves package entrypoints like expo-modules-core during dev bundling.
+    if (
+        moduleName === 'expo'
+        || moduleName.startsWith('expo/')
+        || moduleName.startsWith('expo-')
+        || moduleName.startsWith('@expo/')
+    ) {
+        const resolved = resolveFromProjectNodeModules(moduleName);
+        if (resolved) {
+            return {
+                filePath: resolved,
+                type: 'sourceFile',
+            };
         }
     }
 

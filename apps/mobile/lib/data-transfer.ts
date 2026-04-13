@@ -4,6 +4,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Directory, File, Paths } from 'expo-file-system';
 import { Platform } from 'react-native';
 import {
+    addBreadcrumb,
     applyTodoistImport,
     createBackupFileName,
     flushPendingSave,
@@ -18,7 +19,7 @@ import {
     useTaskStore,
 } from '@mindwtr/core';
 
-import { logError } from './app-log';
+import { logError, logInfo } from './app-log';
 import { mobileStorage } from './storage-adapter';
 
 const StorageAccessFramework = (FileSystem as any).StorageAccessFramework;
@@ -34,6 +35,23 @@ export type TransferDocument = {
 
 type SnapshotApplyResult = {
     snapshotName: string;
+};
+
+const countActiveRecords = (data: AppData) => ({
+    tasks: data.tasks.filter((task) => !task.deletedAt).length,
+    projects: data.projects.filter((project) => !project.deletedAt).length,
+    sections: data.sections.filter((section) => !section.deletedAt).length,
+    areas: data.areas.filter((area) => !area.deletedAt).length,
+});
+
+const toCountExtra = (data: AppData): Record<string, string> => {
+    const counts = countActiveRecords(data);
+    return {
+        tasks: String(counts.tasks),
+        projects: String(counts.projects),
+        sections: String(counts.sections),
+        areas: String(counts.areas),
+    };
 };
 
 const normalizeBaseUri = (value?: string | null): string | null => {
@@ -149,6 +167,13 @@ const pickDocument = async (type: string | string[]): Promise<TransferDocument |
 };
 
 const saveCurrentDataSnapshot = async (data: AppData): Promise<string> => {
+    void logInfo('Recovery snapshot started', {
+        scope: 'transfer',
+        extra: {
+            operation: 'snapshot',
+            source: 'local',
+        },
+    });
     const directory = getSnapshotDirectory();
     if (!directory) {
         throw new Error('Snapshot storage is unavailable on this device.');
@@ -162,6 +187,14 @@ const saveCurrentDataSnapshot = async (data: AppData): Promise<string> => {
     file.create({ intermediates: true, overwrite: true });
     file.write(serializeBackupData(data));
     pruneSnapshots(directory);
+    void logInfo('Recovery snapshot complete', {
+        scope: 'transfer',
+        extra: {
+            operation: 'snapshot',
+            source: 'local',
+            ...toCountExtra(data),
+        },
+    });
     return fileName;
 };
 
@@ -205,25 +238,70 @@ export const inspectTodoistDocument = async (
 };
 
 export const restoreDataFromBackup = async (backupData: AppData): Promise<SnapshotApplyResult> => {
-    await flushPendingSave();
-    const currentData = await mobileStorage.getData();
-    const snapshotName = await saveCurrentDataSnapshot(currentData);
-    await applyImportedData(backupData);
-    return { snapshotName };
+    addBreadcrumb('transfer:restore');
+    void logInfo('Backup restore started', {
+        scope: 'transfer',
+        extra: {
+            operation: 'restoreBackup',
+            source: 'backup',
+        },
+    });
+    try {
+        await flushPendingSave();
+        const currentData = await mobileStorage.getData();
+        const snapshotName = await saveCurrentDataSnapshot(currentData);
+        await applyImportedData(backupData);
+        void logInfo('Backup restore complete', {
+            scope: 'transfer',
+            extra: {
+                operation: 'restoreBackup',
+                source: 'backup',
+                ...toCountExtra(backupData),
+            },
+        });
+        return { snapshotName };
+    } catch (error) {
+        void logError(error, { scope: 'transfer', extra: { operation: 'restoreBackup' } });
+        throw error;
+    }
 };
 
 export const importTodoistData = async (
     parsedProjects: ParsedTodoistProject[]
 ): Promise<SnapshotApplyResult & { result: TodoistImportExecutionResult }> => {
-    await flushPendingSave();
-    const currentData = await mobileStorage.getData();
-    const snapshotName = await saveCurrentDataSnapshot(currentData);
-    const result = applyTodoistImport(currentData, parsedProjects);
-    await applyImportedData(result.data);
-    return {
-        snapshotName,
-        result,
-    };
+    addBreadcrumb('transfer:restore');
+    void logInfo('Todoist import started', {
+        scope: 'transfer',
+        extra: {
+            operation: 'importTodoist',
+            source: 'todoist',
+        },
+    });
+    try {
+        await flushPendingSave();
+        const currentData = await mobileStorage.getData();
+        const snapshotName = await saveCurrentDataSnapshot(currentData);
+        const result = applyTodoistImport(currentData, parsedProjects);
+        await applyImportedData(result.data);
+        void logInfo('Todoist import complete', {
+            scope: 'transfer',
+            extra: {
+                operation: 'importTodoist',
+                source: 'todoist',
+                tasks: String(result.importedTaskCount),
+                projects: String(result.importedProjectCount),
+                sections: String(result.importedSectionCount),
+                checklistItems: String(result.importedChecklistItemCount),
+            },
+        });
+        return {
+            snapshotName,
+            result,
+        };
+    } catch (error) {
+        void logError(error, { scope: 'transfer', extra: { operation: 'importTodoist' } });
+        throw error;
+    }
 };
 
 export const listLocalDataSnapshots = async (): Promise<string[]> => {
@@ -234,9 +312,17 @@ export const listLocalDataSnapshots = async (): Promise<string[]> => {
 };
 
 export const restoreLocalDataSnapshot = async (snapshotName: string): Promise<void> => {
+    addBreadcrumb('transfer:restore');
+    void logInfo('Recovery snapshot restore started', {
+        scope: 'transfer',
+        extra: {
+            operation: 'restoreSnapshot',
+            source: 'snapshot',
+        },
+    });
     const directory = getSnapshotDirectory();
     if (!directory || !SNAPSHOT_FILE_PATTERN.test(snapshotName)) {
-        throw new Error('Invalid snapshot file name.');
+      throw new Error('Invalid snapshot file name.');
     }
     const file = new File(`${directory.uri}/${snapshotName}`);
     if (!file.exists) {
@@ -247,40 +333,82 @@ export const restoreLocalDataSnapshot = async (snapshotName: string): Promise<vo
         throw new Error(validation.errors[0] || 'Snapshot is not a valid backup.');
     }
 
-    await flushPendingSave();
-    await applyImportedData(validation.data);
+    try {
+        await flushPendingSave();
+        await applyImportedData(validation.data);
+        void logInfo('Recovery snapshot restore complete', {
+            scope: 'transfer',
+            extra: {
+                operation: 'restoreSnapshot',
+                source: 'snapshot',
+                ...toCountExtra(validation.data),
+            },
+        });
+    } catch (error) {
+        void logError(error, { scope: 'transfer', extra: { operation: 'restoreSnapshot' } });
+        throw error;
+    }
 };
 
 export const exportCurrentDataBackup = async (data: AppData): Promise<void> => {
+    addBreadcrumb('transfer:export');
     const snapshotName = createBackupFileName();
     const jsonContent = serializeBackupData(data);
-
-    if (Platform.OS === 'android' && StorageAccessFramework) {
-        try {
-            const permissions = await StorageAccessFramework.requestDirectoryPermissionsAsync();
-            if (permissions.granted) {
-                const fileUri = await StorageAccessFramework.createFileAsync(
-                    permissions.directoryUri,
-                    snapshotName,
-                    'application/json'
-                );
-                await StorageAccessFramework.writeAsStringAsync(fileUri, jsonContent);
-                return;
-            }
-        } catch (error) {
-            void logError(error, { scope: 'transfer', extra: { operation: 'exportBackup' } });
-        }
-    }
-
-    const fileUri = `${FileSystem.cacheDirectory}${snapshotName}`;
-    await FileSystem.writeAsStringAsync(fileUri, jsonContent);
-    const Sharing = await import('expo-sharing');
-    if (!(await Sharing.isAvailableAsync())) {
-        throw new Error('Sharing is not available on this device.');
-    }
-    await Sharing.shareAsync(fileUri, {
-        UTI: 'public.json',
-        mimeType: 'application/json',
-        dialogTitle: 'Export Mindwtr Backup',
+    void logInfo('Backup export started', {
+        scope: 'transfer',
+        extra: {
+            operation: 'exportBackup',
+            source: 'local',
+        },
     });
+
+    try {
+        if (Platform.OS === 'android' && StorageAccessFramework) {
+            try {
+                const permissions = await StorageAccessFramework.requestDirectoryPermissionsAsync();
+                if (permissions.granted) {
+                    const fileUri = await StorageAccessFramework.createFileAsync(
+                        permissions.directoryUri,
+                        snapshotName,
+                        'application/json'
+                    );
+                    await StorageAccessFramework.writeAsStringAsync(fileUri, jsonContent);
+                    void logInfo('Backup export complete', {
+                        scope: 'transfer',
+                        extra: {
+                            operation: 'exportBackup',
+                            source: 'local',
+                            ...toCountExtra(data),
+                        },
+                    });
+                    return;
+                }
+            } catch (error) {
+                void logError(error, { scope: 'transfer', extra: { operation: 'exportBackup' } });
+            }
+        }
+
+        const fileUri = `${FileSystem.cacheDirectory}${snapshotName}`;
+        await FileSystem.writeAsStringAsync(fileUri, jsonContent);
+        const Sharing = await import('expo-sharing');
+        if (!(await Sharing.isAvailableAsync())) {
+            throw new Error('Sharing is not available on this device.');
+        }
+        await Sharing.shareAsync(fileUri, {
+            UTI: 'public.json',
+            mimeType: 'application/json',
+            dialogTitle: 'Export Mindwtr Backup',
+        });
+        void logInfo('Backup export complete', {
+            scope: 'transfer',
+            extra: {
+                operation: 'exportBackup',
+                source: 'local',
+                ...toCountExtra(data),
+            },
+        });
+    } catch (error) {
+        void logError(error, { scope: 'transfer', extra: { operation: 'exportBackup' } });
+        throw error;
+    }
 };

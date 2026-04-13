@@ -4,6 +4,7 @@ import { useUiStore } from '../../../store/ui-store';
 import { logError } from '../../../lib/app-log';
 import { markSettingsOpenTrace, measureSettingsOpenStep } from '../../../lib/settings-open-diagnostics';
 import {
+    addBreadcrumb,
     CLOCK_SKEW_THRESHOLD_MS,
     getInMemoryAppDataSnapshot,
     type SyncBackend,
@@ -34,9 +35,16 @@ type UseSyncSettingsOptions = {
     isTauri: boolean;
     showSaved: () => void;
     selectSyncFolderTitle: string;
+    requestConfirmation: (options: { title: string; message: string }) => Promise<boolean>;
 };
 
-export const useSyncSettings = ({ appVersion, isTauri, showSaved, selectSyncFolderTitle }: UseSyncSettingsOptions) => {
+export const useSyncSettings = ({
+    appVersion,
+    isTauri,
+    showSaved,
+    selectSyncFolderTitle,
+    requestConfirmation,
+}: UseSyncSettingsOptions) => {
     const [syncPath, setSyncPath] = useState('');
     const [syncStatus, setSyncStatus] = useState(() => SyncService.getSyncStatus());
     const [syncError, setSyncError] = useState<string | null>(null);
@@ -79,27 +87,6 @@ export const useSyncSettings = ({ appVersion, isTauri, showSaved, selectSyncFold
         const text = String(error || '').trim();
         return text || fallback;
     }, []);
-
-    const requestConfirmation = useCallback(async ({
-        message,
-        title,
-    }: {
-        message: string;
-        title: string;
-    }): Promise<boolean> => {
-        if (isTauri) {
-            const { confirm } = await import('@tauri-apps/plugin-dialog');
-            return await confirm(message, {
-                title,
-                okLabel: 'Continue',
-                cancelLabel: 'Cancel',
-            });
-        }
-        if (typeof window !== 'undefined') {
-            return window.confirm(`${title}\n\n${message}`);
-        }
-        return false;
-    }, [isTauri]);
 
     useEffect(() => {
         markSettingsOpenTrace('sync-settings-effect');
@@ -253,6 +240,7 @@ export const useSyncSettings = ({ appVersion, isTauri, showSaved, selectSyncFold
     }, [formatSyncPathError, isTauri, selectSyncFolderTitle, showSaved, showToast]);
 
     const handleSetSyncBackend = useCallback(async (backend: SyncBackend) => {
+        addBreadcrumb(`settings:syncBackend:${backend}`);
         setSyncBackend(backend);
         setSyncError(null);
         if (backend === 'cloudkit') {
@@ -410,6 +398,7 @@ export const useSyncSettings = ({ appVersion, isTauri, showSaved, selectSyncFold
     }, [dropboxAppKey, showToast, toErrorMessage]);
 
     const handleSync = useCallback(async () => {
+        addBreadcrumb('sync:manual');
         try {
             setSyncError(null);
 
@@ -521,6 +510,7 @@ export const useSyncSettings = ({ appVersion, isTauri, showSaved, selectSyncFold
 
     const handleRestoreSnapshot = useCallback(async (snapshotFileName: string) => {
         if (!snapshotFileName) return false;
+        addBreadcrumb('transfer:restore');
         setIsRestoringSnapshot(true);
         try {
             const result = await SyncService.restoreDataSnapshot(snapshotFileName);
@@ -537,6 +527,7 @@ export const useSyncSettings = ({ appVersion, isTauri, showSaved, selectSyncFold
     }, [showToast]);
 
     const handleExportBackup = useCallback(async () => {
+        addBreadcrumb('transfer:export');
         setTransferAction('export');
         try {
             await exportDesktopBackup(getInMemoryAppDataSnapshot());
@@ -549,6 +540,7 @@ export const useSyncSettings = ({ appVersion, isTauri, showSaved, selectSyncFold
     }, [showToast, toErrorMessage]);
 
     const handleRestoreBackup = useCallback(async () => {
+        addBreadcrumb('transfer:restore');
         setTransferAction('restore');
         try {
             const validation = await inspectDesktopBackup(appVersion);
@@ -587,6 +579,7 @@ export const useSyncSettings = ({ appVersion, isTauri, showSaved, selectSyncFold
     }, [appVersion, isTauri, requestConfirmation, showToast, toErrorMessage]);
 
     const handleImportTodoist = useCallback(async () => {
+        addBreadcrumb('transfer:restore');
         setTransferAction('import');
         try {
             const parseResult = await inspectDesktopTodoistImport();

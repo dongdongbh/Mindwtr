@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Play } from 'lucide-react';
 import {
+    addBreadcrumb,
     DEFAULT_PROJECT_COLOR,
     getFrequentTaskTokens,
     getRecentTaskTokens,
+    parseQuickAddDateCommands,
     safeParseDate,
     safeFormatDate,
     hasTimeComponent,
@@ -11,11 +13,17 @@ import {
     type Area,
     type Project,
     type Task,
+    type TaskEnergyLevel,
+    type TaskPriority,
 } from '@mindwtr/core';
 
 import { InboxProcessingWizard, type ProcessingStep } from '../InboxProcessingWizard';
 import { InboxProcessingQuickPanel, type QuickActionabilityChoice, type QuickExecutionChoice, type QuickTwoMinuteChoice } from '../InboxProcessingQuickPanel';
+import type { InboxProcessingScheduleFieldsControls } from '../InboxProcessingScheduleFields';
+import { DEFAULT_TASK_EDITOR_HIDDEN } from '../Task/task-item-helpers';
 import { resolveAreaFilter, taskMatchesAreaFilter } from '../../lib/area-filter';
+import { reportError } from '../../lib/report-error';
+import { useUiStore } from '../../store/ui-store';
 
 type InboxProcessorProps = {
     t: (key: string) => string;
@@ -46,6 +54,68 @@ const parseTokenListInput = (value: string, prefix: '@' | '#'): string[] => Arra
 const mergeSuggestedTokens = (...groups: string[][]): string[] =>
     Array.from(new Set(groups.flat()));
 
+const normalizeTimeInput = (value: string): string | null => {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    const compact = trimmed.replace(/\s+/g, '');
+    let hours: number;
+    let minutes: number;
+    if (/^\d{1,2}:\d{2}$/.test(compact)) {
+        const [h, m] = compact.split(':');
+        hours = Number(h);
+        minutes = Number(m);
+    } else if (/^\d{3,4}$/.test(compact)) {
+        if (compact.length === 3) {
+            hours = Number(compact.slice(0, 1));
+            minutes = Number(compact.slice(1));
+        } else {
+            hours = Number(compact.slice(0, 2));
+            minutes = Number(compact.slice(2));
+        }
+    } else {
+        return null;
+    }
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+};
+
+const getDateFieldDraft = (value?: string): { date: string; time: string; timeDraft: string } => {
+    const parsed = value ? safeParseDate(value) : null;
+    const date = parsed ? safeFormatDate(parsed, 'yyyy-MM-dd') : '';
+    const time = parsed && value && hasTimeComponent(value)
+        ? safeFormatDate(parsed, 'HH:mm')
+        : '';
+
+    return {
+        date,
+        time,
+        timeDraft: time,
+    };
+};
+
+const resolveCommittedTime = (draft: string, committed: string): { time: string; timeDraft: string } => {
+    const normalized = normalizeTimeInput(draft);
+    if (normalized === null) {
+        return {
+            time: committed,
+            timeDraft: committed,
+        };
+    }
+
+    return {
+        time: normalized,
+        timeDraft: normalized,
+    };
+};
+
+const buildDateTimeUpdate = (date: string, timeDraft: string, committedTime: string): string | undefined => {
+    if (!date) return undefined;
+    const normalized = normalizeTimeInput(timeDraft);
+    const resolvedTime = normalized === null ? committedTime : normalized;
+    return resolvedTime ? `${date}T${resolvedTime}` : date;
+};
+
 export function InboxProcessor({
     t,
     isInbox,
@@ -60,6 +130,7 @@ export function InboxProcessor({
     isProcessing,
     setIsProcessing,
 }: InboxProcessorProps) {
+    const showToast = useUiStore((state) => state.showToast);
     const [processingMode, setProcessingMode] = useState<'guided' | 'quick'>('guided');
     const [processingTask, setProcessingTask] = useState<Task | null>(null);
     const [processingStep, setProcessingStep] = useState<ProcessingStep>('actionable');
@@ -69,6 +140,9 @@ export function InboxProcessor({
     const [quickExecutionChoice, setQuickExecutionChoice] = useState<QuickExecutionChoice>('defer');
     const [selectedContexts, setSelectedContexts] = useState<string[]>([]);
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
+    const [selectedEnergyLevel, setSelectedEnergyLevel] = useState<TaskEnergyLevel | undefined>(undefined);
+    const [selectedAssignedTo, setSelectedAssignedTo] = useState('');
+    const [selectedPriority, setSelectedPriority] = useState<TaskPriority | undefined>(undefined);
     const [delegateWho, setDelegateWho] = useState('');
     const [delegateFollowUp, setDelegateFollowUp] = useState('');
     const [projectSearch, setProjectSearch] = useState('');
@@ -84,6 +158,12 @@ export function InboxProcessor({
     const [scheduleDate, setScheduleDate] = useState('');
     const [scheduleTime, setScheduleTime] = useState('');
     const [scheduleTimeDraft, setScheduleTimeDraft] = useState('');
+    const [dueDate, setDueDate] = useState('');
+    const [dueTime, setDueTime] = useState('');
+    const [dueTimeDraft, setDueTimeDraft] = useState('');
+    const [reviewDate, setReviewDate] = useState('');
+    const [reviewTime, setReviewTime] = useState('');
+    const [reviewTimeDraft, setReviewTimeDraft] = useState('');
     const [skippedIds, setSkippedIds] = useState<Set<string>>(new Set());
 
     const inboxProcessing = settings?.gtd?.inboxProcessing ?? {};
@@ -94,6 +174,13 @@ export function InboxProcessor({
     const contextStepEnabled = inboxProcessing.contextStepEnabled !== false;
     const scheduleEnabled = inboxProcessing.scheduleEnabled === true;
     const referenceEnabled = inboxProcessing.referenceEnabled === true;
+    const prioritiesEnabled = settings?.features?.priorities !== false;
+    const hiddenTaskEditorFields = useMemo(
+        () => new Set(settings?.gtd?.taskEditor?.hidden ?? DEFAULT_TASK_EDITOR_HIDDEN),
+        [settings?.gtd?.taskEditor?.hidden],
+    );
+    const showEnergyLevelField = !hiddenTaskEditorFields.has('energyLevel');
+    const showAssignedToField = !hiddenTaskEditorFields.has('assignedTo');
 
     const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
     const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
@@ -148,6 +235,9 @@ export function InboxProcessor({
         setQuickExecutionChoice('defer');
         setSelectedContexts([]);
         setSelectedTags([]);
+        setSelectedEnergyLevel(undefined);
+        setSelectedAssignedTo('');
+        setSelectedPriority(undefined);
         setDelegateWho('');
         setDelegateFollowUp('');
         setProjectSearch('');
@@ -163,8 +253,24 @@ export function InboxProcessor({
         setScheduleDate('');
         setScheduleTime('');
         setScheduleTimeDraft('');
+        setDueDate('');
+        setDueTime('');
+        setDueTimeDraft('');
+        setReviewDate('');
+        setReviewTime('');
+        setReviewTimeDraft('');
         setSkippedIds(new Set());
-    }, [defaultProcessingMode, isProcessing]);
+    }, [
+        contextStepEnabled,
+        defaultProcessingMode,
+        isProcessing,
+        prioritiesEnabled,
+        projectFirst,
+        referenceEnabled,
+        scheduleEnabled,
+        twoMinuteEnabled,
+        twoMinuteFirst,
+    ]);
 
     const hydrateProcessingTask = useCallback((task: Task) => {
         setProcessingTask(task);
@@ -175,6 +281,9 @@ export function InboxProcessor({
         setQuickExecutionChoice('defer');
         setSelectedContexts(task.contexts ?? []);
         setSelectedTags(task.tags ?? []);
+        setSelectedEnergyLevel(task.energyLevel);
+        setSelectedAssignedTo(task.assignedTo ?? '');
+        setSelectedPriority(task.priority);
         setCustomContext('');
         setCustomTag('');
         setProjectSearch('');
@@ -185,14 +294,18 @@ export function InboxProcessor({
         setNextActionDraft('');
         setSelectedProjectId(task.projectId ?? null);
         setSelectedAreaId(task.projectId ? null : (task.areaId ?? null));
-        const parsedStart = task.startTime ? safeParseDate(task.startTime) : null;
-        const dateValue = parsedStart ? safeFormatDate(parsedStart, 'yyyy-MM-dd') : '';
-        const timeValue = parsedStart && task.startTime && hasTimeComponent(task.startTime)
-            ? safeFormatDate(parsedStart, 'HH:mm')
-            : '';
-        setScheduleDate(dateValue);
-        setScheduleTime(timeValue);
-        setScheduleTimeDraft(timeValue);
+        const startDraft = getDateFieldDraft(task.startTime);
+        setScheduleDate(startDraft.date);
+        setScheduleTime(startDraft.time);
+        setScheduleTimeDraft(startDraft.timeDraft);
+        const dueDraft = getDateFieldDraft(task.dueDate);
+        setDueDate(dueDraft.date);
+        setDueTime(dueDraft.time);
+        setDueTimeDraft(dueDraft.timeDraft);
+        const reviewDraft = getDateFieldDraft(task.reviewAt);
+        setReviewDate(reviewDraft.date);
+        setReviewTime(reviewDraft.time);
+        setReviewTimeDraft(reviewDraft.timeDraft);
     }, []);
 
     const suggestedContexts = useMemo(
@@ -214,8 +327,12 @@ export function InboxProcessor({
         const inboxTasks = tasks.filter((task) => task.status === 'inbox' && matchesAreaFilter(task));
         if (inboxTasks.length === 0) return;
         hydrateProcessingTask(inboxTasks[0]);
+        addBreadcrumb('inbox:start');
         setIsProcessing(true);
     }, [tasks, hydrateProcessingTask, setIsProcessing, matchesAreaFilter]);
+    const closeProcessing = useCallback(() => {
+        setIsProcessing(false);
+    }, [setIsProcessing]);
 
     const processNext = useCallback(() => {
         const currentTaskId = processingTask?.id;
@@ -229,9 +346,14 @@ export function InboxProcessor({
             hydrateProcessingTask(inboxTasks[0]);
             return;
         }
+        addBreadcrumb('inbox:done');
         setIsProcessing(false);
         setProcessingTask(null);
         setSelectedContexts([]);
+        setSelectedTags([]);
+        setSelectedEnergyLevel(undefined);
+        setSelectedAssignedTo('');
+        setSelectedPriority(undefined);
     }, [hydrateProcessingTask, processingTask?.id, tasks, setIsProcessing, skippedIds, matchesAreaFilter]);
 
     const handleSkip = useCallback(() => {
@@ -245,28 +367,64 @@ export function InboxProcessor({
         processNext();
     }, [processNext, processingTask]);
 
-    const applyProcessingEdits = useCallback((updates: Partial<Task>) => {
-        if (!processingTask) return;
-        const trimmedTitle = processingTitle.trim();
-        const title = trimmedTitle.length > 0 ? trimmedTitle : processingTask.title;
+    const buildScheduleUpdates = useCallback(
+        () => (scheduleEnabled
+            ? {
+                startTime: buildDateTimeUpdate(scheduleDate, scheduleTimeDraft, scheduleTime),
+                dueDate: buildDateTimeUpdate(dueDate, dueTimeDraft, dueTime),
+                reviewAt: buildDateTimeUpdate(reviewDate, reviewTimeDraft, reviewTime),
+            }
+            : {}),
+        [
+            dueDate,
+            dueTime,
+            dueTimeDraft,
+            reviewDate,
+            reviewTime,
+            reviewTimeDraft,
+            scheduleDate,
+            scheduleEnabled,
+            scheduleTime,
+            scheduleTimeDraft,
+        ]
+    );
+
+    const applyProcessingEdits = useCallback((
+        updates: Partial<Task>,
+        titleInput: string = processingTitle,
+        fallbackTitle?: string,
+    ) => {
+        if (!processingTask) return false;
+        const { title: parsedTitle, props: parsedDateProps, invalidDateCommands } = parseQuickAddDateCommands(titleInput, new Date());
+        if (invalidDateCommands && invalidDateCommands.length > 0) {
+            showToast(`${t('quickAdd.invalidDateCommand')}: ${invalidDateCommands.join(', ')}`, 'error');
+            return false;
+        }
+        const trimmedTitle = parsedTitle.trim();
+        const title = trimmedTitle.length > 0 ? trimmedTitle : (fallbackTitle ?? processingTask.title);
         const description = processingDescription.trim();
-        updateTask(processingTask.id, {
+        void updateTask(processingTask.id, {
             title,
             description: description.length > 0 ? description : undefined,
             ...updates,
+            ...parsedDateProps,
         });
-    }, [processingDescription, processingTask, processingTitle, updateTask]);
+        return true;
+    }, [processingDescription, processingTask, processingTitle, showToast, t, updateTask]);
 
     const handleNotActionable = useCallback((action: 'trash' | 'someday' | 'reference') => {
         if (!processingTask) return;
         if (action === 'trash') {
-            deleteTask(processingTask.id);
-        } else if (action === 'someday') {
-            applyProcessingEdits({ status: 'someday' });
-        } else {
-            applyProcessingEdits({ status: 'reference' });
+            void deleteTask(processingTask.id);
+            processNext();
+            return;
         }
-        processNext();
+        const applied = action === 'someday'
+            ? applyProcessingEdits({ status: 'someday' })
+            : applyProcessingEdits({ status: 'reference' });
+        if (applied) {
+            processNext();
+        }
     }, [applyProcessingEdits, deleteTask, processNext, processingTask]);
 
     const goToStep = useCallback((nextStep: ProcessingStep) => {
@@ -296,67 +454,77 @@ export function InboxProcessor({
         goToStep(twoMinuteFirst ? 'decide' : 'twomin');
     }, [goToStep, twoMinuteEnabled, twoMinuteFirst]);
 
-    const handleActionable = () => goToStep('projectcheck');
+    const handleActionable = useCallback(() => {
+        goToStep('projectcheck');
+    }, [goToStep]);
 
     const handleProjectCheckNo = useCallback(() => {
         continueFromProjectCheck();
     }, [continueFromProjectCheck]);
 
     const handleProjectCheckYes = useCallback(() => {
+        const { title: parsedTitle } = parseQuickAddDateCommands(processingTitle, new Date());
+        const baseTitle = parsedTitle.trim() || processingTitle.trim() || processingTask?.title || '';
         setConvertToProject(true);
-        const baseTitle = processingTitle.trim() || processingTask?.title || '';
         setProjectTitleDraft(baseTitle);
         setNextActionDraft(baseTitle);
         goToStep('project');
     }, [goToStep, processingTask?.title, processingTitle]);
 
-    const handleTwoMinDone = () => {
-        if (processingTask) {
-            applyProcessingEdits({ status: 'done' });
+    const handleTwoMinDone = useCallback(() => {
+        if (!processingTask) return;
+        if (applyProcessingEdits({ status: 'done' })) {
+            processNext();
         }
-        processNext();
-    };
+    }, [applyProcessingEdits, processNext, processingTask]);
 
-    const handleTwoMinNo = () => goToStep(twoMinuteFirst ? 'actionable' : 'decide');
+    const handleTwoMinNo = useCallback(() => {
+        goToStep(twoMinuteFirst ? 'actionable' : 'decide');
+    }, [goToStep, twoMinuteFirst]);
 
-    const handleDelegate = () => {
+    const handleDelegate = useCallback(() => {
         setDelegateWho('');
         setDelegateFollowUp('');
         goToStep('delegate');
-    };
+    }, [goToStep]);
 
-    const handleConfirmWaiting = () => {
-        if (processingTask) {
-            const baseDescription = processingDescription.trim() || processingTask.description || '';
-            const who = delegateWho.trim();
-            const waitingLine = who ? `Waiting for: ${who}` : '';
-            const nextDescription = [baseDescription, waitingLine]
-                .map((line) => line.trim())
-                .filter(Boolean)
-                .join('\n');
-            const followUpIso = delegateFollowUp
-                ? new Date(`${delegateFollowUp}T09:00:00`).toISOString()
-                : undefined;
-            const scheduleUpdate = (scheduleEnabled && scheduleDate)
-                ? { startTime: scheduleTime ? `${scheduleDate}T${scheduleTime}` : scheduleDate }
-                : {};
-            applyProcessingEdits({
-                status: 'waiting',
-                description: nextDescription.length > 0 ? nextDescription : undefined,
-                reviewAt: followUpIso,
-                ...scheduleUpdate,
-            });
+    const handleConfirmWaiting = useCallback(() => {
+        if (!processingTask) return;
+        const who = delegateWho.trim();
+        const scheduleUpdates = buildScheduleUpdates();
+        const followUpIso = delegateFollowUp
+            ? new Date(`${delegateFollowUp}T09:00:00`).toISOString()
+            : scheduleUpdates.reviewAt;
+        const applied = applyProcessingEdits({
+            status: 'waiting',
+            energyLevel: selectedEnergyLevel ?? undefined,
+            assignedTo: who || undefined,
+            ...(prioritiesEnabled ? { priority: selectedPriority ?? undefined } : {}),
+            ...scheduleUpdates,
+            reviewAt: followUpIso,
+        });
+        if (applied) {
+            setDelegateWho('');
+            setDelegateFollowUp('');
+            processNext();
         }
-        setDelegateWho('');
-        setDelegateFollowUp('');
-        processNext();
-    };
+    }, [
+        applyProcessingEdits,
+        buildScheduleUpdates,
+        delegateFollowUp,
+        delegateWho,
+        prioritiesEnabled,
+        processNext,
+        processingTask,
+        selectedEnergyLevel,
+        selectedPriority,
+    ]);
 
-    const handleDelegateBack = () => {
+    const handleDelegateBack = useCallback(() => {
         goBack();
-    };
+    }, [goBack]);
 
-    const handleSendDelegateRequest = () => {
+    const handleSendDelegateRequest = useCallback(() => {
         if (!processingTask) return;
         const title = processingTitle.trim() || processingTask.title;
         const baseDescription = processingDescription.trim() || processingTask.description || '';
@@ -374,15 +542,15 @@ export function InboxProcessor({
         const subject = `Delegation: ${title}`;
         const mailto = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
         window.open(mailto);
-    };
+    }, [delegateWho, processingDescription, processingTask, processingTitle]);
 
-    const toggleTag = (tag: string) => {
+    const toggleTag = useCallback((tag: string) => {
         setSelectedTags((prev) =>
             prev.includes(tag) ? prev.filter((item) => item !== tag) : [...prev, tag]
         );
-    };
+    }, []);
 
-    const toggleContext = (ctx: string) => {
+    const toggleContext = useCallback((ctx: string) => {
         if (ctx.startsWith('#')) {
             toggleTag(ctx);
             return;
@@ -390,9 +558,9 @@ export function InboxProcessor({
         setSelectedContexts((prev) =>
             prev.includes(ctx) ? prev.filter((item) => item !== ctx) : [...prev, ctx]
         );
-    };
+    }, [toggleTag]);
 
-    const addCustomContext = () => {
+    const addCustomContext = useCallback(() => {
         const trimmed = customContext.trim();
         if (!trimmed) return;
         const raw = trimmed.replace(/^@/, '');
@@ -401,9 +569,9 @@ export function InboxProcessor({
             setSelectedContexts((prev) => [...prev, ctx]);
         }
         setCustomContext('');
-    };
+    }, [customContext, selectedContexts]);
 
-    const addCustomTag = () => {
+    const addCustomTag = useCallback(() => {
         const trimmed = customTag.trim();
         if (!trimmed) return;
         const tag = `#${trimmed.replace(/^#+/, '').trim()}`;
@@ -411,77 +579,156 @@ export function InboxProcessor({
             setSelectedTags((prev) => [...prev, tag]);
         }
         setCustomTag('');
-    };
+    }, [customTag, selectedTags]);
 
-    const normalizeTimeInput = (value: string): string | null => {
-        const trimmed = value.trim();
-        if (!trimmed) return '';
-        const compact = trimmed.replace(/\s+/g, '');
-        let hours: number;
-        let minutes: number;
-        if (/^\d{1,2}:\d{2}$/.test(compact)) {
-            const [h, m] = compact.split(':');
-            hours = Number(h);
-            minutes = Number(m);
-        } else if (/^\d{3,4}$/.test(compact)) {
-            if (compact.length === 3) {
-                hours = Number(compact.slice(0, 1));
-                minutes = Number(compact.slice(1));
-            } else {
-                hours = Number(compact.slice(0, 2));
-                minutes = Number(compact.slice(2));
-            }
-        } else {
-            return null;
-        }
-        if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
-        if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
-        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-    };
+    const handleProcessingTimeCommit = useCallback((
+        draft: string,
+        committed: string,
+        setDraft: (value: string) => void,
+        setTime: (value: string) => void,
+    ) => {
+        const resolved = resolveCommittedTime(draft, committed);
+        setDraft(resolved.timeDraft);
+        setTime(resolved.time);
+    }, []);
 
-    const handleScheduleTimeCommit = () => {
-        const normalized = normalizeTimeInput(scheduleTimeDraft);
-        if (normalized === null) {
-            setScheduleTimeDraft(scheduleTime);
-            return;
-        }
-        setScheduleTimeDraft(normalized);
-        setScheduleTime(normalized);
-    };
-
-    const handleScheduleDateChange = (value: string) => {
-        setScheduleDate(value);
+    const handleDateFieldChange = useCallback((
+        value: string,
+        setDateValue: (value: string) => void,
+        setTimeValue: (value: string) => void,
+        setTimeDraftValue: (value: string) => void,
+    ) => {
+        setDateValue(value);
         if (!value) {
-            setScheduleTime('');
-            setScheduleTimeDraft('');
+            setTimeValue('');
+            setTimeDraftValue('');
         }
-    };
+    }, []);
 
-    const handleConfirmContexts = () => {
+    const handleScheduleTimeCommit = useCallback(() => {
+        handleProcessingTimeCommit(scheduleTimeDraft, scheduleTime, setScheduleTimeDraft, setScheduleTime);
+    }, [handleProcessingTimeCommit, scheduleTime, scheduleTimeDraft]);
+
+    const handleDueTimeCommit = useCallback(() => {
+        handleProcessingTimeCommit(dueTimeDraft, dueTime, setDueTimeDraft, setDueTime);
+    }, [dueTime, dueTimeDraft, handleProcessingTimeCommit]);
+
+    const handleReviewTimeCommit = useCallback(() => {
+        handleProcessingTimeCommit(reviewTimeDraft, reviewTime, setReviewTimeDraft, setReviewTime);
+    }, [handleProcessingTimeCommit, reviewTime, reviewTimeDraft]);
+
+    const handleScheduleDateChange = useCallback((value: string) => {
+        handleDateFieldChange(value, setScheduleDate, setScheduleTime, setScheduleTimeDraft);
+    }, [handleDateFieldChange]);
+
+    const handleDueDateChange = useCallback((value: string) => {
+        handleDateFieldChange(value, setDueDate, setDueTime, setDueTimeDraft);
+    }, [handleDateFieldChange]);
+
+    const handleReviewDateChange = useCallback((value: string) => {
+        handleDateFieldChange(value, setReviewDate, setReviewTime, setReviewTimeDraft);
+    }, [handleDateFieldChange]);
+
+    const clearScheduleDate = useCallback(() => {
+        setScheduleDate('');
+        setScheduleTime('');
+        setScheduleTimeDraft('');
+    }, []);
+
+    const clearDueDate = useCallback(() => {
+        setDueDate('');
+        setDueTime('');
+        setDueTimeDraft('');
+    }, []);
+
+    const clearReviewDate = useCallback(() => {
+        setReviewDate('');
+        setReviewTime('');
+        setReviewTimeDraft('');
+    }, []);
+
+    const scheduleFields = useMemo<InboxProcessingScheduleFieldsControls>(() => ({
+        start: {
+            date: scheduleDate,
+            timeDraft: scheduleTimeDraft,
+            onDateChange: handleScheduleDateChange,
+            onTimeDraftChange: setScheduleTimeDraft,
+            onTimeCommit: handleScheduleTimeCommit,
+            onClear: clearScheduleDate,
+        },
+        due: {
+            date: dueDate,
+            timeDraft: dueTimeDraft,
+            onDateChange: handleDueDateChange,
+            onTimeDraftChange: setDueTimeDraft,
+            onTimeCommit: handleDueTimeCommit,
+            onClear: clearDueDate,
+        },
+        review: {
+            date: reviewDate,
+            timeDraft: reviewTimeDraft,
+            onDateChange: handleReviewDateChange,
+            onTimeDraftChange: setReviewTimeDraft,
+            onTimeCommit: handleReviewTimeCommit,
+            onClear: clearReviewDate,
+        },
+    }), [
+        clearDueDate,
+        clearReviewDate,
+        clearScheduleDate,
+        dueDate,
+        dueTimeDraft,
+        handleDueDateChange,
+        handleDueTimeCommit,
+        handleReviewDateChange,
+        handleReviewTimeCommit,
+        handleScheduleDateChange,
+        handleScheduleTimeCommit,
+        reviewDate,
+        reviewTimeDraft,
+        scheduleDate,
+        scheduleTimeDraft,
+    ]);
+
+    const handleSetProject = useCallback((projectId: string | null) => {
+        if (!processingTask) return;
+        const applied = applyProcessingEdits({
+            status: 'next',
+            contexts: selectedContexts,
+            tags: selectedTags,
+            energyLevel: selectedEnergyLevel ?? undefined,
+            assignedTo: selectedAssignedTo.trim() || undefined,
+            ...(prioritiesEnabled ? { priority: selectedPriority ?? undefined } : {}),
+            projectId: projectId || undefined,
+            areaId: projectId ? undefined : (selectedAreaId || undefined),
+            ...buildScheduleUpdates(),
+        });
+        if (applied) {
+            processNext();
+        }
+    }, [
+        applyProcessingEdits,
+        buildScheduleUpdates,
+        prioritiesEnabled,
+        processNext,
+        processingTask,
+        selectedAreaId,
+        selectedAssignedTo,
+        selectedContexts,
+        selectedEnergyLevel,
+        selectedPriority,
+        selectedTags,
+    ]);
+
+    const handleConfirmContexts = useCallback(() => {
         if (projectFirst) {
             handleSetProject(selectedProjectId);
             return;
         }
         goToStep('project');
-    };
+    }, [goToStep, handleSetProject, projectFirst, selectedProjectId]);
 
-    const handleSetProject = (projectId: string | null) => {
-        if (processingTask) {
-            applyProcessingEdits({
-                status: 'next',
-                contexts: selectedContexts,
-                tags: selectedTags,
-                projectId: projectId || undefined,
-                areaId: projectId ? undefined : (selectedAreaId || undefined),
-                ...(scheduleEnabled && scheduleDate
-                    ? { startTime: scheduleTime ? `${scheduleDate}T${scheduleTime}` : scheduleDate }
-                    : {}),
-            });
-        }
-        processNext();
-    };
-
-    const handleDefer = () => {
+    const handleDefer = useCallback(() => {
         if (contextStepEnabled) {
             setSelectedContexts(processingTask?.contexts ?? []);
             setSelectedTags(processingTask?.tags ?? []);
@@ -493,9 +740,17 @@ export function InboxProcessor({
             return;
         }
         goToStep('project');
-    };
+    }, [
+        contextStepEnabled,
+        goToStep,
+        handleSetProject,
+        processingTask?.contexts,
+        processingTask?.tags,
+        projectFirst,
+        selectedProjectId,
+    ]);
 
-    const handleConvertToProject = async () => {
+    const handleConvertToProject = useCallback(async () => {
         if (!processingTask) return;
         const projectTitle = projectTitleDraft.trim() || processingTitle.trim();
         const nextAction = nextActionDraft.trim();
@@ -504,24 +759,61 @@ export function InboxProcessor({
             alert(t('process.nextActionRequired'));
             return;
         }
-        const existing = projects.find((project) => project.title.toLowerCase() === projectTitle.toLowerCase());
-        const project = existing ?? await addProject(projectTitle, DEFAULT_PROJECT_COLOR);
-        if (!project) return;
-        applyProcessingEdits({
-            title: nextAction,
-            status: 'next',
-            contexts: selectedContexts,
-            tags: selectedTags,
-            projectId: project.id,
-            ...(scheduleEnabled && scheduleDate
-                ? { startTime: scheduleTime ? `${scheduleDate}T${scheduleTime}` : scheduleDate }
-                : {}),
-        });
-        processNext();
-    };
+        try {
+            const existing = projects.find((project) => project.title.toLowerCase() === projectTitle.toLowerCase());
+            const project = existing ?? await addProject(projectTitle, DEFAULT_PROJECT_COLOR);
+            if (!project) return;
+            const applied = applyProcessingEdits({
+                status: 'next',
+                contexts: selectedContexts,
+                tags: selectedTags,
+                energyLevel: selectedEnergyLevel ?? undefined,
+                assignedTo: selectedAssignedTo.trim() || undefined,
+                ...(prioritiesEnabled ? { priority: selectedPriority ?? undefined } : {}),
+                projectId: project.id,
+                ...buildScheduleUpdates(),
+            }, nextAction, processingTask.title);
+            if (applied) {
+                processNext();
+            }
+        } catch (error) {
+            reportError('Failed to create project from inbox processing', error);
+            showToast(t('projects.createFailed') || 'Failed to create project', 'error');
+        }
+    }, [
+        addProject,
+        applyProcessingEdits,
+        buildScheduleUpdates,
+        nextActionDraft,
+        prioritiesEnabled,
+        processingTask,
+        processingTitle,
+        processNext,
+        projectTitleDraft,
+        projects,
+        selectedAssignedTo,
+        selectedContexts,
+        selectedEnergyLevel,
+        selectedPriority,
+        selectedTags,
+        showToast,
+        t,
+    ]);
+
+    const handleRefineNext = useCallback(() => {
+        goToStep(getInitialGuidedStep());
+    }, [getInitialGuidedStep, goToStep]);
+    const handleContextsInputChange = useCallback((value: string) => {
+        setSelectedContexts(parseTokenListInput(value, '@'));
+    }, []);
+    const handleTagsInputChange = useCallback((value: string) => {
+        setSelectedTags(parseTokenListInput(value, '#'));
+    }, []);
 
     const handleQuickSubmit = useCallback(async () => {
         handleScheduleTimeCommit();
+        handleDueTimeCommit();
+        handleReviewTimeCommit();
         if (quickActionability !== 'actionable') {
             handleNotActionable(quickActionability);
             return;
@@ -542,7 +834,9 @@ export function InboxProcessor({
     }, [
         handleConfirmWaiting,
         handleConvertToProject,
+        handleDueTimeCommit,
         handleNotActionable,
+        handleReviewTimeCommit,
         handleScheduleTimeCommit,
         handleSetProject,
         handleTwoMinDone,
@@ -550,6 +844,8 @@ export function InboxProcessor({
         quickExecutionChoice,
         quickTwoMinuteChoice,
         convertToProject,
+        prioritiesEnabled,
+        selectedPriority,
         selectedProjectId,
     ]);
 
@@ -579,7 +875,7 @@ export function InboxProcessor({
                     processingMode={processingMode}
                     onModeChange={setProcessingMode}
                     onSkip={handleSkip}
-                    onClose={() => setIsProcessing(false)}
+                    onClose={closeProcessing}
                     showReferenceOption={referenceEnabled}
                     actionabilityChoice={quickActionability}
                     setActionabilityChoice={setQuickActionability}
@@ -588,11 +884,7 @@ export function InboxProcessor({
                     executionChoice={quickExecutionChoice}
                     setExecutionChoice={setQuickExecutionChoice}
                     showScheduleFields={scheduleEnabled}
-                    scheduleDate={scheduleDate}
-                    scheduleTimeDraft={scheduleTimeDraft}
-                    setScheduleDate={handleScheduleDateChange}
-                    setScheduleTimeDraft={setScheduleTimeDraft}
-                    onScheduleTimeCommit={handleScheduleTimeCommit}
+                    scheduleFields={scheduleFields}
                     delegateWho={delegateWho}
                     setDelegateWho={setDelegateWho}
                     delegateFollowUp={delegateFollowUp}
@@ -600,8 +892,17 @@ export function InboxProcessor({
                     onSendDelegateRequest={handleSendDelegateRequest}
                     selectedContexts={selectedContexts}
                     selectedTags={selectedTags}
-                    onContextsInputChange={(value) => setSelectedContexts(parseTokenListInput(value, '@'))}
-                    onTagsInputChange={(value) => setSelectedTags(parseTokenListInput(value, '#'))}
+                    selectedEnergyLevel={selectedEnergyLevel}
+                    setSelectedEnergyLevel={setSelectedEnergyLevel}
+                    selectedAssignedTo={selectedAssignedTo}
+                    setSelectedAssignedTo={setSelectedAssignedTo}
+                    showEnergyLevelField={showEnergyLevelField}
+                    showAssignedToField={showAssignedToField}
+                    prioritiesEnabled={prioritiesEnabled}
+                    selectedPriority={selectedPriority}
+                    setSelectedPriority={setSelectedPriority}
+                    onContextsInputChange={handleContextsInputChange}
+                    onTagsInputChange={handleTagsInputChange}
                     toggleContext={toggleContext}
                     toggleTag={toggleTag}
                     suggestedContexts={suggestedContexts}
@@ -636,7 +937,7 @@ export function InboxProcessor({
                     setIsProcessing={setIsProcessing}
                     canGoBack={stepHistory.length > 0}
                     onBack={goBack}
-                    handleRefineNext={() => goToStep(getInitialGuidedStep())}
+                    handleRefineNext={handleRefineNext}
                     handleSkip={handleSkip}
                     handleNotActionable={handleNotActionable}
                     handleActionable={handleActionable}
@@ -657,6 +958,15 @@ export function InboxProcessor({
                     handleConfirmWaiting={handleConfirmWaiting}
                     selectedContexts={selectedContexts}
                     selectedTags={selectedTags}
+                    selectedEnergyLevel={selectedEnergyLevel}
+                    setSelectedEnergyLevel={setSelectedEnergyLevel}
+                    selectedAssignedTo={selectedAssignedTo}
+                    setSelectedAssignedTo={setSelectedAssignedTo}
+                    showEnergyLevelField={showEnergyLevelField}
+                    showAssignedToField={showAssignedToField}
+                    prioritiesEnabled={prioritiesEnabled}
+                    selectedPriority={selectedPriority}
+                    setSelectedPriority={setSelectedPriority}
                     allContexts={allContexts}
                     customContext={customContext}
                     setCustomContext={setCustomContext}
@@ -691,12 +1001,8 @@ export function InboxProcessor({
                     setSelectedProjectId={setSelectedProjectId}
                     selectedAreaId={selectedAreaId}
                     setSelectedAreaId={setSelectedAreaId}
-                    scheduleDate={scheduleDate}
-                    scheduleTimeDraft={scheduleTimeDraft}
-                    setScheduleDate={handleScheduleDateChange}
-                    setScheduleTimeDraft={setScheduleTimeDraft}
-                    onScheduleTimeCommit={handleScheduleTimeCommit}
                     showScheduleFields={scheduleEnabled}
+                    scheduleFields={scheduleFields}
                 />
             )}
         </>

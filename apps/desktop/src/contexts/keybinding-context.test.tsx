@@ -6,6 +6,7 @@ import { LanguageProvider } from './language-context';
 import { KeybindingProvider } from './keybinding-context';
 import { useKeybindings } from './keybinding-context';
 import { useUiStore } from '../store/ui-store';
+import { AREA_FILTER_ALL } from '../lib/area-filter';
 
 const DummyList = () => {
     const { registerTaskListScope } = useKeybindings();
@@ -210,6 +211,70 @@ describe('KeybindingProvider (vim)', () => {
         const event = cancelListener.mock.calls[0]?.[0] as CustomEvent<{ taskId: string }>;
         expect(event.detail.taskId).toBe('task-123');
         window.removeEventListener('mindwtr:cancel-task-edit', cancelListener);
+    });
+
+    it('switches the global area filter with a number chord in sidebar order', async () => {
+        useTaskStore.setState((state) => ({
+            ...state,
+            areas: [
+                { id: 'area-work', name: 'Work', order: 2, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+                { id: 'area-home', name: 'Home', order: 0, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+                { id: 'area-errands', name: 'Errands', order: 1, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+            ],
+            settings: {
+                ...state.settings,
+                filters: {
+                    ...(state.settings?.filters ?? {}),
+                    areaId: 'area-work',
+                },
+            },
+        }));
+
+        render(
+            <LanguageProvider>
+                <KeybindingProvider currentView="inbox" onNavigate={vi.fn()}>
+                    <DummyList />
+                </KeybindingProvider>
+            </LanguageProvider>
+        );
+
+        fireEvent.keyDown(window, { key: 'a' });
+        fireEvent.keyDown(window, { key: '2' });
+
+        await waitFor(() => {
+            expect(useTaskStore.getState().settings?.filters?.areaId).toBe('area-errands');
+        });
+    });
+
+    it('clears the global area filter with a0', async () => {
+        useTaskStore.setState((state) => ({
+            ...state,
+            areas: [
+                { id: 'area-home', name: 'Home', order: 0, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
+            ],
+            settings: {
+                ...state.settings,
+                filters: {
+                    ...(state.settings?.filters ?? {}),
+                    areaId: 'area-home',
+                },
+            },
+        }));
+
+        render(
+            <LanguageProvider>
+                <KeybindingProvider currentView="inbox" onNavigate={vi.fn()}>
+                    <DummyList />
+                </KeybindingProvider>
+            </LanguageProvider>
+        );
+
+        fireEvent.keyDown(window, { key: 'a' });
+        fireEvent.keyDown(window, { key: '0' });
+
+        await waitFor(() => {
+            expect(useTaskStore.getState().settings?.filters?.areaId).toBe(AREA_FILTER_ALL);
+        });
     });
 
     it('falls back to visible task cards in views without registered scope', () => {

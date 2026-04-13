@@ -5,7 +5,9 @@ import * as Application from 'expo-application';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useToast } from '@/contexts/toast-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { getPlayStoreUpdateInfoAsync } from '@/lib/play-store-updates';
 import { compareVersions, logSettingsError, logSettingsWarn } from '@/lib/settings-utils';
 
 import {
@@ -25,6 +27,7 @@ export function AboutSettingsScreen({
     onUpdateBadgeChange: (next: boolean) => void;
 }) {
     const tc = useThemeColors();
+    const { showToast } = useToast();
     const { localize, t } = useSettingsLocalization();
     const scrollContentStyle = useSettingsScrollContent();
     const extraConfig = Constants.expoConfig?.extra as MobileExtraConfig | undefined;
@@ -67,11 +70,14 @@ export function AboutSettingsScreen({
     const GITHUB_RELEASES_API = 'https://api.github.com/repos/dongdongbh/Mindwtr/releases/latest';
     const GITHUB_RELEASES_URL = 'https://github.com/dongdongbh/Mindwtr/releases/latest';
     const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=tech.dongdongbh.mindwtr';
-    const PLAY_STORE_LOOKUP_URL = 'https://play.google.com/store/apps/details?id=tech.dongdongbh.mindwtr&hl=en_US&gl=US';
     const PLAY_STORE_MARKET_URL = 'market://details?id=tech.dongdongbh.mindwtr';
     const APP_STORE_BUNDLE_ID = Constants.expoConfig?.ios?.bundleIdentifier || 'tech.dongdongbh.mindwtr';
     const APP_STORE_LOOKUP_URL = `https://itunes.apple.com/lookup?bundleId=${encodeURIComponent(APP_STORE_BUNDLE_ID)}&country=US`;
     const APP_STORE_LOOKUP_FALLBACK_URL = `https://itunes.apple.com/lookup?bundleId=${encodeURIComponent(APP_STORE_BUNDLE_ID)}`;
+
+    type AndroidComparableVersionResult =
+        | { source: 'play-store'; updateAvailable: boolean; availableVersionCode: number | null }
+        | { source: 'github-release'; version: string };
 
     const persistUpdateBadge = useCallback(async (next: boolean, latestVersion?: string) => {
         onUpdateBadgeChange(next);
@@ -139,57 +145,33 @@ export function AboutSettingsScreen({
         throw new Error('Unable to fetch App Store version');
     }, [APP_STORE_LOOKUP_FALLBACK_URL, APP_STORE_LOOKUP_URL]);
 
-    const parsePlayStoreVersion = useCallback((html: string): string | null => {
-        const patterns = [
-            /"softwareVersion"\s*:\s*"([^"]+)"/i,
-            /\\"softwareVersion\\"\s*:\s*\\"([^"]+)\\"/i,
-            /itemprop="softwareVersion"[^>]*>\s*([^<]+)\s*</i,
-            /"versionName"\s*:\s*"([^"]+)"/i,
-        ];
-        for (const pattern of patterns) {
-            const match = html.match(pattern);
-            const value = match?.[1]?.trim();
-            if (value) return value;
+    const fetchAndroidComparableVersion = useCallback(async (): Promise<AndroidComparableVersionResult> => {
+        if (androidInstallerSource === 'sideload') {
+            const release = await fetchLatestRelease();
+            return { version: release.tag_name?.replace(/^v/, '') || '0.0.0', source: 'github-release' };
         }
-        return null;
-    }, []);
+        try {
+            const info = await getPlayStoreUpdateInfoAsync();
+            return {
+                source: 'play-store',
+                updateAvailable: info.updateAvailable,
+                availableVersionCode: info.availableVersionCode,
+            };
+        } catch (error) {
+            logSettingsWarn('Play Store update API failed; falling back to GitHub release', error);
+            const release = await fetchLatestRelease();
+            return { version: release.tag_name?.replace(/^v/, '') || '0.0.0', source: 'github-release' };
+        }
+    }, [androidInstallerSource, fetchLatestRelease]);
 
-    const fetchLatestPlayStoreVersion = useCallback(async () => {
-        const response = await fetch(`${PLAY_STORE_LOOKUP_URL}&_=${Date.now()}`, {
-            headers: {
-                Accept: 'text/html,application/xhtml+xml',
-                'User-Agent': 'Mozilla/5.0 (Android 15; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36',
-            },
-            cache: 'no-store',
-        });
-        if (!response.ok) {
-            throw new Error(`Play Store lookup failed: ${response.status}`);
-        }
-        const html = await response.text();
-        const version = parsePlayStoreVersion(html);
-        if (!version) {
-            throw new Error('Unable to parse Play Store version');
-        }
-        return version;
-    }, [PLAY_STORE_LOOKUP_URL, parsePlayStoreVersion]);
-
-    const fetchLatestComparableVersion = useCallback(async (): Promise<{ version: string; source: 'play-store' | 'app-store' | 'github-release' }> => {
-        if (Platform.OS === 'android' && androidInstallerSource !== 'sideload') {
-            try {
-                return { version: await fetchLatestPlayStoreVersion(), source: 'play-store' };
-            } catch (error) {
-                logSettingsWarn('Play Store lookup failed; falling back to GitHub release', error);
-                const release = await fetchLatestRelease();
-                return { version: release.tag_name?.replace(/^v/, '') || '0.0.0', source: 'github-release' };
-            }
-        }
+    const fetchLatestComparableVersion = useCallback(async (): Promise<{ version: string; source: 'app-store' | 'github-release' }> => {
         if (Platform.OS === 'ios') {
             const { version } = await fetchLatestAppStoreInfo();
             return { version, source: 'app-store' };
         }
         const release = await fetchLatestRelease();
         return { version: release.tag_name?.replace(/^v/, '') || '0.0.0', source: 'github-release' };
-    }, [androidInstallerSource, fetchLatestAppStoreInfo, fetchLatestPlayStoreVersion, fetchLatestRelease]);
+    }, [fetchLatestAppStoreInfo, fetchLatestRelease]);
 
     useEffect(() => {
         let cancelled = false;
@@ -204,11 +186,18 @@ export function AboutSettingsScreen({
                     if (!cancelled) onUpdateBadgeChange(storedBadge === 'true');
                     return;
                 }
-                const { version } = await fetchLatestComparableVersion();
+                const comparable = Platform.OS === 'android'
+                    ? await fetchAndroidComparableVersion()
+                    : await fetchLatestComparableVersion();
                 if (cancelled) return;
-                const hasUpdate = compareVersions(version, currentVersion) > 0;
+                const hasUpdate = comparable.source === 'play-store'
+                    ? comparable.updateAvailable
+                    : compareVersions(comparable.version, currentVersion) > 0;
                 await AsyncStorage.setItem(UPDATE_BADGE_LAST_CHECK_KEY, String(Date.now()));
-                await persistUpdateBadge(hasUpdate, hasUpdate ? version : undefined);
+                await persistUpdateBadge(
+                    hasUpdate,
+                    hasUpdate && comparable.source !== 'play-store' ? comparable.version : undefined
+                );
             } catch (error) {
                 logSettingsWarn('Silent update check failed', error);
             }
@@ -218,17 +207,19 @@ export function AboutSettingsScreen({
         return () => {
             cancelled = true;
         };
-    }, [currentVersion, fetchLatestComparableVersion, isExpoGo, isFossBuild, onUpdateBadgeChange, persistUpdateBadge]);
+    }, [currentVersion, fetchAndroidComparableVersion, fetchLatestComparableVersion, isExpoGo, isFossBuild, onUpdateBadgeChange, persistUpdateBadge]);
 
     const handleCheckUpdates = async () => {
         if (isFossBuild) {
-            Alert.alert(
-                localize('Updates are managed by your distribution source', '更新由发行渠道管理'),
-                localize(
+            showToast({
+                title: localize('Updates are managed by your distribution source', '更新由发行渠道管理'),
+                message: localize(
                     'In-app update checks are disabled in this FOSS build. Please update from your repository or package source.',
                     '此 FOSS 版本已禁用应用内更新检查。请通过你的软件源或包管理渠道更新。'
-                )
-            );
+                ),
+                tone: 'info',
+                durationMs: 4800,
+            });
             return;
         }
 
@@ -239,31 +230,37 @@ export function AboutSettingsScreen({
             if (Platform.OS === 'android' && androidInstallerSource !== 'sideload') {
                 const canOpenMarket = await Linking.canOpenURL(PLAY_STORE_MARKET_URL);
                 const targetUrl = canOpenMarket ? PLAY_STORE_MARKET_URL : PLAY_STORE_URL;
-                const { version: latestVersion, source } = await fetchLatestComparableVersion();
-                const hasUpdate = compareVersions(latestVersion, currentVersion) > 0;
+                const result = await fetchAndroidComparableVersion();
+                const hasUpdate = result.source === 'play-store'
+                    ? result.updateAvailable
+                    : compareVersions(result.version, currentVersion) > 0;
                 if (hasUpdate) {
-                    const updateMessage = source === 'play-store'
+                    const updateMessage = result.source === 'play-store'
                         ? localize(
-                            `v${currentVersion} → v${latestVersion}\n\nUpdate is available on Google Play. Open app listing now?`,
-                            `v${currentVersion} → v${latestVersion}\n\nGoogle Play 已提供更新，是否立即打开应用页面？`
+                            'Update is available on Google Play. Open app listing now?',
+                            'Google Play 已提供更新，是否立即打开应用页面？'
                         )
                         : localize(
-                            `v${currentVersion} → v${latestVersion}\n\nPlay Store version lookup is temporarily unavailable. A newer GitHub release is available, and Play rollout may lag. Open app listing now?`,
-                            `v${currentVersion} → v${latestVersion}\n\n暂时无法直接获取 Google Play 版本，GitHub 已有更新，Play 商店可能会延迟推送。是否立即打开应用页面？`
+                            `v${currentVersion} → v${result.version}\n\nGoogle Play check was unavailable, but a newer GitHub release is available. Play rollout may lag. Open app listing now?`,
+                            `v${currentVersion} → v${result.version}\n\nGoogle Play 检查暂时不可用，但 GitHub 已有更新，Play 商店可能会延迟推送。是否立即打开应用页面？`
                         );
                     Alert.alert(localize('Update Available', '有可用更新'), updateMessage, [
                         { text: localize('Later', '稍后'), style: 'cancel' },
                         { text: localize('Open', '打开'), onPress: () => Linking.openURL(targetUrl) },
                     ]);
-                    await persistUpdateBadge(true, latestVersion);
+                    await persistUpdateBadge(true, result.source === 'github-release' ? result.version : undefined);
                 } else {
-                    const upToDateMessage = source === 'play-store'
+                    const upToDateMessage = result.source === 'play-store'
                         ? localize('You are using the latest Google Play version!', '您正在使用 Google Play 最新版本！')
                         : localize(
-                            'Play Store version lookup is temporarily unavailable. Your version matches the latest GitHub release.',
-                            '暂时无法直接获取 Google Play 版本，但当前版本与 GitHub 最新发布一致。'
+                            'Google Play check was unavailable, but your version matches the latest GitHub release.',
+                            'Google Play 检查暂时不可用，但当前版本与 GitHub 最新发布一致。'
                         );
-                    Alert.alert(localize('Up to Date', '已是最新'), upToDateMessage);
+                    showToast({
+                        title: localize('Up to Date', '已是最新'),
+                        message: upToDateMessage,
+                        tone: 'success',
+                    });
                     await persistUpdateBadge(false);
                 }
                 return;
@@ -291,10 +288,11 @@ export function AboutSettingsScreen({
                     );
                     await persistUpdateBadge(true, latestVersion);
                 } else {
-                    Alert.alert(
-                        localize('Up to Date', '已是最新'),
-                        localize('You are using the latest App Store version!', '您正在使用 App Store 最新版本！')
-                    );
+                    showToast({
+                        title: localize('Up to Date', '已是最新'),
+                        message: localize('You are using the latest App Store version!', '您正在使用 App Store 最新版本！'),
+                        tone: 'success',
+                    });
                     await persistUpdateBadge(false);
                 }
                 return;
@@ -317,12 +315,20 @@ export function AboutSettingsScreen({
                 );
                 await persistUpdateBadge(true, latestVersion);
             } else {
-                Alert.alert(localize('Up to Date', '已是最新'), localize('You are using the latest version!', '您正在使用最新版本！'));
+                showToast({
+                    title: localize('Up to Date', '已是最新'),
+                    message: localize('You are using the latest version!', '您正在使用最新版本！'),
+                    tone: 'success',
+                });
                 await persistUpdateBadge(false);
             }
         } catch (error) {
             logSettingsError('Update check failed:', error);
-            Alert.alert(localize('Error', '错误'), localize('Failed to check for updates', '检查更新失败'));
+            showToast({
+                title: localize('Error', '错误'),
+                message: localize('Failed to check for updates', '检查更新失败'),
+                tone: 'warning',
+            });
         } finally {
             setIsCheckingUpdate(false);
         }

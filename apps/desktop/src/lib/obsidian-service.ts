@@ -140,7 +140,14 @@ export class ObsidianService {
 
     static async scanVault(config: ObsidianConfig): Promise<ObsidianScanResult> {
         if (!isTauriRuntime()) {
-            return { tasks: [], scannedFileCount: 0, scannedRelativePaths: [], warnings: [], importMode: 'inline' };
+            return {
+                tasks: [],
+                scannedFileCount: 0,
+                scannedRelativePaths: [],
+                taskNotesDetectedPaths: [],
+                warnings: [],
+                importMode: 'inline',
+            };
         }
 
         const { exists, readDir, readTextFile, stat } = await import('@tauri-apps/plugin-fs');

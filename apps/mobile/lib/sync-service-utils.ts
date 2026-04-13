@@ -10,6 +10,7 @@ import {
 } from '@mindwtr/core';
 
 export type SyncBackend = CoreSyncBackend | 'cloudkit';
+export type SyncFailureKind = 'offline' | 'auth' | 'permission' | 'rateLimited' | 'misconfigured' | 'conflict' | 'unknown';
 
 const SYNC_FILE_NAME = 'data.json';
 const LEGACY_SYNC_FILE_NAME = 'mindwtr-sync.json';
@@ -17,6 +18,10 @@ const FILE_EXTENSION_PATTERN = /\.[A-Za-z0-9]{1,16}$/;
 const READONLY_ERROR_PATTERN = /isn't writable|not writable|read-only|read only|permission denied|EACCES/i;
 const IOS_TEMP_INBOX_PATTERN = /\/tmp\/[^/\s]*-Inbox\//i;
 const IOS_ABSOLUTE_PATH_PATTERN = /^\/(private\/)?var\/mobile\//i;
+const AUTH_ERROR_PATTERN = /\b401\b|unauthori[sz]ed|forbidden|\b403\b|reauth|re-auth|app password|credentials?/i;
+const RATE_LIMIT_ERROR_PATTERN = /\b429\b|rate limit|too many requests|retry after/i;
+const MISCONFIGURED_SYNC_PATTERN = /not configured|missing .*config|save .*settings first|finish setup/i;
+const CONFLICT_ERROR_PATTERN = /\bconflict\b|stale remote state|precondition failed/i;
 
 export const formatSyncErrorMessage = (error: unknown, backend: SyncBackend): string => {
   const raw = sanitizeSyncErrorMessage(String(error));
@@ -30,6 +35,20 @@ export const formatSyncErrorMessage = (error: unknown, backend: SyncBackend): st
 
 export const isLikelyOfflineSyncError = (errorOrMessage: unknown): boolean => {
   return isCoreLikelyOfflineSyncError(errorOrMessage);
+};
+
+export const classifySyncFailure = (errorOrMessage: unknown): SyncFailureKind => {
+  const message = sanitizeSyncErrorMessage(String(errorOrMessage || ''));
+  if (!message.trim()) return 'unknown';
+  if (isLikelyOfflineSyncError(message)) return 'offline';
+  if (RATE_LIMIT_ERROR_PATTERN.test(message)) return 'rateLimited';
+  if (AUTH_ERROR_PATTERN.test(message)) return 'auth';
+  if (READONLY_ERROR_PATTERN.test(message) || IOS_TEMP_INBOX_PATTERN.test(message) || /cannot access the selected sync file/i.test(message)) {
+    return 'permission';
+  }
+  if (MISCONFIGURED_SYNC_PATTERN.test(message)) return 'misconfigured';
+  if (CONFLICT_ERROR_PATTERN.test(message)) return 'conflict';
+  return 'unknown';
 };
 
 export const normalizeFileSyncPath = (path: string, platformOs: string): string => {

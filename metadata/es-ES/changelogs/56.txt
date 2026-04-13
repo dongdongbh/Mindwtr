@@ -1,0 +1,3 @@
+- La captura rapida ahora entiende fechas naturales como manana.
+- Los toasts moviles se ordenan mejor, la guia de sync es mas clara y las alertas no criticas interrumpen menos.
+- Los widgets de Android encajan mejor en espacios estrechos y los uploads/sync fallan de forma mas segura.

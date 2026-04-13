@@ -3,6 +3,12 @@ import { ExternalCalendarService } from './external-calendar-service';
 import { isTauriRuntime } from './runtime';
 import { fetchSystemCalendarEvents } from './system-calendar';
 
+export const summarizeExternalCalendarWarnings = (warnings: string[]): string | null => {
+    if (warnings.length === 0) return null;
+    if (warnings.length === 1) return warnings[0];
+    return `${warnings[0]} (+${warnings.length - 1} more)`;
+};
+
 async function fetchTextWithTimeout(url: string, timeoutMs: number): Promise<string> {
     if (isTauriRuntime()) {
         const mod: any = await import('@tauri-apps/plugin-http');
@@ -35,6 +41,7 @@ export async function fetchExternalCalendarEvents(
 ): Promise<{
     calendars: ExternalCalendarSubscription[];
     events: ExternalCalendarEvent[];
+    warnings: string[];
 }> {
     const calendars = await ExternalCalendarService.getCalendars();
     const enabled = calendars.filter((calendar) => calendar.enabled);
@@ -50,8 +57,13 @@ export async function fetchExternalCalendarEvents(
     ]);
 
     const events: ExternalCalendarEvent[] = [...systemResults.events];
-    for (const result of icsResults) {
+    const warnings: string[] = [];
+    for (const [index, result] of icsResults.entries()) {
         if (result.status !== 'fulfilled') {
+            const calendar = enabled[index];
+            const label = (calendar?.name || calendar?.url || 'Unnamed calendar').trim();
+            const detail = result.reason instanceof Error ? result.reason.message : String(result.reason ?? 'Unknown error');
+            warnings.push(`Failed to load "${label}": ${detail}`);
             continue;
         }
         events.push(...result.value);
@@ -70,5 +82,5 @@ export async function fetchExternalCalendarEvents(
         return a.start.localeCompare(b.start);
     });
 
-    return { calendars: mergedCalendars, events };
+    return { calendars: mergedCalendars, events, warnings };
 }

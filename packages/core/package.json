@@ -1,7 +1,7 @@
 {
   "name": "@mindwtr/core",
   "license": "AGPL-3.0-only",
-  "version": "0.8.0",
+  "version": "0.8.2",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "exports": {
@@ -54,6 +54,7 @@
   "type": "module",
   "dependencies": {
     "@babel/runtime": "^7.28.4",
+    "chrono-node": "^2.9.0",
     "date-fns": "^4.1.0",
     "fflate": "^0.8.2",
     "uuid": "^9.0.1",
@@ -67,6 +68,6 @@
   "devDependencies": {
     "@types/uuid": "^9.0.8",
     "typescript": "~5.9.2",
-    "vitest": "^2.1.8"
+    "vitest": "^3.2.4"
   }
 }

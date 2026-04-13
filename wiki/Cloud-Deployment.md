@@ -8,6 +8,12 @@ This page is an operations-focused companion to [[Cloud Sync]]. It covers how to
 - It is best for single-tenant or small trusted deployments.
 - You should run it behind HTTPS reverse proxying and standard server hardening controls.
 
+Client compatibility note:
+
+- Mindwtr Cloud clients require **HTTPS** for normal device URLs.
+- `http://localhost` is allowed for development, but `http://192.168.x.x` or other private-LAN HTTP URLs are not accepted by the Cloud sync client.
+- If you want LAN-only deployment, add TLS at the reverse proxy layer. If you need plain HTTP on a private LAN, use WebDAV instead.
+
 ## Deployment Topology
 
 Recommended layout:
@@ -99,7 +105,7 @@ services:
   mindwtr-cloud:
     image: oven/bun:1.3
     working_dir: /app
-    command: ["bun", "run", "src/server.ts", "--host", "0.0.0.0", "--port", "8787"]
+    command: ["bun", "run", "--filter", "mindwtr-cloud", "start", "--", "--host", "0.0.0.0", "--port", "8787"]
     environment:
       MINDWTR_CLOUD_DATA_DIR: /data
       MINDWTR_CLOUD_AUTH_TOKENS: ${MINDWTR_CLOUD_AUTH_TOKENS}

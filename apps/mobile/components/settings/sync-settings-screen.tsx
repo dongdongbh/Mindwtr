@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
+    addBreadcrumb,
     CLOCK_SKEW_THRESHOLD_MS,
     cloudGetJson,
     type BackupValidation,
@@ -16,6 +17,7 @@ import {
 
 import { useMobileSyncBadge } from '@/hooks/use-mobile-sync-badge';
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { useToast } from '@/contexts/toast-context';
 import { pickAndParseSyncFolder } from '@/lib/storage-file';
 import { getCloudKitAccountStatus, isCloudKitAvailable } from '@/lib/cloudkit-sync';
 import {
@@ -48,6 +50,7 @@ import {
 } from '@/lib/settings-utils';
 import { performMobileSync } from '@/lib/sync-service';
 import {
+    classifySyncFailure,
     coerceSupportedBackend,
     getSyncConflictCount,
     getSyncMaxClockSkewMs,
@@ -75,6 +78,7 @@ import { styles } from './settings.styles';
 
 export function SyncSettingsScreen() {
     const tc = useThemeColors();
+    const { showToast } = useToast();
     const { localize, t } = useSettingsLocalization();
     const scrollContentStyle = useSettingsScrollContent();
     const {
@@ -135,6 +139,52 @@ export function SyncSettingsScreen() {
     const cloudUrlError = cloudUrl.trim() ? !isValidHttpUrl(cloudUrl.trim()) : false;
     const backendOptions: ('off' | 'file' | 'webdav' | 'cloud')[] = ['off', 'file', 'webdav', 'cloud'];
     const isCloudSyncSelected = syncBackend === 'cloud' || syncBackend === 'cloudkit';
+    const showSettingsWarning = useCallback((title: string, message: string, durationMs = 4200) => {
+        showToast({
+            title,
+            message,
+            tone: 'warning',
+            durationMs,
+        });
+    }, [showToast]);
+    const showSettingsErrorToast = useCallback((title: string, message: string, durationMs = 4200) => {
+        showToast({
+            title,
+            message,
+            tone: 'error',
+            durationMs,
+        });
+    }, [showToast]);
+    const getSyncFailureToastMessage = useCallback((error: unknown) => {
+        switch (classifySyncFailure(error)) {
+            case 'offline':
+                return localize('Check your internet connection and try again.', '请检查网络连接后重试。');
+            case 'auth':
+                return localize(
+                    'Re-authenticate or review your sync credentials in Data & Sync.',
+                    '请在“数据与同步”中重新验证或检查同步凭据。'
+                );
+            case 'permission':
+                return localize(
+                    'Re-select the sync file or folder, or grant access again in Data & Sync.',
+                    '请在“数据与同步”中重新选择同步文件/文件夹，或重新授予访问权限。'
+                );
+            case 'rateLimited':
+                return localize('The sync backend is rate limiting requests. Wait a moment and try again.', '同步后端正在限流。请稍后再试。');
+            case 'misconfigured':
+                return localize(
+                    'Finish configuring the selected sync backend in Data & Sync.',
+                    '请先在“数据与同步”中完成所选同步后端的配置。'
+                );
+            case 'conflict':
+                return localize(
+                    'Another device or backend reported a sync conflict. Retry after both sides finish syncing.',
+                    '另一台设备或后端报告了同步冲突。请等待双方完成同步后再重试。'
+                );
+            default:
+                return localize('Review Data & Sync settings and try again.', '请检查“数据与同步”设置后重试。');
+        }
+    }, [localize]);
 
     useEffect(() => {
         AsyncStorage.multiGet([
@@ -426,7 +476,7 @@ export function SyncSettingsScreen() {
             await exportCurrentDataBackup({ tasks, projects, sections, areas, settings });
         } catch (error) {
             logSettingsError(error);
-            Alert.alert(localize('Error', '错误'), localize('Failed to export backup', '导出备份失败'));
+            showSettingsErrorToast(localize('Error', '错误'), localize('Failed to export backup', '导出备份失败'));
         } finally {
             setBackupAction(null);
         }
@@ -438,16 +488,18 @@ export function SyncSettingsScreen() {
         try {
             const { snapshotName } = await restoreDataFromBackup(validation.data);
             await refreshRecoverySnapshots();
-            Alert.alert(
-                localize('Restore complete', '恢复完成'),
-                localize(
+            showToast({
+                title: localize('Restore complete', '恢复完成'),
+                message: localize(
                     `Backup restored successfully. Recovery snapshot saved as ${snapshotName}.`,
                     `备份恢复成功。恢复快照已保存为 ${snapshotName}。`
-                )
-            );
+                ),
+                tone: 'success',
+                durationMs: 5000,
+            });
         } catch (error) {
             logSettingsError(error);
-            Alert.alert(localize('Restore failed', '恢复失败'), String(error));
+            showSettingsErrorToast(localize('Restore failed', '恢复失败'), String(error), 5200);
         } finally {
             setBackupAction(null);
         }
@@ -462,7 +514,7 @@ export function SyncSettingsScreen() {
                 appVersion: Constants.expoConfig?.version ?? '0.0.0',
             });
             if (!validation.valid || !validation.data) {
-                Alert.alert(
+                showSettingsWarning(
                     localize('Invalid backup', '无效备份'),
                     validation.errors[0] || localize('This file is not a valid Mindwtr backup.', '这不是有效的 Mindwtr 备份文件。')
                 );
@@ -483,7 +535,7 @@ export function SyncSettingsScreen() {
             );
         } catch (error) {
             logSettingsError(error);
-            Alert.alert(localize('Restore failed', '恢复失败'), String(error));
+            showSettingsErrorToast(localize('Restore failed', '恢复失败'), String(error), 5200);
         } finally {
             setBackupAction(null);
         }
@@ -508,10 +560,15 @@ export function SyncSettingsScreen() {
                 localize(`Recovery snapshot saved as ${snapshotName}.`, `恢复快照已保存为 ${snapshotName}。`),
                 ...(result.warnings.length > 0 ? ['', ...result.warnings] : []),
             ].filter(Boolean);
-            Alert.alert(localize('Import complete', '导入完成'), details.join('\n'));
+            showToast({
+                title: localize('Import complete', '导入完成'),
+                message: details.join('\n'),
+                tone: 'success',
+                durationMs: 5600,
+            });
         } catch (error) {
             logSettingsError(error);
-            Alert.alert(localize('Import failed', '导入失败'), String(error));
+            showSettingsErrorToast(localize('Import failed', '导入失败'), String(error), 5200);
         } finally {
             setBackupAction(null);
         }
@@ -524,7 +581,7 @@ export function SyncSettingsScreen() {
             if (!document) return;
             const parseResult = await inspectTodoistDocument(document);
             if (!parseResult.valid || !parseResult.preview) {
-                Alert.alert(
+                showSettingsWarning(
                     localize('Import failed', '导入失败'),
                     parseResult.errors[0] || localize('The selected file is not a supported Todoist export.', '所选文件不是受支持的 Todoist 导出文件。')
                 );
@@ -543,7 +600,7 @@ export function SyncSettingsScreen() {
             );
         } catch (error) {
             logSettingsError(error);
-            Alert.alert(localize('Import failed', '导入失败'), String(error));
+            showSettingsErrorToast(localize('Import failed', '导入失败'), String(error), 5200);
         } finally {
             setBackupAction(null);
         }
@@ -566,10 +623,14 @@ export function SyncSettingsScreen() {
                         try {
                             await restoreLocalDataSnapshot(snapshotName);
                             await refreshRecoverySnapshots();
-                            Alert.alert(localize('Restore complete', '恢复完成'), localize('Recovery snapshot restored.', '恢复快照已恢复。'));
+                            showToast({
+                                title: localize('Restore complete', '恢复完成'),
+                                message: localize('Recovery snapshot restored.', '恢复快照已恢复。'),
+                                tone: 'success',
+                            });
                         } catch (error) {
                             logSettingsError(error);
-                            Alert.alert(localize('Restore failed', '恢复失败'), String(error));
+                            showSettingsErrorToast(localize('Restore failed', '恢复失败'), String(error), 5200);
                         } finally {
                             setBackupAction(null);
                         }
@@ -598,13 +659,21 @@ export function SyncSettingsScreen() {
     const handleShareLog = async () => {
         const path = await ensureLogFilePath();
         if (!path) {
-            Alert.alert(t('settings.debugLogging'), t('settings.logMissing'));
+            showToast({
+                title: t('settings.debugLogging'),
+                message: t('settings.logMissing'),
+                tone: 'warning',
+            });
             return;
         }
         const Sharing = await import('expo-sharing');
         const canShare = await Sharing.isAvailableAsync();
         if (!canShare) {
-            Alert.alert(t('settings.debugLogging'), t('settings.shareUnavailable'));
+            showToast({
+                title: t('settings.debugLogging'),
+                message: t('settings.shareUnavailable'),
+                tone: 'warning',
+            });
             return;
         }
         await Sharing.shareAsync(path, { mimeType: 'text/plain' });
@@ -612,7 +681,11 @@ export function SyncSettingsScreen() {
 
     const handleClearLog = async () => {
         await clearLog();
-        Alert.alert(t('settings.debugLogging'), t('settings.logCleared'));
+        showToast({
+            title: t('settings.debugLogging'),
+            message: t('settings.logCleared'),
+            tone: 'success',
+        });
     };
 
     const handleSetSyncPath = async () => {
@@ -630,36 +703,43 @@ export function SyncSettingsScreen() {
                     }
                     setSyncPath(fileUri);
                     await AsyncStorage.setItem(SYNC_BACKEND_KEY, 'file');
+                    addBreadcrumb('settings:syncBackend:file');
                     setSyncBackend('file');
                     resetSyncStatusForBackendSwitch();
-                    Alert.alert(localize('Success', '成功'), localize('Sync folder set successfully', '同步文件夹已设置'));
+                    showToast({
+                        title: localize('Success', '成功'),
+                        message: localize('Sync folder set successfully', '同步文件夹已设置'),
+                        tone: 'success',
+                    });
                 }
             }
         } catch (error) {
             logSettingsError(error);
             const message = String(error);
             if (/Selected JSON file is not a Mindwtr backup/i.test(message)) {
-                Alert.alert(
+                showSettingsWarning(
                     localize('Invalid sync file', '无效同步文件'),
                     localize(
                         'Please choose a Mindwtr backup JSON file in the target folder, then try "Select Folder" again.',
                         '请选择目标文件夹中的 Mindwtr 备份 JSON 文件，然后重试“选择文件夹”。'
-                    )
+                    ),
+                    5200
                 );
                 return;
             }
             if (/temporary Inbox location|re-select a folder in Settings -> Data & Sync/i.test(message)) {
-                Alert.alert(
+                showSettingsWarning(
                     localize('Unsupported cloud provider on iOS', 'iOS 云端提供商暂不支持'),
                     localize(
                         'The selected file came from a temporary iOS Files copy. Providers like Google Drive and OneDrive are not reliable for file sync here yet. Please choose iCloud Drive instead, or switch to WebDAV.',
                         '当前选择的是 iOS“文件”提供的临时副本。Google Drive、OneDrive 等提供商暂不适合作为这里的文件同步目录。请改用 iCloud Drive，或切换到 WebDAV。'
-                    )
+                    ),
+                    5600
                 );
                 return;
             }
             if (/read-only|read only|not writable|isn't writable|permission denied|EACCES/i.test(message)) {
-                Alert.alert(
+                showSettingsWarning(
                     localize('Sync folder is read-only', '同步文件夹不可写'),
                     Platform.OS === 'ios'
                         ? localize(
@@ -669,30 +749,32 @@ export function SyncSettingsScreen() {
                         : localize(
                             'The selected folder is read-only. Please choose a writable folder (e.g. My files) or make it available offline.',
                             '所选文件夹不可写。请选择可写文件夹（如“我的文件”），或将其设为离线可用。'
-                        )
+                        ),
+                    5600
                 );
                 return;
             }
-            Alert.alert(localize('Error', '错误'), localize('Failed to set sync path', '设置失败'));
+            showSettingsErrorToast(localize('Error', '错误'), localize('Failed to set sync path', '设置失败'));
         }
     };
 
     const handleConnectDropbox = async () => {
         if (isFossBuild) {
-            Alert.alert(localize('Dropbox unavailable', 'Dropbox 不可用'), localize('Dropbox is disabled in FOSS builds.', 'FOSS 构建不支持 Dropbox。'));
+            showSettingsWarning(localize('Dropbox unavailable', 'Dropbox 不可用'), localize('Dropbox is disabled in FOSS builds.', 'FOSS 构建不支持 Dropbox。'));
             return;
         }
         if (!dropboxConfigured) {
-            Alert.alert(localize('Dropbox unavailable', 'Dropbox 不可用'), localize('Dropbox app key is not configured in this build.', '当前构建未配置 Dropbox App Key。'));
+            showSettingsWarning(localize('Dropbox unavailable', 'Dropbox 不可用'), localize('Dropbox app key is not configured in this build.', '当前构建未配置 Dropbox App Key。'));
             return;
         }
         if (isExpoGo) {
-            Alert.alert(
+            showSettingsWarning(
                 localize('Dropbox unavailable in Expo Go', 'Expo Go 不支持 Dropbox'),
                 `${localize(
                     'Dropbox OAuth requires a development/release build. Expo Go uses temporary redirect URIs that Dropbox rejects.',
                     'Dropbox OAuth 需要开发版或正式版应用。Expo Go 使用临时回调地址，Dropbox 会拒绝。'
-                )}\n\n${localize('Use redirect URI', '请使用回调地址')}: ${getDropboxRedirectUri()}`
+                )}\n\n${localize('Use redirect URI', '请使用回调地址')}: ${getDropboxRedirectUri()}`,
+                6000
             );
             return;
         }
@@ -704,20 +786,26 @@ export function SyncSettingsScreen() {
                 [CLOUD_PROVIDER_KEY, 'dropbox'],
             ]);
             setCloudProvider('dropbox');
+            addBreadcrumb('settings:syncBackend:cloud');
             setSyncBackend('cloud');
             setDropboxConnected(true);
             resetSyncStatusForBackendSwitch();
-            Alert.alert(localize('Success', '成功'), localize('Connected to Dropbox.', '已连接 Dropbox。'));
+            showToast({
+                title: localize('Success', '成功'),
+                message: localize('Connected to Dropbox.', '已连接 Dropbox。'),
+                tone: 'success',
+            });
         } catch (error) {
             logSettingsError(error);
             const message = formatError(error);
             if (/redirect[_\s-]?uri/i.test(message)) {
-                Alert.alert(
+                showSettingsWarning(
                     localize('Invalid redirect URI', '回调地址无效'),
-                    `${localize('Add this exact redirect URI in Dropbox OAuth settings.', '请在 Dropbox OAuth 设置里添加以下精确回调地址。')}\n\n${getDropboxRedirectUri()}`
+                    `${localize('Add this exact redirect URI in Dropbox OAuth settings.', '请在 Dropbox OAuth 设置里添加以下精确回调地址。')}\n\n${getDropboxRedirectUri()}`,
+                    6000
                 );
             } else {
-                Alert.alert(localize('Connection failed', '连接失败'), message);
+                showSettingsErrorToast(localize('Connection failed', '连接失败'), message, 5200);
             }
         } finally {
             setDropboxBusy(false);
@@ -734,10 +822,14 @@ export function SyncSettingsScreen() {
             await disconnectDropbox(dropboxAppKey);
             setDropboxConnected(false);
             resetSyncStatusForBackendSwitch();
-            Alert.alert(localize('Disconnected', '已断开'), localize('Dropbox connection removed.', '已移除 Dropbox 连接。'));
+            showToast({
+                title: localize('Disconnected', '已断开'),
+                message: localize('Dropbox connection removed.', '已移除 Dropbox 连接。'),
+                tone: 'success',
+            });
         } catch (error) {
             logSettingsError(error);
-            Alert.alert(localize('Disconnect failed', '断开失败'), formatError(error));
+            showSettingsErrorToast(localize('Disconnect failed', '断开失败'), formatError(error), 5200);
         } finally {
             setDropboxBusy(false);
         }
@@ -745,31 +837,36 @@ export function SyncSettingsScreen() {
 
     const handleTestDropboxConnection = async () => {
         if (isFossBuild) {
-            Alert.alert(localize('Dropbox unavailable', 'Dropbox 不可用'), localize('Dropbox is disabled in FOSS builds.', 'FOSS 构建不支持 Dropbox。'));
+            showSettingsWarning(localize('Dropbox unavailable', 'Dropbox 不可用'), localize('Dropbox is disabled in FOSS builds.', 'FOSS 构建不支持 Dropbox。'));
             return;
         }
         if (!dropboxConfigured) {
-            Alert.alert(localize('Dropbox unavailable', 'Dropbox 不可用'), localize('Dropbox app key is not configured in this build.', '当前构建未配置 Dropbox App Key。'));
+            showSettingsWarning(localize('Dropbox unavailable', 'Dropbox 不可用'), localize('Dropbox app key is not configured in this build.', '当前构建未配置 Dropbox App Key。'));
             return;
         }
         setIsTestingConnection(true);
         try {
             await runDropboxConnectionTest();
             setDropboxConnected(true);
-            Alert.alert(localize('Connection OK', '连接成功'), localize('Dropbox account is reachable.', 'Dropbox 账号可访问。'));
+            showToast({
+                title: localize('Connection OK', '连接成功'),
+                message: localize('Dropbox account is reachable.', 'Dropbox 账号可访问。'),
+                tone: 'success',
+            });
         } catch (error) {
             logSettingsWarn('Dropbox connection test failed', error);
             if (isDropboxUnauthorizedSettingsError(error)) {
                 setDropboxConnected(false);
-                Alert.alert(
+                showSettingsWarning(
                     localize('Connection failed', '连接失败'),
                     localize(
                         'Dropbox token is invalid or revoked. Please tap Connect Dropbox to re-authorize.',
                         'Dropbox 令牌无效或已失效。请点击“连接 Dropbox”重新授权。'
-                    )
+                    ),
+                    5200
                 );
             } else {
-                Alert.alert(localize('Connection failed', '连接失败'), formatError(error));
+                showSettingsErrorToast(localize('Connection failed', '连接失败'), formatError(error), 5200);
             }
         } finally {
             setIsTestingConnection(false);
@@ -777,6 +874,7 @@ export function SyncSettingsScreen() {
     };
 
     const handleSync = async () => {
+        addBreadcrumb('sync:manual');
         setIsSyncing(true);
         try {
             const previousLastSyncStatus = settings.lastSyncStatus;
@@ -784,11 +882,11 @@ export function SyncSettingsScreen() {
             if (syncBackend === 'off') return;
             if (syncBackend === 'webdav') {
                 if (!webdavUrl.trim()) {
-                    Alert.alert(localize('Notice', '提示'), localize('Please set a WebDAV URL first', '请先设置 WebDAV 地址'));
+                    showSettingsWarning(localize('Notice', '提示'), localize('Please set a WebDAV URL first', '请先设置 WebDAV 地址'));
                     return;
                 }
                 if (webdavUrlError) {
-                    Alert.alert(localize('Invalid URL', '地址无效'), localize('Please enter a valid WebDAV URL (http/https).', '请输入有效的 WebDAV 地址（http/https）。'));
+                    showSettingsWarning(localize('Invalid URL', '地址无效'), localize('Please enter a valid WebDAV URL (http/https).', '请输入有效的 WebDAV 地址（http/https）。'));
                     return;
                 }
                 await AsyncStorage.multiSet([
@@ -802,23 +900,23 @@ export function SyncSettingsScreen() {
                 setCloudKitAccountStatus(accountStatus);
                 const statusDetails = getCloudKitStatusDetails(accountStatus);
                 if (!statusDetails.syncEnabled) {
-                    Alert.alert(localize('iCloud unavailable', 'iCloud 不可用'), statusDetails.helpText);
+                    showSettingsWarning(localize('iCloud unavailable', 'iCloud 不可用'), statusDetails.helpText, 5200);
                     return;
                 }
                 await AsyncStorage.setItem(SYNC_BACKEND_KEY, 'cloudkit');
             } else if (syncBackend === 'cloud') {
                 if (cloudProvider === 'dropbox') {
                     if (isFossBuild) {
-                        Alert.alert(localize('Dropbox unavailable', 'Dropbox 不可用'), localize('Dropbox is disabled in FOSS builds.', 'FOSS 构建不支持 Dropbox。'));
+                        showSettingsWarning(localize('Dropbox unavailable', 'Dropbox 不可用'), localize('Dropbox is disabled in FOSS builds.', 'FOSS 构建不支持 Dropbox。'));
                         return;
                     }
                     if (!dropboxConfigured) {
-                        Alert.alert(localize('Dropbox unavailable', 'Dropbox 不可用'), localize('Dropbox app key is not configured in this build.', '当前构建未配置 Dropbox App Key。'));
+                        showSettingsWarning(localize('Dropbox unavailable', 'Dropbox 不可用'), localize('Dropbox app key is not configured in this build.', '当前构建未配置 Dropbox App Key。'));
                         return;
                     }
                     const connected = await isDropboxConnected();
                     if (!connected) {
-                        Alert.alert(localize('Notice', '提示'), localize('Please connect Dropbox first.', '请先连接 Dropbox。'));
+                        showSettingsWarning(localize('Notice', '提示'), localize('Please connect Dropbox first.', '请先连接 Dropbox。'));
                         return;
                     }
                     await AsyncStorage.multiSet([
@@ -827,11 +925,11 @@ export function SyncSettingsScreen() {
                     ]);
                 } else {
                     if (!cloudUrl.trim()) {
-                        Alert.alert(localize('Notice', '提示'), localize('Please set a self-hosted URL first', '请先设置自托管地址'));
+                        showSettingsWarning(localize('Notice', '提示'), localize('Please set a self-hosted URL first', '请先设置自托管地址'));
                         return;
                     }
                     if (cloudUrlError) {
-                        Alert.alert(localize('Invalid URL', '地址无效'), localize('Please enter a valid self-hosted URL (http/https).', '请输入有效的自托管地址（http/https）。'));
+                        showSettingsWarning(localize('Invalid URL', '地址无效'), localize('Please enter a valid self-hosted URL (http/https).', '请输入有效的自托管地址（http/https）。'));
                         return;
                     }
                     await AsyncStorage.multiSet([
@@ -843,7 +941,7 @@ export function SyncSettingsScreen() {
                 }
             } else {
                 if (!syncPath) {
-                    Alert.alert(localize('Notice', '提示'), localize('Please set a sync folder first', '请先设置同步文件夹'));
+                    showSettingsWarning(localize('Notice', '提示'), localize('Please set a sync folder first', '请先设置同步文件夹'));
                     return;
                 }
                 await AsyncStorage.setItem(SYNC_BACKEND_KEY, 'file');
@@ -852,14 +950,20 @@ export function SyncSettingsScreen() {
             resetSyncStatusForBackendSwitch();
             const result = await performMobileSync(syncBackend === 'file' ? syncPath || undefined : undefined);
             if (result.skipped === 'offline' || isLikelyOfflineSyncError(result.error)) {
-                Alert.alert(localize('Offline', '离线'), localize('No internet connection. Sync skipped.', '当前无网络连接，已跳过同步。'));
+                showToast({
+                    title: localize('Offline', '离线'),
+                    message: localize('No internet connection. Sync skipped.', '当前无网络连接，已跳过同步。'),
+                    tone: 'warning',
+                });
                 return;
             }
             if (result.skipped === 'requeued') {
-                Alert.alert(
-                    localize('Sync queued', '已重新排队'),
-                    localize('Local changes arrived during sync. A retry was queued automatically.', '同步期间检测到本地更改，已自动重新排队重试。')
-                );
+                showToast({
+                    title: localize('Sync queued', '已重新排队'),
+                    message: localize('Local changes arrived during sync. A retry was queued automatically.', '同步期间检测到本地更改，已自动重新排队重试。'),
+                    tone: 'info',
+                    durationMs: 4200,
+                });
                 return;
             }
             if (result.success) {
@@ -884,15 +988,17 @@ export function SyncSettingsScreen() {
                         )
                         : null,
                 ].filter(Boolean);
-                Alert.alert(
-                    localize('Success', '成功'),
-                    [
+                showToast({
+                    title: localize('Success', '成功'),
+                    message: [
                         conflictCount > 0 && !shouldSuppressDuplicateConflictNotice
                             ? localize(`Sync completed with ${conflictCount} conflicts (resolved automatically).`, `同步完成，发现 ${conflictCount} 个冲突（已自动处理）。`)
                             : localize('Sync completed!', '同步完成！'),
                         ...warningDetails,
-                    ].join('\n\n')
-                );
+                    ].join('\n\n'),
+                    tone: conflictCount > 0 || warningDetails.length > 0 ? 'warning' : 'success',
+                    durationMs: warningDetails.length > 0 || conflictCount > 0 ? 5200 : 3600,
+                });
             } else {
                 throw new Error(result.error || 'Unknown error');
             }
@@ -900,16 +1006,17 @@ export function SyncSettingsScreen() {
             logSettingsError(error);
             const message = String(error);
             if (/temporary Inbox location|re-select a folder in Settings -> Data & Sync|Cannot access the selected sync file/i.test(message)) {
-                Alert.alert(
+                showSettingsWarning(
                     localize('Unsupported cloud provider on iOS', 'iOS 云端提供商暂不支持'),
                     localize(
                         'The selected file came from a temporary iOS Files copy. Providers like Google Drive and OneDrive are not reliable for file sync here yet. Please go to Settings → Data & Sync, choose iCloud Drive, or switch to WebDAV.',
                         '当前选择的是 iOS“文件”提供的临时副本。Google Drive、OneDrive 等提供商暂不适合作为这里的文件同步目录。请前往「设置 → 数据与同步」，改选 iCloud Drive，或切换到 WebDAV。'
-                    )
+                    ),
+                    5600
                 );
                 return;
             }
-            Alert.alert(localize('Error', '错误'), localize('Sync failed', '同步失败'));
+            showSettingsErrorToast(localize('Error', '错误'), getSyncFailureToastMessage(error));
         } finally {
             setIsSyncing(false);
         }
@@ -920,7 +1027,7 @@ export function SyncSettingsScreen() {
         try {
             if (backend === 'webdav') {
                 if (!webdavUrl.trim() || webdavUrlError) {
-                    Alert.alert(localize('Invalid URL', '地址无效'), localize('Please enter a valid WebDAV URL (http/https).', '请输入有效的 WebDAV 地址（http/https）。'));
+                    showSettingsWarning(localize('Invalid URL', '地址无效'), localize('Please enter a valid WebDAV URL (http/https).', '请输入有效的 WebDAV 地址（http/https）。'));
                     return;
                 }
                 await webdavGetJson<unknown>(webdavUrl.trim().replace(/\/+$/, ''), {
@@ -928,43 +1035,56 @@ export function SyncSettingsScreen() {
                     password: webdavPassword,
                     timeoutMs: 10_000,
                 });
-                Alert.alert(localize('Connection OK', '连接成功'), localize('WebDAV endpoint is reachable.', 'WebDAV 端点可访问。'));
+                showToast({
+                    title: localize('Connection OK', '连接成功'),
+                    message: localize('WebDAV endpoint is reachable.', 'WebDAV 端点可访问。'),
+                    tone: 'success',
+                });
                 return;
             }
 
             if (cloudProvider === 'dropbox') {
                 if (isFossBuild) {
-                    Alert.alert(localize('Dropbox unavailable', 'Dropbox 不可用'), localize('Dropbox is disabled in FOSS builds.', 'FOSS 构建不支持 Dropbox。'));
+                    showSettingsWarning(localize('Dropbox unavailable', 'Dropbox 不可用'), localize('Dropbox is disabled in FOSS builds.', 'FOSS 构建不支持 Dropbox。'));
                     return;
                 }
                 await runDropboxConnectionTest();
                 setDropboxConnected(true);
-                Alert.alert(localize('Connection OK', '连接成功'), localize('Dropbox account is reachable.', 'Dropbox 账号可访问。'));
+                showToast({
+                    title: localize('Connection OK', '连接成功'),
+                    message: localize('Dropbox account is reachable.', 'Dropbox 账号可访问。'),
+                    tone: 'success',
+                });
                 return;
             }
 
             if (!cloudUrl.trim() || cloudUrlError) {
-                Alert.alert(localize('Invalid URL', '地址无效'), localize('Please enter a valid self-hosted URL (http/https).', '请输入有效的自托管地址（http/https）。'));
+                showSettingsWarning(localize('Invalid URL', '地址无效'), localize('Please enter a valid self-hosted URL (http/https).', '请输入有效的自托管地址（http/https）。'));
                 return;
             }
             await cloudGetJson<unknown>(cloudUrl.trim().replace(/\/+$/, ''), {
                 token: cloudToken,
                 timeoutMs: 10_000,
             });
-            Alert.alert(localize('Connection OK', '连接成功'), localize('Self-hosted endpoint is reachable.', '自托管端点可访问。'));
+            showToast({
+                title: localize('Connection OK', '连接成功'),
+                message: localize('Self-hosted endpoint is reachable.', '自托管端点可访问。'),
+                tone: 'success',
+            });
         } catch (error) {
             logSettingsWarn('Sync connection test failed', error);
             if (cloudProvider === 'dropbox' && isDropboxUnauthorizedSettingsError(error)) {
                 setDropboxConnected(false);
             }
-            Alert.alert(
+            showSettingsErrorToast(
                 localize('Connection failed', '连接失败'),
                 cloudProvider === 'dropbox' && isDropboxUnauthorizedSettingsError(error)
                     ? localize(
                         'Dropbox token is invalid or revoked. Please tap Connect Dropbox to re-authorize.',
                         'Dropbox 令牌无效或已失效。请点击“连接 Dropbox”重新授权。'
                     )
-                    : formatError(error)
+                    : formatError(error),
+                5200
             );
         } finally {
             setIsTestingConnection(false);
@@ -1049,6 +1169,7 @@ export function SyncSettingsScreen() {
                                             ? (cloudProvider === 'cloudkit' ? 'cloudkit' : 'cloud')
                                             : backend;
                                         AsyncStorage.setItem(SYNC_BACKEND_KEY, nextBackend).catch(logSettingsError);
+                                        addBreadcrumb(`settings:syncBackend:${nextBackend}`);
                                         setSyncBackend(nextBackend);
                                         resetSyncStatusForBackendSwitch();
                                     }}
@@ -1179,7 +1300,7 @@ export function SyncSettingsScreen() {
                                 style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
                                 onPress={() => {
                                     if (webdavUrlError || !webdavUrl.trim()) {
-                                        Alert.alert(localize('Invalid URL', '地址无效'), localize('Please enter a valid WebDAV URL (http/https).', '请输入有效的 WebDAV 地址（http/https）。'));
+                                        showSettingsWarning(localize('Invalid URL', '地址无效'), localize('Please enter a valid WebDAV URL (http/https).', '请输入有效的 WebDAV 地址（http/https）。'));
                                         return;
                                     }
                                     AsyncStorage.multiSet([
@@ -1189,8 +1310,18 @@ export function SyncSettingsScreen() {
                                         [WEBDAV_PASSWORD_KEY, webdavPassword],
                                     ]).then(() => {
                                         resetSyncStatusForBackendSwitch();
-                                        Alert.alert(localize('Success', '成功'), t('settings.webdavSave'));
-                                    }).catch(logSettingsError);
+                                        showToast({
+                                            title: localize('Success', '成功'),
+                                            message: t('settings.webdavSave'),
+                                            tone: 'success',
+                                        });
+                                    }).catch((error) => {
+                                        logSettingsError(error);
+                                        showSettingsErrorToast(
+                                            localize('Error', '错误'),
+                                            localize('Failed to save WebDAV settings', '保存 WebDAV 设置失败')
+                                        );
+                                    });
                                 }}
                                 disabled={webdavUrlError || !webdavUrl.trim()}
                             >
@@ -1373,7 +1504,7 @@ export function SyncSettingsScreen() {
                                     style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
                                     onPress={() => {
                                         if (cloudUrlError || !cloudUrl.trim()) {
-                                            Alert.alert(localize('Invalid URL', '地址无效'), localize('Please enter a valid self-hosted URL (http/https).', '请输入有效的自托管地址（http/https）。'));
+                                            showSettingsWarning(localize('Invalid URL', '地址无效'), localize('Please enter a valid self-hosted URL (http/https).', '请输入有效的自托管地址（http/https）。'));
                                             return;
                                         }
                                         AsyncStorage.multiSet([
@@ -1383,8 +1514,18 @@ export function SyncSettingsScreen() {
                                             [CLOUD_TOKEN_KEY, cloudToken],
                                         ]).then(() => {
                                             resetSyncStatusForBackendSwitch();
-                                            Alert.alert(localize('Success', '成功'), t('settings.cloudSave'));
-                                        }).catch(logSettingsError);
+                                            showToast({
+                                                title: localize('Success', '成功'),
+                                                message: t('settings.cloudSave'),
+                                                tone: 'success',
+                                            });
+                                        }).catch((error) => {
+                                            logSettingsError(error);
+                                            showSettingsErrorToast(
+                                                localize('Error', '错误'),
+                                                localize('Failed to save self-hosted settings', '保存自托管设置失败')
+                                            );
+                                        });
                                     }}
                                     disabled={cloudUrlError || !cloudUrl.trim()}
                                 >

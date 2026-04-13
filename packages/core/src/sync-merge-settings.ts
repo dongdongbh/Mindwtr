@@ -5,6 +5,7 @@ import {
     SETTINGS_DENSITY_VALUE_SET,
     SETTINGS_KEYBINDING_STYLE_VALUE_SET,
     SETTINGS_LANGUAGE_VALUE_SET,
+    SETTINGS_TEXT_SIZE_VALUE_SET,
     SETTINGS_THEME_VALUE_SET,
     SETTINGS_TIME_FORMAT_VALUE_SET,
     SETTINGS_WEEK_START_VALUE_SET,
@@ -217,12 +218,28 @@ const sanitizeMergedSettingsForSync = (
     }
     if (next.appearance !== undefined && !isObjectRecord(next.appearance)) {
         next.appearance = localSettings.appearance ? cloneSettingValue(localSettings.appearance) : undefined;
-    } else if (next.appearance?.density !== undefined && !SETTINGS_DENSITY_VALUE_SET.has(next.appearance.density)) {
-        next.appearance = {
-            ...(localSettings.appearance ? cloneSettingValue(localSettings.appearance) : {}),
-            ...next.appearance,
-            density: localSettings.appearance?.density,
-        };
+    } else if (next.appearance) {
+        const fallbackAppearance = localSettings.appearance ? cloneSettingValue(localSettings.appearance) : {};
+
+        if (next.appearance.density !== undefined && !SETTINGS_DENSITY_VALUE_SET.has(next.appearance.density)) {
+            next.appearance = {
+                ...fallbackAppearance,
+                ...next.appearance,
+                density: localSettings.appearance?.density,
+            };
+        }
+        const sanitizedAppearance = next.appearance;
+        if (
+            sanitizedAppearance
+            && sanitizedAppearance.textSize !== undefined
+            && !SETTINGS_TEXT_SIZE_VALUE_SET.has(sanitizedAppearance.textSize)
+        ) {
+            next.appearance = {
+                ...fallbackAppearance,
+                ...sanitizedAppearance,
+                textSize: localSettings.appearance?.textSize,
+            };
+        }
     }
 
     next.syncPreferences = sanitizeSyncPreferences(next.syncPreferences, localSettings.syncPreferences);

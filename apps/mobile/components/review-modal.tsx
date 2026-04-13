@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, Modal, TouchableOpacity, ScrollView, StyleSheet, TextInput, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
     createAIProvider,
     getStaleItems,
@@ -21,6 +22,19 @@ import { useQuickCapture } from '../contexts/quick-capture-context';
 import { SwipeableTaskItem } from './swipeable-task-item';
 import { TaskEditModal } from './task-edit-modal';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import {
+    X,
+    Inbox,
+    Sparkles,
+    Calendar as CalendarIcon,
+    Clock,
+    Tag,
+    FolderOpen,
+    Lightbulb,
+    CheckCircle2,
+    PartyPopper,
+    type LucideIcon,
+} from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
@@ -213,24 +227,24 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
     const includeContextStep = settings?.gtd?.weeklyReview?.includeContextStep !== false;
     const aiProvider = (settings?.ai?.provider ?? 'openai') as AIProviderId;
 
-    const steps = useMemo<{ id: ReviewStep; title: string; icon: string }[]>(() => {
-        const list: { id: ReviewStep; title: string; icon: string }[] = [
-            { id: 'inbox', title: labels.inbox, icon: '📥' },
+    const steps = useMemo<{ id: ReviewStep; title: string; Icon: LucideIcon }[]>(() => {
+        const list: { id: ReviewStep; title: string; Icon: LucideIcon }[] = [
+            { id: 'inbox', title: labels.inbox, Icon: Inbox },
         ];
         if (aiEnabled) {
-            list.push({ id: 'ai', title: labels.ai, icon: '✨' });
+            list.push({ id: 'ai', title: labels.ai, Icon: Sparkles });
         }
         list.push(
-            { id: 'calendar', title: labels.calendar, icon: '📅' },
-            { id: 'waiting', title: labels.waiting, icon: '⏳' },
+            { id: 'calendar', title: labels.calendar, Icon: CalendarIcon },
+            { id: 'waiting', title: labels.waiting, Icon: Clock },
         );
         if (includeContextStep) {
-            list.push({ id: 'contexts', title: labels.contexts, icon: '🏷️' });
+            list.push({ id: 'contexts', title: labels.contexts, Icon: Tag });
         }
         list.push(
-            { id: 'projects', title: labels.projects, icon: '📂' },
-            { id: 'someday', title: labels.someday, icon: '💭' },
-            { id: 'completed', title: labels.done, icon: '✅' },
+            { id: 'projects', title: labels.projects, Icon: FolderOpen },
+            { id: 'someday', title: labels.someday, Icon: Lightbulb },
+            { id: 'completed', title: labels.done, Icon: CheckCircle2 },
         );
         return list;
     }, [aiEnabled, includeContextStep, labels]);
@@ -653,9 +667,12 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
             case 'inbox':
                 return (
                     <View style={styles.stepContent}>
-                        <Text style={[styles.stepTitle, { color: tc.text }]}>
-                            📥 {labels.inboxDesc}
-                        </Text>
+                        <View style={styles.stepTitleRow}>
+                            <Inbox size={22} color={tc.text} strokeWidth={2} />
+                            <Text style={[styles.stepTitleInline, { color: tc.text }]}>
+                                {labels.inboxDesc}
+                            </Text>
+                        </View>
                         <View style={[styles.infoBox, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                             <Text style={[styles.infoText, { color: tc.text }]}>
                                 <Text style={{ fontWeight: '700' }}>{inboxTasks.length}</Text> {labels.itemsInInbox}
@@ -666,7 +683,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                         </View>
                         {inboxTasks.length === 0 ? (
                             <View style={styles.emptyState}>
-                                <Text style={styles.emptyIcon}>✅</Text>
+                                <CheckCircle2 size={48} color={tc.secondaryText} strokeWidth={1.5} style={styles.emptyIcon} />
                                 <Text style={[styles.emptyText, { color: tc.secondaryText }]}>
                                     {labels.inboxEmpty}
                                 </Text>
@@ -680,9 +697,12 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
             case 'ai':
                 return (
                     <View style={styles.stepContent}>
-                        <Text style={[styles.stepTitle, { color: tc.text }]}>
-                            ✨ {labels.ai}
-                        </Text>
+                        <View style={styles.stepTitleRow}>
+                            <Sparkles size={22} color={tc.text} strokeWidth={2} />
+                            <Text style={[styles.stepTitleInline, { color: tc.text }]}>
+                                {labels.ai}
+                            </Text>
+                        </View>
                         <Text style={[styles.hint, { color: tc.secondaryText }]}>
                             {labels.aiDesc}
                         </Text>
@@ -769,9 +789,12 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                         contentContainerStyle={styles.calendarStepContent}
                         showsVerticalScrollIndicator
                     >
-                        <Text style={[styles.stepTitle, { color: tc.text }]}>
-                            📅 {labels.calendar}
-                        </Text>
+                        <View style={styles.stepTitleRow}>
+                            <CalendarIcon size={22} color={tc.text} strokeWidth={2} />
+                            <Text style={[styles.stepTitleInline, { color: tc.text }]}>
+                                {labels.calendar}
+                            </Text>
+                        </View>
                         <TouchableOpacity
                             style={[styles.reviewAddTaskButton, { borderColor: tc.border }]}
                             onPress={() => openReviewQuickAdd({ status: 'inbox' })}
@@ -795,9 +818,12 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
             case 'waiting':
                 return (
                     <View style={styles.stepContent}>
-                        <Text style={[styles.stepTitle, { color: tc.text }]}>
-                            ⏳ {labels.waitingDesc}
-                        </Text>
+                        <View style={styles.stepTitleRow}>
+                            <Clock size={22} color={tc.text} strokeWidth={2} />
+                            <Text style={[styles.stepTitleInline, { color: tc.text }]}>
+                                {labels.waitingDesc}
+                            </Text>
+                        </View>
                         <Text style={[styles.hint, { color: tc.secondaryText }]}>
                             {labels.waitingGuide}
                         </Text>
@@ -816,9 +842,12 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
             case 'contexts':
                 return (
                     <View style={styles.stepContent}>
-                        <Text style={[styles.stepTitle, { color: tc.text }]}>
-                            🏷️ {labels.contexts}
-                        </Text>
+                        <View style={styles.stepTitleRow}>
+                            <Tag size={22} color={tc.text} strokeWidth={2} />
+                            <Text style={[styles.stepTitleInline, { color: tc.text }]}>
+                                {labels.contexts}
+                            </Text>
+                        </View>
                         <Text style={[styles.hint, { color: tc.secondaryText }]}>
                             {labels.contextsDesc}
                         </Text>
@@ -875,9 +904,12 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
             case 'projects':
                 return (
                     <View style={styles.stepContent}>
-                        <Text style={[styles.stepTitle, { color: tc.text }]}>
-                            📂 {labels.projectsDesc}
-                        </Text>
+                        <View style={styles.stepTitleRow}>
+                            <FolderOpen size={22} color={tc.text} strokeWidth={2} />
+                            <Text style={[styles.stepTitleInline, { color: tc.text }]}>
+                                {labels.projectsDesc}
+                            </Text>
+                        </View>
                         <Text style={[styles.hint, { color: tc.secondaryText }]}>
                             {labels.projectsGuide}
                         </Text>
@@ -959,9 +991,12 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
             case 'someday':
                 return (
                     <View style={styles.stepContent}>
-                        <Text style={[styles.stepTitle, { color: tc.text }]}>
-                            💭 {labels.somedayDesc}
-                        </Text>
+                        <View style={styles.stepTitleRow}>
+                            <Lightbulb size={22} color={tc.text} strokeWidth={2} />
+                            <Text style={[styles.stepTitleInline, { color: tc.text }]}>
+                                {labels.somedayDesc}
+                            </Text>
+                        </View>
                         <Text style={[styles.hint, { color: tc.secondaryText }]}>
                             {labels.somedayGuide}
                         </Text>
@@ -980,7 +1015,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
             case 'completed':
                 return (
                     <View style={styles.centerContent}>
-                        <Text style={styles.bigIcon}>🎉</Text>
+                        <PartyPopper size={64} color={tc.tint} strokeWidth={1.5} style={styles.bigIcon} />
                         <Text style={[styles.heading, { color: tc.text }]}>
                             {labels.reviewComplete}
                         </Text>
@@ -1000,15 +1035,27 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
     return (
         <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={handleClose}>
             <GestureHandlerRootView style={{ flex: 1 }}>
-                <View style={[styles.container, { backgroundColor: tc.bg }]}>
+                <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['top', 'bottom']}>
                     {/* Header */}
                     <View style={[styles.header, { borderBottomColor: tc.border }]}>
-                        <TouchableOpacity onPress={handleClose}>
-                            <Text style={[styles.closeButton, { color: tc.text }]}>✕</Text>
+                        <TouchableOpacity
+                            onPress={handleClose}
+                            style={styles.closeButton}
+                            accessibilityRole="button"
+                            accessibilityLabel="Close"
+                            hitSlop={8}
+                        >
+                            <X size={22} color={tc.text} strokeWidth={2} />
                         </TouchableOpacity>
-                        <Text style={[styles.headerTitle, { color: tc.text }]}>
-                            {steps[safeStepIndex].icon} {steps[safeStepIndex].title}
-                        </Text>
+                        <View style={styles.headerTitleRow}>
+                            {(() => {
+                                const HeaderIcon = steps[safeStepIndex].Icon;
+                                return <HeaderIcon size={18} color={tc.text} strokeWidth={2} />;
+                            })()}
+                            <Text style={[styles.headerTitle, { color: tc.text }]}>
+                                {steps[safeStepIndex].title}
+                            </Text>
+                        </View>
                         <Text style={[styles.stepIndicator, { color: tc.secondaryText }]}>
                             {safeStepIndex + 1}/{steps.length}
                         </Text>
@@ -1035,7 +1082,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                             </TouchableOpacity>
                         </View>
                     )}
-                </View>
+                </SafeAreaView>
 
                 {/* Task Edit Modal */}
                 <TaskEditModal
@@ -1113,12 +1160,32 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
     },
     closeButton: {
-        fontSize: 20,
         padding: 4,
+        minWidth: 28,
+        minHeight: 28,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     headerTitle: {
         fontSize: 18,
         fontWeight: '600',
+    },
+    headerTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        flex: 1,
+        justifyContent: 'center',
+    },
+    stepTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 12,
+    },
+    stepTitleInline: {
+        fontSize: 24,
+        fontWeight: 'bold',
     },
     stepIndicator: {
         fontSize: 14,
@@ -1140,7 +1207,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     bigIcon: {
-        fontSize: 64,
         marginBottom: 20,
     },
     heading: {
@@ -1172,11 +1238,6 @@ const styles = StyleSheet.create({
     calendarStepContent: {
         paddingBottom: 20,
     },
-    stepTitle: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        marginBottom: 12,
-    },
     hint: {
         fontSize: 14,
         marginBottom: 16,
@@ -1202,7 +1263,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     emptyIcon: {
-        fontSize: 48,
         marginBottom: 12,
     },
     emptyText: {

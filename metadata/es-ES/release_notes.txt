@@ -1,4 +1,4 @@
-- Agregamos fechas objetivo y fechas de revision opcionales para proyectos y asi planificar mejor.
-- Los widgets de iOS ahora ajustan la cantidad de tareas segun el tamano y evitan escrituras de payload redundantes.
-- File sync en iOS ahora conserva con mas fiabilidad los bookmarks de carpetas al volver a elegir una ubicacion.
-- La configuracion de proveedores cloud ahora agrupa iCloud con mas claridad y el sync y los adjuntos son mas fiables.
+- La captura rapida ahora entiende fechas naturales como manana y el proximo viernes.
+- La retroalimentacion movil es mas tranquila con toasts en cola, acciones mas grandes y menos alertas bloqueantes.
+- El sync y la nube son mas confiables, con subidas de adjuntos mas seguras e identificadores de solicitud mas claros.
+- Foco y Ajustes son mas estables con tareas enfocadas priorizadas y errores mostrados de forma consistente.

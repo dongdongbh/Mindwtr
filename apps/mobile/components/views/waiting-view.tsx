@@ -1,10 +1,10 @@
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Platform } from 'react-native';
-import { extractWaitingPerson, safeParseDueDate, useTaskStore } from '@mindwtr/core';
+import { getWaitingPerson, safeParseDueDate, useTaskStore } from '@mindwtr/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Task, TaskStatus, TimeEstimate } from '@mindwtr/core';
 import { useTheme } from '../../contexts/theme-context';
 import { useLanguage } from '../../contexts/language-context';
-import { Folder } from 'lucide-react-native';
+import { Folder, PauseCircle } from 'lucide-react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -33,7 +33,7 @@ export function WaitingView() {
   const router = useRouter();
 
   const tc = useThemeColors();
-  const timeEstimatesEnabled = settings?.features?.timeEstimates === true;
+  const timeEstimatesEnabled = settings?.features?.timeEstimates !== false;
   const insets = useSafeAreaInsets();
   const navBarInset = Platform.OS === 'android' && insets.bottom >= 24 ? insets.bottom : 0;
   const { areaById, resolvedAreaFilter } = useMobileAreaFilter();
@@ -64,7 +64,7 @@ export function WaitingView() {
   const waitingPeople = useMemo(() => {
     const people = new Map<string, string>();
     for (const task of waitingTasks) {
-      const person = extractWaitingPerson(task.description);
+      const person = getWaitingPerson(task);
       if (!person) continue;
       const key = person.toLowerCase();
       if (!people.has(key)) people.set(key, person);
@@ -74,7 +74,7 @@ export function WaitingView() {
   const filteredWaitingTasks = useMemo(() => {
     return waitingTasks.filter((task) => {
       if (selectedWaitingPerson) {
-        const person = extractWaitingPerson(task.description);
+        const person = getWaitingPerson(task);
         if (!person || person.toLowerCase() !== selectedWaitingPerson.toLowerCase()) {
           return false;
         }
@@ -301,9 +301,9 @@ export function WaitingView() {
           ))
         ) : deferredProjects.length === 0 ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>⏸️</Text>
-            <Text style={styles.emptyTitle}>{t('waiting.empty')}</Text>
-            <Text style={styles.emptyText}>
+            <PauseCircle size={48} color={tc.secondaryText} strokeWidth={1.5} style={styles.emptyIcon} />
+            <Text style={[styles.emptyTitle, { color: tc.text }]}>{t('waiting.empty')}</Text>
+            <Text style={[styles.emptyText, { color: tc.secondaryText }]}>
               {t('waiting.emptyHint')}
             </Text>
           </View>
@@ -444,7 +444,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   emptyIcon: {
-    fontSize: 64,
     marginBottom: 16,
   },
   emptyTitle: {

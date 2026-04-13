@@ -1,11 +1,25 @@
-import { addDays, addMonths, addWeeks, addYears, isValid, nextDay, parseISO, set } from 'date-fns';
+import * as chrono from 'chrono-node';
+import { isValid, set } from 'date-fns';
 import type { Area, Project, Task, TaskStatus } from './types';
 import { normalizeTaskStatus } from './task-status';
+
+export interface QuickAddDetectedDate {
+    date: string;
+    matchedText: string;
+    titleWithoutDate: string;
+}
 
 export interface QuickAddResult {
     title: string;
     props: Partial<Task>;
     projectTitle?: string;
+    invalidDateCommands?: string[];
+    detectedDate?: QuickAddDetectedDate;
+}
+
+export interface QuickAddDateCommandsResult {
+    title: string;
+    props: Pick<Partial<Task>, 'startTime' | 'dueDate' | 'reviewAt'>;
     invalidDateCommands?: string[];
 }
 
@@ -18,31 +32,14 @@ const STATUS_TOKENS: Record<string, TaskStatus> = {
     done: 'done',
 };
 
-type DayOfWeek = 0 | 1 | 2 | 3 | 4 | 5 | 6;
-
-const DOW_MAP: Partial<Record<string, DayOfWeek>> = {
-    sun: 0,
-    sunday: 0,
-    mon: 1,
-    monday: 1,
-    tue: 2,
-    tues: 2,
-    tuesday: 2,
-    wed: 3,
-    wednesday: 3,
-    thu: 4,
-    thur: 4,
-    thurs: 4,
-    thursday: 4,
-    fri: 5,
-    friday: 5,
-    sat: 6,
-    saturday: 6,
-};
-
 const ESCAPE_SENTINEL = '__MW_ESC__';
 const QUICK_ADD_ESCAPE_CHARS = new Set(['@', '#', '+', '/', '!']);
 const QUICK_ADD_COMMAND_BOUNDARY = String.raw`(?=\s\/(?:note:|start:|due:|review:|project:|area:|inbox\b|next\b|in-progress\b|waiting\b|someday\b|done\b|archived\b)|$)`;
+const NATURAL_TIME_HINT_RE = /\b(?:\d{1,2}:\d{2}(?:\s*[ap]m)?|\d{1,2}\s*[ap]m|noon|midnight|morning|afternoon|evening|night|tonight)\b/i;
+const PURE_TIME_ONLY_RE = /^(?:at\s+)?(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|noon|midnight)$/i;
+const BARE_MONTH_RE = /^(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)$/i;
+const TRAILING_DATE_SUFFIX_RE = /^[\s).,!?:;'"\]]*$/u;
+const TRAILING_DATE_SEPARATOR_RE = /[\s,;:()[\]{}-]+$/u;
 
 function protectEscapes(input: string): string {
     let result = '';
@@ -67,74 +64,77 @@ function restoreEscapes(input: string): string {
     );
 }
 
-function parseTime(text: string): { hour: number; minute: number; rest: string } | null {
-    // Treat a value as "time" only when it is explicitly a clock token.
-    // This avoids breaking date expressions such as "in 3 days" or "2026-03-15".
-    const match = text.match(/\b(\d{1,2}):(\d{2})\s*(am|pm)?\b|\b(\d{1,2})\s*(am|pm)\b/);
-    if (!match) return null;
-    const hourToken = match[1] ?? match[4];
-    const minuteToken = match[2];
-    const ampmToken = match[3] ?? match[5];
-    let hour = Number(hourToken);
-    const minute = minuteToken ? Number(minuteToken) : 0;
-    const ampm = ampmToken?.toLowerCase();
-    if (ampm === 'pm' && hour < 12) hour += 12;
-    if (ampm === 'am' && hour === 12) hour = 0;
-    if (hour > 23 || minute > 59) return null;
-    const rest = text.replace(match[0], '').trim();
-    return { hour, minute, rest };
-}
-
 type DateDefaultTimeMode = 'now' | 'startOfDay';
 
-function parseNaturalDate(raw: string, now: Date, defaultTimeMode: DateDefaultTimeMode = 'now'): Date | null {
-    let text = raw.trim().toLowerCase();
-    const time = parseTime(text);
-    if (time) text = time.rest;
+function buildDefaultDate(now: Date, defaultTimeMode: DateDefaultTimeMode): Date {
+    const fallbackHour = defaultTimeMode === 'startOfDay' ? 0 : now.getHours();
+    const fallbackMinute = defaultTimeMode === 'startOfDay' ? 0 : now.getMinutes();
+    return set(new Date(now), { hours: fallbackHour, minutes: fallbackMinute, seconds: 0, milliseconds: 0 });
+}
 
-    let base: Date | null = null;
+function hasNaturalTimeHint(text: string): boolean {
+    return NATURAL_TIME_HINT_RE.test(text);
+}
 
-    if (text === 'today' || text === '') {
-        base = now;
-    } else if (text === 'tomorrow') {
-        base = addDays(now, 1);
-    } else if (text.startsWith('in ')) {
-        const inMatch = text.match(/^in\s+(\d+)\s*(day|days|week|weeks|month|months|year|years)$/);
-        if (inMatch) {
-            const count = Number(inMatch[1]);
-            const unit = inMatch[2];
-            if (unit.startsWith('day')) base = addDays(now, count);
-            else if (unit.startsWith('week')) base = addWeeks(now, count);
-            else if (unit.startsWith('month')) base = addMonths(now, count);
-            else if (unit.startsWith('year')) base = addYears(now, count);
-        }
-    } else if (text === 'next week') {
-        base = addWeeks(now, 1);
-    } else if (text === 'next month') {
-        base = addMonths(now, 1);
-    } else if (text === 'next year') {
-        base = addYears(now, 1);
-    } else {
-        const dow = DOW_MAP[text];
-        if (dow !== undefined) {
-            base = nextDay(now, dow);
-        } else if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
-            const parsed = parseISO(text);
-            if (isValid(parsed)) base = parsed;
-        }
-    }
+function resolveChronoDate(
+    result: chrono.ParsedResult,
+    now: Date,
+    defaultTimeMode: DateDefaultTimeMode,
+): Date | null {
+    let parsed = result.start.date();
+    if (!isValid(parsed)) return null;
 
-    if (!base || !isValid(base)) return null;
-
-    if (time) {
-        base = set(base, { hours: time.hour, minutes: time.minute, seconds: 0, milliseconds: 0 });
-    } else if (!raw.includes('T')) {
+    if (!result.start.isCertain('hour') && !hasNaturalTimeHint(result.text)) {
         const fallbackHour = defaultTimeMode === 'startOfDay' ? 0 : now.getHours();
         const fallbackMinute = defaultTimeMode === 'startOfDay' ? 0 : now.getMinutes();
-        base = set(base, { hours: fallbackHour, minutes: fallbackMinute, seconds: 0, milliseconds: 0 });
+        parsed = set(parsed, { hours: fallbackHour, minutes: fallbackMinute, seconds: 0, milliseconds: 0 });
+    } else {
+        parsed = set(parsed, { seconds: 0, milliseconds: 0 });
     }
 
-    return base;
+    return isValid(parsed) ? parsed : null;
+}
+
+function parseNaturalDate(raw: string, now: Date, defaultTimeMode: DateDefaultTimeMode = 'now'): Date | null {
+    const text = raw.trim();
+    if (!text) return buildDefaultDate(now, defaultTimeMode);
+
+    const results = chrono.parse(text, { instant: now }, { forwardDate: true });
+    const result = results[0];
+    if (!result) return null;
+
+    const matchedEnd = result.index + result.text.length;
+    if (result.index !== 0 || matchedEnd !== text.length) return null;
+
+    return resolveChronoDate(result, now, defaultTimeMode);
+}
+
+function detectTrailingDate(title: string, now: Date): QuickAddDetectedDate | undefined {
+    const trimmed = title.trim();
+    if (!trimmed) return undefined;
+
+    const results = chrono.parse(trimmed, { instant: now }, { forwardDate: true });
+    for (let index = results.length - 1; index >= 0; index -= 1) {
+        const result = results[index];
+        const matchedText = result.text.trim();
+        const suffix = trimmed.slice(result.index + result.text.length);
+        if (!matchedText || !TRAILING_DATE_SUFFIX_RE.test(suffix)) continue;
+        if (PURE_TIME_ONLY_RE.test(matchedText) || BARE_MONTH_RE.test(matchedText)) continue;
+
+        const titleWithoutDate = trimmed.slice(0, result.index).replace(TRAILING_DATE_SEPARATOR_RE, '').trim();
+        if (!titleWithoutDate) continue;
+
+        const parsed = resolveChronoDate(result, now, 'now');
+        if (!parsed) continue;
+
+        return {
+            date: parsed.toISOString(),
+            matchedText,
+            titleWithoutDate,
+        };
+    }
+
+    return undefined;
 }
 
 function stripToken(source: string, token: string): string {
@@ -165,8 +165,66 @@ function parseDateCommand(
     };
 }
 
+function parseDateCommandsFromWorking(
+    working: string,
+    now: Date,
+): {
+    working: string;
+    startTime?: string;
+    dueDate?: string;
+    reviewAt?: string;
+    invalidDateCommands?: string[];
+} {
+    const invalidDateCommands: string[] = [];
+
+    const startResult = parseDateCommand('start', working, now);
+    const startTime = startResult.value;
+    if (startResult.invalidCommand) invalidDateCommands.push(startResult.invalidCommand);
+    working = startResult.working;
+
+    const dueResult = parseDateCommand('due', working, now);
+    const dueDate = dueResult.value;
+    if (dueResult.invalidCommand) invalidDateCommands.push(dueResult.invalidCommand);
+    working = dueResult.working;
+
+    const reviewResult = parseDateCommand('review', working, now);
+    const reviewAt = reviewResult.value;
+    if (reviewResult.invalidCommand) invalidDateCommands.push(reviewResult.invalidCommand);
+    working = reviewResult.working;
+
+    return {
+        working,
+        startTime,
+        dueDate,
+        reviewAt,
+        invalidDateCommands: invalidDateCommands.length > 0 ? invalidDateCommands : undefined,
+    };
+}
+
+export function parseQuickAddDateCommands(input: string, now: Date = new Date()): QuickAddDateCommandsResult {
+    const protectedInput = protectEscapes(input.trim());
+    const {
+        working,
+        startTime,
+        dueDate,
+        reviewAt,
+        invalidDateCommands,
+    } = parseDateCommandsFromWorking(protectedInput, now);
+
+    return {
+        title: restoreEscapes(working.replace(/\s{2,}/g, ' ').trim()),
+        props: {
+            ...(startTime ? { startTime } : {}),
+            ...(dueDate ? { dueDate } : {}),
+            ...(reviewAt ? { reviewAt } : {}),
+        },
+        invalidDateCommands,
+    };
+}
+
 export function parseQuickAdd(input: string, projects?: Project[], now: Date = new Date(), areas?: Area[]): QuickAddResult {
     let working = protectEscapes(input.trim());
+    const hadExplicitDueCommand = /(?:^|\s)\/due:/i.test(working);
 
     const contexts = new Set<string>();
     const tags = new Set<string>();
@@ -224,22 +282,14 @@ export function parseQuickAdd(input: string, projects?: Project[], now: Date = n
     }
 
     // Date commands: /start:..., /due:..., /review:...
-    const invalidDateCommands: string[] = [];
-
-    const startResult = parseDateCommand('start', working, now);
-    let startTime = startResult.value;
-    if (startResult.invalidCommand) invalidDateCommands.push(startResult.invalidCommand);
-    working = startResult.working;
-
-    const dueResult = parseDateCommand('due', working, now);
-    let dueDate = dueResult.value;
-    if (dueResult.invalidCommand) invalidDateCommands.push(dueResult.invalidCommand);
-    working = dueResult.working;
-
-    const reviewResult = parseDateCommand('review', working, now);
-    let reviewAt = reviewResult.value;
-    if (reviewResult.invalidCommand) invalidDateCommands.push(reviewResult.invalidCommand);
-    working = reviewResult.working;
+    const {
+        working: workingWithoutDates,
+        startTime,
+        dueDate,
+        reviewAt,
+        invalidDateCommands,
+    } = parseDateCommandsFromWorking(working, now);
+    working = workingWithoutDates;
 
     // Status tokens like /next, /waiting, etc.
     let status: TaskStatus | undefined;
@@ -283,6 +333,7 @@ export function parseQuickAdd(input: string, projects?: Project[], now: Date = n
     }
 
     const title = restoreEscapes(working.replace(/\s{2,}/g, ' ').trim());
+    const detectedDate = !dueDate && !hadExplicitDueCommand ? detectTrailingDate(title, now) : undefined;
 
     const props: Partial<Task> = {};
     if (status) props.status = status;
@@ -295,5 +346,11 @@ export function parseQuickAdd(input: string, projects?: Project[], now: Date = n
     if (projectId) props.projectId = projectId;
     if (areaId) props.areaId = areaId;
 
-    return { title, props, projectTitle, invalidDateCommands: invalidDateCommands.length > 0 ? invalidDateCommands : undefined };
+    return {
+        title,
+        props,
+        projectTitle,
+        invalidDateCommands,
+        detectedDate,
+    };
 }

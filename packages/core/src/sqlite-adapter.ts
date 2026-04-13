@@ -321,6 +321,8 @@ export class SqliteAdapter {
         const names = new Set(columns.map((col) => col.name));
         const definitions: Array<{ name: string; sql: string }> = [
             { name: 'priority', sql: 'ALTER TABLE tasks ADD COLUMN priority TEXT' },
+            { name: 'energyLevel', sql: 'ALTER TABLE tasks ADD COLUMN energyLevel TEXT' },
+            { name: 'assignedTo', sql: 'ALTER TABLE tasks ADD COLUMN assignedTo TEXT' },
             { name: 'taskMode', sql: 'ALTER TABLE tasks ADD COLUMN taskMode TEXT' },
             { name: 'startTime', sql: 'ALTER TABLE tasks ADD COLUMN startTime TEXT' },
             { name: 'dueDate', sql: 'ALTER TABLE tasks ADD COLUMN dueDate TEXT' },
@@ -561,6 +563,8 @@ export class SqliteAdapter {
             title: String(row.title ?? ''),
             status: normalizeTaskStatus(row.status),
             priority: row.priority as Task['priority'] | undefined,
+            energyLevel: row.energyLevel as Task['energyLevel'] | undefined,
+            assignedTo: row.assignedTo as string | undefined,
             taskMode: row.taskMode as Task['taskMode'] | undefined,
             startTime: row.startTime as string | undefined,
             dueDate: row.dueDate as string | undefined,
@@ -785,6 +789,7 @@ export class SqliteAdapter {
         await this.ensureSchema();
         await this.client.run('BEGIN IMMEDIATE');
         try {
+            const nowIso = new Date().toISOString();
             const chunkArray = <T>(items: T[], size: number): T[][] => {
                 const chunks: T[][] = [];
                 for (let i = 0; i < items.length; i += size) {
@@ -853,18 +858,22 @@ export class SqliteAdapter {
                     'updatedAt',
                     'deletedAt',
                 ],
-                data.areas.map((area) => [
-                    area.id,
-                    area.name,
-                    area.color ?? null,
-                    area.icon ?? null,
-                    area.order,
-                    area.rev ?? null,
-                    area.revBy ?? null,
-                    area.createdAt ?? null,
-                    area.updatedAt ?? null,
-                    area.deletedAt ?? null,
-                ]),
+                data.areas.map((area) => {
+                    const createdAt = area.createdAt ?? area.updatedAt ?? nowIso;
+                    const updatedAt = area.updatedAt ?? area.createdAt ?? nowIso;
+                    return [
+                        area.id,
+                        area.name,
+                        area.color ?? null,
+                        area.icon ?? null,
+                        area.order,
+                        area.rev ?? null,
+                        area.revBy ?? null,
+                        createdAt,
+                        updatedAt,
+                        area.deletedAt ?? null,
+                    ];
+                }),
                 `name=excluded.name,
                  color=excluded.color,
                  icon=excluded.icon,
@@ -987,6 +996,8 @@ export class SqliteAdapter {
                     'title',
                     'status',
                     'priority',
+                    'energyLevel',
+                    'assignedTo',
                     'taskMode',
                     'startTime',
                     'dueDate',
@@ -1021,6 +1032,8 @@ export class SqliteAdapter {
                         task.title,
                         task.status,
                         task.priority ?? null,
+                        task.energyLevel ?? null,
+                        task.assignedTo ?? null,
                         task.taskMode ?? null,
                         task.startTime ?? null,
                         task.dueDate ?? null,
@@ -1052,6 +1065,8 @@ export class SqliteAdapter {
                 `title=excluded.title,
                  status=excluded.status,
                  priority=excluded.priority,
+                 energyLevel=excluded.energyLevel,
+                 assignedTo=excluded.assignedTo,
                  taskMode=excluded.taskMode,
                  startTime=excluded.startTime,
                  dueDate=excluded.dueDate,

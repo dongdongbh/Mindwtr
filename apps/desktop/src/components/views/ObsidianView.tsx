@@ -29,6 +29,7 @@ const navigateToSettings = () => {
 
 const pageShellClassName = 'h-full px-4 py-3';
 const pageContentClassName = 'mx-auto w-full max-w-[84rem] min-w-0 2xl:max-w-[88rem]';
+const MAX_TASKNOTES_DETECTED_PATHS = 6;
 
 const resolveTaskNotesCreationFolder = (tasks: ObsidianTask[]): string => {
     const folders = tasks
@@ -64,6 +65,7 @@ export function ObsidianView() {
     const config = useObsidianStore((state) => state.config);
     const tasks = useObsidianStore((state) => state.tasks);
     const scannedFileCount = useObsidianStore((state) => state.scannedFileCount);
+    const taskNotesDetectedPaths = useObsidianStore((state) => state.taskNotesDetectedPaths);
     const importMode = useObsidianStore((state) => state.importMode);
     const hasScannedThisSession = useObsidianStore((state) => state.hasScannedThisSession);
     const isInitialized = useObsidianStore((state) => state.isInitialized);
@@ -81,6 +83,8 @@ export function ObsidianView() {
 
     const effectiveNewTaskFormat = config.newTaskFormat === 'auto' ? importMode : config.newTaskFormat;
     const taskNotesCreationFolder = resolveTaskNotesCreationFolder(tasks);
+    const visibleTaskNotesDetectedPaths = taskNotesDetectedPaths.slice(0, MAX_TASKNOTES_DETECTED_PATHS);
+    const hiddenTaskNotesDetectedCount = Math.max(0, taskNotesDetectedPaths.length - visibleTaskNotesDetectedPaths.length);
 
     const resolveText = useCallback((key: string, fallback: string) => {
         const value = t(key);
@@ -392,6 +396,45 @@ export function ObsidianView() {
                                         ? resolveText('common.saving', 'Saving...')
                                         : resolveText('obsidian.addTaskAction', 'Add task')}
                                 </button>
+                            </div>
+                        </div>
+                    </section>
+                )}
+
+                {canScan && importMode === 'tasknotes' && taskNotesDetectedPaths.length > 0 && (
+                    <section className="rounded-2xl border border-sky-200 bg-sky-50/70 p-5 shadow-sm">
+                        <div className="space-y-3">
+                            <div>
+                                <h2 className="text-sm font-semibold text-sky-900">
+                                    {resolveText('obsidian.taskNotesDetectedTitle', 'TaskNotes mode is active')}
+                                </h2>
+                                <p className="mt-1 text-sm text-sky-900/85">
+                                    {resolveText(
+                                        'obsidian.taskNotesDetectedBody',
+                                        'Mindwtr detected TaskNotes-style frontmatter in these files, so inline checklist tasks from other notes are ignored.'
+                                    )}
+                                </p>
+                                <p className="mt-2 text-xs text-sky-900/70">
+                                    {resolveText(
+                                        'obsidian.taskNotesDetectedHint',
+                                        'Look for a status field plus TaskNotes metadata like tags: [task], due, scheduled, contexts, projects, timeEstimate, recurrence, or completedDate.'
+                                    )}
+                                </p>
+                            </div>
+                            <div className="space-y-2">
+                                {visibleTaskNotesDetectedPaths.map((path) => (
+                                    <div
+                                        key={path}
+                                        className="rounded-xl border border-sky-200/80 bg-white/70 px-3 py-2 text-sm text-sky-950"
+                                    >
+                                        <span className="font-mono">{path}</span>
+                                    </div>
+                                ))}
+                                {hiddenTaskNotesDetectedCount > 0 && (
+                                    <p className="text-xs text-sky-900/70">
+                                        +{hiddenTaskNotesDetectedCount} {resolveText('obsidian.taskNotesDetectedMore', 'more matching files')}
+                                    </p>
+                                )}
                             </div>
                         </div>
                     </section>

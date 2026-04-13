@@ -346,7 +346,7 @@ export function BoardView() {
   const { isDark } = useTheme();
   const tc = useThemeColors();
   const { t } = useLanguage();
-  const timeEstimatesEnabled = useTaskStore((state) => state.settings?.features?.timeEstimates === true);
+  const timeEstimatesEnabled = useTaskStore((state) => state.settings?.features?.timeEstimates !== false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [dragSourceColumnIndex, setDragSourceColumnIndex] = useState<number | null>(null);
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);

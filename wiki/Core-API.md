@@ -30,6 +30,8 @@ interface Task {
     status: TaskStatus;            // Current status
     taskMode?: 'task' | 'list';    // 'list' = checklist-first task
     priority?: TaskPriority;       // 'low' | 'medium' | 'high' | 'urgent'
+    energyLevel?: TaskEnergyLevel; // 'low' | 'medium' | 'high'
+    assignedTo?: string;           // Waiting-for person
     startTime?: string;            // ISO date string
     dueDate?: string;              // ISO date string
     recurrence?: Recurrence | RecurrenceRule;

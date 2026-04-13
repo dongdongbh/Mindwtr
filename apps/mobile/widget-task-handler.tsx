@@ -10,7 +10,7 @@ import {
     WIDGET_DATA_KEY,
     WIDGET_LANGUAGE_KEY,
 } from './lib/widget-data';
-import { getAdaptiveWidgetTaskLimit } from './lib/widget-layout';
+import { getAdaptiveAndroidWidgetTaskLimit, getAndroidWidgetLayoutMode } from './lib/widget-layout';
 import { logWarn } from './lib/app-log';
 import { getSystemColorSchemeForWidget } from './lib/system-color-scheme';
 
@@ -48,13 +48,13 @@ async function loadWidgetContext() {
 
 const widgetTaskHandler: WidgetTaskHandler = async ({ renderWidget, widgetInfo }) => {
     let { data, language } = await loadWidgetContext();
-    const maxItems = getAdaptiveWidgetTaskLimit(widgetInfo.height);
+    const layoutMode = getAndroidWidgetLayoutMode(widgetInfo.width);
     const tasksPayload = buildWidgetPayload(data, language, {
         systemColorScheme: getSystemColorSchemeForWidget(),
-        maxItems,
+        maxItems: getAdaptiveAndroidWidgetTaskLimit(widgetInfo.height, widgetInfo.width),
     });
     try {
-        renderWidget(buildTasksWidgetTree(tasksPayload));
+        renderWidget(buildTasksWidgetTree(tasksPayload, { layoutMode }));
     } catch (error) {
         if (__DEV__) {
             void logWarn('[RNWidget] Widget render failed', {
@@ -62,12 +62,12 @@ const widgetTaskHandler: WidgetTaskHandler = async ({ renderWidget, widgetInfo }
                 extra: { error: error instanceof Error ? error.message : String(error) },
             });
         }
-        renderWidget(buildTasksWidgetTree(tasksPayload));
+        renderWidget(buildTasksWidgetTree(tasksPayload, { layoutMode }));
     }
 
     if (widgetInfo.width <= 0 || widgetInfo.height <= 0) {
         await new Promise((resolve) => setTimeout(resolve, 600));
-        renderWidget(buildTasksWidgetTree(tasksPayload));
+        renderWidget(buildTasksWidgetTree(tasksPayload, { layoutMode }));
     }
 };
 

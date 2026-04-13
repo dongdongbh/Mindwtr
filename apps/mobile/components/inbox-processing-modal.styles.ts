@@ -297,6 +297,20 @@ export const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 12,
   },
+  prioritySection: {
+    marginBottom: 12,
+    gap: 6,
+  },
+  priorityChip: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  priorityChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
   customContextContainer: {
     flexDirection: 'row',
     alignItems: 'center',

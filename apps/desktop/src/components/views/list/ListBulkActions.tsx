@@ -1,10 +1,11 @@
-import type { TaskStatus } from '@mindwtr/core';
+import type { TaskEnergyLevel, TaskStatus } from '@mindwtr/core';
 
 type ListBulkActionsProps = {
     selectionCount: number;
     onMoveToStatus: (status: TaskStatus) => void;
     onAssignArea?: (areaId: string | null) => void;
     areaOptions?: Array<{ id: string; name: string }>;
+    onAssignEnergyLevel?: (energyLevel: TaskEnergyLevel) => void;
     onAddTag: () => void;
     onRemoveTag?: () => void;
     disableRemoveTag?: boolean;
@@ -17,12 +18,14 @@ type ListBulkActionsProps = {
 };
 
 const BULK_STATUS_OPTIONS: TaskStatus[] = ['inbox', 'next', 'waiting', 'someday', 'reference', 'done'];
+const BULK_ENERGY_OPTIONS: TaskEnergyLevel[] = ['low', 'medium', 'high'];
 
 export function ListBulkActions({
     selectionCount,
     onMoveToStatus,
     onAssignArea,
     areaOptions,
+    onAssignEnergyLevel,
     onAddTag,
     onRemoveTag,
     disableRemoveTag = false,
@@ -38,6 +41,10 @@ export function ListBulkActions({
     const areaLabel = areaLabelRaw === 'projects.areaLabel' ? 'Area' : areaLabelRaw;
     const noAreaLabelRaw = t('taskEdit.noAreaOption');
     const noAreaLabel = noAreaLabelRaw === 'taskEdit.noAreaOption' ? 'No area' : noAreaLabelRaw;
+    const moveToLabelRaw = t('bulk.moveTo');
+    const moveToLabel = moveToLabelRaw === 'bulk.moveTo' ? 'Move to' : moveToLabelRaw;
+    const energyLabelRaw = t('taskEdit.energyLevel');
+    const energyLabel = energyLabelRaw === 'taskEdit.energyLevel' ? 'Energy Level' : energyLabelRaw;
     const removeTagLabelRaw = t('bulk.removeTag');
     const removeTagLabel = removeTagLabelRaw === 'bulk.removeTag' ? 'Remove tag' : removeTagLabelRaw;
     const hasAreaAssignment = Boolean(onAssignArea) && (areaOptions?.length ?? 0) > 0;
@@ -47,18 +54,24 @@ export function ListBulkActions({
             <span className="text-sm text-muted-foreground">
                 {selectionCount} {t('bulk.selected')}
             </span>
-            <div className="flex items-center gap-2">
+            <select
+                defaultValue=""
+                onChange={(event) => {
+                    const value = event.currentTarget.value as TaskStatus | '';
+                    if (!value) return;
+                    onMoveToStatus(value);
+                    event.currentTarget.value = '';
+                }}
+                className="text-xs px-2 py-1 rounded bg-muted/50 border border-border hover:bg-muted transition-colors"
+                aria-label={moveToLabel}
+            >
+                <option value="">{moveToLabel}</option>
                 {BULK_STATUS_OPTIONS.map((status) => (
-                    <button
-                        key={status}
-                        onClick={() => onMoveToStatus(status)}
-                        className="text-xs px-2 py-1 rounded bg-muted/50 hover:bg-muted transition-colors"
-                        aria-label={t(`status.${status}`)}
-                    >
+                    <option key={status} value={status}>
                         {t(`status.${status}`)}
-                    </button>
+                    </option>
                 ))}
-            </div>
+            </select>
             {hasAreaAssignment && (
                 <select
                     defaultValue=""
@@ -76,6 +89,26 @@ export function ListBulkActions({
                     {(areaOptions ?? []).map((area) => (
                         <option key={area.id} value={area.id}>
                             {area.name}
+                        </option>
+                    ))}
+                </select>
+            )}
+            {onAssignEnergyLevel && (
+                <select
+                    defaultValue=""
+                    onChange={(event) => {
+                        const value = event.currentTarget.value as TaskEnergyLevel | '';
+                        if (!value) return;
+                        onAssignEnergyLevel(value);
+                        event.currentTarget.value = '';
+                    }}
+                    className="text-xs px-2 py-1 rounded bg-muted/50 border border-border hover:bg-muted transition-colors"
+                    aria-label={energyLabel}
+                >
+                    <option value="">{energyLabel}</option>
+                    {BULK_ENERGY_OPTIONS.map((energyLevel) => (
+                        <option key={energyLevel} value={energyLevel}>
+                            {t(`energyLevel.${energyLevel}`)}
                         </option>
                     ))}
                 </select>

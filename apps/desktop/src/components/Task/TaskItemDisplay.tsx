@@ -1,4 +1,4 @@
-import { Calendar as CalendarIcon, Tag, Trash2, ArrowRight, Repeat, Check, Clock, Timer, Paperclip, RotateCcw, Copy, MapPin, Hourglass, BookOpen, PauseCircle, Star } from 'lucide-react';
+import { Calendar as CalendarIcon, Tag, Trash2, ArrowRight, Repeat, Check, Clock, Timer, Paperclip, RotateCcw, Copy, MapPin, Hourglass, BookOpen, PauseCircle, Star, Zap } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Area, Attachment, Project, Task, TaskStatus, RecurrenceRule, RecurrenceStrategy, Language } from '@mindwtr/core';
@@ -128,6 +128,8 @@ export function TaskItemDisplay({
         || task.location
         || recurrenceRule
         || (prioritiesEnabled && task.priority)
+        || (task.status !== 'reference' && task.energyLevel)
+        || task.assignedTo
         || (task.contexts?.length ?? 0) > 0
         || task.tags.length > 0
         || checklistProgress
@@ -284,6 +286,19 @@ export function TaskItemDisplay({
                 <MetadataBadge
                     variant="priority"
                     label={t(`priority.${task.priority}`)}
+                />
+            )}
+            {task.status !== 'reference' && task.energyLevel && (
+                <MetadataBadge
+                    variant="info"
+                    icon={Zap}
+                    label={t(`energyLevel.${task.energyLevel}`)}
+                />
+            )}
+            {task.assignedTo && (
+                <MetadataBadge
+                    variant="info"
+                    label={`${t('taskEdit.assignedTo')}: ${task.assignedTo}`}
                 />
             )}
             {task.contexts?.length > 0 && (

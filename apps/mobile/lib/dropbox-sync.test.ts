@@ -93,6 +93,18 @@ describe('dropbox-sync', () => {
         expect(result.rev).toBe('rev-file');
     });
 
+    it('uploads attachment files as binary octet-stream regardless of source mime type', async () => {
+        let requestInit: RequestInit | undefined;
+        const fetcher = async (_input: RequestInfo | URL, init?: RequestInit) => {
+            requestInit = init;
+            return buildResponse(200, '{"rev":"rev-file"}');
+        };
+
+        await uploadDropboxFile('token', 'attachments/a.wav', new Uint8Array([1, 2, 3]), 'audio/wav', fetcher as typeof fetch);
+
+        expect((requestInit?.headers as Record<string, string>)['Content-Type']).toBe('application/octet-stream');
+    });
+
     it('treats delete 409 as success', async () => {
         const fetcher = async () => buildResponse(409, '{"error_summary":"path_lookup/not_found/.."}');
         await expect(deleteDropboxFile('token', '/attachments/a.bin', fetcher as typeof fetch)).resolves.toBeUndefined();

@@ -39,6 +39,7 @@ type AlarmScheduleResult = {
 type AlarmNotificationsApi = {
   parseDate: (date: Date) => string;
   scheduleAlarm: (details: Record<string, unknown>) => Promise<AlarmScheduleResult>;
+  sendNotification?: (details: Record<string, unknown>) => void;
   deleteAlarm: (id: AlarmId) => void;
   deleteRepeatingAlarm: (id: AlarmId) => void;
   removeFiredNotification: (id: AlarmId) => void;
@@ -57,6 +58,7 @@ type LocalAlarmConfig = {
   message: string;
   fireAt: Date;
   repeatInterval?: 'daily' | 'weekly';
+  hasSnoozeAction?: boolean;
   data?: Record<string, string>;
 };
 
@@ -327,6 +329,7 @@ function buildAlarmConfigSignature(config: LocalAlarmConfig): string {
     message: config.message,
     fireAt: config.fireAt.toISOString(),
     repeatInterval: config.repeatInterval ?? 'once',
+    hasSnoozeAction: config.hasSnoozeAction === true,
     data: config.data ?? {},
   });
 }
@@ -381,7 +384,7 @@ async function scheduleAlarmForKey(api: AlarmNotificationsApi, key: string, conf
     auto_cancel: true,
     small_icon: LOCAL_SMALL_ICON,
     color: LOCAL_NOTIFICATION_COLOR,
-    has_button: false,
+    has_button: config.hasSnoozeAction === true,
     loop_sound: false,
     play_sound: true,
     schedule_type: config.repeatInterval ? 'repeat' : 'once',
@@ -509,6 +512,7 @@ async function runRescheduleCycle(api: AlarmNotificationsApi): Promise<void> {
       title: task.title,
       message: task.description || '',
       fireAt: next,
+      hasSnoozeAction: true,
       data: {
         kind: 'task-reminder',
         taskId: task.id,
@@ -610,24 +614,33 @@ export async function sendLocalMobileNotification(
   if (!permission.granted) return;
 
   try {
-    await api.scheduleAlarm({
+    const details = {
       title: trimmedTitle,
       message: normalizeNotificationMessage(trimmedTitle, message),
       channel: LOCAL_ALARM_CHANNEL,
       auto_cancel: true,
       small_icon: LOCAL_SMALL_ICON,
       color: LOCAL_NOTIFICATION_COLOR,
-      fire_date: api.parseDate(new Date(Date.now() + 2000)),
       has_button: false,
       loop_sound: false,
       play_sound: true,
-      schedule_type: 'once',
       use_big_text: true,
       vibrate: false,
       data: {
         kind: 'pomodoro',
         ...(data ?? {}),
       },
+    };
+
+    if (typeof api.sendNotification === 'function') {
+      api.sendNotification(details);
+      return;
+    }
+
+    await api.scheduleAlarm({
+      ...details,
+      fire_date: api.parseDate(new Date(Date.now() + 2000)),
+      schedule_type: 'once',
     });
   } catch (error) {
     logNotificationError('Failed to send local mobile notification', error);

@@ -9,9 +9,12 @@ type AttachmentModalsProps = {
     audioSource: string | null;
     audioRef: RefObject<HTMLAudioElement | null>;
     audioError: string | null;
+    audioTranscribing: boolean;
+    audioTranscriptionError: string | null;
     onCloseAudio: () => void;
     onAudioError: () => void;
     onOpenAudioExternally: () => void;
+    onRetryAudioTranscription: () => void;
     imageAttachment: Attachment | null;
     imageSource: string | null;
     onCloseImage: () => void;
@@ -30,9 +33,12 @@ export function AttachmentModals({
     audioSource,
     audioRef,
     audioError,
+    audioTranscribing,
+    audioTranscriptionError,
     onCloseAudio,
     onAudioError,
     onOpenAudioExternally,
+    onRetryAudioTranscription,
     imageAttachment,
     imageSource,
     onCloseImage,
@@ -53,9 +59,12 @@ export function AttachmentModals({
                     audioSource={audioSource}
                     audioRef={audioRef}
                     audioError={audioError}
+                    audioTranscribing={audioTranscribing}
+                    audioTranscriptionError={audioTranscriptionError}
                     onClose={onCloseAudio}
                     onAudioError={onAudioError}
                     onOpenExternally={onOpenAudioExternally}
+                    onRetryTranscription={onRetryAudioTranscription}
                     t={t}
                 />
             ) : null}

@@ -67,11 +67,13 @@ export const reportProgress = (
 export const collectAttachmentsById = (appData: AppData): Map<string, Attachment> => {
     const attachmentsById = new Map<string, Attachment>();
     for (const task of appData.tasks) {
+        if (task.deletedAt) continue;
         for (const attachment of task.attachments || []) {
             attachmentsById.set(attachment.id, attachment);
         }
     }
     for (const project of appData.projects) {
+        if (project.deletedAt) continue;
         for (const attachment of project.attachments || []) {
             attachmentsById.set(attachment.id, attachment);
         }

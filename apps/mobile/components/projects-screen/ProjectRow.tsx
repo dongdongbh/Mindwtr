@@ -1,9 +1,9 @@
 import React from 'react';
 import { Alert, Text, TouchableOpacity, View } from 'react-native';
 import { type Area, type Project, type Task } from '@mindwtr/core';
-import { Trash2 } from 'lucide-react-native';
+import { Trash2, Star, AlertTriangle } from 'lucide-react-native';
 
-import { projectsScreenStyles as styles } from '@/app/(drawer)/projects-screen.styles';
+import { projectsScreenStyles as styles } from '@/components/projects-screen/projects-screen.styles';
 
 type ThemeColors = {
     cardBg: string;
@@ -68,15 +68,18 @@ export function ProjectRow({
                 onPress={() => onToggleProjectFocus(project.id)}
                 style={styles.focusButton}
                 disabled={!project.isFocused && focusedCount >= 5}
+                accessibilityRole="button"
+                accessibilityLabel={project.isFocused ? 'Unfocus project' : 'Focus project'}
+                accessibilityState={{ selected: project.isFocused, disabled: !project.isFocused && focusedCount >= 5 }}
+                hitSlop={8}
             >
-                <Text
-                    style={[
-                        styles.focusIcon,
-                        project.isFocused ? { opacity: 1 } : { opacity: focusedCount >= 5 ? 0.3 : 0.5 },
-                    ]}
-                >
-                    {project.isFocused ? '⭐' : '☆'}
-                </Text>
+                <Star
+                    size={22}
+                    color={project.isFocused ? '#F59E0B' : tc.secondaryText}
+                    fill={project.isFocused ? '#F59E0B' : 'transparent'}
+                    strokeWidth={2}
+                    style={{ opacity: project.isFocused ? 1 : focusedCount >= 5 ? 0.3 : 0.6 }}
+                />
             </TouchableOpacity>
             <TouchableOpacity
                 style={styles.projectTouchArea}
@@ -102,7 +105,10 @@ export function ProjectRow({
                             ↳ {nextAction.title}
                         </Text>
                     ) : showFocusedWarning ? (
-                        <Text style={[styles.projectMeta, { color: '#F59E0B' }]}>⚠️ No next action</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <AlertTriangle size={12} color="#F59E0B" strokeWidth={2.5} />
+                            <Text style={[styles.projectMeta, { color: '#F59E0B' }]}>{t('projects.noNextAction')}</Text>
+                        </View>
                     ) : (
                         <Text
                             style={[

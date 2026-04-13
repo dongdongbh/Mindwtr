@@ -16,6 +16,8 @@ Mindwtr's self-hosted cloud backend is a small sync server under `apps/cloud`. I
 - Clients point at the `/v1` base URL and sync through `/v1/data`.
 - Attachment APIs live under `/v1/attachments/...`.
 - Deploy it behind HTTPS and treat the bearer token like a password.
+- For normal device access, Mindwtr Cloud requires HTTPS. A local-network URL like `http://192.168.x.x` will not work in the mobile/desktop clients.
+- `http://localhost` is only intended for local development. If you need plain HTTP on a private LAN, use WebDAV instead.
 
 Keep this page only as a redirect for older links and bookmarks.
 

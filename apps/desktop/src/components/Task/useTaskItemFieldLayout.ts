@@ -16,6 +16,8 @@ type UseTaskItemFieldLayoutParams = {
     editSectionId: string;
     editAreaId: string;
     editPriority: TaskPriority | '';
+    editEnergyLevel?: NonNullable<Task['energyLevel']> | '';
+    editAssignedTo?: string;
     editContexts: string;
     editDescription: string;
     editDueDate: string;
@@ -37,6 +39,8 @@ export function useTaskItemFieldLayout({
     editSectionId,
     editAreaId,
     editPriority,
+    editEnergyLevel = '',
+    editAssignedTo = '',
     editContexts,
     editDescription,
     editDueDate,
@@ -86,6 +90,7 @@ export function useTaskItemFieldLayout({
         'reviewAt',
         'recurrence',
         'priority',
+        'energyLevel',
         'timeEstimate',
         'checklist',
     ]), []);
@@ -103,6 +108,10 @@ export function useTaskItemFieldLayout({
             case 'priority':
                 if (!prioritiesEnabled) return false;
                 return Boolean(editPriority);
+            case 'energyLevel':
+                return Boolean(editEnergyLevel);
+            case 'assignedTo':
+                return Boolean(editAssignedTo.trim());
             case 'contexts':
                 return Boolean(editContexts.trim());
             case 'description':
@@ -129,9 +138,11 @@ export function useTaskItemFieldLayout({
         }
     }, [
         editAreaId,
+        editAssignedTo,
         editContexts,
         editDescription,
         editDueDate,
+        editEnergyLevel,
         editPriority,
         editProjectId,
         editRecurrence,
