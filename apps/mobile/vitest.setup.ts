@@ -139,10 +139,49 @@ vi.mock('@expo/vector-icons', () => {
 });
 
 vi.mock('lucide-react-native', () => {
-  return new Proxy(
-    {},
-    {
-      get: () => (props: any) => React.createElement('Icon', props, props.children),
-    },
-  );
+  const Icon = (props: any) => React.createElement('Icon', props, props.children);
+  // Keep this as a plain module object. A catch-all proxy also exposes `then`,
+  // which makes the mock look promise-like and can stall ESM imports in Vitest.
+  const iconNames = [
+    'AlertTriangle',
+    'Archive',
+    'ArrowLeft',
+    'ArrowRight',
+    'ArrowRightCircle',
+    'AtSign',
+    'Calendar',
+    'CalendarDays',
+    'Check',
+    'CheckCircle',
+    'CheckCircle2',
+    'CheckSquare',
+    'ChevronDown',
+    'ChevronRight',
+    'Clock',
+    'Flag',
+    'Folder',
+    'Inbox',
+    'Lightbulb',
+    'Menu',
+    'Mic',
+    'PauseCircle',
+    'Play',
+    'Plus',
+    'RotateCcw',
+    'Search',
+    'SlidersHorizontal',
+    'Sparkles',
+    'Square',
+    'Star',
+    'Tag',
+    'Target',
+    'Trash2',
+    'X',
+  ] as const;
+  const exports = Object.fromEntries(iconNames.map((name) => [name, Icon])) as Record<string, unknown>;
+  return {
+    __esModule: true,
+    ...exports,
+    default: exports,
+  };
 });

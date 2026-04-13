@@ -5,23 +5,25 @@ import { describe, expect, it, vi } from 'vitest';
 import { DailyReviewScreen } from './daily-review-modal';
 import { SwipeableTaskItem } from './swipeable-task-item';
 
+const storeState = {
+  tasks: [
+    {
+      id: 'task-1',
+      title: 'Focus me',
+      status: 'next',
+      contexts: [],
+      tags: [],
+      createdAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: '2026-03-01T00:00:00.000Z',
+    },
+  ],
+  settings: {},
+  updateTask: vi.fn(),
+  deleteTask: vi.fn(),
+};
+
 vi.mock('@mindwtr/core', () => ({
-  useTaskStore: () => ({
-    tasks: [
-      {
-        id: 'task-1',
-        title: 'Focus me',
-        status: 'next',
-        contexts: [],
-        tags: [],
-        createdAt: '2026-03-01T00:00:00.000Z',
-        updatedAt: '2026-03-01T00:00:00.000Z',
-      },
-    ],
-    settings: {},
-    updateTask: vi.fn(),
-    deleteTask: vi.fn(),
-  }),
+  useTaskStore: () => storeState,
   isDueForReview: () => false,
   safeFormatDate: () => '2026-03-15',
   safeParseDate: () => null,

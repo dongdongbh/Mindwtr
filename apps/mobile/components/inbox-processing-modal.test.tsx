@@ -9,31 +9,39 @@ const deleteTask = vi.fn();
 const addProject = vi.fn();
 const push = vi.fn();
 const mockSettings = { gtd: { inboxProcessing: {} }, ai: {} } as any;
+const storeState = {
+  tasks: [
+    {
+      id: 'inbox-1',
+      title: 'Inbox task',
+      description: 'Original description',
+      status: 'inbox',
+      contexts: ['@home'],
+      tags: ['#old'],
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+    },
+  ],
+  projects: [] as any[],
+  areas: [] as any[],
+  settings: mockSettings,
+  updateTask,
+  deleteTask,
+  addProject,
+};
 
-vi.mock('@mindwtr/core', async () => {
-  const actual = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
+vi.mock('@mindwtr/core', () => {
   return {
-    ...actual,
-    useTaskStore: () => ({
-      tasks: [
-        {
-          id: 'inbox-1',
-          title: 'Inbox task',
-          description: 'Original description',
-          status: 'inbox',
-          contexts: ['@home'],
-          tags: ['#old'],
-          createdAt: '2025-01-01T00:00:00.000Z',
-          updatedAt: '2025-01-01T00:00:00.000Z',
-        },
-      ],
-      projects: [],
-      areas: [],
-      settings: mockSettings,
-      updateTask,
-      deleteTask,
-      addProject,
-    }),
+    addBreadcrumb: vi.fn(),
+    DEFAULT_PROJECT_COLOR: '#3b82f6',
+    collectTaskTokenUsage: vi.fn(() => []),
+    createAIProvider: vi.fn(() => ({
+      clarifyTask: vi.fn(),
+    })),
+    resolveAutoTextDirection: vi.fn(() => 'ltr'),
+    safeFormatDate: vi.fn(() => 'Jan 1, 2025'),
+    safeParseDate: vi.fn((value?: string) => (value ? new Date(value) : null)),
+    useTaskStore: () => storeState,
     loadAIKey: vi.fn(),
   };
 });
@@ -112,6 +120,8 @@ describe('InboxProcessingModal', () => {
   it('replaces the header next action with skip and saves edits before advancing', () => {
     mockSettings.features = undefined;
     mockSettings.gtd.inboxProcessing = {};
+    storeState.projects = [];
+    storeState.areas = [];
     updateTask.mockClear();
     deleteTask.mockClear();
     addProject.mockClear();
@@ -158,6 +168,8 @@ describe('InboxProcessingModal', () => {
   it('hides the two-minute section when that shortcut is disabled', () => {
     mockSettings.features = undefined;
     mockSettings.gtd.inboxProcessing = { twoMinuteEnabled: false };
+    storeState.projects = [];
+    storeState.areas = [];
     const onClose = vi.fn();
     let tree: ReturnType<typeof create>;
 
@@ -173,6 +185,8 @@ describe('InboxProcessingModal', () => {
   it('hides the contexts and tags section when disabled', () => {
     mockSettings.features = undefined;
     mockSettings.gtd.inboxProcessing = { contextStepEnabled: false };
+    storeState.projects = [];
+    storeState.areas = [];
     const onClose = vi.fn();
     let tree: ReturnType<typeof create>;
 
@@ -188,6 +202,8 @@ describe('InboxProcessingModal', () => {
   it('saves the selected priority by default when priorities are not explicitly disabled', () => {
     mockSettings.features = undefined;
     mockSettings.gtd.inboxProcessing = {};
+    storeState.projects = [];
+    storeState.areas = [];
     updateTask.mockClear();
     const onClose = vi.fn();
     let tree: ReturnType<typeof create>;
@@ -234,6 +250,8 @@ describe('InboxProcessingModal', () => {
   it('moves delegated tasks to waiting with assignedTo and keeps the description clean', () => {
     mockSettings.features = undefined;
     mockSettings.gtd.inboxProcessing = {};
+    storeState.projects = [];
+    storeState.areas = [];
     updateTask.mockClear();
     const onClose = vi.fn();
     let tree: ReturnType<typeof create>;
@@ -285,6 +303,8 @@ describe('InboxProcessingModal', () => {
   it('keeps the selected priority when delegating a task', () => {
     mockSettings.features = undefined;
     mockSettings.gtd.inboxProcessing = {};
+    storeState.projects = [];
+    storeState.areas = [];
     updateTask.mockClear();
     const onClose = vi.fn();
     let tree: ReturnType<typeof create>;
@@ -347,6 +367,8 @@ describe('InboxProcessingModal', () => {
   it('keeps the selected priority when delegating a task', () => {
     mockSettings.features = undefined;
     mockSettings.gtd.inboxProcessing = {};
+    storeState.projects = [];
+    storeState.areas = [];
     updateTask.mockClear();
     const onClose = vi.fn();
     let tree: ReturnType<typeof create>;
@@ -409,6 +431,8 @@ describe('InboxProcessingModal', () => {
   it('does not allow delegation without an assignee name', () => {
     mockSettings.features = undefined;
     mockSettings.gtd.inboxProcessing = {};
+    storeState.projects = [];
+    storeState.areas = [];
     updateTask.mockClear();
     const onClose = vi.fn();
     let tree: ReturnType<typeof create>;
