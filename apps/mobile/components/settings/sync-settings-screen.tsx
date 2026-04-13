@@ -9,6 +9,8 @@ import {
     CLOCK_SKEW_THRESHOLD_MS,
     cloudGetJson,
     type BackupValidation,
+    type DgtImportParseResult,
+    type ParsedDgtImportData,
     type ParsedTodoistProject,
     type TodoistImportParseResult,
     useTaskStore,
@@ -22,11 +24,14 @@ import { pickAndParseSyncFolder } from '@/lib/storage-file';
 import { getCloudKitAccountStatus, isCloudKitAvailable } from '@/lib/cloudkit-sync';
 import {
     exportCurrentDataBackup,
+    importDgtData,
     importTodoistData,
     inspectBackupDocument,
+    inspectDgtDocument,
     inspectTodoistDocument,
     listLocalDataSnapshots,
     pickBackupDocument,
+    pickDgtDocument,
     pickTodoistDocument,
     restoreDataFromBackup,
     restoreLocalDataSnapshot,
@@ -382,6 +387,39 @@ export function SyncSettingsScreen() {
         return details.join('\n');
     };
 
+    const buildDgtSummary = (preview: NonNullable<DgtImportParseResult['preview']>) => {
+        const projectLines = preview.projects
+            .slice(0, 4)
+            .map((project) => `• ${project.areaName ? `${project.areaName} / ` : ''}${project.name}: ${project.taskCount}`);
+        if (preview.projects.length > 4) {
+            projectLines.push(localize(`• ${preview.projects.length - 4} more project(s)…`, `• 另外还有 ${preview.projects.length - 4} 个项目…`));
+        }
+        const details = [
+            localize(
+                `Import ${preview.taskCount} tasks from ${preview.fileName}?`,
+                `导入来自 ${preview.fileName} 的 ${preview.taskCount} 个任务？`
+            ),
+            preview.areaCount > 0
+                ? localize(`${preview.areaCount} area(s) will be created from DGT folders.`, `${preview.areaCount} 个领域将从 DGT 文件夹创建。`)
+                : null,
+            preview.projectCount > 0
+                ? localize(`${preview.projectCount} project(s) will be created.`, `${preview.projectCount} 个项目将被创建。`)
+                : null,
+            preview.checklistItemCount > 0
+                ? localize(`${preview.checklistItemCount} checklist item(s) will be preserved.`, `${preview.checklistItemCount} 个清单项将被保留。`)
+                : null,
+            preview.standaloneTaskCount > 0
+                ? localize(
+                    `${preview.standaloneTaskCount} task(s) will stay outside projects so you can process them in Mindwtr.`,
+                    `${preview.standaloneTaskCount} 个任务会保留在项目之外，方便你在 Mindwtr 中继续整理。`
+                )
+                : null,
+            ...(projectLines.length > 0 ? ['', ...projectLines] : []),
+            ...(preview.warnings.length > 0 ? ['', ...preview.warnings] : []),
+        ].filter(Boolean);
+        return details.join('\n');
+    };
+
     const renderSyncHistory = () => {
         if (syncHistoryEntries.length === 0) return null;
         return (
@@ -574,6 +612,39 @@ export function SyncSettingsScreen() {
         }
     };
 
+    const confirmDgtImport = async (parsedData: ParsedDgtImportData) => {
+        setBackupAction('import');
+        try {
+            const { snapshotName, result } = await importDgtData(parsedData);
+            await refreshRecoverySnapshots();
+            const details = [
+                localize(
+                    `Imported ${result.importedTaskCount} task(s), ${result.importedProjectCount} project(s), and ${result.importedAreaCount} area(s).`,
+                    `已导入 ${result.importedTaskCount} 个任务、${result.importedProjectCount} 个项目和 ${result.importedAreaCount} 个领域。`
+                ),
+                result.importedChecklistItemCount > 0
+                    ? localize(
+                        `${result.importedChecklistItemCount} checklist item(s) were preserved.`,
+                        `${result.importedChecklistItemCount} 个清单项已被保留。`
+                    )
+                    : null,
+                localize(`Recovery snapshot saved as ${snapshotName}.`, `恢复快照已保存为 ${snapshotName}。`),
+                ...(result.warnings.length > 0 ? ['', ...result.warnings] : []),
+            ].filter(Boolean);
+            showToast({
+                title: localize('Import complete', '导入完成'),
+                message: details.join('\n'),
+                tone: 'success',
+                durationMs: 6200,
+            });
+        } catch (error) {
+            logSettingsError(error);
+            showSettingsErrorToast(localize('Import failed', '导入失败'), String(error), 5200);
+        } finally {
+            setBackupAction(null);
+        }
+    };
+
     const handleImportTodoist = async () => {
         setBackupAction('import');
         try {
@@ -595,6 +666,39 @@ export function SyncSettingsScreen() {
                     {
                         text: localize('Import', '导入'),
                         onPress: () => void confirmTodoistImport(parseResult.parsedProjects),
+                    },
+                ]
+            );
+        } catch (error) {
+            logSettingsError(error);
+            showSettingsErrorToast(localize('Import failed', '导入失败'), String(error), 5200);
+        } finally {
+            setBackupAction(null);
+        }
+    };
+
+    const handleImportDgt = async () => {
+        setBackupAction('import');
+        try {
+            const document = await pickDgtDocument();
+            if (!document) return;
+            const parseResult = await inspectDgtDocument(document);
+            if (!parseResult.valid || !parseResult.preview || !parseResult.parsedData) {
+                showSettingsWarning(
+                    localize('Import failed', '导入失败'),
+                    parseResult.errors[0] || localize('The selected file is not a supported DGT GTD export.', '所选文件不是受支持的 DGT GTD 导出文件。')
+                );
+                return;
+            }
+            const parsedData = parseResult.parsedData;
+            Alert.alert(
+                localize('Import DGT GTD data?', '导入 DGT GTD 数据？'),
+                buildDgtSummary(parseResult.preview),
+                [
+                    { text: localize('Cancel', '取消'), style: 'cancel' },
+                    {
+                        text: localize('Import', '导入'),
+                        onPress: () => void confirmDgtImport(parsedData),
                     },
                 ]
             );
@@ -1674,6 +1778,19 @@ export function SyncSettingsScreen() {
                             <Text style={[styles.settingLabel, { color: tc.tint }]}>{localize('Import from Todoist', '从 Todoist 导入')}</Text>
                             <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
                                 {localize('Import Todoist CSV or ZIP exports into Mindwtr projects.', '将 Todoist 的 CSV 或 ZIP 导出导入为 Mindwtr 项目。')}
+                            </Text>
+                        </View>
+                        {backupAction === 'import' && <ActivityIndicator size="small" color={tc.tint} />}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
+                        onPress={() => void handleImportDgt()}
+                        disabled={isSyncing || isBackupBusy}
+                    >
+                        <View style={styles.settingInfo}>
+                            <Text style={[styles.settingLabel, { color: tc.tint }]}>{localize('Import from DGT GTD', '从 DGT GTD 导入')}</Text>
+                            <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
+                                {localize('Import DGT GTD JSON or ZIP exports into Mindwtr areas, projects, and tasks.', '将 DGT GTD 的 JSON 或 ZIP 导出导入为 Mindwtr 的领域、项目和任务。')}
                             </Text>
                         </View>
                         {backupAction === 'import' && <ActivityIndicator size="small" color={tc.tint} />}

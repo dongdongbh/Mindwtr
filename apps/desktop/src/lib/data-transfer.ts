@@ -1,13 +1,18 @@
 import {
     addBreadcrumb,
+    applyDgtImport,
     applyTodoistImport,
     createBackupFileName,
+    parseDgtImportSource,
     flushPendingSave,
     parseTodoistImportSource,
     serializeBackupData,
     validateBackupJson,
     type AppData,
     type BackupValidation,
+    type ParsedDgtImportData,
+    type DgtImportExecutionResult,
+    type DgtImportParseResult,
     type ParsedTodoistProject,
     type TodoistImportExecutionResult,
     type TodoistImportParseResult,
@@ -205,6 +210,20 @@ export const inspectDesktopTodoistImport = async (): Promise<TodoistImportParseR
     });
 };
 
+export const inspectDesktopDgtImport = async (): Promise<DgtImportParseResult | null> => {
+    const document = await pickTransferDocument({
+        accept: '.json,.zip,application/json,application/zip',
+        extensions: ['json', 'zip'],
+        mode: 'binary',
+        title: 'DGT GTD Export',
+    });
+    if (!document) return null;
+    return parseDgtImportSource({
+        bytes: document.bytes,
+        fileName: document.fileName,
+    });
+};
+
 export const restoreDesktopBackup = async (data: AppData): Promise<DesktopTransferResult> => {
     addBreadcrumb('transfer:restore');
     void logInfo('Backup restore started', {
@@ -267,6 +286,44 @@ export const importDesktopTodoistData = async (
         };
     } catch (error) {
         void logError(error, { scope: 'transfer', extra: { operation: 'importTodoist' } });
+        throw error;
+    }
+};
+
+export const importDesktopDgtData = async (
+    parsedData: ParsedDgtImportData
+): Promise<DesktopTransferResult & { result: DgtImportExecutionResult }> => {
+    addBreadcrumb('transfer:restore');
+    void logInfo('DGT import started', {
+        scope: 'transfer',
+        extra: {
+            operation: 'importDgt',
+            source: 'dgt',
+        },
+    });
+    try {
+        await flushPendingSave();
+        const currentData = await getStorage().getData();
+        const snapshotName = isTauriRuntime() ? await SyncService.createDataSnapshot() : null;
+        const result = applyDgtImport(currentData, parsedData);
+        await persistTransferredData(result.data);
+        void logInfo('DGT import complete', {
+            scope: 'transfer',
+            extra: {
+                operation: 'importDgt',
+                source: 'dgt',
+                tasks: String(result.importedTaskCount),
+                projects: String(result.importedProjectCount),
+                areas: String(result.importedAreaCount),
+                checklistItems: String(result.importedChecklistItemCount),
+            },
+        });
+        return {
+            snapshotName,
+            result,
+        };
+    } catch (error) {
+        void logError(error, { scope: 'transfer', extra: { operation: 'importDgt' } });
         throw error;
     }
 };

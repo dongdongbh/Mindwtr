@@ -5,11 +5,16 @@ import { Directory, File, Paths } from 'expo-file-system';
 import { Platform } from 'react-native';
 import {
     addBreadcrumb,
+    applyDgtImport,
     applyTodoistImport,
     createBackupFileName,
+    parseDgtImportSource,
     flushPendingSave,
     parseTodoistImportSource,
     serializeBackupData,
+    type DgtImportExecutionResult,
+    type DgtImportParseResult,
+    type ParsedDgtImportData,
     type AppData,
     type BackupValidation,
     type TodoistImportExecutionResult,
@@ -215,6 +220,14 @@ export const pickTodoistDocument = async (): Promise<TransferDocument | null> =>
         'application/octet-stream',
     ]);
 
+export const pickDgtDocument = async (): Promise<TransferDocument | null> =>
+    pickDocument([
+        'application/json',
+        'application/zip',
+        'application/x-zip-compressed',
+        'application/octet-stream',
+    ]);
+
 export const inspectBackupDocument = async (
     document: TransferDocument,
     options?: { appVersion?: string | null }
@@ -232,6 +245,16 @@ export const inspectTodoistDocument = async (
 ): Promise<TodoistImportParseResult> => {
     const bytes = await readBinaryFile(document.uri);
     return parseTodoistImportSource({
+        bytes,
+        fileName: document.fileName,
+    });
+};
+
+export const inspectDgtDocument = async (
+    document: TransferDocument
+): Promise<DgtImportParseResult> => {
+    const bytes = await readBinaryFile(document.uri);
+    return parseDgtImportSource({
         bytes,
         fileName: document.fileName,
     });
@@ -300,6 +323,44 @@ export const importTodoistData = async (
         };
     } catch (error) {
         void logError(error, { scope: 'transfer', extra: { operation: 'importTodoist' } });
+        throw error;
+    }
+};
+
+export const importDgtData = async (
+    parsedData: ParsedDgtImportData
+): Promise<SnapshotApplyResult & { result: DgtImportExecutionResult }> => {
+    addBreadcrumb('transfer:restore');
+    void logInfo('DGT import started', {
+        scope: 'transfer',
+        extra: {
+            operation: 'importDgt',
+            source: 'dgt',
+        },
+    });
+    try {
+        await flushPendingSave();
+        const currentData = await mobileStorage.getData();
+        const snapshotName = await saveCurrentDataSnapshot(currentData);
+        const result = applyDgtImport(currentData, parsedData);
+        await applyImportedData(result.data);
+        void logInfo('DGT import complete', {
+            scope: 'transfer',
+            extra: {
+                operation: 'importDgt',
+                source: 'dgt',
+                tasks: String(result.importedTaskCount),
+                projects: String(result.importedProjectCount),
+                areas: String(result.importedAreaCount),
+                checklistItems: String(result.importedChecklistItemCount),
+            },
+        });
+        return {
+            snapshotName,
+            result,
+        };
+    } catch (error) {
+        void logError(error, { scope: 'transfer', extra: { operation: 'importDgt' } });
         throw error;
     }
 };

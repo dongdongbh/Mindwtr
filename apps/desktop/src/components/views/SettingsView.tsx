@@ -1286,6 +1286,7 @@ export function SettingsView() {
     handleExportBackup,
     handleRestoreBackup,
     handleImportTodoist,
+    handleImportDgt,
   } = useSyncSettings({
     appVersion,
     isTauri,
@@ -1591,6 +1592,7 @@ export function SettingsView() {
           onExportBackup={handleExportBackup}
           onRestoreBackup={handleRestoreBackup}
           onImportTodoist={handleImportTodoist}
+          onImportDgt={handleImportDgt}
         />
       );
     }

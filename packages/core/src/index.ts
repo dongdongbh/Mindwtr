@@ -56,3 +56,4 @@ export * from './analytics-heartbeat';
 export * from './dropbox-sync-utils';
 export * from './backup-transfer';
 export * from './todoist-import';
+export * from './dgt-import';

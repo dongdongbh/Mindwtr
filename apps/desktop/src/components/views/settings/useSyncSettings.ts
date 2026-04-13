@@ -10,8 +10,10 @@ import {
     type SyncBackend,
 } from '@mindwtr/core';
 import {
+    importDesktopDgtData,
     exportDesktopBackup,
     importDesktopTodoistData,
+    inspectDesktopDgtImport,
     inspectDesktopBackup,
     inspectDesktopTodoistImport,
     restoreDesktopBackup,
@@ -628,6 +630,59 @@ export const useSyncSettings = ({
         }
     }, [isTauri, requestConfirmation, showToast, toErrorMessage]);
 
+    const handleImportDgt = useCallback(async () => {
+        addBreadcrumb('transfer:restore');
+        setTransferAction('import');
+        try {
+            const parseResult = await inspectDesktopDgtImport();
+            if (!parseResult) return;
+            if (!parseResult.valid || !parseResult.preview || !parseResult.parsedData) {
+                showToast(parseResult.errors[0] || 'The selected file is not a supported DGT GTD export.', 'error');
+                return;
+            }
+
+            const preview = parseResult.preview;
+            const projectLines = preview.projects
+                .slice(0, 4)
+                .map((project: { areaName?: string; name: string; taskCount: number }) => `- ${project.areaName ? `${project.areaName} / ` : ''}${project.name}: ${project.taskCount}`);
+            if (preview.projects.length > 4) {
+                projectLines.push(`- ${preview.projects.length - 4} more project(s)...`);
+            }
+
+            const confirmed = await requestConfirmation({
+                title: 'Import DGT GTD data?',
+                message: [
+                    `Import ${preview.taskCount} tasks from ${preview.fileName}?`,
+                    preview.areaCount > 0 ? `${preview.areaCount} area(s) will be created from DGT folders.` : null,
+                    preview.projectCount > 0 ? `${preview.projectCount} project(s) will be created.` : null,
+                    preview.checklistItemCount > 0 ? `${preview.checklistItemCount} checklist item(s) will be preserved.` : null,
+                    preview.standaloneTaskCount > 0
+                        ? `${preview.standaloneTaskCount} task(s) will stay outside projects so you can process them in Mindwtr.`
+                        : null,
+                    ...(projectLines.length > 0 ? ['', ...projectLines] : []),
+                    ...(preview.warnings.length > 0 ? ['', ...preview.warnings] : []),
+                ].filter(Boolean).join('\n'),
+            });
+            if (!confirmed) return;
+
+            const { snapshotName, result } = await importDesktopDgtData(parseResult.parsedData);
+            if (isTauri) {
+                setSnapshots(await SyncService.listDataSnapshots());
+            }
+            const details = [
+                `Imported ${result.importedTaskCount} task(s), ${result.importedProjectCount} project(s), and ${result.importedAreaCount} area(s).`,
+                result.importedChecklistItemCount > 0 ? `${result.importedChecklistItemCount} checklist item(s) were preserved.` : null,
+                snapshotName ? `Snapshot saved as ${snapshotName}.` : null,
+                ...(result.warnings.length > 0 ? ['', ...result.warnings] : []),
+            ].filter(Boolean).join('\n');
+            showToast(details, 'success', 8000);
+        } catch (error) {
+            showToast(toErrorMessage(error, 'Failed to import DGT GTD data.'), 'error');
+        } finally {
+            setTransferAction(null);
+        }
+    }, [isTauri, requestConfirmation, showToast, toErrorMessage]);
+
     return {
         syncPath,
         setSyncPath,
@@ -679,5 +734,6 @@ export const useSyncSettings = ({
         handleExportBackup,
         handleRestoreBackup,
         handleImportTodoist,
+        handleImportDgt,
     };
 };

@@ -42,6 +42,7 @@
     "./task-status": "./src/task-status.ts",
     "./text-direction": "./src/text-direction.ts",
     "./todoist-import": "./src/todoist-import.ts",
+    "./dgt-import": "./src/dgt-import.ts",
     "./ai/ai-service": "./src/ai/ai-service.ts",
     "./ai/types": "./src/ai/types.ts",
     "./ai/catalog": "./src/ai/catalog.ts",
