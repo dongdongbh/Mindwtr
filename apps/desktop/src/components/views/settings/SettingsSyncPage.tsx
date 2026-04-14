@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { AppData } from '@mindwtr/core';
 import { safeFormatDate } from '@mindwtr/core';
-import { AlertCircle, CheckCircle2, Info, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, Info, RefreshCw, Trash2 } from 'lucide-react';
 
 import { cn } from '../../../lib/utils';
 import { ConfirmModal } from '../../ConfirmModal';
@@ -692,7 +692,7 @@ export function SettingsSyncPage({
                                 <div className="text-sm font-medium">{t.syncPreferences}</div>
                                 <p className="text-xs text-muted-foreground">{t.syncPreferencesDesc}</p>
                             </div>
-                            <span className="text-muted-foreground">{syncOptionsOpen ? '▾' : '▸'}</span>
+                            {syncOptionsOpen ? <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />}
                         </button>
                         {syncOptionsOpen && (
                             <div className="space-y-3">
@@ -768,7 +768,7 @@ export function SettingsSyncPage({
                                     aria-expanded={syncHistoryOpen}
                                 >
                                     <span className="text-xs font-medium text-muted-foreground">{t.syncHistory}</span>
-                                    <span className="text-muted-foreground">{syncHistoryOpen ? '▾' : '▸'}</span>
+                                    {syncHistoryOpen ? <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />}
                                 </button>
                                 {syncHistoryOpen && (
                                     <div className="space-y-1">
@@ -803,7 +803,7 @@ export function SettingsSyncPage({
                                 aria-expanded={snapshotsOpen}
                             >
                                 <span className="text-xs font-medium text-muted-foreground">{t.recoverySnapshots}</span>
-                                <span className="text-muted-foreground">{snapshotsOpen ? '▾' : '▸'}</span>
+                                {snapshotsOpen ? <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />}
                             </button>
                             <div className="text-xs text-muted-foreground">
                                 {t.recoverySnapshotsDesc}
