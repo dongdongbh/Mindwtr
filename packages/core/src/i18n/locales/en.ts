@@ -791,6 +791,7 @@ export const en: Record<string, string> = {
         'ai.errorBody': 'Please try again.',
         'ai.applySuggestion': 'Use suggestion',
         'ai.addSteps': 'Add steps',
+        'ai.working': 'Working...',
         'ai.breakdownTitle': 'Suggested steps',
         'copilot.suggested': 'Suggested',
         'copilot.applyHint': 'Tap to apply',

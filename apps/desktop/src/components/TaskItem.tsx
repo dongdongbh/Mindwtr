@@ -5,23 +5,16 @@ import {
     TaskStatus,
     TaskEditorFieldId,
     getLocalizedWeekdayLabels,
-    type Recurrence,
-    parseRRuleString,
     Project,
     generateUUID,
-    parseQuickAdd,
-    extractChecklistFromMarkdown,
 } from '@mindwtr/core';
 import { cn } from '../lib/utils';
-import { PromptModal } from './PromptModal';
-import { ConfirmModal } from './ConfirmModal';
 import { useLanguage } from '../contexts/language-context';
 import { TaskItemEditor } from './Task/TaskItemEditor';
 import { TaskItemDisplay } from './Task/TaskItemDisplay';
+import { TaskItemEditorSurface } from './Task/TaskItemEditorSurface';
 import { TaskItemFieldRenderer } from './Task/TaskItemFieldRenderer';
-import { TaskItemRecurrenceModal } from './Task/TaskItemRecurrenceModal';
-import { AttachmentModals } from './Task/AttachmentModals';
-import { WEEKDAY_ORDER } from './Task/recurrence-constants';
+import { TaskItemOverlays } from './Task/TaskItemOverlays';
 import {
     getRecurrenceRuleValue,
     getRecurrenceRRuleValue,
@@ -34,9 +27,10 @@ import { useTaskItemAi } from './Task/useTaskItemAi';
 import { useTaskItemEditState } from './Task/useTaskItemEditState';
 import { useTaskItemProjectContext } from './Task/useTaskItemProjectContext';
 import { useTaskItemFieldLayout } from './Task/useTaskItemFieldLayout';
+import { useTaskItemSubmit } from './Task/useTaskItemSubmit';
 import { dispatchNavigateEvent } from '../lib/navigation-events';
 import { reportError } from '../lib/report-error';
-import { mergeMarkdownChecklist } from './Task/task-item-checklist';
+import { resolveNativeDateInputLocale } from '../lib/native-date-input-locale';
 import { useTaskItemStoreState, useTaskItemUiState } from './Task/useTaskItemStoreState';
 
 interface TaskItemProps {
@@ -132,6 +126,18 @@ export const TaskItem = memo(function TaskItem({
         [setProjectView]
     );
     const { t, language } = useLanguage();
+    const nativeDateInputLocale = useMemo(() => {
+        const systemLocale = typeof navigator !== 'undefined'
+            ? String(navigator.languages?.[0] || navigator.language || '').trim()
+            : '';
+        return resolveNativeDateInputLocale({
+            language,
+            dateFormat: settings?.dateFormat,
+            timeFormat: settings?.timeFormat,
+            weekStart: settings?.weekStart === 'monday' ? 'monday' : 'sunday',
+            systemLocale,
+        });
+    }, [language, settings?.dateFormat, settings?.timeFormat, settings?.weekStart]);
     const recurrenceWeekdayLabels = useMemo(
         () => getLocalizedWeekdayLabels(language, 'long'),
         [language]
@@ -477,6 +483,7 @@ export const TaskItem = memo(function TaskItem({
         editContexts,
         editTags,
         language,
+        nativeDateInputLocale,
         popularContextOptions,
         popularTagOptions,
     }), [
@@ -501,6 +508,7 @@ export const TaskItem = memo(function TaskItem({
         editContexts,
         editTags,
         language,
+        nativeDateInputLocale,
         popularContextOptions,
         popularTagOptions,
     ]);
@@ -620,104 +628,38 @@ export const TaskItem = memo(function TaskItem({
         }
     }, [editingTaskId, resetEditState, setEditingTaskId, task.id]);
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        const { title: parsedTitle, props: parsedProps, projectTitle, invalidDateCommands } = parseQuickAdd(editTitle, projects, new Date(), areas);
-        if (invalidDateCommands && invalidDateCommands.length > 0) {
-            showToast(`${t('quickAdd.invalidDateCommand')}: ${invalidDateCommands.join(', ')}`, 'error');
-            return;
-        }
-        const cleanedTitle = parsedTitle.trim() ? parsedTitle : task.title;
-        if (!cleanedTitle.trim()) return;
-
-        const hasProjectCommand = Boolean(parsedProps.projectId || projectTitle);
-        let resolvedProjectId = parsedProps.projectId || undefined;
-        if (!resolvedProjectId && projectTitle) {
-            try {
-                const initialAreaId = editAreaId || undefined;
-                const created = await addProject(
-                    projectTitle,
-                    DEFAULT_PROJECT_COLOR,
-                    initialAreaId ? { areaId: initialAreaId } : undefined
-                );
-                resolvedProjectId = created?.id;
-                if (!resolvedProjectId) {
-                    const projectCreateFailed = t('projects.createFailed');
-                    showToast(
-                        projectCreateFailed === 'projects.createFailed'
-                            ? 'Failed to create project from quick add.'
-                            : projectCreateFailed,
-                        'error'
-                    );
-                }
-            } catch (error) {
-                reportError('Failed to create project from quick add', error);
-                const projectCreateFailed = t('projects.createFailed');
-                showToast(
-                    projectCreateFailed === 'projects.createFailed'
-                        ? 'Failed to create project from quick add.'
-                        : projectCreateFailed,
-                    'error'
-                );
-            }
-        }
-        if (!resolvedProjectId) {
-            resolvedProjectId = editProjectId || undefined;
-        }
-        const recurrenceValue: Recurrence | undefined = editRecurrence
-            ? { rule: editRecurrence, strategy: editRecurrenceStrategy }
-            : undefined;
-        if (recurrenceValue && editRecurrenceRRule) {
-            const parsed = parseRRuleString(editRecurrenceRRule);
-            if (parsed.byDay && parsed.byDay.length > 0) {
-                recurrenceValue.byDay = parsed.byDay;
-            }
-            recurrenceValue.rrule = editRecurrenceRRule;
-        }
-        const currentContexts = editContexts.split(',').map(c => c.trim()).filter(Boolean);
-        const mergedContexts = Array.from(new Set([...currentContexts, ...(parsedProps.contexts || [])]));
-        const currentTags = editTags.split(',').map(c => c.trim()).filter(Boolean);
-        const mergedTags = Array.from(new Set([...currentTags, ...(parsedProps.tags || [])]));
-        const resolvedDescription = parsedProps.description
-            ? (editDescription ? `${editDescription}\n${parsedProps.description}` : parsedProps.description)
-            : (editDescription || undefined);
-        const markdownChecklist = extractChecklistFromMarkdown(String(resolvedDescription ?? ''));
-        const resolvedChecklist = markdownChecklist.length > 0
-            ? mergeMarkdownChecklist(markdownChecklist, task.checklist)
-            : undefined;
-        const projectChangedByCommand = hasProjectCommand && resolvedProjectId !== (editProjectId || undefined);
-        const resolvedSectionId = projectChangedByCommand
-            ? undefined
-            : (resolvedProjectId ? (editSectionId || undefined) : undefined);
-        const resolvedAreaId = projectChangedByCommand
-            ? undefined
-            : (resolvedProjectId ? undefined : (editAreaId || undefined));
-        await updateTask(task.id, {
-            title: cleanedTitle,
-            status: parsedProps.status || editStatus,
-            dueDate: parsedProps.dueDate || editDueDate || undefined,
-            startTime: parsedProps.startTime || editStartTime || undefined,
-            projectId: resolvedProjectId,
-            sectionId: resolvedSectionId,
-            areaId: resolvedAreaId,
-            contexts: mergedContexts,
-            tags: mergedTags,
-            description: resolvedDescription,
-            ...(resolvedChecklist ? { checklist: resolvedChecklist } : {}),
-            location: editLocation || undefined,
-            recurrence: recurrenceValue,
-            timeEstimate: editTimeEstimate || undefined,
-            priority: editPriority || undefined,
-            energyLevel: editEnergyLevel || undefined,
-            assignedTo: editAssignedTo.trim() || undefined,
-            reviewAt: parsedProps.reviewAt || editReviewAt || undefined,
-            attachments: editAttachments.length > 0 ? editAttachments : undefined,
-        });
-        setIsEditing(false);
-        if (editingTaskId === task.id) {
-            setEditingTaskId(null);
-        }
-    };
+    const handleSubmit = useTaskItemSubmit({
+        addProject,
+        areas,
+        editAreaId,
+        editAssignedTo,
+        editAttachments,
+        editContexts,
+        editDescription,
+        editDueDate,
+        editEnergyLevel,
+        editLocation,
+        editPriority,
+        editProjectId,
+        editRecurrence,
+        editRecurrenceRRule,
+        editRecurrenceStrategy,
+        editReviewAt,
+        editSectionId,
+        editStartTime,
+        editStatus,
+        editTags,
+        editTimeEstimate,
+        editTitle,
+        editingTaskId,
+        projects,
+        setEditingTaskId,
+        setIsEditing,
+        showToast,
+        t,
+        task,
+        updateTask,
+    });
 
     const project = currentProject;
     const taskArea = currentTaskArea;
@@ -727,21 +669,6 @@ export const TaskItem = memo(function TaskItem({
         setSelectedProjectId(projectId);
         dispatchNavigateEvent('projects');
     }, [setHighlightTask, setSelectedProjectId, task.id]);
-    const waitingDuePromptTitle = useMemo(() => {
-        const translated = t('task.waitingDuePromptTitle');
-        if (translated === 'task.waitingDuePromptTitle') return 'Set follow-up / review date';
-        return translated;
-    }, [t]);
-    const waitingDuePromptDescription = useMemo(() => {
-        const translated = t('task.waitingDuePromptDescription');
-        if (translated === 'task.waitingDuePromptDescription') return 'This sets the task review date. When should this waiting task resurface?';
-        return translated;
-    }, [t]);
-    const skipLabel = useMemo(() => {
-        const translated = t('common.skip');
-        if (translated === 'common.skip') return 'Skip';
-        return translated;
-    }, [t]);
     const undoLabel = useMemo(() => {
         const translated = t('common.undo');
         if (translated === 'common.undo') return 'Undo';
@@ -937,10 +864,6 @@ export const TaskItem = memo(function TaskItem({
         const label = t('task.select');
         return label === 'task.select' ? 'Select task' : label;
     })();
-    const resolveText = useCallback((key: string, fallback: string) => {
-        const value = t(key);
-        return value === key ? fallback : value;
-    }, [t]);
 
     return (
         <>
@@ -973,231 +896,111 @@ export const TaskItem = memo(function TaskItem({
                         />
                     )}
 
-                    {isEditing && !isModalEditor ? (
-                        <div className="flex-1 min-w-0">
-                            {renderEditor()}
-                        </div>
-                    ) : (
-                        <TaskItemDisplay
-                            task={task}
-                            language={language}
-                            project={project}
-                            area={taskArea}
-                            projectColor={projectColor}
-                            selectionMode={selectionMode}
-                            isViewOpen={isTaskExpanded}
-                            actions={{
-                                onToggleSelect,
-                                onToggleView: () => toggleTaskExpanded(task.id),
-                                onEdit: startEditing,
-                                onDelete: () => setShowDeleteConfirm(true),
-                                onDuplicate: () => duplicateTask(task.id, false),
-                                onStatusChange: handleStatusChange,
-                                onMoveToWaitingWithPrompt: handleMoveToWaitingWithPrompt,
-                                onOpenProject: project ? handleOpenProject : undefined,
-                                openAttachment,
-                                onToggleChecklistItem: handleToggleChecklistItem,
-                                focusToggle: effectiveFocusToggle,
-                            }}
-                            visibleAttachments={visibleAttachments}
-                            recurrenceRule={recurrenceRule}
-                            recurrenceStrategy={recurrenceStrategy}
-                            prioritiesEnabled={prioritiesEnabled}
-                            timeEstimatesEnabled={timeEstimatesEnabled}
-                            isStagnant={isStagnant}
-                            showQuickDone={showQuickDone}
-                            showStatusSelect={showStatusSelect}
-                            showProjectBadgeInActions={showProjectBadgeInActions}
-                            readOnly={effectiveReadOnly}
-                            compactMetaEnabled={compactMetaEnabled}
-                            dense={isCompact}
-                            actionsOverlay={actionsOverlay}
-                            dragHandle={dragHandle}
-                            showHoverHint={showHoverHint}
-                            t={t}
-                        />
-                    )}
+                    <TaskItemEditorSurface
+                        editorAriaLabel={t('taskEdit.editTask') || 'Edit task'}
+                        getModalFocusableElements={getModalFocusableElements}
+                        isEditing={isEditing}
+                        isModalEditor={isModalEditor}
+                        modalEditorRef={modalEditorRef}
+                        onCancel={handleEditorCancel}
+                        renderDisplay={() => (
+                            <TaskItemDisplay
+                                task={task}
+                                language={language}
+                                project={project}
+                                area={taskArea}
+                                projectColor={projectColor}
+                                selectionMode={selectionMode}
+                                isViewOpen={isTaskExpanded}
+                                actions={{
+                                    onToggleSelect,
+                                    onToggleView: () => toggleTaskExpanded(task.id),
+                                    onEdit: startEditing,
+                                    onDelete: () => setShowDeleteConfirm(true),
+                                    onDuplicate: () => duplicateTask(task.id, false),
+                                    onStatusChange: handleStatusChange,
+                                    onMoveToWaitingWithPrompt: handleMoveToWaitingWithPrompt,
+                                    onOpenProject: project ? handleOpenProject : undefined,
+                                    openAttachment,
+                                    onToggleChecklistItem: handleToggleChecklistItem,
+                                    focusToggle: effectiveFocusToggle,
+                                }}
+                                visibleAttachments={visibleAttachments}
+                                recurrenceRule={recurrenceRule}
+                                recurrenceStrategy={recurrenceStrategy}
+                                prioritiesEnabled={prioritiesEnabled}
+                                timeEstimatesEnabled={timeEstimatesEnabled}
+                                isStagnant={isStagnant}
+                                showQuickDone={showQuickDone}
+                                showStatusSelect={showStatusSelect}
+                                showProjectBadgeInActions={showProjectBadgeInActions}
+                                readOnly={effectiveReadOnly}
+                                compactMetaEnabled={compactMetaEnabled}
+                                dense={isCompact}
+                                actionsOverlay={actionsOverlay}
+                                dragHandle={dragHandle}
+                                showHoverHint={showHoverHint}
+                                t={t}
+                            />
+                        )}
+                        renderEditor={renderEditor}
+                    />
                 </div>
             </div>
-            {isEditing && isModalEditor && (
-                <div
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label={t('taskEdit.editTask') || 'Edit task'}
-                    onMouseDown={(event) => {
-                        if (event.target !== event.currentTarget) return;
-                        handleEditorCancel();
-                    }}
-                >
-                    <div
-                        ref={modalEditorRef}
-                        tabIndex={-1}
-                        className="w-[min(1100px,92vw)] max-h-[90vh] rounded-xl border border-border bg-card p-4 shadow-2xl"
-                        onMouseDown={(event) => event.stopPropagation()}
-                        onClick={(event) => event.stopPropagation()}
-                        onKeyDown={(event) => {
-                            if (event.key === 'Escape') {
-                                event.preventDefault();
-                                handleEditorCancel();
-                                return;
-                            }
-                            if (event.key !== 'Tab') return;
-                            const focusable = getModalFocusableElements();
-                            if (focusable.length === 0) return;
-                            const first = focusable[0];
-                            const last = focusable[focusable.length - 1];
-                            const active = document.activeElement as HTMLElement | null;
-                            if (!active || !focusable.includes(active)) {
-                                event.preventDefault();
-                                first.focus();
-                                return;
-                            }
-                            if (event.shiftKey && active === first) {
-                                event.preventDefault();
-                                last.focus();
-                                return;
-                            }
-                            if (!event.shiftKey && active === last) {
-                                event.preventDefault();
-                                first.focus();
-                            }
-                        }}
-                    >
-                        {renderEditor()}
-                    </div>
-                </div>
-            )}
-            {showCustomRecurrence && (
-                <TaskItemRecurrenceModal
-                    t={t}
-                    weekdayOrder={WEEKDAY_ORDER}
-                    weekdayLabels={recurrenceWeekdayLabels}
-                    customInterval={customInterval}
-                    customMode={customMode}
-                    customOrdinal={customOrdinal}
-                    customWeekday={customWeekday}
-                    customMonthDay={customMonthDay}
-                    onIntervalChange={(value) => setCustomInterval(value)}
-                    onModeChange={(value) => setCustomMode(value)}
-                    onOrdinalChange={(value) => setCustomOrdinal(value)}
-                    onWeekdayChange={(value) => setCustomWeekday(value)}
-                    onMonthDayChange={(value) => {
-                        const safe = Number.isFinite(value) ? Math.min(Math.max(value, 1), 31) : 1;
-                        setCustomMonthDay(safe);
-                    }}
-                    onClose={() => setShowCustomRecurrence(false)}
-                    onApply={applyCustomRecurrence}
-                />
-            )}
-            {showLinkPrompt && (
-                <PromptModal
-                    isOpen={showLinkPrompt}
-                    title={t('attachments.addLink')}
-                    description={t('attachments.linkInputHint')}
-                    placeholder={t('attachments.linkPlaceholder')}
-                    defaultValue=""
-                    confirmLabel={t('common.save')}
-                    cancelLabel={t('common.cancel')}
-                    onCancel={() => setShowLinkPrompt(false)}
-                    onConfirm={(value) => {
-                        const added = handleAddLinkAttachment(value);
-                        if (!added) return;
-                        setShowLinkPrompt(false);
-                    }}
-                />
-            )}
-            {showWaitingDuePrompt && (
-                <PromptModal
-                    isOpen={showWaitingDuePrompt}
-                    title={waitingDuePromptTitle}
-                    description={waitingDuePromptDescription}
-                    inputType="date"
-                    defaultValue=""
-                    secondaryLabel={skipLabel}
-                    onSecondary={() => {
-                        setShowWaitingDuePrompt(false);
-                        void moveTask(task.id, 'waiting');
-                    }}
-                    confirmLabel={t('common.save')}
-                    cancelLabel={t('common.cancel')}
-                    onCancel={() => {
-                        setShowWaitingDuePrompt(false);
-                    }}
-                    onConfirm={(value) => {
-                        const input = value.trim();
-                        if (!input) {
-                            return;
-                        }
-                        setShowWaitingDuePrompt(false);
-                        void moveTask(task.id, 'waiting');
-                        void updateTask(task.id, { reviewAt: input });
-                    }}
-                />
-            )}
-            {showDeleteConfirm && (
-                <ConfirmModal
-                    isOpen={showDeleteConfirm}
-                    title={resolveText('common.delete', 'Delete task')}
-                    description={resolveText('task.deleteConfirmBody', 'Move this task to Trash?')}
-                    confirmLabel={resolveText('common.delete', 'Delete')}
-                    cancelLabel={t('common.cancel')}
-                    onCancel={() => setShowDeleteConfirm(false)}
-                    onConfirm={() => {
-                        setShowDeleteConfirm(false);
-                        void deleteTask(task.id);
-                        const deletedMessage = resolveText('task.aria.delete', 'Task deleted');
-                        if (!undoNotificationsEnabled) return;
-                        showToast(
-                            deletedMessage,
-                            'info',
-                            5000,
-                            {
-                                label: undoLabel,
-                                onClick: () => {
-                                    void restoreTask(task.id);
-                                },
-                            }
-                        );
-                    }}
-                />
-            )}
-            {showDiscardConfirm && (
-                <ConfirmModal
-                    isOpen={showDiscardConfirm}
-                    title={resolveText('taskEdit.discardChanges', 'Discard unsaved changes?')}
-                    description={resolveText('taskEdit.discardChangesDesc', 'Your changes will be lost if you leave now.')}
-                    confirmLabel={resolveText('common.discard', 'Discard')}
-                    cancelLabel={t('common.cancel')}
-                    onCancel={() => setShowDiscardConfirm(false)}
-                    onConfirm={() => {
-                        setShowDiscardConfirm(false);
-                        handleDiscardChanges();
-                    }}
-                />
-            )}
-            <AttachmentModals
+            <TaskItemOverlays
+                applyCustomRecurrence={applyCustomRecurrence}
                 audioAttachment={audioAttachment}
-                audioSource={audioSource}
-                audioRef={audioRef}
                 audioError={audioError}
+                audioRef={audioRef}
+                audioSource={audioSource}
                 audioTranscribing={audioTranscribing}
                 audioTranscriptionError={audioTranscriptionError}
-                onCloseAudio={closeAudio}
-                onAudioError={handleAudioError}
-                onOpenAudioExternally={openAudioExternally}
-                onRetryAudioTranscription={retryAudioTranscription}
+                clearLinkPrompt={() => setShowLinkPrompt(false)}
+                closeAudio={closeAudio}
+                closeImage={closeImage}
+                closeText={closeText}
+                customInterval={customInterval}
+                customMode={customMode}
+                customMonthDay={customMonthDay}
+                customOrdinal={customOrdinal}
+                customWeekday={customWeekday}
+                deleteTask={deleteTask}
+                handleAddLinkAttachment={handleAddLinkAttachment}
+                handleAudioError={handleAudioError}
+                handleDiscardChanges={handleDiscardChanges}
+                handleOpenDeleteConfirm={setShowDeleteConfirm}
+                handleOpenDiscardConfirm={setShowDiscardConfirm}
                 imageAttachment={imageAttachment}
                 imageSource={imageSource}
-                onCloseImage={closeImage}
+                moveTask={moveTask}
                 onOpenImageExternally={openImageExternally}
+                onOpenTextExternally={openTextExternally}
+                openAudioExternally={openAudioExternally}
+                openDeleteConfirm={showDeleteConfirm}
+                openDiscardConfirm={showDiscardConfirm}
+                openLinkPrompt={showLinkPrompt}
+                openWaitingDuePrompt={showWaitingDuePrompt}
+                openWaitingDuePromptSetter={setShowWaitingDuePrompt}
+                restoreTask={restoreTask}
+                retryAudioTranscription={retryAudioTranscription}
+                setCustomInterval={setCustomInterval}
+                setCustomMode={setCustomMode}
+                setCustomMonthDay={setCustomMonthDay}
+                setCustomOrdinal={setCustomOrdinal}
+                setCustomWeekday={setCustomWeekday}
+                setShowCustomRecurrence={setShowCustomRecurrence}
+                showCustomRecurrence={showCustomRecurrence}
+                showToast={showToast}
+                t={t}
+                taskId={task.id}
                 textAttachment={textAttachment}
                 textContent={textContent}
-                textLoading={textLoading}
                 textError={textError}
-                onCloseText={closeText}
-                onOpenTextExternally={openTextExternally}
-                t={t}
+                textLoading={textLoading}
+                undoLabel={undoLabel}
+                undoNotificationsEnabled={undoNotificationsEnabled}
+                updateTask={updateTask}
+                weekdayLabels={recurrenceWeekdayLabels}
             />
         </>
     );

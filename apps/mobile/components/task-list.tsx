@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { View, TextInput, FlatList, StyleSheet, TouchableOpacity, Text, RefreshControl, ScrollView, Modal, Pressable, ActivityIndicator, Keyboard } from 'react-native';
+import { View, FlatList, TouchableOpacity, Text, RefreshControl, ActivityIndicator, Keyboard } from 'react-native';
 import { router } from 'expo-router';
 import {
   useTaskStore,
@@ -33,8 +33,22 @@ import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigatio
 import { buildCopilotConfig, isAIKeyRequired, loadAIKey } from '../lib/ai-config';
 import { logError } from '../lib/app-log';
 import {
-  MOBILE_TIME_ESTIMATE_OPTIONS,
-  formatTimeEstimateChipLabel,
+  TaskListBulkBar,
+} from './task-list/TaskListBulkBar';
+import {
+  TaskListHeader,
+} from './task-list/TaskListHeader';
+import {
+  TaskListQuickAdd,
+} from './task-list/TaskListQuickAdd';
+import {
+  TaskListSortModal,
+} from './task-list/TaskListSortModal';
+import {
+  TaskListTagModal,
+} from './task-list/TaskListTagModal';
+import { styles } from './task-list/task-list.styles';
+import {
   matchesSelectedTimeEstimates,
 } from './time-estimate-filter-utils';
 import { useTaskListSelection } from './use-task-list-selection';
@@ -719,254 +733,79 @@ function TaskListComponent({
   }, [getListItemKey, registerItemHeight, renderTask, themeColorsMemo.secondaryText, themeColorsMemo.text]);
   return (
     <View style={[styles.container, { backgroundColor: themeColorsMemo.bg }]}>
-      {showHeader ? (
-        <View style={[styles.header, { borderBottomColor: themeColorsMemo.border, backgroundColor: themeColorsMemo.cardBg }]}>
-          <View style={styles.headerTopRow}>
-            <Text style={[styles.title, { color: themeColorsMemo.text }]} accessibilityRole="header" numberOfLines={1}>
-              {title}
-            </Text>
-            <Text style={[styles.count, { color: themeColorsMemo.secondaryText }]} accessibilityLabel={`${orderedTasks.length} tasks`}>
-              {orderedTasks.length} {t('common.tasks')}
-            </Text>
-          </View>
-          <View style={styles.headerActions}>
-            {showSort && (
-              <TouchableOpacity
-                onPress={() => setSortModalVisible(true)}
-                style={[styles.sortButton, { borderColor: themeColorsMemo.border }]}
-                accessibilityRole="button"
-                accessibilityLabel={t('sort.label')}
-              >
-                <Text style={[styles.sortButtonText, { color: themeColorsMemo.secondaryText }]}>
-                  {t(`sort.${sortBy}`)}
-                </Text>
-              </TouchableOpacity>
-            )}
-            {headerAccessory}
-            {enableBulkActions && (
-              <TouchableOpacity
-                onPress={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}
-                style={[
-                  styles.selectButton,
-                  { borderColor: themeColors.border, backgroundColor: selectionMode ? themeColors.filterBg : 'transparent' }
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel={selectionMode ? t('bulk.exitSelect') : t('bulk.select')}
-              >
-                <Text style={[styles.selectButtonText, { color: themeColors.text }]}>
-                  {selectionMode ? t('bulk.exitSelect') : t('bulk.select')}
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-      ) : headerAccessory ? (
-        <View style={styles.headerAccessoryRow}>{headerAccessory}</View>
-      ) : null}
-
-      {showTimeEstimateFilters && (
-        <View style={[styles.filterSection, { borderBottomColor: themeColorsMemo.border, backgroundColor: themeColorsMemo.cardBg }]}>
-          <Text style={[styles.filterLabel, { color: themeColorsMemo.secondaryText }]}>
-            {t('filters.timeEstimate')}
-          </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
-            <TouchableOpacity
-              onPress={() => setSelectedTimeEstimates([])}
-              style={[
-                styles.filterChip,
-                {
-                  borderColor: themeColorsMemo.border,
-                  backgroundColor: !hasActiveTimeEstimateFilters ? themeColorsMemo.tint : themeColorsMemo.filterBg,
-                },
-              ]}
-              accessibilityRole="button"
-              accessibilityState={{ selected: !hasActiveTimeEstimateFilters }}
-            >
-              <Text style={[styles.filterChipText, { color: !hasActiveTimeEstimateFilters ? themeColorsMemo.onTint : themeColorsMemo.text }]}>
-                {t('common.all')}
-              </Text>
-            </TouchableOpacity>
-            {MOBILE_TIME_ESTIMATE_OPTIONS.map((estimate) => {
-              const isActive = selectedTimeEstimates.includes(estimate);
-              return (
-                <TouchableOpacity
-                  key={estimate}
-                  onPress={() => toggleTimeEstimate(estimate)}
-                  style={[
-                    styles.filterChip,
-                    {
-                      borderColor: themeColorsMemo.border,
-                      backgroundColor: isActive ? themeColorsMemo.tint : themeColorsMemo.filterBg,
-                    },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: isActive }}
-                >
-                  <Text style={[styles.filterChipText, { color: isActive ? themeColorsMemo.onTint : themeColorsMemo.text }]}>
-                    {formatTimeEstimateChipLabel(estimate)}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-      )}
+      <TaskListHeader
+        count={orderedTasks.length}
+        enableBulkActions={enableBulkActions}
+        hasActiveTimeEstimateFilters={hasActiveTimeEstimateFilters}
+        headerAccessory={headerAccessory}
+        onOpenSort={() => setSortModalVisible(true)}
+        onToggleSelectionMode={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}
+        selectedTimeEstimates={selectedTimeEstimates}
+        selectionMode={selectionMode}
+        setTimeEstimates={() => setSelectedTimeEstimates([])}
+        showHeader={showHeader}
+        showSort={showSort}
+        showTimeEstimateFilters={showTimeEstimateFilters}
+        sortByLabel={t(`sort.${sortBy}`)}
+        t={t}
+        themeColors={themeColorsMemo}
+        title={title}
+        toggleTimeEstimate={toggleTimeEstimate}
+      />
 
       {enableBulkActions && selectionMode && (
-        <View style={[styles.bulkBar, { backgroundColor: themeColors.cardBg, borderBottomColor: themeColors.border }]}>
-          <View style={styles.bulkStatusRow}>
-            <Text style={[styles.bulkCount, { color: themeColors.secondaryText }]}>
-              {selectedIdsArray.length} {t('bulk.selected')}
-            </Text>
-            {bulkActionLoading && (
-              <View style={styles.bulkLoadingRow}>
-                <ActivityIndicator size="small" color={themeColors.tint} />
-                <Text style={[styles.bulkLoadingText, { color: themeColors.secondaryText }]}>
-                  {bulkActionLabel || t('common.loading')}
-                </Text>
-              </View>
-            )}
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bulkMoveRow}>
-            {(['inbox', 'next', 'waiting', 'someday', 'reference', 'done'] as TaskStatus[]).map((status) => (
-              <TouchableOpacity
-                key={status}
-                onPress={() => handleBatchMove(status)}
-                disabled={!hasSelection || bulkActionLoading}
-                style={[styles.bulkMoveButton, { backgroundColor: themeColors.filterBg, opacity: hasSelection && !bulkActionLoading ? 1 : 0.5 }]}
-                accessibilityRole="button"
-                accessibilityLabel={`${t('bulk.moveTo')} ${t(`status.${status}`)}`}
-              >
-                <Text style={[styles.bulkMoveText, { color: themeColors.text }]}>{t(`status.${status}`)}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-          <View style={styles.bulkActions}>
-            <TouchableOpacity
-              onPress={() => setTagModalVisible(true)}
-              disabled={!hasSelection || bulkActionLoading}
-              style={[styles.bulkActionButton, { backgroundColor: themeColors.filterBg, opacity: hasSelection && !bulkActionLoading ? 1 : 0.5 }]}
-              accessibilityRole="button"
-              accessibilityLabel={t('bulk.addTag')}
-            >
-              <Text style={[styles.bulkActionText, { color: themeColors.text }]}>{t('bulk.addTag')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleBatchDelete}
-              disabled={!hasSelection || bulkActionLoading}
-              style={[styles.bulkActionButton, { backgroundColor: themeColors.filterBg, opacity: hasSelection && !bulkActionLoading ? 1 : 0.5 }]}
-              accessibilityRole="button"
-              accessibilityLabel={t('bulk.delete')}
-            >
-              <Text style={[styles.bulkActionText, { color: themeColors.text }]}>{t('bulk.delete')}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        <TaskListBulkBar
+          bulkActionLabel={bulkActionLabel}
+          bulkActionLoading={bulkActionLoading}
+          handleBatchDelete={handleBatchDelete}
+          handleBatchMove={handleBatchMove}
+          hasSelection={hasSelection}
+          onOpenTagModal={() => setTagModalVisible(true)}
+          selectedCount={selectedIdsArray.length}
+          t={t}
+          themeColors={themeColorsMemo}
+        />
       )}
 
       {allowAdd && (
-        <>
-          <View style={[styles.inputContainer, { borderBottomColor: themeColors.border }]}>
-            <TextInput
-              style={[styles.input, { backgroundColor: themeColors.inputBg, borderColor: themeColors.border, color: themeColors.text }]}
-              autoCapitalize="sentences"
-              autoCorrect={false}
-              placeholder={t('inbox.addPlaceholder')}
-              placeholderTextColor={themeColors.secondaryText}
-              value={newTaskTitle}
-              onChangeText={(text) => {
-                setNewTaskTitle(text);
-                setInputSelection({ start: text.length, end: text.length });
-                setTypeaheadIndex(0);
-                setCopilotApplied(false);
-                setCopilotContext(undefined);
-                setCopilotTags([]);
-              }}
-              onSelectionChange={(event) => {
-                const selection = event.nativeEvent.selection;
-                setInputSelection(selection);
-                setTypeaheadOpen(Boolean(getTrigger(newTaskTitle, selection.start ?? newTaskTitle.length)));
-              }}
-              onSubmitEditing={handleAddTask}
-              returnKeyType="done"
-              accessibilityLabel={`Input new task for ${title}`}
-              accessibilityHint="Type task title, then tap add button or enter"
-            />
-            <TouchableOpacity
-              onPress={handleAddTask}
-              style={[
-                styles.addButton,
-                { backgroundColor: themeColors.tint },
-                !newTaskTitle.trim() && styles.addButtonDisabled
-              ]}
-              disabled={!newTaskTitle.trim()}
-              accessibilityLabel="Add Task"
-              accessibilityRole="button"
-              accessibilityState={{ disabled: !newTaskTitle.trim() }}
-            >
-              <Text style={styles.addButtonText}>+</Text>
-            </TouchableOpacity>
-          </View>
-          {typeaheadOpen && trigger && typeaheadOptions.length > 0 && (
-            <View style={[styles.typeaheadContainer, { backgroundColor: themeColors.cardBg, borderColor: themeColors.border }]}>
-              {typeaheadOptions.map((option, index) => (
-                <TouchableOpacity
-                  key={`${option.kind}:${option.value}`}
-                  onPress={() => applyTypeaheadOption(option)}
-                  style={[
-                    styles.typeaheadRow,
-                    index === typeaheadIndex && { backgroundColor: themeColors.filterBg },
-                  ]}
-                >
-                  <Text style={[styles.typeaheadText, { color: themeColors.text }]}>
-                    {option.kind === 'create' ? `✨ ${option.label}` : option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-          {enableCopilot && aiEnabled && copilotSuggestion && !copilotApplied && (
-            <TouchableOpacity
-              style={[styles.copilotPill, { borderColor: themeColors.border, backgroundColor: themeColors.inputBg }]}
-              onPress={() => {
-                setCopilotContext(copilotSuggestion.context);
-                setCopilotTags(copilotSuggestion.tags ?? []);
-                setCopilotApplied(true);
-              }}
-            >
-              <Text style={[styles.copilotText, { color: themeColors.text }]}>
-                ✨ {t('copilot.suggested')}{' '}
-                {copilotSuggestion.context ? `${copilotSuggestion.context} ` : ''}
-                {copilotSuggestion.tags?.length ? copilotSuggestion.tags.join(' ') : ''}
-              </Text>
-              <Text style={[styles.copilotHint, { color: themeColors.secondaryText }]}>
-                {t('copilot.applyHint')}
-              </Text>
-            </TouchableOpacity>
-          )}
-          {enableCopilot && aiEnabled && copilotThinking && !copilotSuggestion && !copilotApplied && (
-            <View style={[styles.copilotPill, styles.copilotLoadingRow, { borderColor: themeColors.border, backgroundColor: themeColors.inputBg }]}>
-              <ActivityIndicator size="small" color={themeColors.tint} />
-              <Text style={[styles.copilotHint, { color: themeColors.secondaryText, marginTop: 0 }]}>
-                {t('common.loading')}
-              </Text>
-            </View>
-          )}
-          {enableCopilot && aiEnabled && copilotApplied && (
-            <View style={[styles.copilotPill, { borderColor: themeColors.border, backgroundColor: themeColors.inputBg }]}>
-              <Text style={[styles.copilotText, { color: themeColors.text }]}>
-                ✅ {t('copilot.applied')}{' '}
-                {copilotContext ? `${copilotContext} ` : ''}
-                {copilotTags.length ? copilotTags.join(' ') : ''}
-              </Text>
-            </View>
-          )}
-          {showQuickAddHelp && !projectId && (
-            <Text style={[styles.quickAddHelp, { color: themeColors.secondaryText }]}>
-              {t('quickAdd.help')}
-            </Text>
-          )}
-        </>
+        <TaskListQuickAdd
+          aiEnabled={aiEnabled}
+          applyTypeaheadOption={applyTypeaheadOption}
+          copilotApplied={copilotApplied}
+          copilotContext={copilotContext}
+          copilotSuggestion={copilotSuggestion}
+          copilotTags={copilotTags}
+          copilotThinking={copilotThinking}
+          enableCopilot={enableCopilot}
+          handleAddTask={handleAddTask}
+          newTaskTitle={newTaskTitle}
+          onApplyCopilot={() => {
+            setCopilotContext(copilotSuggestion?.context);
+            setCopilotTags(copilotSuggestion?.tags ?? []);
+            setCopilotApplied(true);
+          }}
+          onChangeText={(text) => {
+            setNewTaskTitle(text);
+            setInputSelection({ start: text.length, end: text.length });
+            setCopilotApplied(false);
+            setCopilotContext(undefined);
+            setCopilotTags([]);
+          }}
+          onSelectionChange={(selection) => {
+            setInputSelection(selection);
+            setTypeaheadOpen(Boolean(getTrigger(newTaskTitle, selection.start ?? newTaskTitle.length)));
+          }}
+          projectId={projectId}
+          setTypeaheadIndex={setTypeaheadIndex}
+          showQuickAddHelp={showQuickAddHelp}
+          t={t}
+          themeColors={themeColorsMemo}
+          title={title}
+          trigger={trigger}
+          typeaheadIndex={typeaheadIndex}
+          typeaheadOpen={typeaheadOpen}
+          typeaheadOptions={typeaheadOptions}
+        />
       )}
 
       {staticList ? (
@@ -975,10 +814,10 @@ function TaskListComponent({
             <ListEmptyState
               message={emptyMessage}
               hint={emptyHint}
-              backgroundColor={themeColors.cardBg}
-              borderColor={themeColors.border}
-              textColor={themeColors.text}
-              mutedTextColor={themeColors.secondaryText}
+              backgroundColor={themeColorsMemo.cardBg}
+              borderColor={themeColorsMemo.border}
+              textColor={themeColorsMemo.text}
+              mutedTextColor={themeColorsMemo.secondaryText}
             />
           ) : (
             listItems.map((item) => (
@@ -1010,90 +849,40 @@ function TaskListComponent({
             <ListEmptyState
               message={emptyMessage}
               hint={emptyHint}
-              backgroundColor={themeColors.cardBg}
-              borderColor={themeColors.border}
-              textColor={themeColors.text}
-              mutedTextColor={themeColors.secondaryText}
+              backgroundColor={themeColorsMemo.cardBg}
+              borderColor={themeColorsMemo.border}
+              textColor={themeColorsMemo.text}
+              mutedTextColor={themeColorsMemo.secondaryText}
             />
           }
         />
       )}
 
-      <Modal
+      <TaskListTagModal
+        onChangeTag={setTagInput}
+        onClose={() => {
+          setTagModalVisible(false);
+          setTagInput('');
+        }}
+        onSave={handleBatchAddTag}
+        t={t}
+        tagInput={tagInput}
+        themeColors={themeColorsMemo}
         visible={tagModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setTagModalVisible(false)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setTagModalVisible(false)}>
-          <Pressable
-            style={[styles.modalCard, { backgroundColor: themeColors.cardBg }]}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <Text style={[styles.modalTitle, { color: themeColors.text }]}>{t('bulk.addTag')}</Text>
-            <TextInput
-              value={tagInput}
-              onChangeText={setTagInput}
-              placeholder={t('taskEdit.tagsLabel')}
-              placeholderTextColor={themeColors.secondaryText}
-              style={[
-                styles.modalInput,
-                { backgroundColor: themeColors.inputBg, color: themeColors.text, borderColor: themeColors.border }
-              ]}
-            />
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                onPress={() => {
-                  setTagModalVisible(false);
-                  setTagInput('');
-                }}
-                style={styles.modalButton}
-              >
-                <Text style={[styles.modalButtonText, { color: themeColors.secondaryText }]}>{t('common.cancel')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleBatchAddTag}
-                disabled={!tagInput.trim()}
-                style={[styles.modalButton, !tagInput.trim() && styles.modalButtonDisabled]}
-              >
-                <Text style={[styles.modalButtonText, { color: themeColors.tint }]}>{t('common.save')}</Text>
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      />
 
-      <Modal
+      <TaskListSortModal
+        onClose={() => setSortModalVisible(false)}
+        onSelect={(option) => {
+          updateSettings({ taskSortBy: option });
+          setSortModalVisible(false);
+        }}
+        sortBy={sortBy}
+        sortOptions={sortOptions}
+        t={t}
+        themeColors={themeColorsMemo}
         visible={sortModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSortModalVisible(false)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setSortModalVisible(false)}>
-          <View style={[styles.modalCard, { backgroundColor: themeColors.cardBg }]}>
-            <Text style={[styles.modalTitle, { color: themeColors.text }]}>{t('sort.label')}</Text>
-            <View style={styles.sortList}>
-              {sortOptions.map((option) => (
-                <Pressable
-                  key={option}
-                  onPress={() => {
-                    updateSettings({ taskSortBy: option });
-                    setSortModalVisible(false);
-                  }}
-                  style={[
-                    styles.sortItem,
-                    option === sortBy && { backgroundColor: themeColors.filterBg }
-                  ]}
-                >
-                  <Text style={[styles.sortItemText, { color: themeColors.text }]}>
-                    {t(`sort.${option}`)}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          </View>
-        </Pressable>
-      </Modal>
+      />
 
       <ErrorBoundary>
         <TaskEditModal
@@ -1116,357 +905,3 @@ function TaskListComponent({
 }
 
 export const TaskList = React.memo(TaskListComponent);
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    gap: 10,
-  },
-  headerTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  title: {
-    flex: 1,
-    minWidth: 0,
-    fontSize: 22,
-    fontWeight: '700',
-  },
-  count: {
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-end',
-    gap: 10,
-  },
-  headerAccessoryRow: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 6,
-    alignItems: 'flex-end',
-  },
-  sortButton: {
-    borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  sortButtonText: {
-    fontSize: 12,
-  },
-  selectButton: {
-    borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  selectButtonText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  bulkBar: {
-    borderBottomWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 8,
-  },
-  bulkCount: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  bulkStatusRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 8,
-  },
-  bulkLoadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  bulkLoadingText: {
-    fontSize: 11,
-    fontWeight: '500',
-  },
-  bulkMoveRow: {
-    gap: 6,
-    paddingVertical: 2,
-  },
-  bulkMoveButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-  },
-  bulkMoveText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  bulkActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  bulkActionButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-  },
-  bulkActionText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 360,
-    borderRadius: 12,
-    padding: 16,
-    gap: 12,
-  },
-  modalTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  modalInput: {
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 14,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 12,
-  },
-  modalButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  modalButtonDisabled: {
-    opacity: 0.5,
-  },
-  modalButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  sortList: {
-    gap: 6,
-  },
-  sortItem: {
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-  },
-  sortItemText: {
-    fontSize: 14,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    padding: 16,
-    gap: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e5e5',
-  },
-  input: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 16,
-  },
-  copilotPill: {
-    marginTop: 8,
-    marginHorizontal: 16,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  copilotText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  copilotHint: {
-    fontSize: 11,
-    marginTop: 2,
-  },
-  copilotLoadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  addButton: {
-    width: 44,
-    height: 44,
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  addButtonDisabled: {
-    opacity: 0.5,
-  },
-  typeaheadContainer: {
-    marginTop: 8,
-    borderWidth: 1,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  typeaheadRow: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  typeaheadText: {
-    fontSize: 13,
-  },
-  addButtonText: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  quickAddHelp: {
-    fontSize: 12,
-    paddingHorizontal: 16,
-    paddingTop: 4,
-    paddingBottom: 8,
-  },
-  filterSection: {
-    borderBottomWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    gap: 8,
-  },
-  filterLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  filterChips: {
-    gap: 8,
-    alignItems: 'center',
-  },
-  filterChip: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  filterChipText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  list: {
-    flex: 1,
-  },
-  staticList: {
-    flex: 1,
-  },
-  staticItem: {
-    marginBottom: 0,
-  },
-  listContent: {
-    padding: 12,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 6,
-    paddingTop: 10,
-    paddingBottom: 6,
-  },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  sectionCount: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  taskItem: {
-    flexDirection: 'row',
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
-    alignItems: 'center',
-  },
-  taskContent: {
-    flex: 1,
-  },
-  taskTitle: {
-    fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 4,
-  },
-  taskDescription: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 4,
-  },
-  taskMeta: {
-    fontSize: 12,
-    color: '#666',
-  },
-  deleteButton: {
-    display: 'none', // Hidden in favor of swipe
-  },
-  deleteAction: {
-    backgroundColor: '#EF4444',
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: 80,
-    height: '100%',
-  },
-  promoteAction: {
-    backgroundColor: '#3B82F6',
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: 80,
-    height: '100%',
-  },
-  actionText: {
-    color: '#fff',
-    fontWeight: '600',
-    padding: 20,
-  },
-  badgeContainer: {
-    justifyContent: 'center',
-    paddingLeft: 8,
-  },
-  searchInput: {
-    marginHorizontal: 16,
-    marginVertical: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    fontSize: 16,
-    backgroundColor: '#f9f9f9',
-  },
-});

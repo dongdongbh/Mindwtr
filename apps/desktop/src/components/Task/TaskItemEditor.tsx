@@ -132,6 +132,10 @@ export function TaskItemEditor({
     onSubmit,
 }: TaskItemEditorProps) {
     const titleDirection = resolveAutoTextDirection(editTitle, language);
+    const aiAssistantLabel = t('taskEdit.aiAssistant');
+    const aiAssistantAriaLabel = aiAssistantLabel === 'taskEdit.aiAssistant' ? 'AI assistant' : aiAssistantLabel;
+    const aiWorkingLabel = t('ai.working');
+    const aiWorkingText = aiWorkingLabel === 'ai.working' ? 'Working...' : aiWorkingLabel;
 
     const compareLabels = (left: string, right: string) =>
         left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
@@ -199,44 +203,53 @@ export function TaskItemEditor({
                         dir={titleDirection}
                     />
                     {aiEnabled && (
-                        <div className="relative" ref={aiMenuRef}>
-                            <button
-                                type="button"
-                                onClick={() => setAiMenuOpen((prev) => !prev)}
-                                aria-label={t('taskEdit.aiAssistant') || 'AI assistant'}
-                                aria-expanded={aiMenuOpen}
-                                className="p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors focus:outline-none focus:ring-2 focus:ring-primary/40"
-                            >
-                                <Sparkles className="w-4 h-4" />
-                            </button>
-                            {aiMenuOpen && (
-                                <div className="absolute right-0 mt-2 w-44 rounded-md border border-border bg-card shadow-lg overflow-hidden z-10">
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setAiMenuOpen(false);
-                                            handleAIClarify();
-                                        }}
-                                        disabled={isAIWorking}
-                                        aria-busy={isAIWorking}
-                                        className="w-full text-left text-xs px-3 py-2 hover:bg-muted/60 transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
-                                    >
-                                        {isAIWorking && <Loader2 className="w-3 h-3 animate-spin" />}
-                                        {t('taskEdit.aiClarify')}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setAiMenuOpen(false);
-                                            handleAIBreakdown();
-                                        }}
-                                        disabled={isAIWorking}
-                                        aria-busy={isAIWorking}
-                                        className="w-full text-left text-xs px-3 py-2 hover:bg-muted/60 transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
-                                    >
-                                        {isAIWorking && <Loader2 className="w-3 h-3 animate-spin" />}
-                                        {t('taskEdit.aiBreakdown')}
-                                    </button>
+                        <div className="flex items-center gap-2">
+                            <div className="relative" ref={aiMenuRef}>
+                                <button
+                                    type="button"
+                                    onClick={() => setAiMenuOpen((prev) => !prev)}
+                                    disabled={isAIWorking}
+                                    aria-label={aiAssistantAriaLabel}
+                                    aria-expanded={aiMenuOpen}
+                                    aria-busy={isAIWorking}
+                                    className="p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60 disabled:cursor-not-allowed"
+                                >
+                                    {isAIWorking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                                </button>
+                                {aiMenuOpen && (
+                                    <div className="absolute right-0 mt-2 w-44 rounded-md border border-border bg-card shadow-lg overflow-hidden z-10">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setAiMenuOpen(false);
+                                                handleAIClarify();
+                                            }}
+                                            disabled={isAIWorking}
+                                            aria-busy={isAIWorking}
+                                            className="w-full text-left text-xs px-3 py-2 hover:bg-muted/60 transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
+                                        >
+                                            {isAIWorking && <Loader2 className="w-3 h-3 animate-spin" />}
+                                            {t('taskEdit.aiClarify')}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setAiMenuOpen(false);
+                                                handleAIBreakdown();
+                                            }}
+                                            disabled={isAIWorking}
+                                            aria-busy={isAIWorking}
+                                            className="w-full text-left text-xs px-3 py-2 hover:bg-muted/60 transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
+                                        >
+                                            {isAIWorking && <Loader2 className="w-3 h-3 animate-spin" />}
+                                            {t('taskEdit.aiBreakdown')}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                            {isAIWorking && (
+                                <div role="status" aria-live="polite" className="text-xs text-muted-foreground">
+                                    {aiWorkingText}
                                 </div>
                             )}
                         </div>

@@ -1,0 +1,227 @@
+import { StyleSheet } from 'react-native';
+
+export const styles = StyleSheet.create({
+    taskItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        borderRadius: 14,
+        marginBottom: 8,
+        position: 'relative',
+    },
+    selectionIndicator: {
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        borderWidth: 1.5,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    selectionIndicatorText: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    titleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    taskContent: {
+        flex: 1,
+    },
+    taskTitle: {
+        fontSize: 15,
+        fontWeight: '500',
+        lineHeight: 20,
+    },
+    taskTitleFlex: {
+        flex: 1,
+    },
+    focusButton: {
+        minWidth: 44,
+        minHeight: 44,
+        paddingHorizontal: 8,
+        paddingVertical: 8,
+        borderRadius: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    focusButtonText: {
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    taskDescription: {
+        fontSize: 12,
+        marginTop: 2,
+    },
+    inlineMeta: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        gap: 4,
+        marginTop: 4,
+    },
+    inlineMetaItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        maxWidth: '100%',
+    },
+    inlineMetaButton: {
+        maxWidth: '100%',
+    },
+    metaText: {
+        fontSize: 12,
+        fontWeight: '500',
+    },
+    metaSeparator: {
+        fontSize: 12,
+        fontWeight: '600',
+        marginHorizontal: 2,
+    },
+    contextText: {
+        color: '#3B82F6',
+    },
+    tagText: {
+        color: '#7C3AED',
+    },
+    dueText: {
+        color: '#EF4444',
+        fontWeight: '600',
+    },
+    projectDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+    },
+    staleText: {
+        fontSize: 11,
+        marginTop: 4,
+    },
+    checklistRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginTop: 8,
+    },
+    checklistText: {
+        fontSize: 11,
+        fontWeight: '600',
+    },
+    checklistBar: {
+        flex: 1,
+        height: 4,
+        borderRadius: 2,
+        overflow: 'hidden',
+    },
+    checklistBarFill: {
+        height: '100%',
+        backgroundColor: '#3B82F6',
+    },
+    checklistItems: {
+        marginTop: 6,
+        gap: 4,
+    },
+    checklistItem: {
+        paddingVertical: 2,
+    },
+    checklistItemText: {
+        fontSize: 11,
+    },
+    checklistItemCompleted: {
+        textDecorationLine: 'line-through',
+        opacity: 0.6,
+    },
+    statusBadge: {
+        minHeight: 44,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 8,
+        marginLeft: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    statusText: {
+        fontSize: 10,
+        fontWeight: '600',
+        textTransform: 'capitalize',
+    },
+    swipeActionLeft: {
+        backgroundColor: '#10B981',
+        justifyContent: 'center',
+        alignItems: 'center',
+        width: 90,
+        borderRadius: 14,
+        marginBottom: 8,
+        marginRight: 8,
+        gap: 4,
+    },
+    swipeActionRight: {
+        backgroundColor: '#EF4444',
+        justifyContent: 'center',
+        alignItems: 'center',
+        width: 90,
+        borderRadius: 14,
+        marginBottom: 8,
+        marginLeft: 8,
+        gap: 4,
+    },
+    swipeActionText: {
+        color: '#FFFFFF',
+        fontWeight: '600',
+        fontSize: 12,
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20,
+    },
+    menuContainer: {
+        width: '100%',
+        maxWidth: 340,
+        borderRadius: 16,
+        padding: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+        elevation: 5,
+    },
+    menuTitle: {
+        fontSize: 18,
+        fontWeight: '600',
+        marginBottom: 16,
+        textAlign: 'center',
+    },
+    menuGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 12,
+        justifyContent: 'center',
+    },
+    menuItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        borderRadius: 20,
+        borderWidth: 1,
+        minWidth: '40%',
+    },
+    menuDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        marginRight: 8,
+    },
+    menuText: {
+        fontSize: 14,
+        fontWeight: '500',
+        textTransform: 'capitalize',
+    },
+});

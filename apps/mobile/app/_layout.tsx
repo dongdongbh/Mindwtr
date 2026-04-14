@@ -317,6 +317,12 @@ function RootLayoutContentInner() {
             }}
           />
           <Stack.Screen
+            name="weekly-review"
+            options={{
+              headerShown: false,
+            }}
+          />
+          <Stack.Screen
             name="global-search"
             options={{
               headerShown: false,

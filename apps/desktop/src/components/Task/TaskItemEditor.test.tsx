@@ -14,6 +14,8 @@ const translations: Record<string, string> = {
     'task.aria.location': 'Location',
     'taskEdit.locationPlaceholder': 'Add location',
     'taskEdit.duplicateTask': 'Duplicate task',
+    'taskEdit.aiAssistant': 'AI assistant',
+    'ai.working': 'Working...',
     'common.save': 'Save',
     'common.cancel': 'Cancel',
 };
@@ -97,5 +99,18 @@ describe('TaskItemEditor', () => {
         expect(queryByText('field:contexts')).not.toBeInTheDocument();
         expect(queryByText('field:description')).not.toBeInTheDocument();
         expect(queryByText('Location')).not.toBeInTheDocument();
+    });
+
+    it('shows a visible loading label while AI is working', () => {
+        const { getByRole, getByText } = render(
+            <TaskItemEditor
+                {...baseProps}
+                aiEnabled
+                isAIWorking
+            />
+        );
+
+        expect(getByRole('button', { name: 'AI assistant' })).toBeDisabled();
+        expect(getByText('Working...')).toBeInTheDocument();
     });
 });

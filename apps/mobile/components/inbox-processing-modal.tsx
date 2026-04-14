@@ -103,6 +103,8 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
     PRIORITY_OPTIONS,
     processedCount,
   } = useInboxProcessingController({ visible, onClose });
+  const aiWorkingLabel = t('ai.working');
+  const aiWorkingText = aiWorkingLabel === 'ai.working' ? 'Working...' : aiWorkingLabel;
 
   if (!visible) return null;
 
@@ -493,9 +495,11 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
                   style={[styles.aiActionButton, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
                   onPress={handleAIClarifyInbox}
                   disabled={isAIWorking}
+                  accessibilityState={{ disabled: isAIWorking, busy: isAIWorking }}
                 >
+                  {isAIWorking && <ActivityIndicator size="small" color={tc.tint} />}
                   <Text style={[styles.aiActionText, { color: tc.tint }]}>
-                    {t('taskEdit.aiClarify')}
+                    {isAIWorking ? aiWorkingText : t('taskEdit.aiClarify')}
                   </Text>
                 </TouchableOpacity>
               </View>

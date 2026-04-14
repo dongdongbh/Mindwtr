@@ -65,6 +65,7 @@ export type TaskItemFieldRendererData = {
     editContexts: string;
     editTags: string;
     language: string;
+    nativeDateInputLocale: string;
     popularContextOptions: string[];
     popularTagOptions: string[];
 };
@@ -128,6 +129,7 @@ export function TaskItemFieldRenderer({
         editContexts,
         editTags,
         language,
+        nativeDateInputLocale,
         popularContextOptions,
         popularTagOptions,
     } = data;
@@ -319,6 +321,7 @@ export function TaskItemFieldRenderer({
             <div className="flex w-full max-w-[min(22rem,100%)] items-center gap-2">
                 <input
                     type="date"
+                    lang={nativeDateInputLocale}
                     aria-label={dateAriaLabel}
                     value={dateValue}
                     onChange={(event) => onDateChange(event.target.value)}
@@ -530,6 +533,7 @@ export function TaskItemFieldRenderer({
                     timeInput: (
                         <input
                             type="time"
+                            lang={nativeDateInputLocale}
                             aria-label={t('task.aria.startTime')}
                             value={timeValue}
                             onChange={(event) => handleTimeChange(event.target.value)}
@@ -575,6 +579,7 @@ export function TaskItemFieldRenderer({
                     timeInput: (
                         <input
                             type="time"
+                            lang={nativeDateInputLocale}
                             aria-label={t('task.aria.dueTime')}
                             value={timeValue}
                             onChange={(event) => handleTimeChange(event.target.value)}

@@ -99,6 +99,8 @@ export function TaskEditFormTab({
     const formScrollRef = React.useRef<ScrollView | null>(null);
     const formScrollOffsetRef = React.useRef(0);
     const keyboardTopRef = React.useRef(Dimensions.get('window').height);
+    const aiWorkingLabel = t('ai.working');
+    const aiWorkingText = aiWorkingLabel === 'ai.working' ? 'Working...' : aiWorkingLabel;
 
     React.useEffect(() => {
         if (suspendKeyboardHandling) return;
@@ -283,7 +285,7 @@ export function TaskEditFormTab({
                                 <View style={styles.aiWorking}>
                                     <ActivityIndicator size="small" color={tc.tint} />
                                     <Text style={[styles.aiWorkingText, { color: tc.secondaryText }]}>
-                                        {t('ai.working') || 'Working…'}
+                                        {aiWorkingText}
                                     </Text>
                                 </View>
                             )}

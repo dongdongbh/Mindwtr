@@ -57,6 +57,7 @@ const createData = (overrides: Partial<TaskItemFieldRendererData> = {}): TaskIte
     editContexts: '',
     editTags: '',
     language: 'en',
+    nativeDateInputLocale: 'en-US',
     popularContextOptions: [],
     popularTagOptions: [],
     ...overrides,
@@ -139,5 +140,23 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         );
 
         expect(queryByRole('button', { name: 'Clear Due Date' })).toBeNull();
+    });
+
+    it('applies the configured locale to native date and time inputs', () => {
+        const handlers = createHandlers();
+
+        const { getByLabelText } = render(
+            <TaskItemFieldRenderer
+                fieldId="dueDate"
+                data={createData({
+                    editDueDate: '2026-04-19T11:45',
+                    nativeDateInputLocale: 'en-CA-u-hc-h23-fw-mon',
+                })}
+                handlers={handlers}
+            />
+        );
+
+        expect(getByLabelText('Due date')).toHaveAttribute('lang', 'en-CA-u-hc-h23-fw-mon');
+        expect(getByLabelText('Due time')).toHaveAttribute('lang', 'en-CA-u-hc-h23-fw-mon');
     });
 });

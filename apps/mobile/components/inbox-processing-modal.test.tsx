@@ -8,6 +8,7 @@ const updateTask = vi.fn();
 const deleteTask = vi.fn();
 const addProject = vi.fn();
 const push = vi.fn();
+const clarifyTask = vi.fn();
 const mockSettings = { gtd: { inboxProcessing: {} }, ai: {} } as any;
 const storeState = {
   tasks: [
@@ -36,7 +37,7 @@ vi.mock('@mindwtr/core', () => {
     DEFAULT_PROJECT_COLOR: '#3b82f6',
     collectTaskTokenUsage: vi.fn(() => []),
     createAIProvider: vi.fn(() => ({
-      clarifyTask: vi.fn(),
+      clarifyTask,
     })),
     resolveAutoTextDirection: vi.fn(() => 'ltr'),
     safeFormatDate: vi.fn(() => 'Jan 1, 2025'),
@@ -468,5 +469,37 @@ describe('InboxProcessingModal', () => {
 
     expect(updateTask).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('shows a working state while AI clarify is running', async () => {
+    mockSettings.features = undefined;
+    mockSettings.gtd.inboxProcessing = {};
+    mockSettings.ai = { enabled: true, provider: 'openai' };
+    storeState.projects = [];
+    storeState.areas = [];
+    clarifyTask.mockReset();
+    clarifyTask.mockImplementation(() => new Promise(() => {}));
+    const onClose = vi.fn();
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={onClose} />);
+    });
+
+    const root = tree!.root;
+    const aiClarifyLabel = root.findByProps({ children: 'taskEdit.aiClarify' });
+    const aiClarifyButton = aiClarifyLabel.parent;
+
+    if (!aiClarifyButton) {
+      throw new Error('AI clarify button not found');
+    }
+
+    await act(async () => {
+      aiClarifyButton.props.onPress();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(root.findByProps({ children: 'Working...' })).toBeTruthy();
   });
 });

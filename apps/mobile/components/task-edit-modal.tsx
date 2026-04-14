@@ -1,21 +1,15 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { View, Modal, ScrollView, Share, Alert, Animated, Keyboard, Platform } from 'react-native';
+import { View, Modal, Animated, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
     Task,
     TaskEditorFieldId,
-    TaskStatus,
-    TimeEstimate,
     useTaskStore,
-    createAIProvider,
-    generateUUID,
-    type AIProviderId,
     type RecurrenceWeekday,
     type RecurrenceByDay,
     buildRRuleString,
     parseRRuleString,
     resolveAutoTextDirection,
-    parseQuickAdd,
     DEFAULT_PROJECT_COLOR,
     getLocalizedWeekdayButtons,
     getLocalizedWeekdayLabels,
@@ -24,8 +18,6 @@ import {
 import { useLanguage } from '../contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useToast } from '@/contexts/toast-context';
-import { buildAIConfig, isAIKeyRequired, loadAIKey } from '../lib/ai-config';
-import type { AIResponseAction } from './ai-response-modal';
 import { ExpandedMarkdownEditor } from './expanded-markdown-editor';
 import { KeyboardAccessoryHost } from './keyboard-accessory-host';
 import { styles } from './task-edit/task-edit-modal.styles';
@@ -37,30 +29,22 @@ import { TaskEditHeader } from './task-edit/TaskEditHeader';
 import { TaskEditModalErrorBoundary } from './task-edit/TaskEditModalErrorBoundary';
 import { TaskEditOverlayStack } from './task-edit/TaskEditOverlayStack';
 import { TaskEditTabs } from './task-edit/TaskEditTabs';
-import { areTaskFieldValuesEqual } from './task-edit/task-edit-modal.helpers';
 import {
     getRecurrenceRuleValue,
     getRecurrenceStrategyValue,
-    buildRecurrenceValue,
 } from './task-edit/recurrence-utils';
 import { useTaskEditCopilot } from './task-edit/use-task-edit-copilot';
+import { logTaskError } from './task-edit/task-edit-modal.utils';
 import {
-    getInitialWindowWidth,
-    getTaskEditTabOffset,
-    logTaskError,
-    logTaskWarn,
-    syncTaskEditPagerPosition,
-} from './task-edit/task-edit-modal.utils';
-import {
-    applyMarkdownChecklistToTask,
     parseTokenList,
     replaceTrailingToken,
 } from './task-edit/task-edit-token-utils';
+import { useTaskEditActions } from './task-edit/use-task-edit-actions';
 import { useTaskEditAttachments } from './task-edit/use-task-edit-attachments';
 import { useTaskEditDates } from './task-edit/use-task-edit-dates';
+import { useTaskEditPager } from './task-edit/use-task-edit-pager';
 import { useTaskEditPreview } from './task-edit/use-task-edit-preview';
 import {
-    type TaskEditTab,
     useTaskEditState,
 } from './task-edit/use-task-edit-state';
 import { useTaskEditDerivedState } from './task-edit/use-task-edit-derived-state';
@@ -121,7 +105,6 @@ function TaskEditModalInner({
         editedTask,
         isAIWorking,
         isContextInputFocused,
-        isDirtyRef,
         isTagInputFocused,
         pendingDueDate,
         pendingStartDate,
@@ -162,7 +145,7 @@ function TaskEditModalInner({
     const recurrenceWeekdayButtons = useMemo(() => getLocalizedWeekdayButtons(language, 'narrow'), [language]);
     const recurrenceWeekdayLabels = useMemo(() => getLocalizedWeekdayLabels(language, 'long'), [language]);
     const aiEnabled = settings.ai?.enabled === true;
-    const aiProvider = (settings.ai?.provider ?? 'openai') as AIProviderId;
+    const aiProvider = settings.ai?.provider ?? 'openai';
 
     const contextOptions = React.useMemo(() => Array.from(new Set([
             ...getUsedTaskTokens(tasks, (item) => item.contexts, { prefix: '@' }),
@@ -342,190 +325,6 @@ function TaskEditModalInner({
         }
     }, [activeProjectId]);
 
-    const handleSave = async () => {
-        if (!task) return;
-        if (titleDebounceRef.current) {
-            clearTimeout(titleDebounceRef.current);
-            titleDebounceRef.current = null;
-        }
-        if (descriptionDebounceRef.current) {
-            clearTimeout(descriptionDebounceRef.current);
-            descriptionDebounceRef.current = null;
-        }
-        const rawTitle = String(titleDraftRef.current ?? '');
-        const { title: parsedTitle, props: parsedProps, projectTitle, invalidDateCommands } = parseQuickAdd(rawTitle, projects, new Date(), areas);
-        if (invalidDateCommands && invalidDateCommands.length > 0) {
-            showToast({
-                title: t('common.notice'),
-                message: `${t('quickAdd.invalidDateCommand')}: ${invalidDateCommands.join(', ')}`,
-                tone: 'warning',
-                durationMs: 4200,
-            });
-            return;
-        }
-        const existingProjectId = editedTask.projectId ?? task?.projectId;
-        const hasProjectCommand = Boolean(parsedProps.projectId || projectTitle);
-        let resolvedProjectId = parsedProps.projectId;
-        if (!resolvedProjectId && projectTitle) {
-            try {
-                const created = await addProject(
-                    projectTitle,
-                    DEFAULT_PROJECT_COLOR,
-                    projectFilterAreaId ? { areaId: projectFilterAreaId } : undefined
-                );
-                resolvedProjectId = created?.id;
-            } catch (error) {
-                logTaskError('Failed to create project from quick add', error);
-            }
-        }
-        if (!resolvedProjectId) {
-            resolvedProjectId = existingProjectId;
-        }
-        const fallbackTitle = editedTask.title ?? task.title ?? rawTitle;
-        const cleanedTitle = parsedTitle.trim() ? parsedTitle : fallbackTitle;
-        const baseDescription = descriptionDraftRef.current;
-        const resolvedDescription = parsedProps.description
-            ? (baseDescription ? `${baseDescription}\n${parsedProps.description}` : parsedProps.description)
-            : baseDescription;
-        const mergedContexts = parsedProps.contexts
-            ? Array.from(new Set([...(editedTask.contexts || []), ...parsedProps.contexts]))
-            : editedTask.contexts;
-        const mergedTags = parsedProps.tags
-            ? Array.from(new Set([...(editedTask.tags || []), ...parsedProps.tags]))
-            : editedTask.tags;
-        const updates: Partial<Task> = {
-            ...editedTask,
-            title: cleanedTitle,
-            description: resolvedDescription,
-            contexts: mergedContexts,
-            tags: mergedTags,
-        };
-        updates.checklist = applyMarkdownChecklistToTask(resolvedDescription, updates.checklist);
-        if (parsedProps.status) updates.status = parsedProps.status;
-        if (parsedProps.startTime) updates.startTime = parsedProps.startTime;
-        if (parsedProps.dueDate) updates.dueDate = parsedProps.dueDate;
-        if (parsedProps.reviewAt) updates.reviewAt = parsedProps.reviewAt;
-        if (hasProjectCommand && resolvedProjectId && resolvedProjectId !== existingProjectId) {
-            updates.projectId = resolvedProjectId;
-            updates.sectionId = undefined;
-            updates.areaId = undefined;
-        }
-        const recurrenceRule = getRecurrenceRuleValue(editedTask.recurrence);
-        const recurrenceStrategy = getRecurrenceStrategyValue(editedTask.recurrence);
-        if (recurrenceRule) {
-            if (recurrenceRule === 'weekly' && customWeekdays.length > 0) {
-                const rrule = buildRRuleString('weekly', customWeekdays);
-                updates.recurrence = { rule: 'weekly', strategy: recurrenceStrategy, byDay: customWeekdays, rrule };
-            } else if (recurrenceRRuleValue) {
-                const parsed = parseRRuleString(recurrenceRRuleValue);
-                if (parsed.byDay?.length) {
-                    updates.recurrence = { rule: recurrenceRule, strategy: recurrenceStrategy, byDay: parsed.byDay, rrule: recurrenceRRuleValue };
-                } else {
-                    updates.recurrence = { rule: recurrenceRule, strategy: recurrenceStrategy, rrule: recurrenceRRuleValue };
-                }
-            } else {
-                updates.recurrence = buildRecurrenceValue(recurrenceRule, recurrenceStrategy);
-            }
-        } else {
-            updates.recurrence = undefined;
-        }
-        const baseTask = baseTaskRef.current ?? task;
-        const nextProjectId = updates.projectId ?? baseTask.projectId;
-        if (nextProjectId) {
-            updates.areaId = undefined;
-        } else {
-            updates.sectionId = undefined;
-        }
-        if (nextProjectId) {
-            const nextSectionId = updates.sectionId ?? baseTask.sectionId;
-            if (nextSectionId) {
-                const isValid = sections.some((section) =>
-                    section.id === nextSectionId && section.projectId === nextProjectId && !section.deletedAt
-                );
-                if (!isValid) {
-                    updates.sectionId = undefined;
-                }
-            }
-        }
-        const trimmedUpdates: Partial<Task> = { ...updates };
-        (Object.keys(trimmedUpdates) as (keyof Task)[]).forEach((key) => {
-            const nextValue = trimmedUpdates[key];
-            const baseValue = baseTask[key];
-            if (Array.isArray(nextValue) || typeof nextValue === 'object') {
-                const nextSerialized = nextValue == null ? null : JSON.stringify(nextValue);
-                const baseSerialized = baseValue == null ? null : JSON.stringify(baseValue);
-                if (nextSerialized === baseSerialized) delete trimmedUpdates[key];
-            } else if ((nextValue ?? null) === (baseValue ?? null)) {
-                delete trimmedUpdates[key];
-            }
-        });
-        if (Object.keys(trimmedUpdates).length === 0) {
-            onClose();
-            return;
-        }
-        onSave(task.id, trimmedUpdates);
-        onClose();
-    };
-
-    const handleShare = async () => {
-        if (!task) return;
-
-        const title = String(titleDraftRef.current ?? editedTask.title ?? task.title ?? '').trim();
-        const lines: string[] = [];
-
-        if (title) lines.push(title);
-
-        const status = (editedTask.status ?? task.status) as TaskStatus | undefined;
-        if (status) lines.push(`${t('taskEdit.statusLabel')}: ${t(`status.${status}`)}`);
-        if (prioritiesEnabled) {
-            const priority = editedTask.priority ?? task.priority;
-            if (priority) lines.push(`${t('taskEdit.priorityLabel')}: ${t(`priority.${priority}`)}`);
-        }
-
-        if (editedTask.startTime) lines.push(`${t('taskEdit.startDateLabel')}: ${formatDate(editedTask.startTime)}`);
-        if (editedTask.dueDate) lines.push(`${t('taskEdit.dueDateLabel')}: ${formatDueDate(editedTask.dueDate)}`);
-        if (editedTask.reviewAt) lines.push(`${t('taskEdit.reviewDateLabel')}: ${formatDate(editedTask.reviewAt)}`);
-
-        if (timeEstimatesEnabled) {
-            const estimate = editedTask.timeEstimate as TimeEstimate | undefined;
-            if (estimate) lines.push(`${t('taskEdit.timeEstimateLabel')}: ${formatTimeEstimateLabel(estimate)}`);
-        }
-
-        const contexts = (editedTask.contexts ?? []).filter(Boolean);
-        if (contexts.length) lines.push(`${t('taskEdit.contextsLabel')}: ${contexts.join(', ')}`);
-
-        const tags = (editedTask.tags ?? []).filter(Boolean);
-        if (tags.length) lines.push(`${t('taskEdit.tagsLabel')}: ${tags.join(', ')}`);
-
-        const description = String(editedTask.description ?? '').trim();
-        if (description) {
-            lines.push('');
-            lines.push(`${t('taskEdit.descriptionLabel')}:`);
-            lines.push(description);
-        }
-
-        const checklist = (editedTask.checklist ?? []).filter((item) => item && item.title);
-        if (checklist.length) {
-            lines.push('');
-            lines.push(`${t('taskEdit.checklist')}:`);
-            checklist.forEach((item) => {
-                lines.push(`${item.isCompleted ? '[x]' : '[ ]'} ${item.title}`);
-            });
-        }
-
-        const message = lines.join('\n').trim();
-        if (!message) return;
-
-        try {
-            await Share.share({
-                title: title || undefined,
-                message,
-            });
-        } catch (error) {
-            logTaskError('Share failed:', error);
-        }
-    };
-
     const {
         formatDate,
         formatDueDate,
@@ -608,6 +407,42 @@ function TaskEditModalInner({
         setCustomRecurrenceVisible(false);
     }, [customInterval, customMode, customOrdinal, customWeekday, customMonthDay, recurrenceStrategyValue, setEditedTask]);
 
+    const [isMarkdownOverlayOpen, setIsMarkdownOverlayOpen] = useState(false);
+    const {
+        containerWidth,
+        handleContainerLayout,
+        handleInputFocus,
+        handleMomentumScrollEnd,
+        handleTabPress,
+        registerScrollTaskFormToEnd,
+        scrollRef,
+        scrollX,
+    } = useTaskEditPager({
+        editTab,
+        isMarkdownOverlayOpen,
+        setEditTab,
+        taskId: task?.id,
+        visible,
+    });
+
+    useEffect(() => {
+        if (!visible) {
+            setIsMarkdownOverlayOpen(false);
+        }
+    }, [visible]);
+
+    const descriptionEditor = useTaskDescriptionEditor({
+        task,
+        descriptionDraft,
+        descriptionDraftRef,
+        setDescriptionDraft,
+        descriptionDebounceRef,
+        setEditedTask,
+        resetCopilotDraft,
+        onMarkdownOverlayVisibilityChange: setIsMarkdownOverlayOpen,
+        onInputFocusTracked: handleInputFocus,
+    });
+
     const updateContextInput = useCallback((text: string) => {
         setContextInputDraft(text);
         setEditedTask((prev) => ({ ...prev, contexts: parseTokenList(text, '@') }));
@@ -649,391 +484,62 @@ function TaskEditModalInner({
         updateTagInput(parseTokenList(tagInputDraft, '#').join(', '));
     }, [tagInputDraft, updateTagInput]);
 
-    const discardAndClose = useCallback(() => {
-        if (titleDebounceRef.current) {
-            clearTimeout(titleDebounceRef.current);
-            titleDebounceRef.current = null;
-        }
-        if (descriptionDebounceRef.current) {
-            clearTimeout(descriptionDebounceRef.current);
-            descriptionDebounceRef.current = null;
-        }
-        isDirtyRef.current = false;
-        onClose();
-    }, [onClose]);
-
-    const hasPendingChanges = useCallback((): boolean => {
-        if (!task) return false;
-
-        const baseTask = baseTaskRef.current ?? task;
-        const pendingContexts = isContextInputFocused
-            ? parseTokenList(contextInputDraft, '@')
-            : (editedTask.contexts ?? baseTask.contexts ?? []);
-        const pendingTags = isTagInputFocused
-            ? parseTokenList(tagInputDraft, '#')
-            : (editedTask.tags ?? baseTask.tags ?? []);
-        const currentSnapshot: Task = {
-            ...baseTask,
-            ...editedTask,
-            title: String(titleDraftRef.current ?? editedTask.title ?? baseTask.title ?? ''),
-            description: String(descriptionDraftRef.current ?? editedTask.description ?? baseTask.description ?? ''),
-            contexts: pendingContexts,
-            tags: pendingTags,
-        };
-        const keys = new Set<keyof Task>([
-            ...(Object.keys(baseTask) as (keyof Task)[]),
-            ...(Object.keys(currentSnapshot) as (keyof Task)[]),
-        ]);
-
-        for (const key of keys) {
-            if (!areTaskFieldValuesEqual(currentSnapshot[key], baseTask[key])) {
-                return true;
-            }
-        }
-
-        return false;
-    }, [contextInputDraft, editedTask, isContextInputFocused, isTagInputFocused, tagInputDraft, task]);
-
-    const handleAttemptClose = useCallback(() => {
-        if (!hasPendingChanges()) {
-            discardAndClose();
-            return;
-        }
-
-        Alert.alert(
-            t('taskEdit.discardChanges'),
-            t('taskEdit.discardChangesDesc'),
-            [
-                {
-                    text: t('common.cancel'),
-                    style: 'cancel',
-                },
-                {
-                    text: t('common.discard'),
-                    style: 'destructive',
-                    onPress: discardAndClose,
-                },
-                {
-                    text: t('common.save'),
-                    onPress: () => {
-                        void handleSave();
-                    },
-                },
-            ],
-            { cancelable: true }
-        );
-    }, [discardAndClose, handleSave, hasPendingChanges, t]);
-
-    const handleDone = () => {
-        void handleSave();
-    };
-
-    const setModeTab = useCallback((mode: TaskEditTab) => {
-        setEditTab(mode);
-    }, []);
-
-    const [containerWidth, setContainerWidth] = useState(getInitialWindowWidth);
-    const scrollX = useRef(new Animated.Value(0)).current;
-    const scrollRef = useRef<ScrollView | null>(null);
-    const [scrollTaskFormToEnd, setScrollTaskFormToEnd] = useState<((targetInput?: number | string) => void) | null>(null);
-    const [isMarkdownOverlayOpen, setIsMarkdownOverlayOpen] = useState(false);
-    const registerScrollTaskFormToEnd = useCallback((handler: ((targetInput?: number | string) => void) | null) => {
-        setScrollTaskFormToEnd(() => handler);
-    }, []);
-    const lastFocusedInputRef = useRef<number | string | undefined>(undefined);
-    const pendingScrollTaskFormTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-    const scrollToTab = useCallback((mode: TaskEditTab, animated = true) => {
-        const node = scrollRef.current as unknown as {
-            scrollTo?: (options: { x: number; animated?: boolean }) => void;
-            getNode?: () => { scrollTo?: (options: { x: number; animated?: boolean }) => void };
-        } | null;
-        syncTaskEditPagerPosition({
-            mode,
-            containerWidth,
-            scrollValue: scrollX,
-            scrollNode: node,
-            animated,
-        });
-    }, [containerWidth, scrollX]);
-    const alignPagerToActiveTab = useCallback(() => {
-        if (isMarkdownOverlayOpen) return;
-        if (!visible || !containerWidth) return;
-        requestAnimationFrame(() => {
-            scrollToTab(editTab, false);
-        });
-    }, [containerWidth, editTab, isMarkdownOverlayOpen, scrollToTab, visible]);
-    useEffect(() => {
-        if (isMarkdownOverlayOpen) return;
-        if (!visible || !containerWidth) return;
-        scrollToTab(editTab, false);
-    }, [containerWidth, editTab, isMarkdownOverlayOpen, scrollToTab, task?.id, visible]);
-
-    useEffect(() => {
-        if (isMarkdownOverlayOpen) return;
-        if (!visible || !containerWidth) return;
-        const alignmentTimer = setTimeout(() => {
-            scrollToTab(editTab, false);
-        }, 90);
-        return () => clearTimeout(alignmentTimer);
-    }, [containerWidth, editTab, isMarkdownOverlayOpen, scrollToTab, task?.id, visible]);
-
-    useEffect(() => () => {
-        if (pendingScrollTaskFormTimerRef.current) {
-            clearTimeout(pendingScrollTaskFormTimerRef.current);
-            pendingScrollTaskFormTimerRef.current = null;
-        }
-    }, []);
-
-    useEffect(() => {
-        if (!visible) {
-            setIsMarkdownOverlayOpen(false);
-        }
-    }, [visible]);
-
-    useEffect(() => {
-        if (isMarkdownOverlayOpen) return;
-        if (!visible) return;
-        if (typeof Keyboard?.addListener !== 'function') return;
-        const handleKeyboardShow = () => {
-            alignPagerToActiveTab();
-            if (lastFocusedInputRef.current !== undefined) {
-                scrollTaskFormToEnd?.(lastFocusedInputRef.current);
-            }
-        };
-        const handleKeyboardHide = () => {
-            alignPagerToActiveTab();
-        };
-        const showListener = Keyboard.addListener('keyboardDidShow', handleKeyboardShow);
-        const hideListener = Keyboard.addListener('keyboardDidHide', handleKeyboardHide);
-        return () => {
-            showListener.remove();
-            hideListener.remove();
-        };
-    }, [alignPagerToActiveTab, isMarkdownOverlayOpen, scrollTaskFormToEnd, visible]);
-
-    const handleInputFocus = useCallback((targetInput?: number | string) => {
-        if (pendingScrollTaskFormTimerRef.current) {
-            clearTimeout(pendingScrollTaskFormTimerRef.current);
-            pendingScrollTaskFormTimerRef.current = null;
-        }
-        lastFocusedInputRef.current = targetInput;
-        if (targetInput === undefined) {
-            return;
-        }
-        pendingScrollTaskFormTimerRef.current = setTimeout(() => {
-            scrollTaskFormToEnd?.(targetInput);
-            pendingScrollTaskFormTimerRef.current = null;
-        }, 140);
-    }, [scrollTaskFormToEnd]);
-
-    const descriptionEditor = useTaskDescriptionEditor({
-        task,
+    const {
+        applyChecklistUpdate,
+        handleAIClarify,
+        handleAIBreakdown,
+        handleAttemptClose,
+        handleConvertToReference,
+        handleDeleteTask,
+        handleDone,
+        handleDuplicateTask,
+        handleResetChecklist,
+        handleShare,
+    } = useTaskEditActions({
+        addProject,
+        aiEnabled,
+        areas,
+        baseTaskRef,
+        closeAIModal,
+        contextInputDraft,
+        customWeekdays,
+        deleteTask,
+        descriptionDebounceRef,
         descriptionDraft,
         descriptionDraftRef,
-        setDescriptionDraft,
-        descriptionDebounceRef,
+        duplicateTask,
+        editedTask,
+        formatDate,
+        formatDueDate,
+        formatTimeEstimateLabel,
+        isAIWorking,
+        isContextInputFocused,
+        isTagInputFocused,
+        onClose,
+        onSave,
+        prioritiesEnabled,
+        projectContext,
+        projectFilterAreaId,
+        projects,
+        recurrenceRuleValue,
+        recurrenceRRuleValue,
+        recurrenceStrategyValue,
+        resetTaskChecklist,
+        sections,
+        setAiModal,
         setEditedTask,
-        resetCopilotDraft,
-        onMarkdownOverlayVisibilityChange: setIsMarkdownOverlayOpen,
-        onInputFocusTracked: handleInputFocus,
+        setIsAIWorking,
+        setTitleImmediate,
+        settings,
+        showToast,
+        t,
+        tagInputDraft,
+        task,
+        tasks,
+        timeEstimatesEnabled,
+        titleDebounceRef,
+        titleDraftRef,
     });
-
-    const handleTabPress = (mode: TaskEditTab) => {
-        setModeTab(mode);
-        scrollToTab(mode);
-    };
-
-    const applyChecklistUpdate = (nextChecklist: NonNullable<Task['checklist']>) => {
-        setEditedTask(prev => {
-            const currentStatus = (prev.status ?? task?.status ?? 'inbox') as TaskStatus;
-            let nextStatus = currentStatus;
-            const isListMode = (prev.taskMode ?? task?.taskMode) === 'list';
-            if (isListMode) {
-                const allComplete = nextChecklist.length > 0 && nextChecklist.every((item) => item.isCompleted);
-                if (allComplete) {
-                    nextStatus = 'done';
-                } else if (currentStatus === 'done') {
-                    nextStatus = 'next';
-                }
-            }
-            return {
-                ...prev,
-                checklist: nextChecklist,
-                status: nextStatus,
-            };
-        });
-    };
-
-    const handleResetChecklist = () => {
-        const current = editedTask.checklist || [];
-        if (current.length === 0 || !task) return;
-        const reset = current.map((item) => ({ ...item, isCompleted: false }));
-        applyChecklistUpdate(reset);
-        resetTaskChecklist(task.id).catch((error) => logTaskError('Failed to reset checklist', error));
-    };
-
-    const handleDuplicateTask = async () => {
-        if (!task) return;
-        await duplicateTask(task.id, false).catch((error) => logTaskError('Failed to duplicate task', error));
-        Alert.alert(t('taskEdit.duplicateDoneTitle'), t('taskEdit.duplicateDoneBody'));
-    };
-
-    const handleDeleteTask = async () => {
-        if (!task) return;
-        await deleteTask(task.id).catch((error) => logTaskError('Failed to delete task', error));
-        onClose();
-    };
-
-    const handleConvertToReference = useCallback(() => {
-        if (!task) return;
-        const referenceUpdate: Partial<Task> = {
-            status: 'reference',
-            startTime: undefined,
-            dueDate: undefined,
-            reviewAt: undefined,
-            recurrence: undefined,
-            priority: undefined,
-            timeEstimate: undefined,
-            checklist: undefined,
-            isFocusedToday: false,
-            pushCount: 0,
-        };
-        onSave(task.id, referenceUpdate);
-        setEditedTask((prev) => ({
-            ...prev,
-            ...referenceUpdate,
-        }));
-    }, [onSave, setEditedTask, task]);
-
-    const getAIProvider = async () => {
-        if (!aiEnabled) {
-            Alert.alert(t('ai.disabledTitle'), t('ai.disabledBody'));
-            return null;
-        }
-        const provider = (settings.ai?.provider ?? 'openai') as AIProviderId;
-        const apiKey = await loadAIKey(provider);
-        if (isAIKeyRequired(settings) && !apiKey) {
-            Alert.alert(t('ai.missingKeyTitle'), t('ai.missingKeyBody'));
-            return null;
-        }
-        return createAIProvider(buildAIConfig(settings, apiKey));
-    };
-
-    const applyAISuggestion = (suggested: { title?: string; context?: string; timeEstimate?: TimeEstimate }) => {
-        if (suggested.title) {
-            setTitleImmediate(suggested.title);
-        }
-        setEditedTask((prev) => {
-            const nextContexts = suggested.context
-                ? Array.from(new Set([...(prev.contexts ?? []), suggested.context]))
-                : prev.contexts;
-            return {
-                ...prev,
-                title: suggested.title ?? prev.title,
-                timeEstimate: suggested.timeEstimate ?? prev.timeEstimate,
-                contexts: nextContexts,
-            };
-        });
-    };
-
-    const handleAIClarify = async () => {
-        if (!task || isAIWorking) return;
-        const title = String(titleDraftRef.current ?? editedTask.title ?? task.title ?? '').trim();
-        if (!title) return;
-        setIsAIWorking(true);
-        try {
-            const provider = await getAIProvider();
-            if (!provider) return;
-            const contextOptions = Array.from(new Set([
-                ...getUsedTaskTokens(tasks, (item) => item.contexts, { prefix: '@' }),
-                ...(editedTask.contexts ?? []),
-            ]));
-            const response = await provider.clarifyTask({
-                title,
-                contexts: contextOptions,
-                ...(projectContext ?? {}),
-            });
-            const actions: AIResponseAction[] = response.options.slice(0, 3).map((option) => ({
-                label: option.label,
-                onPress: () => {
-                    setTitleImmediate(option.action);
-                    closeAIModal();
-                },
-            }));
-            if (response.suggestedAction?.title) {
-                actions.push({
-                    label: t('ai.applySuggestion'),
-                    variant: 'primary',
-                    onPress: () => {
-                        applyAISuggestion(response.suggestedAction!);
-                        closeAIModal();
-                    },
-                });
-            }
-            actions.push({
-                label: t('common.cancel'),
-                variant: 'secondary',
-                onPress: closeAIModal,
-            });
-            setAiModal({
-                title: response.question || t('taskEdit.aiClarify'),
-                actions,
-            });
-        } catch (error) {
-            logTaskWarn('AI clarify failed', error);
-            Alert.alert(t('ai.errorTitle'), t('ai.errorBody'));
-        } finally {
-            setIsAIWorking(false);
-        }
-    };
-
-    const handleAIBreakdown = async () => {
-        if (!task || isAIWorking) return;
-        const title = String(titleDraftRef.current ?? editedTask.title ?? task.title ?? '').trim();
-        if (!title) return;
-        setIsAIWorking(true);
-        try {
-            const provider = await getAIProvider();
-            if (!provider) return;
-            const response = await provider.breakDownTask({
-                title,
-                description: String(descriptionDraft ?? ''),
-                ...(projectContext ?? {}),
-            });
-            const steps = response.steps.map((step) => step.trim()).filter(Boolean).slice(0, 8);
-            if (steps.length === 0) return;
-            setAiModal({
-                title: t('ai.breakdownTitle'),
-                message: steps.map((step, index) => `${index + 1}. ${step}`).join('\n'),
-                actions: [
-                    {
-                        label: t('common.cancel'),
-                        variant: 'secondary',
-                        onPress: closeAIModal,
-                    },
-                    {
-                        label: t('ai.addSteps'),
-                        variant: 'primary',
-                        onPress: () => {
-                            const newItems = steps.map((step) => ({
-                                id: generateUUID(),
-                                title: step,
-                                isCompleted: false,
-                            }));
-                            applyChecklistUpdate([...(editedTask.checklist || []), ...newItems]);
-                            closeAIModal();
-                        },
-                    },
-                ],
-            });
-        } catch (error) {
-            logTaskWarn('AI breakdown failed', error);
-            Alert.alert(t('ai.errorTitle'), t('ai.errorBody'));
-        } finally {
-            setIsAIWorking(false);
-        }
-    };
 
     const inputStyle = { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text };
     const combinedText = `${titleDraft ?? ''}\n${descriptionDraft ?? ''}`.trim();
@@ -1163,12 +669,7 @@ function TaskEditModalInner({
 
                     <View
                         style={styles.tabContent}
-                        onLayout={(event) => {
-                            const nextWidth = Math.round(event.nativeEvent.layout.width);
-                            if (nextWidth > 0 && nextWidth !== containerWidth) {
-                                setContainerWidth(nextWidth);
-                            }
-                        }}
+                        onLayout={handleContainerLayout}
                     >
                         <Animated.ScrollView
                             ref={scrollRef}
@@ -1182,16 +683,7 @@ function TaskEditModalInner({
                                 [{ nativeEvent: { contentOffset: { x: scrollX } } }],
                                 { useNativeDriver: true }
                             )}
-                            onMomentumScrollEnd={(event) => {
-                                if (!containerWidth) return;
-                                const offsetX = event.nativeEvent.contentOffset.x;
-                                const target = offsetX >= containerWidth * 0.5 ? 'view' : 'task';
-                                setModeTab(target);
-                                const targetX = getTaskEditTabOffset(target, containerWidth);
-                                if (Math.abs(offsetX - targetX) > 1) {
-                                    scrollToTab(target, false);
-                                }
-                            }}
+                            onMomentumScrollEnd={handleMomentumScrollEnd}
                         >
                             <TaskEditFormTab
                                 t={t}
