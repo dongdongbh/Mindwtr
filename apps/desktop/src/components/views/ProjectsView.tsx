@@ -22,6 +22,29 @@ import { useProjectsViewStore } from './projects/useProjectsViewStore';
 import { splitProjectsForSidebar } from './projects/project-sidebar-grouping';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 
+const COLLAPSED_AREAS_STORAGE_KEY = 'mindwtr:projects:collapsedAreas';
+
+function loadCollapsedAreas(): Record<string, boolean> {
+    if (typeof window === 'undefined') return {};
+    try {
+        const raw = window.localStorage.getItem(COLLAPSED_AREAS_STORAGE_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+        return {};
+    }
+}
+
+function saveCollapsedAreas(state: Record<string, boolean>) {
+    if (typeof window === 'undefined') return;
+    try {
+        window.localStorage.setItem(COLLAPSED_AREAS_STORAGE_KEY, JSON.stringify(state));
+    } catch {
+        // storage unavailable — fall back to in-memory only
+    }
+}
+
 export function ProjectsView() {
     const perf = usePerformanceMonitor('ProjectsView');
     const {
@@ -69,7 +92,8 @@ export function ProjectsView() {
     const [newProjectTitle, setNewProjectTitle] = useState('');
     const [showDeferredProjects, setShowDeferredProjects] = useState(false);
     const [showArchivedProjects, setShowArchivedProjects] = useState(false);
-    const [collapsedAreas, setCollapsedAreas] = useState<Record<string, boolean>>({});
+    const [collapsedAreas, setCollapsedAreas] = useState<Record<string, boolean>>(loadCollapsedAreas);
+    useEffect(() => { saveCollapsedAreas(collapsedAreas); }, [collapsedAreas]);
     const [showAreaManager, setShowAreaManager] = useState(false);
     const [newAreaName, setNewAreaName] = useState('');
     const [newAreaColor, setNewAreaColor] = useState(DEFAULT_AREA_COLOR);
