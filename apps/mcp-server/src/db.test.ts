@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -27,39 +27,46 @@ describe('mcp db bootstrap', () => {
     const dir = createTempDir();
     const dbPath = join(dir, 'mindwtr.db');
     const dataPath = join(dir, 'data.json');
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    writeFileSync(
-      dataPath,
-      JSON.stringify(
-        {
-          tasks: [
-            {
-              id: 'task-1',
-              title: 'Bootstrap task',
-              status: 'inbox',
-              createdAt: '2026-04-13T00:00:00.000Z',
-              updatedAt: '2026-04-13T00:00:00.000Z',
-            },
-          ],
-          projects: [],
-          sections: [],
-          areas: [],
-          settings: {},
-        },
-        null,
-        2
-      )
-    );
-
-    const { db, path } = await openMindwtrDb({ dbPath, readonly: true });
     try {
-      expect(path).toBe(dbPath);
-      expect(existsSync(dbPath)).toBe(true);
-      expect(
-        db.prepare('SELECT id, title, status FROM tasks ORDER BY id').all()
-      ).toEqual([{ id: 'task-1', title: 'Bootstrap task', status: 'inbox' }]);
+      writeFileSync(
+        dataPath,
+        JSON.stringify(
+          {
+            tasks: [
+              {
+                id: 'task-1',
+                title: 'Bootstrap task',
+                status: 'inbox',
+                createdAt: '2026-04-13T00:00:00.000Z',
+                updatedAt: '2026-04-13T00:00:00.000Z',
+              },
+            ],
+            projects: [],
+            sections: [],
+            areas: [],
+            settings: {},
+          },
+          null,
+          2
+        )
+      );
+
+      const { db, path } = await openMindwtrDb({ dbPath, readonly: true });
+      try {
+        expect(path).toBe(dbPath);
+        expect(existsSync(dbPath)).toBe(true);
+        expect(
+          db.prepare('SELECT id, title, status FROM tasks ORDER BY id').all()
+        ).toEqual([{ id: 'task-1', title: 'Bootstrap task', status: 'inbox' }]);
+      } finally {
+        closeDb(db);
+      }
+      expect(warnSpy).toHaveBeenCalledWith(`[mindwtr-mcp] Bootstrapping SQLite database from fallback data.json: ${dataPath}`);
+      expect(warnSpy).toHaveBeenCalledWith(`[mindwtr-mcp] Bootstrapped SQLite database at: ${dbPath}`);
     } finally {
-      closeDb(db);
+      warnSpy.mockRestore();
     }
   });
 

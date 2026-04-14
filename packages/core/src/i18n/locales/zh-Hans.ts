@@ -163,6 +163,7 @@ export const zhHans: Record<string, string> = {
         'markdown.edit': '编辑',
         'markdown.expand': 'Expand',
         'markdown.collapse': 'Collapse',
+        'markdown.referenceRestore': '恢复',
         'markdown.toolbar.heading': 'Insert heading',
         'markdown.toolbar.bold': 'Bold',
         'markdown.toolbar.italic': 'Italic',

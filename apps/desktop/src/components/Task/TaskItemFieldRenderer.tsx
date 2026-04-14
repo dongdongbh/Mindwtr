@@ -5,6 +5,7 @@ import {
     buildRRuleString,
     continueMarkdownOnEnter,
     hasTimeComponent,
+    normalizeMarkdownInternalLinks,
     parseRRuleString,
     resolveAutoTextDirection,
     safeFormatDate,
@@ -28,9 +29,11 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ExpandedMarkdownEditor } from '../ExpandedMarkdownEditor';
 import { MarkdownFormatToolbar } from '../MarkdownFormatToolbar';
+import { MarkdownReferenceAutocompleteMenu, useMarkdownReferenceAutocomplete } from '../MarkdownReferenceAutocomplete';
 import { WeekdaySelector } from './TaskForm/WeekdaySelector';
 import { AttachmentsField } from './TaskForm/AttachmentsField';
 import { ChecklistField } from './TaskForm/ChecklistField';
+import { InternalMarkdownLink } from '../InternalMarkdownLink';
 import { normalizeDateInputValue } from './task-item-helpers';
 import { AutosizeTextarea } from '../ui/AutosizeTextarea';
 
@@ -230,7 +233,22 @@ export function TaskItemFieldRenderer({
         });
         return next;
     };
+    const descriptionAutocomplete = useMarkdownReferenceAutocomplete({
+        value: editDescription,
+        selection: descriptionSelectionRef.current,
+        textareaRef: descriptionTextareaRef,
+        onApplyResult: (next) => {
+            applyDescriptionValue(next.value, {
+                baseSelection: descriptionSelectionRef.current,
+                nextSelection: next.selection,
+            });
+            descriptionSelectionRef.current = next.selection;
+        },
+    });
     const handleDescriptionKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+        if (descriptionAutocomplete.handleKeyDown(event)) {
+            return;
+        }
         const lowerKey = event.key.toLowerCase();
         if ((event.metaKey || event.ctrlKey) && !event.altKey) {
             if (lowerKey !== 'z') return;
@@ -343,12 +361,12 @@ export function TaskItemFieldRenderer({
                                 disallowedElements={['img']}
                                 components={{
                                     a: ({ className, ...props }: any) => (
-                                        <a
+                                        <InternalMarkdownLink
+                                            href={props.href}
                                             className={cn("text-primary underline hover:text-primary/80", className)}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            {...props}
-                                        />
+                                        >
+                                            {props.children}
+                                        </InternalMarkdownLink>
                                     ),
                                     ul: ({ className, ...props }: any) => (
                                         <ul className={cn("list-disc pl-4 py-1 space-y-0.5", className)} {...props} />
@@ -393,11 +411,11 @@ export function TaskItemFieldRenderer({
                                     }
                                 }}
                             >
-                                {editDescription || ''}
+                                {normalizeMarkdownInternalLinks(editDescription || '')}
                             </ReactMarkdown>
                         </div>
                     ) : (
-                        <div className="flex flex-col gap-2">
+                        <div className="relative flex flex-col gap-2">
                             <MarkdownFormatToolbar
                                 textareaRef={descriptionTextareaRef}
                                 t={t}
@@ -433,6 +451,14 @@ export function TaskItemFieldRenderer({
                                 placeholder={t('taskEdit.descriptionPlaceholder')}
                                 dir={resolvedDirection}
                             />
+                            <MarkdownReferenceAutocompleteMenu
+                                isOpen={descriptionAutocomplete.isOpen}
+                                suggestions={descriptionAutocomplete.suggestions}
+                                selectedIndex={descriptionAutocomplete.selectedIndex}
+                                setSelectedIndex={descriptionAutocomplete.setSelectedIndex}
+                                applySuggestion={descriptionAutocomplete.applySuggestion}
+                                t={t}
+                            />
                         </div>
                     )}
                     <ExpandedMarkdownEditor
@@ -446,6 +472,7 @@ export function TaskItemFieldRenderer({
                         t={t}
                         initialMode="edit"
                         direction={resolvedDirection}
+                        selection={descriptionSelectionRef.current}
                         canUndo={descriptionUndoDepth > 0}
                         onUndo={handleDescriptionUndo}
                         onApplyAction={handleDescriptionApplyAction}

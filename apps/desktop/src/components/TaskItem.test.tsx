@@ -1,7 +1,8 @@
+import { Profiler } from 'react';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { act, render, fireEvent } from '@testing-library/react';
 import { TaskItem } from '../components/TaskItem';
-import { Task, configureDateFormatting, safeFormatDate } from '@mindwtr/core';
+import { Project, Task, configureDateFormatting, safeFormatDate, useTaskStore } from '@mindwtr/core';
 import { LanguageProvider } from '../contexts/language-context';
 import { useUiStore } from '../store/ui-store';
 
@@ -14,10 +15,17 @@ const mockTask: Task = {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
 };
+const initialTaskState = useTaskStore.getState();
+const initialUiState = useUiStore.getState();
 
 describe('TaskItem', () => {
     beforeEach(() => {
+        act(() => {
+            useTaskStore.setState(initialTaskState, true);
+            useUiStore.setState(initialUiState, true);
+        });
         useUiStore.setState({
+            ...useUiStore.getState(),
             editingTaskId: null,
             expandedTaskIds: {},
         });
@@ -223,5 +231,124 @@ describe('TaskItem', () => {
         );
 
         expect(secondRender.getByText('Checklist item')).toBeInTheDocument();
+    });
+
+    it('does not rerender for unrelated project updates while not editing', () => {
+        const task: Task = {
+            ...mockTask,
+            id: 'task-with-project',
+            projectId: 'project-1',
+        };
+        const project: Project = {
+            id: 'project-1',
+            title: 'Primary project',
+            status: 'active',
+            color: '#000000',
+            order: 0,
+            tagIds: [],
+            createdAt: task.createdAt,
+            updatedAt: task.updatedAt,
+        };
+        const otherProject: Project = {
+            id: 'project-2',
+            title: 'Other project',
+            status: 'active',
+            color: '#000000',
+            order: 1,
+            tagIds: [],
+            createdAt: task.createdAt,
+            updatedAt: task.updatedAt,
+        };
+        const commits: number[] = [];
+
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                tasks: [task],
+                _allTasks: [task],
+                projects: [project, otherProject],
+                sections: [],
+                areas: [],
+            }));
+        });
+
+        render(
+            <LanguageProvider>
+                <Profiler id="task-item" onRender={() => commits.push(1)}>
+                    <TaskItem task={task} />
+                </Profiler>
+            </LanguageProvider>
+        );
+
+        expect(commits).toHaveLength(1);
+
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                projects: [
+                    project,
+                    {
+                        ...otherProject,
+                        title: 'Renamed unrelated project',
+                        updatedAt: new Date(Date.parse(otherProject.updatedAt) + 1_000).toISOString(),
+                    },
+                ],
+            }));
+        });
+
+        expect(commits).toHaveLength(1);
+    });
+
+    it('rerenders when its own project changes', () => {
+        const task: Task = {
+            ...mockTask,
+            id: 'task-project-refresh',
+            projectId: 'project-1',
+        };
+        const project: Project = {
+            id: 'project-1',
+            title: 'Primary project',
+            status: 'active',
+            color: '#000000',
+            order: 0,
+            tagIds: [],
+            createdAt: task.createdAt,
+            updatedAt: task.updatedAt,
+        };
+        const commits: number[] = [];
+
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                tasks: [task],
+                _allTasks: [task],
+                projects: [project],
+                sections: [],
+                areas: [],
+            }));
+        });
+
+        render(
+            <LanguageProvider>
+                <Profiler id="task-item" onRender={() => commits.push(1)}>
+                    <TaskItem task={task} />
+                </Profiler>
+            </LanguageProvider>
+        );
+
+        expect(commits).toHaveLength(1);
+
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                projects: [{
+                    ...project,
+                    title: 'Renamed primary project',
+                    updatedAt: new Date(Date.parse(project.updatedAt) + 1_000).toISOString(),
+                }],
+            }));
+        });
+
+        expect(commits.length).toBeGreaterThan(1);
     });
 });

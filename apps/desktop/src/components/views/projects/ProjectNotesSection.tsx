@@ -14,6 +14,7 @@ import {
 import { ExpandedMarkdownEditor } from '../../ExpandedMarkdownEditor';
 import { MarkdownFormatToolbar } from '../../MarkdownFormatToolbar';
 import { Markdown } from '../../Markdown';
+import { MarkdownReferenceAutocompleteMenu, useMarkdownReferenceAutocomplete } from '../../MarkdownReferenceAutocomplete';
 import { AttachmentProgressIndicator } from '../../AttachmentProgressIndicator';
 import { getAttachmentDisplayTitle } from '../../../lib/attachment-utils';
 
@@ -135,8 +136,23 @@ export function ProjectNotesSection({
         });
         return next;
     };
+    const notesAutocomplete = useMarkdownReferenceAutocomplete({
+        value: draftNotes,
+        selection: notesSelectionRef.current,
+        textareaRef,
+        onApplyResult: (next) => {
+            applyNotesValue(next.value, {
+                baseSelection: notesSelectionRef.current,
+                nextSelection: next.selection,
+            });
+            notesSelectionRef.current = next.selection;
+        },
+    });
 
     const handleNotesKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+        if (notesAutocomplete.handleKeyDown(event)) {
+            return;
+        }
         if ((event.metaKey || event.ctrlKey) && !event.altKey) {
             if (event.key.toLowerCase() !== 'z') return;
             if (notesUndoRef.current.length === 0) return;
@@ -219,7 +235,7 @@ export function ProjectNotesSection({
                         <Markdown markdown={draftNotes} className={isRtl ? 'text-right' : undefined} />
                     </div>
                 ) : (
-                    <div className="flex flex-col gap-2">
+                    <div className="relative flex flex-col gap-2">
                         <MarkdownFormatToolbar
                             textareaRef={textareaRef}
                             t={t}
@@ -251,6 +267,14 @@ export function ProjectNotesSection({
                                 onUpdateNotes(event.target.value);
                                 event.currentTarget.scrollTop = 0;
                             }}
+                        />
+                        <MarkdownReferenceAutocompleteMenu
+                            isOpen={notesAutocomplete.isOpen}
+                            suggestions={notesAutocomplete.suggestions}
+                            selectedIndex={notesAutocomplete.selectedIndex}
+                            setSelectedIndex={notesAutocomplete.setSelectedIndex}
+                            applySuggestion={notesAutocomplete.applySuggestion}
+                            t={t}
                         />
                     </div>
                 )}
@@ -305,6 +329,7 @@ export function ProjectNotesSection({
                     t={t}
                     initialMode="edit"
                     direction={resolvedDirection}
+                    selection={notesSelectionRef.current}
                     canUndo={notesUndoDepth > 0}
                     onUndo={handleNotesUndo}
                     onApplyAction={handleNotesApplyAction}

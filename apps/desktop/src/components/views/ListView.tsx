@@ -1,19 +1,15 @@
-import React, { memo, useState, useMemo, useDeferredValue, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
-import { AlertTriangle, Folder } from 'lucide-react';
+import React, { memo, useState, useMemo, useDeferredValue, useEffect, useRef, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { shallow, useTaskStore, TaskPriority, TimeEstimate, DEFAULT_AREA_COLOR, sortTasksBy, parseQuickAdd, matchesHierarchicalToken, safeParseDate, isTaskInActiveProject, getWaitingPerson } from '@mindwtr/core';
-import type { StoreActionResult, Task, TaskStatus } from '@mindwtr/core';
+import type { Task, TaskStatus } from '@mindwtr/core';
 import type { TaskSortBy } from '@mindwtr/core';
 import { TaskItem } from '../TaskItem';
 import { ConfirmModal } from '../ConfirmModal';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { ListEmptyState } from './list/ListEmptyState';
-import { ListQuickAdd } from './list/ListQuickAdd';
+import { ListControlsPanel } from './list/ListControlsPanel';
 import { PromptModal } from '../PromptModal';
 import { InboxProcessor } from './InboxProcessor';
-import { ListFiltersPanel } from './list/ListFiltersPanel';
-import { ListHeader } from './list/ListHeader';
-import { ListBulkActions } from './list/ListBulkActions';
 import { useLanguage } from '../../contexts/language-context';
 import { useKeybindings } from '../../contexts/keybinding-context';
 import { useListCopilot } from './list/useListCopilot';
@@ -21,11 +17,13 @@ import { useUiStore } from '../../store/ui-store';
 import { usePerformanceMonitor } from '../../hooks/usePerformanceMonitor';
 import { checkBudget } from '../../config/performanceBudgets';
 import { useListViewOptimizations } from '../../hooks/useListViewOptimizations';
+import { dispatchNavigateEvent } from '../../lib/navigation-events';
 import { reportError } from '../../lib/report-error';
 import { AREA_FILTER_ALL, AREA_FILTER_NONE, projectMatchesAreaFilter, resolveAreaFilter, taskMatchesAreaFilter } from '../../lib/area-filter';
 import { cn } from '../../lib/utils';
 import { sortDoneTasksForListView } from './list/done-sort';
 import { groupTasksByArea, groupTasksByContext, type NextGroupBy, type TaskGroup } from './list/next-grouping';
+import { useListSelection } from './list/useListSelection';
 
 
 interface ListViewProps {
@@ -38,7 +36,6 @@ const EMPTY_ESTIMATES: TimeEstimate[] = [];
 const VIRTUALIZATION_THRESHOLD = 25;
 const VIRTUAL_ROW_ESTIMATE = 120;
 const VIRTUAL_OVERSCAN = 600;
-const RESTORE_DELETED_TASKS_FAILED_MESSAGE = 'Failed to restore deleted tasks';
 
 type ShowToast = (
     message: string,
@@ -46,30 +43,6 @@ type ShowToast = (
     durationMs?: number,
     action?: { label: string; onClick: () => void }
 ) => void;
-
-export async function restoreDeletedTasksWithFeedback(
-    taskIds: string[],
-    restoreTask: (taskId: string) => Promise<StoreActionResult>,
-    showToast: ShowToast,
-): Promise<void> {
-    const results = await Promise.allSettled(taskIds.map((taskId) => restoreTask(taskId)));
-    const failedRestore = results.find(
-        (result): result is PromiseRejectedResult | PromiseFulfilledResult<StoreActionResult> =>
-            result.status === 'rejected' || !result.value.success,
-    );
-
-    if (!failedRestore) return;
-
-    const message = failedRestore.status === 'rejected'
-        ? (failedRestore.reason instanceof Error ? failedRestore.reason.message : RESTORE_DELETED_TASKS_FAILED_MESSAGE)
-        : (failedRestore.value.error || RESTORE_DELETED_TASKS_FAILED_MESSAGE);
-    const error = failedRestore.status === 'rejected'
-        ? failedRestore.reason
-        : new Error(message);
-
-    reportError(RESTORE_DELETED_TASKS_FAILED_MESSAGE, error);
-    showToast(message, 'error');
-}
 
 export function reportArchivedTaskQueryFailure(error: unknown, showToast: ShowToast): void {
     reportError('Failed to load archived tasks', error);
@@ -147,22 +120,11 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
     const selectedPriorities = listFilters.priorities;
     const selectedTimeEstimates = listFilters.estimates;
     const filtersOpen = listFilters.open;
-    const [selectedIndex, setSelectedIndex] = useState(0);
-    const [selectionMode, setSelectionMode] = useState(false);
-    const [multiSelectedIds, setMultiSelectedIds] = useState<Set<string>>(new Set());
-    const [tagPromptOpen, setTagPromptOpen] = useState(false);
-    const [tagPromptIds, setTagPromptIds] = useState<string[]>([]);
-    const [contextPromptOpen, setContextPromptOpen] = useState(false);
-    const [contextPromptMode, setContextPromptMode] = useState<'add' | 'remove'>('add');
-    const [contextPromptIds, setContextPromptIds] = useState<string[]>([]);
     const [selectedWaitingPerson, setSelectedWaitingPerson] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
-    const lastFilterKeyRef = useRef<string>('');
-    const pendingSelectionScrollRef = useRef(false);
     const addInputRef = useRef<HTMLInputElement>(null);
     const viewFilterInputRef = useRef<HTMLInputElement>(null);
     const listScrollRef = useRef<HTMLDivElement>(null);
-    const [selectionScrollVersion, setSelectionScrollVersion] = useState(0);
     const prioritiesEnabled = settings?.features?.priorities !== false;
     const timeEstimatesEnabled = settings?.features?.timeEstimates !== false;
     const undoNotificationsEnabled = settings?.undoNotificationsEnabled !== false;
@@ -187,20 +149,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
         return () => window.clearTimeout(timer);
     }, [perf.enabled]);
 
-    const exitSelectionMode = useCallback(() => {
-        setSelectionMode(false);
-        setMultiSelectedIds(new Set());
-    }, []);
-
-    const requestSelectionScroll = useCallback(() => {
-        pendingSelectionScrollRef.current = true;
-        setSelectionScrollVersion((current) => current + 1);
-    }, []);
-
     const [isProcessing, setIsProcessing] = useState(false);
-    const [isBatchDeleting, setIsBatchDeleting] = useState(false);
-    const [pendingDeleteTask, setPendingDeleteTask] = useState<Task | null>(null);
-    const [pendingBatchDeleteIds, setPendingBatchDeleteIds] = useState<string[]>([]);
     const {
         allContexts,
         allTags,
@@ -515,7 +464,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
     const showEmptyState = filteredTasks.length === 0 && !showDeferredProjectSection;
     const handleOpenProject = useCallback((projectId: string) => {
         setProjectView({ selectedProjectId: projectId });
-        window.dispatchEvent(new CustomEvent('mindwtr:navigate', { detail: { view: 'projects' } }));
+        dispatchNavigateEvent('projects');
     }, [setProjectView]);
     const handleReactivateProject = useCallback((projectId: string) => {
         updateProject(projectId, { status: 'active' })
@@ -535,297 +484,71 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
     });
     const virtualRows = shouldVirtualize ? rowVirtualizer.getVirtualItems() : [];
     const totalHeight = shouldVirtualize ? rowVirtualizer.getTotalSize() : 0;
-
-    useEffect(() => {
-        const filterKey = [
-            statusFilter,
-            prioritiesEnabled ? '1' : '0',
-            timeEstimatesEnabled ? '1' : '0',
-            selectedTokens.join('|'),
-            selectedPriorities.join('|'),
-            selectedTimeEstimates.join('|'),
-            selectedWaitingPerson,
-            resolvedAreaFilter,
-            activeNextGroupBy,
-        ].join('::');
-        if (lastFilterKeyRef.current !== filterKey) {
-            lastFilterKeyRef.current = filterKey;
-            requestSelectionScroll();
-            setSelectedIndex(0);
-            exitSelectionMode();
-            return;
-        }
-        if (filteredTasks.length === 0) {
-            if (selectedIndex !== 0) {
-                setSelectedIndex(0);
-            }
-            return;
-        }
-        if (selectedIndex >= filteredTasks.length) {
-            requestSelectionScroll();
-            setSelectedIndex(filteredTasks.length - 1);
-        }
-    }, [
-        statusFilter,
-        selectedTokens,
+    const {
+        confirmBatchDelete,
+        confirmSingleDelete,
+        contextPromptMode,
+        contextPromptOpen,
+        handleBatchAddContext,
+        handleBatchAddTag,
+        handleBatchAssignArea,
+        handleBatchDelete,
+        handleBatchMove,
+        handleBatchRemoveContext,
+        handleConfirmContextPrompt,
+        handleConfirmTagPrompt,
+        handleSelectIndex,
+        isBatchDeleting,
+        multiSelectedIds,
+        pendingBatchDeleteIds,
+        pendingDeleteTask,
+        selectedIdsArray,
+        selectedIndex,
+        selectionMode,
+        setContextPromptOpen,
+        setPendingBatchDeleteIds,
+        setPendingDeleteTask,
+        setTagPromptOpen,
+        tagPromptOpen,
+        toggleMultiSelect,
+        toggleSelectionMode,
+    } = useListSelection({
+        activeNextGroupBy,
+        addInputRef,
+        batchDeleteTasks,
+        batchMoveTasks,
+        batchUpdateTasks,
+        deleteTask,
+        filteredTasks,
+        highlightTaskId,
+        isProcessing,
+        moveTask,
+        prioritiesEnabled,
+        registerTaskListScope,
+        restoreTask,
+        scrollToVirtualIndex: (index, align) => rowVirtualizer.scrollToIndex(index, { align }),
         selectedPriorities,
         selectedTimeEstimates,
+        selectedTokens,
         selectedWaitingPerson,
-        prioritiesEnabled,
-        timeEstimatesEnabled,
-        activeNextGroupBy,
-        exitSelectionMode,
-        filteredTasks,
-        selectedIndex,
-        requestSelectionScroll,
-    ]);
-
-    useLayoutEffect(() => {
-        if (!pendingSelectionScrollRef.current) return;
-        pendingSelectionScrollRef.current = false;
-        const task = filteredTasks[selectedIndex];
-        if (!task) return;
-        if (shouldVirtualize && listScrollRef.current) {
-            rowVirtualizer.scrollToIndex(selectedIndex, { align: 'auto' });
-            return;
-        }
-        const el = document.querySelector(`[data-task-id="${task.id}"]`) as HTMLElement | null;
-        if (el && typeof (el as any).scrollIntoView === 'function') {
-            el.scrollIntoView({ block: 'nearest' });
-        }
-    }, [filteredTasks, selectedIndex, selectionScrollVersion, shouldVirtualize, rowVirtualizer]);
-
-    useEffect(() => {
-        if (!highlightTaskId) return;
-        const index = filteredTasks.findIndex((task) => task.id === highlightTaskId);
-        if (index < 0) return;
-        setSelectedIndex(index);
-        if (shouldVirtualize && listScrollRef.current) {
-            rowVirtualizer.scrollToIndex(index, { align: 'center' });
-        }
-        const el = document.querySelector(`[data-task-id="${highlightTaskId}"]`) as HTMLElement | null;
-        if (el && typeof (el as any).scrollIntoView === 'function') {
-            el.scrollIntoView({ block: 'center' });
-        }
-        const timer = window.setTimeout(() => setHighlightTask(null), 4000);
-        return () => window.clearTimeout(timer);
-    }, [highlightTaskId, filteredTasks, shouldVirtualize, rowVirtualizer, setHighlightTask]);
-
-    const selectNext = useCallback(() => {
-        if (filteredTasks.length === 0) return;
-        requestSelectionScroll();
-        setSelectedIndex((i) => Math.min(i + 1, filteredTasks.length - 1));
-    }, [filteredTasks.length, requestSelectionScroll]);
-
-    const selectPrev = useCallback(() => {
-        requestSelectionScroll();
-        setSelectedIndex((i) => Math.max(i - 1, 0));
-    }, [requestSelectionScroll]);
-
-    const selectFirst = useCallback(() => {
-        requestSelectionScroll();
-        setSelectedIndex(0);
-    }, [requestSelectionScroll]);
-
-    const selectLast = useCallback(() => {
-        if (filteredTasks.length > 0) {
-            requestSelectionScroll();
-            setSelectedIndex(filteredTasks.length - 1);
-        }
-    }, [filteredTasks.length, requestSelectionScroll]);
-
-    const editSelected = useCallback(() => {
-        const task = filteredTasks[selectedIndex];
-        if (!task) return;
-        const editTrigger = document.querySelector(
-            `[data-task-id="${task.id}"] [data-task-edit-trigger]`
-        ) as HTMLElement | null;
-        editTrigger?.focus();
-        editTrigger?.click();
-    }, [filteredTasks, selectedIndex]);
-
-    const toggleDoneSelected = useCallback(() => {
-        const task = filteredTasks[selectedIndex];
-        if (!task) return;
-        const nextStatus = task.status === 'done' ? 'inbox' : 'done';
-        void moveTask(task.id, nextStatus)
-            .then(() => {
-                if (!undoNotificationsEnabled || nextStatus !== 'done') return;
-                showToast(
-                    `${task.title} marked Done`,
-                    'info',
-                    5000,
-                    {
-                        label: t('common.undo') || 'Undo',
-                        onClick: () => {
-                            void moveTask(task.id, task.status);
-                        },
-                    }
-                );
-            })
-            .catch((error) => reportError('Failed to update task status', error));
-    }, [filteredTasks, selectedIndex, moveTask, showToast, undoNotificationsEnabled]);
-
-    const runSingleDelete = useCallback(async (task: Task) => {
-        await deleteTask(task.id);
-        if (!undoNotificationsEnabled) return;
-        showToast(
-            t('list.taskDeleted') || 'Task deleted',
-            'info',
-            5000,
-            {
-                label: t('common.undo') || 'Undo',
-                onClick: () => {
-                    void restoreTask(task.id);
-                },
-            }
-        );
-    }, [deleteTask, restoreTask, showToast, t, undoNotificationsEnabled]);
-
-    const deleteSelected = useCallback(() => {
-        const task = filteredTasks[selectedIndex];
-        if (!task) return;
-        setPendingDeleteTask(task);
-    }, [filteredTasks, selectedIndex]);
-
-    useEffect(() => {
-        if (isProcessing) {
-            registerTaskListScope(null);
-            return;
-        }
-
-        registerTaskListScope({
-            kind: 'taskList',
-            selectNext,
-            selectPrev,
-            selectFirst,
-            selectLast,
-            editSelected,
-            toggleDoneSelected,
-            deleteSelected,
-            focusAddInput: () => {
-                if (showViewFilterInput) {
-                    viewFilterInputRef.current?.focus();
-                    return;
-                }
-                addInputRef.current?.focus();
-            },
-        });
-
-        return () => registerTaskListScope(null);
-    }, [
-        registerTaskListScope,
-        isProcessing,
-        selectNext,
-        selectPrev,
-        selectFirst,
-        selectLast,
-        editSelected,
-        toggleDoneSelected,
-        deleteSelected,
+        setHighlightTask,
+        shouldVirtualize,
+        showToast,
         showViewFilterInput,
-    ]);
-
-    const toggleMultiSelect = useCallback((taskId: string) => {
-        setMultiSelectedIds(prev => {
-            const next = new Set(prev);
-            if (next.has(taskId)) next.delete(taskId);
-            else next.add(taskId);
-            return next;
-        });
-    }, []);
-
-    const handleSelectIndex = useCallback((index: number) => {
-        if (!selectionMode) setSelectedIndex(index);
-    }, [selectionMode]);
-
-    const selectedIdsArray = useMemo(() => Array.from(multiSelectedIds), [multiSelectedIds]);
+        statusFilter,
+        t,
+        tasksById,
+        timeEstimatesEnabled,
+        translateWithFallback,
+        undoNotificationsEnabled,
+        viewFilterInputRef,
+    });
     const bulkAreaOptions = useMemo(
         () => [...areas]
             .sort((a, b) => a.name.localeCompare(b.name))
             .map((area) => ({ id: area.id, name: area.name })),
         [areas]
     );
-
-    const handleBatchMove = useCallback(async (newStatus: TaskStatus) => {
-        if (selectedIdsArray.length === 0) return;
-        try {
-            await batchMoveTasks(selectedIdsArray, newStatus);
-            exitSelectionMode();
-        } catch (error) {
-            reportError('Failed to batch move tasks', error);
-            showToast(translateWithFallback('bulk.moveFailed', 'Failed to update selected tasks'), 'error');
-        }
-    }, [batchMoveTasks, selectedIdsArray, exitSelectionMode, showToast, translateWithFallback]);
-
-    const handleBatchDelete = useCallback(async () => {
-        if (selectedIdsArray.length === 0) return;
-        setPendingBatchDeleteIds(selectedIdsArray);
-    }, [selectedIdsArray]);
-
-    const confirmBatchDelete = useCallback(async (taskIds: string[]) => {
-        setIsBatchDeleting(true);
-        try {
-            await batchDeleteTasks(taskIds);
-            exitSelectionMode();
-            if (undoNotificationsEnabled) {
-                const deletedMessage = taskIds.length === 1
-                    ? (t('list.taskDeleted') || 'Task deleted')
-                    : (t('list.tasksDeleted') || '{{count}} tasks deleted').replace('{{count}}', String(taskIds.length));
-                showToast(
-                    deletedMessage,
-                    'info',
-                    5000,
-                    {
-                        label: t('common.undo') || 'Undo',
-                        onClick: () => {
-                            void restoreDeletedTasksWithFeedback(taskIds, restoreTask, showToast);
-                        },
-                    }
-                );
-            }
-        } catch (error) {
-            reportError('Failed to batch delete tasks', error);
-            showToast(translateWithFallback('bulk.deleteFailed', 'Failed to delete selected tasks'), 'error');
-        } finally {
-            setIsBatchDeleting(false);
-            setPendingBatchDeleteIds([]);
-        }
-    }, [batchDeleteTasks, exitSelectionMode, restoreTask, showToast, t, translateWithFallback, undoNotificationsEnabled]);
-
-    const handleBatchAssignArea = useCallback(async (areaId: string | null) => {
-        if (selectedIdsArray.length === 0) return;
-        try {
-            await batchUpdateTasks(selectedIdsArray.map((id) => ({
-                id,
-                updates: { areaId: areaId ?? undefined },
-            })));
-            exitSelectionMode();
-        } catch (error) {
-            reportError('Failed to batch assign area', error);
-            showToast(translateWithFallback('bulk.moveFailed', 'Failed to update selected tasks'), 'error');
-        }
-    }, [batchUpdateTasks, selectedIdsArray, exitSelectionMode, showToast, translateWithFallback]);
-
-    const handleBatchAddTag = useCallback(async () => {
-        if (selectedIdsArray.length === 0) return;
-        setTagPromptIds(selectedIdsArray);
-        setTagPromptOpen(true);
-    }, [batchUpdateTasks, selectedIdsArray, tasksById, t, exitSelectionMode]);
-
-    const handleBatchAddContext = useCallback(() => {
-        if (selectedIdsArray.length === 0) return;
-        setContextPromptIds(selectedIdsArray);
-        setContextPromptMode('add');
-        setContextPromptOpen(true);
-    }, [selectedIdsArray]);
-
-    const handleBatchRemoveContext = useCallback(() => {
-        if (selectedIdsArray.length === 0) return;
-        setContextPromptIds(selectedIdsArray);
-        setContextPromptMode('remove');
-        setContextPromptOpen(true);
-    }, [selectedIdsArray]);
 
     const handleAddTask = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -871,7 +594,6 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
     const isInbox = statusFilter === 'inbox';
     const isNextView = statusFilter === 'next';
     const isWaitingView = statusFilter === 'waiting';
-    const NEXT_WARNING_THRESHOLD = 15;
     const priorityOptions: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
     const timeEstimateOptions: TimeEstimate[] = ['5min', '10min', '15min', '30min', '1hr', '2hr', '3hr', '4hr', '4hr+'];
     const formatEstimate = (estimate: TimeEstimate) => {
@@ -980,183 +702,74 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
     return (
         <ErrorBoundary>
             <div className="flex h-full flex-col">
-                <div className="space-y-6">
-                    <ListHeader
-                        title={title}
-                        showNextCount={isNextView}
-                        nextCount={nextCount}
-                        taskCount={filteredTasks.length}
-                        hasFilters={hasFilters}
-                        filterSummaryLabel={filterSummaryLabel}
-                        filterSummarySuffix={filterSummarySuffix}
-                        sortBy={sortBy}
-                        onChangeSortBy={(value) => updateSettings({ taskSortBy: value })}
-                        showGroupBy={isNextView}
-                        groupBy={activeNextGroupBy}
-                        onChangeGroupBy={(value) => setListOptions({ nextGroupBy: value })}
-                        selectionMode={selectionMode}
-                        onToggleSelection={() => {
-                            if (selectionMode) exitSelectionMode();
-                            else setSelectionMode(true);
-                        }}
-                        showListDetails={showListDetails}
-                        onToggleDetails={() => setListOptions({ showDetails: !showListDetails })}
-                        densityMode={densityMode}
-                        onToggleDensity={() => {
-                            void updateSettings({
-                                appearance: {
-                                    density: densityMode === 'compact' ? 'comfortable' : 'compact',
-                                },
-                            });
-                        }}
-                        t={t}
-                    />
-
-                    {(isProcessing || isBatchDeleting) && (
-                        <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                            {isBatchDeleting
-                                ? (t('bulk.deleting') || 'Deleting selected tasks...')
-                                : (t('common.loading') || 'Loading...')}
-                        </div>
-                    )}
-
-                    {selectionMode && selectedIdsArray.length > 0 && (
-                        <ListBulkActions
-                            selectionCount={selectedIdsArray.length}
-                            onMoveToStatus={handleBatchMove}
-                            onAssignArea={handleBatchAssignArea}
-                            areaOptions={bulkAreaOptions}
-                            onAddTag={handleBatchAddTag}
-                            onAddContext={handleBatchAddContext}
-                            onRemoveContext={handleBatchRemoveContext}
-                            onDelete={handleBatchDelete}
-                            isDeleting={isBatchDeleting}
+                <ListControlsPanel
+                    title={title}
+                    t={t}
+                    nextCount={nextCount}
+                    taskCount={filteredTasks.length}
+                    hasFilters={hasFilters}
+                    filterSummaryLabel={filterSummaryLabel}
+                    filterSummarySuffix={filterSummarySuffix}
+                    sortBy={sortBy}
+                    onChangeSortBy={(value) => updateSettings({ taskSortBy: value })}
+                    activeNextGroupBy={activeNextGroupBy}
+                    onChangeGroupBy={(value) => setListOptions({ nextGroupBy: value })}
+                    selectionMode={selectionMode}
+                    onToggleSelection={toggleSelectionMode}
+                    showListDetails={showListDetails}
+                    onToggleDetails={() => setListOptions({ showDetails: !showListDetails })}
+                    densityMode={densityMode}
+                    onToggleDensity={() => {
+                        void updateSettings({
+                            appearance: {
+                                density: densityMode === 'compact' ? 'comfortable' : 'compact',
+                            },
+                        });
+                    }}
+                    isProcessing={isProcessing}
+                    isBatchDeleting={isBatchDeleting}
+                    selectedCount={selectedIdsArray.length}
+                    onMoveToStatus={handleBatchMove}
+                    onAssignArea={handleBatchAssignArea}
+                    areaOptions={bulkAreaOptions}
+                    onAddTag={handleBatchAddTag}
+                    onAddContext={handleBatchAddContext}
+                    onRemoveContext={handleBatchRemoveContext}
+                    onDeleteSelection={handleBatchDelete}
+                    isNextView={isNextView}
+                    showDeferredProjectSection={showDeferredProjectSection}
+                    deferredProjects={deferredProjects}
+                    areaById={areaById}
+                    onOpenProject={handleOpenProject}
+                    onReactivateProject={handleReactivateProject}
+                    inboxProcessor={(
+                        <InboxProcessor
                             t={t}
+                            isInbox={isInbox}
+                            tasks={tasks}
+                            projects={projects}
+                            areas={areas}
+                            settings={settings}
+                            addProject={addProject}
+                            updateTask={updateTask}
+                            deleteTask={deleteTask}
+                            allContexts={allContexts}
+                            isProcessing={isProcessing}
+                            setIsProcessing={setIsProcessing}
                         />
                     )}
-
-            {/* Next Actions Warning */}
-            {isNextView && nextCount > NEXT_WARNING_THRESHOLD && (
-                <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 flex items-start gap-3">
-                    <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5" />
-                    <div>
-                        <p className="font-medium text-amber-700 dark:text-amber-400">
-                            {nextCount} {t('next.warningCount')}
-                        </p>
-                        <p className="text-sm text-amber-600 dark:text-amber-500 mt-1">
-                            {t('next.warningHint')}
-                        </p>
-                    </div>
-                </div>
-            )}
-
-            {showDeferredProjectSection && (
-                <div className="rounded-lg border border-border bg-card/50 p-4">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        {t('projects.title') || 'Projects'}
-                    </div>
-                    <div className="mt-3 space-y-2">
-                        {deferredProjects.map((project) => {
-                            const projectArea = project.areaId ? areaById.get(project.areaId) : undefined;
-                            return (
-                                <div
-                                    key={project.id}
-                                    className="flex w-full items-center justify-between gap-3 rounded-md border border-border/60 bg-background px-3 py-2"
-                                >
-                                    <button
-                                        type="button"
-                                        onClick={() => handleOpenProject(project.id)}
-                                        className="flex min-w-0 flex-1 items-center gap-2 text-left hover:text-primary"
-                                        aria-label={`${t('projects.title') || 'Project'}: ${project.title}`}
-                                    >
-                                        <Folder className="h-4 w-4 shrink-0" style={{ color: project.color }} />
-                                        <span className="text-sm font-medium text-foreground truncate">{project.title}</span>
-                                        {projectArea && (
-                                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                                                <span
-                                                    className="h-2 w-2 rounded-full"
-                                                    style={{ backgroundColor: projectArea.color || DEFAULT_AREA_COLOR }}
-                                                />
-                                                {projectArea.name}
-                                            </span>
-                                        )}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => handleReactivateProject(project.id)}
-                                        className="text-xs px-2 py-1 rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted/60"
-                                    >
-                                        {t('projects.reactivate')}
-                                    </button>
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-            )}
-
-            <InboxProcessor
-                t={t}
-                isInbox={isInbox}
-                tasks={tasks}
-                projects={projects}
-                areas={areas}
-                settings={settings}
-                addProject={addProject}
-                updateTask={updateTask}
-                deleteTask={deleteTask}
-                allContexts={allContexts}
-                isProcessing={isProcessing}
-                setIsProcessing={setIsProcessing}
-            />
-
-            {showViewFilterInput && !isProcessing && (
-                <input
-                    ref={viewFilterInputRef}
-                    type="text"
-                    data-view-filter-input
-                    placeholder={t('common.search')}
-                    value={searchQuery}
-                    onChange={(event) => setSearchQuery(event.target.value)}
-                    className="w-full text-sm px-3 py-2 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
-                />
-            )}
-
-            {isWaitingView && !isProcessing && (
-                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-                    <span className="text-xs font-medium text-muted-foreground">{t('process.delegateWhoLabel')}</span>
-                    <select
-                        value={selectedWaitingPerson}
-                        onChange={(event) => setSelectedWaitingPerson(event.target.value)}
-                        className="text-xs bg-background text-foreground border border-border rounded px-2 py-1 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40"
-                    >
-                        <option value="">{t('common.all')}</option>
-                        {waitingPeople.map((person) => (
-                            <option key={person} value={person}>
-                                {person}
-                            </option>
-                        ))}
-                    </select>
-                    {selectedWaitingPerson && (
-                        <button
-                            type="button"
-                            onClick={() => setSelectedWaitingPerson('')}
-                            className="text-xs px-2 py-1 rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted/60"
-                        >
-                            {t('common.clear')}
-                        </button>
-                    )}
-                </div>
-            )}
-
-            {/* Filters */}
-            {showFilters && !isProcessing && (
-                <ListFiltersPanel
-                    t={t}
-                    hasFilters={hasFilters}
+                    showViewFilterInput={showViewFilterInput}
+                    searchQuery={searchQuery}
+                    onChangeSearch={setSearchQuery}
+                    isWaitingView={isWaitingView}
+                    waitingPeople={waitingPeople}
+                    selectedWaitingPerson={selectedWaitingPerson}
+                    onChangeSelectedWaitingPerson={setSelectedWaitingPerson}
+                    onClearSelectedWaitingPerson={() => setSelectedWaitingPerson('')}
+                    showFilters={showFilters}
                     showFiltersPanel={showFiltersPanel}
                     onClearFilters={clearFilters}
-                    onToggleOpen={() => setListFilters({ open: !filtersOpen })}
+                    onToggleFiltersOpen={() => setListFilters({ open: !filtersOpen })}
                     allTokens={allTokens}
                     selectedTokens={selectedTokens}
                     tokenCounts={tokenCounts}
@@ -1170,57 +783,48 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                     selectedTimeEstimates={selectedTimeEstimates}
                     onToggleEstimate={toggleTimeFilter}
                     formatEstimate={formatEstimate}
-                />
-            )}
-
-            {/* Only show add task for inbox/next - other views are read-only */}
-            {['inbox', 'next'].includes(statusFilter) && (
-                <ListQuickAdd
-                    inputRef={addInputRef}
-                    value={newTaskTitle}
+                    showQuickAdd={['inbox', 'next'].includes(statusFilter)}
+                    quickAddValue={newTaskTitle}
+                    addInputRef={addInputRef}
                     projects={projects}
                     areas={areas}
-                    contexts={allTokens}
-                    t={t}
-                    dense={isCompact}
                     onCreateProject={async (title) => {
                         const created = await addProject(title, DEFAULT_AREA_COLOR);
                         return created?.id ?? null;
                     }}
-                    onChange={(next) => {
-                        setNewTaskTitle(next);
-                        resetCopilot();
-                    }}
-                    onSubmit={handleAddTask}
-                    onOpenAudio={() => openQuickAdd(statusFilter, 'audio')}
+                    onChangeQuickAdd={setNewTaskTitle}
+                    onSubmitQuickAdd={handleAddTask}
+                    onOpenAudioQuickAdd={() => openQuickAdd(statusFilter, 'audio')}
                     onResetCopilot={resetCopilot}
+                    quickAddFooter={(
+                        <>
+                            {aiEnabled && copilotSuggestion && !copilotApplied && (
+                                <button
+                                    type="button"
+                                    onClick={() => applyCopilotSuggestion(copilotSuggestion)}
+                                    className="mt-2 rounded border border-border bg-muted/30 px-2 py-1 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60"
+                                >
+                                    ✨ {t('copilot.suggested')}{' '}
+                                    {copilotSuggestion.context ? `${copilotSuggestion.context} ` : ''}
+                                    {copilotSuggestion.tags?.length ? copilotSuggestion.tags.join(' ') : ''}
+                                    <span className="ml-2 text-muted-foreground/70">{t('copilot.applyHint')}</span>
+                                </button>
+                            )}
+                            {aiEnabled && copilotApplied && (
+                                <div className="mt-2 rounded border border-border bg-muted/30 px-2 py-1 text-xs text-muted-foreground">
+                                    ✅ {t('copilot.applied')}{' '}
+                                    {copilotContext ? `${copilotContext} ` : ''}
+                                    {copilotTags.length ? copilotTags.join(' ') : ''}
+                                </div>
+                            )}
+                            {!isProcessing && (
+                                <p className="text-xs text-muted-foreground">
+                                    {t('quickAdd.help')}
+                                </p>
+                            )}
+                        </>
+                    )}
                 />
-            )}
-            {['inbox', 'next'].includes(statusFilter) && aiEnabled && copilotSuggestion && !copilotApplied && (
-                <button
-                    type="button"
-                    onClick={() => applyCopilotSuggestion(copilotSuggestion)}
-                    className="mt-2 text-xs px-2 py-1 rounded bg-muted/30 border border-border text-muted-foreground hover:bg-muted/60 transition-colors text-left"
-                >
-                    ✨ {t('copilot.suggested')}{' '}
-                    {copilotSuggestion.context ? `${copilotSuggestion.context} ` : ''}
-                    {copilotSuggestion.tags?.length ? copilotSuggestion.tags.join(' ') : ''}
-                    <span className="ml-2 text-muted-foreground/70">{t('copilot.applyHint')}</span>
-                </button>
-            )}
-            {['inbox', 'next'].includes(statusFilter) && aiEnabled && copilotApplied && (
-                <div className="mt-2 text-xs px-2 py-1 rounded bg-muted/30 border border-border text-muted-foreground">
-                    ✅ {t('copilot.applied')}{' '}
-                    {copilotContext ? `${copilotContext} ` : ''}
-                    {copilotTags.length ? copilotTags.join(' ') : ''}
-                </div>
-            )}
-            {['inbox', 'next'].includes(statusFilter) && !isProcessing && (
-                <p className="text-xs text-muted-foreground">
-                    {t('quickAdd.help')}
-                </p>
-            )}
-            </div>
             <div
                 ref={listScrollRef}
                 className="flex-1 min-h-0 overflow-y-auto pt-3"
@@ -1349,19 +953,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             confirmLabel={t('common.save')}
             cancelLabel={t('common.cancel')}
             onCancel={() => setTagPromptOpen(false)}
-            onConfirm={async (value) => {
-                const input = value.trim();
-                if (!input) return;
-                const tag = input.startsWith('#') ? input : `#${input}`;
-                await batchUpdateTasks(tagPromptIds.map((id) => {
-                    const task = tasksById.get(id);
-                    const existingTags = task?.tags || [];
-                    const nextTags = Array.from(new Set([...existingTags, tag]));
-                    return { id, updates: { tags: nextTags } };
-                }));
-                setTagPromptOpen(false);
-                exitSelectionMode();
-            }}
+            onConfirm={handleConfirmTagPrompt}
         />
         <PromptModal
             isOpen={contextPromptOpen}
@@ -1372,21 +964,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             confirmLabel={t('common.save')}
             cancelLabel={t('common.cancel')}
             onCancel={() => setContextPromptOpen(false)}
-            onConfirm={async (value) => {
-                const input = value.trim();
-                if (!input) return;
-                const ctx = input.startsWith('@') ? input : `@${input}`;
-                await batchUpdateTasks(contextPromptIds.map((id) => {
-                    const task = tasksById.get(id);
-                    const existing = task?.contexts || [];
-                    const nextContexts = contextPromptMode === 'add'
-                        ? Array.from(new Set([...existing, ctx]))
-                        : existing.filter((token) => token !== ctx);
-                    return { id, updates: { contexts: nextContexts } };
-                }));
-                setContextPromptOpen(false);
-                exitSelectionMode();
-            }}
+            onConfirm={handleConfirmContextPrompt}
         />
         <ConfirmModal
             isOpen={pendingDeleteTask !== null}
@@ -1395,12 +973,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             confirmLabel={t('common.delete') || 'Delete'}
             cancelLabel={t('common.cancel')}
             onCancel={() => setPendingDeleteTask(null)}
-            onConfirm={() => {
-                const task = pendingDeleteTask;
-                setPendingDeleteTask(null);
-                if (!task) return;
-                void runSingleDelete(task).catch((error) => reportError('Failed to delete task', error));
-            }}
+            onConfirm={confirmSingleDelete}
         />
         <ConfirmModal
             isOpen={pendingBatchDeleteIds.length > 0}
@@ -1409,10 +982,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             confirmLabel={t('common.delete') || 'Delete'}
             cancelLabel={t('common.cancel')}
             onCancel={() => setPendingBatchDeleteIds([])}
-            onConfirm={() => {
-                const taskIds = [...pendingBatchDeleteIds];
-                void confirmBatchDelete(taskIds);
-            }}
+            onConfirm={confirmBatchDelete}
         />
         </ErrorBoundary>
     );

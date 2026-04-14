@@ -393,6 +393,21 @@ Recurring Todoist schedules are not recreated automatically. Mindwtr imports the
 
 See [[Todoist Import]] for details and supported mappings.
 
+### DGT GTD JSON / ZIP Import
+
+Mindwtr can import DGT GTD exports from **Settings → Data & Sync / Sync → Import from DGT GTD**.
+
+- Supports a DGT GTD JSON export or a ZIP archive containing the exported JSON file
+- Creates Mindwtr areas from DGT folders
+- Creates Mindwtr projects from DGT projects
+- Preserves DGT checklists as Mindwtr checklist tasks
+- Preserves DGT contexts and tags on imported tasks
+- Keeps supported repeat rules and warns when a DGT repeat pattern must be imported once with the original text preserved
+
+Standalone DGT tasks stay in Mindwtr without forcing them into new projects, so you can organize them afterward if needed.
+
+See [[DGT GTD Import]] for details and supported mappings.
+
 ### Backup Strategy
 
 - Regular exports to sync folder

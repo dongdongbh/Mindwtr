@@ -1,17 +1,41 @@
+import type { Area, Project, Section, Task } from '@mindwtr/core';
 import { shallow, useTaskStore } from '@mindwtr/core';
 import { useUiStore } from '../../store/ui-store';
 
-export const useTaskItemStoreState = () =>
+const EMPTY_PROJECTS: Project[] = [];
+const EMPTY_SECTIONS: Section[] = [];
+const EMPTY_AREAS: Area[] = [];
+
+type UseTaskItemStoreStateParams = {
+    task: Task;
+    propProject?: Project;
+    isEditing: boolean;
+};
+
+export const useTaskItemStoreState = ({ task, propProject, isEditing }: UseTaskItemStoreStateParams) =>
     useTaskStore(
-        (state) => ({
+        (state) => {
+            const derived = state.getDerivedState();
+            const project = propProject ?? (task.projectId ? derived.projectMap.get(task.projectId) : undefined);
+            const projectArea = project?.areaId
+                ? state.areas.find((area) => area.id === project.areaId)
+                : undefined;
+            const taskArea = !task.projectId && task.areaId
+                ? state.areas.find((area) => area.id === task.areaId)
+                : undefined;
+
+            return {
             updateTask: state.updateTask,
             deleteTask: state.deleteTask,
             moveTask: state.moveTask,
-            projects: state.projects,
-            sections: state.sections,
-            areas: state.areas,
+            projects: isEditing ? state.projects : EMPTY_PROJECTS,
+            sections: isEditing ? state.sections : EMPTY_SECTIONS,
+            areas: isEditing ? state.areas : EMPTY_AREAS,
+            project,
+            projectArea,
+            taskArea,
             settings: state.settings,
-            focusedCount: state.getDerivedState().focusedCount,
+            focusedCount: derived.focusedCount,
             duplicateTask: state.duplicateTask,
             resetTaskChecklist: state.resetTaskChecklist,
             restoreTask: state.restoreTask,
@@ -22,7 +46,8 @@ export const useTaskItemStoreState = () =>
             addSection: state.addSection,
             lockEditing: state.lockEditing,
             unlockEditing: state.unlockEditing,
-        }),
+            };
+        },
         shallow
     );
 

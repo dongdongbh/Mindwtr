@@ -2,6 +2,7 @@ import React from 'react';
 
 import { parseInlineMarkdown } from '@mindwtr/core';
 import { cn } from '../lib/utils';
+import { InternalMarkdownLink } from './InternalMarkdownLink';
 
 const TASK_LIST_RE = /^\s{0,3}(?:[-*+]\s+)?\[( |x|X)\]\s+(.+)$/;
 const BULLET_LIST_RE = /^\s{0,3}[-*+]\s+(.+)$/;
@@ -17,15 +18,6 @@ function isBlockBoundary(line: string): boolean {
     if (TASK_LIST_RE.test(line)) return true;
     if (BULLET_LIST_RE.test(line)) return true;
     return false;
-}
-
-function isSafeLink(href: string): boolean {
-    try {
-        const url = new URL(href);
-        return url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === 'mailto:';
-    } catch {
-        return false;
-    }
 }
 
 function renderInline(text: string): React.ReactNode[] {
@@ -45,23 +37,15 @@ function renderInline(text: string): React.ReactNode[] {
             return <em key={`italic-${index}`}>{token.text}</em>;
         }
         if (token.type === 'link') {
-            if (isSafeLink(token.href)) {
-                return (
-                    <a
-                        key={`link-${index}`}
-                        href={token.href}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-primary underline underline-offset-2 hover:opacity-90"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                        }}
-                    >
-                        {token.text}
-                    </a>
-                );
-            }
-            return token.text;
+            return (
+                <InternalMarkdownLink
+                    key={`link-${index}`}
+                    href={token.href}
+                    className="text-primary underline underline-offset-2 hover:opacity-90"
+                >
+                    {token.text}
+                </InternalMarkdownLink>
+            );
         }
         return null;
     }).filter((node): node is string | React.ReactElement => node !== null);

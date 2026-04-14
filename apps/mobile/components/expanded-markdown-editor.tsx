@@ -29,6 +29,7 @@ import { useThemeColors } from '@/hooks/use-theme-colors';
 import { expandedMarkdownEditorStyles as styles } from './expanded-markdown-editor.styles';
 import { KeyboardAccessoryHost } from './keyboard-accessory-host';
 import { MarkdownFormatToolbar } from './markdown-format-toolbar';
+import { MarkdownReferenceAutocomplete } from './markdown-reference-autocomplete';
 import { MarkdownText } from './markdown-text';
 
 const selectionsEqual = (left: MarkdownSelection, right: MarkdownSelection) => (
@@ -288,6 +289,15 @@ export function ExpandedMarkdownEditor({
         restoreEditorFocus(next.selection);
         return next;
     }, [onApplyAction, onChange, onSelectionChange, restoreEditorFocus]);
+    const handleAutocompleteApply = React.useCallback((next: MarkdownToolbarResult) => {
+        valueRef.current = next.value;
+        selectionRef.current = next.selection;
+        setEditorValue(next.value);
+        setEditorSelection(next.selection);
+        onChange(next.value);
+        onSelectionChange(next.selection);
+        restoreEditorFocus(next.selection);
+    }, [onChange, onSelectionChange, restoreEditorFocus]);
 
     return (
         <Modal
@@ -355,6 +365,15 @@ export function ExpandedMarkdownEditor({
                                     onUndo={onUndo}
                                     onApplyAction={handleApplyAction}
                                     onInteractionStart={handleToolbarInteractionStart}
+                                />
+                                <MarkdownReferenceAutocomplete
+                                    value={editorValue}
+                                    selection={editorSelection}
+                                    inputRef={inputRef}
+                                    visible={isInputFocused}
+                                    onApplyResult={handleAutocompleteApply}
+                                    t={t}
+                                    tc={tc}
                                 />
                                 <TextInput
                                     ref={inputRef}

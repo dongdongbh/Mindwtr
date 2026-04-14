@@ -1622,6 +1622,7 @@ export class SyncService {
                     ensureLocalSnapshotFresh();
                     await persistLocalDataWithTracking(data);
                 },
+                flushPendingLocalBeforeRetryRead: syncServiceDependencies.flushPendingSave,
                 prepareRemoteWrite: (data) => SyncService.prepareRemoteWriteData(context, data, helpers),
                 writeRemote: async (data) => {
                     ensureLocalSnapshotFresh();

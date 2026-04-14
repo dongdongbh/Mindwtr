@@ -2,6 +2,8 @@
 
 Mindwtr can import tasks from an Obsidian vault on desktop, keep them refreshed as files change, open the source note back in Obsidian, and perform narrowly-scoped write-back for supported task formats.
 
+Related: [[Markdown Links]]
+
 ## Current Scope
 
 Desktop Obsidian support currently includes:
@@ -12,6 +14,7 @@ Desktop Obsidian support currently includes:
 - deep links back to the source note with `obsidian://`
 - limited write-back for supported task formats
 - support for standard inline Markdown tasks
+- support for Mindwtr internal Markdown task/project references
 - support for TaskNotes files
 
 Out of scope:

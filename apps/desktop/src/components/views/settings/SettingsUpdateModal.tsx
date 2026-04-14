@@ -2,12 +2,12 @@ import { ExternalLink } from 'lucide-react';
 import type { UpdateInfo } from '../../../lib/update-service';
 import { cn } from '../../../lib/utils';
 
-type RecommendedDownload = {
+export type RecommendedDownload = {
     label: string;
     url?: string;
 };
 
-type SettingsUpdateModalProps = {
+export type SettingsUpdateModalProps = {
     isOpen: boolean;
     updateInfo: UpdateInfo | null;
     t: Record<string, string>;

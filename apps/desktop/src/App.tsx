@@ -41,6 +41,7 @@ import {
     applyDesktopTextSize,
     coerceDesktopTextSize,
 } from './lib/text-size';
+import { subscribeNavigateEvent } from './lib/navigation-events';
 import { useUiStore } from './store/ui-store';
 import { useObsidianStore } from './store/obsidian-store';
 
@@ -566,14 +567,9 @@ function App() {
     };
 
     useEffect(() => {
-        const handler: EventListener = (event) => {
-            const detail = (event as CustomEvent<{ view?: string }>).detail;
-            if (detail?.view) {
-                handleViewChange(detail.view);
-            }
-        };
-        window.addEventListener('mindwtr:navigate', handler);
-        return () => window.removeEventListener('mindwtr:navigate', handler);
+        return subscribeNavigateEvent(({ view }) => {
+            handleViewChange(view);
+        });
     }, [handleViewChange]);
 
     return (

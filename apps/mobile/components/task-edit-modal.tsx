@@ -1065,6 +1065,7 @@ function TaskEditModalInner({
         handleDescriptionChange: descriptionEditor.handleDescriptionChange,
         handleDescriptionUndo: descriptionEditor.handleDescriptionUndo,
         handleDescriptionApplyAction: descriptionEditor.handleDescriptionApplyAction,
+        applyDescriptionResult: descriptionEditor.applyDescriptionResult,
         openDescriptionExpandedEditor: descriptionEditor.openDescriptionExpandedEditor,
         downloadAttachment,
         editedTask,

@@ -158,7 +158,7 @@ _Don't show me a cockpit when I just want to ride a bike._
 - ☁️ **Dropbox OAuth Sync (Optional)** - Native Dropbox App Folder sync in supported non-FOSS builds
 - 📤 **Export/Backup** - Export data to JSON
 - ♻️ **Restore from Backup** - Replace local data from a validated Mindwtr backup with a recovery snapshot first
-- 📥 **Todoist CSV/ZIP Import** - Import Todoist exports into Mindwtr projects and Inbox
+- 📥 **Todoist + DGT GTD Import** - Import Todoist CSV/ZIP exports or DGT GTD JSON/ZIP exports into Mindwtr
 - 🔗 **Obsidian Integration** - Desktop vault task import with deep links back to source notes
 - 🗓️ **External Calendars (System + ICS)** - Mobile reads system calendars; desktop supports ICS subscriptions
 
@@ -273,7 +273,7 @@ scoop install mindwtr
 
 **Portable ZIP (no admin required):**
 
-- Download the `*_portable.zip` asset from [GitHub Releases](https://github.com/dongdongbh/Mindwtr/releases).
+- Download `mindwtr_<version>_windows_x64_portable.zip` from [GitHub Releases](https://github.com/dongdongbh/Mindwtr/releases).
 - Extract it to a writable folder and keep `portable.txt` next to `mindwtr.exe`.
 - Mindwtr stores data under `profile/` in the extracted folder.
 
@@ -361,7 +361,6 @@ You can help in several ways:
 ## Roadmap
 
 - 🤖 Add to F-Droid ([#219](https://github.com/dongdongbh/Mindwtr/issues/219))
-- 🗣️ iOS Reminders Inbox import (Siri capture -> Mindwtr Inbox)
 - ✉️ Email to Inbox ([#35](https://github.com/dongdongbh/Mindwtr/issues/35))
 - 🗓️ One-way Mindwtr -> external calendar export/sync ([#361](https://github.com/dongdongbh/Mindwtr/issues/361))
 
@@ -371,6 +370,7 @@ You can help in several ways:
 - 🚀 [Getting Started](https://github.com/dongdongbh/Mindwtr/wiki/Getting-Started)
 - ❓ [FAQ](https://github.com/dongdongbh/Mindwtr/wiki/FAQ)
 - 🔄 [Data & Sync](https://github.com/dongdongbh/Mindwtr/wiki/Data-and-Sync)
+- 🔗 [Markdown Links](https://github.com/dongdongbh/Mindwtr/wiki/Markdown-Links)
 - ☁️ [Cloud Sync](https://github.com/dongdongbh/Mindwtr/wiki/Cloud-Sync)
 - 🛠️ [Cloud Deployment](https://github.com/dongdongbh/Mindwtr/wiki/Cloud-Deployment)
 - 🧠 [MCP Server](https://github.com/dongdongbh/Mindwtr/wiki/MCP-Server)

@@ -3,7 +3,9 @@ import { View, Text, StyleSheet, type TextStyle } from 'react-native';
 import * as Linking from 'expo-linking';
 
 import type { ThemeColors } from '@/hooks/use-theme-colors';
-import { parseInlineMarkdown } from '@mindwtr/core';
+import { parseInlineMarkdown, parseMarkdownReferenceHref, shallow, useTaskStore } from '@mindwtr/core';
+import { useLanguage } from '@/contexts/language-context';
+import { openProjectScreen, openTaskScreen } from '@/lib/task-meta-navigation';
 
 const TASK_LIST_RE = /^\s{0,3}(?:[-*+]\s+)?\[( |x|X)\]\s+(.+)$/;
 const BULLET_LIST_RE = /^\s{0,3}[-*+]\s+(.+)$/;
@@ -22,10 +24,20 @@ function isBlockBoundary(line: string): boolean {
 }
 
 function isSafeLink(href: string): boolean {
-  return /^https?:\/\//i.test(href) || /^mailto:/i.test(href);
+  return /^https?:\/\//i.test(href) || /^mailto:/i.test(href) || /^tel:/i.test(href);
 }
 
-function renderInline(text: string, tc: ThemeColors, keyPrefix: string): React.ReactNode[] {
+function renderInline(
+  text: string,
+  tc: ThemeColors,
+  keyPrefix: string,
+  options: {
+    resolveTask: (id: string) => { title: string; projectId?: string } | null;
+    resolveProject: (id: string) => { title: string } | null;
+    deletedTaskLabel: string;
+    deletedProjectLabel: string;
+  },
+): React.ReactNode[] {
   const nodes: (string | React.ReactElement | null)[] = parseInlineMarkdown(text).map((token, index) => {
     if (token.type === 'text') return token.text;
     if (token.type === 'code') {
@@ -50,6 +62,47 @@ function renderInline(text: string, tc: ThemeColors, keyPrefix: string): React.R
       );
     }
     if (token.type === 'link') {
+      const reference = parseMarkdownReferenceHref(token.href);
+      if (reference?.entityType === 'project') {
+        const project = options.resolveProject(reference.id);
+        if (!project) {
+          return (
+            <Text key={`${keyPrefix}-deleted-project-${index}`} style={[styles.deletedLink, { color: tc.secondaryText }]}>
+              <Text style={styles.struckText}>{token.text}</Text>
+              <Text>{` (${options.deletedProjectLabel})`}</Text>
+            </Text>
+          );
+        }
+        return (
+          <Text
+            key={`${keyPrefix}-project-${index}`}
+            style={[styles.link, { color: tc.tint }]}
+            onPress={() => openProjectScreen(reference.id)}
+          >
+            {token.text}
+          </Text>
+        );
+      }
+      if (reference?.entityType === 'task') {
+        const task = options.resolveTask(reference.id);
+        if (!task) {
+          return (
+            <Text key={`${keyPrefix}-deleted-task-${index}`} style={[styles.deletedLink, { color: tc.secondaryText }]}>
+              <Text style={styles.struckText}>{token.text}</Text>
+              <Text>{` (${options.deletedTaskLabel})`}</Text>
+            </Text>
+          );
+        }
+        return (
+          <Text
+            key={`${keyPrefix}-task-${index}`}
+            style={[styles.link, { color: tc.tint }]}
+            onPress={() => openTaskScreen(reference.id, task.projectId)}
+          >
+            {token.text}
+          </Text>
+        );
+      }
       if (isSafeLink(token.href)) {
         return (
           <Text
@@ -77,11 +130,39 @@ export function MarkdownText({
   tc: ThemeColors;
   direction?: 'ltr' | 'rtl';
 }) {
+  const { t } = useLanguage();
+  const { tasks, projects } = useTaskStore((state) => ({
+    tasks: state._allTasks,
+    projects: state.projects,
+  }), shallow);
   const source = (markdown || '').replace(/\r\n/g, '\n');
   const lines = source.split('\n');
   const directionStyle: TextStyle | undefined = direction
     ? { writingDirection: direction, textAlign: direction === 'rtl' ? 'right' : 'left' }
     : undefined;
+  const deletedTaskLabel = (() => {
+    const translated = t('markdown.referenceDeletedTask');
+    return translated === 'markdown.referenceDeletedTask' ? 'deleted task' : translated;
+  })();
+  const deletedProjectLabel = (() => {
+    const translated = t('markdown.referenceDeletedProject');
+    return translated === 'markdown.referenceDeletedProject' ? 'deleted project' : translated;
+  })();
+  const resolveTask = React.useCallback((id: string) => {
+    const task = tasks.find((candidate) => candidate.id === id && !candidate.deletedAt);
+    if (!task) return null;
+    return {
+      title: task.title,
+      projectId: task.projectId,
+    };
+  }, [tasks]);
+  const resolveProject = React.useCallback((id: string) => {
+    const project = projects.find((candidate) => candidate.id === id && !candidate.deletedAt);
+    if (!project) return null;
+    return {
+      title: project.title,
+    };
+  }, [projects]);
 
   const blocks: React.ReactNode[] = [];
   let i = 0;
@@ -106,7 +187,7 @@ export function MarkdownText({
             directionStyle,
           ]}
         >
-          {renderInline(text, tc, `h-${i}`)}
+          {renderInline(text, tc, `h-${i}`, { resolveTask, resolveProject, deletedTaskLabel, deletedProjectLabel })}
         </Text>
       );
       i += 1;
@@ -139,7 +220,7 @@ export function MarkdownText({
                 {item.checked ? '☑' : '☐'}
               </Text>
               <Text style={[styles.paragraph, styles.taskListText, { color: tc.text }, directionStyle]}>
-                {renderInline(item.text, tc, `task-li-${start}-${idx}`)}
+                {renderInline(item.text, tc, `task-li-${start}-${idx}`, { resolveTask, resolveProject, deletedTaskLabel, deletedProjectLabel })}
               </Text>
             </View>
           ))}
@@ -162,7 +243,7 @@ export function MarkdownText({
         <View key={`ul-${start}`} style={styles.list}>
           {items.map((item, idx) => (
             <Text key={idx} style={[styles.paragraph, { color: tc.text }, directionStyle]}>
-              • {renderInline(item, tc, `li-${start}-${idx}`)}
+              • {renderInline(item, tc, `li-${start}-${idx}`, { resolveTask, resolveProject, deletedTaskLabel, deletedProjectLabel })}
             </Text>
           ))}
         </View>
@@ -179,7 +260,7 @@ export function MarkdownText({
     if (text) {
       blocks.push(
         <Text key={`p-${i}`} style={[styles.paragraph, { color: tc.text }, directionStyle]}>
-          {renderInline(text, tc, `p-${i}`)}
+          {renderInline(text, tc, `p-${i}`, { resolveTask, resolveProject, deletedTaskLabel, deletedProjectLabel })}
         </Text>
       );
     }
@@ -230,6 +311,12 @@ const styles = StyleSheet.create({
   },
   link: {
     textDecorationLine: 'underline',
+  },
+  deletedLink: {
+    textDecorationLine: 'none',
+  },
+  struckText: {
+    textDecorationLine: 'line-through',
   },
   separator: {
     height: StyleSheet.hairlineWidth,

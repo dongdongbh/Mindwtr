@@ -163,6 +163,7 @@ export const zhHant: Record<string, string> = {
         'markdown.edit': '編輯',
         'markdown.expand': 'Expand',
         'markdown.collapse': 'Collapse',
+        'markdown.referenceRestore': '恢復',
         'markdown.toolbar.heading': 'Insert heading',
         'markdown.toolbar.bold': 'Bold',
         'markdown.toolbar.italic': 'Italic',

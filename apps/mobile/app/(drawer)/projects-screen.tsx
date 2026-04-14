@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Modal, Alert, Pressable, ScrollView, SectionList, Dimensions, Platform, Keyboard, ActionSheetIOS } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Modal, Alert, Pressable, ScrollView, SectionList, Dimensions, Platform } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +16,7 @@ import {
   normalizeProjectTag,
   resolveAttachmentValidationMessage,
 } from '@/components/projects-screen/projects-screen.utils';
+import { openProjectAreaPicker, openProjectTagPicker } from '@/components/projects-screen/project-meta-pickers';
 import { ProjectImagePreviewModal, ProjectLinkModal, ProjectTagPickerModal } from '@/components/projects-screen/ProjectOverlayModals';
 import { ProjectRow } from '@/components/projects-screen/ProjectRow';
 import { TaskEditModal } from '@/components/task-edit-modal';
@@ -23,6 +24,7 @@ import { useProjectFiltering, type ProjectSectionItem } from '@/hooks/use-projec
 import { ExpandedMarkdownEditor } from '../../components/expanded-markdown-editor';
 import { KeyboardAccessoryHost } from '../../components/keyboard-accessory-host';
 import { MarkdownFormatToolbar } from '../../components/markdown-format-toolbar';
+import { MarkdownReferenceAutocomplete } from '../../components/markdown-reference-autocomplete';
 import { TaskList } from '../../components/task-list';
 import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { useLanguage } from '../../contexts/language-context';
@@ -71,8 +73,8 @@ export default function ProjectsScreen() {
   const [newAreaName, setNewAreaName] = useState('');
   const [newAreaColor, setNewAreaColor] = useState('#3b82f6');
   const [expandedAreaColorId, setExpandedAreaColorId] = useState<string | null>(null);
-  const { projectId, taskId } = useLocalSearchParams<{ projectId?: string; taskId?: string }>();
-  const lastOpenedTaskIdRef = useRef<string | null>(null);
+  const { projectId, taskId, openToken } = useLocalSearchParams<{ projectId?: string; taskId?: string; openToken?: string }>();
+  const lastOpenedTaskKeyRef = useRef<string | null>(null);
   const selectedProjectNotesRef = useRef('');
   const ALL_TAGS = '__all__';
   const NO_TAGS = '__none__';
@@ -156,13 +158,14 @@ export default function ProjectsScreen() {
   useEffect(() => {
     if (!taskId || typeof taskId !== 'string') return;
     if (!selectedProject || selectedProject.id !== projectId) return;
-    if (lastOpenedTaskIdRef.current === taskId) return;
+    const openKey = `${taskId}:${typeof openToken === 'string' ? openToken : ''}`;
+    if (lastOpenedTaskKeyRef.current === openKey) return;
     const task = tasks.find((item) => item.id === taskId && !item.deletedAt);
     if (!task || task.projectId !== selectedProject.id) return;
-    lastOpenedTaskIdRef.current = taskId;
+    lastOpenedTaskKeyRef.current = openKey;
     setHighlightTask(task.id);
     setEditingTask(task);
-  }, [taskId, projectId, selectedProject, tasks, setHighlightTask]);
+  }, [openToken, taskId, projectId, selectedProject, tasks, setHighlightTask]);
 
   useEffect(() => {
     selectedProjectNotesRef.current = selectedProject?.supportNotes || '';
@@ -428,314 +431,39 @@ export default function ProjectsScreen() {
   };
 
   const openAreaPicker = () => {
-    Keyboard.dismiss();
-    setShowStatusMenu(false);
-    if (Platform.OS === 'ios' && selectedProject) {
-      const manageAreasLabel = (() => {
-        const translated = t('projects.manageAreas');
-        return translated === 'projects.manageAreas' ? 'Manage areas' : translated;
-      })();
-      const chooseColorLabel = (() => {
-        const translated = t('projects.changeColor');
-        return translated === 'projects.changeColor' ? 'Choose color' : translated;
-      })();
-      const nextLabel = (() => {
-        const translated = t('common.next');
-        return translated === 'common.next' ? 'Next' : translated;
-      })();
-      const createAreaWithColor = (onCreated: (created: Area) => void, logMessage: string) => {
-        Alert.prompt(
-          t('projects.areaLabel'),
-          `${t('common.add')} ${t('projects.areaLabel')}`,
-          [
-            { text: t('common.cancel'), style: 'cancel' },
-            {
-              text: nextLabel,
-              onPress: (value?: string) => {
-                const name = (value ?? '').trim();
-                if (!name) return;
-                ActionSheetIOS.showActionSheetWithOptions(
-                  {
-                    options: [
-                      t('common.cancel'),
-                      ...colors.map((color) => {
-                        const colorMeta = colorDisplayByHex[color] ?? { nameKey: '', swatch: '◯' };
-                        const colorName = colorMeta.nameKey ? t(colorMeta.nameKey) : color.toUpperCase();
-                        return `${colorMeta.swatch} ${colorName}`;
-                      }),
-                    ],
-                    cancelButtonIndex: 0,
-                    title: chooseColorLabel,
-                  },
-                  async (colorIndex) => {
-                    if (colorIndex <= 0) return;
-                    const color = colors[colorIndex - 1];
-                    if (!color) return;
-                    try {
-                      const created = await addArea(name, { color });
-                      if (!created) return;
-                      onCreated(created);
-                    } catch (error) {
-                      logProjectError(logMessage, error);
-                    }
-                  }
-                );
-              },
-            },
-          ],
-          'plain-text'
-        );
-      };
-      const openIOSAreaManager = () => {
-        const editAreaLabel = (() => {
-          const translated = t('projects.editArea');
-          return translated === 'projects.editArea' ? 'Edit area' : translated;
-        })();
-        const renameAreaLabel = (() => {
-          const translated = t('projects.renameArea');
-          return translated === 'projects.renameArea' ? 'Rename area' : translated;
-        })();
-        const changeColorLabel = (() => {
-          const translated = t('projects.changeColor');
-          return translated === 'projects.changeColor' ? 'Change color' : translated;
-        })();
-        const openIOSAreaEditor = (area: Area) => {
-          ActionSheetIOS.showActionSheetWithOptions(
-            {
-              options: [t('common.cancel'), renameAreaLabel, changeColorLabel],
-              cancelButtonIndex: 0,
-              title: area.name,
-            },
-            (editIndex) => {
-              if (editIndex === 0) return;
-              if (editIndex === 1) {
-                Alert.prompt(
-                  renameAreaLabel,
-                  area.name,
-                  [
-                    { text: t('common.cancel'), style: 'cancel' },
-                    {
-                      text: t('common.save'),
-                      onPress: async (value?: string) => {
-                        const nextName = (value ?? '').trim();
-                        if (!nextName || nextName === area.name) return;
-                        try {
-                          await updateArea(area.id, { name: nextName });
-                        } catch (error) {
-                          logProjectError('Failed to rename area on iOS', error);
-                        }
-                      },
-                    },
-                  ],
-                  'plain-text',
-                  area.name
-                );
-                return;
-              }
-              ActionSheetIOS.showActionSheetWithOptions(
-                {
-                  options: [
-                    t('common.cancel'),
-                    ...colors.map((color) => {
-                      const colorMeta = colorDisplayByHex[color] ?? { nameKey: '', swatch: '◯' };
-                      const colorName = colorMeta.nameKey ? t(colorMeta.nameKey) : color.toUpperCase();
-                      return `${area.color === color ? '✓ ' : ''}${colorMeta.swatch} ${colorName}`;
-                    }),
-                  ],
-                  cancelButtonIndex: 0,
-                  title: changeColorLabel,
-                },
-                async (colorIndex) => {
-                  if (colorIndex <= 0) return;
-                  const color = colors[colorIndex - 1];
-                  if (!color || color === area.color) return;
-                  try {
-                    await updateArea(area.id, { color });
-                  } catch (error) {
-                    logProjectError('Failed to change area color on iOS', error);
-                  }
-                }
-              );
-            }
-          );
-        };
-        ActionSheetIOS.showActionSheetWithOptions(
-          {
-            options: [
-              t('common.cancel'),
-              `${t('common.add')} ${t('projects.areaLabel')}`,
-              editAreaLabel,
-              t('projects.sortByName'),
-              t('projects.sortByColor'),
-              t('common.delete'),
-            ],
-            cancelButtonIndex: 0,
-            title: manageAreasLabel,
-          },
-          (manageIndex) => {
-            if (manageIndex === 0) return;
-            if (manageIndex === 1) {
-              createAreaWithColor((created) => {
-                updateProject(selectedProject.id, { areaId: created.id });
-                setSelectedProject({ ...selectedProject, areaId: created.id });
-              }, 'Failed to create area from iOS manager');
-              return;
-            }
-            if (manageIndex === 2) {
-              if (sortedAreas.length === 0) {
-                showToast({
-                  title: t('common.notice') || 'Notice',
-                  message: t('projects.noArea'),
-                  tone: 'warning',
-                });
-                return;
-              }
-              ActionSheetIOS.showActionSheetWithOptions(
-                {
-                  options: [t('common.cancel'), ...sortedAreas.map((area) => area.name)],
-                  cancelButtonIndex: 0,
-                  title: editAreaLabel,
-                },
-                (areaIndex) => {
-                  if (areaIndex <= 0) return;
-                  const target = sortedAreas[areaIndex - 1];
-                  if (!target) return;
-                  openIOSAreaEditor(target);
-                }
-              );
-              return;
-            }
-            if (manageIndex === 3) {
-              sortAreasByName();
-              return;
-            }
-            if (manageIndex === 4) {
-              sortAreasByColor();
-              return;
-            }
-            const deletableAreas = sortedAreas.filter((area) => (areaUsage.get(area.id) || 0) === 0);
-            if (deletableAreas.length === 0) {
-              showToast({
-                title: t('common.notice') || 'Notice',
-                message: t('projects.areaInUse') || 'Area has projects.',
-                tone: 'warning',
-              });
-              return;
-            }
-            ActionSheetIOS.showActionSheetWithOptions(
-              {
-                options: [t('common.cancel'), ...deletableAreas.map((area) => `${t('common.delete')} ${area.name}`)],
-                cancelButtonIndex: 0,
-                destructiveButtonIndex: deletableAreas.length > 0 ? 1 : undefined,
-                title: t('common.delete'),
-              },
-              (deleteIndex) => {
-                if (deleteIndex <= 0) return;
-                const target = deletableAreas[deleteIndex - 1];
-                if (!target) return;
-                deleteArea(target.id);
-              }
-            );
-          }
-        );
-      };
-      const options = [
-        t('common.cancel'),
-        t('projects.noArea'),
-        `${t('common.add')} ${t('projects.areaLabel')}`,
-        manageAreasLabel,
-        ...sortedAreas.map((area) => area.name),
-      ];
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options,
-          cancelButtonIndex: 0,
-          title: t('projects.areaLabel'),
-        },
-        (buttonIndex) => {
-          if (!selectedProject) return;
-          if (buttonIndex === 0) return;
-          if (buttonIndex === 1) {
-            updateProject(selectedProject.id, { areaId: undefined });
-            setSelectedProject({ ...selectedProject, areaId: undefined });
-            return;
-          }
-          if (buttonIndex === 2) {
-            createAreaWithColor((created) => {
-              updateProject(selectedProject.id, { areaId: created.id });
-              setSelectedProject({ ...selectedProject, areaId: created.id });
-            }, 'Failed to create area from iOS action sheet');
-            return;
-          }
-          if (buttonIndex === 3) {
-            openIOSAreaManager();
-            return;
-          }
-          const pickedArea = sortedAreas[buttonIndex - 4];
-          if (!pickedArea) return;
-          updateProject(selectedProject.id, { areaId: pickedArea.id });
-          setSelectedProject({ ...selectedProject, areaId: pickedArea.id });
-        }
-      );
-      return;
-    }
-    setShowAreaPicker(true);
+    openProjectAreaPicker({
+      addArea,
+      areaUsage,
+      colorDisplayByHex,
+      colors,
+      deleteArea,
+      logProjectError,
+      selectedProject,
+      setSelectedProject,
+      setShowAreaPicker,
+      setShowStatusMenu,
+      showToast,
+      sortAreasByColor,
+      sortAreasByName,
+      sortedAreas,
+      t,
+      updateArea,
+      updateProject,
+    });
   };
 
   const openTagPicker = () => {
-    Keyboard.dismiss();
-    setShowStatusMenu(false);
-    if (Platform.OS === 'ios' && selectedProject) {
-      const existingTags = selectedProject.tagIds || [];
-      const tagOptions = projectTagOptions.slice(0, 25);
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: [
-            t('common.cancel'),
-            `${t('common.add')} ${t('taskEdit.tagsLabel')}`,
-            t('common.clear'),
-            ...tagOptions.map((tag) => (existingTags.includes(tag) ? `✓ ${tag}` : tag)),
-          ],
-          cancelButtonIndex: 0,
-          title: t('taskEdit.tagsLabel'),
-        },
-        (buttonIndex) => {
-          if (buttonIndex === 0) return;
-          if (buttonIndex === 1) {
-            Alert.prompt(
-              t('taskEdit.tagsLabel'),
-              `${t('common.add')} ${t('taskEdit.tagsLabel')}`,
-              [
-                { text: t('common.cancel'), style: 'cancel' },
-                {
-                  text: t('common.save'),
-                  onPress: (value?: string) => {
-                    const normalized = normalizeProjectTag(value ?? '');
-                    if (!normalized) return;
-                    const next = Array.from(new Set([...(selectedProject.tagIds || []), normalized]));
-                    updateProject(selectedProject.id, { tagIds: next });
-                    setSelectedProject({ ...selectedProject, tagIds: next });
-                  },
-                },
-              ],
-              'plain-text'
-            );
-            return;
-          }
-          if (buttonIndex === 2) {
-            updateProject(selectedProject.id, { tagIds: [] });
-            setSelectedProject({ ...selectedProject, tagIds: [] });
-            return;
-          }
-          const pickedTag = tagOptions[buttonIndex - 3];
-          if (!pickedTag) return;
-          toggleProjectTag(pickedTag);
-        }
-      );
-      return;
-    }
-    setTagDraft('');
-    setShowTagPicker(true);
+    openProjectTagPicker({
+      projectTagOptions,
+      selectedProject,
+      setSelectedProject,
+      setShowStatusMenu,
+      setShowTagPicker,
+      setTagDraft,
+      t,
+      toggleProjectTag,
+      updateProject,
+    });
   };
 
   const updateAttachmentStatus = (
@@ -1284,6 +1012,24 @@ export default function ProjectsScreen() {
                               canUndo={selectedProjectNotesUndoDepth > 0}
                               onUndo={handleSelectedProjectNotesUndo}
                               onApplyAction={handleSelectedProjectNotesApplyAction}
+                            />
+                            <MarkdownReferenceAutocomplete
+                              value={selectedProjectNotes}
+                              selection={selectedProjectNotesSelection}
+                              inputRef={selectedProjectNotesInputRef}
+                              visible={isSelectedProjectNotesFocused}
+                              onApplyResult={(next) => {
+                                applySelectedProjectNotesValue(next.value, {
+                                  baseSelection: selectedProjectNotesSelectionRef.current,
+                                  nextSelection: next.selection,
+                                });
+                                selectedProjectNotesSelectionRef.current = next.selection;
+                                if (selectedProject) {
+                                  updateProject(selectedProject.id, { supportNotes: next.value });
+                                }
+                              }}
+                              t={t}
+                              tc={tc}
                             />
                             <TextInput
                               ref={selectedProjectNotesInputRef}

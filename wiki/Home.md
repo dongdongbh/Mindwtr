@@ -51,6 +51,7 @@ Mindwtr is **simple by default and powerful when needed**. We focus on reducing 
 - [[Data and Sync]] — Storage locations and sync setup
 - [[Backup and Restore]] — Export backups, restore local data, and use recovery snapshots
 - [[Todoist Import]] — Import Todoist CSV or ZIP exports into Mindwtr
+- [[DGT GTD Import]] — Import DGT GTD JSON or ZIP exports into Mindwtr
 - [[iCloud Sync]] — Native Apple-only iCloud / CloudKit backend
 - [[Sync Algorithm]] — Conflict rules, tombstones, and merge behavior
 - Self-hosted cloud setup is split between [[Data and Sync]] (client setup) and [[Cloud Deployment]] (server operations)

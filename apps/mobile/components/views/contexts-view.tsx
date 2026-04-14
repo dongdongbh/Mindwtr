@@ -246,7 +246,9 @@ export function ContextsView() {
     }
     return bulkTokenPicker.action === 'add' ? addContextOptions : removableContextOptions;
   })();
-  const tokenPickerPlaceholder = bulkTokenPicker?.field === 'tags' ? '#tag' : '@context';
+  const tokenPickerPlaceholder = bulkTokenPicker?.field === 'tags'
+    ? t('taskEdit.tagsPlaceholder')
+    : t('taskEdit.contextsPlaceholder');
 
   const handleBulkTokenConfirm = async (value: string) => {
     if (!bulkTokenPicker || !hasSelection) return;

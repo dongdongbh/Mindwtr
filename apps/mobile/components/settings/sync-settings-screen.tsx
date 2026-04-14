@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Constants from 'expo-constants';
-import { ActivityIndicator, Alert, Platform, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -78,8 +78,26 @@ import {
 
 import { CloudProvider, MobileExtraConfig, isValidHttpUrl } from './settings.constants';
 import { useSettingsLocalization, useSettingsScrollContent } from './settings.hooks';
+import { SyncCloudKitBackendPanel } from './sync-settings-cloudkit-panel';
+import { SyncDropboxBackendPanel } from './sync-settings-dropbox-panel';
+import { SyncFileBackendPanel } from './sync-settings-file-panel';
+import {
+    SyncBackupSection,
+    SyncDiagnosticsCard,
+    SyncLastStatusCard,
+    SyncPreferencesCard,
+} from './sync-settings-sections';
+import { SyncSelfHostedBackendPanel, type SelfHostedSyncSettings } from './sync-settings-selfhosted-panel';
+import { SyncWebDavBackendPanel, type WebDavSyncSettings } from './sync-settings-webdav-panel';
 import { SettingsTopBar, SubHeader } from './settings.shell';
 import { styles } from './settings.styles';
+
+type SyncActionOptions = {
+    backend?: 'file' | 'webdav' | 'cloud' | 'cloudkit';
+    cloud?: SelfHostedSyncSettings;
+    cloudProvider?: CloudProvider;
+    webdav?: WebDavSyncSettings;
+};
 
 export function SyncSettingsScreen() {
     const tc = useThemeColors();
@@ -140,8 +158,6 @@ export function SyncSettingsScreen() {
     ].slice(0, 6);
     const loggingEnabled = settings.diagnostics?.loggingEnabled === true;
     const isBackupBusy = backupAction !== null;
-    const webdavUrlError = webdavUrl.trim() ? !isValidHttpUrl(webdavUrl.trim()) : false;
-    const cloudUrlError = cloudUrl.trim() ? !isValidHttpUrl(cloudUrl.trim()) : false;
     const backendOptions: ('off' | 'file' | 'webdav' | 'cloud')[] = ['off', 'file', 'webdav', 'cloud'];
     const isCloudSyncSelected = syncBackend === 'cloud' || syncBackend === 'cloudkit';
     const showSettingsWarning = useCallback((title: string, message: string, durationMs = 4200) => {
@@ -977,29 +993,105 @@ export function SyncSettingsScreen() {
         }
     };
 
-    const handleSync = async () => {
+    const handleSaveWebDavSettings = async (nextSettings: WebDavSyncSettings) => {
+        const trimmedUrl = nextSettings.url.trim();
+        if (!trimmedUrl || !isValidHttpUrl(trimmedUrl)) {
+            showSettingsWarning(localize('Invalid URL', '地址无效'), localize('Please enter a valid WebDAV URL (http/https).', '请输入有效的 WebDAV 地址（http/https）。'));
+            return;
+        }
+        const trimmedUsername = nextSettings.username.trim();
+        try {
+            await AsyncStorage.multiSet([
+                [SYNC_BACKEND_KEY, 'webdav'],
+                [WEBDAV_URL_KEY, trimmedUrl],
+                [WEBDAV_USERNAME_KEY, trimmedUsername],
+                [WEBDAV_PASSWORD_KEY, nextSettings.password],
+            ]);
+            setWebdavUrl(trimmedUrl);
+            setWebdavUsername(trimmedUsername);
+            setWebdavPassword(nextSettings.password);
+            setSyncBackend('webdav');
+            resetSyncStatusForBackendSwitch();
+            showToast({
+                title: localize('Success', '成功'),
+                message: t('settings.webdavSave'),
+                tone: 'success',
+            });
+        } catch (error) {
+            logSettingsError(error);
+            showSettingsErrorToast(
+                localize('Error', '错误'),
+                localize('Failed to save WebDAV settings', '保存 WebDAV 设置失败')
+            );
+        }
+    };
+
+    const handleSaveSelfHostedSettings = async (nextSettings: SelfHostedSyncSettings) => {
+        const trimmedUrl = nextSettings.url.trim();
+        if (!trimmedUrl || !isValidHttpUrl(trimmedUrl)) {
+            showSettingsWarning(localize('Invalid URL', '地址无效'), localize('Please enter a valid self-hosted URL (http/https).', '请输入有效的自托管地址（http/https）。'));
+            return;
+        }
+        try {
+            await AsyncStorage.multiSet([
+                [SYNC_BACKEND_KEY, 'cloud'],
+                [CLOUD_PROVIDER_KEY, 'selfhosted'],
+                [CLOUD_URL_KEY, trimmedUrl],
+                [CLOUD_TOKEN_KEY, nextSettings.token],
+            ]);
+            setCloudUrl(trimmedUrl);
+            setCloudToken(nextSettings.token);
+            setCloudProvider('selfhosted');
+            setSyncBackend('cloud');
+            resetSyncStatusForBackendSwitch();
+            showToast({
+                title: localize('Success', '成功'),
+                message: t('settings.cloudSave'),
+                tone: 'success',
+            });
+        } catch (error) {
+            logSettingsError(error);
+            showSettingsErrorToast(
+                localize('Error', '错误'),
+                localize('Failed to save self-hosted settings', '保存自托管设置失败')
+            );
+        }
+    };
+
+    const handleSync = async (options?: SyncActionOptions) => {
         addBreadcrumb('sync:manual');
         setIsSyncing(true);
         try {
             const previousLastSyncStatus = settings.lastSyncStatus;
             const previousLastSyncStats = settings.lastSyncStats ?? null;
-            if (syncBackend === 'off') return;
-            if (syncBackend === 'webdav') {
-                if (!webdavUrl.trim()) {
+            const effectiveBackend = options?.backend ?? syncBackend;
+            const effectiveCloud = options?.cloud ?? { token: cloudToken, url: cloudUrl };
+            const effectiveCloudProvider = options?.cloudProvider ?? cloudProvider;
+            const effectiveWebdav = options?.webdav ?? { password: webdavPassword, url: webdavUrl, username: webdavUsername };
+
+            if (effectiveBackend === 'off') return;
+            if (effectiveBackend === 'webdav') {
+                const trimmedWebDavUrl = effectiveWebdav.url.trim();
+                if (!trimmedWebDavUrl) {
                     showSettingsWarning(localize('Notice', '提示'), localize('Please set a WebDAV URL first', '请先设置 WebDAV 地址'));
                     return;
                 }
-                if (webdavUrlError) {
+                if (!isValidHttpUrl(trimmedWebDavUrl)) {
                     showSettingsWarning(localize('Invalid URL', '地址无效'), localize('Please enter a valid WebDAV URL (http/https).', '请输入有效的 WebDAV 地址（http/https）。'));
                     return;
                 }
+                const trimmedWebDavUsername = effectiveWebdav.username.trim();
                 await AsyncStorage.multiSet([
                     [SYNC_BACKEND_KEY, 'webdav'],
-                    [WEBDAV_URL_KEY, webdavUrl.trim()],
-                    [WEBDAV_USERNAME_KEY, webdavUsername.trim()],
-                    [WEBDAV_PASSWORD_KEY, webdavPassword],
+                    [WEBDAV_URL_KEY, trimmedWebDavUrl],
+                    [WEBDAV_USERNAME_KEY, trimmedWebDavUsername],
+                    [WEBDAV_PASSWORD_KEY, effectiveWebdav.password],
                 ]);
-            } else if (syncBackend === 'cloudkit') {
+                setWebdavUrl(trimmedWebDavUrl);
+                setWebdavUsername(trimmedWebDavUsername);
+                setWebdavPassword(effectiveWebdav.password);
+                setSyncBackend('webdav');
+            } else if (effectiveBackend === 'cloudkit') {
                 const accountStatus = await getCloudKitAccountStatus();
                 setCloudKitAccountStatus(accountStatus);
                 const statusDetails = getCloudKitStatusDetails(accountStatus);
@@ -1007,9 +1099,14 @@ export function SyncSettingsScreen() {
                     showSettingsWarning(localize('iCloud unavailable', 'iCloud 不可用'), statusDetails.helpText, 5200);
                     return;
                 }
-                await AsyncStorage.setItem(SYNC_BACKEND_KEY, 'cloudkit');
-            } else if (syncBackend === 'cloud') {
-                if (cloudProvider === 'dropbox') {
+                await AsyncStorage.multiSet([
+                    [SYNC_BACKEND_KEY, 'cloudkit'],
+                    [CLOUD_PROVIDER_KEY, 'cloudkit'],
+                ]);
+                setCloudProvider('cloudkit');
+                setSyncBackend('cloudkit');
+            } else if (effectiveBackend === 'cloud') {
+                if (effectiveCloudProvider === 'dropbox') {
                     if (isFossBuild) {
                         showSettingsWarning(localize('Dropbox unavailable', 'Dropbox 不可用'), localize('Dropbox is disabled in FOSS builds.', 'FOSS 构建不支持 Dropbox。'));
                         return;
@@ -1027,21 +1124,28 @@ export function SyncSettingsScreen() {
                         [SYNC_BACKEND_KEY, 'cloud'],
                         [CLOUD_PROVIDER_KEY, 'dropbox'],
                     ]);
+                    setCloudProvider('dropbox');
+                    setSyncBackend('cloud');
                 } else {
-                    if (!cloudUrl.trim()) {
+                    const trimmedCloudUrl = effectiveCloud.url.trim();
+                    if (!trimmedCloudUrl) {
                         showSettingsWarning(localize('Notice', '提示'), localize('Please set a self-hosted URL first', '请先设置自托管地址'));
                         return;
                     }
-                    if (cloudUrlError) {
+                    if (!isValidHttpUrl(trimmedCloudUrl)) {
                         showSettingsWarning(localize('Invalid URL', '地址无效'), localize('Please enter a valid self-hosted URL (http/https).', '请输入有效的自托管地址（http/https）。'));
                         return;
                     }
                     await AsyncStorage.multiSet([
                         [SYNC_BACKEND_KEY, 'cloud'],
                         [CLOUD_PROVIDER_KEY, 'selfhosted'],
-                        [CLOUD_URL_KEY, cloudUrl.trim()],
-                        [CLOUD_TOKEN_KEY, cloudToken],
+                        [CLOUD_URL_KEY, trimmedCloudUrl],
+                        [CLOUD_TOKEN_KEY, effectiveCloud.token],
                     ]);
+                    setCloudUrl(trimmedCloudUrl);
+                    setCloudToken(effectiveCloud.token);
+                    setCloudProvider('selfhosted');
+                    setSyncBackend('cloud');
                 }
             } else {
                 if (!syncPath) {
@@ -1049,10 +1153,11 @@ export function SyncSettingsScreen() {
                     return;
                 }
                 await AsyncStorage.setItem(SYNC_BACKEND_KEY, 'file');
+                setSyncBackend('file');
             }
 
             resetSyncStatusForBackendSwitch();
-            const result = await performMobileSync(syncBackend === 'file' ? syncPath || undefined : undefined);
+            const result = await performMobileSync(effectiveBackend === 'file' ? syncPath || undefined : undefined);
             if (result.skipped === 'offline' || isLikelyOfflineSyncError(result.error)) {
                 showToast({
                     title: localize('Offline', '离线'),
@@ -1126,17 +1231,21 @@ export function SyncSettingsScreen() {
         }
     };
 
-    const handleTestConnection = async (backend: 'webdav' | 'cloud') => {
+    const handleTestConnection = async (backend: 'webdav' | 'cloud', options?: Omit<SyncActionOptions, 'backend'>) => {
         setIsTestingConnection(true);
+        const effectiveCloud = options?.cloud ?? { token: cloudToken, url: cloudUrl };
+        const effectiveCloudProvider = options?.cloudProvider ?? cloudProvider;
+        const effectiveWebdav = options?.webdav ?? { password: webdavPassword, url: webdavUrl, username: webdavUsername };
         try {
             if (backend === 'webdav') {
-                if (!webdavUrl.trim() || webdavUrlError) {
+                const trimmedWebDavUrl = effectiveWebdav.url.trim();
+                if (!trimmedWebDavUrl || !isValidHttpUrl(trimmedWebDavUrl)) {
                     showSettingsWarning(localize('Invalid URL', '地址无效'), localize('Please enter a valid WebDAV URL (http/https).', '请输入有效的 WebDAV 地址（http/https）。'));
                     return;
                 }
-                await webdavGetJson<unknown>(webdavUrl.trim().replace(/\/+$/, ''), {
-                    username: webdavUsername.trim(),
-                    password: webdavPassword,
+                await webdavGetJson<unknown>(trimmedWebDavUrl.replace(/\/+$/, ''), {
+                    username: effectiveWebdav.username.trim(),
+                    password: effectiveWebdav.password,
                     timeoutMs: 10_000,
                 });
                 showToast({
@@ -1147,7 +1256,7 @@ export function SyncSettingsScreen() {
                 return;
             }
 
-            if (cloudProvider === 'dropbox') {
+            if (effectiveCloudProvider === 'dropbox') {
                 if (isFossBuild) {
                     showSettingsWarning(localize('Dropbox unavailable', 'Dropbox 不可用'), localize('Dropbox is disabled in FOSS builds.', 'FOSS 构建不支持 Dropbox。'));
                     return;
@@ -1162,12 +1271,13 @@ export function SyncSettingsScreen() {
                 return;
             }
 
-            if (!cloudUrl.trim() || cloudUrlError) {
+            const trimmedCloudUrl = effectiveCloud.url.trim();
+            if (!trimmedCloudUrl || !isValidHttpUrl(trimmedCloudUrl)) {
                 showSettingsWarning(localize('Invalid URL', '地址无效'), localize('Please enter a valid self-hosted URL (http/https).', '请输入有效的自托管地址（http/https）。'));
                 return;
             }
-            await cloudGetJson<unknown>(cloudUrl.trim().replace(/\/+$/, ''), {
-                token: cloudToken,
+            await cloudGetJson<unknown>(trimmedCloudUrl.replace(/\/+$/, ''), {
+                token: effectiveCloud.token,
                 timeoutMs: 10_000,
             });
             showToast({
@@ -1177,12 +1287,12 @@ export function SyncSettingsScreen() {
             });
         } catch (error) {
             logSettingsWarn('Sync connection test failed', error);
-            if (cloudProvider === 'dropbox' && isDropboxUnauthorizedSettingsError(error)) {
+            if (effectiveCloudProvider === 'dropbox' && isDropboxUnauthorizedSettingsError(error)) {
                 setDropboxConnected(false);
             }
             showSettingsErrorToast(
                 localize('Connection failed', '连接失败'),
-                cloudProvider === 'dropbox' && isDropboxUnauthorizedSettingsError(error)
+                effectiveCloudProvider === 'dropbox' && isDropboxUnauthorizedSettingsError(error)
                     ? localize(
                         'Dropbox token is invalid or revoked. Please tap Connect Dropbox to re-authorize.',
                         'Dropbox 令牌无效或已失效。请点击“连接 Dropbox”重新授权。'
@@ -1196,42 +1306,19 @@ export function SyncSettingsScreen() {
     };
 
     const lastSyncCard = (
-        <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 12 }]}>
-            <View style={styles.settingRow}>
-                <View style={styles.settingInfo}>
-                    <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.lastSync')}</Text>
-                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                        {settings.lastSyncAt ? new Date(settings.lastSyncAt).toLocaleString() : t('settings.lastSyncNever')}
-                        {settings.lastSyncStatus === 'error' && t('settings.syncStatusFailedSuffix')}
-                        {settings.lastSyncStatus === 'conflict' && t('settings.syncStatusConflictsSuffix')}
-                    </Text>
-                    {showLastSyncStats && (
-                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                            {t('settings.lastSyncConflicts')}: {syncConflictCount}
-                        </Text>
-                    )}
-                    {showLastSyncStats && maxClockSkewMs > 0 && (
-                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                            {t('settings.lastSyncSkew')}: {formatClockSkew(maxClockSkewMs)}
-                        </Text>
-                    )}
-                    {showLastSyncStats && timestampAdjustments > 0 && (
-                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                            {t('settings.lastSyncAdjusted')}: {timestampAdjustments}
-                        </Text>
-                    )}
-                    {showLastSyncStats && conflictIds.length > 0 && (
-                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                            {t('settings.lastSyncConflictIds')}: {conflictIds.join(', ')}
-                        </Text>
-                    )}
-                    {settings.lastSyncStatus === 'error' && settings.lastSyncError && (
-                        <Text style={[styles.settingDescription, { color: '#EF4444' }]}>{settings.lastSyncError}</Text>
-                    )}
-                    {renderSyncHistory()}
-                </View>
-            </View>
-        </View>
+        <SyncLastStatusCard
+            conflictCount={syncConflictCount}
+            conflictIds={conflictIds}
+            historyContent={renderSyncHistory()}
+            lastSyncAt={settings.lastSyncAt}
+            lastSyncError={settings.lastSyncError}
+            lastSyncStatus={settings.lastSyncStatus}
+            maxClockSkewLabel={maxClockSkewMs > 0 ? formatClockSkew(maxClockSkewMs) : undefined}
+            showLastSyncStats={showLastSyncStats}
+            t={t}
+            tc={tc}
+            timestampAdjustments={timestampAdjustments}
+        />
     );
 
     return (
@@ -1310,161 +1397,33 @@ export function SyncSettingsScreen() {
                 )}
 
                 {syncBackend === 'file' && (
-                    <>
-                        <View style={[styles.helpBox, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
-                            <Text style={[styles.helpTitle, { color: tc.text }]}>{localize('How to Sync', '如何同步')}</Text>
-                            <Text style={[styles.helpText, { color: tc.secondaryText }]}>
-                                {Platform.OS === 'ios' ? t('settings.fileSyncHowToIos') : t('settings.fileSyncHowToAndroid')}
-                            </Text>
-                            <Text style={[styles.helpText, { color: tc.secondaryText, marginTop: 8 }]}>{t('settings.fileSyncTip')}</Text>
-                        </View>
-
-                        <Text style={[styles.sectionTitle, { color: tc.text, marginTop: 16 }]}>{t('settings.syncSettings')}</Text>
-                        <View style={[styles.settingCard, { backgroundColor: tc.cardBg }]}>
-                            <View style={styles.settingRow}>
-                                <View style={styles.settingInfo}>
-                                    <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.syncFolderLocation')}</Text>
-                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]} numberOfLines={1}>
-                                        {syncPath ? syncPath.split('/').pop() : t('common.notSet')}
-                                    </Text>
-                                </View>
-                                <TouchableOpacity onPress={() => void handleSetSyncPath()}>
-                                    <Text style={styles.linkText}>{t('settings.selectFolder')}</Text>
-                                </TouchableOpacity>
-                            </View>
-                            <TouchableOpacity
-                                style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
-                                onPress={() => void handleSync()}
-                                disabled={isSyncing || !syncPath}
-                            >
-                                <View style={styles.settingInfo}>
-                                    <Text style={[styles.settingLabel, { color: syncPath ? '#3B82F6' : tc.secondaryText }]}>{t('settings.syncNow')}</Text>
-                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.syncReadMergeFolder')}</Text>
-                                </View>
-                                {isSyncing && <ActivityIndicator size="small" color="#3B82F6" />}
-                            </TouchableOpacity>
-                            <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                <View style={styles.settingInfo}>{lastSyncCard}</View>
-                            </View>
-                        </View>
-                    </>
+                    <SyncFileBackendPanel
+                        isSyncing={isSyncing}
+                        lastSyncCard={lastSyncCard}
+                        localize={localize}
+                        onSelectFolder={() => void handleSetSyncPath()}
+                        onSync={() => void handleSync({ backend: 'file' })}
+                        syncPath={syncPath}
+                        t={t}
+                        tc={tc}
+                    />
                 )}
 
                 {syncBackend === 'webdav' && (
-                    <>
-                        <Text style={[styles.sectionTitle, { color: tc.text, marginTop: 16 }]}>{t('settings.syncBackendWebdav')}</Text>
-                        <View style={[styles.settingCard, { backgroundColor: tc.cardBg }]}>
-                            <View style={styles.inputGroup}>
-                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.webdavUrl')}</Text>
-                                <TextInput
-                                    value={webdavUrl}
-                                    onChangeText={setWebdavUrl}
-                                    placeholder={t('settings.webdavUrlPlaceholder')}
-                                    placeholderTextColor={tc.secondaryText}
-                                    autoCapitalize="none"
-                                    autoCorrect={false}
-                                    style={[styles.textInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-                                />
-                                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.webdavHint')}</Text>
-                                {webdavUrlError && (
-                                    <Text style={[styles.settingDescription, { color: '#EF4444' }]}>{t('settings.invalidUrlHttp')}</Text>
-                                )}
-                            </View>
-                            <View style={[styles.inputGroup, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.webdavUsername')}</Text>
-                                <TextInput
-                                    value={webdavUsername}
-                                    onChangeText={setWebdavUsername}
-                                    placeholder={t('settings.webdavUsernamePlaceholder')}
-                                    placeholderTextColor={tc.secondaryText}
-                                    autoCapitalize="none"
-                                    autoCorrect={false}
-                                    style={[styles.textInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-                                />
-                            </View>
-                            <View style={[styles.inputGroup, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.webdavPassword')}</Text>
-                                <TextInput
-                                    value={webdavPassword}
-                                    onChangeText={setWebdavPassword}
-                                    placeholder="••••••••"
-                                    placeholderTextColor={tc.secondaryText}
-                                    autoCapitalize="none"
-                                    autoCorrect={false}
-                                    secureTextEntry
-                                    style={[styles.textInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-                                />
-                            </View>
-                            {Platform.OS === 'web' && (
-                                <Text style={[styles.settingDescription, { color: '#F59E0B' }]}>
-                                    {localize('Web warning: WebDAV passwords are stored in browser storage. Use only on trusted devices.', 'Web 提示：WebDAV 密码会保存在浏览器本地存储中，请仅在可信设备使用。')}
-                                </Text>
-                            )}
-                            <TouchableOpacity
-                                style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
-                                onPress={() => {
-                                    if (webdavUrlError || !webdavUrl.trim()) {
-                                        showSettingsWarning(localize('Invalid URL', '地址无效'), localize('Please enter a valid WebDAV URL (http/https).', '请输入有效的 WebDAV 地址（http/https）。'));
-                                        return;
-                                    }
-                                    AsyncStorage.multiSet([
-                                        [SYNC_BACKEND_KEY, 'webdav'],
-                                        [WEBDAV_URL_KEY, webdavUrl.trim()],
-                                        [WEBDAV_USERNAME_KEY, webdavUsername.trim()],
-                                        [WEBDAV_PASSWORD_KEY, webdavPassword],
-                                    ]).then(() => {
-                                        resetSyncStatusForBackendSwitch();
-                                        showToast({
-                                            title: localize('Success', '成功'),
-                                            message: t('settings.webdavSave'),
-                                            tone: 'success',
-                                        });
-                                    }).catch((error) => {
-                                        logSettingsError(error);
-                                        showSettingsErrorToast(
-                                            localize('Error', '错误'),
-                                            localize('Failed to save WebDAV settings', '保存 WebDAV 设置失败')
-                                        );
-                                    });
-                                }}
-                                disabled={webdavUrlError || !webdavUrl.trim()}
-                            >
-                                <View style={styles.settingInfo}>
-                                    <Text style={[styles.settingLabel, { color: webdavUrlError || !webdavUrl.trim() ? tc.secondaryText : tc.tint }]}>
-                                        {t('settings.webdavSave')}
-                                    </Text>
-                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.webdavUrl')}</Text>
-                                </View>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
-                                onPress={() => void handleSync()}
-                                disabled={isSyncing || !webdavUrl.trim() || webdavUrlError}
-                            >
-                                <View style={styles.settingInfo}>
-                                    <Text style={[styles.settingLabel, { color: webdavUrl.trim() && !webdavUrlError ? tc.tint : tc.secondaryText }]}>
-                                        {t('settings.syncNow')}
-                                    </Text>
-                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.syncReadMergeWebdav')}</Text>
-                                </View>
-                                {isSyncing && <ActivityIndicator size="small" color={tc.tint} />}
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
-                                onPress={() => void handleTestConnection('webdav')}
-                                disabled={isSyncing || isTestingConnection || !webdavUrl.trim() || webdavUrlError}
-                            >
-                                <View style={styles.settingInfo}>
-                                    <Text style={[styles.settingLabel, { color: webdavUrl.trim() && !webdavUrlError ? tc.tint : tc.secondaryText }]}>
-                                        {t('settings.testConnection')}
-                                    </Text>
-                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.webdavTestHint')}</Text>
-                                </View>
-                                {isTestingConnection && <ActivityIndicator size="small" color={tc.tint} />}
-                            </TouchableOpacity>
-                        </View>
-                        {lastSyncCard}
-                    </>
+                    <SyncWebDavBackendPanel
+                        initialPassword={webdavPassword}
+                        initialUrl={webdavUrl}
+                        initialUsername={webdavUsername}
+                        isSyncing={isSyncing}
+                        isTestingConnection={isTestingConnection}
+                        lastSyncCard={lastSyncCard}
+                        localize={localize}
+                        onSave={(settings) => void handleSaveWebDavSettings(settings)}
+                        onSync={(settings) => void handleSync({ backend: 'webdav', webdav: settings })}
+                        onTestConnection={(settings) => void handleTestConnection('webdav', { webdav: settings })}
+                        t={t}
+                        tc={tc}
+                    />
                 )}
 
                 {isCloudSyncSelected && (
@@ -1540,380 +1499,90 @@ export function SyncSettingsScreen() {
                         </View>
 
                         {cloudProvider === 'cloudkit' && supportsNativeICloudSync ? (
-                            <>
-                                <View style={[styles.helpBox, { backgroundColor: tc.cardBg, borderColor: tc.border, marginTop: 12 }]}>
-                                    <Text style={[styles.helpTitle, { color: tc.text }]}>iCloud Sync</Text>
-                                    <Text style={[styles.helpText, { color: tc.secondaryText }]}>
-                                        {cloudKitStatusDetails.helpText}
-                                    </Text>
-                                    <Text style={[styles.helpText, { color: tc.secondaryText, marginTop: 8 }]}>
-                                        {localize('Account status', '账户状态')}: {cloudKitStatusDetails.label}
-                                    </Text>
-                                </View>
-
-                                <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 12 }]}>
-                                    <TouchableOpacity
-                                        style={styles.settingRow}
-                                        onPress={() => void handleSync()}
-                                        disabled={isSyncing || !cloudKitStatusDetails.syncEnabled}
-                                    >
-                                        <View style={styles.settingInfo}>
-                                            <Text style={[styles.settingLabel, { color: cloudKitStatusDetails.syncEnabled ? tc.tint : tc.secondaryText }]}>
-                                                {t('settings.syncNow')}
-                                            </Text>
-                                            <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                                                {localize(
-                                                    'Read and merge the latest CloudKit data now.',
-                                                    '立即读取并合并最新的 CloudKit 数据。'
-                                                )}
-                                            </Text>
-                                        </View>
-                                        {isSyncing && <ActivityIndicator size="small" color={tc.tint} />}
-                                    </TouchableOpacity>
-                                </View>
-                            </>
+                            <SyncCloudKitBackendPanel
+                                helpText={cloudKitStatusDetails.helpText}
+                                isSyncEnabled={cloudKitStatusDetails.syncEnabled}
+                                isSyncing={isSyncing}
+                                lastSyncCard={lastSyncCard}
+                                localize={localize}
+                                onSync={() => void handleSync({ backend: 'cloudkit', cloudProvider: 'cloudkit' })}
+                                statusLabel={cloudKitStatusDetails.label}
+                                t={t}
+                                tc={tc}
+                            />
                         ) : cloudProvider === 'selfhosted' || isFossBuild ? (
-                            <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 12 }]}>
-                                <View style={styles.inputGroup}>
-                                    <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.cloudUrl')}</Text>
-                                    <TextInput
-                                        value={cloudUrl}
-                                        onChangeText={setCloudUrl}
-                                        placeholder={t('settings.cloudUrlPlaceholder')}
-                                        placeholderTextColor={tc.secondaryText}
-                                        autoCapitalize="none"
-                                        autoCorrect={false}
-                                        style={[styles.textInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-                                    />
-                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.cloudHint')}</Text>
-                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.cloudBaseUrlHint')}</Text>
-                                    {cloudUrlError && (
-                                        <Text style={[styles.settingDescription, { color: '#EF4444' }]}>{t('settings.invalidUrlHttp')}</Text>
-                                    )}
-                                </View>
-                                <View style={[styles.inputGroup, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                    <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.cloudToken')}</Text>
-                                    <TextInput
-                                        value={cloudToken}
-                                        onChangeText={setCloudToken}
-                                        placeholder="••••••••"
-                                        placeholderTextColor={tc.secondaryText}
-                                        autoCapitalize="none"
-                                        autoCorrect={false}
-                                        secureTextEntry
-                                        style={[styles.textInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-                                    />
-                                </View>
-                                <TouchableOpacity
-                                    style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
-                                    onPress={() => {
-                                        if (cloudUrlError || !cloudUrl.trim()) {
-                                            showSettingsWarning(localize('Invalid URL', '地址无效'), localize('Please enter a valid self-hosted URL (http/https).', '请输入有效的自托管地址（http/https）。'));
-                                            return;
-                                        }
-                                        AsyncStorage.multiSet([
-                                            [SYNC_BACKEND_KEY, 'cloud'],
-                                            [CLOUD_PROVIDER_KEY, 'selfhosted'],
-                                            [CLOUD_URL_KEY, cloudUrl.trim()],
-                                            [CLOUD_TOKEN_KEY, cloudToken],
-                                        ]).then(() => {
-                                            resetSyncStatusForBackendSwitch();
-                                            showToast({
-                                                title: localize('Success', '成功'),
-                                                message: t('settings.cloudSave'),
-                                                tone: 'success',
-                                            });
-                                        }).catch((error) => {
-                                            logSettingsError(error);
-                                            showSettingsErrorToast(
-                                                localize('Error', '错误'),
-                                                localize('Failed to save self-hosted settings', '保存自托管设置失败')
-                                            );
-                                        });
-                                    }}
-                                    disabled={cloudUrlError || !cloudUrl.trim()}
-                                >
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: cloudUrlError || !cloudUrl.trim() ? tc.secondaryText : tc.tint }]}>
-                                            {t('settings.cloudSave')}
-                                        </Text>
-                                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.cloudUrl')}</Text>
-                                    </View>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
-                                    onPress={() => void handleSync()}
-                                    disabled={isSyncing || !cloudUrl.trim() || cloudUrlError}
-                                >
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: cloudUrl.trim() && !cloudUrlError ? tc.tint : tc.secondaryText }]}>
-                                            {t('settings.syncNow')}
-                                        </Text>
-                                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.syncReadMergeSelfHosted')}</Text>
-                                    </View>
-                                    {isSyncing && <ActivityIndicator size="small" color={tc.tint} />}
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
-                                    onPress={() => void handleTestConnection('cloud')}
-                                    disabled={isSyncing || isTestingConnection || !cloudUrl.trim() || cloudUrlError}
-                                >
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: cloudUrl.trim() && !cloudUrlError ? tc.tint : tc.secondaryText }]}>
-                                            {t('settings.testConnection')}
-                                        </Text>
-                                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.cloudTestHint')}</Text>
-                                    </View>
-                                    {isTestingConnection && <ActivityIndicator size="small" color={tc.tint} />}
-                                </TouchableOpacity>
-                            </View>
+                            <SyncSelfHostedBackendPanel
+                                initialToken={cloudToken}
+                                initialUrl={cloudUrl}
+                                isSyncing={isSyncing}
+                                isTestingConnection={isTestingConnection}
+                                lastSyncCard={lastSyncCard}
+                                onSave={(settings) => void handleSaveSelfHostedSettings(settings)}
+                                onSync={(settings) => void handleSync({ backend: 'cloud', cloud: settings, cloudProvider: 'selfhosted' })}
+                                onTestConnection={(settings) => void handleTestConnection('cloud', { cloud: settings, cloudProvider: 'selfhosted' })}
+                                t={t}
+                                tc={tc}
+                            />
                         ) : (
-                            <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 12 }]}>
-                                <View style={styles.settingRowColumn}>
-                                    <Text style={[styles.settingLabel, { color: tc.text }]}>{localize('Dropbox account', 'Dropbox 账号')}</Text>
-                                    <Text style={[styles.settingDescription, { color: tc.secondaryText, marginTop: 6 }]}>
-                                        {localize(
-                                            'OAuth with Dropbox App Folder access. Mindwtr syncs /Apps/Mindwtr/data.json and /Apps/Mindwtr/attachments/* in your Dropbox.',
-                                            '使用 Dropbox OAuth（应用文件夹权限）。Mindwtr 会同步 Dropbox 中 /Apps/Mindwtr/data.json 与 /Apps/Mindwtr/attachments/*。'
-                                        )}
-                                    </Text>
-                                    <Text style={[styles.settingDescription, { color: tc.secondaryText, marginTop: 6 }]}>
-                                        {localize('Redirect URI', '回调地址')}: {getDropboxRedirectUri()}
-                                    </Text>
-                                    {!dropboxConfigured && (
-                                        <Text style={[styles.settingDescription, { color: '#EF4444', marginTop: 8 }]}>
-                                            {localize('Dropbox app key is not configured for this build.', '当前构建未配置 Dropbox App Key。')}
-                                        </Text>
-                                    )}
-                                    {isExpoGo && (
-                                        <Text style={[styles.settingDescription, { color: '#EF4444', marginTop: 8 }]}>
-                                            {localize('Expo Go is not supported for Dropbox OAuth. Use a development/release build.', 'Expo Go 不支持 Dropbox OAuth。请使用开发版或正式版应用。')}
-                                        </Text>
-                                    )}
-                                    <Text style={[styles.settingDescription, { color: tc.secondaryText, marginTop: 8 }]}>
-                                        {dropboxConnected ? localize('Status: Connected', '状态：已连接') : localize('Status: Not connected', '状态：未连接')}
-                                    </Text>
-                                </View>
-                                <TouchableOpacity
-                                    style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
-                                    onPress={() => void (dropboxConnected ? handleDisconnectDropbox() : handleConnectDropbox())}
-                                    disabled={dropboxBusy || !dropboxConfigured || isExpoGo}
-                                >
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: dropboxConfigured && !isExpoGo ? tc.tint : tc.secondaryText }]}>
-                                            {dropboxConnected ? localize('Disconnect Dropbox', '断开 Dropbox') : localize('Connect Dropbox', '连接 Dropbox')}
-                                        </Text>
-                                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                                            {isExpoGo
-                                                ? localize('Requires development/release build (Expo Go unsupported).', '需要开发版/正式版应用（Expo Go 不支持）。')
-                                                : dropboxConnected
-                                                    ? localize('Revoke app token and remove local auth.', '撤销应用令牌并移除本地授权。')
-                                                    : localize('Open Dropbox OAuth sign-in in browser.', '在浏览器中打开 Dropbox OAuth 登录。')}
-                                        </Text>
-                                    </View>
-                                    {dropboxBusy && <ActivityIndicator size="small" color={tc.tint} />}
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
-                                    onPress={() => void handleTestDropboxConnection()}
-                                    disabled={isTestingConnection || !dropboxConfigured || !dropboxConnected}
-                                >
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: dropboxConnected ? tc.tint : tc.secondaryText }]}>
-                                            {t('settings.testConnection')}
-                                        </Text>
-                                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.dropboxTestHint')}</Text>
-                                    </View>
-                                    {isTestingConnection && <ActivityIndicator size="small" color={tc.tint} />}
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
-                                    onPress={() => void handleSync()}
-                                    disabled={isSyncing || !dropboxConfigured || !dropboxConnected}
-                                >
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: dropboxConnected ? tc.tint : tc.secondaryText }]}>
-                                            {t('settings.syncNow')}
-                                        </Text>
-                                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                                            {localize('Read and merge Dropbox data.', '读取并合并 Dropbox 数据。')}
-                                        </Text>
-                                    </View>
-                                    {isSyncing && <ActivityIndicator size="small" color={tc.tint} />}
-                                </TouchableOpacity>
-                            </View>
+                            <SyncDropboxBackendPanel
+                                dropboxBusy={dropboxBusy}
+                                dropboxConfigured={dropboxConfigured}
+                                dropboxConnected={dropboxConnected}
+                                isExpoGo={isExpoGo}
+                                isSyncing={isSyncing}
+                                isTestingConnection={isTestingConnection}
+                                lastSyncCard={lastSyncCard}
+                                localize={localize}
+                                onConnectToggle={() => void (dropboxConnected ? handleDisconnectDropbox() : handleConnectDropbox())}
+                                onSync={() => void handleSync({ backend: 'cloud', cloudProvider: 'dropbox' })}
+                                onTestConnection={() => void handleTestDropboxConnection()}
+                                redirectUri={getDropboxRedirectUri()}
+                                t={t}
+                                tc={tc}
+                            />
                         )}
-                        {lastSyncCard}
                     </>
                 )}
 
-                <Text style={[styles.sectionTitle, { color: tc.text, marginTop: 24 }]}>{t('settings.backup')}</Text>
-                <View style={[styles.settingCard, { backgroundColor: tc.cardBg }]}>
-                    <TouchableOpacity style={styles.settingRow} onPress={() => void handleBackup()} disabled={isSyncing || isBackupBusy}>
-                        <View style={styles.settingInfo}>
-                            <Text style={[styles.settingLabel, { color: '#3B82F6' }]}>{t('settings.exportBackup')}</Text>
-                            <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.saveToSyncFolder')}</Text>
-                        </View>
-                        {backupAction === 'export' && <ActivityIndicator size="small" color={tc.tint} />}
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
-                        onPress={() => void handleRestoreBackup()}
-                        disabled={isSyncing || isBackupBusy}
-                    >
-                        <View style={styles.settingInfo}>
-                            <Text style={[styles.settingLabel, { color: tc.tint }]}>{localize('Restore Backup', '恢复备份')}</Text>
-                            <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                                {localize('Replace local data from a backup JSON file.', '从备份 JSON 文件替换本地数据。')}
-                            </Text>
-                        </View>
-                        {backupAction === 'restore' && <ActivityIndicator size="small" color={tc.tint} />}
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
-                        onPress={() => void handleImportTodoist()}
-                        disabled={isSyncing || isBackupBusy}
-                    >
-                        <View style={styles.settingInfo}>
-                            <Text style={[styles.settingLabel, { color: tc.tint }]}>{localize('Import from Todoist', '从 Todoist 导入')}</Text>
-                            <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                                {localize('Import Todoist CSV or ZIP exports into Mindwtr projects.', '将 Todoist 的 CSV 或 ZIP 导出导入为 Mindwtr 项目。')}
-                            </Text>
-                        </View>
-                        {backupAction === 'import' && <ActivityIndicator size="small" color={tc.tint} />}
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
-                        onPress={() => void handleImportDgt()}
-                        disabled={isSyncing || isBackupBusy}
-                    >
-                        <View style={styles.settingInfo}>
-                            <Text style={[styles.settingLabel, { color: tc.tint }]}>{localize('Import from DGT GTD', '从 DGT GTD 导入')}</Text>
-                            <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                                {localize('Import DGT GTD JSON or ZIP exports into Mindwtr areas, projects, and tasks.', '将 DGT GTD 的 JSON 或 ZIP 导出导入为 Mindwtr 的领域、项目和任务。')}
-                            </Text>
-                        </View>
-                        {backupAction === 'import' && <ActivityIndicator size="small" color={tc.tint} />}
-                    </TouchableOpacity>
-                </View>
+                <SyncBackupSection
+                    backupAction={backupAction}
+                    formatRecoverySnapshotLabel={formatRecoverySnapshotLabel}
+                    handleBackup={() => void handleBackup()}
+                    handleImportDgt={() => void handleImportDgt()}
+                    handleImportTodoist={() => void handleImportTodoist()}
+                    handleRestoreBackup={() => void handleRestoreBackup()}
+                    handleRestoreRecoverySnapshot={(snapshot) => void handleRestoreRecoverySnapshot(snapshot)}
+                    isBackupBusy={isBackupBusy}
+                    isLoadingRecoverySnapshots={isLoadingRecoverySnapshots}
+                    isSyncing={isSyncing}
+                    localize={localize}
+                    recoverySnapshots={recoverySnapshots}
+                    recoverySnapshotsOpen={recoverySnapshotsOpen}
+                    setRecoverySnapshotsOpen={setRecoverySnapshotsOpen}
+                    t={t}
+                    tc={tc}
+                />
 
-                <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 12 }]}>
-                    <TouchableOpacity style={styles.settingRow} onPress={() => setRecoverySnapshotsOpen((prev) => !prev)}>
-                        <View style={styles.settingInfo}>
-                            <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.recoverySnapshots')}</Text>
-                            <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                                {localize(
-                                    'Saved automatically before restore and import operations.',
-                                    '在恢复和导入之前自动保存。'
-                                )}
-                            </Text>
-                        </View>
-                        <Text style={[styles.chevron, { color: tc.secondaryText }]}>{recoverySnapshotsOpen ? '▾' : '▸'}</Text>
-                    </TouchableOpacity>
-                    {recoverySnapshotsOpen && (
-                        <>
-                            {isLoadingRecoverySnapshots && (
-                                <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                                        {t('settings.recoverySnapshotsLoading')}
-                                    </Text>
-                                </View>
-                            )}
-                            {!isLoadingRecoverySnapshots && recoverySnapshots.length === 0 && (
-                                <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                                        {t('settings.recoverySnapshotsEmpty')}
-                                    </Text>
-                                </View>
-                            )}
-                            {!isLoadingRecoverySnapshots && recoverySnapshots.map((snapshot) => (
-                                <TouchableOpacity
-                                    key={snapshot}
-                                    style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
-                                    onPress={() => void handleRestoreRecoverySnapshot(snapshot)}
-                                    disabled={isSyncing || isBackupBusy}
-                                >
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: tc.text }]} numberOfLines={1}>
-                                            {formatRecoverySnapshotLabel(snapshot)}
-                                        </Text>
-                                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]} numberOfLines={1}>
-                                            {snapshot}
-                                        </Text>
-                                    </View>
-                                    {backupAction === 'snapshot'
-                                        ? <ActivityIndicator size="small" color={tc.tint} />
-                                        : <Text style={[styles.settingLabel, { color: tc.tint }]}>{t('settings.recoverySnapshotsRestore')}</Text>}
-                                </TouchableOpacity>
-                            ))}
-                        </>
-                    )}
-                </View>
+                <SyncPreferencesCard
+                    syncAiEnabled={syncAiEnabled}
+                    syncAppearanceEnabled={syncAppearanceEnabled}
+                    syncExternalCalendarsEnabled={syncExternalCalendarsEnabled}
+                    syncLanguageEnabled={syncLanguageEnabled}
+                    syncOptionsOpen={syncOptionsOpen}
+                    t={t}
+                    tc={tc}
+                    toggleSyncOptionsOpen={() => setSyncOptionsOpen((prev) => !prev)}
+                    updateSyncPreferences={updateSyncPreferences}
+                />
 
-                <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 16 }]}>
-                    <TouchableOpacity style={styles.settingRow} onPress={() => setSyncOptionsOpen((prev) => !prev)}>
-                        <View style={styles.settingInfo}>
-                            <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.syncPreferences')}</Text>
-                            <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.syncPreferencesDesc')}</Text>
-                        </View>
-                        <Text style={[styles.chevron, { color: tc.secondaryText }]}>{syncOptionsOpen ? '▾' : '▸'}</Text>
-                    </TouchableOpacity>
-                    {syncOptionsOpen && (
-                        <>
-                            <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                <View style={styles.settingInfo}>
-                                    <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.syncPreferenceAppearance')}</Text>
-                                </View>
-                                <Switch value={syncAppearanceEnabled} onValueChange={(value) => updateSyncPreferences({ appearance: value })} trackColor={{ false: '#767577', true: '#3B82F6' }} />
-                            </View>
-                            <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                <View style={styles.settingInfo}>
-                                    <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.syncPreferenceLanguage')}</Text>
-                                </View>
-                                <Switch value={syncLanguageEnabled} onValueChange={(value) => updateSyncPreferences({ language: value })} trackColor={{ false: '#767577', true: '#3B82F6' }} />
-                            </View>
-                            <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                <View style={styles.settingInfo}>
-                                    <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.syncPreferenceExternalCalendars')}</Text>
-                                </View>
-                                <Switch value={syncExternalCalendarsEnabled} onValueChange={(value) => updateSyncPreferences({ externalCalendars: value })} trackColor={{ false: '#767577', true: '#3B82F6' }} />
-                            </View>
-                            <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                <View style={styles.settingInfo}>
-                                    <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.syncPreferenceAi')}</Text>
-                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.syncPreferenceAiHint')}</Text>
-                                </View>
-                                <Switch value={syncAiEnabled} onValueChange={(value) => updateSyncPreferences({ ai: value })} trackColor={{ false: '#767577', true: '#3B82F6' }} />
-                            </View>
-                        </>
-                    )}
-                </View>
-
-                <Text style={[styles.sectionTitle, { color: tc.text, marginTop: 24 }]}>{t('settings.diagnostics')}</Text>
-                <View style={[styles.settingCard, { backgroundColor: tc.cardBg }]}>
-                    <View style={styles.settingRow}>
-                        <View style={styles.settingInfo}>
-                            <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.debugLogging')}</Text>
-                            <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.debugLoggingDesc')}</Text>
-                        </View>
-                        <Switch value={loggingEnabled} onValueChange={toggleDebugLogging} trackColor={{ false: '#767577', true: '#3B82F6' }} />
-                    </View>
-                    {loggingEnabled && (
-                        <>
-                            <TouchableOpacity style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]} onPress={() => void handleShareLog()}>
-                                <View style={styles.settingInfo}>
-                                    <Text style={[styles.settingLabel, { color: tc.tint }]}>{t('settings.shareLog')}</Text>
-                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.logFile')}</Text>
-                                </View>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]} onPress={() => void handleClearLog()}>
-                                <View style={styles.settingInfo}>
-                                    <Text style={[styles.settingLabel, { color: tc.secondaryText }]}>{t('settings.clearLog')}</Text>
-                                </View>
-                            </TouchableOpacity>
-                        </>
-                    )}
-                </View>
+                <SyncDiagnosticsCard
+                    handleClearLog={() => void handleClearLog()}
+                    handleShareLog={() => void handleShareLog()}
+                    loggingEnabled={loggingEnabled}
+                    t={t}
+                    tc={tc}
+                    toggleDebugLogging={toggleDebugLogging}
+                />
             </ScrollView>
         </SafeAreaView>
     );

@@ -1,6 +1,26 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 import { createService } from './service.js';
+
+const tempDirs: string[] = [];
+
+const createTempDir = (): string => {
+  const dir = mkdtempSync(join(tmpdir(), 'mindwtr-mcp-service-'));
+  tempDirs.push(dir);
+  return dir;
+};
+
+afterEach(() => {
+  while (tempDirs.length > 0) {
+    const dir = tempDirs.pop();
+    if (dir) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
 
 describe('mcp service', () => {
   test('delegates read operations through query deps', async () => {
@@ -381,5 +401,69 @@ describe('mcp service', () => {
     expect(receivedProjectCreate.props.areaId).toBeUndefined();
     expect(receivedAreaUpdate.updates.icon).toBe('briefcase');
     expect(receivedAreaUpdate.updates.color).toBeUndefined();
+  });
+
+  test('persists write operations to a real sqlite database', async () => {
+    const dir = createTempDir();
+    const dbPath = join(dir, 'mindwtr.db');
+    const dataPath = join(dir, 'data.json');
+
+    writeFileSync(
+      dataPath,
+      JSON.stringify(
+        {
+          tasks: [],
+          projects: [],
+          sections: [],
+          areas: [],
+          settings: {},
+        },
+        null,
+        2
+      )
+    );
+
+    const service = createService({ dbPath, readonly: false });
+    try {
+      const project = await service.addProject({
+        title: 'Home',
+        status: 'active',
+      });
+
+      const task = await service.addTask({
+        quickAdd: 'Buy milk +Home @errands #weekly /due:2026-04-20 /next',
+      });
+
+      const updatedProject = await service.updateProject({
+        id: project.id,
+        title: 'Household',
+        status: 'waiting',
+        supportNotes: 'Track home-related work here.',
+      });
+
+      const tasks = await service.listTasks({ status: 'all' });
+      const projects = await service.listProjects();
+      const persistedTask = tasks.find((item) => item.id === task.id);
+      const persistedProject = projects.find((item) => item.id === project.id);
+
+      expect(updatedProject.title).toBe('Household');
+      expect(updatedProject.status).toBe('waiting');
+      expect(updatedProject.supportNotes).toBe('Track home-related work here.');
+
+      expect(persistedTask).toBeTruthy();
+      expect(persistedTask?.title).toBe('Buy milk');
+      expect(persistedTask?.status).toBe('next');
+      expect(persistedTask?.projectId).toBe(project.id);
+      expect(persistedTask?.dueDate).toContain('2026-04-20');
+      expect(persistedTask?.contexts).toEqual(['@errands']);
+      expect(persistedTask?.tags).toEqual(['#weekly']);
+
+      expect(persistedProject).toBeTruthy();
+      expect(persistedProject?.title).toBe('Household');
+      expect(persistedProject?.status).toBe('waiting');
+      expect(persistedProject?.supportNotes).toBe('Track home-related work here.');
+    } finally {
+      await service.close();
+    }
   });
 });

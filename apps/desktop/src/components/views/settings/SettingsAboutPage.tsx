@@ -16,7 +16,7 @@ type Labels = {
     checkFailed: string;
 };
 
-type SettingsAboutPageProps = {
+export type SettingsAboutPageProps = {
     t: Labels;
     appVersion: string;
     installChannel?: string | null;

@@ -98,7 +98,7 @@ jobs:
         run: |
           $buildDir = "apps/desktop/src-tauri/target/release"
           $portableDir = "portable-staging"
-          $zipPath = "mindwtr_${{ steps.version.outputs.version }}_x64_portable.zip"
+          $zipPath = "mindwtr_${{ steps.version.outputs.version }}_windows_x64_portable.zip"
 
           Remove-Item -Recurse -Force $portableDir -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path "$portableDir\profile\config" | Out-Null
@@ -133,7 +133,7 @@ jobs:
             $lower = $_.Name.ToLower()
             Copy-Item $_.FullName "release-artifacts/$lower"
           }
-          Get-ChildItem "mindwtr_*_x64_portable.zip" -ErrorAction SilentlyContinue | ForEach-Object {
+          Get-ChildItem "mindwtr_*_windows_x64_portable.zip" -ErrorAction SilentlyContinue | ForEach-Object {
             Copy-Item $_.FullName "release-artifacts/$($_.Name)"
           }
           Get-ChildItem release-artifacts

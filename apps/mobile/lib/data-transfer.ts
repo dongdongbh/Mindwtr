@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from './file-system';
 import { Directory, File, Paths } from 'expo-file-system';
 import { Platform } from 'react-native';
 import {
@@ -27,7 +27,7 @@ import {
 import { logError, logInfo } from './app-log';
 import { mobileStorage } from './storage-adapter';
 
-const StorageAccessFramework = (FileSystem as any).StorageAccessFramework;
+const StorageAccessFramework = FileSystem.StorageAccessFramework;
 const SNAPSHOT_DIR_NAME = 'snapshots';
 const SNAPSHOT_FILE_PATTERN = /^data\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.snapshot\.json$/u;
 const MAX_LOCAL_SNAPSHOTS = 5;
@@ -427,9 +427,10 @@ export const exportCurrentDataBackup = async (data: AppData): Promise<void> => {
         if (Platform.OS === 'android' && StorageAccessFramework) {
             try {
                 const permissions = await StorageAccessFramework.requestDirectoryPermissionsAsync();
-                if (permissions.granted) {
+                const directoryUri = permissions.directoryUri;
+                if (permissions.granted && directoryUri) {
                     const fileUri = await StorageAccessFramework.createFileAsync(
-                        permissions.directoryUri,
+                        directoryUri,
                         snapshotName,
                         'application/json'
                     );

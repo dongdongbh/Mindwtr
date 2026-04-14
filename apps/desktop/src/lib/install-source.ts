@@ -22,16 +22,18 @@ export function normalizeAnalyticsInstallChannel(value: string | null | undefine
         case 'brew':
         case 'home-brew':
             return 'homebrew';
+        case 'aur':
+            return 'aur-source';
         case 'github-release':
         case 'winget':
         case 'homebrew':
-        case 'aur':
         case 'aur-bin':
         case 'aur-source':
         case 'apt':
         case 'rpm':
         case 'snap':
         case 'appimage':
+        case 'portable':
         case 'direct':
             return normalized;
         default:

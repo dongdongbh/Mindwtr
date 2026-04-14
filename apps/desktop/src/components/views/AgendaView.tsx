@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ErrorBoundary } from '../ErrorBoundary';
-import { shallow, useTaskStore, TaskPriority, TimeEstimate, getUsedTaskTokens, matchesHierarchicalToken, safeFormatDate, safeParseDate, safeParseDueDate, isDueForReview, isTaskInActiveProject } from '@mindwtr/core';
+import { shallow, useTaskStore, TaskPriority, TimeEstimate, getUsedTaskTokens, matchesHierarchicalToken, safeParseDate, safeParseDueDate, isDueForReview, isTaskInActiveProject } from '@mindwtr/core';
 import type { Task, Project, TaskEnergyLevel } from '@mindwtr/core';
 import { useLanguage } from '../../contexts/language-context';
 import { cn } from '../../lib/utils';
 import { useUiStore } from '../../store/ui-store';
-import { Clock, Star, Calendar, ArrowRight, Filter, Folder, List, ChevronDown, ChevronRight, CheckCircle2, type LucideIcon } from 'lucide-react';
+import { Clock, Star, ArrowRight, Folder, CheckCircle2 } from 'lucide-react';
 import { usePerformanceMonitor } from '../../hooks/usePerformanceMonitor';
 import { checkBudget } from '../../config/performanceBudgets';
 import { TaskItem } from '../TaskItem';
 import { projectMatchesAreaFilter, resolveAreaFilter, taskMatchesAreaFilter } from '../../lib/area-filter';
 import { PomodoroPanel } from './PomodoroPanel';
-import { groupTasksByArea, groupTasksByContext, type NextGroupBy, type TaskGroup } from './list/next-grouping';
+import { AgendaFiltersPanel } from './agenda/AgendaFiltersPanel';
+import { AgendaHeader } from './agenda/AgendaHeader';
+import { AgendaCollapsibleSection, AgendaProjectSection } from './agenda/AgendaSections';
+import { groupTasksByArea, groupTasksByContext, type TaskGroup } from './list/next-grouping';
 
 const AGENDA_VIRTUALIZATION_THRESHOLD = 25;
 
@@ -573,124 +576,6 @@ export function AgendaView() {
         }));
     }, []);
 
-    const SectionToggle = ({
-        title,
-        icon: Icon,
-        color,
-        count,
-        expanded,
-        onToggle,
-        controlsId,
-    }: {
-        title: string;
-        icon: LucideIcon;
-        color: string;
-        count: number;
-        expanded: boolean;
-        onToggle: () => void;
-        controlsId: string;
-    }) => (
-        <h3>
-            <button
-                type="button"
-                onClick={onToggle}
-                aria-expanded={expanded}
-                aria-controls={controlsId}
-                className={cn(
-                    "w-full flex items-center gap-2 text-left font-semibold transition-colors",
-                    "focus:outline-none focus:ring-2 focus:ring-primary/30 rounded-md",
-                    color
-                )}
-            >
-                {expanded ? (
-                    <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                ) : (
-                    <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                )}
-                <Icon className="w-5 h-5" />
-                <span>{title}</span>
-                <span className="text-muted-foreground font-normal">({count})</span>
-            </button>
-        </h3>
-    );
-
-    const Section = ({ sectionKey, title, icon: Icon, tasks, color }: {
-        sectionKey: keyof typeof expandedSections;
-        title: string;
-        icon: LucideIcon;
-        tasks: Task[];
-        color: string;
-    }) => {
-        if (tasks.length === 0) return null;
-        const expanded = expandedSections[sectionKey];
-        const controlsId = `agenda-section-${sectionKey}`;
-
-        return (
-            <div className="space-y-3">
-                <SectionToggle
-                    title={title}
-                    icon={Icon}
-                    color={color}
-                    count={tasks.length}
-                    expanded={expanded}
-                    onToggle={() => toggleSection(sectionKey)}
-                    controlsId={controlsId}
-                />
-                {expanded ? (
-                    <div id={controlsId}>
-                        <AgendaTaskList
-                            tasks={tasks}
-                            projectMap={projectMap}
-                            buildFocusToggle={buildFocusToggle}
-                            showListDetails={showListDetails}
-                            highlightTaskId={highlightTaskId}
-                        />
-                    </div>
-                ) : null}
-            </div>
-        );
-    };
-
-    const ProjectSection = ({ title, icon: Icon, projects, color }: {
-        title: string;
-        icon: LucideIcon;
-        projects: Project[];
-        color: string;
-    }) => {
-        if (projects.length === 0) return null;
-
-        return (
-            <div className="space-y-3">
-                <h3 className={cn("font-semibold flex items-center gap-2", color)}>
-                    <Icon className="w-5 h-5" />
-                    {title}
-                    <span className="text-muted-foreground font-normal">({projects.length})</span>
-                </h3>
-                <div className="space-y-2">
-                    {projects.map((project) => (
-                        <div
-                            key={project.id}
-                            className="flex items-center justify-between rounded-lg border border-border bg-card/80 px-3 py-2"
-                        >
-                            <div className="flex items-center gap-2">
-                                <Folder className="w-4 h-4" style={{ color: project.color }} />
-                                <span className="text-sm font-medium text-foreground">{project.title}</span>
-                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
-                                    {t(`status.${project.status}`)}
-                                </span>
-                            </div>
-                            {project.reviewAt && (
-                                <span className="text-xs text-muted-foreground">
-                                    {safeFormatDate(project.reviewAt, 'P')}
-                                </span>
-                            )}
-                        </div>
-                    ))}
-                </div>
-            </div>
-        );
-    };
-
     const visibleActive = filteredActiveTasks.length;
     const nextActionsCount = sections.nextActions.length;
     const pomodoroTasks = useMemo(() => {
@@ -711,208 +596,44 @@ export function AgendaView() {
     return (
         <ErrorBoundary>
             <div className="space-y-6 w-full">
-            <header className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                    <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
-                        <Calendar className="w-8 h-8" />
-                        {t('agenda.title')}
-                    </h2>
-                    <p className="text-muted-foreground">
-                        {nextActionsCount} {t('list.next') || t('agenda.nextActions')}
-                    </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                    <button
-                        type="button"
-                        onClick={() => setTop3Only((prev) => !prev)}
-                        className={cn(
-                            "inline-flex items-center gap-2 text-xs px-3 py-1.5 rounded-full border transition-colors",
-                            top3Only
-                                ? "bg-primary text-primary-foreground border-primary"
-                                : "bg-muted/50 text-muted-foreground border-border hover:bg-muted"
-                        )}
-                    >
-                        {t('agenda.top3Only')}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setListOptions({ showDetails: !showListDetails })}
-                        aria-pressed={showListDetails}
-                        className={cn(
-                            "text-xs px-3 py-1.5 rounded-full border transition-colors inline-flex items-center gap-1.5",
-                            showListDetails
-                                ? "bg-primary/10 text-primary border-primary"
-                                : "bg-muted/50 text-muted-foreground border-border hover:bg-muted hover:text-foreground"
-                        )}
-                        title={showListDetails ? (t('list.details') || 'Details on') : (t('list.detailsOff') || 'Details off')}
-                    >
-                        <List className="w-3.5 h-3.5" />
-                        {showListDetails ? (t('list.details') || 'Details') : (t('list.detailsOff') || 'Details off')}
-                    </button>
-                    <div className="relative">
-                        <select
-                            value={nextGroupBy}
-                            onChange={(event) => setListOptions({ nextGroupBy: event.target.value as NextGroupBy })}
-                            aria-label={resolveText('list.groupBy', 'Group')}
-                            className={cn(
-                                "min-w-[136px] appearance-none text-xs leading-none rounded-full border pl-3 pr-8 py-1.5 transition-colors",
-                                "bg-muted/50 text-muted-foreground border-border hover:bg-muted hover:text-foreground",
-                                "focus:outline-none focus:ring-2 focus:ring-primary/40"
-                            )}
-                        >
-                            <option value="none">{resolveText('list.groupByNone', 'No grouping')}</option>
-                            <option value="context">{resolveText('list.groupByContext', 'Context')}</option>
-                            <option value="area">{resolveText('list.groupByArea', 'Area')}</option>
-                        </select>
-                        <ChevronDown
-                            className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
-                            aria-hidden="true"
-                        />
-                    </div>
-                </div>
-            </header>
+            <AgendaHeader
+                nextActionsCount={nextActionsCount}
+                nextGroupBy={nextGroupBy}
+                onChangeGroupBy={(value) => setListOptions({ nextGroupBy: value })}
+                onToggleDetails={() => setListOptions({ showDetails: !showListDetails })}
+                onToggleTop3={() => setTop3Only((prev) => !prev)}
+                resolveText={resolveText}
+                showListDetails={showListDetails}
+                t={t}
+                top3Only={top3Only}
+            />
 
             {pomodoroEnabled && <PomodoroPanel tasks={pomodoroTasks} />}
 
-            <div className="bg-card border border-border rounded-lg p-3 space-y-3">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                        <Filter className="w-4 h-4" />
-                        {t('filters.label')}
-                    </div>
-                    <div className="flex items-center gap-2">
-                        {hasFilters && (
-                            <button
-                                type="button"
-                                onClick={clearFilters}
-                                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                            >
-                                {t('filters.clear')}
-                            </button>
-                        )}
-                        <button
-                            type="button"
-                            onClick={() => setFiltersOpen((prev) => !prev)}
-                            aria-expanded={showFiltersPanel}
-                            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                            {showFiltersPanel ? t('filters.hide') : t('filters.show')}
-                        </button>
-                    </div>
-                </div>
-                <input
-                    type="text"
-                    data-view-filter-input
-                    placeholder={t('common.search')}
-                    value={searchQuery}
-                    onChange={(event) => setSearchQuery(event.target.value)}
-                    className="w-full text-sm px-3 py-2 rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
-                />
-                {showFiltersPanel && (
-                    <div className="space-y-4">
-                        <div className="space-y-2">
-                            <div className="text-xs text-muted-foreground uppercase tracking-wide">{t('filters.contexts')}</div>
-                            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
-                                {allTokens.map((token) => {
-                                    const isActive = selectedTokens.includes(token);
-                                    return (
-                                        <button
-                                            key={token}
-                                            type="button"
-                                            onClick={() => toggleTokenFilter(token)}
-                                            aria-pressed={isActive}
-                                            className={cn(
-                                                "px-3 py-1.5 rounded-full text-xs font-medium transition-colors",
-                                                isActive
-                                                    ? "bg-primary text-primary-foreground"
-                                                    : "bg-muted hover:bg-muted/80 text-muted-foreground"
-                                            )}
-                                        >
-                                            {token}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                        {prioritiesEnabled && (
-                            <div className="space-y-2">
-                                <div className="text-xs text-muted-foreground uppercase tracking-wide">{t('filters.priority')}</div>
-                                <div className="flex flex-wrap gap-2">
-                                    {priorityOptions.map((priority) => {
-                                        const isActive = selectedPriorities.includes(priority);
-                                        return (
-                                            <button
-                                                key={priority}
-                                                type="button"
-                                                onClick={() => togglePriorityFilter(priority)}
-                                                aria-pressed={isActive}
-                                                className={cn(
-                                                    "px-3 py-1.5 rounded-full text-xs font-medium transition-colors",
-                                                    isActive
-                                                        ? "bg-primary text-primary-foreground"
-                                                        : "bg-muted hover:bg-muted/80 text-muted-foreground"
-                                                )}
-                                            >
-                                                {t(`priority.${priority}`)}
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        )}
-                        <div className="space-y-2">
-                            <div className="text-xs text-muted-foreground uppercase tracking-wide">{t('taskEdit.energyLevel')}</div>
-                            <div className="flex flex-wrap gap-2">
-                                {energyLevelOptions.map((energyLevel) => {
-                                    const isActive = selectedEnergyLevels.includes(energyLevel);
-                                    return (
-                                        <button
-                                            key={energyLevel}
-                                            type="button"
-                                            onClick={() => toggleEnergyFilter(energyLevel)}
-                                            aria-pressed={isActive}
-                                            className={cn(
-                                                "px-3 py-1.5 rounded-full text-xs font-medium transition-colors",
-                                                isActive
-                                                    ? "bg-primary text-primary-foreground"
-                                                    : "bg-muted hover:bg-muted/80 text-muted-foreground"
-                                            )}
-                                        >
-                                            {t(`energyLevel.${energyLevel}`)}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                        {timeEstimatesEnabled && (
-                            <div className="space-y-2">
-                                <div className="text-xs text-muted-foreground uppercase tracking-wide">{t('filters.timeEstimate')}</div>
-                                <div className="flex flex-wrap gap-2">
-                                    {timeEstimateOptions.map((estimate) => {
-                                        const isActive = selectedTimeEstimates.includes(estimate);
-                                        return (
-                                            <button
-                                                key={estimate}
-                                                type="button"
-                                                onClick={() => toggleTimeFilter(estimate)}
-                                                aria-pressed={isActive}
-                                                className={cn(
-                                                    "px-3 py-1.5 rounded-full text-xs font-medium transition-colors",
-                                                    isActive
-                                                        ? "bg-primary text-primary-foreground"
-                                                        : "bg-muted hover:bg-muted/80 text-muted-foreground"
-                                                )}
-                                            >
-                                                {formatEstimate(estimate)}
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                )}
-            </div>
+            <AgendaFiltersPanel
+                allTokens={allTokens}
+                energyLevelOptions={energyLevelOptions}
+                formatEstimate={formatEstimate}
+                hasFilters={hasFilters}
+                onClearFilters={clearFilters}
+                onSearchChange={setSearchQuery}
+                onToggleEnergy={toggleEnergyFilter}
+                onToggleFiltersOpen={() => setFiltersOpen((prev) => !prev)}
+                onTogglePriority={togglePriorityFilter}
+                onToggleTime={toggleTimeFilter}
+                onToggleToken={toggleTokenFilter}
+                prioritiesEnabled={prioritiesEnabled}
+                priorityOptions={priorityOptions}
+                searchQuery={searchQuery}
+                selectedEnergyLevels={selectedEnergyLevels}
+                selectedPriorities={selectedPriorities}
+                selectedTimeEstimates={selectedTimeEstimates}
+                selectedTokens={selectedTokens}
+                showFiltersPanel={showFiltersPanel}
+                t={t}
+                timeEstimateOptions={timeEstimateOptions}
+                timeEstimatesEnabled={timeEstimatesEnabled}
+            />
 
             {top3Only ? (
                 <div className="space-y-4">
@@ -975,25 +696,29 @@ export function AgendaView() {
 
                     {/* Other Sections */}
                     <div className="space-y-6">
-                        <Section
-                            sectionKey="schedule"
-                            title={t('focus.schedule') || t('agenda.dueToday')}
-                            icon={Calendar}
-                            tasks={sections.schedule}
-                            color="text-yellow-600"
-                        />
+                        {sections.schedule.length > 0 && (
+                            <AgendaCollapsibleSection
+                                title={t('focus.schedule') || t('agenda.dueToday')}
+                                icon={Clock}
+                                color="text-yellow-600"
+                                count={sections.schedule.length}
+                                expanded={expandedSections.schedule}
+                                onToggle={() => toggleSection('schedule')}
+                                controlsId="agenda-section-schedule"
+                            >
+                                <AgendaTaskList
+                                    tasks={sections.schedule}
+                                    projectMap={projectMap}
+                                    buildFocusToggle={buildFocusToggle}
+                                    showListDetails={showListDetails}
+                                    highlightTaskId={highlightTaskId}
+                                />
+                            </AgendaCollapsibleSection>
+                        )}
 
                         {nextGroupBy === 'none' ? (
-                            <Section
-                                sectionKey="nextActions"
-                                title={t('agenda.nextActions')}
-                                icon={ArrowRight}
-                                tasks={sections.nextActions}
-                                color="text-blue-600"
-                            />
-                        ) : (
-                            <div className="space-y-3">
-                                <SectionToggle
+                            sections.nextActions.length > 0 && (
+                                <AgendaCollapsibleSection
                                     title={t('agenda.nextActions')}
                                     icon={ArrowRight}
                                     color="text-blue-600"
@@ -1001,13 +726,32 @@ export function AgendaView() {
                                     expanded={expandedSections.nextActions}
                                     onToggle={() => toggleSection('nextActions')}
                                     controlsId="agenda-section-nextActions"
-                                />
-                                {expandedSections.nextActions ? (
-                                    <div id="agenda-section-nextActions" className="space-y-2">
+                                >
+                                    <AgendaTaskList
+                                        tasks={sections.nextActions}
+                                        projectMap={projectMap}
+                                        buildFocusToggle={buildFocusToggle}
+                                        showListDetails={showListDetails}
+                                        highlightTaskId={highlightTaskId}
+                                    />
+                                </AgendaCollapsibleSection>
+                            )
+                        ) : (
+                            sections.nextActions.length > 0 && (
+                                <AgendaCollapsibleSection
+                                    title={t('agenda.nextActions')}
+                                    icon={ArrowRight}
+                                    color="text-blue-600"
+                                    count={sections.nextActions.length}
+                                    expanded={expandedSections.nextActions}
+                                    onToggle={() => toggleSection('nextActions')}
+                                    controlsId="agenda-section-nextActions"
+                                >
+                                    <div className="space-y-2">
                                         {nextActionGroups.map((group) => (
                                             <div key={group.id} className="rounded-md border border-border/40 bg-card/30">
                                                 <div className={cn(
-                                                    'px-3 py-2 text-xs font-semibold uppercase tracking-wide border-b border-border/30',
+                                                    'border-b border-border/30 px-3 py-2 text-xs font-semibold uppercase tracking-wide',
                                                     group.muted ? 'text-muted-foreground' : 'text-foreground/90',
                                                 )}>
                                                     <span className="inline-flex items-center gap-1.5">
@@ -1028,23 +772,36 @@ export function AgendaView() {
                                             </div>
                                         ))}
                                     </div>
-                                ) : null}
-                            </div>
+                                </AgendaCollapsibleSection>
+                            )
                         )}
 
-                        <Section
-                            sectionKey="reviewDue"
-                            title={t('agenda.reviewDue') || 'Review Due'}
-                            icon={Clock}
-                            tasks={sections.reviewDue}
-                            color="text-purple-600"
-                        />
+                        {sections.reviewDue.length > 0 && (
+                            <AgendaCollapsibleSection
+                                title={t('agenda.reviewDue') || 'Review Due'}
+                                icon={Clock}
+                                color="text-purple-600"
+                                count={sections.reviewDue.length}
+                                expanded={expandedSections.reviewDue}
+                                onToggle={() => toggleSection('reviewDue')}
+                                controlsId="agenda-section-reviewDue"
+                            >
+                                <AgendaTaskList
+                                    tasks={sections.reviewDue}
+                                    projectMap={projectMap}
+                                    buildFocusToggle={buildFocusToggle}
+                                    showListDetails={showListDetails}
+                                    highlightTaskId={highlightTaskId}
+                                />
+                            </AgendaCollapsibleSection>
+                        )}
 
-                        <ProjectSection
+                        <AgendaProjectSection
                             title={t('agenda.reviewDueProjects') || 'Projects to review'}
                             icon={Folder}
                             projects={reviewDueProjects}
                             color="text-indigo-600"
+                            t={t}
                         />
                     </div>
                 </>

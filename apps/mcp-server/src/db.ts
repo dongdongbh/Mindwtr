@@ -122,8 +122,10 @@ export async function ensureMindwtrDbPath(options: DbOptions = {}): Promise<stri
   const dataJsonPath = resolveMindwtrDataJsonPath(options.dbPath);
   if (existsSync(dataJsonPath)) {
     try {
+      console.warn(`[mindwtr-mcp] Bootstrapping SQLite database from fallback data.json: ${dataJsonPath}`);
       await bootstrapMindwtrDbFromJson(path, dataJsonPath);
       if (existsSync(path)) {
+        console.warn(`[mindwtr-mcp] Bootstrapped SQLite database at: ${path}`);
         return path;
       }
     } catch (error) {

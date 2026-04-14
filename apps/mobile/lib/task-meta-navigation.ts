@@ -18,3 +18,19 @@ export function openContextsScreen(token: string) {
     if (!token) return;
     navigateToTaskMetaScreen('/contexts', { token });
 }
+
+export function openTaskScreen(taskId: string, projectId?: string) {
+    if (!taskId) return;
+    const openToken = String(Date.now());
+    if (projectId) {
+        router.push({
+            pathname: '/projects-screen',
+            params: { projectId, taskId, openToken },
+        });
+        return;
+    }
+    router.push({
+        pathname: '/focus',
+        params: { taskId, openToken },
+    });
+}

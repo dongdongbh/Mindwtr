@@ -9,9 +9,12 @@ describe('normalizeAnalyticsInstallChannel', () => {
     });
 
     it('keeps other managed channels stable', () => {
+        expect(normalizeAnalyticsInstallChannel('aur')).toBe('aur-source');
+        expect(normalizeAnalyticsInstallChannel('aur-bin')).toBe('aur-bin');
         expect(normalizeAnalyticsInstallChannel('aur-source')).toBe('aur-source');
         expect(normalizeAnalyticsInstallChannel('apt')).toBe('apt');
         expect(normalizeAnalyticsInstallChannel('appimage')).toBe('appimage');
+        expect(normalizeAnalyticsInstallChannel('portable')).toBe('portable');
     });
 
     it('normalizes aliases and unknown values', () => {

@@ -12,7 +12,7 @@ type QuickActionabilityChoice = 'actionable' | 'trash' | 'someday' | 'reference'
 type QuickTwoMinuteChoice = 'yes' | 'no';
 type QuickExecutionChoice = 'defer' | 'delegate';
 
-type InboxProcessingQuickPanelProps = {
+export type InboxProcessingQuickPanelProps = {
     t: (key: string) => string;
     processingTask: Task;
     remainingCount: number;

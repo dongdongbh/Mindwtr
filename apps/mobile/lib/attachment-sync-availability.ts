@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from './file-system';
 import type { Attachment } from '@mindwtr/core';
 import { cloudGetFile, webdavGetFile, withRetry } from '@mindwtr/core';
 import { downloadDropboxFile } from './dropbox-sync';

@@ -681,6 +681,7 @@ describe('performSyncCycle', () => {
             title: 'fresh local title',
         }]);
         refreshedPendingLocal.settings.pendingRemoteWriteAt = '2025-12-31T23:59:59.000Z';
+        let localData = stalePendingLocal;
         let localReads = 0;
         let remoteWriteData: AppData | null = null;
 
@@ -688,7 +689,7 @@ describe('performSyncCycle', () => {
             readLocal: async () => {
                 sequence.push('read-local');
                 localReads += 1;
-                return localReads === 1 ? stalePendingLocal : refreshedPendingLocal;
+                return localData;
             },
             readRemote: async () => {
                 sequence.push('read-remote');
@@ -701,13 +702,20 @@ describe('performSyncCycle', () => {
                 remoteWriteData = data;
                 sequence.push(`write-remote:${data.settings.pendingRemoteWriteAt ? 'pending' : 'clear'}`);
             },
+            flushPendingLocalBeforeRetryRead: async () => {
+                sequence.push('flush-before-retry-read');
+                localData = refreshedPendingLocal;
+            },
             now: () => '2026-01-01T00:00:00.000Z',
         });
 
         const refreshReadIndex = sequence.lastIndexOf('read-local');
         const readRemoteIndex = sequence.indexOf('read-remote');
+        const flushIndex = sequence.indexOf('flush-before-retry-read');
         const retryWriteIndex = sequence.indexOf('write-remote:clear');
         expect(localReads).toBe(2);
+        expect(flushIndex).toBeGreaterThan(sequence.indexOf('read-local'));
+        expect(flushIndex).toBeLessThan(refreshReadIndex);
         expect(refreshReadIndex).toBeGreaterThan(sequence.indexOf('read-local'));
         expect(readRemoteIndex).toBeGreaterThan(refreshReadIndex);
         expect(retryWriteIndex).toBeGreaterThan(readRemoteIndex);

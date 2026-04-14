@@ -5,6 +5,7 @@ import { X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { MarkdownFormatToolbar } from './MarkdownFormatToolbar';
 import { Markdown } from './Markdown';
+import { MarkdownReferenceAutocompleteMenu, useMarkdownReferenceAutocomplete } from './MarkdownReferenceAutocomplete';
 import type { MarkdownSelection, MarkdownToolbarActionId, MarkdownToolbarResult } from '@mindwtr/core';
 
 type ExpandedMarkdownEditorProps = {
@@ -19,6 +20,7 @@ type ExpandedMarkdownEditorProps = {
     t: (key: string) => string;
     initialMode?: 'edit' | 'preview';
     direction?: 'ltr' | 'rtl';
+    selection: MarkdownSelection;
     canUndo: boolean;
     onUndo: () => MarkdownSelection | undefined;
     onApplyAction: (actionId: MarkdownToolbarActionId, selection: MarkdownSelection) => MarkdownToolbarResult | void;
@@ -38,6 +40,7 @@ export function ExpandedMarkdownEditor({
     t,
     initialMode = 'edit',
     direction = 'ltr',
+    selection,
     canUndo,
     onUndo,
     onApplyAction,
@@ -51,6 +54,15 @@ export function ExpandedMarkdownEditor({
     const lastActiveElement = useRef<HTMLElement | null>(null);
     const titleId = useId();
     const resolvedHeaderTitle = (headerTitle || '').trim() || title;
+    const autocomplete = useMarkdownReferenceAutocomplete({
+        value,
+        selection,
+        textareaRef,
+        onApplyResult: (next) => {
+            onChange(next.value);
+            onSelectionChange(next.selection);
+        },
+    });
 
     const isRtl = direction === 'rtl';
 
@@ -179,30 +191,45 @@ export function ExpandedMarkdownEditor({
                                 onUndo={onUndo}
                                 onApplyAction={onApplyAction}
                             />
-                            <textarea
-                                ref={textareaRef}
-                                value={value}
-                                onChange={(event) => {
-                                    onChange(event.target.value);
-                                    onSelectionChange({
-                                        start: event.currentTarget.selectionStart ?? event.currentTarget.value.length,
-                                        end: event.currentTarget.selectionEnd ?? event.currentTarget.value.length,
-                                    });
-                                }}
-                                onSelect={(event) => {
-                                    onSelectionChange({
-                                        start: event.currentTarget.selectionStart ?? event.currentTarget.value.length,
-                                        end: event.currentTarget.selectionEnd ?? event.currentTarget.value.length,
-                                    });
-                                }}
-                                onKeyDown={onEditorKeyDown}
-                                placeholder={placeholder}
-                                dir={direction}
-                                className={cn(
-                                    'min-h-0 flex-1 resize-none rounded-xl border border-border bg-background px-4 py-3 text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-primary/30',
-                                    isRtl && 'text-right',
-                                )}
-                            />
+                            <div className="relative flex min-h-0 flex-1 flex-col">
+                                <textarea
+                                    ref={textareaRef}
+                                    value={value}
+                                    onChange={(event) => {
+                                        onChange(event.target.value);
+                                        onSelectionChange({
+                                            start: event.currentTarget.selectionStart ?? event.currentTarget.value.length,
+                                            end: event.currentTarget.selectionEnd ?? event.currentTarget.value.length,
+                                        });
+                                    }}
+                                    onSelect={(event) => {
+                                        onSelectionChange({
+                                            start: event.currentTarget.selectionStart ?? event.currentTarget.value.length,
+                                            end: event.currentTarget.selectionEnd ?? event.currentTarget.value.length,
+                                        });
+                                    }}
+                                    onKeyDown={(event) => {
+                                        if (autocomplete.handleKeyDown(event)) {
+                                            return;
+                                        }
+                                        onEditorKeyDown?.(event);
+                                    }}
+                                    placeholder={placeholder}
+                                    dir={direction}
+                                    className={cn(
+                                        'min-h-0 flex-1 resize-none rounded-xl border border-border bg-background px-4 py-3 text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-primary/30',
+                                        isRtl && 'text-right',
+                                    )}
+                                />
+                                <MarkdownReferenceAutocompleteMenu
+                                    isOpen={autocomplete.isOpen}
+                                    suggestions={autocomplete.suggestions}
+                                    selectedIndex={autocomplete.selectedIndex}
+                                    setSelectedIndex={autocomplete.setSelectedIndex}
+                                    applySuggestion={autocomplete.applySuggestion}
+                                    t={t}
+                                />
+                            </div>
                         </div>
                     ) : (
                         <div

@@ -1,6 +1,6 @@
 import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from './file-system';
 import { Directory as ExpoDirectory, File as ExpoFile } from 'expo-file-system';
 import { AppData } from '@mindwtr/core';
 import { Platform } from 'react-native';
@@ -8,7 +8,7 @@ import { logError, logInfo, logWarn } from './app-log';
 import { createSyncPathBookmark } from './sync-path-bookmarks';
 
 // StorageAccessFramework is part of the legacy FileSystem module
-const StorageAccessFramework = (FileSystem as any).StorageAccessFramework;
+const StorageAccessFramework = FileSystem.StorageAccessFramework;
 
 interface PickResult extends AppData {
     __fileUri?: string;
@@ -490,6 +490,7 @@ export const pickAndParseSyncFolder = async (): Promise<PickResult | null> => {
         const permissions = await StorageAccessFramework.requestDirectoryPermissionsAsync();
         if (!permissions.granted) return null;
         const directoryUri = permissions.directoryUri;
+        if (!directoryUri) return null;
         let fileUri = await resolveSyncFileUri(directoryUri, { createIfMissing: true });
         let fileContent: string | null = null;
         if (fileUri) {
@@ -660,10 +661,11 @@ export const exportData = async (data: AppData): Promise<void> => {
                     },
                 });
 
-                if (permissions.granted) {
+                const directoryUri = permissions.directoryUri;
+                if (permissions.granted && directoryUri) {
                     // Create the file in the selected directory
                     const fileUri = await StorageAccessFramework.createFileAsync(
-                        permissions.directoryUri,
+                        directoryUri,
                         filename,
                         'application/json'
                     );

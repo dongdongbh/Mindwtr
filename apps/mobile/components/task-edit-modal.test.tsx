@@ -99,6 +99,16 @@ vi.mock('expo-linking', () => ({
   openURL: vi.fn(),
 }));
 
+vi.mock('expo-router', () => ({
+  router: {
+    push: vi.fn(),
+    navigate: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    canGoBack: vi.fn(() => false),
+  },
+}));
+
 vi.mock('./task-edit/task-edit-modal.utils', async () => {
   const actual = await vi.importActual<typeof import('./task-edit/task-edit-modal.utils')>('./task-edit/task-edit-modal.utils');
   return {

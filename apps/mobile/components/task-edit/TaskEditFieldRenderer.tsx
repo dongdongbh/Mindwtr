@@ -31,6 +31,7 @@ import {
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 
 import { MarkdownFormatToolbar } from '../markdown-format-toolbar';
+import { MarkdownReferenceAutocomplete } from '../markdown-reference-autocomplete';
 import { MarkdownText } from '../markdown-text';
 import { buildRecurrenceValue } from './recurrence-utils';
 import type { SetEditedTask } from './use-task-edit-state';
@@ -71,6 +72,7 @@ type TaskEditFieldRendererProps = {
     handleDescriptionChange: (text: string) => void;
     handleDescriptionUndo: () => MarkdownSelection | undefined;
     handleDescriptionApplyAction: (actionId: MarkdownToolbarActionId, selection: MarkdownSelection) => MarkdownToolbarResult;
+    applyDescriptionResult: (result: MarkdownToolbarResult) => void;
     openDescriptionExpandedEditor: () => void;
     downloadAttachment: (attachment: Attachment) => void | Promise<void>;
     editedTask: Partial<Task>;
@@ -152,6 +154,7 @@ export function TaskEditFieldRenderer(input: TaskEditFieldRendererProps) {
         handleDescriptionChange,
         handleDescriptionUndo,
         handleDescriptionApplyAction,
+        applyDescriptionResult,
         openDescriptionExpandedEditor,
         downloadAttachment,
         editedTask,
@@ -910,6 +913,15 @@ export function TaskEditFieldRenderer(input: TaskEditFieldRendererProps) {
                                     canUndo={descriptionUndoDepth > 0}
                                     onUndo={handleDescriptionUndo}
                                     onApplyAction={handleDescriptionApplyAction}
+                                />
+                                <MarkdownReferenceAutocomplete
+                                    value={descriptionDraft}
+                                    selection={descriptionSelection}
+                                    inputRef={descriptionInputRef}
+                                    visible={isDescriptionInputFocused}
+                                    onApplyResult={applyDescriptionResult}
+                                    t={t}
+                                    tc={tc}
                                 />
                                 <TextInput
                                     ref={descriptionInputRef}

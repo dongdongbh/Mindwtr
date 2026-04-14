@@ -67,7 +67,7 @@ type Labels = {
 
 type LanguageOption = { id: Language; native: string };
 
-type SettingsMainPageProps = {
+export type SettingsMainPageProps = {
     t: Labels;
     themeMode: ThemeMode;
     onThemeChange: (mode: ThemeMode) => void;

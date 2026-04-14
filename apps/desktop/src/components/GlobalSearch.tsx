@@ -11,7 +11,6 @@ import {
     SearchTaskResult,
     getStorageAdapter,
     TaskStatus,
-    safeParseDate,
 } from '@mindwtr/core';
 import { useLanguage } from '../contexts/language-context';
 import { cn } from '../lib/utils';
@@ -19,35 +18,13 @@ import { PromptModal } from './PromptModal';
 import { useUiStore } from '../store/ui-store';
 import { AREA_FILTER_ALL, AREA_FILTER_NONE, resolveAreaFilter } from '../lib/area-filter';
 import { computeGlobalSearchResults, type DuePreset, type GlobalSearchScope } from './global-search-filtering';
+import { resolveTaskNavigationView } from '../lib/task-navigation';
 
 interface GlobalSearchProps {
     onNavigate: (view: string, itemId?: string) => void;
 }
 
-function isDeferredForPrimaryFocus(task: Task, now: Date = new Date()): boolean {
-    const start = safeParseDate(task.startTime);
-    if (!start) return false;
-    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-    return start > endOfToday;
-}
-
-export function resolveGlobalSearchTaskView(task: Task, now: Date = new Date()): string {
-    const statusViewMap: Record<TaskStatus, string> = {
-        inbox: 'inbox',
-        next: 'next',
-        waiting: 'waiting',
-        someday: 'someday',
-        reference: 'reference',
-        done: 'done',
-        archived: 'archived',
-    };
-    const primaryView = statusViewMap[task.status] || 'next';
-    const hidesDeferredTasks = primaryView === 'inbox' || primaryView === 'next';
-    if (hidesDeferredTasks && isDeferredForPrimaryFocus(task, now)) {
-        return 'review';
-    }
-    return primaryView;
-}
+export const resolveGlobalSearchTaskView = resolveTaskNavigationView;
 
 export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
     const [isOpen, setIsOpen] = useState(false);

@@ -330,6 +330,19 @@ Yes. Mindwtr can import Todoist CSV exports and ZIP backups from **Settings → 
 
 See [[Todoist Import]].
 
+### Can I import from DGT GTD?
+
+Yes. Mindwtr can import DGT GTD JSON exports and ZIP archives from **Settings → Data & Sync / Sync → Import from DGT GTD**.
+
+- DGT folders become Mindwtr areas
+- DGT projects become Mindwtr projects
+- DGT checklists become checklist tasks
+- DGT contexts and tags are preserved
+
+Unsupported DGT repeat patterns are imported once and the original repeat text is preserved in the description.
+
+See [[DGT GTD Import]].
+
 ---
 
 ## Troubleshooting

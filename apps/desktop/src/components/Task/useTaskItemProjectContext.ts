@@ -4,10 +4,10 @@ import { getFrequentTaskTokens, getUsedTaskTokens, useTaskStore } from '@mindwtr
 
 type UseTaskItemProjectContextParams = {
     task: Task;
-    propProject?: Project;
-    projects: Project[];
+    project?: Project;
+    projectArea?: Area;
+    taskArea?: Area;
     sections: Section[];
-    areas: Area[];
     isEditing: boolean;
     editProjectId: string;
     setEditAreaId: (value: string) => void;
@@ -15,15 +15,14 @@ type UseTaskItemProjectContextParams = {
 
 export function useTaskItemProjectContext({
     task,
-    propProject,
-    projects,
+    project,
+    projectArea,
+    taskArea,
     sections,
-    areas,
     isEditing,
     editProjectId,
     setEditAreaId,
 }: UseTaskItemProjectContextParams) {
-    const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
     const sectionsByProject = useMemo(() => {
         const map = new Map<string, Section[]>();
         sections.forEach((section) => {
@@ -43,7 +42,6 @@ export function useTaskItemProjectContext({
         });
         return map;
     }, [sections]);
-    const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
 
     const [projectContext, setProjectContext] = useState<{ projectTitle: string; projectTasks: string[] } | null>(null);
     const [tagOptions, setTagOptions] = useState<string[]>([]);
@@ -58,7 +56,7 @@ export function useTaskItemProjectContext({
         }
         const { tasks: storeTasks, projects: storeProjects } = useTaskStore.getState();
         const projectId = editProjectId || task.projectId;
-        const project = propProject || (projectId ? storeProjects.find((item) => item.id === projectId) : undefined);
+        const activeProject = project || (projectId ? storeProjects.find((item) => item.id === projectId) : undefined);
         if (projectId) {
             const projectTasks = storeTasks
                 .filter((candidate) => candidate.projectId === projectId && candidate.id !== task.id && !candidate.deletedAt)
@@ -66,7 +64,7 @@ export function useTaskItemProjectContext({
                 .filter(Boolean)
                 .slice(0, 20);
             setProjectContext({
-                projectTitle: project?.title || '',
+                projectTitle: activeProject?.title || '',
                 projectTasks,
             });
         } else {
@@ -77,12 +75,13 @@ export function useTaskItemProjectContext({
         setPopularTagOptions(getFrequentTaskTokens(storeTasks, (candidate) => candidate.tags, 8, { prefix: '#' }));
         setAllContexts(getUsedTaskTokens(storeTasks, (candidate) => candidate.contexts, { prefix: '@' }));
         setPopularContextOptions(getFrequentTaskTokens(storeTasks, (candidate) => candidate.contexts, 5, { prefix: '@' }));
-    }, [editProjectId, isEditing, propProject, setEditAreaId, task.id, task.projectId]);
+    }, [editProjectId, isEditing, project, setEditAreaId, task.id, task.projectId]);
 
     return {
-        projectById,
         sectionsByProject,
-        areaById,
+        currentProject: project,
+        currentTaskArea: project?.areaId ? projectArea : taskArea,
+        currentProjectColor: projectArea?.color,
         projectContext,
         tagOptions,
         popularTagOptions,

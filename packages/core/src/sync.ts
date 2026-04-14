@@ -12,6 +12,7 @@ import {
 } from './sync-types';
 import {
     isValidTimestamp,
+    type SyncMergeArea,
     normalizeAreaForSyncMerge,
     normalizeAppData,
     normalizeProjectForSyncMerge,
@@ -98,6 +99,7 @@ const PENDING_REMOTE_WRITE_RETRY_BASE_MS = 5 * 1000;
 const PENDING_REMOTE_WRITE_RETRY_MAX_MS = 5 * 60 * 1000;
 const ATTACHMENT_URI_DECODE_LIMIT = 32;
 const ATTACHMENT_TRAVERSAL_SEGMENT_PATTERN = /(^|[\\/])\.\.([\\/]|$)/;
+const ATTACHMENT_TRAVERSAL_SEGMENT_CACHE_LIMIT = 1024;
 
 type ComparisonNormalizer<T> = (item: T) => unknown;
 
@@ -121,6 +123,8 @@ const parseMergeTimestamp = (value: unknown, maxAllowedMs?: number): MergeTimest
     return { raw: parsed, safe: parsed, wasClamped: false };
 };
 
+const attachmentTraversalSegmentCache = new Map<string, boolean>();
+
 const getMergeTimestampComparison = (
     localTime: MergeTimestampInfo,
     incomingTime: MergeTimestampInfo,
@@ -138,6 +142,11 @@ const getMergeTimestampComparison = (
 };
 
 const containsAttachmentTraversalSegment = (value: string): boolean => {
+    const cached = attachmentTraversalSegmentCache.get(value);
+    if (cached !== undefined) {
+        return cached;
+    }
+
     const candidates = new Set<string>([value]);
     const queue: string[] = [value];
 
@@ -177,7 +186,12 @@ const containsAttachmentTraversalSegment = (value: string): boolean => {
         }
     }
 
-    return Array.from(candidates).some((candidate) => ATTACHMENT_TRAVERSAL_SEGMENT_PATTERN.test(candidate));
+    const hasTraversalSegment = Array.from(candidates).some((candidate) => ATTACHMENT_TRAVERSAL_SEGMENT_PATTERN.test(candidate));
+    if (attachmentTraversalSegmentCache.size >= ATTACHMENT_TRAVERSAL_SEGMENT_CACHE_LIMIT) {
+        attachmentTraversalSegmentCache.clear();
+    }
+    attachmentTraversalSegmentCache.set(value, hasTraversalSegment);
+    return hasTraversalSegment;
 };
 
 const sanitizeMergedAttachmentUri = (value: unknown): string | undefined => {
@@ -315,9 +329,9 @@ function mergeEntitiesWithStats<T extends MergeableEntity>(
             stats.maxClockSkewDirection = safeTimeDiff >= 0 ? 'remote-ahead' : 'local-ahead';
         }
         const withinSkew = Math.abs(safeTimeDiff) <= CLOCK_SKEW_THRESHOLD_MS;
-        const resolveOperationTime = (item: T): number => {
-            const updatedTime = parseMergeTimestamp(item.updatedAt, maxAllowedMergeTime).safe;
-            if (!item.deletedAt) return updatedTime;
+        const resolveOperationTime = (item: T, updatedTime: MergeTimestampInfo): number => {
+            const safeUpdatedTime = updatedTime.safe;
+            if (!item.deletedAt) return safeUpdatedTime;
 
             const deletedTimeRaw = new Date(item.deletedAt).getTime();
             if (!Number.isFinite(deletedTimeRaw)) {
@@ -327,10 +341,10 @@ function mergeEntitiesWithStats<T extends MergeableEntity>(
                     logWarn('Invalid deletedAt timestamp during merge; using updatedAt fallback', {
                         scope: 'sync',
                         category: 'sync',
-                        context: { id: item.id, deletedAt: item.deletedAt, updatedAt: item.updatedAt, fallbackDeletedTime: updatedTime },
+                        context: { id: item.id, deletedAt: item.deletedAt, updatedAt: item.updatedAt, fallbackDeletedTime: safeUpdatedTime },
                     });
                 }
-                return updatedTime;
+                return safeUpdatedTime;
             }
 
             return deletedTimeRaw > maxAllowedMergeTime ? maxAllowedMergeTime : deletedTimeRaw;
@@ -350,8 +364,8 @@ function mergeEntitiesWithStats<T extends MergeableEntity>(
             localCandidate: T,
             incomingCandidate: T,
         ): { winner: T; preservedLiveInAmbiguousWindow: boolean; operationDiffMs: number } => {
-            const localOpTime = resolveOperationTime(localCandidate);
-            const incomingOpTime = resolveOperationTime(incomingCandidate);
+            const localOpTime = resolveOperationTime(localCandidate, localUpdatedTime);
+            const incomingOpTime = resolveOperationTime(incomingCandidate, incomingUpdatedTime);
             const operationDiff = incomingOpTime - localOpTime;
             if (Math.abs(operationDiff) <= DELETE_VS_LIVE_AMBIGUOUS_WINDOW_MS) {
                 if (hasRevision && revDiff !== 0) {
@@ -490,10 +504,8 @@ function mergeEntitiesWithStats<T extends MergeableEntity>(
     return { merged, stats };
 }
 
-function mergeAreas(local: Area[], incoming: Area[], nowIso: string): { merged: Area[]; stats: EntityMergeStats } {
-    const localNormalized = local.map((area) => normalizeRevisionMetadata(normalizeAreaForSyncMerge(area, nowIso)));
-    const incomingNormalized = incoming.map((area) => normalizeRevisionMetadata(normalizeAreaForSyncMerge(area, nowIso)));
-    const result = mergeEntitiesWithStats(localNormalized, incomingNormalized, undefined, undefined, 'area');
+function mergeAreas(local: SyncMergeArea[], incoming: SyncMergeArea[]): { merged: Area[]; stats: EntityMergeStats } {
+    const result = mergeEntitiesWithStats(local, incoming, undefined, undefined, 'area');
     let fallbackOrder = result.merged.reduce((maxOrder, area) => {
         const order = typeof area.order === 'number' && Number.isFinite(area.order) ? area.order : -1;
         return Math.max(maxOrder, order);
@@ -678,7 +690,7 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData): MergeR
         'section'
     );
 
-    const areasResult = mergeAreas(local.areas || [], incoming.areas || [], nowIso);
+    const areasResult = mergeAreas(localNormalized.areas, incomingNormalized.areas);
 
     const stats = {
         tasks: tasksResult.stats,
@@ -814,6 +826,9 @@ export async function performSyncCycle(io: SyncCycleIO): Promise<SyncCycleResult
             pendingAt: localData.settings.pendingRemoteWriteAt as string,
             attempts: getPendingRemoteWriteAttemptCount(localData),
         };
+        if (typeof io.flushPendingLocalBeforeRetryRead === 'function') {
+            await io.flushPendingLocalBeforeRetryRead();
+        }
         localData = clearPendingRemoteWriteFlag(await readLocalDataForSync());
     }
 

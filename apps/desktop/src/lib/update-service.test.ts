@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   checkForUpdates,
+  findPortableZipAsset,
   getFlatpakInstallChannel,
   normalizeInstallSource,
 } from "./update-service";
@@ -218,9 +219,9 @@ describe("update-service channel selection", () => {
                 "https://example.com/mindwtr_1.2.0_x64-setup.exe",
             },
             {
-              name: "mindwtr_1.2.0_x64_portable.zip",
+              name: "mindwtr_1.2.0_windows_x64_portable.zip",
               browser_download_url:
-                "https://example.com/mindwtr_1.2.0_x64_portable.zip",
+                "https://example.com/mindwtr_1.2.0_windows_x64_portable.zip",
             },
           ],
         });
@@ -234,8 +235,20 @@ describe("update-service channel selection", () => {
     });
 
     expect(result.downloadUrl).toBe(
-      "https://example.com/mindwtr_1.2.0_x64_portable.zip",
+      "https://example.com/mindwtr_1.2.0_windows_x64_portable.zip",
     );
     expect(normalizeInstallSource("portable")).toBe("portable");
+  });
+
+  it("prefers explicitly windows-named portable assets when multiple portable zips exist", () => {
+    const asset = findPortableZipAsset([
+      { name: "mindwtr_1.2.0_portable.zip", url: "https://example.com/generic.zip" },
+      {
+        name: "mindwtr_1.2.0_windows_x64_portable.zip",
+        url: "https://example.com/windows.zip",
+      },
+    ]);
+
+    expect(asset?.name).toBe("mindwtr_1.2.0_windows_x64_portable.zip");
   });
 });

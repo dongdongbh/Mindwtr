@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from './file-system';
 import type { AppData, Attachment } from '@mindwtr/core';
 import {
   computeSha256Hex,
@@ -19,7 +19,7 @@ import { isLikelyFilePath } from './sync-service-utils';
 
 export const ATTACHMENTS_DIR_NAME = 'attachments';
 export const DEFAULT_CONTENT_TYPE = 'application/octet-stream';
-export const StorageAccessFramework = (FileSystem as any).StorageAccessFramework;
+export const StorageAccessFramework = FileSystem.StorageAccessFramework;
 export const WEBDAV_ATTACHMENT_RETRY_OPTIONS = { maxAttempts: 5, baseDelayMs: 2000, maxDelayMs: 60_000 };
 export const WEBDAV_ATTACHMENT_MIN_INTERVAL_MS = 400;
 export const WEBDAV_ATTACHMENT_COOLDOWN_MS = 60_000;

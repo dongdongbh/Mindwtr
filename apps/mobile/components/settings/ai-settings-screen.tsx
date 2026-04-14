@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Constants from 'expo-constants';
 import { Directory, File, Paths } from 'expo-file-system';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -23,6 +23,8 @@ import { useToast } from '@/contexts/toast-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { logSettingsError, logSettingsWarn } from '@/lib/settings-utils';
 
+import { AiSettingsAssistantCard } from './ai-settings-assistant-card';
+import { AiSettingsSpeechCard } from './ai-settings-speech-card';
 import {
     AI_PROVIDER_CONSENT_KEY,
     DEFAULT_WHISPER_MODEL,
@@ -258,6 +260,17 @@ export function AISettingsScreen() {
         })();
     };
 
+    const handleAiApiKeyChange = useCallback((value: string) => {
+        setAiApiKey(value);
+        saveAIKey(aiProvider, value).catch(logSettingsError);
+    }, [aiProvider]);
+
+    const handleAnthropicThinkingEnabledChange = useCallback((value: boolean) => {
+        updateAISettings({
+            thinkingBudget: value ? (DEFAULT_ANTHROPIC_THINKING_BUDGET || 1024) : 0,
+        });
+    }, [updateAISettings]);
+
     const getWhisperDirectories = () => {
         const candidates: Directory[] = [];
         try {
@@ -367,6 +380,31 @@ export function AISettingsScreen() {
     const applyWhisperModel = (modelId: string) => {
         updateSpeechSettings({ model: modelId, offlineModelPath: resolveWhisperModelPath(modelId) });
     };
+
+    const handleSpeechProviderChange = useCallback((provider: 'openai' | 'gemini' | 'whisper') => {
+        updateSpeechSettings({
+            provider,
+            model: provider === 'openai'
+                ? 'gpt-4o-transcribe'
+                : provider === 'gemini'
+                    ? 'gemini-2.5-flash'
+                    : DEFAULT_WHISPER_MODEL,
+            offlineModelPath: provider === 'whisper'
+                ? resolveWhisperModelPath(DEFAULT_WHISPER_MODEL)
+                : undefined,
+        });
+    }, [updateSpeechSettings]);
+
+    const handleSpeechApiKeyChange = useCallback((value: string) => {
+        setSpeechApiKey(value);
+        if (speechProvider === 'whisper') return;
+        saveAIKey(speechProvider, value).catch(logSettingsError);
+    }, [speechProvider]);
+
+    const handleSpeechLanguageChange = useCallback((value: string) => {
+        const trimmed = value.trim();
+        updateSpeechSettings({ language: trimmed ? trimmed : 'auto' });
+    }, [updateSpeechSettings]);
 
     useEffect(() => {
         if (speechProvider !== 'whisper') return;
@@ -558,570 +596,66 @@ export function AISettingsScreen() {
                     keyboardShouldPersistTaps="handled"
                     contentContainerStyle={scrollContentStyleWithKeyboard}
                 >
-                    <View style={[styles.settingCard, { backgroundColor: tc.cardBg }]}>
-                        <TouchableOpacity style={styles.settingRow} onPress={() => setAiAssistantOpen((prev) => !prev)}>
-                            <View style={styles.settingInfo}>
-                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.ai')}</Text>
-                                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.aiDesc')}</Text>
-                            </View>
-                            <Text style={[styles.chevron, { color: tc.secondaryText }]}>{aiAssistantOpen ? '▾' : '▸'}</Text>
-                        </TouchableOpacity>
+                    <AiSettingsAssistantCard
+                        aiApiKey={aiApiKey}
+                        aiAssistantOpen={aiAssistantOpen}
+                        aiBaseUrl={aiBaseUrl}
+                        aiCopilotModel={aiCopilotModel}
+                        aiCopilotOptions={aiCopilotOptions}
+                        aiEnabled={aiEnabled}
+                        aiModel={aiModel}
+                        aiModelOptions={aiModelOptions}
+                        aiProvider={aiProvider}
+                        aiReasoningEffort={aiReasoningEffort}
+                        aiThinkingBudget={aiThinkingBudget}
+                        anthropicThinkingEnabled={anthropicThinkingEnabled}
+                        getAIProviderLabel={getAIProviderLabel}
+                        isFossBuild={isFossBuild}
+                        localize={localize}
+                        onAiApiKeyChange={handleAiApiKeyChange}
+                        onAiBaseUrlChange={(value) => updateAISettings({ baseUrl: value })}
+                        onAiCopilotModelChange={(value) => updateAISettings({ copilotModel: value })}
+                        onAiEnabledChange={handleAIEnabledToggle}
+                        onAiModelChange={(value) => updateAISettings({ model: value })}
+                        onAiProviderChange={handleAIProviderChange}
+                        onAiReasoningEffortChange={(value) => updateAISettings({ reasoningEffort: value })}
+                        onAiThinkingBudgetChange={(value) => updateAISettings({ thinkingBudget: value })}
+                        onAnthropicThinkingEnabledChange={handleAnthropicThinkingEnabledChange}
+                        onModelPickerChange={setModelPicker}
+                        onToggleOpen={() => setAiAssistantOpen((prev) => !prev)}
+                        t={t}
+                        tc={tc}
+                    />
 
-                        {aiAssistantOpen && (
-                            <>
-                                <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.aiEnable')}</Text>
-                                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                                            {localize(
-                                                `When enabled, task text is sent directly to ${getAIProviderLabel(aiProvider)} using your API key.`,
-                                                `启用后，任务文本将通过你的 API Key 直接发送到 ${getAIProviderLabel(aiProvider)}。`
-                                            )}
-                                        </Text>
-                                    </View>
-                                    <Switch
-                                        value={aiEnabled}
-                                        onValueChange={handleAIEnabledToggle}
-                                        trackColor={{ false: '#767577', true: '#3B82F6' }}
-                                    />
-                                </View>
-
-                                <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.aiProvider')}</Text>
-                                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{getAIProviderLabel(aiProvider)}</Text>
-                                    </View>
-                                </View>
-                                <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                                    <View style={styles.backendToggle}>
-                                        <TouchableOpacity
-                                            style={[
-                                                styles.backendOption,
-                                                { borderColor: tc.border, backgroundColor: aiProvider === 'openai' ? tc.filterBg : 'transparent' },
-                                            ]}
-                                            onPress={() => handleAIProviderChange('openai')}
-                                        >
-                                            <Text style={[styles.backendOptionText, { color: aiProvider === 'openai' ? tc.tint : tc.secondaryText }]}>
-                                                {getAIProviderLabel('openai')}
-                                            </Text>
-                                        </TouchableOpacity>
-                                        {!isFossBuild && (
-                                            <TouchableOpacity
-                                                style={[
-                                                    styles.backendOption,
-                                                    { borderColor: tc.border, backgroundColor: aiProvider === 'gemini' ? tc.filterBg : 'transparent' },
-                                                ]}
-                                                onPress={() => handleAIProviderChange('gemini')}
-                                            >
-                                                <Text style={[styles.backendOptionText, { color: aiProvider === 'gemini' ? tc.tint : tc.secondaryText }]}>
-                                                    {t('settings.aiProviderGemini')}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        )}
-                                        {!isFossBuild && (
-                                            <TouchableOpacity
-                                                style={[
-                                                    styles.backendOption,
-                                                    { borderColor: tc.border, backgroundColor: aiProvider === 'anthropic' ? tc.filterBg : 'transparent' },
-                                                ]}
-                                                onPress={() => handleAIProviderChange('anthropic')}
-                                            >
-                                                <Text style={[styles.backendOptionText, { color: aiProvider === 'anthropic' ? tc.tint : tc.secondaryText }]}>
-                                                    {t('settings.aiProviderAnthropic')}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        )}
-                                    </View>
-                                </View>
-
-                                <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.aiModel')}</Text>
-                                    </View>
-                                </View>
-                                <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                                    <View style={styles.modelInputRow}>
-                                        <TextInput
-                                            value={aiModel}
-                                            onChangeText={(value) => updateAISettings({ model: value })}
-                                            placeholder={aiModelOptions[0]}
-                                            placeholderTextColor={tc.secondaryText}
-                                            autoCapitalize="none"
-                                            autoCorrect={false}
-                                            style={[styles.modelTextInput, { borderColor: tc.border, color: tc.text }]}
-                                        />
-                                        <TouchableOpacity
-                                            style={[styles.modelSuggestButton, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
-                                            onPress={() => setModelPicker('model')}
-                                        >
-                                            <Text style={[styles.modelSuggestButtonText, { color: tc.secondaryText }]}>
-                                                {localize('Suggestions', '建议')}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                </View>
-
-                                <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.aiCopilotModel')}</Text>
-                                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.aiCopilotHint')}</Text>
-                                    </View>
-                                </View>
-                                <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                                    <View style={styles.modelInputRow}>
-                                        <TextInput
-                                            value={aiCopilotModel}
-                                            onChangeText={(value) => updateAISettings({ copilotModel: value })}
-                                            placeholder={aiCopilotOptions[0]}
-                                            placeholderTextColor={tc.secondaryText}
-                                            autoCapitalize="none"
-                                            autoCorrect={false}
-                                            style={[styles.modelTextInput, { borderColor: tc.border, color: tc.text }]}
-                                        />
-                                        <TouchableOpacity
-                                            style={[styles.modelSuggestButton, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
-                                            onPress={() => setModelPicker('copilot')}
-                                        >
-                                            <Text style={[styles.modelSuggestButtonText, { color: tc.secondaryText }]}>
-                                                {localize('Suggestions', '建议')}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                </View>
-
-                                {aiProvider === 'openai' && (
-                                    <>
-                                        <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                            <View style={styles.settingInfo}>
-                                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.aiReasoning')}</Text>
-                                                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                                                    {t(isFossBuild ? 'settings.aiReasoningHintFoss' : 'settings.aiReasoningHint')}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                        <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                                            <View style={styles.backendToggle}>
-                                                {(['low', 'medium', 'high'] as AIReasoningEffort[]).map((effort) => (
-                                                    <TouchableOpacity
-                                                        key={effort}
-                                                        style={[
-                                                            styles.backendOption,
-                                                            { borderColor: tc.border, backgroundColor: aiReasoningEffort === effort ? tc.filterBg : 'transparent' },
-                                                        ]}
-                                                        onPress={() => updateAISettings({ reasoningEffort: effort })}
-                                                    >
-                                                        <Text style={[styles.backendOptionText, { color: aiReasoningEffort === effort ? tc.tint : tc.secondaryText }]}>
-                                                            {effort === 'low'
-                                                                ? t('settings.aiEffortLow')
-                                                                : effort === 'medium'
-                                                                    ? t('settings.aiEffortMedium')
-                                                                    : t('settings.aiEffortHigh')}
-                                                        </Text>
-                                                    </TouchableOpacity>
-                                                ))}
-                                            </View>
-                                        </View>
-                                        <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                            <View style={styles.settingInfo}>
-                                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.aiBaseUrl')}</Text>
-                                                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.aiBaseUrlHint')}</Text>
-                                            </View>
-                                        </View>
-                                        <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                                            <TextInput
-                                                value={aiBaseUrl}
-                                                onChangeText={(value) => updateAISettings({ baseUrl: value })}
-                                                placeholder={t('settings.aiBaseUrlPlaceholder')}
-                                                placeholderTextColor={tc.secondaryText}
-                                                autoCapitalize="none"
-                                                autoCorrect={false}
-                                                style={[styles.textInput, { borderColor: tc.border, color: tc.text }]}
-                                            />
-                                        </View>
-                                    </>
-                                )}
-
-                                {aiProvider === 'gemini' && (
-                                    <>
-                                        <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                            <View style={styles.settingInfo}>
-                                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.aiThinkingBudget')}</Text>
-                                                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.aiThinkingHint')}</Text>
-                                            </View>
-                                        </View>
-                                        <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                                            <View style={styles.backendToggle}>
-                                                {[
-                                                    { value: 0, label: t('settings.aiThinkingOff') },
-                                                    { value: 128, label: t('settings.aiThinkingLow') },
-                                                    { value: 256, label: t('settings.aiThinkingMedium') },
-                                                    { value: 512, label: t('settings.aiThinkingHigh') },
-                                                ].map((option) => (
-                                                    <TouchableOpacity
-                                                        key={option.value}
-                                                        style={[
-                                                            styles.backendOption,
-                                                            { borderColor: tc.border, backgroundColor: aiThinkingBudget === option.value ? tc.filterBg : 'transparent' },
-                                                        ]}
-                                                        onPress={() => updateAISettings({ thinkingBudget: option.value })}
-                                                    >
-                                                        <Text style={[styles.backendOptionText, { color: aiThinkingBudget === option.value ? tc.tint : tc.secondaryText }]}>
-                                                            {option.label}
-                                                        </Text>
-                                                    </TouchableOpacity>
-                                                ))}
-                                            </View>
-                                        </View>
-                                    </>
-                                )}
-
-                                {aiProvider === 'anthropic' && (
-                                    <>
-                                        <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                            <View style={styles.settingInfo}>
-                                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.aiThinkingEnable')}</Text>
-                                                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.aiThinkingEnableDesc')}</Text>
-                                            </View>
-                                            <Switch
-                                                value={anthropicThinkingEnabled}
-                                                onValueChange={(value) => updateAISettings({
-                                                    thinkingBudget: value ? (DEFAULT_ANTHROPIC_THINKING_BUDGET || 1024) : 0,
-                                                })}
-                                                trackColor={{ false: '#767577', true: '#3B82F6' }}
-                                            />
-                                        </View>
-                                        {anthropicThinkingEnabled && (
-                                            <>
-                                                <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                                    <View style={styles.settingInfo}>
-                                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.aiThinkingBudget')}</Text>
-                                                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.aiThinkingHint')}</Text>
-                                                    </View>
-                                                </View>
-                                                <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                                                    <View style={styles.backendToggle}>
-                                                        {[
-                                                            { value: DEFAULT_ANTHROPIC_THINKING_BUDGET || 1024, label: t('settings.aiThinkingLow') },
-                                                            { value: 2048, label: t('settings.aiThinkingMedium') },
-                                                            { value: 4096, label: t('settings.aiThinkingHigh') },
-                                                        ].map((option) => (
-                                                            <TouchableOpacity
-                                                                key={option.value}
-                                                                style={[
-                                                                    styles.backendOption,
-                                                                    { borderColor: tc.border, backgroundColor: aiThinkingBudget === option.value ? tc.filterBg : 'transparent' },
-                                                                ]}
-                                                                onPress={() => updateAISettings({ thinkingBudget: option.value })}
-                                                            >
-                                                                <Text style={[styles.backendOptionText, { color: aiThinkingBudget === option.value ? tc.tint : tc.secondaryText }]}>
-                                                                    {option.label}
-                                                                </Text>
-                                                            </TouchableOpacity>
-                                                        ))}
-                                                    </View>
-                                                </View>
-                                            </>
-                                        )}
-                                    </>
-                                )}
-
-                                <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.aiApiKey')}</Text>
-                                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.aiApiKeyHint')}</Text>
-                                    </View>
-                                </View>
-                                <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
-                                    <TextInput
-                                        value={aiApiKey}
-                                        onChangeText={(value) => {
-                                            setAiApiKey(value);
-                                            saveAIKey(aiProvider, value).catch(logSettingsError);
-                                        }}
-                                        placeholder={t('settings.aiApiKeyPlaceholder')}
-                                        placeholderTextColor={tc.secondaryText}
-                                        autoCapitalize="none"
-                                        secureTextEntry
-                                        style={[styles.textInput, { borderColor: tc.border, color: tc.text }]}
-                                    />
-                                </View>
-                            </>
-                        )}
-                    </View>
-
-                    <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 12 }]}>
-                        <TouchableOpacity style={styles.settingRow} onPress={() => setSpeechOpen((prev) => !prev)}>
-                            <View style={styles.settingInfo}>
-                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.speechTitle')}</Text>
-                                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.speechDesc')}</Text>
-                            </View>
-                            <Text style={[styles.chevron, { color: tc.secondaryText }]}>{speechOpen ? '▾' : '▸'}</Text>
-                        </TouchableOpacity>
-
-                        {speechOpen && (
-                            <>
-                                <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.speechEnable')}</Text>
-                                    </View>
-                                    <Switch
-                                        value={speechEnabled}
-                                        onValueChange={(value) => updateSpeechSettings({ enabled: value })}
-                                        trackColor={{ false: '#767577', true: '#3B82F6' }}
-                                    />
-                                </View>
-                                <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.speechProvider')}</Text>
-                                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                                            {speechProvider === 'openai'
-                                                ? t('settings.aiProviderOpenAI')
-                                                : speechProvider === 'gemini'
-                                                    ? t('settings.aiProviderGemini')
-                                                    : t('settings.speechProviderOffline')}
-                                        </Text>
-                                    </View>
-                                </View>
-                                <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                                    <View style={styles.backendToggle}>
-                                        {!isFossBuild && (
-                                            <TouchableOpacity
-                                                style={[
-                                                    styles.backendOption,
-                                                    { borderColor: tc.border, backgroundColor: speechProvider === 'openai' ? tc.filterBg : 'transparent' },
-                                                ]}
-                                                onPress={() => {
-                                                    updateSpeechSettings({
-                                                        provider: 'openai',
-                                                        model: 'gpt-4o-transcribe',
-                                                        offlineModelPath: undefined,
-                                                    });
-                                                }}
-                                            >
-                                                <Text style={[styles.backendOptionText, { color: speechProvider === 'openai' ? tc.tint : tc.secondaryText }]}>
-                                                    {t('settings.aiProviderOpenAI')}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        )}
-                                        {!isFossBuild && (
-                                            <TouchableOpacity
-                                                style={[
-                                                    styles.backendOption,
-                                                    { borderColor: tc.border, backgroundColor: speechProvider === 'gemini' ? tc.filterBg : 'transparent' },
-                                                ]}
-                                                onPress={() => {
-                                                    updateSpeechSettings({
-                                                        provider: 'gemini',
-                                                        model: 'gemini-2.5-flash',
-                                                        offlineModelPath: undefined,
-                                                    });
-                                                }}
-                                            >
-                                                <Text style={[styles.backendOptionText, { color: speechProvider === 'gemini' ? tc.tint : tc.secondaryText }]}>
-                                                    {t('settings.aiProviderGemini')}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        )}
-                                        <TouchableOpacity
-                                            style={[
-                                                styles.backendOption,
-                                                { borderColor: tc.border, backgroundColor: speechProvider === 'whisper' ? tc.filterBg : 'transparent' },
-                                            ]}
-                                            onPress={() => {
-                                                updateSpeechSettings({
-                                                    provider: 'whisper',
-                                                    model: DEFAULT_WHISPER_MODEL,
-                                                    offlineModelPath: resolveWhisperModelPath(DEFAULT_WHISPER_MODEL),
-                                                });
-                                            }}
-                                        >
-                                            <Text style={[styles.backendOptionText, { color: speechProvider === 'whisper' ? tc.tint : tc.secondaryText }]}>
-                                                {isFossBuild ? localize('Local Whisper', '本地 Whisper') : t('settings.speechProviderOffline')}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                </View>
-
-                                <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.speechModel')}</Text>
-                                    </View>
-                                </View>
-                                <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                                    <TouchableOpacity
-                                        style={[styles.dropdownButton, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
-                                        onPress={() => setModelPicker('speech')}
-                                    >
-                                        <Text style={[styles.dropdownValue, { color: tc.text }]} numberOfLines={1}>{speechModel}</Text>
-                                        <Text style={[styles.dropdownChevron, { color: tc.secondaryText }]}>▾</Text>
-                                    </TouchableOpacity>
-                                </View>
-
-                                {speechProvider === 'whisper' ? (
-                                    <>
-                                        <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                            <View style={styles.settingInfo}>
-                                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.speechOfflineModel')}</Text>
-                                                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.speechOfflineModelDesc')}</Text>
-                                                {isExpoGo ? (
-                                                    <Text style={[styles.settingDescription, { color: tc.danger, marginTop: 6 }]}>
-                                                        {localize(
-                                                            'Whisper transcription requires a dev build or production build (not Expo Go).',
-                                                            'Whisper 转录需要开发版或正式版构建（Expo Go 不支持）。'
-                                                        )}
-                                                    </Text>
-                                                ) : null}
-                                            </View>
-                                        </View>
-                                        <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                                                <View style={{ flex: 1 }}>
-                                                    <Text style={{ color: tc.secondaryText, fontSize: 12 }}>
-                                                        {whisperDownloaded ? t('settings.speechOfflineReady') : t('settings.speechOfflineNotDownloaded')}
-                                                        {whisperSizeLabel ? ` - ${whisperSizeLabel}` : ''}
-                                                    </Text>
-                                                    {whisperDownloadState === 'success' ? (
-                                                        <Text style={{ color: tc.tint, fontSize: 12, marginTop: 6 }}>
-                                                            {t('settings.speechOfflineDownloadSuccess')}
-                                                        </Text>
-                                                    ) : null}
-                                                    {whisperDownloadError ? (
-                                                        <Text style={{ color: tc.danger, fontSize: 12, marginTop: 6 }}>{whisperDownloadError}</Text>
-                                                    ) : null}
-                                                </View>
-                                                {whisperDownloadState === 'downloading' ? (
-                                                    <ActivityIndicator color={tc.tint} />
-                                                ) : whisperDownloaded ? (
-                                                    <TouchableOpacity
-                                                        style={[styles.backendOption, { borderColor: tc.border }]}
-                                                        onPress={handleDeleteWhisperModel}
-                                                    >
-                                                        <Text style={[styles.backendOptionText, { color: tc.text }]}>
-                                                            {t('settings.speechOfflineDelete')}
-                                                        </Text>
-                                                    </TouchableOpacity>
-                                                ) : (
-                                                    <TouchableOpacity
-                                                        style={[styles.backendOption, { borderColor: tc.border }]}
-                                                        onPress={() => void handleDownloadWhisperModel()}
-                                                    >
-                                                        <Text style={[styles.backendOptionText, { color: tc.text }]}>
-                                                            {t('settings.speechOfflineDownload')}
-                                                        </Text>
-                                                    </TouchableOpacity>
-                                                )}
-                                            </View>
-                                        </View>
-                                    </>
-                                ) : (
-                                    <>
-                                        <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                            <View style={styles.settingInfo}>
-                                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.aiApiKey')}</Text>
-                                                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.aiApiKeyHint')}</Text>
-                                            </View>
-                                        </View>
-                                        <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                                            <TextInput
-                                                value={speechApiKey}
-                                                onChangeText={(value) => {
-                                                    setSpeechApiKey(value);
-                                                    saveAIKey(speechProvider, value).catch(logSettingsError);
-                                                }}
-                                                placeholder={t('settings.aiApiKeyPlaceholder')}
-                                                placeholderTextColor={tc.secondaryText}
-                                                autoCapitalize="none"
-                                                secureTextEntry
-                                                style={[styles.textInput, { borderColor: tc.border, color: tc.text }]}
-                                            />
-                                        </View>
-                                    </>
-                                )}
-
-                                <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.speechLanguage')}</Text>
-                                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.speechLanguageHint')}</Text>
-                                    </View>
-                                </View>
-                                <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                                    <TextInput
-                                        value={speechLanguage === 'auto' ? '' : speechLanguage}
-                                        onChangeText={(value) => {
-                                            const trimmed = value.trim();
-                                            updateSpeechSettings({ language: trimmed ? trimmed : 'auto' });
-                                        }}
-                                        placeholder={t('settings.speechLanguageAuto')}
-                                        placeholderTextColor={tc.secondaryText}
-                                        autoCapitalize="none"
-                                        style={[styles.textInput, { borderColor: tc.border, color: tc.text }]}
-                                    />
-                                </View>
-
-                                <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.speechMode')}</Text>
-                                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.speechModeHint')}</Text>
-                                    </View>
-                                </View>
-                                <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                                    <View style={styles.backendToggle}>
-                                        <TouchableOpacity
-                                            style={[
-                                                styles.backendOption,
-                                                { borderColor: tc.border, backgroundColor: speechMode === 'smart_parse' ? tc.filterBg : 'transparent' },
-                                            ]}
-                                            onPress={() => updateSpeechSettings({ mode: 'smart_parse' })}
-                                        >
-                                            <Text style={[styles.backendOptionText, { color: speechMode === 'smart_parse' ? tc.tint : tc.secondaryText }]}>
-                                                {t('settings.speechModeSmart')}
-                                            </Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity
-                                            style={[
-                                                styles.backendOption,
-                                                { borderColor: tc.border, backgroundColor: speechMode === 'transcribe_only' ? tc.filterBg : 'transparent' },
-                                            ]}
-                                            onPress={() => updateSpeechSettings({ mode: 'transcribe_only' })}
-                                        >
-                                            <Text style={[styles.backendOptionText, { color: speechMode === 'transcribe_only' ? tc.tint : tc.secondaryText }]}>
-                                                {t('settings.speechModeTranscript')}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                </View>
-
-                                <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.speechFieldStrategy')}</Text>
-                                        <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.speechFieldStrategyHint')}</Text>
-                                    </View>
-                                </View>
-                                <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                                    <View style={styles.backendToggle}>
-                                        {[
-                                            { value: 'smart', label: t('settings.speechFieldSmart') },
-                                            { value: 'title_only', label: t('settings.speechFieldTitle') },
-                                            { value: 'description_only', label: t('settings.speechFieldDescription') },
-                                        ].map((option) => (
-                                            <TouchableOpacity
-                                                key={option.value}
-                                                style={[
-                                                    styles.backendOption,
-                                                    { borderColor: tc.border, backgroundColor: speechFieldStrategy === option.value ? tc.filterBg : 'transparent' },
-                                                ]}
-                                                onPress={() => updateSpeechSettings({ fieldStrategy: option.value as 'smart' | 'title_only' | 'description_only' })}
-                                            >
-                                                <Text style={[styles.backendOptionText, { color: speechFieldStrategy === option.value ? tc.tint : tc.secondaryText }]}>
-                                                    {option.label}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        ))}
-                                    </View>
-                                </View>
-                            </>
-                        )}
-                    </View>
+                    <AiSettingsSpeechCard
+                        isExpoGo={isExpoGo}
+                        isFossBuild={isFossBuild}
+                        localize={localize}
+                        onDeleteWhisperModel={handleDeleteWhisperModel}
+                        onDownloadWhisperModel={() => void handleDownloadWhisperModel()}
+                        onOpenModelPicker={() => setModelPicker('speech')}
+                        onSpeechApiKeyChange={handleSpeechApiKeyChange}
+                        onSpeechEnabledChange={(value) => updateSpeechSettings({ enabled: value })}
+                        onSpeechFieldStrategyChange={(value) => updateSpeechSettings({ fieldStrategy: value })}
+                        onSpeechLanguageChange={handleSpeechLanguageChange}
+                        onSpeechModeChange={(value) => updateSpeechSettings({ mode: value })}
+                        onSpeechProviderChange={handleSpeechProviderChange}
+                        onToggleOpen={() => setSpeechOpen((prev) => !prev)}
+                        speechApiKey={speechApiKey}
+                        speechEnabled={speechEnabled}
+                        speechFieldStrategy={speechFieldStrategy}
+                        speechLanguage={speechLanguage}
+                        speechMode={speechMode}
+                        speechModel={speechModel}
+                        speechOpen={speechOpen}
+                        speechProvider={speechProvider}
+                        t={t}
+                        tc={tc}
+                        whisperDownloadError={whisperDownloadError}
+                        whisperDownloadState={whisperDownloadState}
+                        whisperDownloaded={whisperDownloaded}
+                        whisperSizeLabel={whisperSizeLabel}
+                    />
 
                     <Modal
                         transparent

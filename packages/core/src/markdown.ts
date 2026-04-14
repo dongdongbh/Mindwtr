@@ -5,10 +5,14 @@
  * Apps can use `stripMarkdown` for previews and notifications.
  */
 
+import type { Project, Task } from './types';
+
 const CODE_BLOCK_RE = /```[\s\S]*?```/g;
 const INLINE_CODE_RE = /`([^`]+)`/g;
 const LINK_RE = /\[([^\]]+)\]\(([^)]+)\)/g;
 const INLINE_TOKEN_RE = /(\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\n]+)\*|_([^_\n]+)_|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\))/g;
+const INTERNAL_LINK_RE = /\[\[(task|project):([^\]|]+)\|([^\]]+)\]\]/g;
+const INTERNAL_LINK_TOKEN_RE = /^\[\[(task|project):([^\]|]+)\|([^\]]+)\]\]$/;
 const TASK_LIST_RE = /^\s{0,3}(?:[-*+]\s+)?\[( |x|X)\]\s+(.+)$/;
 
 export type InlineToken =
@@ -21,6 +25,29 @@ export type InlineToken =
 export type MarkdownChecklistItem = {
     title: string;
     isCompleted: boolean;
+};
+
+export type MarkdownReferenceEntityType = 'task' | 'project';
+
+export type MarkdownReferenceTarget = {
+    entityType: MarkdownReferenceEntityType;
+    id: string;
+};
+
+export type MarkdownReference = MarkdownReferenceTarget & {
+    label: string;
+};
+
+export type MarkdownReferenceSearchResult = MarkdownReferenceTarget & {
+    title: string;
+    status: string;
+    updatedAt: string;
+};
+
+export type ActiveMarkdownReferenceQuery = {
+    start: number;
+    end: number;
+    query: string;
 };
 
 export type MarkdownToolbarActionId =
@@ -75,7 +102,7 @@ const sanitizeLinkHref = (href: string): string | null => {
     }
     try {
         const url = new URL(trimmed);
-        if (['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol)) {
+        if (['http:', 'https:', 'mailto:', 'tel:', 'mindwtr:'].includes(url.protocol)) {
             return trimmed;
         }
     } catch {
@@ -84,16 +111,219 @@ const sanitizeLinkHref = (href: string): string | null => {
     return null;
 };
 
+const replaceOutsideInlineCode = (
+    text: string,
+    replacer: (plainText: string) => string,
+): string => {
+    const inlineCodeRegex = /`[^`]+`/g;
+    let result = '';
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = inlineCodeRegex.exec(text)) !== null) {
+        result += replacer(text.slice(lastIndex, match.index));
+        result += match[0];
+        lastIndex = match.index + match[0].length;
+    }
+
+    result += replacer(text.slice(lastIndex));
+    return result;
+};
+
+const replaceOutsideCode = (
+    markdown: string,
+    replacer: (plainText: string) => string,
+): string => {
+    const codeBlockRegex = /```[\s\S]*?```/g;
+    let result = '';
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = codeBlockRegex.exec(markdown)) !== null) {
+        result += replaceOutsideInlineCode(markdown.slice(lastIndex, match.index), replacer);
+        result += match[0];
+        lastIndex = match.index + match[0].length;
+    }
+
+    result += replaceOutsideInlineCode(markdown.slice(lastIndex), replacer);
+    return result;
+};
+
+export function sanitizeMarkdownReferenceLabel(label: string): string {
+    const sanitized = label.replace(/[|\]]/g, ' ').replace(/\s+/g, ' ').trim();
+    return sanitized || 'Untitled';
+}
+
+export function serializeMarkdownReferenceHref(reference: MarkdownReferenceTarget): string {
+    return `mindwtr://${reference.entityType}/${encodeURIComponent(reference.id)}`;
+}
+
+export function serializeMarkdownReference(reference: MarkdownReference): string {
+    return `[[${reference.entityType}:${reference.id}|${sanitizeMarkdownReferenceLabel(reference.label)}]]`;
+}
+
+export function parseMarkdownReferenceToken(token: string): MarkdownReference | null {
+    const match = INTERNAL_LINK_TOKEN_RE.exec(token.trim());
+    if (!match) return null;
+    const entityType = match[1] as MarkdownReferenceEntityType;
+    const id = match[2]?.trim();
+    const label = match[3]?.trim();
+    if (!id || !label) return null;
+    return { entityType, id, label };
+}
+
+export function parseMarkdownReferenceHref(href: string): MarkdownReferenceTarget | null {
+    try {
+        const url = new URL(href);
+        if (url.protocol !== 'mindwtr:') return null;
+        const entityType = url.hostname;
+        if (entityType !== 'task' && entityType !== 'project') return null;
+        const id = decodeURIComponent(url.pathname.replace(/^\/+/, '').trim());
+        if (!id) return null;
+        return {
+            entityType,
+            id,
+        };
+    } catch {
+        return null;
+    }
+}
+
+export function normalizeMarkdownInternalLinks(markdown: string): string {
+    if (!markdown) return '';
+    return replaceOutsideCode(markdown, (plainText) => (
+        plainText.replace(INTERNAL_LINK_RE, (_match, entityType, id, label) => (
+            `[${sanitizeMarkdownReferenceLabel(String(label))}](${serializeMarkdownReferenceHref({
+                entityType: entityType as MarkdownReferenceEntityType,
+                id: String(id),
+            })})`
+        ))
+    ));
+}
+
+export function getActiveMarkdownReferenceQuery(
+    value: string,
+    selection: MarkdownSelection,
+): ActiveMarkdownReferenceQuery | null {
+    const normalizedSelection = normalizeSelection(value, selection);
+    if (normalizedSelection.start !== normalizedSelection.end) return null;
+
+    const cursor = normalizedSelection.end;
+    const beforeCursor = value.slice(0, cursor);
+    const openIndex = beforeCursor.lastIndexOf('[[');
+    if (openIndex === -1) return null;
+
+    const closeIndex = beforeCursor.lastIndexOf(']]');
+    if (closeIndex > openIndex) return null;
+
+    const query = value.slice(openIndex + 2, cursor);
+    if (!query && cursor < value.length && value.slice(cursor, cursor + 2) === ']]') {
+        return null;
+    }
+    if (query.includes('\n') || query.includes('\r') || query.includes(']') || query.includes('|')) {
+        return null;
+    }
+    if (/^\s*(task|project):/i.test(query)) {
+        return null;
+    }
+
+    return {
+        start: openIndex,
+        end: cursor,
+        query,
+    };
+}
+
+export function insertMarkdownReferenceAtQuery(
+    value: string,
+    activeQuery: ActiveMarkdownReferenceQuery,
+    reference: MarkdownReference,
+): MarkdownToolbarResult {
+    const before = value.slice(0, activeQuery.start);
+    const after = value.slice(activeQuery.end);
+    const token = serializeMarkdownReference(reference);
+    const nextValue = `${before}${token}${after}`;
+    const cursor = before.length + token.length;
+    return {
+        value: nextValue,
+        selection: {
+            start: cursor,
+            end: cursor,
+        },
+    };
+}
+
+const scoreMarkdownReferenceTitle = (title: string, query: string): number => {
+    if (!query) return 0;
+    const normalizedTitle = title.trim().toLowerCase();
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedTitle || !normalizedQuery) return 0;
+    if (normalizedTitle === normalizedQuery) return 400;
+    if (normalizedTitle.startsWith(normalizedQuery)) return 300;
+    const wordIndex = normalizedTitle.indexOf(` ${normalizedQuery}`);
+    if (wordIndex !== -1) return 200 - Math.min(wordIndex, 50);
+    const containsIndex = normalizedTitle.indexOf(normalizedQuery);
+    if (containsIndex !== -1) return 100 - Math.min(containsIndex, 50);
+    return -1;
+};
+
+export function searchMarkdownReferences(
+    tasks: Task[],
+    projects: Project[],
+    query: string,
+    limit = 8,
+): MarkdownReferenceSearchResult[] {
+    const normalizedQuery = query.trim().toLowerCase();
+    const taskCandidates: MarkdownReferenceSearchResult[] = tasks
+        .filter((task) => !task.deletedAt && Boolean(task.title?.trim()))
+        .map((task) => ({
+            entityType: 'task',
+            id: task.id,
+            title: task.title.trim(),
+            status: task.status,
+            updatedAt: task.updatedAt,
+        }));
+    const projectCandidates: MarkdownReferenceSearchResult[] = projects
+        .filter((project) => !project.deletedAt && Boolean(project.title?.trim()))
+        .map((project) => ({
+            entityType: 'project',
+            id: project.id,
+            title: project.title.trim(),
+            status: project.status,
+            updatedAt: project.updatedAt,
+        }));
+
+    return [...taskCandidates, ...projectCandidates]
+        .map((candidate) => ({
+            candidate,
+            score: scoreMarkdownReferenceTitle(candidate.title, normalizedQuery),
+        }))
+        .filter(({ score }) => normalizedQuery ? score >= 0 : true)
+        .sort((left, right) => {
+            if (left.score !== right.score) return right.score - left.score;
+            const updatedAtDelta = right.candidate.updatedAt.localeCompare(left.candidate.updatedAt);
+            if (updatedAtDelta !== 0) return updatedAtDelta;
+            if (left.candidate.entityType !== right.candidate.entityType) {
+                return left.candidate.entityType === 'project' ? -1 : 1;
+            }
+            return left.candidate.title.localeCompare(right.candidate.title);
+        })
+        .slice(0, limit)
+        .map(({ candidate }) => candidate);
+}
+
 export function parseInlineMarkdown(text: string): InlineToken[] {
     const tokens: InlineToken[] = [];
     if (!text) return tokens;
 
+    const source = normalizeMarkdownInternalLinks(text);
+
     let lastIndex = 0;
     let match: RegExpExecArray | null;
 
-    while ((match = INLINE_TOKEN_RE.exec(text)) !== null) {
+    while ((match = INLINE_TOKEN_RE.exec(source)) !== null) {
         if (match.index > lastIndex) {
-            tokens.push({ type: 'text', text: text.slice(lastIndex, match.index) });
+            tokens.push({ type: 'text', text: source.slice(lastIndex, match.index) });
         }
 
         const boldA = match[2];
@@ -122,8 +352,8 @@ export function parseInlineMarkdown(text: string): InlineToken[] {
         lastIndex = INLINE_TOKEN_RE.lastIndex;
     }
 
-    if (lastIndex < text.length) {
-        tokens.push({ type: 'text', text: text.slice(lastIndex) });
+    if (lastIndex < source.length) {
+        tokens.push({ type: 'text', text: source.slice(lastIndex) });
     }
 
     return tokens;
@@ -132,7 +362,7 @@ export function parseInlineMarkdown(text: string): InlineToken[] {
 export function stripMarkdown(markdown: string): string {
     if (!markdown) return '';
 
-    let text = markdown;
+    let text = normalizeMarkdownInternalLinks(markdown);
 
     // Remove fenced code blocks but keep their contents.
     text = text.replace(CODE_BLOCK_RE, (block) => block.replace(/```/g, ''));

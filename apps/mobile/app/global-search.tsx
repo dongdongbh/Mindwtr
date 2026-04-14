@@ -351,6 +351,10 @@ export default function SearchScreen() {
         </TouchableOpacity>
     );
     const filtersActive = filtersOpen || activeChips.length > 0;
+    const searchPlaceholderRaw = t('search.placeholder');
+    const searchPlaceholder = searchPlaceholderRaw === 'search.placeholder'
+      ? t('common.search')
+      : searchPlaceholderRaw;
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['top']}>
@@ -359,7 +363,7 @@ export default function SearchScreen() {
                 <TextInput
                     ref={inputRef}
                     style={[styles.input, { color: tc.text }]}
-                    placeholder={t('search.placeholder') || "Search..."}
+                    placeholder={searchPlaceholder}
                     placeholderTextColor={placeholderColor}
                     value={query}
                     onChangeText={setQuery}

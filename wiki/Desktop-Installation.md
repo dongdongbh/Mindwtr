@@ -110,7 +110,7 @@ scoop install mindwtr
 
 ### Portable
 
-1. Download `mindwtr_<version>_x64_portable.zip` from [GitHub Releases](https://github.com/dongdongbh/Mindwtr/releases).
+1. Download `mindwtr_<version>_windows_x64_portable.zip` from [GitHub Releases](https://github.com/dongdongbh/Mindwtr/releases).
 2. Extract it to any writable folder.
 3. Keep `portable.txt` next to `mindwtr.exe`.
 

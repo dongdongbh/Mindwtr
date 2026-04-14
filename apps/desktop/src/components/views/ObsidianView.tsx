@@ -18,13 +18,14 @@ import {
 import { DEFAULT_TASKNOTES_FOLDER, safeFormatDate, type ObsidianTask } from '@mindwtr/core';
 
 import { ObsidianService } from '../../lib/obsidian-service';
+import { dispatchNavigateEvent } from '../../lib/navigation-events';
 import { cn } from '../../lib/utils';
 import { useLanguage } from '../../contexts/language-context';
 import { useObsidianStore } from '../../store/obsidian-store';
 import { useUiStore } from '../../store/ui-store';
 
 const navigateToSettings = () => {
-    window.dispatchEvent(new CustomEvent('mindwtr:navigate', { detail: { view: 'settings' } }));
+    dispatchNavigateEvent('settings');
 };
 
 const pageShellClassName = 'h-full px-4 py-3';

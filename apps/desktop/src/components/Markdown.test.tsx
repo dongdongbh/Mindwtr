@@ -1,19 +1,26 @@
+// @vitest-environment jsdom
+
 import { describe, expect, it } from 'vitest';
 import { render } from '@testing-library/react';
 import { Markdown } from './Markdown';
+import { LanguageProvider } from '../contexts/language-context';
 
 describe('Markdown', () => {
     it('renders list blocks after plain text without requiring a blank line', () => {
         const { container, getByText } = render(
-            <Markdown markdown={'Intro line\n- item one\n- item two'} />
+            <LanguageProvider>
+                <Markdown markdown={'Intro line\n- item one\n- item two'} />
+            </LanguageProvider>
         );
-        expect(getByText('item one')).toBeInTheDocument();
+        expect(getByText('item one')).toBeTruthy();
         expect(container.querySelectorAll('ul').length).toBe(1);
     });
 
     it('renders task list checkboxes when immediately following text', () => {
         const { getAllByRole } = render(
-            <Markdown markdown={'Notes\n- [x] done\n- [ ] todo'} />
+            <LanguageProvider>
+                <Markdown markdown={'Notes\n- [x] done\n- [ ] todo'} />
+            </LanguageProvider>
         );
         const checkboxes = getAllByRole('checkbox') as HTMLInputElement[];
         expect(checkboxes).toHaveLength(2);
@@ -23,7 +30,9 @@ describe('Markdown', () => {
 
     it('renders horizontal separator from markdown hr syntax', () => {
         const { container } = render(
-            <Markdown markdown={'Top\n---\nBottom'} />
+            <LanguageProvider>
+                <Markdown markdown={'Top\n---\nBottom'} />
+            </LanguageProvider>
         );
         expect(container.querySelector('hr')).not.toBeNull();
     });

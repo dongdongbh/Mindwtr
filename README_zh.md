@@ -154,7 +154,7 @@ Mindwtr **默认简单，需要时也足够强大**。我们专注于降低认�
 - ☁️ **Dropbox OAuth 同步（可选）** - 在支持的非 FOSS 构建中提供原生 Dropbox App Folder 同步
 - 📤 **导出/备份** - 导出 JSON 数据
 - ♻️ **从备份恢复** - 先创建恢复快照，再用已验证的 Mindwtr 备份替换本地数据
-- 📥 **Todoist CSV/ZIP 导入** - 将 Todoist 导出导入到 Mindwtr 的项目与收件箱
+- 📥 **Todoist + DGT GTD 导入** - 将 Todoist CSV/ZIP 导出或 DGT GTD JSON/ZIP 导入到 Mindwtr
 - 🔗 **Obsidian 集成** - 桌面端导入 Vault 中的任务，并可深度链接回源笔记
 - 🗓️ **外部日历（系统日历 + ICS）** - 移动端读取系统日历；桌面端支持 ICS 订阅
 
@@ -262,7 +262,7 @@ scoop install mindwtr
 
 **便携版 ZIP（无需管理员权限）：**
 
-- 从 [GitHub Releases](https://github.com/dongdongbh/Mindwtr/releases) 下载 `*_portable.zip` 资源。
+- 从 [GitHub Releases](https://github.com/dongdongbh/Mindwtr/releases) 下载 `mindwtr_<version>_windows_x64_portable.zip`。
 - 解压到可写目录，并将 `portable.txt` 与 `mindwtr.exe` 放在同一目录。
 - Mindwtr 会将数据保存在解压目录下的 `profile/` 中。
 

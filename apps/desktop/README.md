@@ -99,7 +99,7 @@ bun run build
 # Output in src-tauri/target/release/
 ```
 
-Windows release builds also publish `mindwtr_<version>_x64_portable.zip`.
+Windows release builds also publish `mindwtr_<version>_windows_x64_portable.zip`.
 Extract it to a writable folder and keep `portable.txt` next to `mindwtr.exe`.
 
 ## Data Storage

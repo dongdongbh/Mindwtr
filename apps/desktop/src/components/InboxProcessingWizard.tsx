@@ -11,7 +11,7 @@ import { ProjectSelector } from './ui/ProjectSelector';
 
 export type ProcessingStep = 'refine' | 'actionable' | 'projectcheck' | 'twomin' | 'decide' | 'context' | 'project' | 'delegate';
 
-type InboxProcessingWizardProps = {
+export type InboxProcessingWizardProps = {
     t: (key: string) => string;
     isProcessing: boolean;
     processingTask: Task | null;

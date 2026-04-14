@@ -194,6 +194,13 @@ export function useTaskDescriptionEditor({
         });
         return next;
     }, [applyDescriptionValue, descriptionDraftRef]);
+    const applyDescriptionResult = React.useCallback((next: MarkdownToolbarResult) => {
+        applyDescriptionValue(next.value, {
+            baseSelection: descriptionSelectionRef.current,
+            nextSelection: next.selection,
+        });
+        restoreDescriptionSelection(next.selection);
+    }, [applyDescriptionValue, restoreDescriptionSelection]);
 
     const openDescriptionExpandedEditor = React.useCallback(() => {
         descriptionInputRef.current?.blur();
@@ -219,6 +226,7 @@ export function useTaskDescriptionEditor({
         handleDescriptionChange,
         handleDescriptionUndo,
         handleDescriptionApplyAction,
+        applyDescriptionResult,
         openDescriptionExpandedEditor,
         closeDescriptionExpandedEditor,
     };

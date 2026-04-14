@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from './file-system';
 import type { AppData, Attachment } from '@mindwtr/core';
 import {
   cloudPutFile,

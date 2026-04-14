@@ -102,6 +102,20 @@ const getAssetNameFromUrl = (url: string): string => {
   }
 };
 
+export const isPortableZipAssetName = (name: string): boolean =>
+  /\.zip$/i.test(name) && /portable/i.test(name);
+
+const isWindowsPortableZipAssetName = (name: string): boolean =>
+  isPortableZipAssetName(name) &&
+  /(?:^|[_-])win(?:dows)?(?:[_-]|$)/i.test(name);
+
+export const findPortableZipAsset = <T extends { name: string }>(
+  assets: T[],
+): T | null =>
+  assets.find((asset) => isWindowsPortableZipAssetName(asset.name)) ??
+  assets.find((asset) => isPortableZipAssetName(asset.name)) ??
+  null;
+
 const findChecksumAsset = (
   assets: UpdateAsset[],
   downloadUrl: string,
@@ -214,9 +228,7 @@ function getDownloadUrl(
   installSource: InstallSource,
 ): string | null {
   if (platform === "windows" && installSource === "portable") {
-    const portableAsset = assets.find(
-      (asset) => /portable/i.test(asset.name) && /\.zip$/i.test(asset.name),
-    );
+    const portableAsset = findPortableZipAsset(assets);
     return portableAsset?.browser_download_url ?? null;
   }
 

@@ -6,7 +6,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../../contexts/language-context';
 import { KeybindingProvider } from '../../contexts/keybinding-context';
 import { useUiStore } from '../../store/ui-store';
-import { ListView, reportArchivedTaskQueryFailure, restoreDeletedTasksWithFeedback } from './ListView';
+import { restoreDeletedTasksWithFeedback } from './list/useListSelection';
+import { ListView, reportArchivedTaskQueryFailure } from './ListView';
 
 const reportErrorMock = vi.hoisted(() => vi.fn());
 

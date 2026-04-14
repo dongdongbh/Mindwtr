@@ -22,7 +22,7 @@ Mindwtr is a cross-platform GTD application with:
 │   React + Vite + Tailwind   │  React Native + NativeWind│
 ├─────────────────────────────┴───────────────────────────┤
 │                     @mindwtr/core                        │
-│    Zustand Store · Types · i18n · Utils · Sync          │
+│ Zustand Store · Types · i18n Loader/Locales · Sync Core │
 ├─────────────────────────────┬───────────────────────────┤
 │    Tauri FS (Rust)          │   SQLite + JSON backup    │
 │    SQLite + JSON backup     │     App storage           │
@@ -37,7 +37,8 @@ Mindwtr is a cross-platform GTD application with:
 ## Design Trade-offs
 
 - **Cloud sync is file-based** and optimized for single-machine self-hosting.
-- **SQLite foreign keys are not enforced** so soft-delete + sync merges can be handled explicitly in the app layer.
+- **SQLite foreign keys are enforced** for live-record integrity, while soft-delete/tombstone repair still happens in shared application logic.
+- **Hard deletes are rare but real**. `sections.projectId` uses `ON DELETE CASCADE`, while task/project/area references mostly use `ON DELETE SET NULL`.
 
 ### System Diagram (Mermaid)
 
@@ -91,11 +92,13 @@ The core package contains all shared business logic:
 | ------------------- | --------------------------------------------- |
 | `store.ts`          | Zustand state store with all actions          |
 | `types.ts`          | TypeScript interfaces (Task, Project, etc.)   |
-| `i18n.ts`           | Translation strings and loading               |
+| `i18n/i18n-loader.ts` | Lazy translation loading                    |
+| `i18n/i18n-translate.ts` | Build-time translation helpers          |
+| `i18n/locales/*.ts` | English base locale plus per-language overrides |
 | `contexts.ts`       | Preset contexts and tags                      |
 | `quick-add.ts`      | Natural language task parser                  |
 | `recurrence.ts`     | Recurring task logic (RFC 5545 partial)       |
-| `sync.ts`           | Data merge utilities (LWW + Tombstones)       |
+| `sync.ts` + `sync-*.ts` | Sync orchestration, normalization, signatures, settings merge, and tombstones |
 | `date.ts`           | Safe date parsing utilities                   |
 | `ai/`               | AI integration (Gemini/OpenAI/Anthropic)      |
 | `sqlite-adapter.ts` | Local storage adapter interface               |
@@ -260,105 +263,36 @@ setStorageAdapter(mobileStorage);
 
 ## Data Model
 
-### Task
+The canonical type surface lives in [[Core API]] and `packages/core/src/types.ts`.
 
-```typescript
-interface Task {
-    id: string;
-    title: string;
-    status: TaskStatus;  // inbox | next | waiting | someday | done | archived
-    priority?: TaskPriority; // low | medium | high | urgent
-    startTime?: string;
-    dueDate?: string;
-    recurrence?: Recurrence | RecurrenceRule;
-    tags: string[];
-    contexts: string[];
-    checklist?: ChecklistItem[];
-    description?: string;
-    attachments?: Attachment[];
-    location?: string;
-    projectId?: string;
-    isFocusedToday?: boolean;
-    timeEstimate?: TimeEstimate;
-    reviewAt?: string; // Tickler/review date
-    completedAt?: string;
-    createdAt: string;
-    updatedAt: string;
-    deletedAt?: string;  // Tombstone for sync
-    pushCount?: number;
-    orderNum?: number;
-}
-```
-
-### Project
-
-```typescript
-interface Project {
-    id: string;
-    title: string;
-    status: 'active' | 'someday' | 'waiting' | 'archived';
-    color: string;
-    areaId?: string;
-    tagIds: string[];
-    isSequential?: boolean;
-    isFocused?: boolean;
-    supportNotes?: string;
-    attachments?: Attachment[];
-    reviewAt?: string;
-    createdAt: string;
-    updatedAt: string;
-    deletedAt?: string;
-}
-```
-
-### Area
-
-```typescript
-interface Area {
-    id: string;
-    name: string;
-    color?: string;
-    icon?: string;
-    order: number;
-    createdAt?: string;
-    updatedAt?: string;
-}
-```
-
-### Attachment
-
-```typescript
-interface Attachment {
-    id: string;
-    kind: 'file' | 'link';
-    title: string;
-    uri: string;
-    createdAt: string;
-    updatedAt: string;
-    deletedAt?: string;
-}
-```
+- Use [[Core API]] for current field-level docs for `Task`, `Project`, `Section`, `Area`, `Attachment`, and `AppData`.
+- Sync-sensitive fields such as `rev`, `revBy`, `purgedAt`, `orderNum`, `mimeType`, `size`, `cloudKey`, and `localStatus` evolve more often than this architecture overview.
+- Keeping the detailed type dump in one page avoids architecture docs drifting from the code.
 
 ---
 
 ## Sync Strategy
 
-### Last-Write-Wins (LWW) with Tombstones
+### Revision-Aware LWW with Tombstones
 
-Data synchronization relies on merging local and remote datasets based on timestamps (`updatedAt`).
+Data synchronization relies on revision-aware last-write-wins with deterministic tie-breaks.
 
 ### Merge Logic
 
 1. **Resolution**:
-    - If item exists in both: keep the one with newer `updatedAt`.
-    - If clock skew is within threshold (5 mins), prefer deletion over modification, otherwise rely on timestamps.
+    - If both sides have revisions, higher `rev` wins before timestamp tie-breaks.
+    - If revisions tie, compare `updatedAt`.
+    - If timestamps still tie, compare deterministic normalized content signatures so every device picks the same winner.
 2. **Tombstones**:
     - Deleted items retain their record with `deletedAt` set.
     - Prevents resurrection on sync.
     - Allows proper merge across devices.
+    - Delete-vs-live conflicts use operation time (`max(updatedAt, deletedAt)` for tombstones).
+    - If delete-vs-live operations land within the 30-second ambiguity window, Mindwtr preserves the live item instead of eagerly deleting it.
 3. **Conflicts**:
     - Metadata-level conflicts are resolved automatically.
-    - Content-level conflicts (e.g. concurrent edits) follow LWW.
+    - Settings merge by sync groups (`appearance`, `language`, `externalCalendars`, `ai`) rather than one giant object timestamp.
+    - Large clock skew warnings fire when merge drift exceeds the current 5-minute threshold.
 
 ### Sync Cycle
 
@@ -366,9 +300,12 @@ Data synchronization relies on merging local and remote datasets based on timest
 1. Read Local Data
 2. Read Remote Data (Cloud/WebDAV/File)
 3. Merge (Memory) -> Generate Stats (conflicts, updates)
-4. Write Local (if changed)
-5. Write Remote (if changed)
+4. Write Local with pending-remote-write marker
+5. Write Remote
+6. Clear pending-remote-write marker locally
 ```
+
+If remote write fails after local persistence, Mindwtr stores retry metadata and backs off from 5 seconds up to 5 minutes before retrying.
 
 ---
 
@@ -376,14 +313,12 @@ Data synchronization relies on merging local and remote datasets based on timest
 
 ### Structure
 
-Translations are in `packages/core/src/i18n.ts` and `i18n-translations.ts`:
+Translations are split across the `packages/core/src/i18n/` folder:
 
 ```typescript
-export const translations: Record<Language, Record<string, string>> = {
-    en: { 'nav.inbox': 'Inbox', ... },
-    zh: { 'nav.inbox': '收集箱', ... },
-    // ... other languages
-};
+// packages/core/src/i18n/i18n-loader.ts
+// packages/core/src/i18n/i18n-translations.ts
+// packages/core/src/i18n/locales/*.ts
 ```
 
 ### Usage
