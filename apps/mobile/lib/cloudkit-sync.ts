@@ -294,31 +294,13 @@ export const subscribeToCloudKitChanges = (onChanged: () => void): (() => void) 
 
 // MARK: - Helpers
 
-/**
- * Fetch all records of a given type, returning an empty array if CloudKit
- * reports the record type doesn't exist yet. This happens on a fresh CloudKit
- * container before any data has been written (record types are created
- * implicitly on first write, so a background readRemote before the first
- * manual sync would otherwise throw).
- */
-async function fetchAllRecordsSafe(recordType: string): Promise<Array<Record<string, unknown>>> {
-    try {
-        return await CloudKitSync!.fetchAllRecords(recordType);
-    } catch (error) {
-        if (error instanceof Error && error.message.includes('Did not find record type')) {
-            return [];
-        }
-        throw error;
-    }
-}
-
 async function fullFetch(): Promise<AppData> {
     const [tasks, projects, sections, areas, settingsRecords] = await Promise.all([
-        fetchAllRecordsSafe(RECORD_TYPES.task),
-        fetchAllRecordsSafe(RECORD_TYPES.project),
-        fetchAllRecordsSafe(RECORD_TYPES.section),
-        fetchAllRecordsSafe(RECORD_TYPES.area),
-        fetchAllRecordsSafe(RECORD_TYPES.settings),
+        CloudKitSync!.fetchAllRecords(RECORD_TYPES.task),
+        CloudKitSync!.fetchAllRecords(RECORD_TYPES.project),
+        CloudKitSync!.fetchAllRecords(RECORD_TYPES.section),
+        CloudKitSync!.fetchAllRecords(RECORD_TYPES.area),
+        CloudKitSync!.fetchAllRecords(RECORD_TYPES.settings),
     ]);
 
     // Extract settings from the single settings record
