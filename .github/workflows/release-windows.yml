@@ -642,7 +642,7 @@ jobs:
             Write-Warning "metadata/metadata.json not found; submitting cloned metadata from last published version."
           }
 
-          foreach ($prop in @('id', 'status', 'statusDetails', 'fileUploadUrl', 'friendlyName', 'pendingApplicationId')) {
+          foreach ($prop in @('id', 'status', 'statusDetails', 'fileUploadUrl', 'friendlyName', 'pendingApplicationId', 'sales')) {
             if ($submission.PSObject.Properties.Name -contains $prop) {
               $submission.PSObject.Properties.Remove($prop)
             }
