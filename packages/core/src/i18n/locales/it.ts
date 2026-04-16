@@ -27,7 +27,7 @@ export const itOverrides: Record<string, string> = {
         'nav.sectionArchive': 'Archivio',
 
         // Quick Add
-        'quickAdd.help': 'L\'aggiunta rapida supporta /start:<quando>, /due:<quando>, /review:<quando>, /note:<testo>, /next, /area:<nome> oppure !Area, @contesto, #tag, +Progetto.',
+        'quickAdd.help': 'L\'aggiunta rapida supporta /start:<when>, /due:<when>, /review:<when>, /note:<text>, /next, /area:<name> or !Area, @context, #tag, +Project.',
         'quickAdd.example': 'Esempio: Chiama la mamma /start:domani /due:domani 17:00 @telefono #famiglia',
         'quickAdd.placeholder': 'Aggiungi un\'attività… usa @contesto +Progetto #tag /start:domani /due:domani',
         'quickAdd.addAnother': 'Aggiungi un\'altra',
