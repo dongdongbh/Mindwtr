@@ -21,3 +21,20 @@ Any missing key falls back to the English source string at runtime.
 ```bash
 bun run --filter @mindwtr/core test
 ```
+
+## How to find new strings to translate
+
+You do not need to compare `en.ts` and `<lang>.ts` line by line.
+
+From the repo root, run:
+
+```bash
+bun run scripts/i18n-locale-diff.ts de
+```
+
+Replace `de` with another locale code such as `fr`, `it`, or `nl`.
+
+The script reports:
+
+- keys that exist in `en.ts` but are missing from the locale file and currently fall back to English
+- keys that exist in the locale file but no longer exist in `en.ts`
