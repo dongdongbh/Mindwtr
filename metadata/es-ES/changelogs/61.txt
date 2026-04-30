@@ -1,0 +1,4 @@
+La importacion de OmniFocus acepta JSON y ZIP, con carpetas como areas, tareas anidadas como checklist y reglas de repeticion compatibles.
+Pomodoro puede iniciar descansos o el siguiente foco automaticamente, y Focus muestra tareas listas para revisar.
+La captura rapida en Android es mas estable con animacion sin rastros, mejores selectores accesibles y listas medianas mas fluidas.
+Sync es mas estable con mejor manejo WebDAV y limpieza de conflictos/tombstones.

@@ -67,7 +67,7 @@ export function useAreaSidebarState({
         const reordered = arrayMove(sortedAreas, oldIndex, newIndex).map((area) => area.id);
         void Promise.resolve(reorderAreas(reordered)).catch((error) => {
             reportError('Failed to reorder areas', error);
-            showToast?.('Failed to reorder areas', 'error');
+            showToast?.(t('projects.areaReorderFailed') || 'Failed to reorder areas', 'error');
         });
     };
 

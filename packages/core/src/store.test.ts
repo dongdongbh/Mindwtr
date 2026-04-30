@@ -982,6 +982,24 @@ describe('TaskStore', () => {
         expect(useTaskStore.getState()._allTasks.find((task) => task.id === deletedTask.id)?.purgedAt).toBeTruthy();
     });
 
+    it('does not re-purge tasks that already have a tombstone purge marker', async () => {
+        const alreadyPurgedTask = createStoreTask('purged-task', {
+            deletedAt: '2026-04-01T00:00:00.000Z',
+            purgedAt: '2026-04-02T00:00:00.000Z',
+            updatedAt: '2026-04-03T00:00:00.000Z',
+            rev: 7,
+        });
+
+        useTaskStore.setState({
+            tasks: [],
+            _allTasks: [alreadyPurgedTask],
+        });
+
+        await useTaskStore.getState().purgeDeletedTasks();
+
+        expect(useTaskStore.getState()._allTasks).toEqual([alreadyPurgedTask]);
+    });
+
     it('should coalesce saves and allow immediate flush', async () => {
         const { addTask } = useTaskStore.getState();
 
@@ -1346,7 +1364,7 @@ describe('TaskStore', () => {
 
         const nextInstance = state._allTasks.find(t => t.id !== original.id)!;
         expect(nextInstance.status).toBe('next');
-        expect(nextInstance.recurrence).toBe('daily');
+        expect(nextInstance.recurrence).toEqual({ rule: 'daily' });
         expect(nextInstance.dueDate).toBe('2023-01-02T09:00');
     });
 
@@ -1562,6 +1580,23 @@ describe('TaskStore', () => {
 
             expect(result).toEqual({ success: false, error: 'Tasks not found: missing-task' });
             expect(useTaskStore.getState()._allTasks.find((item) => item.id === task.id)?.deletedAt).toBeUndefined();
+        });
+
+        it('fails batch deletes when any task id is already tombstoned', async () => {
+            const { addTask, batchDeleteTasks, deleteTask } = useTaskStore.getState();
+            await addTask('Active Task', { status: 'next' });
+            await addTask('Deleted Task', { status: 'next' });
+            const activeTask = useTaskStore.getState()._allTasks.find((item) => item.title === 'Active Task')!;
+            const deletedTask = useTaskStore.getState()._allTasks.find((item) => item.title === 'Deleted Task')!;
+
+            await deleteTask(deletedTask.id);
+            const deletedTaskBeforeBatch = useTaskStore.getState()._allTasks.find((item) => item.id === deletedTask.id)!;
+
+            const result = await batchDeleteTasks([activeTask.id, deletedTask.id]);
+
+            expect(result).toEqual({ success: false, error: `Tasks not found: ${deletedTask.id}` });
+            expect(useTaskStore.getState()._allTasks.find((item) => item.id === activeTask.id)?.deletedAt).toBeUndefined();
+            expect(useTaskStore.getState()._allTasks.find((item) => item.id === deletedTask.id)).toEqual(deletedTaskBeforeBatch);
         });
 
         it('preserves deleted project task section ids so a project can be restored intact', async () => {

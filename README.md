@@ -136,7 +136,7 @@ _Don't show me a cockpit when I just want to ride a bike._
 
 ### Productivity Features
 
-- 🔍 **Global Search** - Search operators (status:, context:, due:<=7d)
+- 🔍 **Global Search** - Search operators (status:, context:, assigned:, due:<=7d)
 - 📦 **Bulk Actions** - Multi-select, batch move/tag/delete
 - 📎 **Attachments** - Files and links on tasks
 - ✏️ **Markdown Notes** - Rich text descriptions with preview
@@ -146,7 +146,7 @@ _Don't show me a cockpit when I just want to ride a bike._
 - ✅ **Checklist Mode** - Fast list-style checking for checklist tasks
 - ✅ **Audio Capture** - Quick voice capture with automatic transcription and task creation
 - 🧭 **Copilot Suggestions** - Optional context/tag/time hints while typing
-- 🍅 **Pomodoro Focus (Optional)** - 15/3, 25/5, 50/10 timer panel in Focus view
+- 🍅 **Pomodoro Focus (Optional)** - 15/3, 25/5, 50/10 timer panel in Focus view with one optional custom preset
 - 🔔 **Notifications** - Due date reminders with snooze
 - 📊 **Daily Digest** - Morning briefing + evening review
 - 📅 **Weekly Review** - Customizable weekly reminder
@@ -158,7 +158,7 @@ _Don't show me a cockpit when I just want to ride a bike._
 - ☁️ **Dropbox OAuth Sync (Optional)** - Native Dropbox App Folder sync in supported non-FOSS builds
 - 📤 **Export/Backup** - Export data to JSON
 - ♻️ **Restore from Backup** - Replace local data from a validated Mindwtr backup with a recovery snapshot first
-- 📥 **Todoist + DGT GTD Import** - Import Todoist CSV/ZIP exports or DGT GTD JSON/ZIP exports into Mindwtr
+- 📥 **Todoist + DGT GTD + OmniFocus Import** - Import Todoist CSV/ZIP, DGT GTD JSON/ZIP, or OmniFocus CSV exports into Mindwtr
 - 🔗 **Obsidian Integration** - Desktop vault task import with deep links back to source notes
 - 🗓️ **External Calendars (System + ICS)** - Mobile reads system calendars and can push due-dated tasks to a dedicated device calendar; desktop supports ICS subscriptions
 
@@ -377,6 +377,16 @@ You can help in several ways:
 - 🛠️ [Cloud Deployment](https://github.com/dongdongbh/Mindwtr/wiki/Cloud-Deployment)
 - 🧠 [MCP Server](https://github.com/dongdongbh/Mindwtr/wiki/MCP-Server)
 - 📝 [Release Notes Index](docs/release-notes/README.md)
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=dongdongbh%2FMindwtr&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=dongdongbh/Mindwtr&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=dongdongbh/Mindwtr&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=dongdongbh/Mindwtr&type=date&legend=top-left" />
+ </picture>
+</a>
 
 ## Sponsors
 

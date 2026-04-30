@@ -5,6 +5,8 @@ import type {
     Area,
     BackupValidation,
     DgtImportParseResult,
+    OmniFocusImportParseResult,
+    ParsedOmniFocusImportData,
     ParsedDgtImportData,
     Project,
     ParsedTodoistProject,
@@ -16,12 +18,15 @@ import type {
 import {
     exportCurrentDataBackup,
     importDgtData,
+    importOmniFocusData,
     importTodoistData,
     inspectBackupDocument,
     inspectDgtDocument,
+    inspectOmniFocusDocument,
     inspectTodoistDocument,
     pickBackupDocument,
     pickDgtDocument,
+    pickOmniFocusDocument,
     pickTodoistDocument,
     restoreDataFromBackup,
     restoreLocalDataSnapshot,
@@ -150,6 +155,46 @@ export function useSyncSettingsBackupActions({
                     `${preview.standaloneTaskCount} 个任务会保留在项目之外，方便你在 Mindwtr 中继续整理。`
                 )
                 : null,
+            ...(projectLines.length > 0 ? ['', ...projectLines] : []),
+            ...(preview.warnings.length > 0 ? ['', ...preview.warnings] : []),
+        ].filter(Boolean);
+        return details.join('\n');
+    }, [localize]);
+
+    const buildOmniFocusSummary = useCallback((preview: NonNullable<OmniFocusImportParseResult['preview']>) => {
+        const projectLines = preview.projects
+            .slice(0, 4)
+            .map((project) => `• ${project.name}: ${project.taskCount}`);
+        if (preview.projects.length > 4) {
+            projectLines.push(localize(`• ${preview.projects.length - 4} more project(s)…`, `• 另外还有 ${preview.projects.length - 4} 个项目…`));
+        }
+        const details = [
+            localize(
+                `Import ${preview.taskCount} task(s) from ${preview.fileName}?`,
+                `导入来自 ${preview.fileName} 的 ${preview.taskCount} 个任务？`
+            ),
+            preview.projectCount > 0
+                ? localize(`${preview.projectCount} project(s) will be created when needed.`, `${preview.projectCount} 个项目会在需要时创建。`)
+                : null,
+            preview.areaCount > 0
+                ? localize(`${preview.areaCount} area(s) will be created from OmniFocus folders when needed.`, `${preview.areaCount} 个领域会在需要时根据 OmniFocus 文件夹创建。`)
+                : null,
+            preview.checklistItemCount > 0
+                ? localize(
+                    `${preview.checklistItemCount} nested task(s) will become checklist items when possible.`,
+                    `${preview.checklistItemCount} 个嵌套任务会在可能时转换为清单项。`
+                )
+                : null,
+            preview.standaloneTaskCount > 0
+                ? localize(
+                    `${preview.standaloneTaskCount} task(s) will stay outside projects so you can process them in Mindwtr.`,
+                    `${preview.standaloneTaskCount} 个任务会保留在项目之外，方便你在 Mindwtr 中继续整理。`
+                )
+                : null,
+            localize(
+                'Imported tasks keep OmniFocus notes, dates, tags, recurrence, and checklist children when supported.',
+                '导入后的任务会尽量保留 OmniFocus 的备注、日期、标签、重复规则和清单子项。'
+            ),
             ...(projectLines.length > 0 ? ['', ...projectLines] : []),
             ...(preview.warnings.length > 0 ? ['', ...preview.warnings] : []),
         ].filter(Boolean);
@@ -293,6 +338,51 @@ export function useSyncSettingsBackupActions({
         }
     }, [localize, refreshRecoverySnapshots, setBackupAction, showSettingsErrorToast, showToast]);
 
+    const confirmOmniFocusImport = useCallback(async (parsedData: ParsedOmniFocusImportData) => {
+        setBackupAction('import');
+        try {
+            const { snapshotName, result } = await importOmniFocusData(parsedData);
+            await refreshRecoverySnapshots();
+            const details = [
+                localize(
+                    `Imported ${result.importedTaskCount} task(s) and ${result.importedProjectCount} project(s).`,
+                    `已导入 ${result.importedTaskCount} 个任务和 ${result.importedProjectCount} 个项目。`
+                ),
+                result.importedAreaCount > 0
+                    ? localize(
+                        `${result.importedAreaCount} area(s) were created from OmniFocus folders.`,
+                        `已根据 OmniFocus 文件夹创建 ${result.importedAreaCount} 个领域。`
+                    )
+                    : null,
+                result.importedChecklistItemCount > 0
+                    ? localize(
+                        `${result.importedChecklistItemCount} nested task(s) became checklist items.`,
+                        `${result.importedChecklistItemCount} 个嵌套任务已转换为清单项。`
+                    )
+                    : null,
+                result.importedStandaloneTaskCount > 0
+                    ? localize(
+                        `${result.importedStandaloneTaskCount} task(s) stayed outside projects.`,
+                        `${result.importedStandaloneTaskCount} 个任务保留在项目之外。`
+                    )
+                    : null,
+                localize(`Recovery snapshot saved as ${snapshotName}.`, `恢复快照已保存为 ${snapshotName}。`),
+                ...(result.warnings.length > 0 ? ['', ...result.warnings] : []),
+            ].filter(Boolean);
+            showToast({
+                title: localize('Import complete', '导入完成'),
+                message: details.join('\n'),
+                tone: 'success',
+                durationMs: 6200,
+            });
+        } catch (error) {
+            logSettingsError(error);
+            showSettingsErrorToast(localize('Import failed', '导入失败'), String(error), 5200);
+        } finally {
+            setBackupAction(null);
+        }
+    }, [localize, refreshRecoverySnapshots, setBackupAction, showSettingsErrorToast, showToast]);
+
     const handleImportTodoist = useCallback(async () => {
         setBackupAction('import');
         try {
@@ -357,6 +447,39 @@ export function useSyncSettingsBackupActions({
             setBackupAction(null);
         }
     }, [buildDgtSummary, confirmDgtImport, localize, setBackupAction, showSettingsErrorToast, showSettingsWarning]);
+
+    const handleImportOmniFocus = useCallback(async () => {
+        setBackupAction('import');
+        try {
+            const document = await pickOmniFocusDocument();
+            if (!document) return;
+            const parseResult = await inspectOmniFocusDocument(document);
+            if (!parseResult.valid || !parseResult.preview || !parseResult.parsedData) {
+                showSettingsWarning(
+                    localize('Import failed', '导入失败'),
+                    parseResult.errors[0] || localize('The selected file is not a supported OmniFocus export.', '所选文件不是受支持的 OmniFocus 导出文件。')
+                );
+                return;
+            }
+            const parsedData = parseResult.parsedData;
+            Alert.alert(
+                localize('Import OmniFocus data?', '导入 OmniFocus 数据？'),
+                buildOmniFocusSummary(parseResult.preview),
+                [
+                    { text: localize('Cancel', '取消'), style: 'cancel' },
+                    {
+                        text: localize('Import', '导入'),
+                        onPress: () => void confirmOmniFocusImport(parsedData),
+                    },
+                ]
+            );
+        } catch (error) {
+            logSettingsError(error);
+            showSettingsErrorToast(localize('Import failed', '导入失败'), String(error), 5200);
+        } finally {
+            setBackupAction(null);
+        }
+    }, [buildOmniFocusSummary, confirmOmniFocusImport, localize, setBackupAction, showSettingsErrorToast, showSettingsWarning]);
 
     const handleRestoreRecoverySnapshot = useCallback(async (snapshotName: string) => {
         Alert.alert(
@@ -445,6 +568,7 @@ export function useSyncSettingsBackupActions({
         handleBackup,
         handleClearLog,
         handleImportDgt,
+        handleImportOmniFocus,
         handleImportTodoist,
         handleRestoreBackup,
         handleRestoreRecoverySnapshot,

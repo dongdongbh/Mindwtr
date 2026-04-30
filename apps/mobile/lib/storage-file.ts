@@ -414,7 +414,7 @@ const pickAndParseIosSyncFolder = async (): Promise<PickResult | null> => {
         if (!pickedFileUri) return null;
 
         if (isIosTemporaryInboxUri(pickedFileUri)) {
-            throw new Error('Selected iOS sync file is in a temporary Inbox location and is read-only. Re-select a folder in Settings -> Data & Sync.');
+            throw new Error('Selected iOS sync file is in a temporary Inbox location and is read-only. Re-select a folder in Settings -> Sync.');
         }
 
         await assertIosFileWritable(pickedFileUri);
@@ -555,7 +555,7 @@ export const readSyncFile = async (fileUri: string): Promise<AppData | null> => 
         const message = String(error);
         // Provide a clearer UX-oriented error.
         if (fileUri.startsWith('content://') && /Invalid URI|IllegalArgumentException/i.test(message)) {
-            throw new Error('Cannot access the selected sync file. Please re-select it in Settings → Data & Sync.');
+            throw new Error('Cannot access the selected sync file. Please re-select it in Settings → Sync.');
         }
         if (/JSON|Unexpected token|trailing characters|Invalid data format|Sync file is empty/i.test(message)) {
             void logWarn('[Sync] Invalid JSON in sync file. Using local data and repairing file.', { scope: 'sync' });

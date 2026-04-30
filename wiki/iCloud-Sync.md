@@ -4,10 +4,10 @@ Mindwtr supports a native **iCloud / CloudKit** sync backend for Apple devices w
 
 ## Availability
 
-- **iPhone / iPad:** supported through the native `iCloud` sync backend in **Settings → Data & Sync**
+- **iPhone / iPad:** supported through the native `iCloud` sync backend in **Settings → Sync**
 - **Android:** not supported
 - **Windows / Linux:** not supported
-- **macOS desktop:** supported through the native `iCloud` sync backend in **Settings → Data & Sync**
+- **macOS desktop:** supported through the native `iCloud` sync backend in **Settings → Sync**
 
 ## What It Syncs
 
@@ -25,7 +25,7 @@ It uses CloudKit in your Apple account rather than a user-selected `data.json` f
 
 1. Sign in to the same Apple ID on the devices you want to sync.
 2. Make sure iCloud is enabled for Mindwtr on those devices.
-3. In Mindwtr on your Apple device, open **Settings → Data & Sync**.
+3. In Mindwtr on your Apple device, open **Settings → Sync**.
 4. Choose **iCloud** as the sync backend.
 5. Run a sync once to seed or pull your data.
 

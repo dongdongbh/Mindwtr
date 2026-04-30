@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { AppData, Attachment, MergeStats, createSyncOrchestrator, useTaskStore, webdavGetJson, webdavPutJson, cloudGetJson, cloudPutJson, flushPendingSave, performSyncCycle, findOrphanedAttachments, removeOrphanedAttachmentsFromData, removeAttachmentsByIdFromData, webdavDeleteFile, cloudDeleteFile, CLOCK_SKEW_THRESHOLD_MS, appendSyncHistory, withRetry, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeWebdavUrl, normalizeCloudUrl, sanitizeAppDataForRemote, areSyncPayloadsEqual, assertNoPendingAttachmentUploads, findPendingAttachmentUploads, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, mergeAppData, cloneAppData, LocalSyncAbort, getInMemoryAppDataSnapshot, shouldRunAttachmentCleanup, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type CloudProvider } from '@mindwtr/core';
+import { AppData, Attachment, MergeStats, createSyncOrchestrator, runPreSyncAttachmentPhase, useTaskStore, webdavGetJson, webdavPutJson, cloudGetJson, cloudPutJson, flushPendingSave, performSyncCycle, findOrphanedAttachments, removeOrphanedAttachmentsFromData, removeAttachmentsByIdFromData, webdavDeleteFile, cloudDeleteFile, CLOCK_SKEW_THRESHOLD_MS, appendSyncHistory, withRetry, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeWebdavUrl, normalizeCloudUrl, sanitizeAppDataForRemote, areSyncPayloadsEqual, assertNoPendingAttachmentUploads, findPendingAttachmentUploads, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, mergeAppData, cloneAppData, LocalSyncAbort, getInMemoryAppDataSnapshot, shouldRunAttachmentCleanup, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type CloudProvider } from '@mindwtr/core';
 import { mobileStorage } from './storage-adapter';
 import { logInfo, logSyncError, logWarn, sanitizeLogMessage } from './app-log';
 import { readSyncFile, resolveSyncFileUri, writeSyncFile } from './storage-file';
@@ -267,23 +267,48 @@ const buildRequeuedSkipResult = (): MobileSyncResult => ({
   skipped: 'requeued',
 });
 
-const shouldSkipSyncForOfflineState = async (backend: SyncBackend): Promise<boolean> => {
+type MobileNetworkStatus = {
+  isConnected: boolean | null;
+  isInternetReachable: boolean | null;
+  isAirplaneModeEnabled: boolean;
+};
+
+const getMobileNetworkStatus = (state: {
+  isConnected?: boolean | null;
+  isInternetReachable?: boolean | null;
+  isAirplaneModeEnabled?: unknown;
+}): MobileNetworkStatus => ({
+  isConnected: typeof state.isConnected === 'boolean' ? state.isConnected : null,
+  isInternetReachable: typeof state.isInternetReachable === 'boolean' ? state.isInternetReachable : null,
+  isAirplaneModeEnabled: typeof state.isAirplaneModeEnabled === 'boolean' ? state.isAirplaneModeEnabled : false,
+});
+
+const isDefinitelyOfflineNetworkStatus = (status: MobileNetworkStatus): boolean => (
+  status.isAirplaneModeEnabled
+  || status.isConnected === false
+  || (status.isConnected !== true && status.isInternetReachable === false)
+);
+
+const formatNetworkStatusForLog = (status: MobileNetworkStatus): Record<string, string> => ({
+  isConnected: status.isConnected === null ? 'unknown' : String(status.isConnected),
+  isInternetReachable: status.isInternetReachable === null ? 'unknown' : String(status.isInternetReachable),
+  isAirplaneModeEnabled: String(status.isAirplaneModeEnabled),
+});
+
+const shouldSkipSyncForOfflineState = async (
+  backend: SyncBackend,
+  onOffline?: (status: MobileNetworkStatus) => void
+): Promise<boolean> => {
   if (!isRemoteSyncBackend(backend)) return false;
   try {
     const state = await Network.getNetworkStateAsync();
-    const isConnected = state.isConnected ?? false;
-    const isInternetReachable = state.isInternetReachable ?? isConnected;
-    const isAirplaneModeEnabled = (() => {
-      const value = (state as { isAirplaneModeEnabled?: unknown }).isAirplaneModeEnabled;
-      return typeof value === 'boolean' ? value : false;
-    })();
+    const status = getMobileNetworkStatus(state);
 
-    if (isAirplaneModeEnabled || !isInternetReachable) {
+    if (isDefinitelyOfflineNetworkStatus(status)) {
+      onOffline?.(status);
       logSyncInfo('Sync skipped: offline/airplane mode', {
         backend,
-        isConnected: String(isConnected),
-        isInternetReachable: String(isInternetReachable),
-        isAirplaneModeEnabled: String(isAirplaneModeEnabled),
+        ...formatNetworkStatusForLog(status),
       });
       return true;
     }
@@ -343,6 +368,8 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
     let wroteLocal = false;
     let localSnapshotChangeAt = useTaskStore.getState().lastDataChangeAt;
     let networkWentOffline = false;
+    let offlineDetectionCause: string | null = null;
+    let lastOfflineNetworkStatus: MobileNetworkStatus | null = null;
     let networkSubscription: { remove?: () => void } | null = null;
     let preSyncedLocalData: AppData | null = null;
     const requestAbortController = new AbortController();
@@ -362,14 +389,18 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
       if (!webdavSyncRateLimitController.noteError(backend, error)) return;
       logSyncWarning('WebDAV rate limited; pausing remote sync', error);
     };
+    const markNetworkOffline = (cause: string, status?: MobileNetworkStatus) => {
+      networkWentOffline = true;
+      offlineDetectionCause = cause;
+      lastOfflineNetworkStatus = status ?? lastOfflineNetworkStatus;
+    };
     const ensureNetworkStillAvailable = async () => {
       if (!isRemoteSyncBackend(backend)) return;
       if (networkWentOffline) {
         requestAbortController.abort();
         throw new Error('Sync paused: offline state detected');
       }
-      if (await shouldSkipSyncForOfflineState(backend)) {
-        networkWentOffline = true;
+      if (await shouldSkipSyncForOfflineState(backend, (status) => markNetworkOffline('network-check', status))) {
         requestAbortController.abort();
         throw new Error('Sync paused: offline state detected');
       }
@@ -378,14 +409,9 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
       if (isRemoteSyncBackend(backend)) {
         try {
           networkSubscription = Network.addNetworkStateListener((state) => {
-            const isConnected = state.isConnected ?? false;
-            const isInternetReachable = state.isInternetReachable ?? isConnected;
-            const isAirplaneModeEnabled = (() => {
-              const value = (state as { isAirplaneModeEnabled?: unknown }).isAirplaneModeEnabled;
-              return typeof value === 'boolean' ? value : false;
-            })();
-            if (isAirplaneModeEnabled || !isInternetReachable) {
-              networkWentOffline = true;
+            const status = getMobileNetworkStatus(state);
+            if (isDefinitelyOfflineNetworkStatus(status)) {
+              markNetworkOffline('network-listener', status);
               requestAbortController.abort();
             }
           });
@@ -419,7 +445,7 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
           logSyncInfo('Normalized file sync path to iOS file URI');
         }
         if (fileSyncPath.startsWith('file://') && IOS_TEMP_INBOX_PATH_PATTERN.test(decodeUriSafe(fileSyncPath))) {
-          throw new Error('Selected iOS sync file is in a temporary Inbox location and is read-only. Re-select a folder in Settings -> Data & Sync.');
+          throw new Error('Selected iOS sync file is in a temporary Inbox location and is read-only. Re-select a folder in Settings -> Sync.');
         }
         if (fileSyncPath.startsWith('content://')) {
           try {
@@ -496,26 +522,38 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
       try {
         const persistedData = await mobileStorage.getData();
         const localData = mergeAppData(persistedData, getInMemoryAppDataSnapshot());
-        let preMutated = false;
-        if (backend === 'webdav' && webdavConfig?.url) {
-          const baseSyncUrl = getBaseSyncUrl(webdavConfig.url);
-          preMutated = await syncWebdavAttachments(localData, webdavConfig, baseSyncUrl);
-        } else if (backend === 'cloud' && cloudProvider === CLOUD_PROVIDER_SELF_HOSTED && cloudConfig?.url) {
-          const baseSyncUrl = getCloudBaseUrl(cloudConfig.url);
-          preMutated = await syncCloudAttachments(localData, cloudConfig, baseSyncUrl);
-        } else if (backend === 'cloud' && cloudProvider === CLOUD_PROVIDER_DROPBOX) {
-          preMutated = await syncDropboxAttachments(localData, dropboxClientId, fetchWithAbort);
-        } else if (backend === 'file' && fileSyncPath) {
-          preMutated = await syncFileAttachments(localData, fileSyncPath);
-        }
-        if (preMutated) {
+        const preSyncResult = await runPreSyncAttachmentPhase({
+          backend,
+          cloudProvider,
+          data: localData,
+          ensureNetworkStillAvailable,
+          webdav: webdavConfig?.url
+            ? async (data) => {
+              const baseSyncUrl = getBaseSyncUrl(webdavConfig.url);
+              return syncWebdavAttachments(data, webdavConfig, baseSyncUrl);
+            }
+            : undefined,
+          selfHostedCloud: cloudProvider === CLOUD_PROVIDER_SELF_HOSTED && cloudConfig?.url
+            ? async (data) => {
+              const baseSyncUrl = getCloudBaseUrl(cloudConfig.url);
+              return syncCloudAttachments(data, cloudConfig, baseSyncUrl);
+            }
+            : undefined,
+          dropbox: cloudProvider === CLOUD_PROVIDER_DROPBOX
+            ? async (data) => syncDropboxAttachments(data, dropboxClientId, fetchWithAbort)
+            : undefined,
+          file: fileSyncPath
+            ? async (data) => syncFileAttachments(data, fileSyncPath)
+            : undefined,
+        });
+        if (preSyncResult.mutated) {
           // Capture pre-sync attachment mutations before stale-snapshot checks so we can persist them on abort.
-          preSyncedLocalData = localData;
+          preSyncedLocalData = preSyncResult.data ?? localData;
           ensureLocalSnapshotFresh();
         }
         logSyncInfo('Attachment pre-sync complete', {
           backend,
-          mutated: preMutated ? 'true' : 'false',
+          mutated: preSyncResult.mutated ? 'true' : 'false',
         });
       } catch (error) {
         if (error instanceof LocalSyncAbort) {
@@ -954,7 +992,11 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
         }
         return buildRequeuedSkipResult();
       }
-      if (isRemoteSyncBackend(backend) && (networkWentOffline || isLikelyOfflineSyncError(error))) {
+      const likelyOfflineRequestError = isLikelyOfflineSyncError(error);
+      if (isRemoteSyncBackend(backend) && (networkWentOffline || likelyOfflineRequestError)) {
+        if (!offlineDetectionCause && likelyOfflineRequestError) {
+          offlineDetectionCause = 'request-error';
+        }
         if (preSyncedLocalData && !wroteLocal) {
           const inMemorySnapshot = getInMemoryAppDataSnapshot();
           const reconciledData = mergeAppData(preSyncedLocalData, inMemorySnapshot);
@@ -968,7 +1010,12 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
             logSyncWarning('[Mobile] Failed to refresh store after offline sync skip', fetchError);
           }
         }
-        logSyncInfo('Sync skipped after offline detection', { backend, step });
+        logSyncInfo('Sync skipped after offline detection', {
+          backend,
+          step,
+          reason: offlineDetectionCause ?? 'unknown',
+          ...(lastOfflineNetworkStatus ? formatNetworkStatusForLog(lastOfflineNetworkStatus) : {}),
+        });
         return buildOfflineSkipResult();
       }
       const now = new Date().toISOString();

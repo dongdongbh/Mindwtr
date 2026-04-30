@@ -7,6 +7,7 @@ import { Undo2, Trash2 } from 'lucide-react';
 import { useLanguage } from '../../contexts/language-context';
 import { usePerformanceMonitor } from '../../hooks/usePerformanceMonitor';
 import { checkBudget } from '../../config/performanceBudgets';
+import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import {
     LIST_VIRTUALIZATION_THRESHOLD,
     LIST_VIRTUAL_ROW_ESTIMATE,
@@ -102,6 +103,7 @@ export function ArchiveView() {
         shallow
     );
     const { t } = useLanguage();
+    const { requestConfirmation, confirmModal } = useConfirmDialog();
     const [searchQuery, setSearchQuery] = useState('');
     const listScrollRef = useRef<HTMLDivElement>(null);
     const rowHeightsRef = useRef<Map<string, number>>(new Map());
@@ -173,9 +175,18 @@ export function ArchiveView() {
         updateTask(taskId, { status: 'inbox' }); // Restore to inbox? Or previous status? Inbox is safest.
     }, [updateTask]);
 
-    const handleDelete = useCallback((taskId: string) => {
+    const handleDelete = useCallback(async (taskId: string) => {
+        const task = _allTasks.find((item) => item.id === taskId);
+        if (!task) return;
+        const confirmed = await requestConfirmation({
+            title: task.title,
+            description: t('trash.deleteConfirmBody'),
+            confirmLabel: t('common.delete'),
+            cancelLabel: t('common.cancel') || 'Cancel',
+        });
+        if (!confirmed) return;
         purgeTask(taskId);
-    }, [purgeTask]);
+    }, [_allTasks, purgeTask, requestConfirmation, t]);
 
     return (
         <ErrorBoundary>
@@ -239,6 +250,7 @@ export function ArchiveView() {
                 )}
             </div>
             </div>
+            {confirmModal}
         </ErrorBoundary>
     );
 }

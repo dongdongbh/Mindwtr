@@ -53,7 +53,7 @@ Your unified dashboard combining daily planning and next actions.
 **Features:**
 - **Context Filters**: Filter Next Actions by context (e.g., @home, @work) or tag.
 - **Top 3 Only**: Toggle to hide everything except your top 3 focus tasks (Zen Mode).
-- **Pomodoro (Optional)**: Enable in **Settings → GTD → Features → Pomodoro timer** to show a task-linked focus/break timer panel (15/3, 25/5, 50/10).
+- **Pomodoro (Optional)**: Enable in **Settings → GTD → Features → Pomodoro timer** to show a task-linked focus/break timer panel (15/3, 25/5, 50/10, plus one optional custom preset).
 
 ### 📁 Projects
 
@@ -170,18 +170,19 @@ Powerful search with operators to find anything instantly.
 
 #### Search Operators
 
-| Operator   | Example            | Description                   |
-| ---------- | ------------------ | ----------------------------- |
-| `status:`  | `status:next`      | Filter by task status         |
-| `-status:` | `-status:done`     | Exclude a status              |
-| `context:` | `context:@home`    | Filter by context             |
-| `tag:`     | `tag:#focused`     | Filter by tag                 |
-| `project:` | `project:HomeReno` | Filter by project name or ID  |
-| `due:`     | `due:today`        | Tasks due on date             |
-| `due:<=`   | `due:<=7d`         | Tasks due within 7 days       |
-| `start:`   | `start:>=tomorrow` | Tasks starting from date      |
-| `created:` | `created:>=30d`    | Tasks created in last 30 days |
-| `OR`       | `@home OR @work`   | Match either condition        |
+| Operator    | Example            | Description                   |
+| ----------- | ------------------ | ----------------------------- |
+| `status:`   | `status:next`      | Filter by task status         |
+| `-status:`  | `-status:done`     | Exclude a status              |
+| `context:`  | `context:@home`    | Filter by context             |
+| `tag:`      | `tag:#focused`     | Filter by tag                 |
+| `assigned:` | `assigned:Tom`     | Filter by delegated assignee  |
+| `project:`  | `project:HomeReno` | Filter by project name or ID  |
+| `due:`      | `due:today`        | Tasks due on date             |
+| `due:<=`    | `due:<=7d`         | Tasks due within 7 days       |
+| `start:`    | `start:>=tomorrow` | Tasks starting from date      |
+| `created:`  | `created:>=30d`    | Tasks created in last 30 days |
+| `OR`        | `@home OR @work`   | Match either condition        |
 
 **Date formats:** `today`, `tomorrow`, `7d` (7 days), `2w` (2 weeks), `1m` (1 month), `2025-01-15`
 
@@ -345,8 +346,11 @@ When you complete a recurring task, Mindwtr automatically creates the next insta
   Example: every 5 days remains anchored to the planned cycle.
 - **Repeat after completion**: shifts the next due date from completion time.
   Example: complete now, next is due 5 days later.
+- **Ends: Never / On date / After N occurrences**: choose whether the series runs forever, stops on a specific date, or stops after a fixed number of occurrences.
+  `After N occurrences` counts the current task as part of the series total.
 
 You can toggle this in the task editor recurrence field using **Repeat after completion**.
+Use the same recurrence sheet to set an end date or an occurrence count when you need the series to stop automatically.
 
 
 ---

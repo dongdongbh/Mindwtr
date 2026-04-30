@@ -11,6 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import {
     MARKDOWN_TOOLBAR_ACTIONS,
+    translateWithFallback,
     type MarkdownSelection,
     type MarkdownToolbarActionId,
     type MarkdownToolbarResult,
@@ -31,11 +32,6 @@ type MarkdownFormatToolbarProps = {
     onUndo: () => MarkdownSelection | undefined;
     onApplyAction: (actionId: MarkdownToolbarActionId, selection: MarkdownSelection) => MarkdownToolbarResult | void;
     onInteractionStart?: () => void;
-};
-
-const translateWithFallback = (t: (key: string) => string, key: string, fallback: string) => {
-    const translated = t(key);
-    return translated === key ? fallback : translated;
 };
 
 const renderActionLabel = (actionId: MarkdownToolbarActionId, shortLabel: string, color: string) => {

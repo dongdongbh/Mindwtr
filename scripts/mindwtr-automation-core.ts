@@ -4,6 +4,7 @@ import {
     searchAll,
     setStorageAdapter,
     useTaskStore,
+    type Area,
     type Project,
     type SearchProjectResult,
     type SearchResults,
@@ -191,6 +192,10 @@ export async function createMindwtrAutomationService(options: AutomationServiceO
                     status: project.status,
                     areaId: project.areaId,
                 }));
+        },
+        listAreas: async (): Promise<Area[]> => {
+            const state = await refreshState();
+            return state._allAreas.filter((area) => !area.deletedAt);
         },
     };
 }

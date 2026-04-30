@@ -1,6 +1,7 @@
 import { createNextRecurringTask } from './recurrence';
 import { getUsedTaskTokens } from './task-token-usage';
 import { rescheduleTask } from './task-utils';
+import { filterNotDeleted } from './sync-helpers';
 import type { AppData, Area, Project, Section, Task, TaskStatus } from './types';
 import { generateUUID as uuidv4 } from './uuid';
 import type { DerivedState, SaveBaseState } from './store-types';
@@ -119,7 +120,7 @@ export const isTaskVisible = (task?: Task | null, options?: TaskVisibilityOption
 export const toVisibleTask = (task: Task): Task => {
     const attachments = task.attachments;
     if (!attachments || attachments.length === 0) return task;
-    const visibleAttachments = attachments.filter((attachment) => !attachment.deletedAt);
+    const visibleAttachments = filterNotDeleted(attachments);
     return visibleAttachments.length === attachments.length
         ? task
         : { ...task, attachments: visibleAttachments };
@@ -129,13 +130,13 @@ export const selectVisibleTasks = (tasks: Task[]): Task[] =>
     tasks.filter((task) => isTaskVisible(task)).map(toVisibleTask);
 
 export const selectVisibleProjects = (projects: Project[]): Project[] =>
-    projects.filter((project) => !project.deletedAt);
+    filterNotDeleted(projects);
 
 export const selectVisibleSections = (sections: Section[]): Section[] =>
-    sections.filter((section) => !section.deletedAt);
+    filterNotDeleted(sections);
 
 export const selectVisibleAreas = (areas: Area[]): Area[] =>
-    areas.filter((area) => !area.deletedAt);
+    filterNotDeleted(areas);
 
 export const buildEntityMap = <T extends EntityWithId>(items: readonly T[]): Map<string, T> =>
     new Map(items.map((item) => [item.id, item] as const));

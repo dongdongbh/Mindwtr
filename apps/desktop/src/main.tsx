@@ -12,6 +12,7 @@ import { webStorage } from './lib/storage-adapter-web';
 import { isDiagnosticsEnabled, logError, logInfo, logWarn, setupGlobalErrorLogging } from './lib/app-log';
 import { THEME_STORAGE_KEY, applyThemeMode, coerceDesktopThemeMode, resolveNativeTheme } from './lib/theme';
 import { TEXT_SIZE_STORAGE_KEY, applyDesktopTextSize, coerceDesktopTextSize } from './lib/text-size';
+import { loadStoredFullscreen } from './lib/window-state';
 
 const ANALYTICS_DISTINCT_ID_KEY = 'mindwtr-analytics-distinct-id';
 const ANALYTICS_HEARTBEAT_URL = String(import.meta.env.VITE_ANALYTICS_HEARTBEAT_URL || '').trim();
@@ -243,10 +244,30 @@ async function initStorage() {
     setStorageAdapter(webStorage);
 }
 
+async function restoreFullscreenState() {
+    if (!isTauriRuntime()) return;
+    if (!loadStoredFullscreen(localStorage)) return;
+    try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        const current = getCurrentWindow();
+        if (await current.isFullscreen()) return;
+        await current.setFullscreen(true);
+    } catch (error) {
+        void logWarn('Failed to restore fullscreen state', {
+            scope: 'window',
+            extra: {
+                step: 'restoreFullscreen',
+                error: error instanceof Error ? error.message : String(error),
+            },
+        });
+    }
+}
+
 async function bootstrap() {
     await initStorage();
     setupGlobalErrorLogging();
     await logDesktopStartupContext().catch(() => undefined);
+    await restoreFullscreenState();
 
     if (!isTauriRuntime() && 'serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js').catch(() => undefined);

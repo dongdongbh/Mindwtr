@@ -1,3 +1,5 @@
-- Mobile project groups now match desktop, and the Manage section keeps its expanded state more reliably.
-- Mobile editing is smoother with fenced Markdown code blocks, quicker task field toggles, and better share-capture keyboard dismissal.
-- Calendar and sync flows are steadier with stronger due-date calendar push behavior, safer WebDAV handling, and better review/reminder coordination.
+- Calendar planning adds a mobile week view, refreshed month flow, scheduled task composer, and default schedule time.
+- Calendar sync can choose a push target while Mindwtr mirror calendars are ignored to prevent duplicate planning loops.
+- Review reminders now open the Review page directly.
+- Inbox gains a Later shortcut, search supports assignee filters, and sync/cloud merge handling is more reliable.
+- Quick capture text stays inside its sheet and speech-to-text avoids an Android realtime crash.

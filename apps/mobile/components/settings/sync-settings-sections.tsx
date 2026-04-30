@@ -78,38 +78,28 @@ export function SyncLastStatusCard({
 
 type SyncBackupSectionProps = {
   backupAction: null | 'export' | 'restore' | 'import' | 'snapshot';
-  formatRecoverySnapshotLabel: (fileName: string) => string;
   handleBackup: () => void;
   handleImportDgt: () => void;
+  handleImportOmniFocus: () => void;
   handleImportTodoist: () => void;
   handleRestoreBackup: () => void;
-  handleRestoreRecoverySnapshot: (snapshotName: string) => void;
   isBackupBusy: boolean;
-  isLoadingRecoverySnapshots: boolean;
   isSyncing: boolean;
   localize: Localize;
-  recoverySnapshots: string[];
-  recoverySnapshotsOpen: boolean;
-  setRecoverySnapshotsOpen: (open: boolean) => void;
   t: Translate;
   tc: ThemeColors;
 };
 
 export function SyncBackupSection({
   backupAction,
-  formatRecoverySnapshotLabel,
   handleBackup,
   handleImportDgt,
+  handleImportOmniFocus,
   handleImportTodoist,
   handleRestoreBackup,
-  handleRestoreRecoverySnapshot,
   isBackupBusy,
-  isLoadingRecoverySnapshots,
   isSyncing,
   localize,
-  recoverySnapshots,
-  recoverySnapshotsOpen,
-  setRecoverySnapshotsOpen,
   t,
   tc,
 }: SyncBackupSectionProps) {
@@ -163,61 +153,106 @@ export function SyncBackupSection({
           </View>
           {backupAction === 'import' && <ActivityIndicator size="small" color={tc.tint} />}
         </TouchableOpacity>
-      </View>
-
-      <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 12 }]}>
-        <TouchableOpacity style={styles.settingRow} onPress={() => setRecoverySnapshotsOpen(!recoverySnapshotsOpen)}>
+        <TouchableOpacity
+          style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
+          onPress={handleImportOmniFocus}
+          disabled={isSyncing || isBackupBusy}
+        >
           <View style={styles.settingInfo}>
-            <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.recoverySnapshots')}</Text>
+            <Text style={[styles.settingLabel, { color: tc.tint }]}>{localize('Import from OmniFocus', '从 OmniFocus 导入')}</Text>
             <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-              {localize('Saved automatically before restore and import operations.', '在恢复和导入之前自动保存。')}
+              {localize('Import OmniFocus CSV, JSON, or ZIP exports into Mindwtr projects and inbox tasks.', '将 OmniFocus 的 CSV、JSON 或 ZIP 导出导入为 Mindwtr 项目和收集箱任务。')}
             </Text>
           </View>
-          <Text style={[styles.chevron, { color: tc.secondaryText }]}>{recoverySnapshotsOpen ? '▾' : '▸'}</Text>
+          {backupAction === 'import' && <ActivityIndicator size="small" color={tc.tint} />}
         </TouchableOpacity>
-        {recoverySnapshotsOpen && (
-          <>
-            {isLoadingRecoverySnapshots && (
-              <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                  {t('settings.recoverySnapshotsLoading')}
-                </Text>
-              </View>
-            )}
-            {!isLoadingRecoverySnapshots && recoverySnapshots.length === 0 && (
-              <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                  {t('settings.recoverySnapshotsEmpty')}
-                </Text>
-              </View>
-            )}
-            {!isLoadingRecoverySnapshots &&
-              recoverySnapshots.map((snapshot) => (
-                <TouchableOpacity
-                  key={snapshot}
-                  style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
-                  onPress={() => handleRestoreRecoverySnapshot(snapshot)}
-                  disabled={isSyncing || isBackupBusy}
-                >
-                  <View style={styles.settingInfo}>
-                    <Text style={[styles.settingLabel, { color: tc.text }]} numberOfLines={1}>
-                      {formatRecoverySnapshotLabel(snapshot)}
-                    </Text>
-                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]} numberOfLines={1}>
-                      {snapshot}
-                    </Text>
-                  </View>
-                  {backupAction === 'snapshot' ? (
-                    <ActivityIndicator size="small" color={tc.tint} />
-                  ) : (
-                    <Text style={[styles.settingLabel, { color: tc.tint }]}>{t('settings.recoverySnapshotsRestore')}</Text>
-                  )}
-                </TouchableOpacity>
-              ))}
-          </>
-        )}
       </View>
     </>
+  );
+}
+
+type RecoverySnapshotsCardProps = {
+  backupAction: null | 'export' | 'restore' | 'import' | 'snapshot';
+  formatRecoverySnapshotLabel: (fileName: string) => string;
+  handleRestoreRecoverySnapshot: (snapshotName: string) => void;
+  isBackupBusy: boolean;
+  isLoadingRecoverySnapshots: boolean;
+  isSyncing: boolean;
+  localize: Localize;
+  recoverySnapshots: string[];
+  recoverySnapshotsOpen: boolean;
+  setRecoverySnapshotsOpen: (open: boolean) => void;
+  t: Translate;
+  tc: ThemeColors;
+};
+
+export function RecoverySnapshotsCard({
+  backupAction,
+  formatRecoverySnapshotLabel,
+  handleRestoreRecoverySnapshot,
+  isBackupBusy,
+  isLoadingRecoverySnapshots,
+  isSyncing,
+  localize,
+  recoverySnapshots,
+  recoverySnapshotsOpen,
+  setRecoverySnapshotsOpen,
+  t,
+  tc,
+}: RecoverySnapshotsCardProps) {
+  return (
+    <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 16 }]}>
+      <TouchableOpacity style={styles.settingRow} onPress={() => setRecoverySnapshotsOpen(!recoverySnapshotsOpen)}>
+        <View style={styles.settingInfo}>
+          <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.recoverySnapshots')}</Text>
+          <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
+            {localize('Saved automatically before restore and import operations.', '在恢复和导入之前自动保存。')}
+          </Text>
+        </View>
+        <Text style={[styles.chevron, { color: tc.secondaryText }]}>{recoverySnapshotsOpen ? '▾' : '▸'}</Text>
+      </TouchableOpacity>
+      {recoverySnapshotsOpen && (
+        <>
+          {isLoadingRecoverySnapshots && (
+            <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+              <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
+                {t('settings.recoverySnapshotsLoading')}
+              </Text>
+            </View>
+          )}
+          {!isLoadingRecoverySnapshots && recoverySnapshots.length === 0 && (
+            <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+              <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
+                {t('settings.recoverySnapshotsEmpty')}
+              </Text>
+            </View>
+          )}
+          {!isLoadingRecoverySnapshots &&
+            recoverySnapshots.map((snapshot) => (
+              <TouchableOpacity
+                key={snapshot}
+                style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
+                onPress={() => handleRestoreRecoverySnapshot(snapshot)}
+                disabled={isSyncing || isBackupBusy}
+              >
+                <View style={styles.settingInfo}>
+                  <Text style={[styles.settingLabel, { color: tc.text }]} numberOfLines={1}>
+                    {formatRecoverySnapshotLabel(snapshot)}
+                  </Text>
+                  <Text style={[styles.settingDescription, { color: tc.secondaryText }]} numberOfLines={1}>
+                    {snapshot}
+                  </Text>
+                </View>
+                {backupAction === 'snapshot' ? (
+                  <ActivityIndicator size="small" color={tc.tint} />
+                ) : (
+                  <Text style={[styles.settingLabel, { color: tc.tint }]}>{t('settings.recoverySnapshotsRestore')}</Text>
+                )}
+              </TouchableOpacity>
+            ))}
+        </>
+      )}
+    </View>
   );
 }
 
@@ -225,18 +260,20 @@ type SyncPreferencesCardProps = {
   syncAiEnabled: boolean;
   syncAppearanceEnabled: boolean;
   syncExternalCalendarsEnabled: boolean;
+  syncGtdEnabled: boolean;
   syncLanguageEnabled: boolean;
   syncOptionsOpen: boolean;
   t: Translate;
   tc: ThemeColors;
   toggleSyncOptionsOpen: () => void;
-  updateSyncPreferences: (partial: { ai?: boolean; appearance?: boolean; externalCalendars?: boolean; language?: boolean }) => void;
+  updateSyncPreferences: (partial: { ai?: boolean; appearance?: boolean; externalCalendars?: boolean; gtd?: boolean; language?: boolean }) => void;
 };
 
 export function SyncPreferencesCard({
   syncAiEnabled,
   syncAppearanceEnabled,
   syncExternalCalendarsEnabled,
+  syncGtdEnabled,
   syncLanguageEnabled,
   syncOptionsOpen,
   t,
@@ -272,6 +309,16 @@ export function SyncPreferencesCard({
             <Switch
               value={syncLanguageEnabled}
               onValueChange={(value) => updateSyncPreferences({ language: value })}
+              trackColor={{ false: '#767577', true: '#3B82F6' }}
+            />
+          </View>
+          <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+            <View style={styles.settingInfo}>
+              <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.syncPreferenceGtd')}</Text>
+            </View>
+            <Switch
+              value={syncGtdEnabled}
+              onValueChange={(value) => updateSyncPreferences({ gtd: value })}
               trackColor={{ false: '#767577', true: '#3B82F6' }}
             />
           </View>

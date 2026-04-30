@@ -15,6 +15,10 @@ type UseRootLayoutNotificationOpenHandlerParams = {
     router: RouterLike;
 };
 
+function isReviewReminderKind(kind: string | undefined): boolean {
+    return kind === 'task-review' || kind === 'project-review';
+}
+
 export function useRootLayoutNotificationOpenHandler({
     appReady,
     pathname,
@@ -39,6 +43,17 @@ export function useRootLayoutNotificationOpenHandler({
         const taskId = typeof payload?.taskId === 'string' ? payload.taskId : undefined;
         const projectId = typeof payload?.projectId === 'string' ? payload.projectId : undefined;
         const kind = typeof payload?.kind === 'string' ? payload.kind : undefined;
+        if (isReviewReminderKind(kind)) {
+            router.push({
+                pathname: '/review',
+                params: {
+                    openToken,
+                    ...(taskId ? { taskId } : {}),
+                    ...(projectId ? { projectId } : {}),
+                },
+            });
+            return;
+        }
         if (taskId) {
             useTaskStore.getState().setHighlightTask(taskId);
             router.push({ pathname: '/focus', params: { taskId, openToken } });

@@ -2,10 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { View, Text, TextInput, TouchableOpacity, Alert, FlatList, Dimensions, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { AREA_PRESET_COLORS, Attachment, DEFAULT_PROJECT_COLOR, generateUUID, normalizeLinkAttachmentInput, Project, resolveAutoTextDirection, Task, type MarkdownSelection, type MarkdownToolbarActionId, type MarkdownToolbarResult, applyMarkdownToolbarAction, continueMarkdownOnTextChange, useTaskStore, validateAttachmentForUpload } from '@mindwtr/core';
-import * as DocumentPicker from 'expo-document-picker';
-import * as Linking from 'expo-linking';
-import * as Sharing from 'expo-sharing';
+import { AREA_PRESET_COLORS, Attachment, DEFAULT_PROJECT_COLOR, Project, Task, useTaskStore } from '@mindwtr/core';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ChevronDown, ChevronRight } from 'lucide-react-native';
 
@@ -21,6 +18,8 @@ import { ProjectDetailModal } from '@/components/projects-screen/ProjectDetailMo
 import { ProjectImagePreviewModal, ProjectLinkModal, ProjectTagPickerModal } from '@/components/projects-screen/ProjectOverlayModals';
 import { ProjectRow } from '@/components/projects-screen/ProjectRow';
 import { buildProjectListRows, type ProjectListRow } from '@/components/projects-screen/project-list-model';
+import { useProjectAttachments } from '@/components/projects-screen/use-project-attachments';
+import { useProjectNotesEditor } from '@/components/projects-screen/use-project-notes-editor';
 import { TaskEditModal } from '@/components/task-edit-modal';
 import { useProjectFiltering } from '@/hooks/use-project-filtering';
 import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
@@ -28,14 +27,9 @@ import { useLanguage } from '../../contexts/language-context';
 import { useToast } from '../../contexts/toast-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { ListSectionHeader, defaultListContentStyle } from '@/components/list-layout';
-import { ensureAttachmentAvailable } from '../../lib/attachment-sync';
 import { logError, logWarn } from '../../lib/app-log';
 import { AREA_FILTER_ALL, AREA_FILTER_NONE } from '@/lib/area-filter';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
-
-const selectionsEqual = (left: MarkdownSelection, right: MarkdownSelection) => (
-  left.start === right.start && left.end === right.end
-);
 
 export default function ProjectsScreen() {
   const { projects, tasks, addProject, updateProject, deleteProject, toggleProjectFocus, addArea, updateArea, deleteArea, reorderAreas, updateTask, setHighlightTask } = useTaskStore();
@@ -52,16 +46,10 @@ export default function ProjectsScreen() {
   };
   const [newProjectTitle, setNewProjectTitle] = useState('');
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [notesExpanded, setNotesExpanded] = useState(false);
-  const [showNotesPreview, setShowNotesPreview] = useState(false);
-  const [notesFullscreen, setNotesFullscreen] = useState(false);
   const [showProjectMeta, setShowProjectMeta] = useState(false);
   const [showDueDatePicker, setShowDueDatePicker] = useState(false);
   const [showReviewPicker, setShowReviewPicker] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
-  const [linkModalVisible, setLinkModalVisible] = useState(false);
-  const [imagePreviewAttachment, setImagePreviewAttachment] = useState<Attachment | null>(null);
-  const [linkInput, setLinkInput] = useState('');
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [showAreaPicker, setShowAreaPicker] = useState(false);
   const [showAreaManager, setShowAreaManager] = useState(false);
@@ -70,7 +58,6 @@ export default function ProjectsScreen() {
   const [expandedAreaColorId, setExpandedAreaColorId] = useState<string | null>(null);
   const { projectId, taskId, openToken } = useLocalSearchParams<{ projectId?: string; taskId?: string; openToken?: string }>();
   const lastOpenedTaskKeyRef = useRef<string | null>(null);
-  const selectedProjectNotesRef = useRef('');
   const ALL_TAGS = '__all__';
   const NO_TAGS = '__none__';
   const ALL_AREAS = AREA_FILTER_ALL;
@@ -92,13 +79,6 @@ export default function ProjectsScreen() {
   }, []);
   const [showTagFilter, setShowTagFilter] = useState(false);
   const [tagDraft, setTagDraft] = useState('');
-  const selectedProjectNotesInputRef = useRef<TextInput | null>(null);
-  const selectedProjectNotesUndoRef = useRef<Array<{ value: string; selection: MarkdownSelection }>>([]);
-  const [selectedProjectNotesUndoDepth, setSelectedProjectNotesUndoDepth] = useState(0);
-  const [isSelectedProjectNotesFocused, setIsSelectedProjectNotesFocused] = useState(false);
-  const [selectedProjectNotesSelection, setSelectedProjectNotesSelection] = useState({ start: 0, end: 0 });
-  const selectedProjectNotesSelectionRef = useRef<MarkdownSelection>({ start: 0, end: 0 });
-  const pendingSelectedProjectNotesSelectionRef = useRef<MarkdownSelection | null>(null);
   const windowHeight = Dimensions.get('window').height;
   const pickerCardMaxHeight = Math.min(windowHeight * 0.8, 560);
   const areaListMaxHeight = Math.min(windowHeight * 0.4, 280);
@@ -133,6 +113,54 @@ export default function ProjectsScreen() {
     noTagsValue: NO_TAGS,
     t,
   });
+  const {
+    notesExpanded,
+    setNotesExpanded,
+    showNotesPreview,
+    setShowNotesPreview,
+    notesFullscreen,
+    setNotesFullscreen,
+    selectedProjectNotes,
+    selectedProjectNotesDirection,
+    selectedProjectNotesTextDirectionStyle,
+    selectedProjectNotesInputRef,
+    selectedProjectNotesUndoDepth,
+    isSelectedProjectNotesFocused,
+    setIsSelectedProjectNotesFocused,
+    selectedProjectNotesSelection,
+    commitSelectedProjectNotes,
+    handleSelectedProjectNotesApplyAction,
+    handleSelectedProjectNotesApplyAutocomplete,
+    handleSelectedProjectNotesChange,
+    handleSelectedProjectNotesSelectionChange,
+    handleSelectedProjectNotesUndo,
+    resetProjectNotesUi,
+  } = useProjectNotesEditor({
+    selectedProject,
+    setSelectedProject,
+    updateProject,
+    language,
+  });
+  const {
+    linkModalVisible,
+    setLinkModalVisible,
+    imagePreviewAttachment,
+    setImagePreviewAttachment,
+    linkInput,
+    setLinkInput,
+    openAttachment,
+    downloadAttachment,
+    addProjectFileAttachment,
+    confirmAddProjectLink,
+    removeProjectAttachment,
+    resetProjectAttachmentUi,
+  } = useProjectAttachments({
+    selectedProject,
+    setSelectedProject,
+    updateProject,
+    t,
+    logProjectError,
+  });
 
   const projectListRows = useMemo(() => buildProjectListRows({
     areaById,
@@ -156,16 +184,13 @@ export default function ProjectsScreen() {
 
   const openProject = useCallback((project: Project) => {
     setSelectedProject(project);
-    setNotesExpanded(false);
-    setShowNotesPreview(false);
-    setNotesFullscreen(false);
+    resetProjectNotesUi();
     setShowProjectMeta(false);
     setShowDueDatePicker(false);
     setShowReviewPicker(false);
     setShowStatusMenu(false);
-    setLinkModalVisible(false);
-    setLinkInput('');
-  }, []);
+    resetProjectAttachmentUi();
+  }, [resetProjectAttachmentUi, resetProjectNotesUi]);
 
   useEffect(() => {
     if (!projectId || typeof projectId !== 'string') return;
@@ -186,17 +211,6 @@ export default function ProjectsScreen() {
     setHighlightTask(task.id);
     setEditingTask(task);
   }, [openToken, taskId, projectId, selectedProject, tasks, setHighlightTask]);
-
-  useEffect(() => {
-    selectedProjectNotesRef.current = selectedProject?.supportNotes || '';
-    const selectionEnd = (selectedProject?.supportNotes || '').length;
-    selectedProjectNotesUndoRef.current = [];
-    setSelectedProjectNotesUndoDepth(0);
-    setIsSelectedProjectNotesFocused(false);
-    pendingSelectedProjectNotesSelectionRef.current = null;
-    selectedProjectNotesSelectionRef.current = { start: selectionEnd, end: selectionEnd };
-    setSelectedProjectNotesSelection({ start: selectionEnd, end: selectionEnd });
-  }, [selectedProject]);
 
   const sortAreasByName = () => {
     const reordered = [...sortedAreas]
@@ -317,142 +331,9 @@ export default function ProjectsScreen() {
     return renderProjectItem(item.project);
   };
 
-  const selectedProjectNotes = selectedProject?.supportNotes || '';
   const selectedProjectAreaName = selectedProject?.areaId && areaById.has(selectedProject.areaId)
     ? areaById.get(selectedProject.areaId)?.name || t('projects.noArea')
     : t('projects.noArea');
-  const selectedProjectNotesDirection = selectedProject
-    ? resolveAutoTextDirection(`${selectedProject.title ?? ''}\n${selectedProjectNotes}`.trim(), language)
-    : 'ltr';
-  const selectedProjectNotesTextDirectionStyle = {
-    writingDirection: selectedProjectNotesDirection,
-    textAlign: selectedProjectNotesDirection === 'rtl' ? 'right' : 'left',
-  } as const;
-  const pushSelectedProjectNotesUndoEntry = useCallback((value: string, selection: MarkdownSelection) => {
-    const previousEntry = selectedProjectNotesUndoRef.current[selectedProjectNotesUndoRef.current.length - 1];
-    if (
-      previousEntry
-      && previousEntry.value === value
-      && previousEntry.selection.start === selection.start
-      && previousEntry.selection.end === selection.end
-    ) {
-      return;
-    }
-    const nextUndoEntries = [...selectedProjectNotesUndoRef.current, { value, selection }];
-    selectedProjectNotesUndoRef.current = nextUndoEntries.length > 100
-      ? nextUndoEntries.slice(nextUndoEntries.length - 100)
-      : nextUndoEntries;
-    setSelectedProjectNotesUndoDepth(selectedProjectNotesUndoRef.current.length);
-  }, []);
-  const applySelectedProjectNotesValue = useCallback((
-    text: string,
-    options?: {
-      nextSelection?: MarkdownSelection;
-      recordUndo?: boolean;
-      baseSelection?: MarkdownSelection;
-    },
-  ) => {
-    if (!selectedProject) return;
-    if ((options?.recordUndo ?? true) && text !== selectedProjectNotes) {
-      pushSelectedProjectNotesUndoEntry(selectedProjectNotes, options?.baseSelection ?? selectedProjectNotesSelectionRef.current);
-    }
-    selectedProjectNotesRef.current = text;
-    setSelectedProject({ ...selectedProject, supportNotes: text });
-    if (options?.nextSelection) {
-      selectedProjectNotesSelectionRef.current = options.nextSelection;
-      setSelectedProjectNotesSelection(options.nextSelection);
-    }
-  }, [pushSelectedProjectNotesUndoEntry, selectedProject, selectedProjectNotes]);
-  const restoreSelectedProjectNotesSelection = useCallback((selection: MarkdownSelection) => {
-    pendingSelectedProjectNotesSelectionRef.current = selection;
-    const applySelection = () => {
-      selectedProjectNotesInputRef.current?.setNativeProps?.({ selection });
-    };
-    requestAnimationFrame(applySelection);
-    setTimeout(() => {
-      applySelection();
-      if (
-        pendingSelectedProjectNotesSelectionRef.current
-        && selectionsEqual(pendingSelectedProjectNotesSelectionRef.current, selection)
-      ) {
-        pendingSelectedProjectNotesSelectionRef.current = null;
-      }
-    }, 40);
-  }, []);
-  const handleSelectedProjectNotesChange = useCallback((text: string) => {
-    const continued = continueMarkdownOnTextChange(
-      selectedProjectNotesRef.current,
-      text,
-      selectedProjectNotesSelectionRef.current,
-    );
-    if (continued) {
-      applySelectedProjectNotesValue(continued.value, {
-        baseSelection: selectedProjectNotesSelectionRef.current,
-        nextSelection: continued.selection,
-      });
-      restoreSelectedProjectNotesSelection(continued.selection);
-      return;
-    }
-    applySelectedProjectNotesValue(text);
-  }, [applySelectedProjectNotesValue, restoreSelectedProjectNotesSelection]);
-  useEffect(() => {
-    selectedProjectNotesSelectionRef.current = selectedProjectNotesSelection;
-  }, [selectedProjectNotesSelection]);
-  const handleSelectedProjectNotesSelectionChange = useCallback((selection: MarkdownSelection) => {
-    const pendingSelection = pendingSelectedProjectNotesSelectionRef.current;
-    if (pendingSelection) {
-      if (!selectionsEqual(pendingSelection, selection)) {
-        return;
-      }
-      pendingSelectedProjectNotesSelectionRef.current = null;
-    }
-    selectedProjectNotesSelectionRef.current = selection;
-    setSelectedProjectNotesSelection(selection);
-  }, []);
-  useEffect(() => {
-    setSelectedProjectNotesSelection((prev) => {
-      const nextStart = Math.min(prev.start, selectedProjectNotes.length);
-      const nextEnd = Math.min(prev.end, selectedProjectNotes.length);
-      if (nextStart === prev.start && nextEnd === prev.end) {
-        return prev;
-      }
-      return { start: nextStart, end: nextEnd };
-    });
-  }, [selectedProjectNotes.length]);
-  const handleSelectedProjectNotesUndo = useCallback(() => {
-    const previousEntry = selectedProjectNotesUndoRef.current[selectedProjectNotesUndoRef.current.length - 1];
-    if (!previousEntry) return undefined;
-    selectedProjectNotesUndoRef.current = selectedProjectNotesUndoRef.current.slice(0, -1);
-    setSelectedProjectNotesUndoDepth(selectedProjectNotesUndoRef.current.length);
-    applySelectedProjectNotesValue(previousEntry.value, {
-      nextSelection: previousEntry.selection,
-      recordUndo: false,
-    });
-    return previousEntry.selection;
-  }, [applySelectedProjectNotesValue]);
-  const handleSelectedProjectNotesApplyAction = useCallback((actionId: MarkdownToolbarActionId, selection: MarkdownSelection): MarkdownToolbarResult => {
-    const next = applyMarkdownToolbarAction(selectedProjectNotesRef.current, selection, actionId);
-    applySelectedProjectNotesValue(next.value, {
-      baseSelection: selection,
-      nextSelection: next.selection,
-    });
-    return next;
-  }, [applySelectedProjectNotesValue, selectedProjectNotesRef]);
-  const commitSelectedProjectNotes = () => {
-    if (!selectedProject) return;
-    updateProject(selectedProject.id, { supportNotes: selectedProjectNotesRef.current });
-  };
-  const handleSelectedProjectNotesApplyAutocomplete = useCallback((next: { value: string; selection: MarkdownSelection }) => {
-    applySelectedProjectNotesValue(next.value, {
-      baseSelection: selectedProjectNotesSelectionRef.current,
-      nextSelection: next.selection,
-    });
-    selectedProjectNotesSelectionRef.current = next.selection;
-    if (selectedProject) {
-      updateProject(selectedProject.id, { supportNotes: next.value });
-    }
-  }, [applySelectedProjectNotesValue, selectedProject, updateProject]);
-
 
   const handleAddProject = () => {
     if (newProjectTitle.trim()) {
@@ -492,14 +373,11 @@ export default function ProjectsScreen() {
   const closeProjectDetail = () => {
     persistSelectedProjectEdits(selectedProject);
     setSelectedProject(null);
-    setNotesExpanded(false);
-    setShowNotesPreview(false);
-    setNotesFullscreen(false);
+    resetProjectNotesUi();
     setShowProjectMeta(false);
     setShowReviewPicker(false);
     setShowStatusMenu(false);
-    setLinkModalVisible(false);
-    setLinkInput('');
+    resetProjectAttachmentUi();
     setShowAreaPicker(false);
     setShowTagPicker(false);
     if (projectId && router.canGoBack()) {
@@ -583,186 +461,6 @@ export default function ProjectsScreen() {
     if (mime?.startsWith('image/')) return true;
     return /\.(png|jpg|jpeg|gif|webp|heic|heif)$/i.test(attachment.uri);
   }, []);
-
-  const openAttachment = async (attachment: Attachment) => {
-    const shouldDownload = attachment.kind === 'file'
-      && attachment.cloudKey
-      && (attachment.localStatus === 'missing' || !attachment.uri);
-    if (shouldDownload && selectedProject) {
-      const next = updateAttachmentStatus(
-        selectedProject.attachments || [],
-        attachment.id,
-        'downloading'
-      );
-      updateProject(selectedProject.id, { attachments: next });
-      setSelectedProject({ ...selectedProject, attachments: next });
-    }
-
-    const resolved = await ensureAttachmentAvailable(attachment);
-    if (!resolved) {
-      if (shouldDownload && selectedProject) {
-        const next = updateAttachmentStatus(
-          selectedProject.attachments || [],
-          attachment.id,
-          'missing'
-        );
-        updateProject(selectedProject.id, { attachments: next });
-        setSelectedProject({ ...selectedProject, attachments: next });
-      }
-      const message = attachment.kind === 'file' ? t('attachments.missing') : t('attachments.fileNotSupported');
-      Alert.alert(t('attachments.title'), message);
-      return;
-    }
-    if (resolved.uri !== attachment.uri || resolved.localStatus !== attachment.localStatus) {
-      const next = (selectedProject?.attachments || []).map((item): Attachment =>
-        item.id === resolved.id ? { ...item, ...resolved } : item
-      );
-      if (selectedProject) {
-        updateProject(selectedProject.id, { attachments: next });
-        setSelectedProject({ ...selectedProject, attachments: next });
-      }
-    }
-
-    if (resolved.kind === 'link') {
-      Linking.openURL(resolved.uri).catch((error) => logProjectError('Failed to open attachment URL', error));
-      return;
-    }
-    if (isImageAttachment(resolved)) {
-      setImagePreviewAttachment(resolved);
-      return;
-    }
-
-    const available = await Sharing.isAvailableAsync().catch((error) => {
-      void logWarn('[Sharing] availability check failed', {
-        scope: 'project',
-        extra: { error: error instanceof Error ? error.message : String(error) },
-      });
-      return false;
-    });
-    if (available) {
-      Sharing.shareAsync(resolved.uri).catch((error) => logProjectError('Failed to share attachment', error));
-    } else {
-      Linking.openURL(resolved.uri).catch((error) => logProjectError('Failed to open attachment URL', error));
-    }
-  };
-
-  useEffect(() => {
-    if (!selectedProject) {
-      setImagePreviewAttachment(null);
-    }
-  }, [selectedProject]);
-
-  const downloadAttachment = async (attachment: Attachment) => {
-    if (!selectedProject) return;
-    const shouldDownload = attachment.kind === 'file'
-      && attachment.cloudKey
-      && (attachment.localStatus === 'missing' || !attachment.uri);
-    if (shouldDownload) {
-      const next = updateAttachmentStatus(
-        selectedProject.attachments || [],
-        attachment.id,
-        'downloading'
-      );
-      updateProject(selectedProject.id, { attachments: next });
-      setSelectedProject({ ...selectedProject, attachments: next });
-    }
-
-    const resolved = await ensureAttachmentAvailable(attachment);
-    if (!resolved) {
-      const next = updateAttachmentStatus(
-        selectedProject.attachments || [],
-        attachment.id,
-        'missing'
-      );
-      updateProject(selectedProject.id, { attachments: next });
-      setSelectedProject({ ...selectedProject, attachments: next });
-      const message = attachment.kind === 'file' ? t('attachments.missing') : t('attachments.fileNotSupported');
-      Alert.alert(t('attachments.title'), message);
-      return;
-    }
-    if (resolved.uri !== attachment.uri || resolved.localStatus !== attachment.localStatus) {
-      const next = (selectedProject.attachments || []).map((item): Attachment =>
-        item.id === resolved.id ? { ...item, ...resolved } : item
-      );
-      updateProject(selectedProject.id, { attachments: next });
-      setSelectedProject({ ...selectedProject, attachments: next });
-    }
-  };
-
-  const addProjectFileAttachment = async () => {
-    if (!selectedProject) return;
-    const result = await DocumentPicker.getDocumentAsync({
-      copyToCacheDirectory: false,
-      multiple: false,
-    });
-    if (result.canceled) return;
-    const asset = result.assets[0];
-    const size = asset.size;
-    if (typeof size === 'number') {
-      const validation = await validateAttachmentForUpload(
-        {
-          id: 'pending',
-          kind: 'file',
-          title: asset.name || 'file',
-          uri: asset.uri,
-          mimeType: asset.mimeType,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        size
-      );
-      if (!validation.valid) {
-        Alert.alert(t('attachments.title'), resolveAttachmentValidationMessage(validation.error, t));
-        return;
-      }
-    }
-    const now = new Date().toISOString();
-    const attachment: Attachment = {
-      id: generateUUID(),
-      kind: 'file',
-      title: asset.name || 'file',
-      uri: asset.uri,
-      mimeType: asset.mimeType,
-      size: asset.size,
-      createdAt: now,
-      updatedAt: now,
-      localStatus: 'available',
-    };
-    const next = [...(selectedProject.attachments || []), attachment];
-    updateProject(selectedProject.id, { attachments: next });
-    setSelectedProject({ ...selectedProject, attachments: next });
-  };
-
-  const confirmAddProjectLink = () => {
-    if (!selectedProject) return;
-    const normalized = normalizeLinkAttachmentInput(linkInput);
-    if (!normalized.uri) return;
-    const now = new Date().toISOString();
-    const attachment: Attachment = {
-      id: generateUUID(),
-      kind: normalized.kind,
-      title: normalized.title,
-      uri: normalized.uri,
-      createdAt: now,
-      updatedAt: now,
-    };
-    const next = [...(selectedProject.attachments || []), attachment];
-    updateProject(selectedProject.id, { attachments: next });
-    setSelectedProject({ ...selectedProject, attachments: next });
-    setLinkModalVisible(false);
-    setLinkInput('');
-  };
-
-  const removeProjectAttachment = (id: string) => {
-    if (!selectedProject) return;
-    const now = new Date().toISOString();
-    const next = (selectedProject.attachments || []).map((a) =>
-      a.id === id ? { ...a, deletedAt: now, updatedAt: now } : a
-    );
-    updateProject(selectedProject.id, { attachments: next });
-    setSelectedProject({ ...selectedProject, attachments: next });
-  };
-
 
   const modalHeaderStyle = [styles.modalHeader, {
     borderBottomColor: tc.border,

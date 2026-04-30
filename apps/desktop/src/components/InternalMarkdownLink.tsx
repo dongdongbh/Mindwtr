@@ -1,5 +1,5 @@
 import React from 'react';
-import { parseMarkdownReferenceHref, useTaskStore, shallow } from '@mindwtr/core';
+import { parseMarkdownReferenceHref, tFallback, useTaskStore, shallow } from '@mindwtr/core';
 
 import { useLanguage } from '../contexts/language-context';
 import { dispatchNavigateEvent } from '../lib/navigation-events';
@@ -57,26 +57,11 @@ export function InternalMarkdownLink({ href, className, children }: InternalMark
         );
     }
 
-    const taskLabel = (() => {
-        const translated = t('taskEdit.tab.task');
-        return translated === 'taskEdit.tab.task' ? 'Task' : translated;
-    })();
-    const projectLabel = (() => {
-        const translated = t('taskEdit.projectLabel');
-        return translated === 'taskEdit.projectLabel' ? 'Project' : translated;
-    })();
-    const deletedTaskLabel = (() => {
-        const translated = t('markdown.referenceDeletedTask');
-        return translated === 'markdown.referenceDeletedTask' ? 'deleted task' : translated;
-    })();
-    const deletedProjectLabel = (() => {
-        const translated = t('markdown.referenceDeletedProject');
-        return translated === 'markdown.referenceDeletedProject' ? 'deleted project' : translated;
-    })();
-    const restoreLabel = (() => {
-        const translated = t('markdown.referenceRestore');
-        return translated === 'markdown.referenceRestore' ? 'Restore' : translated;
-    })();
+    const taskLabel = tFallback(t, 'taskEdit.tab.task', 'Task');
+    const projectLabel = tFallback(t, 'taskEdit.projectLabel', 'Project');
+    const deletedTaskLabel = tFallback(t, 'markdown.referenceDeletedTask', 'deleted task');
+    const deletedProjectLabel = tFallback(t, 'markdown.referenceDeletedProject', 'deleted project');
+    const restoreLabel = tFallback(t, 'markdown.referenceRestore', 'Restore');
 
     if (reference.entityType === 'project') {
         const project = projects.find((candidate) => candidate.id === reference.id && !candidate.deletedAt);
@@ -107,8 +92,7 @@ export function InternalMarkdownLink({ href, className, children }: InternalMark
         }
         const statusLabel = (() => {
             const key = `status.${project.status}` as const;
-            const translated = t(key);
-            return translated === key ? project.status : translated;
+            return tFallback(t, key, project.status);
         })();
         return (
             <button
@@ -164,8 +148,7 @@ export function InternalMarkdownLink({ href, className, children }: InternalMark
 
     const statusLabel = (() => {
         const key = `status.${task.status}` as const;
-        const translated = t(key);
-        return translated === key ? task.status : translated;
+        return tFallback(t, key, task.status);
     })();
     const currentTitle = task.title?.trim();
 

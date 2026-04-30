@@ -576,6 +576,79 @@ fn normalize_webdav_url(raw: &str) -> String {
     }
 }
 
+fn parent_webdav_collection_url(raw: &str) -> Option<String> {
+    let mut parsed = reqwest::Url::parse(raw).ok()?;
+    let trimmed_path = parsed.path().trim_end_matches('/').to_string();
+    let last_slash = trimmed_path.rfind('/')?;
+    if last_slash == 0 {
+        return None;
+    }
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+    parsed.set_path(&trimmed_path[..last_slash]);
+    Some(parsed.to_string().trim_end_matches('/').to_string())
+}
+
+fn ensure_webdav_collection_exists_with<F>(url: &str, request_mkcol: &mut F) -> Result<(), String>
+where
+    F: FnMut(&str) -> Result<reqwest::StatusCode, String>,
+{
+    let mut status = request_mkcol(url)?;
+    if status.is_success() || status == reqwest::StatusCode::METHOD_NOT_ALLOWED {
+        return Ok(());
+    }
+
+    if status == reqwest::StatusCode::CONFLICT {
+        let parent = parent_webdav_collection_url(url)
+            .ok_or_else(|| format!("WebDAV MKCOL failed ({status})"))?;
+        if parent == url {
+            return Err(format!("WebDAV MKCOL failed ({status})"));
+        }
+        ensure_webdav_collection_exists_with(&parent, request_mkcol)?;
+        status = request_mkcol(url)?;
+        if status.is_success() || status == reqwest::StatusCode::METHOD_NOT_ALLOWED {
+            return Ok(());
+        }
+    }
+
+    Err(format!("WebDAV MKCOL failed ({status})"))
+}
+
+fn ensure_webdav_parent_collections_with<F>(
+    file_url: &str,
+    request_mkcol: &mut F,
+) -> Result<(), String>
+where
+    F: FnMut(&str) -> Result<reqwest::StatusCode, String>,
+{
+    let Some(parent) = parent_webdav_collection_url(file_url) else {
+        return Ok(());
+    };
+    ensure_webdav_collection_exists_with(&parent, request_mkcol)
+}
+
+fn ensure_webdav_parent_collections_blocking(
+    client: &reqwest::blocking::Client,
+    file_url: &str,
+    username: &str,
+    password: &str,
+) -> Result<(), String> {
+    let mkcol_method =
+        reqwest::Method::from_bytes(b"MKCOL").map_err(|e| format!("Invalid WebDAV method: {e}"))?;
+    ensure_webdav_parent_collections_with(file_url, &mut |target| {
+        let response = client
+            .request(mkcol_method.clone(), target)
+            .basic_auth(username, Some(password))
+            .send()
+            .map_err(|e| format!("WebDAV request failed: {e}"))?;
+        Ok(response.status())
+    })
+}
+
+fn is_webdav_mkcol_conflict_error(error: &str) -> bool {
+    error.starts_with("WebDAV MKCOL failed (409")
+}
+
 fn webdav_get_json_blocking(app: &tauri::AppHandle) -> Result<Value, String> {
     let config = read_config(app);
     let url = normalize_webdav_url(&config.webdav_url.unwrap_or_default());
@@ -646,13 +719,29 @@ fn webdav_put_json_blocking(app: &tauri::AppHandle, data: &Value) -> Result<bool
     let payload = serde_json::to_string_pretty(&data)
         .map_err(|e| format!("Failed to encode WebDAV payload: {e}"))?;
     let client = reqwest::blocking::Client::new();
-    let response = client
-        .put(url)
-        .basic_auth(username, Some(password))
-        .header("Content-Type", "application/json")
-        .body(payload)
-        .send()
-        .map_err(|e| format!("WebDAV request failed: {e}"))?;
+    let send_put = || {
+        client
+            .put(url.clone())
+            .basic_auth(&username, Some(&password))
+            .header("Content-Type", "application/json")
+            .body(payload.clone())
+            .send()
+            .map_err(|e| format!("WebDAV request failed: {e}"))
+    };
+    let mut response = send_put()?;
+
+    if response.status() == reqwest::StatusCode::NOT_FOUND
+        || response.status() == reqwest::StatusCode::CONFLICT
+    {
+        if let Err(error) =
+            ensure_webdav_parent_collections_blocking(&client, &url, &username, &password)
+        {
+            if !is_webdav_mkcol_conflict_error(&error) {
+                return Err(error);
+            }
+        }
+        response = send_put()?;
+    }
 
     if !response.status().is_success() {
         return Err(format!("WebDAV error: {}", response.status()));
@@ -665,6 +754,61 @@ pub(crate) async fn webdav_put_json(app: tauri::AppHandle, data: Value) -> Resul
     tauri::async_runtime::spawn_blocking(move || webdav_put_json_blocking(&app, &data))
         .await
         .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parent_webdav_collection_url_strips_query_and_hash() {
+        assert_eq!(
+            parent_webdav_collection_url(
+                "https://example.com/remote.php/dav/files/user/mindwtr/data.json?foo=1#frag"
+            ),
+            Some("https://example.com/remote.php/dav/files/user/mindwtr".to_string())
+        );
+    }
+
+    #[test]
+    fn ensure_webdav_parent_collections_recurses_on_conflict() {
+        let mut calls: Vec<String> = Vec::new();
+        let mut attempt = 0usize;
+
+        let result = ensure_webdav_parent_collections_with(
+            "https://example.com/remote.php/dav/files/user/mindwtr/nested/data.json",
+            &mut |url| {
+                calls.push(url.to_string());
+                attempt += 1;
+                Ok(match attempt {
+                    1 => reqwest::StatusCode::CONFLICT,
+                    2 => reqwest::StatusCode::CREATED,
+                    3 => reqwest::StatusCode::CREATED,
+                    _ => panic!("unexpected MKCOL attempt"),
+                })
+            },
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(
+            calls,
+            vec![
+                "https://example.com/remote.php/dav/files/user/mindwtr/nested".to_string(),
+                "https://example.com/remote.php/dav/files/user/mindwtr".to_string(),
+                "https://example.com/remote.php/dav/files/user/mindwtr/nested".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn webdav_mkcol_conflict_errors_are_retryable() {
+        assert!(is_webdav_mkcol_conflict_error(
+            "WebDAV MKCOL failed (409 Conflict)"
+        ));
+        assert!(!is_webdav_mkcol_conflict_error(
+            "WebDAV MKCOL failed (500 Internal Server Error)"
+        ));
+    }
 }
 
 #[tauri::command]

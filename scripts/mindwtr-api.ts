@@ -164,6 +164,10 @@ async function main() {
                 return jsonResponse({ projects: await service.listProjects() });
             }
 
+            if (req.method === 'GET' && (pathname === '/areas' || pathname === '/v1/areas')) {
+                return jsonResponse({ areas: await service.listAreas() });
+            }
+
             if (req.method === 'GET' && pathname === '/search') {
                 const query = url.searchParams.get('query') || '';
                 return jsonResponse(await service.search(query));

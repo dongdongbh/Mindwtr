@@ -8,7 +8,6 @@ import {
   TimeEstimate,
   sortTasksBy,
   parseQuickAdd,
-  safeParseDate,
   getUsedTaskTokens,
   createAIProvider,
   type AIProviderId,
@@ -16,6 +15,7 @@ import {
   DEFAULT_PROJECT_COLOR,
   getTranslationsSync,
   shallow,
+  tFallback,
 } from '@mindwtr/core';
 
 import { TaskEditModal } from './task-edit-modal';
@@ -52,6 +52,8 @@ import {
   matchesSelectedTimeEstimates,
 } from './time-estimate-filter-utils';
 import { useTaskListSelection } from './use-task-list-selection';
+
+const REMOVE_CLIPPED_SUBVIEWS_MIN_ITEMS = 15;
 
 export interface TaskListProps {
   statusFilter: TaskStatus | 'all';
@@ -261,17 +263,12 @@ function TaskListComponent({
 
   // Memoize filtered and sorted tasks for performance
   const filteredTasks = useMemo(() => {
-    const now = new Date();
     const filtered = tasks.filter(t => {
       // Filter out soft-deleted tasks
       if (t.deletedAt) return false;
       if (statusFilter === 'all' && t.status === 'reference') return false;
       const matchesStatus = statusFilter === 'all' ? true : t.status === statusFilter;
       const matchesProject = projectId ? t.projectId === projectId : true;
-      if (statusFilter === 'inbox') {
-        const start = safeParseDate(t.startTime);
-        if (start && start > now) return false;
-      }
       if (showTimeEstimateFilters && !matchesSelectedTimeEstimates(t, selectedTimeEstimates)) return false;
       if (!taskMatchesAreaFilter(t, resolvedAreaFilter, projectById, areaById)) return false;
       return matchesStatus && matchesProject;
@@ -330,7 +327,7 @@ function TaskListComponent({
         items.push({
           type: 'section',
           id: 'general',
-          title: t('settings.general') === 'settings.general' ? 'General' : t('settings.general'),
+          title: tFallback(t, 'settings.general', 'General'),
           count: generalTasks.length,
           muted: true,
         });
@@ -843,7 +840,7 @@ function TaskListComponent({
           maxToRenderPerBatch={12}
           windowSize={5}
           updateCellsBatchingPeriod={50}
-          removeClippedSubviews={listItems.length >= 25}
+          removeClippedSubviews={listItems.length >= REMOVE_CLIPPED_SUBVIEWS_MIN_ITEMS}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }

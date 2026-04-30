@@ -6,6 +6,7 @@ import {
     buildTaskUpdatesFromSpeechResult,
     generateUUID,
     normalizeLinkAttachmentInput,
+    translateWithFallback,
     useTaskStore,
     validateAttachmentForUpload,
 } from '@mindwtr/core';
@@ -70,8 +71,7 @@ export function useTaskEditAttachments({
         return t('attachments.fileNotSupported');
     }, [t]);
     const resolveText = React.useCallback((key: string, fallback: string) => {
-        const translated = t(key);
-        return translated === key ? fallback : translated;
+        return translateWithFallback(t, key, fallback);
     }, [t]);
 
     const addFileAttachment = React.useCallback(async () => {

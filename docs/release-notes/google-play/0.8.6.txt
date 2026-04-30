@@ -1,0 +1,15 @@
+<en-US>
+Recurring tasks can now end on a date or after a set number of occurrences, with translated copy across the app.
+Android capture and editing are steadier with keyboard submit, safer task-edit reset on close, and checklist updates that stay in sync.
+Sync and import are more reliable with OmniFocus CSV import, automatic WebDAV folder creation, preserved calendar deletions, and clearer localized sync feedback.
+</en-US>
+<zh-CN>
+重复任务现已支持在某日结束或执行 N 次后结束，并补齐了全应用文案。
+Android 端捕获与编辑更稳定：键盘提交更顺手，关闭编辑器时状态重置更可靠，清单更新也能保持同步。
+同步与导入更可靠：加入 OmniFocus CSV 导入、自动创建 WebDAV 目录、保留日历删除操作，并提供更清晰的本地化同步提示。
+</zh-CN>
+<es-ES>
+Las tareas recurrentes ya pueden terminar en una fecha o despues de un numero fijo de repeticiones, con texto actualizado en toda la app.
+La captura y edicion en Android son mas estables con envio por teclado, reinicio mas seguro del editor al cerrar y listas de verificacion que se mantienen sincronizadas.
+Sync e importacion son mas fiables con importacion CSV de OmniFocus, creacion automatica de carpetas WebDAV, conservacion de borrados de calendario y mensajes mas claros.
+</es-ES>

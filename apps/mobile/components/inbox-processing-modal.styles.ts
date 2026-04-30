@@ -254,6 +254,7 @@ export const styles = StyleSheet.create({
   startDateActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     marginTop: 6,
     gap: 8,
   },

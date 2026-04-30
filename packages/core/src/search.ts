@@ -23,9 +23,10 @@ export interface SearchQuery {
 }
 
 const DATE_FIELDS = new Set(['due', 'start', 'review', 'created']);
+const ASSIGNEE_FIELDS = new Set(['assigned', 'assignee', 'assignedto']);
 
 function tokenize(query: string): string[] {
-    const tokens = query.match(/"[^"]+"|\S+/g) || [];
+    const tokens = query.match(/-?[^:\s]+:"[^"]+"|"[^"]+"|\S+/g) || [];
     return tokens.map((t) => t.trim()).filter(Boolean);
 }
 
@@ -205,6 +206,8 @@ export function matchesTask(term: SearchTerm, task: Task, projectById: Map<strin
             const project = projectById?.get(task.projectId);
             result = task.projectId === value || (project ? matchesText(project.title, value) : false);
         }
+    } else if (ASSIGNEE_FIELDS.has(field)) {
+        result = value.trim().length > 0 && matchesText(task.assignedTo, value);
     } else if (DATE_FIELDS.has(field)) {
         if (field === 'due') result = matchDueDateField(task.dueDate, term.comparator, value, now);
         else if (field === 'start') result = matchDateField(task.startTime, term.comparator, value, now);

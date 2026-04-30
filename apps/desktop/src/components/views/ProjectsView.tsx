@@ -9,7 +9,7 @@ import {
     type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { ErrorBoundary } from '../ErrorBoundary';
-import { useTaskStore, Task, type Project } from '@mindwtr/core';
+import { tFallback, useTaskStore, Task, type Project } from '@mindwtr/core';
 import { useLanguage } from '../../contexts/language-context';
 import { PromptModal } from '../PromptModal';
 import { ProjectsSidebar } from './projects/ProjectsSidebar';
@@ -213,10 +213,7 @@ export function ProjectsView() {
         sidebarResizeCleanupRef.current?.();
     }, []);
 
-    const resizeSidebarLabel = (() => {
-        const label = t('projects.resizeSidebar');
-        return label === 'projects.resizeSidebar' ? 'Resize projects panel' : label;
-    })();
+    const resizeSidebarLabel = tFallback(t, 'projects.resizeSidebar', 'Resize projects panel');
 
     const handleSidebarResizePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
         if (event.button !== 0) return;

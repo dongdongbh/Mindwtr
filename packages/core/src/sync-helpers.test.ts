@@ -205,6 +205,43 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
         expect(sanitized.settings.sidebarCollapsed).toBeUndefined();
     });
 
+    it('includes the default schedule time with synced GTD preferences', () => {
+        const data = createData([]);
+        data.settings = {
+            syncPreferences: { gtd: true, language: true },
+            gtd: {
+                defaultScheduleTime: '09:30',
+                inboxProcessing: { scheduleEnabled: true },
+            },
+            language: 'en',
+            timeFormat: '24h',
+        };
+
+        const sanitized = sanitizeAppDataForRemote(data);
+
+        expect(sanitized.settings.gtd).toEqual({ defaultScheduleTime: '09:30' });
+        expect(sanitized.settings.language).toBe('en');
+        expect(sanitized.settings.timeFormat).toBe('24h');
+    });
+
+    it('does not include the default schedule time with only synced date/time preferences', () => {
+        const data = createData([]);
+        data.settings = {
+            syncPreferences: { language: true },
+            gtd: {
+                defaultScheduleTime: '09:30',
+            },
+            language: 'en',
+            timeFormat: '24h',
+        };
+
+        const sanitized = sanitizeAppDataForRemote(data);
+
+        expect(sanitized.settings.gtd).toBeUndefined();
+        expect(sanitized.settings.language).toBe('en');
+        expect(sanitized.settings.timeFormat).toBe('24h');
+    });
+
     it('sanitizes file attachment URIs while preserving cloud metadata', () => {
         const data: AppData = {
             tasks: [
@@ -250,7 +287,7 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
         expect(attachment?.localStatus).toBeUndefined();
     });
 
-    it('tombstones live file attachments that have neither uri nor cloudKey', () => {
+    it('keeps live file attachments that have neither uri nor cloudKey unless marked missing', () => {
         const data = createData([
             fileAttachment({
                 id: 'missing-reference',
@@ -262,9 +299,28 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
         const sanitized = sanitizeAppDataForRemote(data);
         const attachment = sanitized.tasks[0]?.attachments?.[0];
         expect(attachment).toBeDefined();
+        expect(attachment?.deletedAt).toBeUndefined();
+        expect(attachment?.uri).toBe('');
+        expect(attachment?.cloudKey).toBeUndefined();
+    });
+
+    it('tombstones missing local file attachments that have no cloud key', () => {
+        const data = createData([
+            fileAttachment({
+                id: 'missing-local-file',
+                uri: '',
+                cloudKey: undefined,
+                localStatus: 'missing',
+            }),
+        ]);
+
+        const sanitized = sanitizeAppDataForRemote(data);
+        const attachment = sanitized.tasks[0]?.attachments?.[0];
+        expect(attachment).toBeDefined();
         expect(attachment?.deletedAt).toBeDefined();
         expect(attachment?.uri).toBe('');
         expect(attachment?.cloudKey).toBeUndefined();
+        expect(attachment?.localStatus).toBeUndefined();
     });
 
     it('tombstones local-only file attachments on deleted tasks before remote sync', () => {

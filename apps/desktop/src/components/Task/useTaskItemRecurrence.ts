@@ -33,7 +33,7 @@ export function useTaskItemRecurrence({
         const hasByMonthDay = parsed.byMonthDay && parsed.byMonthDay.length > 0;
         const interval = parsed.interval && parsed.interval > 0 ? parsed.interval : 1;
         const isCustomDay = hasByMonthDay && parsed.byMonthDay?.[0] !== monthlyAnchorDate.getDate();
-        const pattern: 'custom' | 'date' = hasNth || hasLast || interval > 1 || isCustomDay ? 'custom' : 'date';
+        const pattern: 'custom' | 'date' = hasNth || hasLast || isCustomDay ? 'custom' : 'date';
         return { pattern, interval };
     }, [editRecurrence, editRecurrenceRRule, monthlyAnchorDate]);
 
@@ -75,20 +75,33 @@ export function useTaskItemRecurrence({
     }, [editRecurrenceRRule, monthlyAnchorDate, monthlyWeekdayCode]);
 
     const applyCustomRecurrence = useCallback(() => {
+        const parsed = parseRRuleString(editRecurrenceRRule);
         const intervalValue = Number(customInterval);
         const safeInterval = Number.isFinite(intervalValue) && intervalValue > 0 ? intervalValue : 1;
         const safeMonthDay = Math.min(Math.max(Math.round(customMonthDay || 1), 1), 31);
         const rrule = customMode === 'nth'
-            ? buildRRuleString('monthly', [`${customOrdinal}${customWeekday}` as RecurrenceByDay], safeInterval)
-            : [
-                'FREQ=MONTHLY',
-                safeInterval > 1 ? `INTERVAL=${safeInterval}` : null,
-                `BYMONTHDAY=${safeMonthDay}`,
-            ].filter(Boolean).join(';');
+            ? buildRRuleString('monthly', [`${customOrdinal}${customWeekday}` as RecurrenceByDay], safeInterval, {
+                count: parsed.count,
+                until: parsed.until,
+            })
+            : buildRRuleString('monthly', undefined, safeInterval, {
+                byMonthDay: [safeMonthDay],
+                count: parsed.count,
+                until: parsed.until,
+            });
         setEditRecurrence('monthly');
         setEditRecurrenceRRule(rrule);
         setShowCustomRecurrence(false);
-    }, [customInterval, customMode, customOrdinal, customWeekday, customMonthDay, setEditRecurrence, setEditRecurrenceRRule]);
+    }, [
+        customInterval,
+        customMode,
+        customMonthDay,
+        customOrdinal,
+        customWeekday,
+        editRecurrenceRRule,
+        setEditRecurrence,
+        setEditRecurrenceRRule,
+    ]);
 
     return {
         monthlyRecurrence,

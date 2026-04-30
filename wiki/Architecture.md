@@ -318,6 +318,8 @@ Mindwtr sync currently transports full snapshots on purpose. This is not a place
 
 The delta-log decision should be revisited only if snapshot files regularly exceed 5 MB, sync round-trips exceed 5 seconds on typical networks, or the product needs real-time multi-device streaming.
 
+Testing coverage and release gates are tracked separately in [[Testing Strategy]] so this page can stay focused on runtime architecture.
+
 ---
 
 ## Internationalization

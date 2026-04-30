@@ -12,13 +12,10 @@ import { MOBILE_SYNC_BADGE_COLORS, resolveMobileSyncBadgeState } from '../lib/sy
 
 export function useMobileSyncBadge() {
     const pathname = usePathname();
-    const { language } = useLanguage();
+    const { t } = useLanguage();
     const settings = useTaskStore((state) => state.settings);
     const [syncConfigured, setSyncConfigured] = useState(false);
     const [syncActivityState, setSyncActivityState] = useState(() => getMobileSyncActivityState());
-    const localize = useCallback((enText: string, zhText?: string) => (
-        language.startsWith('zh') ? (zhText ?? enText) : enText
-    ), [language]);
 
     const refreshSyncBadgeConfig = useCallback(async () => {
         try {
@@ -63,13 +60,13 @@ export function useMobileSyncBadge() {
     const syncBadgeAccessibilityLabel = useMemo(() => {
         if (syncBadgeState === 'hidden') return undefined;
         if (syncBadgeState === 'syncing') {
-            return localize('Sync in progress', '同步进行中');
+            return t('settings.syncBadgeSyncing');
         }
         if (syncBadgeState === 'healthy') {
-            return localize('Sync healthy', '同步正常');
+            return t('settings.syncBadgeHealthy');
         }
-        return localize('Sync needs attention', '同步需要关注');
-    }, [localize, syncBadgeState]);
+        return t('settings.syncBadgeWarning');
+    }, [syncBadgeState, t]);
 
     return {
         refreshSyncBadgeConfig,

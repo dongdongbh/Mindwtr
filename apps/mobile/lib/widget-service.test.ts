@@ -142,7 +142,7 @@ describe('widget-service', () => {
         if (!renderedTree) {
             throw new Error('Expected Android widget render tree');
         }
-        expect(countRenderedTaskRows(renderedTree)).toBe(4);
+        expect(countRenderedTaskRows(renderedTree)).toBe(5);
     });
 
     it('uses a compact Android widget layout for narrow 2x3 widgets', async () => {
@@ -169,7 +169,7 @@ describe('widget-service', () => {
         if (!renderedTree) {
             throw new Error('Expected Android widget render tree');
         }
-        expect(countRenderedTaskRows(renderedTree)).toBe(3);
+        expect(countRenderedTaskRows(renderedTree)).toBe(4);
     });
 
     it('renders fewer rows for the shorter default 2x2 Android widget size', async () => {

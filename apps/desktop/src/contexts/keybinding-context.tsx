@@ -6,6 +6,7 @@ import { isTauriRuntime } from '../lib/runtime';
 import { reportError } from '../lib/report-error';
 import { logWarn } from '../lib/app-log';
 import { useUiStore } from '../store/ui-store';
+import { saveStoredFullscreen } from '../lib/window-state';
 import {
     type GlobalQuickAddShortcutSetting,
     matchesGlobalQuickAddShortcut,
@@ -404,7 +405,9 @@ export function KeybindingProvider({
             const { getCurrentWindow } = await import('@tauri-apps/api/window');
             const current = getCurrentWindow();
             const isFullscreen = await current.isFullscreen();
-            await current.setFullscreen(!isFullscreen);
+            const nextFullscreen = !isFullscreen;
+            await current.setFullscreen(nextFullscreen);
+            saveStoredFullscreen(nextFullscreen, localStorage);
         } catch (error) {
             void logWarn('Failed to toggle fullscreen', {
                 scope: 'keybinding',

@@ -65,7 +65,7 @@ sudo dnf install gstreamer1-plugins-base gstreamer1-plugins-good gstreamer1-plug
 
 Mindwtr automatically cleans up **orphaned attachments** (files no longer referenced by any task/project).
 
-- Desktop: You can also run cleanup manually in **Settings → Sync → Attachment cleanup**.
+- Desktop: You can also run cleanup manually in **Settings → Data → Attachment cleanup**.
 - Mobile: Cleanup runs automatically during sync.
 
 ---

@@ -13,6 +13,8 @@ This folder contains small, focused decision documents that explain **why** we m
 - [ADR 0007: Prefer live data in ambiguous delete-vs-live merges](0007-live-wins-in-ambiguous-delete-merge.md)
 - [ADR 0008: Snapshot sync without a delta log](0008-snapshot-sync-without-delta-log.md)
 - [ADR 0009: SQLite as primary store, JSON as sync snapshot bridge](0009-sqlite-json-sync-bridge.md)
+- [ADR 0010: Self-hosted cloud sync server](0010-self-hosted-cloud-sync-server.md)
+- [ADR 0011: Attachment sync model](0011-attachment-sync-model.md)
 
 ## Template
 

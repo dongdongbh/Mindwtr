@@ -133,7 +133,7 @@ Mindwtr **默认简单，需要时也足够强大**。我们专注于降低认�
 - 📦 **归档** - 隐藏历史，按需搜索
 
 ### 生产力功能
-- 🔍 **全局搜索** - 搜索操作符（status:, context:, due:<=7d）
+- 🔍 **全局搜索** - 搜索操作符（status:, context:, assigned:, due:<=7d）
 - 📦 **批量操作** - 多选、批量移动/打标签/删除
 - 📎 **附件** - 任务支持文件与链接
 - ✏️ **Markdown 备注** - 富文本描述与预览
@@ -154,7 +154,7 @@ Mindwtr **默认简单，需要时也足够强大**。我们专注于降低认�
 - ☁️ **Dropbox OAuth 同步（可选）** - 在支持的非 FOSS 构建中提供原生 Dropbox App Folder 同步
 - 📤 **导出/备份** - 导出 JSON 数据
 - ♻️ **从备份恢复** - 先创建恢复快照，再用已验证的 Mindwtr 备份替换本地数据
-- 📥 **Todoist + DGT GTD 导入** - 将 Todoist CSV/ZIP 导出或 DGT GTD JSON/ZIP 导入到 Mindwtr
+- 📥 **Todoist + DGT GTD + OmniFocus 导入** - 将 Todoist CSV/ZIP、DGT GTD JSON/ZIP 或 OmniFocus CSV 导出导入到 Mindwtr
 - 🔗 **Obsidian 集成** - 桌面端导入 Vault 中的任务，并可深度链接回源笔记
 - 🗓️ **外部日历（系统日历 + ICS）** - 移动端读取系统日历；桌面端支持 ICS 订阅
 
@@ -362,6 +362,16 @@ Mindwtr 的发展离不开用户与贡献者的支持，感谢大家一起把它
 - 🛠️ [云端部署](https://github.com/dongdongbh/Mindwtr/wiki/Cloud-Deployment)
 - 🧠 [MCP 服务器](https://github.com/dongdongbh/Mindwtr/wiki/MCP-Server)
 - 📝 [版本说明索引](docs/release-notes/README.md)
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=dongdongbh%2FMindwtr&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=dongdongbh/Mindwtr&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=dongdongbh/Mindwtr&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=dongdongbh/Mindwtr&type=date&legend=top-left" />
+ </picture>
+</a>
 
 ## 赞助者
 

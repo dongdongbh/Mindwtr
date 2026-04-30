@@ -6,12 +6,17 @@ import { Platform } from 'react-native';
 import {
     addBreadcrumb,
     applyDgtImport,
+    applyOmniFocusImport,
     applyTodoistImport,
     createBackupFileName,
     parseDgtImportSource,
     flushPendingSave,
+    parseOmniFocusImportSource,
     parseTodoistImportSource,
     serializeBackupData,
+    type OmniFocusImportExecutionResult,
+    type OmniFocusImportParseResult,
+    type ParsedOmniFocusImportData,
     type DgtImportExecutionResult,
     type DgtImportParseResult,
     type ParsedDgtImportData,
@@ -228,6 +233,16 @@ export const pickDgtDocument = async (): Promise<TransferDocument | null> =>
         'application/octet-stream',
     ]);
 
+export const pickOmniFocusDocument = async (): Promise<TransferDocument | null> =>
+    pickDocument([
+        'text/csv',
+        'text/comma-separated-values',
+        'application/json',
+        'application/zip',
+        'application/x-zip-compressed',
+        'application/octet-stream',
+    ]);
+
 export const inspectBackupDocument = async (
     document: TransferDocument,
     options?: { appVersion?: string | null }
@@ -255,6 +270,16 @@ export const inspectDgtDocument = async (
 ): Promise<DgtImportParseResult> => {
     const bytes = await readBinaryFile(document.uri);
     return parseDgtImportSource({
+        bytes,
+        fileName: document.fileName,
+    });
+};
+
+export const inspectOmniFocusDocument = async (
+    document: TransferDocument
+): Promise<OmniFocusImportParseResult> => {
+    const bytes = await readBinaryFile(document.uri);
+    return parseOmniFocusImportSource({
         bytes,
         fileName: document.fileName,
     });
@@ -361,6 +386,45 @@ export const importDgtData = async (
         };
     } catch (error) {
         void logError(error, { scope: 'transfer', extra: { operation: 'importDgt' } });
+        throw error;
+    }
+};
+
+export const importOmniFocusData = async (
+    parsedData: ParsedOmniFocusImportData
+): Promise<SnapshotApplyResult & { result: OmniFocusImportExecutionResult }> => {
+    addBreadcrumb('transfer:restore');
+    void logInfo('OmniFocus import started', {
+        scope: 'transfer',
+        extra: {
+            operation: 'importOmniFocus',
+            source: 'omnifocus',
+        },
+    });
+    try {
+        await flushPendingSave();
+        const currentData = await mobileStorage.getData();
+        const snapshotName = await saveCurrentDataSnapshot(currentData);
+        const result = applyOmniFocusImport(currentData, parsedData);
+        await applyImportedData(result.data);
+        void logInfo('OmniFocus import complete', {
+            scope: 'transfer',
+            extra: {
+                operation: 'importOmniFocus',
+                source: 'omnifocus',
+                areas: String(result.importedAreaCount),
+                checklistItems: String(result.importedChecklistItemCount),
+                tasks: String(result.importedTaskCount),
+                projects: String(result.importedProjectCount),
+                standaloneTasks: String(result.importedStandaloneTaskCount),
+            },
+        });
+        return {
+            snapshotName,
+            result,
+        };
+    } catch (error) {
+        void logError(error, { scope: 'transfer', extra: { operation: 'importOmniFocus' } });
         throw error;
     }
 };

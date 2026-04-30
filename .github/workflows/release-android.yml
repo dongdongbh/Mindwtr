@@ -196,6 +196,14 @@ jobs:
           PY
           ls -la "$OUT_DIR"
 
+      - name: Prepare Google Play listing assets
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/prepare-google-play-listing-assets.py \
+            apps/mobile/screenshots/android/playstore \
+            apps/mobile/build/play-listing-assets.json
+          cat apps/mobile/build/play-listing-assets.json
+
       - name: Publish to Google Play Store (Production)
         if: startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch'
         env:
@@ -206,6 +214,7 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           AAB_PATH="apps/mobile/build/mindwtr-${VERSION}.aab"
           NOTES_DIR="apps/mobile/build/play-release-notes"
+          LISTING_ASSETS_FILE="apps/mobile/build/play-listing-assets.json"
 
           if [ ! -f "$AAB_PATH" ]; then
             echo "Missing AAB artifact: $AAB_PATH" >&2
@@ -242,6 +251,55 @@ jobs:
           if [ -z "$VERSION_CODE" ] || [ "$VERSION_CODE" = "null" ]; then
             echo "Failed to parse uploaded versionCode: $(cat "$UPLOAD_FILE")" >&2
             exit 1
+          fi
+
+          if [ -f "$LISTING_ASSETS_FILE" ] && [ "$(jq 'length' "$LISTING_ASSETS_FILE")" -gt 0 ]; then
+            declare -A RESET_GROUPS=()
+            while IFS=$'\t' read -r LANGUAGE IMAGE_TYPE ASSET_PATH; do
+              if [ -z "$LANGUAGE" ] || [ -z "$IMAGE_TYPE" ] || [ -z "$ASSET_PATH" ]; then
+                continue
+              fi
+              if [ ! -f "$ASSET_PATH" ]; then
+                echo "Missing Google Play listing asset: $ASSET_PATH" >&2
+                exit 1
+              fi
+
+              GROUP_KEY="${LANGUAGE}/${IMAGE_TYPE}"
+              if [ -z "${RESET_GROUPS[$GROUP_KEY]:-}" ]; then
+                DELETE_FILE=$(mktemp)
+                DELETE_CODE=$(curl -sS -o "$DELETE_FILE" -w "%{http_code}" -X DELETE \
+                  -H "Authorization: Bearer $ACCESS_TOKEN" \
+                  "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID/listings/$LANGUAGE/$IMAGE_TYPE")
+                if [ "$DELETE_CODE" != "200" ]; then
+                  echo "Failed to clear Google Play listing assets for $GROUP_KEY (HTTP $DELETE_CODE): $(cat "$DELETE_FILE")" >&2
+                  exit 1
+                fi
+                RESET_GROUPS[$GROUP_KEY]=1
+              fi
+
+              case "${ASSET_PATH##*.}" in
+                png|PNG) CONTENT_TYPE="image/png" ;;
+                jpg|JPG|jpeg|JPEG) CONTENT_TYPE="image/jpeg" ;;
+                *)
+                  echo "Unsupported Google Play listing asset type: $ASSET_PATH" >&2
+                  exit 1
+                  ;;
+              esac
+
+              IMAGE_FILE=$(mktemp)
+              IMAGE_CODE=$(curl -sS -o "$IMAGE_FILE" -w "%{http_code}" -X POST \
+                -H "Authorization: Bearer $ACCESS_TOKEN" \
+                -H "Content-Type: $CONTENT_TYPE" \
+                --data-binary @"$ASSET_PATH" \
+                "https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/$PACKAGE/edits/$EDIT_ID/listings/$LANGUAGE/$IMAGE_TYPE?uploadType=media")
+              if [ "$IMAGE_CODE" != "200" ]; then
+                echo "Failed to upload Google Play listing asset $ASSET_PATH for $GROUP_KEY (HTTP $IMAGE_CODE): $(cat "$IMAGE_FILE")" >&2
+                exit 1
+              fi
+              echo "Uploaded Google Play listing asset $ASSET_PATH -> $GROUP_KEY"
+            done < <(jq -r '.[] | [.language, .imageType, .path] | @tsv' "$LISTING_ASSETS_FILE")
+          else
+            echo "No Google Play listing assets found; skipping listing image upload."
           fi
 
           PAYLOAD_FILE=$(mktemp)

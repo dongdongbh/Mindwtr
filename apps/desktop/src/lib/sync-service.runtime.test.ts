@@ -48,6 +48,26 @@ const localData: AppData = {
     settings: {},
 };
 
+const buildResponse = (
+    status: number,
+    body: string,
+    headers: Record<string, string> = {}
+): Response => ({
+    status,
+    ok: status >= 200 && status < 300,
+    headers: {
+        get: (name: string) => headers[name.toLowerCase()] ?? null,
+    } as Headers,
+    text: async () => body,
+    json: async () => {
+        try {
+            return JSON.parse(body);
+        } catch {
+            return {};
+        }
+    },
+} as unknown as Response);
+
 const invokeMock = vi.hoisted(() => vi.fn());
 const markLocalWriteMock = vi.hoisted(() => vi.fn());
 const flushPendingSaveMock = vi.hoisted(() => vi.fn());
@@ -496,5 +516,101 @@ describe('desktop sync-service runtime', () => {
 
         expect(result).toEqual({ success: true, stats: emptyStats });
         expect(writeRemoteCloudKitMock).not.toHaveBeenCalled();
+    });
+
+    it('falls back to browser fetch when native Dropbox download returns an empty body', async () => {
+        const syncServiceModule = await syncServiceModulePromise;
+        const dropboxRemoteData: AppData = {
+            tasks: [
+                {
+                    id: 'remote-task-1',
+                    title: 'Remote from Dropbox',
+                    status: 'next',
+                    tags: [],
+                    contexts: [],
+                    createdAt: '2026-04-23T00:00:00.000Z',
+                    updatedAt: '2026-04-23T00:00:00.000Z',
+                },
+            ],
+            projects: [],
+            sections: [],
+            areas: [],
+            settings: {},
+        };
+        const localDropboxData: AppData = {
+            tasks: [],
+            projects: [],
+            sections: [],
+            areas: [],
+            settings: {},
+        };
+        const nativeFetchMock = vi.fn(async (input: RequestInfo | URL) => {
+            if (String(input) === 'https://content.dropboxapi.com/2/files/download') {
+                return buildResponse(200, '', { 'dropbox-api-result': '{"rev":"rev-native"}' });
+            }
+            throw new Error(`Unexpected native fetch input: ${String(input)}`);
+        });
+        const browserFetchMock = vi.fn(async (input: RequestInfo | URL) => {
+            if (String(input) === 'https://content.dropboxapi.com/2/files/download') {
+                return buildResponse(200, JSON.stringify(dropboxRemoteData), { 'dropbox-api-result': '{"rev":"rev-browser"}' });
+            }
+            throw new Error(`Unexpected browser fetch input: ${String(input)}`);
+        });
+        const originalFetch = globalThis.fetch;
+
+        localStorage.setItem('mindwtr-cloud-provider', 'dropbox');
+        globalThis.fetch = browserFetchMock as unknown as typeof fetch;
+        storeStateRef.current = {
+            ...storeStateRef.current,
+            _allTasks: [],
+            _allProjects: [],
+            _allSections: [],
+            _allAreas: [],
+            settings: {},
+        };
+
+        invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+            if (command === 'get_sync_backend') return 'cloud';
+            if (command === 'create_data_snapshot') return undefined;
+            if (command === 'get_data') return structuredClone(localDropboxData);
+            if (command === 'save_data') return undefined;
+            throw new Error(`Unexpected command: ${command} ${JSON.stringify(args)}`);
+        });
+        syncServiceModule.__syncServiceTestUtils.setDependenciesForTests({
+            getTauriFetch: async () => nativeFetchMock as unknown as typeof fetch,
+        });
+        vi.spyOn(syncServiceModule.SyncService, 'getDropboxAppKey').mockResolvedValue('dropbox-app-key');
+        vi.spyOn(syncServiceModule.SyncService, 'getDropboxAccessToken').mockResolvedValue('dropbox-token');
+        performSyncCycleMock.mockImplementation(async (io: {
+            readLocal: () => Promise<AppData>;
+            readRemote: () => Promise<AppData | null>;
+            writeLocal: (data: AppData) => Promise<void>;
+        }) => {
+            const remote = await io.readRemote();
+            expect(remote).toEqual(dropboxRemoteData);
+            await io.writeLocal(remote ?? localDropboxData);
+            return { status: 'success', stats: emptyStats, data: remote ?? localDropboxData };
+        });
+
+        try {
+            const result = await syncServiceModule.SyncService.performSync();
+
+            expect(result).toEqual({ success: true, stats: emptyStats });
+            expect(nativeFetchMock).toHaveBeenCalledTimes(1);
+            expect(browserFetchMock).toHaveBeenCalledTimes(1);
+            expect(logInfoMock).toHaveBeenCalledWith(
+                'Retrying Dropbox remote read with browser fetch fallback',
+                expect.objectContaining({ scope: 'sync' }),
+            );
+            expect(logInfoMock).toHaveBeenCalledWith(
+                'Recovered Dropbox remote read via browser fetch fallback',
+                expect.objectContaining({ scope: 'sync' }),
+            );
+            expect(invokeMock).toHaveBeenCalledWith('save_data', { data: dropboxRemoteData });
+        } finally {
+            globalThis.fetch = originalFetch;
+            localStorage.removeItem('mindwtr-cloud-provider');
+            vi.restoreAllMocks();
+        }
     });
 });

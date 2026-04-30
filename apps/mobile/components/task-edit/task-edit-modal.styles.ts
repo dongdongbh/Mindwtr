@@ -18,7 +18,7 @@ export const styles = StyleSheet.create({
     textArea: { minHeight: 100, textAlignVertical: 'top' },
     row: { flexDirection: 'row', gap: 12 },
     flex1: { flex: 1 },
-    dateRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    dateRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
     dateBtn: {
         backgroundColor: '#fff',
         padding: 12,

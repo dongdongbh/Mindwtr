@@ -14,6 +14,7 @@ import {
 } from './store-helpers';
 import { logWarn } from './logger';
 import { generateUUID as uuidv4 } from './uuid';
+import { normalizeRecurrenceForLoad } from './recurrence';
 
 const stripAttachmentRemoteMetadata = (attachments: Task['attachments']): Task['attachments'] =>
     attachments?.map((attachment) => (
@@ -214,6 +215,12 @@ const normalizeTaskUpdateForStore = ({
     allTasks: Task[];
 }): Partial<Task> => {
     let adjustedUpdates = updates;
+    if (hasOwnField(updates, 'recurrence')) {
+        adjustedUpdates = {
+            ...adjustedUpdates,
+            recurrence: normalizeRecurrenceForLoad(updates.recurrence),
+        };
+    }
     const hasOrder = Object.prototype.hasOwnProperty.call(updates, 'order');
     const hasOrderNum = Object.prototype.hasOwnProperty.call(updates, 'orderNum');
     if (hasOrder || hasOrderNum) {
@@ -335,6 +342,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave }: TaskA
                 tags: initialProps?.tags ?? [],
                 contexts: initialProps?.contexts ?? [],
                 pushCount: initialProps?.pushCount ?? 0,
+                recurrence: normalizeRecurrenceForLoad(initialProps?.recurrence),
                 rev: 1,
                 revBy: deviceId,
                 createdAt: now,
@@ -601,18 +609,22 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave }: TaskA
         let snapshot: AppData | null = null;
         set((state) => {
             const deviceState = ensureDeviceId(state.settings);
-            const newAllTasks = state._allTasks.map((task) =>
-                task.deletedAt
-                    ? {
-                        ...task,
-                        purgedAt: now,
-                        attachments: stripAttachmentRemoteMetadata(task.attachments),
-                        updatedAt: now,
-                        rev: normalizeRevision(task.rev) + 1,
-                        revBy: deviceState.deviceId,
-                    }
-                    : task
-            );
+            let changed = false;
+            const newAllTasks = state._allTasks.map((task) => {
+                if (!task.deletedAt || task.purgedAt) return task;
+                changed = true;
+                return {
+                    ...task,
+                    purgedAt: now,
+                    attachments: stripAttachmentRemoteMetadata(task.attachments),
+                    updatedAt: now,
+                    rev: normalizeRevision(task.rev) + 1,
+                    revBy: deviceState.deviceId,
+                };
+            });
+            if (!changed && !deviceState.updated) {
+                return state;
+            }
             snapshot = buildSaveSnapshot(state, {
                 tasks: newAllTasks,
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
@@ -882,7 +894,11 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave }: TaskA
     batchDeleteTasks: async (ids: string[]) => {
         if (ids.length === 0) return actionOk();
         const state = get();
-        const existingTaskIds = new Set(state._allTasks.map((task) => task.id));
+        const existingTaskIds = new Set(
+            state._allTasks
+                .filter((task) => !task.deletedAt)
+                .map((task) => task.id)
+        );
         const missingIds = ids.filter((id, index) => !existingTaskIds.has(id) && ids.indexOf(id) === index);
         if (missingIds.length > 0) {
             const message = `Tasks not found: ${missingIds.join(', ')}`;

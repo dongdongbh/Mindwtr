@@ -124,7 +124,7 @@ describe('performSyncCycle', () => {
         expect(wroteRemote?.tasks[0]?.deletedAt).toBeUndefined();
     });
 
-    it('surfaces a clock skew warning when merge drift exceeds the threshold', async () => {
+    it('does not surface a clock skew warning for normal timestamp drift', async () => {
         const result = await performSyncCycle({
             readLocal: async () => mockAppData([
                 createMockTask('task-1', '2026-03-01T00:10:00.000Z'),
@@ -136,6 +136,26 @@ describe('performSyncCycle', () => {
             writeRemote: async () => undefined,
         });
 
+        expect(result.status).toBe('success');
+        expect(result.clockSkewWarning).toBeUndefined();
+        expect(result.stats.tasks.maxClockSkewMs).toBe(0);
+    });
+
+    it('surfaces a clock skew warning when conflicted merge drift exceeds the threshold', async () => {
+        const result = await performSyncCycle({
+            readLocal: async () => mockAppData([{
+                ...createMockTask('task-1', '2026-03-01T00:10:00.000Z'),
+                title: 'Local title',
+            }]),
+            readRemote: async () => mockAppData([{
+                ...createMockTask('task-1', '2026-03-01T00:00:00.000Z'),
+                title: 'Remote title',
+            }]),
+            writeLocal: async () => undefined,
+            writeRemote: async () => undefined,
+        });
+
+        expect(result.status).toBe('conflict');
         expect(result.clockSkewWarning).toEqual({
             skewMs: 10 * 60 * 1000,
             direction: 'local-ahead',
@@ -340,7 +360,7 @@ describe('performSyncCycle', () => {
         expect(saved!.areas.every((area) => area.revBy === undefined)).toBe(true);
     });
 
-    it('purges expired task tombstones and deleted attachment tombstones by default', async () => {
+    it('purges expired tombstones while retaining pending remote attachment deletes', async () => {
         let saved: AppData | null = null;
         const oldPurgedTask = {
             ...createMockTask('old-purged', '2025-06-01T00:00:00.000Z', '2025-06-01T00:00:00.000Z'),
@@ -403,7 +423,7 @@ describe('performSyncCycle', () => {
 
         expect(saved).not.toBeNull();
         expect(saved!.tasks.some((task) => task.id === 'old-purged')).toBe(false);
-        expect(saved!.tasks.some((task) => task.id === 'old-deleted')).toBe(true);
+        expect(saved!.tasks.some((task) => task.id === 'old-deleted')).toBe(false);
         expect(saved!.projects.some((project) => project.id === 'old-project')).toBe(false);
         expect(saved!.sections.some((section) => section.id === 'old-section')).toBe(false);
         expect(saved!.areas.some((area) => area.id === 'old-area')).toBe(false);
@@ -411,6 +431,7 @@ describe('performSyncCycle', () => {
         expect(keptTask).toBeTruthy();
         expect(keptTask!.attachments).toBeUndefined();
         expect(saved!.settings.attachments?.pendingRemoteDeletes?.map((entry) => entry.cloudKey)).toEqual([
+            'attachments/stale.bin',
             'attachments/recent.bin',
         ]);
     });
@@ -560,6 +581,7 @@ describe('performSyncCycle', () => {
         expect(localWrites[0].settings.pendingRemoteWriteRetryAt).toBeUndefined();
         expect(localWrites[0].settings.pendingRemoteWriteAttempts).toBeUndefined();
         expect(localWrites[1].settings.pendingRemoteWriteAt).toBe('2026-01-01T00:00:00.000Z');
+        expect(localWrites[1].settings.lastSyncStatus).toBe('error');
         expect(localWrites[1].settings.pendingRemoteWriteRetryAt).toBe('2026-01-01T00:00:05.000Z');
         expect(localWrites[1].settings.pendingRemoteWriteAttempts).toBe(1);
     });
@@ -665,6 +687,7 @@ describe('performSyncCycle', () => {
         expect(localWrites[0].settings.pendingRemoteWriteRetryAt).toBeUndefined();
         expect(localWrites[0].settings.pendingRemoteWriteAttempts).toBe(1);
         expect(localWrites[1].settings.pendingRemoteWriteAt).toBe('2025-12-31T23:59:59.000Z');
+        expect(localWrites[1].settings.lastSyncStatus).toBe('error');
         expect(localWrites[1].settings.pendingRemoteWriteRetryAt).toBe('2026-01-01T00:00:10.000Z');
         expect(localWrites[1].settings.pendingRemoteWriteAttempts).toBe(2);
     });

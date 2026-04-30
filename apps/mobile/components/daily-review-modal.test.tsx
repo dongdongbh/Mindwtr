@@ -127,15 +127,19 @@ describe('DailyReviewScreen', () => {
       tree = create(<DailyReviewScreen onClose={vi.fn()} />);
     });
 
-    const nextStepLabel = tree.root.findByProps({ children: 'Next Step' });
-    const nextStepButton = nextStepLabel.parent;
-    if (!nextStepButton) {
-      throw new Error('Next step button not found');
-    }
+    const pressNextStep = async () => {
+      const nextStepLabel = tree.root.findByProps({ children: 'Next Step' });
+      const nextStepButton = nextStepLabel.parent;
+      if (!nextStepButton) {
+        throw new Error('Next step button not found');
+      }
+      await act(async () => {
+        nextStepButton.props.onPress();
+      });
+    };
 
-    await act(async () => {
-      nextStepButton.props.onPress();
-    });
+    await pressNextStep();
+    await pressNextStep();
 
     const taskRows = tree.root.findAllByType(SwipeableTaskItem);
     expect(taskRows).toHaveLength(1);

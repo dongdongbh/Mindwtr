@@ -19,7 +19,7 @@ export function resolveTaskNavigationView(task: Task, now: Date = new Date()): D
         archived: 'archived',
     };
     const primaryView = statusViewMap[task.status] || 'next';
-    const hidesDeferredTasks = primaryView === 'inbox' || primaryView === 'next';
+    const hidesDeferredTasks = primaryView === 'next';
     if (hidesDeferredTasks && isDeferredForPrimaryFocus(task, now)) {
         return 'review';
     }

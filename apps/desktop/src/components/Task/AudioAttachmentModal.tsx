@@ -1,5 +1,5 @@
 import type { RefObject } from 'react';
-import type { Attachment } from '@mindwtr/core';
+import { translateWithFallback, type Attachment } from '@mindwtr/core';
 
 type AudioAttachmentModalProps = {
     attachment: Attachment | null;
@@ -30,8 +30,7 @@ export function AudioAttachmentModal({
 }: AudioAttachmentModalProps) {
     if (!attachment || !audioSource) return null;
     const resolveText = (key: string, fallback: string) => {
-        const translated = t(key);
-        return translated === key ? fallback : translated;
+        return translateWithFallback(t, key, fallback);
     };
     return (
         <div

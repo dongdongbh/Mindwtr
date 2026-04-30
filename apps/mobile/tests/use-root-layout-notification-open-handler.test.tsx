@@ -96,6 +96,31 @@ describe('useRootLayoutNotificationOpenHandler', () => {
     });
   });
 
+  it('routes review date reminders to the review page before task or project fallbacks', () => {
+    const router = { push: vi.fn() };
+
+    act(() => {
+      create(<TestHarness router={router} />);
+    });
+
+    const handler = setNotificationOpenHandler.mock.calls[0]?.[0];
+
+    act(() => {
+      handler({ kind: 'task-review', taskId: 'task-1', notificationId: 'review-task-1' });
+      handler({ kind: 'project-review', projectId: 'project-1', notificationId: 'review-project-1' });
+    });
+
+    expect(setHighlightTask).not.toHaveBeenCalled();
+    expect(router.push).toHaveBeenNthCalledWith(1, {
+      pathname: '/review',
+      params: { openToken: 'review-task-1', taskId: 'task-1' },
+    });
+    expect(router.push).toHaveBeenNthCalledWith(2, {
+      pathname: '/review',
+      params: { openToken: 'review-project-1', projectId: 'project-1' },
+    });
+  });
+
   it('replays a pending Android notification open on mount', async () => {
     const router = { push: vi.fn() };
     consumePendingNotificationOpenPayload.mockResolvedValue({

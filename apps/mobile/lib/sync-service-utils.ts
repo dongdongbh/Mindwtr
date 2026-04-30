@@ -1,9 +1,11 @@
 import {
   formatSyncErrorMessage as formatCoreSyncErrorMessage,
   getFileSyncDir,
+  coerceSupportedSyncBackend,
   isLikelyOfflineSyncError as isCoreLikelyOfflineSyncError,
+  isRemoteSyncBackend as isCoreRemoteSyncBackend,
   isSyncFilePath as isCoreSyncFilePath,
-  normalizeSyncBackend,
+  resolveSyncBackend,
   sanitizeSyncErrorMessage,
   type MergeStats,
   type SyncBackend as CoreSyncBackend,
@@ -87,16 +89,12 @@ export const getFileSyncBaseDir = (syncPath: string) => {
   return lastSlash > -1 ? stripped.slice(0, lastSlash) : '';
 };
 
-export const isRemoteSyncBackend = (backend: SyncBackend): boolean =>
-  backend === 'webdav' || backend === 'cloud' || backend === 'cloudkit';
+export const isRemoteSyncBackend = (backend: SyncBackend): boolean => isCoreRemoteSyncBackend(backend);
 
-export const resolveBackend = (value: string | null): SyncBackend => {
-  if (value === 'cloudkit') return 'cloudkit';
-  return normalizeSyncBackend(value);
-};
+export const resolveBackend = (value: string | null): SyncBackend => resolveSyncBackend(value);
 
 export const coerceSupportedBackend = (backend: SyncBackend, allowCloudKit: boolean): SyncBackend =>
-  backend === 'cloudkit' && !allowCloudKit ? 'off' : backend;
+  coerceSupportedSyncBackend(backend, { allowCloudKit });
 
 const collectConflictIds = (stats?: MergeStats | null): string[] => {
   if (!stats) return [];

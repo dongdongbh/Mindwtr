@@ -57,6 +57,8 @@ export function SettingsTopBar() {
     const tc = useThemeColors();
     const insets = useSafeAreaInsets();
     const canGoBack = router.canGoBack();
+    const backLabel = t('common.back');
+    const backText = backLabel && backLabel !== 'common.back' ? backLabel : 'Back';
 
     return (
         <View
@@ -72,7 +74,7 @@ export function SettingsTopBar() {
         >
             <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Back"
+                accessibilityLabel={backText}
                 disabled={!canGoBack}
                 hitSlop={8}
                 onPress={() => {

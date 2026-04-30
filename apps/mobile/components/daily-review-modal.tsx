@@ -119,15 +119,10 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
         [tasks],
     );
 
-    const inboxTasks = useMemo(() => {
-        const now = new Date();
-        return activeTasks.filter((task) => {
-            if (task.status !== 'inbox') return false;
-            const start = safeParseDate(task.startTime);
-            if (start && start > now) return false;
-            return true;
-        });
-    }, [activeTasks]);
+    const inboxTasks = useMemo(
+        () => activeTasks.filter((task) => task.status === 'inbox'),
+        [activeTasks],
+    );
 
     const focusedTasks = useMemo(
         () => activeTasks.filter((task) => task.isFocusedToday && task.status !== 'done'),
@@ -187,8 +182,8 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
 
     const steps: { id: DailyReviewStep; title: string; description: string }[] = [
         { id: 'today', title: t('dailyReview.todayStep'), description: t('dailyReview.todayDesc') },
-        { id: 'focus', title: t('dailyReview.focusStep'), description: t('dailyReview.focusDesc') },
         { id: 'inbox', title: t('dailyReview.inboxStep'), description: t('dailyReview.inboxDesc') },
+        { id: 'focus', title: t('dailyReview.focusStep'), description: t('dailyReview.focusDesc') },
         { id: 'waiting', title: t('dailyReview.waitingStep'), description: t('dailyReview.waitingDesc') },
         { id: 'complete', title: t('dailyReview.completeTitle'), description: t('dailyReview.completeDesc') },
     ];

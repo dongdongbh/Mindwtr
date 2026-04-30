@@ -10,19 +10,18 @@ const addProject = vi.fn();
 const push = vi.fn();
 const clarifyTask = vi.fn();
 const mockSettings = { gtd: { inboxProcessing: {} }, ai: {} } as any;
+const baseInboxTask = {
+  id: 'inbox-1',
+  title: 'Inbox task',
+  description: 'Original description',
+  status: 'inbox',
+  contexts: ['@home'],
+  tags: ['#old'],
+  createdAt: '2025-01-01T00:00:00.000Z',
+  updatedAt: '2025-01-01T00:00:00.000Z',
+};
 const storeState = {
-  tasks: [
-    {
-      id: 'inbox-1',
-      title: 'Inbox task',
-      description: 'Original description',
-      status: 'inbox',
-      contexts: ['@home'],
-      tags: ['#old'],
-      createdAt: '2025-01-01T00:00:00.000Z',
-      updatedAt: '2025-01-01T00:00:00.000Z',
-    },
-  ],
+  tasks: [{ ...baseInboxTask }] as any[],
   projects: [] as any[],
   areas: [] as any[],
   settings: mockSettings,
@@ -32,6 +31,15 @@ const storeState = {
 };
 
 vi.mock('@mindwtr/core', () => {
+  const formatDateOnly = (value: Date | string) => {
+    const date = value instanceof Date ? value : new Date(value);
+    return [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, '0'),
+      String(date.getDate()).padStart(2, '0'),
+    ].join('-');
+  };
+
   return {
     addBreadcrumb: vi.fn(),
     DEFAULT_PROJECT_COLOR: '#3b82f6',
@@ -39,9 +47,27 @@ vi.mock('@mindwtr/core', () => {
     createAIProvider: vi.fn(() => ({
       clarifyTask,
     })),
+    hasTimeComponent: vi.fn((value?: string | null) => Boolean(value && /[T\s]\d{2}:\d{2}/.test(value))),
+    normalizeClockTimeInput: vi.fn((value?: string | null) => {
+      const trimmed = String(value ?? '').trim();
+      if (!trimmed) return '';
+      const match = /^(\d{1,2}):(\d{2})$/.exec(trimmed);
+      if (!match) return null;
+      const hour = Number(match[1]);
+      const minute = Number(match[2]);
+      if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+      return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    }),
     resolveAutoTextDirection: vi.fn(() => 'ltr'),
-    safeFormatDate: vi.fn(() => 'Jan 1, 2025'),
+    safeFormatDate: vi.fn((value: Date | string, formatStr: string) => {
+      if (formatStr === 'yyyy-MM-dd') return formatDateOnly(value);
+      return 'Jan 1, 2025';
+    }),
     safeParseDate: vi.fn((value?: string) => (value ? new Date(value) : null)),
+    tFallback: vi.fn((t: (key: string) => string, key: string, fallback: string) => {
+      const translated = t(key);
+      return translated && translated !== key ? translated : fallback;
+    }),
     useTaskStore: () => storeState,
     loadAIKey: vi.fn(),
   };
@@ -111,6 +137,7 @@ describe('InboxProcessingModal', () => {
     mockSettings.features = undefined;
     mockSettings.gtd = { inboxProcessing: {}, taskEditor: undefined };
     mockSettings.ai = {};
+    storeState.tasks = [{ ...baseInboxTask }];
     storeState.projects = [];
     storeState.areas = [];
     updateTask.mockClear();
@@ -251,6 +278,203 @@ describe('InboxProcessingModal', () => {
     expect(root.findByProps({ children: 'inbox.refineTitle' })).toBeTruthy();
     expect(findNodesWithText(root, 'Inbox task')).toHaveLength(0);
     expect(findNodesWithText(root, 'Original description')).toHaveLength(0);
+  });
+
+  it('includes future-start inbox tasks in processing', () => {
+    storeState.tasks = [{
+      ...baseInboxTask,
+      startTime: '2999-01-01',
+    }];
+    const onClose = vi.fn();
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={onClose} />);
+    });
+
+    const root = tree!.root;
+
+    expect(root.findByProps({ children: 'inbox.refineTitle' })).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('moves Later items to next with a date-only start date', () => {
+    const onClose = vi.fn();
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={onClose} />);
+    });
+
+    const root = tree!.root;
+    const laterLabel = findNodeWithText(root, 'Later');
+    const laterButton = laterLabel.parent;
+
+    if (!laterButton) {
+      throw new Error('Later button not found');
+    }
+
+    act(() => {
+      laterButton.props.onPress();
+    });
+
+    const startValueLabel = root.findByProps({ children: 'common.notSet' });
+    const startButton = startValueLabel.parent;
+
+    if (!startButton) {
+      throw new Error('Start date button not found');
+    }
+
+    act(() => {
+      startButton.props.onPress();
+    });
+
+    const datePicker = root.findByType('DateTimePicker' as any);
+
+    act(() => {
+      datePicker.props.onChange({ type: 'set' }, new Date(2026, 2, 23, 12, 0, 0));
+    });
+
+    const nextTaskLabel = findNodeWithText(root, 'Next task →');
+    const nextTaskButton = nextTaskLabel.parent;
+
+    if (!nextTaskButton) {
+      throw new Error('Next task button not found');
+    }
+
+    act(() => {
+      nextTaskButton.props.onPress();
+    });
+
+    expect(updateTask).toHaveBeenCalledWith(
+      'inbox-1',
+      expect.objectContaining({
+        status: 'next',
+        startTime: '2026-03-23',
+      })
+    );
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('moves Later items with the configured default schedule time', () => {
+    mockSettings.gtd.defaultScheduleTime = '09:00';
+    const onClose = vi.fn();
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={onClose} />);
+    });
+
+    const root = tree!.root;
+    const laterButton = findNodeWithText(root, 'Later').parent;
+
+    if (!laterButton) {
+      throw new Error('Later button not found');
+    }
+
+    act(() => {
+      laterButton.props.onPress();
+    });
+
+    const startButton = root.findByProps({ children: 'common.notSet' }).parent;
+
+    if (!startButton) {
+      throw new Error('Start date button not found');
+    }
+
+    act(() => {
+      startButton.props.onPress();
+    });
+
+    const datePicker = root.findByType('DateTimePicker' as any);
+
+    act(() => {
+      datePicker.props.onChange({ type: 'set' }, new Date(2026, 2, 23, 12, 0, 0));
+    });
+
+    const nextTaskButton = findNodeWithText(root, 'Next task →').parent;
+
+    if (!nextTaskButton) {
+      throw new Error('Next task button not found');
+    }
+
+    act(() => {
+      nextTaskButton.props.onPress();
+    });
+
+    expect(updateTask).toHaveBeenCalledWith(
+      'inbox-1',
+      expect.objectContaining({
+        status: 'next',
+        startTime: '2026-03-23T09:00',
+      })
+    );
+  });
+
+  it('allows Later items to stay date-only when a default schedule time is configured', () => {
+    mockSettings.gtd.defaultScheduleTime = '09:00';
+    const onClose = vi.fn();
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={onClose} />);
+    });
+
+    const root = tree!.root;
+    const laterButton = findNodeWithText(root, 'Later').parent;
+
+    if (!laterButton) {
+      throw new Error('Later button not found');
+    }
+
+    act(() => {
+      laterButton.props.onPress();
+    });
+
+    const startButton = root.findByProps({ children: 'common.notSet' }).parent;
+
+    if (!startButton) {
+      throw new Error('Start date button not found');
+    }
+
+    act(() => {
+      startButton.props.onPress();
+    });
+
+    const datePicker = root.findByType('DateTimePicker' as any);
+
+    act(() => {
+      datePicker.props.onChange({ type: 'set' }, new Date(2026, 2, 23, 12, 0, 0));
+    });
+
+    const dateOnlyLabel = findNodeWithText(root, 'Date only');
+    const dateOnlyButton = dateOnlyLabel.parent;
+
+    if (!dateOnlyButton) {
+      throw new Error('Date only button not found');
+    }
+
+    act(() => {
+      dateOnlyButton.props.onPress();
+    });
+
+    const nextTaskButton = findNodeWithText(root, 'Next task →').parent;
+
+    if (!nextTaskButton) {
+      throw new Error('Next task button not found');
+    }
+
+    act(() => {
+      nextTaskButton.props.onPress();
+    });
+
+    expect(updateTask).toHaveBeenCalledWith(
+      'inbox-1',
+      expect.objectContaining({
+        status: 'next',
+        startTime: '2026-03-23',
+      })
+    );
   });
 
   it('saves the selected priority by default when priorities are not explicitly disabled', () => {

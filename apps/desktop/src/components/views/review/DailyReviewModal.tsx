@@ -57,15 +57,10 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
     const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
 
     const activeTasks = tasks.filter((task) => !task.deletedAt && task.status !== 'reference' && isTaskInActiveProject(task, projectMap));
-    const inboxTasks = useMemo(() => {
-        const now = new Date();
-        return activeTasks.filter((task) => {
-            if (task.status !== 'inbox') return false;
-            const start = safeParseDate(task.startTime);
-            if (start && start > now) return false;
-            return true;
-        });
-    }, [activeTasks]);
+    const inboxTasks = useMemo(
+        () => activeTasks.filter((task) => task.status === 'inbox'),
+        [activeTasks],
+    );
     const focusedTasks = activeTasks.filter((task) => task.isFocusedToday && task.status !== 'done');
     const waitingTasks = useMemo(
         () => sortTasksBy(activeTasks.filter((task) => task.status === 'waiting'), sortBy),
@@ -234,8 +229,8 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
 
     const steps: { id: DailyReviewStep; title: string; description: string; icon: LucideIcon }[] = [
         { id: 'today', title: t('dailyReview.todayStep'), description: t('dailyReview.todayDesc'), icon: Calendar },
-        { id: 'focus', title: t('dailyReview.focusStep'), description: t('dailyReview.focusDesc'), icon: CheckSquare },
         { id: 'inbox', title: t('dailyReview.inboxStep'), description: t('dailyReview.inboxDesc'), icon: CheckSquare },
+        { id: 'focus', title: t('dailyReview.focusStep'), description: t('dailyReview.focusDesc'), icon: CheckSquare },
         { id: 'waiting', title: t('dailyReview.waitingStep'), description: t('dailyReview.waitingDesc'), icon: ArrowRight },
         { id: 'completed', title: t('dailyReview.completeTitle'), description: t('dailyReview.completeDesc'), icon: Check },
     ];

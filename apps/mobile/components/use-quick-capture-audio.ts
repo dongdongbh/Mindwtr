@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
 import { Directory, File, Paths } from 'expo-file-system';
 import {
@@ -211,7 +211,10 @@ export function useQuickCaptureAudio({
       const resolvedModelPath = provider === 'whisper'
         ? (whisperResolved?.exists ? whisperResolved.path : modelPath)
         : undefined;
-      const useWhisperRealtime = speech?.enabled && provider === 'whisper' && whisperModelReady;
+      const useWhisperRealtime = Platform.OS !== 'android'
+        && speech?.enabled
+        && provider === 'whisper'
+        && whisperModelReady;
       if (useWhisperRealtime) {
         try {
           const now = new Date();

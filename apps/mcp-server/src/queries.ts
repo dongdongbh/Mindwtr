@@ -1,88 +1,25 @@
-import { DEFAULT_PROJECT_COLOR, parseQuickAdd as parseQuickAddCore, type Project as CoreProject } from '@mindwtr/core';
+import {
+  DEFAULT_PROJECT_COLOR,
+  TASK_STATUS_SET,
+  normalizeTaskStatus as normalizeCoreTaskStatus,
+  parseQuickAdd as parseQuickAddCore,
+  type Area as CoreArea,
+  type Project as CoreProject,
+  type Task as CoreTask,
+  type TaskStatus as CoreTaskStatus,
+} from '@mindwtr/core';
 import type { DbClient } from './db.js';
 import { parseJson } from './db.js';
 import { NotFoundError, ValidationError } from './errors.js';
 
-export type TaskStatus = 'inbox' | 'next' | 'waiting' | 'someday' | 'reference' | 'done' | 'archived';
-export type Task = {
-  id: string;
-  title: string;
-  status: TaskStatus;
-  priority?: string;
-  energyLevel?: string;
-  assignedTo?: string;
-  taskMode?: string;
-  startTime?: string;
-  dueDate?: string;
-  recurrence?: unknown;
-  pushCount?: number;
-  tags?: string[];
-  contexts?: string[];
-  checklist?: unknown[];
-  description?: string;
-  textDirection?: string;
-  attachments?: unknown[];
-  location?: string;
-  projectId?: string;
-  sectionId?: string;
-  areaId?: string;
-  orderNum?: number;
-  isFocusedToday?: boolean;
-  timeEstimate?: string;
-  reviewAt?: string;
-  completedAt?: string;
-  createdAt: string;
-  updatedAt: string;
-  deletedAt?: string;
-  purgedAt?: string;
-};
-
-export type Project = {
-  id: string;
-  title: string;
-  status?: string;
-  color?: string;
-  orderNum?: number;
-  tagIds?: string[];
-  areaId?: string;
-  areaTitle?: string;
-  isSequential?: boolean;
-  isFocused?: boolean;
-  supportNotes?: string;
-  attachments?: unknown[];
-  dueDate?: string;
-  reviewAt?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  deletedAt?: string;
-};
-
-export type Area = {
-  id: string;
-  name: string;
-  color?: string;
-  icon?: string;
-  order?: number;
-  createdAt?: string;
-  updatedAt?: string;
-  deletedAt?: string;
-};
-
-type ProjectRef = Pick<Project, 'id' | 'title'>;
-
-const STATUS_TOKENS: Record<string, TaskStatus> = {
-  inbox: 'inbox',
-  next: 'next',
-  waiting: 'waiting',
-  someday: 'someday',
-  reference: 'reference',
-  done: 'done',
-  archived: 'archived',
-};
+export type TaskStatus = CoreTaskStatus;
+export type Task = CoreTask;
+export type Project = CoreProject & { orderNum?: number };
+export type Area = CoreArea;
+export type ProjectRef = Pick<CoreProject, 'id' | 'title'>;
 
 const normalizeTaskStatus = (value: string): TaskStatus => {
-  const key = value.toLowerCase();
-  return STATUS_TOKENS[key] ?? 'inbox';
+  return normalizeCoreTaskStatus(value);
 };
 
 const parseTaskStatusInput = (value: unknown): TaskStatus | undefined => {
@@ -90,11 +27,11 @@ const parseTaskStatusInput = (value: unknown): TaskStatus | undefined => {
   if (typeof value !== 'string') {
     throw new ValidationError(`Invalid task status: ${String(value)}`);
   }
-  const normalized = STATUS_TOKENS[value.toLowerCase()];
-  if (!normalized) {
+  const normalized = value.toLowerCase().trim();
+  if (!TASK_STATUS_SET.has(normalized as TaskStatus)) {
     throw new ValidationError(`Invalid task status: ${value}`);
   }
-  return normalized;
+  return normalized as TaskStatus;
 };
 
 const generateUUID = (): string => {
@@ -105,7 +42,7 @@ const generateUUID = (): string => {
 };
 
 export const parseQuickAdd = (input: string, projects: ProjectRef[]): { title: string; props: Partial<Task> } => {
-  const parsed = parseQuickAddCore(input, projects as unknown as CoreProject[]);
+  const parsed = parseQuickAddCore(input, projects as CoreProject[]);
   return {
     title: parsed.title,
     props: parsed.props as Partial<Task>,
@@ -143,12 +80,7 @@ export type AddTaskInput = {
 
 export type CompleteTaskInput = { id: string };
 
-export type TaskRow = Task & {
-  contexts?: string[];
-  tags?: string[];
-  checklist?: Task['checklist'];
-  attachments?: Task['attachments'];
-};
+export type TaskRow = Task;
 
 const BASE_TASK_COLUMNS = [
   'id',
@@ -255,6 +187,7 @@ function mapTaskRow(row: any): TaskRow {
     projectId: row.projectId ?? undefined,
     sectionId: row.sectionId ?? undefined,
     areaId: row.areaId ?? undefined,
+    order: row.orderNum ?? undefined,
     orderNum: row.orderNum ?? undefined,
     isFocusedToday: row.isFocusedToday === 1,
     timeEstimate: row.timeEstimate ?? undefined,
@@ -393,8 +326,9 @@ export function listProjects(db: DbClient): Project[] {
 const mapProjectRow = (row: any): Project => ({
   id: row.id,
   title: row.title,
-  status: row.status,
+  status: row.status === 'someday' || row.status === 'waiting' || row.status === 'archived' ? row.status : 'active',
   color: row.color ?? DEFAULT_PROJECT_COLOR,
+  order: row.orderNum ?? 0,
   orderNum: row.orderNum ?? undefined,
   tagIds: parseJson(row.tagIds, []),
   isSequential: row.isSequential === 1,
@@ -461,7 +395,7 @@ const mapAreaRow = (row: any): Area => ({
   name: row.name,
   color: row.color ?? undefined,
   icon: row.icon ?? undefined,
-  order: row.orderNum ?? undefined,
+  order: row.orderNum ?? 0,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
   deletedAt: row.deletedAt ?? undefined,
@@ -526,7 +460,8 @@ export function addTask(db: DbClient, input: AddTaskInput): TaskRow {
       attachments: props.attachments,
       location: props.location,
       projectId: input.projectId ?? props.projectId,
-      orderNum: props.orderNum ?? undefined,
+      order: props.order ?? props.orderNum ?? undefined,
+      orderNum: props.orderNum ?? props.order ?? undefined,
       isFocusedToday: props.isFocusedToday ?? false,
       timeEstimate: input.timeEstimate ?? props.timeEstimate,
       reviewAt: props.reviewAt,

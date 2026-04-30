@@ -5,6 +5,7 @@ const plugin = require('./patch-alarm-notification-gradle');
 const {
   applyGradleCompatPatchToSource,
   applyAlarmPendingIntentPatchToSource,
+  applyAlarmDuplicateToastPatchToSource,
   applyAlarmReminderBehaviorPatchToSource,
   applyAlarmAudioInterfacePatchToSource,
   applyAlarmDismissReceiverPatchToSource,
@@ -29,6 +30,24 @@ describe('patch-alarm-notification-gradle', () => {
     expect(output).toContain('private int getImmutableFlag()');
     expect(output).toContain('PendingIntent.getBroadcast(context, id, intent, getImmutableFlag())');
     expect(output).toContain('PendingIntent.getActivity(context, id, intent, getUpdateCurrentImmutableFlags())');
+  });
+
+  it('removes the native duplicate alarm toast so JS retries stay silent', () => {
+    const input = `    boolean checkAlarm(ArrayList<AlarmModel> alarms, AlarmModel alarm) {
+        boolean contain = false;
+
+        if (contain) {
+            Toast.makeText(mContext, "You have already set this Alarm", Toast.LENGTH_SHORT).show();
+        }
+
+        return contain;
+    }`;
+
+    const output = applyAlarmDuplicateToastPatchToSource(input);
+
+    expect(output).not.toContain('Toast.makeText');
+    expect(output).toContain('Duplicate alarms are reported to JS via promise rejection');
+    expect(output).toContain('return contain;');
   });
 
   it('patches AlarmUtil reminder behavior away from alarm semantics', () => {

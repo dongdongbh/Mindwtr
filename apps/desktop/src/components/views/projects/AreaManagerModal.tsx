@@ -1,6 +1,6 @@
 import { DndContext, type DragEndEvent, closestCenter } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import type { Area, StoreActionResult } from '@mindwtr/core';
+import { translateWithFallback, type Area, type StoreActionResult } from '@mindwtr/core';
 import type { ChangeEventHandler, MouseEventHandler } from 'react';
 import { X } from 'lucide-react';
 import { SortableAreaRow } from './SortableRows';
@@ -45,8 +45,7 @@ export function AreaManagerModal({
         event.stopPropagation();
     };
     const resolveText = (key: string, fallback: string) => {
-        const value = t(key);
-        return value === key ? fallback : value;
+        return translateWithFallback(t, key, fallback);
     };
     const manageAreasLabel = resolveText('areas.manage', 'Manage Areas');
     const newAreaLabel = resolveText('areas.new', 'New Area');

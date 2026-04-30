@@ -28,6 +28,29 @@ const THEME_CHANGE_ACTIONS = [
     'android.intent.action.UI_MODE_CHANGED',
 ];
 
+const getTasksWidgetConfig = (props) => {
+    const widgets = Array.isArray(props?.widgets) ? props.widgets : [];
+    return widgets.find((widget) => widget?.name === 'TasksWidget') ?? {};
+};
+
+const setXmlAttribute = (xml, attributeName, value, insertAfterAttribute) => {
+    const line = `    android:${attributeName}="${value}"`;
+    const existing = new RegExp(`    android:${attributeName}="[^"]*"`);
+    if (existing.test(xml)) {
+        return xml.replace(existing, line);
+    }
+
+    const anchor = new RegExp(`(    android:${insertAfterAttribute}="[^"]*"\\n)`);
+    if (anchor.test(xml)) {
+        return xml.replace(anchor, `$1${line}\n`);
+    }
+
+    return xml.replace(
+        '<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"\n',
+        `<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"\n${line}\n`
+    );
+};
+
 const addThemeBroadcastActionsToWidgetReceiver = (config) =>
     withAndroidManifest(config, (cfg) => {
         const manifest = cfg.modResults?.manifest;
@@ -69,6 +92,37 @@ const addThemeBroadcastActionsToWidgetReceiver = (config) =>
 
         return cfg;
     });
+
+const patchTasksWidgetProviderXml = (config, props = {}) =>
+    withDangerousMod(config, [
+        'android',
+        async (cfg) => {
+            const widgetConfig = getTasksWidgetConfig(props);
+            const xmlPath = path.join(
+                cfg.modRequest.platformProjectRoot,
+                'app',
+                'src',
+                'main',
+                'res',
+                'xml',
+                'widgetprovider_taskswidget.xml'
+            );
+
+            if (!fs.existsSync(xmlPath)) return cfg;
+
+            const minResizeWidth = widgetConfig.minResizeWidth ?? widgetConfig.minWidth ?? '120dp';
+            const minResizeHeight = widgetConfig.minResizeHeight ?? widgetConfig.minHeight ?? '120dp';
+            const current = fs.readFileSync(xmlPath, 'utf8');
+            let next = setXmlAttribute(current, 'minResizeWidth', minResizeWidth, 'minHeight');
+            next = setXmlAttribute(next, 'minResizeHeight', minResizeHeight, 'minResizeWidth');
+
+            if (next !== current) {
+                fs.writeFileSync(xmlPath, next);
+            }
+
+            return cfg;
+        },
+    ]);
 
 const patchTasksWidgetProvider = (config, androidPackage) =>
     withDangerousMod(config, [
@@ -135,6 +189,7 @@ module.exports = function withAndroidWidget(config, props = {}) {
     }
 
     nextConfig = addThemeBroadcastActionsToWidgetReceiver(nextConfig);
+    nextConfig = patchTasksWidgetProviderXml(nextConfig, props);
     nextConfig = patchTasksWidgetProvider(nextConfig, androidPackage);
     return nextConfig;
 };

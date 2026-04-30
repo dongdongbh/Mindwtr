@@ -4,7 +4,7 @@ import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { AlertTriangle, ChevronDown, ChevronRight, CornerDownRight, Folder, Plus, Star } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import { SortableProjectRow } from './SortableRows';
-import type { Area, Project, StoreActionResult, Task } from '@mindwtr/core';
+import { tFallback, type Area, type Project, type StoreActionResult, type Task } from '@mindwtr/core';
 import { reportError } from '../../../lib/report-error';
 import {
     computeProjectAreaDragResult,
@@ -219,7 +219,7 @@ export function ProjectsSidebar({
     const handleProjectDragEnd = useCallback((dndState: ReturnType<typeof buildProjectDndState>) => (event: DragEndEvent) => {
         const failProjectMove = (error: unknown) => {
             reportError('Failed to move project between areas', error);
-            showToast?.('Failed to move project', 'error');
+            showToast?.(t('projects.moveProjectFailed') || 'Failed to move project', 'error');
         };
         const { active, over } = event;
         if (!over || active.id === over.id) return;
@@ -661,22 +661,13 @@ export function ProjectsSidebar({
                     <div className="text-sm text-muted-foreground text-center py-8 space-y-3">
                         <p className="text-base font-medium text-foreground">
                             {areaFilterLabel
-                                ? (t('projects.noProjectsInArea') === 'projects.noProjectsInArea'
-                                    ? 'No projects in this area.'
-                                    : t('projects.noProjectsInArea'))
+                                ? tFallback(t, 'projects.noProjectsInArea', 'No projects in this area.')
                                 : t('projects.noProjects')}
                         </p>
                         <p>
                             {areaFilterLabel
-                                ? (t('projects.emptyHintFiltered') === 'projects.emptyHintFiltered'
-                                    ? 'Try switching the Area filter or create a project in this area.'
-                                    : t('projects.emptyHintFiltered'))
-                                : (() => {
-                                    const hint = t('projects.emptyHint');
-                                    return hint === 'projects.emptyHint'
-                                        ? 'Create your first project to start organizing work.'
-                                        : hint;
-                                })()}
+                                ? tFallback(t, 'projects.emptyHintFiltered', 'Try switching the Area filter or create a project in this area.')
+                                : tFallback(t, 'projects.emptyHint', 'Create your first project to start organizing work.')}
                         </p>
                         <button
                             type="button"

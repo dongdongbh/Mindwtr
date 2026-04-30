@@ -1,6 +1,6 @@
-import { Calendar as CalendarIcon, Tag, Trash2, ArrowRight, Repeat, Check, Clock, Timer, Paperclip, RotateCcw, Copy, MapPin, Hourglass, BookOpen, PauseCircle, Star, Zap } from 'lucide-react';
+import { Calendar as CalendarIcon, Tag, Trash2, ArrowRight, Repeat, Check, Clock, Timer, Paperclip, RotateCcw, Copy, MapPin, Hourglass, BookOpen, PauseCircle, Star, Zap, MoreHorizontal } from 'lucide-react';
 import type { Area, Attachment, Project, Task, TaskStatus, RecurrenceRule, RecurrenceStrategy, Language } from '@mindwtr/core';
-import { DEFAULT_AREA_COLOR, getChecklistProgress, getTaskAgeLabel, getTaskStaleness, getTaskUrgency, hasTimeComponent, safeFormatDate, resolveTaskTextDirection } from '@mindwtr/core';
+import { DEFAULT_AREA_COLOR, getChecklistProgress, getRecurrenceCountValue, getRecurrenceUntilValue, getTaskAgeLabel, getTaskStaleness, getTaskUrgency, hasTimeComponent, parseRRuleString, safeFormatDate, resolveTaskTextDirection, tFallback } from '@mindwtr/core';
 import { cn } from '../../lib/utils';
 import { getAttachmentDisplayTitle } from '../../lib/attachment-utils';
 import { getContextColor } from '../../lib/context-color';
@@ -8,7 +8,7 @@ import { MetadataBadge } from '../ui/MetadataBadge';
 import { AttachmentProgressIndicator } from '../AttachmentProgressIndicator';
 import { RichMarkdown } from '../RichMarkdown';
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
-import { useEffect, useRef } from 'react';
+import { memo, useEffect, useRef } from 'react';
 import { isImageAttachment } from './task-item-attachment-utils';
 import { AttachmentImage } from './AttachmentImage';
 
@@ -19,6 +19,7 @@ interface TaskItemDisplayActions {
     onDelete: () => void;
     onDuplicate: () => void;
     onStatusChange: (status: TaskStatus) => void;
+    onOpenQuickActions?: (event: MouseEvent<HTMLButtonElement>) => void;
     onMoveToWaitingWithPrompt?: () => void;
     onOpenProject?: (projectId: string) => void;
     openAttachment: (attachment: Attachment) => void;
@@ -78,7 +79,7 @@ const formatTimeEstimate = (estimate: string) => {
     return value;
 };
 
-export function TaskItemDisplay({
+export const TaskItemDisplay = memo(function TaskItemDisplay({
     task,
     language,
     project,
@@ -111,6 +112,7 @@ export function TaskItemDisplay({
         onDelete,
         onDuplicate,
         onStatusChange,
+        onOpenQuickActions,
         onMoveToWaitingWithPrompt,
         onOpenProject,
         openAttachment,
@@ -118,6 +120,24 @@ export function TaskItemDisplay({
         focusToggle,
     } = actions;
     const checklistProgress = getChecklistProgress(task);
+    const recurrenceCount = getRecurrenceCountValue(task.recurrence);
+    const recurrenceUntil = getRecurrenceUntilValue(task.recurrence);
+    const recurrenceInterval = task.recurrence && typeof task.recurrence === 'object' && task.recurrence.rrule
+        ? parseRRuleString(task.recurrence.rrule).interval
+        : undefined;
+    const recurrenceLabel = recurrenceRule
+        ? [
+            `${t(`recurrence.${recurrenceRule}`)}${recurrenceStrategy === 'fluid' ? ` · ${t('recurrence.afterCompletionShort')}` : ''}`,
+            recurrenceRule === 'weekly' && recurrenceInterval && recurrenceInterval > 1
+                ? `${t('recurrence.repeatEvery')} ${recurrenceInterval} ${t('recurrence.weekUnit')}`
+                : undefined,
+            recurrenceRule === 'monthly' && recurrenceInterval && recurrenceInterval > 1
+                ? `${t('recurrence.repeatEvery')} ${recurrenceInterval} ${t('recurrence.monthUnit')}`
+                : undefined,
+            recurrenceUntil ? `${t('recurrence.endsOnDate')} ${safeFormatDate(recurrenceUntil, 'P')}` : undefined,
+            recurrenceCount ? `${t('recurrence.endsAfterCount')} ${recurrenceCount} ${t('recurrence.occurrenceUnit')}` : undefined,
+        ].filter(Boolean).join(' · ')
+        : '';
     const ageLabel = getTaskAgeLabel(task.createdAt, language);
     const showCompactMeta = compactMetaEnabled && !isViewOpen;
     const showAgeBadge = task.status !== 'done' && Boolean(ageLabel);
@@ -140,17 +160,10 @@ export function TaskItemDisplay({
     const resolvedDirection = resolveTaskTextDirection(task);
     const isRtl = resolvedDirection === 'rtl';
     const hoverHintText = showHoverHint
-        ? (() => {
-            const hint = t('task.hoverHint');
-            return hint === 'task.hoverHint'
-                ? 'Click to toggle details / Double-click to edit'
-                : hint;
-        })()
+        ? tFallback(t, 'task.hoverHint', 'Click to toggle details / Double-click to edit')
         : '';
-    const moveToWaitingWithDueLabel = (() => {
-        const label = t('task.moveToWaitingWithDue');
-        return label === 'task.moveToWaitingWithDue' ? 'Move to Waiting and set due date' : label;
-    })();
+    const moreOptionsLabel = tFallback(t, 'taskEdit.moreOptions', 'More options');
+    const moveToWaitingWithDueLabel = tFallback(t, 'task.moveToWaitingWithDue', 'Move to Waiting and set due date');
     const imageAttachments = visibleAttachments.filter((attachment) => {
         if (!isImageAttachment(attachment)) return false;
         if (!attachment.uri) return false;
@@ -286,7 +299,7 @@ export function TaskItemDisplay({
                 <MetadataBadge
                     variant="info"
                     icon={Repeat}
-                    label={`${t(`recurrence.${recurrenceRule}`)}${recurrenceStrategy === 'fluid' ? ` · ${t('recurrence.afterCompletionShort')}` : ''}`}
+                    label={recurrenceLabel}
                 />
             )}
             {prioritiesEnabled && task.priority && (
@@ -647,6 +660,17 @@ export function TaskItemDisplay({
                             <Star className={cn("w-4 h-4", focusToggle.isFocused && "fill-current")} />
                         </button>
                     )}
+                    {onOpenQuickActions && (
+                        <button
+                            type="button"
+                            onClick={onOpenQuickActions}
+                            aria-label={moreOptionsLabel}
+                            title={moreOptionsLabel}
+                            className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-muted-foreground hover:text-foreground p-1 rounded hover:bg-muted/50"
+                        >
+                            <MoreHorizontal className="w-4 h-4" />
+                        </button>
+                    )}
                     {readOnly ? (
                         <>
                             <button
@@ -730,4 +754,4 @@ export function TaskItemDisplay({
             )}
         </div>
     );
-}
+});

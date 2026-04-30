@@ -1,7 +1,7 @@
 import React from 'react';
 import { Image, Modal, Pressable, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-import type { Attachment } from '@mindwtr/core';
+import { translateWithFallback, type Attachment } from '@mindwtr/core';
 
 import { styles } from './task-edit-modal.styles';
 
@@ -131,10 +131,7 @@ export const TaskEditAudioModal = ({
     onRetryTranscription,
     onClose,
 }: TaskEditAudioModalProps) => {
-    const resolveText = (key: string, fallback: string) => {
-        const translated = t(key);
-        return translated === key ? fallback : translated;
-    };
+    const resolveText = (key: string, fallback: string) => translateWithFallback(t, key, fallback);
 
     return (
         <Modal

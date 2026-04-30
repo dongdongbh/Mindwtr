@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useId, useMemo, useRef } from 'react';
 import { Search, FileText, CheckCircle, Save, SlidersHorizontal, X } from 'lucide-react';
 import {
     shallow,
@@ -27,6 +27,7 @@ interface GlobalSearchProps {
 export const resolveGlobalSearchTaskView = resolveTaskNavigationView;
 
 export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
+    const dialogTitleId = useId();
     const [isOpen, setIsOpen] = useState(false);
     const [query, setQuery] = useState('');
     const [selectedIndex, setSelectedIndex] = useState(0);
@@ -367,11 +368,13 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
             className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh] bg-background/80 backdrop-blur-sm animate-in fade-in-0"
             role="dialog"
             aria-modal="true"
+            aria-labelledby={dialogTitleId}
         >
             <div
                 className="w-full max-w-lg bg-popover text-popover-foreground rounded-xl border shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-100"
                 onClick={(e) => e.stopPropagation()}
             >
+                <h2 id={dialogTitleId} className="sr-only">{t('search.title')}</h2>
                 <div className="flex items-center border-b px-4 py-3 gap-3">
                     <Search className="w-5 h-5 text-muted-foreground" />
                     <input
@@ -400,7 +403,7 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
                     </div>
                     <button
                         type="button"
-                        aria-label="Filters"
+                        aria-label={t('filters.label')}
                         aria-expanded={filtersOpen}
                         onClick={() => setFiltersOpen((prev) => !prev)}
                         className={cn(

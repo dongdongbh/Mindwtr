@@ -53,6 +53,19 @@ export function TrashView() {
         purgeDeletedTasks();
     };
 
+    const handlePurgeTask = async (taskId: string) => {
+        const task = _allTasks.find((item) => item.id === taskId);
+        if (!task) return;
+        const confirmed = await requestConfirmation({
+            title: task.title,
+            description: t('trash.deleteConfirmBody'),
+            confirmLabel: t('common.delete'),
+            cancelLabel: t('common.cancel') || 'Cancel',
+        });
+        if (!confirmed) return;
+        purgeTask(taskId);
+    };
+
     return (
         <ErrorBoundary>
             <div className="space-y-6">
@@ -109,7 +122,9 @@ export function TrashView() {
                                     <Undo2 className="w-4 h-4" />
                                 </button>
                                 <button
-                                    onClick={() => purgeTask(task.id)}
+                                    onClick={() => {
+                                        void handlePurgeTask(task.id);
+                                    }}
                                     className="p-2 hover:bg-destructive/10 rounded-md text-muted-foreground hover:text-destructive transition-colors"
                                     title={t('trash.deletePermanently')}
                                 >

@@ -172,6 +172,7 @@ vi.mock('./settings/useSyncSettings', () => ({
         dropboxConfigured: false,
         dropboxConnected: false,
         dropboxBusy: false,
+        dropboxAuthInProgress: false,
         dropboxRedirectUri: '',
         dropboxTestState: null,
         isSyncing: false,

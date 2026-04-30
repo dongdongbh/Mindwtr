@@ -1,5 +1,5 @@
 import { format } from 'date-fns';
-import { safeParseDate, type Project } from '@mindwtr/core';
+import { safeParseDate, tFallback, type Project } from '@mindwtr/core';
 import { Archive as ArchiveIcon, Calendar, CalendarClock, ChevronDown, ChevronRight, Copy, FolderOpenDot, ListOrdered, Loader2, RotateCcw, Signal, Trash2 } from 'lucide-react';
 
 type ProjectProgress = {
@@ -54,11 +54,11 @@ export function ProjectDetailsHeader({
     const completedRatio = projectProgress && projectProgress.total > 0
         ? Math.round((projectProgress.doneCount / projectProgress.total) * 100)
         : 0;
-    const detailsLabel = t('taskEdit.details') === 'taskEdit.details' ? 'Details' : t('taskEdit.details');
+    const detailsLabel = tFallback(t, 'taskEdit.details', 'Details');
     const dueDateValue = dueDate ? safeParseDate(dueDate) : null;
     const reviewDate = reviewAt ? safeParseDate(reviewAt) : null;
-    const dueLabelPrefix = t('taskEdit.dueDateLabel') === 'taskEdit.dueDateLabel' ? 'Due' : t('taskEdit.dueDateLabel');
-    const reviewLabelPrefix = t('projects.reviewAt') === 'projects.reviewAt' ? 'Review' : t('projects.reviewAt');
+    const dueLabelPrefix = tFallback(t, 'taskEdit.dueDateLabel', 'Due');
+    const reviewLabelPrefix = tFallback(t, 'projects.reviewAt', 'Review');
     const summaryItems = [
         {
             key: 'status',
@@ -74,8 +74,8 @@ export function ProjectDetailsHeader({
             key: 'sequence',
             icon: ListOrdered,
             label: isSequential
-                ? (t('projects.sequential') === 'projects.sequential' ? 'Sequential' : t('projects.sequential'))
-                : (t('projects.parallel') === 'projects.parallel' ? 'Parallel' : t('projects.parallel')),
+                ? tFallback(t, 'projects.sequential', 'Sequential')
+                : tFallback(t, 'projects.parallel', 'Parallel'),
         },
         ...(dueDateValue ? [{
             key: 'due',

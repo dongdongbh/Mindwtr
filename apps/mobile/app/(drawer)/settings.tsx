@@ -4,11 +4,14 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { translateText } from '@mindwtr/core';
+
 import { useMobileSyncBadge } from '@/hooks/use-mobile-sync-badge';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { AboutSettingsScreen } from '@/components/settings/about-settings-screen';
 import { AISettingsScreen } from '@/components/settings/ai-settings-screen';
 import { CalendarSettingsScreen } from '@/components/settings/calendar-settings-screen';
+import { DataSettingsScreen, SyncSettingsScreen } from '@/components/settings/sync-settings-screen';
 import { GeneralSettingsScreen } from '@/components/settings/general-settings-screen';
 import { GtdSettingsScreen } from '@/components/settings/gtd-settings-screen';
 import { ManageSettingsScreen } from '@/components/settings/manage-settings-screen';
@@ -21,12 +24,11 @@ import {
     UPDATE_BADGE_AVAILABLE_KEY,
 } from '@/components/settings/settings.constants';
 import { useSettingsLocalization, useSettingsScrollContent } from '@/components/settings/settings.hooks';
-import { SyncSettingsScreen } from '@/components/settings/sync-settings-screen';
 
 export default function SettingsPage() {
     const router = useRouter();
     const tc = useThemeColors();
-    const { t } = useSettingsLocalization();
+    const { language, t } = useSettingsLocalization();
     const scrollContentStyle = useSettingsScrollContent();
     const { settingsScreen } = useLocalSearchParams<{ settingsScreen?: string | string[] }>();
     const { syncBadgeAccessibilityLabel, syncBadgeColor } = useMobileSyncBadge();
@@ -43,6 +45,11 @@ export default function SettingsPage() {
         if (!rawScreen) return 'main';
         return SETTINGS_SCREEN_SET[rawScreen as SettingsScreen] ? (rawScreen as SettingsScreen) : 'main';
     }, [settingsScreen]);
+    const dataLabel = useMemo(() => {
+        if (language === 'zh') return '数据';
+        if (language === 'zh-Hant') return '數據';
+        return translateText('Data', language);
+    }, [language]);
 
     const pushSettingsScreen = (nextScreen: SettingsScreen) => {
         if (nextScreen === 'main') {
@@ -85,6 +92,10 @@ export default function SettingsPage() {
         return <SyncSettingsScreen />;
     }
 
+    if (currentScreen === 'data') {
+        return <DataSettingsScreen />;
+    }
+
     if (currentScreen === 'about') {
         return <AboutSettingsScreen onUpdateBadgeChange={setHasUpdateBadge} />;
     }
@@ -114,12 +125,13 @@ export default function SettingsPage() {
                     <MenuItem title={t('settings.manage')} onPress={() => pushSettingsScreen('manage')} />
                     <MenuItem title={t('settings.notifications')} onPress={() => pushSettingsScreen('notifications')} />
                     <MenuItem
-                        title={t('settings.dataSync')}
+                        title={t('settings.sync')}
                         onPress={() => pushSettingsScreen('sync')}
                         showIndicator={Boolean(syncBadgeColor)}
                         indicatorColor={syncBadgeColor}
                         indicatorAccessibilityLabel={syncBadgeAccessibilityLabel}
                     />
+                    <MenuItem title={dataLabel} onPress={() => pushSettingsScreen('data')} />
                     <MenuItem title={t('settings.advanced')} onPress={() => pushSettingsScreen('advanced')} />
                     <MenuItem title={t('settings.about')} onPress={() => pushSettingsScreen('about')} showIndicator={hasUpdateBadge} />
                 </View>

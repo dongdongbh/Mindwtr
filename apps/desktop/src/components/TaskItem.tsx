@@ -7,6 +7,8 @@ import {
     getLocalizedWeekdayLabels,
     Project,
     generateUUID,
+    normalizeClockTimeInput,
+    tFallback,
 } from '@mindwtr/core';
 import { cn } from '../lib/utils';
 import { useLanguage } from '../contexts/language-context';
@@ -15,6 +17,7 @@ import { TaskItemDisplay } from './Task/TaskItemDisplay';
 import { TaskItemEditorSurface } from './Task/TaskItemEditorSurface';
 import { TaskItemFieldRenderer } from './Task/TaskItemFieldRenderer';
 import { TaskItemOverlays } from './Task/TaskItemOverlays';
+import { TaskQuickActionMenu } from './Task/TaskQuickActionMenu';
 import {
     getRecurrenceRuleValue,
     getRecurrenceRRuleValue,
@@ -83,6 +86,7 @@ export const TaskItem = memo(function TaskItem({
 }: TaskItemProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [autoFocusTitle, setAutoFocusTitle] = useState(false);
+    const [quickActionMenu, setQuickActionMenu] = useState<{ x: number; y: number } | null>(null);
     const modalEditorRef = useRef<HTMLDivElement | null>(null);
     const lastFocusedBeforeModalRef = useRef<HTMLElement | null>(null);
     const {
@@ -486,6 +490,7 @@ export const TaskItem = memo(function TaskItem({
         editTags,
         language,
         nativeDateInputLocale,
+        defaultScheduleTime: normalizeClockTimeInput(settings?.gtd?.defaultScheduleTime) || '',
         popularContextOptions,
         popularTagOptions,
     }), [
@@ -511,6 +516,7 @@ export const TaskItem = memo(function TaskItem({
         editTags,
         language,
         nativeDateInputLocale,
+        settings?.gtd?.defaultScheduleTime,
         popularContextOptions,
         popularTagOptions,
     ]);
@@ -671,11 +677,7 @@ export const TaskItem = memo(function TaskItem({
         setSelectedProjectId(projectId);
         dispatchNavigateEvent('projects');
     }, [setHighlightTask, setSelectedProjectId, task.id]);
-    const undoLabel = useMemo(() => {
-        const translated = t('common.undo');
-        if (translated === 'common.undo') return 'Undo';
-        return translated;
-    }, [t]);
+    const undoLabel = useMemo(() => tFallback(t, 'common.undo', 'Undo'), [t]);
     const closeWaitingAssignmentPrompt = useCallback(() => {
         setShowWaitingAssignmentPrompt(false);
         setWaitingTransitionMode(null);
@@ -811,6 +813,27 @@ export const TaskItem = memo(function TaskItem({
         }
         handleDiscardChanges();
     }, [handleDiscardChanges, hasPendingEdits]);
+    const handleOpenQuickActionMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+        if (selectionMode || isEditing) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onSelect?.();
+        setQuickActionMenu({
+            x: event.clientX,
+            y: event.clientY,
+        });
+    }, [isEditing, onSelect, selectionMode]);
+    const handleOpenQuickActionButton = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+        if (selectionMode || isEditing) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onSelect?.();
+        const rect = event.currentTarget.getBoundingClientRect();
+        setQuickActionMenu({
+            x: rect.left,
+            y: rect.bottom + 4,
+        });
+    }, [isEditing, onSelect, selectionMode]);
     useEffect(() => {
         if (!isEditing) return;
         const handleGlobalCancel = (event: Event) => {
@@ -895,10 +918,35 @@ export const TaskItem = memo(function TaskItem({
         />
     );
 
-    const selectAriaLabel = (() => {
-        const label = t('task.select');
-        return label === 'task.select' ? 'Select task' : label;
-    })();
+    const selectAriaLabel = tFallback(t, 'task.select', 'Select task');
+    const displayActions = useMemo(() => ({
+        onToggleSelect,
+        onToggleView: () => toggleTaskExpanded(task.id),
+        onEdit: startEditing,
+        onDelete: () => setShowDeleteConfirm(true),
+        onDuplicate: () => duplicateTask(task.id, false),
+        onStatusChange: handleStatusChange,
+        onOpenQuickActions: handleOpenQuickActionButton,
+        onMoveToWaitingWithPrompt: handleMoveToWaitingWithPrompt,
+        onOpenProject: project ? handleOpenProject : undefined,
+        openAttachment,
+        onToggleChecklistItem: handleToggleChecklistItem,
+        focusToggle: effectiveFocusToggle,
+    }), [
+        duplicateTask,
+        effectiveFocusToggle,
+        handleMoveToWaitingWithPrompt,
+        handleOpenProject,
+        handleOpenQuickActionButton,
+        handleStatusChange,
+        handleToggleChecklistItem,
+        onToggleSelect,
+        openAttachment,
+        project,
+        startEditing,
+        task.id,
+        toggleTaskExpanded,
+    ]);
 
     return (
         <>
@@ -910,6 +958,7 @@ export const TaskItem = memo(function TaskItem({
                     event.stopPropagation();
                     startEditing();
                 }}
+                onContextMenu={handleOpenQuickActionMenu}
                 className={cn(
                     "group rounded-lg hover:bg-muted/50 dark:hover:bg-muted/20 transition-colors animate-in fade-in slide-in-from-bottom-2",
                     isCompact ? "p-2.5" : "px-3 py-3",
@@ -947,19 +996,7 @@ export const TaskItem = memo(function TaskItem({
                                 projectColor={projectColor}
                                 selectionMode={selectionMode}
                                 isViewOpen={isTaskExpanded}
-                                actions={{
-                                    onToggleSelect,
-                                    onToggleView: () => toggleTaskExpanded(task.id),
-                                    onEdit: startEditing,
-                                    onDelete: () => setShowDeleteConfirm(true),
-                                    onDuplicate: () => duplicateTask(task.id, false),
-                                    onStatusChange: handleStatusChange,
-                                    onMoveToWaitingWithPrompt: handleMoveToWaitingWithPrompt,
-                                    onOpenProject: project ? handleOpenProject : undefined,
-                                    openAttachment,
-                                    onToggleChecklistItem: handleToggleChecklistItem,
-                                    focusToggle: effectiveFocusToggle,
-                                }}
+                                actions={displayActions}
                                 visibleAttachments={visibleAttachments}
                                 recurrenceRule={recurrenceRule}
                                 recurrenceStrategy={recurrenceStrategy}
@@ -982,6 +1019,25 @@ export const TaskItem = memo(function TaskItem({
                     />
                 </div>
             </div>
+            {quickActionMenu && (
+                <TaskQuickActionMenu
+                    task={task}
+                    x={quickActionMenu.x}
+                    y={quickActionMenu.y}
+                    t={t}
+                    nativeDateInputLocale={nativeDateInputLocale}
+                    contextOptions={popularContextOptions}
+                    readOnly={effectiveReadOnly}
+                    onClose={() => setQuickActionMenu(null)}
+                    onDuplicate={() => {
+                        duplicateTask(task.id, false);
+                    }}
+                    onDelete={() => {
+                        setShowDeleteConfirm(true);
+                    }}
+                    onUpdateTask={(updates) => updateTask(task.id, updates)}
+                />
+            )}
             <TaskItemOverlays
                 applyCustomRecurrence={applyCustomRecurrence}
                 audioAttachment={audioAttachment}

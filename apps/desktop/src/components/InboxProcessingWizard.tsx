@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { ArrowRight, BookOpen, CheckCircle, ChevronLeft, ClipboardList, Clock, Trash2, User, X } from 'lucide-react';
-import { DEFAULT_PROJECT_COLOR, type Area, type Project, type Task, type TaskPriority, type TimeEstimate } from '@mindwtr/core';
+import { DEFAULT_PROJECT_COLOR, tFallback, type Area, type Project, type Task, type TaskPriority, type TimeEstimate } from '@mindwtr/core';
 
 import { cn } from '../lib/utils';
 import {
@@ -29,6 +29,7 @@ export type InboxProcessingWizardProps = {
     handleRefineNext: () => void;
     handleSkip: () => void;
     handleNotActionable: (destination: 'trash' | 'someday' | 'reference') => void;
+    handleLater: () => void;
     handleActionable: () => void;
     showDoneNowShortcut: boolean;
     showReferenceOption: boolean;
@@ -134,6 +135,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     handleRefineNext,
     handleSkip,
     handleNotActionable,
+    handleLater,
     handleActionable,
     showDoneNowShortcut,
     showReferenceOption,
@@ -212,6 +214,8 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     const currentProject = selectedProjectId
         ? projects.find((project) => project.id === selectedProjectId) ?? null
         : null;
+    const laterLabel = tFallback(t, 'process.later', 'Later');
+    const laterHint = tFallback(t, 'process.laterHint', 'Set a start date and move this to Next.');
 
     const stepLabel: Record<ProcessingStep, string> = {
         refine: t('process.refineTitle'),
@@ -419,6 +423,22 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                 <BookOpen className="w-3.5 h-3.5" /> {t('process.reference')}
                             </button>
                         )}
+                    </div>
+                    <div className="space-y-3 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
+                        <div className="text-xs text-muted-foreground">{laterHint}</div>
+                        <InboxProcessingScheduleFields
+                            t={t}
+                            fields={scheduleFields}
+                            visibleFieldKeys={['start']}
+                            variant="guided"
+                        />
+                        <button
+                            type="button"
+                            onClick={handleLater}
+                            className="w-full flex items-center justify-center gap-2 rounded-lg bg-blue-500 text-white py-2.5 text-sm font-semibold transition-colors hover:bg-blue-600"
+                        >
+                            <Clock className="w-4 h-4" /> {laterLabel}
+                        </button>
                     </div>
                     <div className={cn('gap-3', showDoneNowShortcut ? 'flex' : 'block')}>
                         <button

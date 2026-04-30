@@ -88,6 +88,29 @@ type LogEntry = {
   context?: Record<string, string>;
 };
 
+export type LogBackend = {
+  appendLogLine?: (
+    entry: {
+      ts: string;
+      level: 'info' | 'warn' | 'error';
+      scope: string;
+      message: string;
+      stack?: string;
+      context?: Record<string, string>;
+    },
+    options?: { force?: boolean }
+  ) => Promise<string | null>;
+  getLogPath?: () => Promise<string | null>;
+  ensureLogFilePath?: () => Promise<string | null>;
+  clearLog?: () => Promise<void>;
+};
+
+let customLogBackend: LogBackend | null = null;
+
+export function setLogBackend(backend: LogBackend | null): void {
+  customLogBackend = backend;
+}
+
 export function sanitizeLogMessage(value: string): string {
   return sanitizeForLog(value);
 }
@@ -193,6 +216,9 @@ function appendWithFileHandle(line: string): boolean {
 
 async function appendLogLine(entry: LogEntry, options?: { force?: boolean }): Promise<string | null> {
   if (!options?.force && !isLoggingEnabled()) return null;
+  if (customLogBackend?.appendLogLine) {
+    return customLogBackend.appendLogLine(entry, options);
+  }
   try {
     await ensureLogDir();
     if (!await ensureLogFile()) return null;
@@ -218,11 +244,17 @@ async function appendLogLine(entry: LogEntry, options?: { force?: boolean }): Pr
 }
 
 export async function getLogPath(): Promise<string | null> {
+  if (customLogBackend?.getLogPath) {
+    return customLogBackend.getLogPath();
+  }
   await ensureLogTargets();
   return LOG_FILE?.uri ?? null;
 }
 
 export async function ensureLogFilePath(): Promise<string | null> {
+  if (customLogBackend?.ensureLogFilePath) {
+    return customLogBackend.ensureLogFilePath();
+  }
   await ensureLogTargets();
   try {
     await ensureLogDir();
@@ -236,6 +268,10 @@ export async function ensureLogFilePath(): Promise<string | null> {
 }
 
 export async function clearLog(): Promise<void> {
+  if (customLogBackend?.clearLog) {
+    await customLogBackend.clearLog();
+    return;
+  }
   await ensureLogTargets();
   if (!LOG_FILE) return;
   try {

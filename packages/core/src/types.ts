@@ -23,7 +23,7 @@ export type RecurrenceByDay =
     | RecurrenceWeekday
     | `${'1' | '2' | '3' | '4' | '-1'}${RecurrenceWeekday}`;
 
-export type SettingsSyncGroup = 'appearance' | 'language' | 'externalCalendars' | 'ai';
+export type SettingsSyncGroup = 'appearance' | 'language' | 'gtd' | 'externalCalendars' | 'ai';
 
 export type SettingsSyncPreferences = Partial<Record<SettingsSyncGroup, boolean>>;
 
@@ -33,6 +33,10 @@ export interface Recurrence {
     rule: RecurrenceRule;
     strategy?: RecurrenceStrategy; // Defaults to 'strict'
     byDay?: RecurrenceByDay[]; // Explicit weekdays for weekly/monthly recurrences
+    weekStart?: RecurrenceWeekday; // RFC 5545 WKST for weekly interval anchoring
+    count?: number; // Total occurrences in the series, including the current task
+    until?: string; // ISO date/datetime when the series should stop
+    completedOccurrences?: number; // Internal counter used to preserve COUNT across generated tasks
     rrule?: string; // Optional RFC 5545 fragment (e.g. FREQ=WEEKLY;BYDAY=MO,WE)
 }
 
@@ -129,7 +133,7 @@ export interface Attachment {
     /** Optional hash (e.g., SHA-256) for integrity checks. */
     fileHash?: string;
     /**
-     * Local runtime status (not synced to remote).
+     * Local availability/transfer status. Persisted locally, but not synced to remote.
      * - available: File exists at `uri`
      * - missing: Metadata exists, file not found at `uri`
      * - uploading/downloading: Transfer in progress
@@ -153,7 +157,7 @@ export interface Task {
     taskMode?: TaskMode; // 'list' for checklist-first tasks
     startTime?: string; // ISO date string
     dueDate?: string; // ISO date string
-    recurrence?: Recurrence | RecurrenceRule;
+    recurrence?: Recurrence | RecurrenceRule; // Legacy string inputs are normalized to Recurrence on load/store writes
     pushCount?: number; // Tracks how many times dueDate was pushed later
     tags: string[];
     contexts: string[]; // e.g., '@home', '@work'
@@ -213,6 +217,7 @@ export interface AppData {
             };
             autoArchiveDays?: number;
             defaultCaptureMethod?: 'text' | 'audio';
+            defaultScheduleTime?: string; // HH:mm, used to prefill manual scheduling fields.
             saveAudioAttachments?: boolean;
             inboxProcessing?: {
                 defaultMode?: InboxProcessingMode;
@@ -225,6 +230,14 @@ export interface AppData {
             };
             weeklyReview?: {
                 includeContextStep?: boolean;
+            };
+            pomodoro?: {
+                customDurations?: {
+                    focusMinutes?: number;
+                    breakMinutes?: number;
+                };
+                autoStartBreaks?: boolean;
+                autoStartFocus?: boolean;
             };
         };
         attachments?: {
@@ -248,6 +261,9 @@ export interface AppData {
         syncPreferences?: SettingsSyncPreferences;
         syncPreferencesUpdatedAt?: SettingsSyncUpdatedAt;
         externalCalendars?: ExternalCalendarSubscription[];
+        calendar?: {
+            viewMode?: 'month' | 'day' | 'week' | 'schedule';
+        };
         keybindingStyle?: 'vim' | 'emacs';
         globalQuickAddShortcut?: string;
         window?: {

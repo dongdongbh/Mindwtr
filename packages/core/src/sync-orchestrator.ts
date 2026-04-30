@@ -17,6 +17,72 @@ export interface SyncOrchestrator<Arg, Result> {
     getState: () => { inFlight: boolean; queued: boolean };
 }
 
+export type PreSyncAttachmentBackend = 'off' | 'file' | 'webdav' | 'cloud' | 'cloudkit';
+export type PreSyncAttachmentCloudProvider = 'dropbox' | 'selfhosted';
+export type PreSyncAttachmentOperation<Data> = (data: Data) => Promise<boolean | Data | null | undefined>;
+
+export interface RunPreSyncAttachmentPhaseOptions<Data> {
+    backend: PreSyncAttachmentBackend;
+    cloudProvider?: PreSyncAttachmentCloudProvider;
+    data: Data;
+    dropbox?: PreSyncAttachmentOperation<Data>;
+    file?: PreSyncAttachmentOperation<Data>;
+    selfHostedCloud?: PreSyncAttachmentOperation<Data>;
+    webdav?: PreSyncAttachmentOperation<Data>;
+    ensureNetworkStillAvailable?: () => Promise<void> | void;
+}
+
+export interface PreSyncAttachmentPhaseResult<Data> {
+    data: Data | null;
+    mutated: boolean;
+    ran: boolean;
+}
+
+const normalizePreSyncAttachmentResult = <Data>(
+    originalData: Data,
+    result: boolean | Data | null | undefined
+): PreSyncAttachmentPhaseResult<Data> => {
+    if (result === true) {
+        return { data: originalData, mutated: true, ran: true };
+    }
+    if (result && typeof result === 'object') {
+        return { data: result, mutated: true, ran: true };
+    }
+    return { data: null, mutated: false, ran: true };
+};
+
+const ensureNetworkIfNeeded = async <Data>(
+    operation: PreSyncAttachmentOperation<Data> | undefined,
+    ensureNetworkStillAvailable: RunPreSyncAttachmentPhaseOptions<Data>['ensureNetworkStillAvailable']
+): Promise<PreSyncAttachmentOperation<Data> | undefined> => {
+    if (!operation) return undefined;
+    await ensureNetworkStillAvailable?.();
+    return operation;
+};
+
+export const runPreSyncAttachmentPhase = async <Data>(
+    options: RunPreSyncAttachmentPhaseOptions<Data>
+): Promise<PreSyncAttachmentPhaseResult<Data>> => {
+    const { backend, cloudProvider = 'selfhosted', data } = options;
+    let operation: PreSyncAttachmentOperation<Data> | undefined;
+
+    if (backend === 'webdav') {
+        operation = await ensureNetworkIfNeeded(options.webdav, options.ensureNetworkStillAvailable);
+    } else if (backend === 'file') {
+        operation = options.file;
+    } else if (backend === 'cloud' && cloudProvider === 'selfhosted') {
+        operation = await ensureNetworkIfNeeded(options.selfHostedCloud, options.ensureNetworkStillAvailable);
+    } else if (backend === 'cloud' && cloudProvider === 'dropbox') {
+        operation = await ensureNetworkIfNeeded(options.dropbox, options.ensureNetworkStillAvailable);
+    }
+
+    if (!operation) {
+        return { data: null, mutated: false, ran: false };
+    }
+
+    return normalizePreSyncAttachmentResult(data, await operation(data));
+};
+
 export const createSyncOrchestrator = <Arg, Result>(
     options: CreateSyncOrchestratorOptions<Arg, Result>
 ): SyncOrchestrator<Arg, Result> => {
@@ -46,10 +112,23 @@ export const createSyncOrchestrator = <Arg, Result>(
         const cycleArg = queuedArg ?? arg;
         queuedArg = undefined;
 
-        const current = runCycle(cycleArg, {
-            requestFollowUp: (nextArg?: Arg) => requestFollowUp(nextArg ?? cycleArg),
+        let resolveDeferred!: (value: Result) => void;
+        let rejectDeferred!: (error: unknown) => void;
+        const current = new Promise<Result>((resolve, reject) => {
+            resolveDeferred = resolve;
+            rejectDeferred = reject;
         });
         inFlight = current;
+        try {
+            void runCycle(cycleArg, {
+                requestFollowUp: (nextArg?: Arg) => requestFollowUp(nextArg ?? cycleArg),
+            }).then(
+                (result) => resolveDeferred(result),
+                (error) => rejectDeferred(error),
+            );
+        } catch (error) {
+            rejectDeferred(error);
+        }
 
         current.finally(() => {
             if (inFlight !== current) return;

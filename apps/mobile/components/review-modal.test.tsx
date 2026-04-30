@@ -70,7 +70,10 @@ vi.mock('../contexts/theme-context', () => ({
 }));
 
 vi.mock('../contexts/language-context', () => ({
-    useLanguage: () => ({ language: 'en' }),
+    useLanguage: () => ({
+        language: 'en',
+        t: (key: string) => (key === 'common.close' ? 'Close' : key),
+    }),
 }));
 
 vi.mock('../contexts/quick-capture-context', () => ({

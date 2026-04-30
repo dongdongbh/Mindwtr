@@ -1,0 +1,3 @@
+Recurring tasks can now end on a date or after a set number of occurrences, with translated copy across the app.
+Android capture and editing are steadier with keyboard submit, safer task-edit reset on close, and checklist updates that stay in sync.
+Sync and import are more reliable with OmniFocus CSV import, automatic WebDAV folder creation, preserved calendar deletions, and clearer localized sync feedback.

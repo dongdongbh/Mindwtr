@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { Modal, Pressable, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -70,7 +71,7 @@ export function GeneralSettingsScreen() {
                             <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.theme')}</Text>
                             <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{currentThemeLabel}</Text>
                         </View>
-                        <Text style={{ color: tc.secondaryText, fontSize: 18 }}>▾</Text>
+                        <Ionicons color={tc.secondaryText} name="chevron-down" size={18} />
                     </TouchableOpacity>
                 </View>
                 <Modal
@@ -104,7 +105,7 @@ export function GeneralSettingsScreen() {
                                             <Text style={[styles.pickerOptionText, { color: selected ? tc.tint : tc.text }]}>
                                                 {option.label}
                                             </Text>
-                                            {selected && <Text style={{ color: tc.tint, fontSize: 18 }}>✓</Text>}
+                                            {selected && <Ionicons color={tc.tint} name="checkmark" size={18} />}
                                         </TouchableOpacity>
                                     );
                                 })}
@@ -123,7 +124,7 @@ export function GeneralSettingsScreen() {
                                 {LANGUAGES.find((lang) => lang.id === language)?.native ?? language}
                             </Text>
                         </View>
-                        <Text style={{ color: tc.secondaryText, fontSize: 18 }}>▾</Text>
+                        <Ionicons color={tc.secondaryText} name="chevron-down" size={18} />
                     </TouchableOpacity>
                 </View>
                 <Modal
@@ -157,7 +158,7 @@ export function GeneralSettingsScreen() {
                                             <Text style={[styles.pickerOptionText, { color: selected ? tc.tint : tc.text }]}>
                                                 {lang.native}
                                             </Text>
-                                            {selected && <Text style={{ color: tc.tint, fontSize: 18 }}>✓</Text>}
+                                            {selected && <Ionicons color={tc.tint} name="checkmark" size={18} />}
                                         </TouchableOpacity>
                                     );
                                 })}
@@ -172,7 +173,7 @@ export function GeneralSettingsScreen() {
                             <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.weekStart')}</Text>
                             <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{currentWeekStartLabel}</Text>
                         </View>
-                        <Text style={{ color: tc.secondaryText, fontSize: 18 }}>▾</Text>
+                        <Ionicons color={tc.secondaryText} name="chevron-down" size={18} />
                     </TouchableOpacity>
                 </View>
                 <Modal
@@ -205,7 +206,7 @@ export function GeneralSettingsScreen() {
                                             <Text style={[styles.pickerOptionText, { color: selected ? tc.tint : tc.text }]}>
                                                 {option.label}
                                             </Text>
-                                            {selected && <Text style={{ color: tc.tint, fontSize: 18 }}>✓</Text>}
+                                            {selected && <Ionicons color={tc.tint} name="checkmark" size={18} />}
                                         </TouchableOpacity>
                                     );
                                 })}
@@ -220,7 +221,7 @@ export function GeneralSettingsScreen() {
                             <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.dateFormat')}</Text>
                             <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{currentDateFormatLabel}</Text>
                         </View>
-                        <Text style={{ color: tc.secondaryText, fontSize: 18 }}>▾</Text>
+                        <Ionicons color={tc.secondaryText} name="chevron-down" size={18} />
                     </TouchableOpacity>
                 </View>
                 <Modal
@@ -253,7 +254,7 @@ export function GeneralSettingsScreen() {
                                             <Text style={[styles.pickerOptionText, { color: selected ? tc.tint : tc.text }]}>
                                                 {option.label}
                                             </Text>
-                                            {selected && <Text style={{ color: tc.tint, fontSize: 18 }}>✓</Text>}
+                                            {selected && <Ionicons color={tc.tint} name="checkmark" size={18} />}
                                         </TouchableOpacity>
                                     );
                                 })}
@@ -268,7 +269,7 @@ export function GeneralSettingsScreen() {
                             <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.timeFormat')}</Text>
                             <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{currentTimeFormatLabel}</Text>
                         </View>
-                        <Text style={{ color: tc.secondaryText, fontSize: 18 }}>▾</Text>
+                        <Ionicons color={tc.secondaryText} name="chevron-down" size={18} />
                     </TouchableOpacity>
                 </View>
                 <Modal
@@ -301,7 +302,7 @@ export function GeneralSettingsScreen() {
                                             <Text style={[styles.pickerOptionText, { color: selected ? tc.tint : tc.text }]}>
                                                 {option.label}
                                             </Text>
-                                            {selected && <Text style={{ color: tc.tint, fontSize: 18 }}>✓</Text>}
+                                            {selected && <Ionicons color={tc.tint} name="checkmark" size={18} />}
                                         </TouchableOpacity>
                                     );
                                 })}

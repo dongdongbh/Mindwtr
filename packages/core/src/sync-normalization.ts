@@ -1,19 +1,6 @@
 import type { AppData, Area, Project, Task } from './types';
 import { normalizeTaskForLoad } from './task-status';
-import {
-    AI_PROVIDER_VALUE_SET,
-    AI_REASONING_EFFORT_VALUE_SET,
-    SETTINGS_DENSITY_VALUE_SET,
-    SETTINGS_KEYBINDING_STYLE_VALUE_SET,
-    SETTINGS_LANGUAGE_VALUE_SET,
-    SETTINGS_TEXT_SIZE_VALUE_SET,
-    SETTINGS_THEME_VALUE_SET,
-    SETTINGS_TIME_FORMAT_VALUE_SET,
-    SETTINGS_WEEK_START_VALUE_SET,
-    STT_FIELD_STRATEGY_VALUE_SET,
-    STT_MODE_VALUE_SET,
-    STT_PROVIDER_VALUE_SET,
-} from './settings-options';
+import { SYNC_REPAIR_REV_BY } from './sync-types';
 
 export const normalizeAppData = (data: AppData): AppData => ({
     tasks: Array.isArray(data.tasks) ? data.tasks : [],
@@ -128,6 +115,16 @@ export const normalizeAreaForSyncMerge = (area: Area, nowIso: string): SyncMerge
 
 const hasDeletedAt = (value: { deletedAt?: string } | undefined): boolean => Boolean(value?.deletedAt);
 
+const normalizeRepairRevision = (value?: number): number => (
+    typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value >= 0 ? value : 0
+);
+
+const withRepairRevision = <T extends { rev?: number; revBy?: string }>(item: T): T => ({
+    ...item,
+    rev: normalizeRepairRevision(item.rev) + 1,
+    revBy: SYNC_REPAIR_REV_BY,
+});
+
 export const repairMergedSyncReferences = (data: AppData, nowIso: string): AppData => {
     const liveAreaIds = new Set(
         data.areas
@@ -153,7 +150,7 @@ export const repairMergedSyncReferences = (data: AppData, nowIso: string): AppDa
                 };
         }
         return {
-            ...project,
+            ...withRepairRevision(project),
             areaId: undefined,
             areaTitle: undefined,
             updatedAt: nowIso,
@@ -176,7 +173,7 @@ export const repairMergedSyncReferences = (data: AppData, nowIso: string): AppDa
             return section;
         }
         return {
-            ...section,
+            ...withRepairRevision(section),
             deletedAt: nowIso,
             updatedAt: nowIso,
         };
@@ -227,7 +224,7 @@ export const repairMergedSyncReferences = (data: AppData, nowIso: string): AppDa
         if (!changed) return task;
 
         return {
-            ...task,
+            ...withRepairRevision(task),
             projectId: nextProjectId,
             sectionId: nextSectionId,
             areaId: nextAreaId,
@@ -443,102 +440,4 @@ export const validateSyncPayloadShape = (data: unknown, source: 'local' | 'remot
         errors.push(`${source} payload field "settings" must be an object when present`);
     }
     return errors;
-};
-
-export const sanitizeMergedSettingsForSync = (
-    merged: AppData['settings'],
-    localSettings: AppData['settings']
-): AppData['settings'] => {
-    const next: AppData['settings'] = typeof globalThis.structuredClone === 'function'
-        ? globalThis.structuredClone(merged)
-        : JSON.parse(JSON.stringify(merged));
-
-    if (next.theme !== undefined && !SETTINGS_THEME_VALUE_SET.has(next.theme)) {
-        next.theme = localSettings.theme;
-    }
-    if (next.language !== undefined && !SETTINGS_LANGUAGE_VALUE_SET.has(next.language)) {
-        next.language = localSettings.language;
-    }
-    if (next.weekStart !== undefined && !SETTINGS_WEEK_START_VALUE_SET.has(next.weekStart)) {
-        next.weekStart = localSettings.weekStart;
-    }
-    if (next.timeFormat !== undefined && !SETTINGS_TIME_FORMAT_VALUE_SET.has(next.timeFormat)) {
-        next.timeFormat = localSettings.timeFormat;
-    }
-    if (next.keybindingStyle !== undefined && !SETTINGS_KEYBINDING_STYLE_VALUE_SET.has(next.keybindingStyle)) {
-        next.keybindingStyle = localSettings.keybindingStyle;
-    }
-    if (next.dateFormat !== undefined && typeof next.dateFormat !== 'string') {
-        next.dateFormat = localSettings.dateFormat;
-    }
-    if (next.appearance !== undefined && !isObjectRecord(next.appearance)) {
-        next.appearance = localSettings.appearance
-            ? (typeof globalThis.structuredClone === 'function'
-                ? globalThis.structuredClone(localSettings.appearance)
-                : JSON.parse(JSON.stringify(localSettings.appearance)))
-            : undefined;
-    } else if (next.appearance) {
-        const fallbackAppearance = localSettings.appearance
-            ? (typeof globalThis.structuredClone === 'function'
-                ? globalThis.structuredClone(localSettings.appearance)
-                : JSON.parse(JSON.stringify(localSettings.appearance)))
-            : {};
-        let didSanitizeAppearance = false;
-
-        if (next.appearance.density !== undefined && !SETTINGS_DENSITY_VALUE_SET.has(next.appearance.density)) {
-            next.appearance = {
-                ...fallbackAppearance,
-                ...next.appearance,
-                density: localSettings.appearance?.density,
-            };
-            didSanitizeAppearance = true;
-        }
-        const sanitizedAppearance = next.appearance;
-        if (
-            sanitizedAppearance
-            && sanitizedAppearance.textSize !== undefined
-            && !SETTINGS_TEXT_SIZE_VALUE_SET.has(sanitizedAppearance.textSize)
-        ) {
-            next.appearance = {
-                ...fallbackAppearance,
-                ...sanitizedAppearance,
-                textSize: localSettings.appearance?.textSize,
-            };
-            didSanitizeAppearance = true;
-        }
-
-        const finalAppearance = next.appearance;
-        if (
-            didSanitizeAppearance
-            && finalAppearance
-            && finalAppearance.density === undefined
-            && finalAppearance.textSize === undefined
-        ) {
-            next.appearance = Object.keys(fallbackAppearance).length > 0 ? next.appearance : undefined;
-        }
-    }
-
-    if (next.ai?.enabled !== undefined && typeof next.ai.enabled !== 'boolean') {
-        next.ai.enabled = localSettings.ai?.enabled;
-    }
-    if (next.ai?.provider !== undefined && !AI_PROVIDER_VALUE_SET.has(next.ai.provider)) {
-        next.ai.provider = localSettings.ai?.provider;
-    }
-    if (next.ai?.reasoningEffort !== undefined && !AI_REASONING_EFFORT_VALUE_SET.has(next.ai.reasoningEffort)) {
-        next.ai.reasoningEffort = localSettings.ai?.reasoningEffort;
-    }
-    if (next.ai?.speechToText?.provider !== undefined && !STT_PROVIDER_VALUE_SET.has(next.ai.speechToText.provider)) {
-        next.ai.speechToText.provider = localSettings.ai?.speechToText?.provider;
-    }
-    if (next.ai?.speechToText?.mode !== undefined && !STT_MODE_VALUE_SET.has(next.ai.speechToText.mode)) {
-        next.ai.speechToText.mode = localSettings.ai?.speechToText?.mode;
-    }
-    if (
-        next.ai?.speechToText?.fieldStrategy !== undefined
-        && !STT_FIELD_STRATEGY_VALUE_SET.has(next.ai.speechToText.fieldStrategy)
-    ) {
-        next.ai.speechToText.fieldStrategy = localSettings.ai?.speechToText?.fieldStrategy;
-    }
-
-    return next;
 };

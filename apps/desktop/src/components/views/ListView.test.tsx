@@ -97,6 +97,39 @@ describe('ListView', () => {
     expect(html).toContain('data-view-filter-input');
   });
 
+  it('keeps future-start inbox tasks visible while hiding future-start next actions', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-04-16T10:00:00Z'));
+
+      useTaskStore.setState({
+        tasks: [
+          makeTask('inbox-future', {
+            title: 'Future inbox task',
+            status: 'inbox',
+            startTime: '2026-04-20',
+          }),
+          makeTask('next-future', {
+            title: 'Future next task',
+            status: 'next',
+            startTime: '2026-04-20',
+          }),
+        ],
+        lastDataChangeAt: 1,
+      });
+
+      const inbox = renderListView('inbox', 'Inbox');
+      expect(inbox.queryByText('Future inbox task')).toBeInTheDocument();
+      inbox.unmount();
+
+      const next = renderListView('next', 'Next');
+      expect(next.queryByText('Future next task')).not.toBeInTheDocument();
+      next.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not show filtering feedback after a background task refresh settles', async () => {
     useTaskStore.setState({
       tasks: [makeTask('1')],
@@ -267,7 +300,7 @@ describe('ListView', () => {
       });
 
       expect(addTask).toHaveBeenCalledWith('Tax deadline', expect.objectContaining({
-        dueDate: '2027-04-15T10:00:00.000Z',
+        dueDate: '2027-04-15',
         status: 'inbox',
       }));
     } finally {

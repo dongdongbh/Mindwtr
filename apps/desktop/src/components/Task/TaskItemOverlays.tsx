@@ -1,5 +1,5 @@
 import React from 'react';
-import type { RecurrenceWeekday } from '@mindwtr/core';
+import { translateWithFallback, type RecurrenceWeekday } from '@mindwtr/core';
 import { ConfirmModal } from '../ConfirmModal';
 import { PromptModal } from '../PromptModal';
 import { AttachmentModals } from './AttachmentModals';
@@ -124,8 +124,7 @@ export function TaskItemOverlays({
     weekdayLabels,
 }: TaskItemOverlaysProps) {
     const resolveText = (key: string, fallback: string) => {
-        const value = t(key);
-        return value === key ? fallback : value;
+        return translateWithFallback(t, key, fallback);
     };
     const waitingDuePromptTitle = resolveText('task.waitingDuePromptTitle', 'Set follow-up / review date');
     const waitingDuePromptDescription = resolveText(

@@ -1,6 +1,6 @@
 import React, { memo, useState, useMemo, useDeferredValue, useEffect, useRef, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { shallow, useTaskStore, TaskPriority, TimeEstimate, DEFAULT_AREA_COLOR, sortTasksBy, parseQuickAdd, matchesHierarchicalToken, safeParseDate, isTaskInActiveProject, getWaitingPerson } from '@mindwtr/core';
+import { shallow, useTaskStore, TaskPriority, TimeEstimate, DEFAULT_AREA_COLOR, sortTasksBy, parseQuickAdd, matchesHierarchicalToken, safeParseDate, isTaskInActiveProject, getWaitingPerson, translateWithFallback as translateTextWithFallback } from '@mindwtr/core';
 import type { Task, TaskStatus } from '@mindwtr/core';
 import type { TaskSortBy } from '@mindwtr/core';
 import { ConfirmModal } from '../ConfirmModal';
@@ -104,8 +104,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
     const resetListFilters = useUiStore((state) => state.resetListFilters);
     const showToast = useUiStore((state) => state.showToast);
     const translateWithFallback = useCallback((key: string, fallback: string) => {
-        const value = t(key);
-        return value === key ? fallback : value;
+        return translateTextWithFallback(t, key, fallback);
     }, [t]);
     const showListDetails = useUiStore((state) => state.listOptions.showDetails);
     const nextGroupBy = useUiStore((state) => state.listOptions.nextGroupBy);
@@ -359,10 +358,6 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                     deferredFilterInputs.areaById
                 )) return false;
 
-                if (deferredFilterInputs.statusFilter === 'inbox') {
-                    const start = safeParseDate(t.startTime);
-                    if (start && start > now) return false;
-                }
                 if (deferredFilterInputs.statusFilter === 'next') {
                     const start = safeParseDate(t.startTime);
                     if (start && start > now) return false;
@@ -414,8 +409,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
         });
     }, [deferredFilterInputs, normalizedSearchQuery, showViewFilterInput]);
     const resolveText = useCallback((key: string, fallback: string) => {
-        const value = t(key);
-        return value === key ? fallback : value;
+        return translateTextWithFallback(t, key, fallback);
     }, [t]);
     const activeNextGroupBy: NextGroupBy = statusFilter === 'next' ? nextGroupBy : 'none';
     const isReferenceAreaGrouping = statusFilter === 'reference';
@@ -966,7 +960,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             isOpen={tagPromptOpen}
             title={t('bulk.addTag')}
             description={t('bulk.addTag')}
-            placeholder="#tag"
+            placeholder={t('bulk.tagPlaceholder')}
             defaultValue=""
             confirmLabel={t('common.save')}
             cancelLabel={t('common.cancel')}
@@ -977,7 +971,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             isOpen={contextPromptOpen}
             title={contextPromptMode === 'add' ? t('bulk.addContext') : t('bulk.removeContext')}
             description={contextPromptMode === 'add' ? t('bulk.addContext') : t('bulk.removeContext')}
-            placeholder="@context"
+            placeholder={t('bulk.contextPlaceholder')}
             defaultValue=""
             confirmLabel={t('common.save')}
             cancelLabel={t('common.cancel')}

@@ -25,7 +25,7 @@ By default, this feature is **off** to keep Focus minimal and distraction-free.
 ## How It Works
 
 - Pick one task from your current Focus candidates.
-- Choose a preset: `15/3`, `25/5`, or `50/10`
+- Choose a preset: `15/3`, `25/5`, `50/10`, or one optional custom preset from **Settings → GTD**
 - Start your focus session.
 - When a focus session ends, Mindwtr switches to break and pauses so you can start intentionally.
 - When a break ends, it switches back to focus.
@@ -49,6 +49,7 @@ Controls:
 - Use `15/3` for inbox cleanup, small admin work, or getting unstuck.
 - Use `25/5` as the default daily rhythm for normal next actions.
 - Use `50/10` for deep project work when the task is already clear enough to start.
+- Use a custom preset if you need one different rhythm, but keep it simple.
 - Use **Mark done** only when the selected task is actually finished; otherwise pause or switch phase and keep the task alive.
 
 ---
@@ -57,4 +58,4 @@ Controls:
 
 - Pomodoro is task-linked in Focus, so you always know what you are working on.
 - The panel is intentionally opt-in so users who prefer a clean GTD Focus page can keep it hidden.
-- The built-in presets are fixed and simple by design to avoid turning Focus into a timer customization screen.
+- The built-in presets stay fixed and simple. Mindwtr only adds one optional custom preset so Focus does not turn into a timer customization screen.

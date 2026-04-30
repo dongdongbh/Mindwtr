@@ -23,7 +23,7 @@ import {
     type LucideIcon,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { shallow, useTaskStore, safeParseDate, safeFormatDate } from '@mindwtr/core';
+import { shallow, useTaskStore, safeFormatDate, translateWithFallback } from '@mindwtr/core';
 import { useLanguage } from '../contexts/language-context';
 import { useUiStore } from '../store/ui-store';
 import { useObsidianStore } from '../store/obsidian-store';
@@ -89,10 +89,10 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
     const { t } = useLanguage();
     const isCollapsed = settings?.sidebarCollapsed ?? false;
     const isFocusMode = useUiStore((state) => state.isFocusMode);
+    const showToast = useUiStore((state) => state.showToast);
     const isObsidianEnabled = useObsidianStore((state) => state.config.enabled);
     const tOrFallback = (key: string, fallback: string) => {
-        const value = t(key);
-        return value === key ? fallback : value;
+        return translateWithFallback(t, key, fallback);
     };
     const [syncStatus, setSyncStatus] = useState(() => SyncService.getSyncStatus());
     const [isOnline, setIsOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
@@ -114,6 +114,7 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
     }, []);
     const [syncFreshness, setSyncFreshness] = useState(() => getSyncFreshnessBucket(lastSyncAt));
     const lastSyncAtRef = useRef(lastSyncAt);
+    const shownConflictToastKeyRef = useRef<string | null>(null);
     lastSyncAtRef.current = lastSyncAt;
     useEffect(() => {
         setSyncFreshness(getSyncFreshnessBucket(lastSyncAt));
@@ -123,10 +124,24 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
         return () => clearInterval(timer);
     }, [lastSyncAt, getSyncFreshnessBucket]);
 
+    const syncConflictNotice = tOrFallback(
+        'settings.syncConflictNotice',
+        'Sync conflict resolved with last-write-wins. Open sync settings to review the details.'
+    );
+    useEffect(() => {
+        if (lastSyncStatus !== 'conflict') return;
+        const toastKey = `${lastSyncAt ?? 'unknown'}:${lastSyncStatus}`;
+        if (shownConflictToastKeyRef.current === toastKey) return;
+        shownConflictToastKeyRef.current = toastKey;
+        showToast(syncConflictNotice, 'info', 6000);
+    }, [lastSyncAt, lastSyncStatus, showToast, syncConflictNotice]);
+
     const syncFreshnessDotClass = !isOnline
         ? 'bg-destructive'
         : lastSyncStatus === 'error'
             ? 'bg-orange-400'
+            : lastSyncStatus === 'conflict'
+                ? 'bg-amber-400'
             : syncFreshness === 'none'
                 ? 'bg-muted-foreground/40'
                 : syncFreshness === 'old'
@@ -139,6 +154,8 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
         ? (t('common.offline') || 'Offline')
         : lastSyncStatus === 'error' && lastSyncError
             ? `${tOrFallback('settings.lastSyncError', 'Sync failed')}: ${lastSyncError}\n${tOrFallback('settings.lastSync', 'Last sync')}: ${fullSyncTimestamp}`
+            : lastSyncStatus === 'conflict'
+                ? `${tOrFallback('settings.lastSyncConflict', 'Conflicts resolved')}\n${syncConflictNotice}\n${tOrFallback('settings.lastSync', 'Last sync')}: ${fullSyncTimestamp}`
             : `${tOrFallback('settings.lastSync', 'Last sync')}: ${fullSyncTimestamp}`;
     const formatCompactSyncTime = useCallback((iso: string) => {
         const date = new Date(iso);
@@ -164,13 +181,10 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
     );
     const sortedAreas = useMemo(() => [...areas].sort((a, b) => a.order - b.order), [areas]);
     const inboxCount = useMemo(() => {
-        const now = Date.now();
         let count = 0;
         for (const task of tasks) {
             if (task.deletedAt) continue;
             if (task.status !== 'inbox') continue;
-            const start = safeParseDate(task.startTime);
-            if (start && start.getTime() > now) continue;
             if (!taskMatchesAreaFilter(task, resolvedAreaFilter, projectMap, areaById)) continue;
             count += 1;
         }

@@ -176,6 +176,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_reviewAt ON tasks(reviewAt);
 CREATE INDEX IF NOT EXISTS idx_tasks_completedAt ON tasks(completedAt);
 CREATE INDEX IF NOT EXISTS idx_tasks_createdAt ON tasks(createdAt);
 CREATE INDEX IF NOT EXISTS idx_tasks_updatedAt ON tasks(updatedAt);
+CREATE INDEX IF NOT EXISTS idx_tasks_updatedAt_rev ON tasks(updatedAt, rev);
 CREATE INDEX IF NOT EXISTS idx_tasks_updatedAt_deletedAt ON tasks(updatedAt, deletedAt);
 CREATE INDEX IF NOT EXISTS idx_tasks_status_deletedAt ON tasks(status, deletedAt);
 CREATE INDEX IF NOT EXISTS idx_tasks_project_deletedAt ON tasks(projectId, deletedAt);
@@ -187,8 +188,12 @@ CREATE INDEX IF NOT EXISTS idx_tasks_area_id ON tasks(areaId);
 CREATE INDEX IF NOT EXISTS idx_tasks_section_id ON tasks(sectionId);
 CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
 CREATE INDEX IF NOT EXISTS idx_projects_areaId ON projects(areaId);
+CREATE INDEX IF NOT EXISTS idx_projects_area_deletedAt ON projects(areaId, deletedAt);
 CREATE INDEX IF NOT EXISTS idx_projects_area_order ON projects(areaId, orderNum);
 CREATE INDEX IF NOT EXISTS idx_projects_dueDate ON projects(dueDate);
+CREATE INDEX IF NOT EXISTS idx_projects_updatedAt_rev ON projects(updatedAt, rev);
+CREATE INDEX IF NOT EXISTS idx_sections_updatedAt_rev ON sections(updatedAt, rev);
+CREATE INDEX IF NOT EXISTS idx_areas_updatedAt_rev ON areas(updatedAt, rev);
 `;
 
 export const SQLITE_FTS_SCHEMA = `

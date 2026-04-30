@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+    canAutoSync,
+    coerceSupportedSyncBackend,
     formatSyncErrorMessage,
     getFileSyncDir,
     isLikelyOfflineSyncError,
+    isRemoteSyncBackend,
     isSyncFilePath,
     normalizeSyncBackend,
+    resolveSyncBackend,
     sanitizeSyncErrorMessage,
 } from './sync-service-utils';
 
@@ -19,6 +23,18 @@ describe('sync-service-utils', () => {
         expect(normalizeSyncBackend(null)).toBe('off');
     });
 
+    it('resolves supported backend capabilities', () => {
+        expect(resolveSyncBackend('cloudkit')).toBe('cloudkit');
+        expect(resolveSyncBackend('invalid')).toBe('off');
+        expect(coerceSupportedSyncBackend('cloudkit', { allowCloudKit: false })).toBe('off');
+        expect(coerceSupportedSyncBackend('cloudkit', { allowCloudKit: true })).toBe('cloudkit');
+        expect(isRemoteSyncBackend('webdav')).toBe(true);
+        expect(isRemoteSyncBackend('cloud')).toBe(true);
+        expect(isRemoteSyncBackend('cloudkit')).toBe(true);
+        expect(isRemoteSyncBackend('file')).toBe(false);
+        expect(isRemoteSyncBackend('off')).toBe(false);
+    });
+
     it('detects sync file paths using default names', () => {
         expect(isSyncFilePath('/storage/data.json')).toBe(true);
         expect(isSyncFilePath('/storage/mindwtr-sync.json')).toBe(true);
@@ -29,6 +45,18 @@ describe('sync-service-utils', () => {
         expect(getFileSyncDir('/storage/folder/data.json')).toBe('/storage/folder');
         expect(getFileSyncDir('/storage/folder/mindwtr-sync.json')).toBe('/storage/folder');
         expect(getFileSyncDir('/storage/folder/')).toBe('/storage/folder');
+    });
+
+    it('evaluates autosync eligibility from normalized backend config', () => {
+        expect(canAutoSync({ backend: 'off' })).toBe(false);
+        expect(canAutoSync({ backend: 'cloudkit' })).toBe(true);
+        expect(canAutoSync({ backend: 'file', filePath: '' })).toBe(false);
+        expect(canAutoSync({ backend: 'file', filePath: '/tmp/data.json' })).toBe(true);
+        expect(canAutoSync({ backend: 'webdav', webdavUrl: 'https://sync.example.com' })).toBe(true);
+        expect(canAutoSync({ backend: 'cloud', cloudProvider: 'selfhosted', cloudUrl: '' })).toBe(false);
+        expect(canAutoSync({ backend: 'cloud', cloudProvider: 'selfhosted', cloudUrl: 'https://sync.example.com' })).toBe(true);
+        expect(canAutoSync({ backend: 'cloud', cloudProvider: 'dropbox', dropboxAppKey: 'key', isDropboxConnected: false })).toBe(false);
+        expect(canAutoSync({ backend: 'cloud', cloudProvider: 'dropbox', dropboxAppKey: 'key', isDropboxConnected: true })).toBe(true);
     });
 
     it('redacts credentials from sync error messages', () => {

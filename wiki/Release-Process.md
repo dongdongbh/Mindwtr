@@ -89,6 +89,7 @@ For larger releases, also verify:
 - desktop updater metadata
 - mobile store metadata / Fastlane inputs
 - wiki/docs changes for user-visible features
+- cross-backend sync smoke with a small seed dataset: add, update, delete, and attachment transfer should converge across Cloud, WebDAV/file sync, and any platform-native backend available to the release tester; a second sync should report no new conflicts
 
 ---
 

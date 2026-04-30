@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { KeybindingStyle } from '../contexts/keybinding-context';
 import {
     type GlobalQuickAddShortcutSetting,
@@ -25,6 +26,7 @@ export function KeybindingHelpModal({
     quickAddShortcut,
     t,
 }: KeybindingHelpModalProps) {
+    const titleId = useId();
     const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);
     const quickAddShortcutDisplay = formatGlobalQuickAddShortcutForDisplay(quickAddShortcut, isMac);
     const sharedGlobal: HelpItem[] = [
@@ -111,24 +113,24 @@ export function KeybindingHelpModal({
     return (
         <div
             className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-            role="button"
-            tabIndex={0}
-            aria-label={t('common.close')}
-            onClick={onClose}
             onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
+                if (event.key === 'Escape') {
                     event.preventDefault();
                     onClose();
                 }
             }}
         >
+            <div className="absolute inset-0" aria-hidden="true" onClick={onClose} />
             <div
-                className="bg-card border border-border rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col"
+                className="relative bg-card border border-border rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={titleId}
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="p-6 border-b border-border flex items-center justify-between">
                     <div>
-                        <h3 className="text-xl font-semibold">{t('keybindings.helpTitle')}</h3>
+                        <h3 id={titleId} className="text-xl font-semibold">{t('keybindings.helpTitle')}</h3>
                         <p className="text-sm text-muted-foreground mt-1">
                             {t('keybindings.helpSubtitle')}
                         </p>
@@ -170,6 +172,7 @@ export function KeybindingHelpModal({
 
                 <div className="p-4 border-t border-border flex justify-end">
                     <button
+                        type="button"
                         onClick={onClose}
                         className="px-4 py-2 rounded-md text-sm font-medium bg-muted hover:bg-muted/80 transition-colors"
                     >

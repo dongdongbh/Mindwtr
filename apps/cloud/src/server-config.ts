@@ -1,4 +1,4 @@
-import type { Task } from '@mindwtr/core';
+import type { Area, Project, Section, Task } from '@mindwtr/core';
 
 type Flags = Record<string, string | boolean>;
 type LogLevel = 'info' | 'warn' | 'error';
@@ -120,6 +120,43 @@ export const CLOUD_TASK_PATCH_ALLOWED_PROP_KEYS = new Set<keyof Task>([
     'order',
     'orderNum',
     ...CLOUD_TASK_CREATION_ALLOWED_PROP_KEYS,
+]);
+export const CLOUD_PROJECT_CREATION_ALLOWED_PROP_KEYS = new Set<keyof Project>([
+    'status',
+    'color',
+    'order',
+    'tagIds',
+    'isSequential',
+    'isFocused',
+    'supportNotes',
+    'attachments',
+    'dueDate',
+    'reviewAt',
+    'areaId',
+    'areaTitle',
+]);
+export const CLOUD_PROJECT_PATCH_ALLOWED_PROP_KEYS = new Set<keyof Project>([
+    'title',
+    ...CLOUD_PROJECT_CREATION_ALLOWED_PROP_KEYS,
+]);
+export const CLOUD_SECTION_CREATION_ALLOWED_PROP_KEYS = new Set<keyof Section>([
+    'description',
+    'order',
+    'isCollapsed',
+]);
+export const CLOUD_SECTION_PATCH_ALLOWED_PROP_KEYS = new Set<keyof Section>([
+    'projectId',
+    'title',
+    ...CLOUD_SECTION_CREATION_ALLOWED_PROP_KEYS,
+]);
+export const CLOUD_AREA_CREATION_ALLOWED_PROP_KEYS = new Set<keyof Area>([
+    'color',
+    'icon',
+    'order',
+]);
+export const CLOUD_AREA_PATCH_ALLOWED_PROP_KEYS = new Set<keyof Area>([
+    'name',
+    ...CLOUD_AREA_CREATION_ALLOWED_PROP_KEYS,
 ]);
 export const CLOUD_API_REV_BY = 'cloud';
 export const BEARER_TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]{20,512}$/;

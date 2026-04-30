@@ -1,10 +1,8 @@
-import { Area, Project } from '@mindwtr/core';
+import { Area, Project, translateWithFallback, type TranslateFn } from '@mindwtr/core';
 import { ActionSheetIOS, Alert, Keyboard, Platform } from 'react-native';
 
 import type { ToastOptions } from '@/contexts/toast-context';
 import { normalizeProjectTag } from '@/components/projects-screen/projects-screen.utils';
-
-type TranslateFn = (key: string) => string;
 
 type AreaColorMeta = {
     nameKey: string;
@@ -41,11 +39,6 @@ type OpenProjectTagPickerArgs = {
     t: TranslateFn;
     toggleProjectTag: (tag: string) => void;
     updateProject: (id: string, updates: Partial<Project>) => void;
-};
-
-const translateWithFallback = (t: TranslateFn, key: string, fallback: string) => {
-    const translated = t(key);
-    return translated === key ? fallback : translated;
 };
 
 export const openProjectAreaPicker = ({

@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+    advancePomodoroState,
     createPomodoroState,
     DEFAULT_POMODORO_DURATIONS,
     formatPomodoroClock,
-    POMODORO_PRESETS,
+    getPomodoroPresetOptions,
+    PomodoroAutoStartOptions,
     PomodoroDurations,
+    PomodoroEvent,
     PomodoroState,
     resetPomodoroState,
     Task,
-    tickPomodoroState,
+    translateWithFallback,
     useTaskStore,
 } from '@mindwtr/core';
 import { Play, Pause, RotateCcw, TimerReset, CheckCircle2 } from 'lucide-react';
@@ -20,13 +23,11 @@ interface PomodoroPanelProps {
     tasks: Task[];
 }
 
-type PomodoroEvent = 'focus-finished' | 'break-finished' | null;
-
 type PomodoroSnapshot = {
     durations: PomodoroDurations;
     timerState: PomodoroState;
     selectedTaskId?: string;
-    lastEvent: PomodoroEvent;
+    lastEvent: PomodoroEvent | null;
     updatedAtMs: number;
 };
 
@@ -38,34 +39,21 @@ const createInitialSnapshot = (): PomodoroSnapshot => ({
     updatedAtMs: Date.now(),
 });
 
-const advancePomodoro = (
-    timerState: PomodoroState,
-    durations: PomodoroDurations,
-    elapsedSeconds: number
-): { timerState: PomodoroState; lastEvent: PomodoroEvent } => {
-    let nextState = timerState;
-    let lastEvent: PomodoroEvent = null;
-    for (let i = 0; i < elapsedSeconds; i += 1) {
-        const next = tickPomodoroState(nextState, durations);
-        nextState = next.state;
-        if (next.switchedPhase) {
-            lastEvent = next.completedFocusSession ? 'focus-finished' : 'break-finished';
-        }
-    }
-    return { timerState: nextState, lastEvent };
-};
-
-const reconcileSnapshot = (snapshot: PomodoroSnapshot, nowMs: number): PomodoroSnapshot => {
+const reconcileSnapshot = (
+    snapshot: PomodoroSnapshot,
+    nowMs: number,
+    autoStartOptions: PomodoroAutoStartOptions
+): PomodoroSnapshot => {
     if (!snapshot.timerState.isRunning) {
         return { ...snapshot, updatedAtMs: nowMs };
     }
     const elapsedSeconds = Math.floor((nowMs - snapshot.updatedAtMs) / 1000);
     if (elapsedSeconds <= 0) return snapshot;
-    const advanced = advancePomodoro(snapshot.timerState, snapshot.durations, elapsedSeconds);
+    const advanced = advancePomodoroState(snapshot.timerState, snapshot.durations, elapsedSeconds, autoStartOptions);
     const updatedAtMs = snapshot.updatedAtMs + elapsedSeconds * 1000;
     return {
         ...snapshot,
-        timerState: advanced.timerState,
+        timerState: advanced.state,
         lastEvent: advanced.lastEvent ?? snapshot.lastEvent,
         updatedAtMs,
     };
@@ -76,16 +64,22 @@ let persistedSnapshot: PomodoroSnapshot = createInitialSnapshot();
 export function PomodoroPanel({ tasks }: PomodoroPanelProps) {
     const updateTask = useTaskStore((state) => state.updateTask);
     const notificationsEnabled = useTaskStore((state) => state.settings.notificationsEnabled !== false);
+    const customDurations = useTaskStore((state) => state.settings.gtd?.pomodoro?.customDurations);
+    const autoStartBreaks = useTaskStore((state) => state.settings.gtd?.pomodoro?.autoStartBreaks === true);
+    const autoStartFocus = useTaskStore((state) => state.settings.gtd?.pomodoro?.autoStartFocus === true);
     const { t } = useLanguage();
+    const autoStartOptions = useMemo<PomodoroAutoStartOptions>(
+        () => ({ autoStartBreaks, autoStartFocus }),
+        [autoStartBreaks, autoStartFocus]
+    );
     const resolveText = useCallback((key: string, fallback: string) => {
-        const value = t(key);
-        return value === key ? fallback : value;
+        return translateWithFallback(t, key, fallback);
     }, [t]);
     const [snapshot, setSnapshot] = useState<PomodoroSnapshot>(() => {
-        persistedSnapshot = reconcileSnapshot(persistedSnapshot, Date.now());
+        persistedSnapshot = reconcileSnapshot(persistedSnapshot, Date.now(), autoStartOptions);
         return persistedSnapshot;
     });
-    const previousEventRef = useRef<PomodoroEvent>(snapshot.lastEvent);
+    const previousEventRef = useRef<PomodoroEvent | null>(snapshot.lastEvent);
 
     const commitSnapshot = useCallback((updater: (prev: PomodoroSnapshot) => PomodoroSnapshot) => {
         setSnapshot((prev) => {
@@ -108,10 +102,10 @@ export function PomodoroPanel({ tasks }: PomodoroPanelProps) {
     useEffect(() => {
         if (!snapshot.timerState.isRunning) return;
         const intervalId = window.setInterval(() => {
-            commitSnapshot((prev) => reconcileSnapshot(prev, Date.now()));
+            commitSnapshot((prev) => reconcileSnapshot(prev, Date.now(), autoStartOptions));
         }, 1000);
         return () => window.clearInterval(intervalId);
-    }, [commitSnapshot, snapshot.timerState.isRunning]);
+    }, [autoStartOptions, commitSnapshot, snapshot.timerState.isRunning]);
 
     const durations = snapshot.durations;
     const timerState = snapshot.timerState;
@@ -122,25 +116,19 @@ export function PomodoroPanel({ tasks }: PomodoroPanelProps) {
         () => (selectedTaskId ? tasks.find((task) => task.id === selectedTaskId) : undefined),
         [selectedTaskId, tasks]
     );
+    const presetOptions = useMemo(() => getPomodoroPresetOptions(customDurations), [customDurations]);
 
-    const phaseLabelRaw = timerState.phase === 'focus' ? t('pomodoro.phaseFocus') : t('pomodoro.phaseBreak');
-    const phaseLabel = phaseLabelRaw.startsWith('pomodoro.') ? (timerState.phase === 'focus' ? 'Focus session' : 'Break') : phaseLabelRaw;
-    const cardTitleRaw = t('pomodoro.title');
-    const cardTitle = cardTitleRaw.startsWith('pomodoro.') ? 'Pomodoro Focus' : cardTitleRaw;
-    const subtitleRaw = t('pomodoro.subtitle');
-    const subtitle = subtitleRaw.startsWith('pomodoro.') ? 'Work one task at a time.' : subtitleRaw;
-    const sessionCountRaw = t('pomodoro.sessionsDone');
-    const sessionCountLabel = sessionCountRaw.startsWith('pomodoro.') ? 'Focus sessions completed' : sessionCountRaw;
-    const switchPhaseRaw = t('pomodoro.switchPhase');
-    const switchPhaseLabel = switchPhaseRaw.startsWith('pomodoro.') ? 'Switch phase' : switchPhaseRaw;
-    const markDoneRaw = t('pomodoro.markTaskDone');
-    const markDoneLabel = markDoneRaw.startsWith('pomodoro.') ? 'Mark done' : markDoneRaw;
-    const noTaskRaw = t('pomodoro.noTask');
-    const noTaskLabel = noTaskRaw.startsWith('pomodoro.') ? 'No available focus task' : noTaskRaw;
-    const focusDoneRaw = t('pomodoro.focusComplete');
-    const focusDoneLabel = focusDoneRaw.startsWith('pomodoro.') ? 'Focus session complete. Take a short break.' : focusDoneRaw;
-    const breakDoneRaw = t('pomodoro.breakComplete');
-    const breakDoneLabel = breakDoneRaw.startsWith('pomodoro.') ? 'Break complete. Ready for the next focus session.' : breakDoneRaw;
+    const phaseLabel = timerState.phase === 'focus'
+        ? resolveText('pomodoro.phaseFocus', 'Focus session')
+        : resolveText('pomodoro.phaseBreak', 'Break');
+    const cardTitle = resolveText('pomodoro.title', 'Pomodoro Focus');
+    const subtitle = resolveText('pomodoro.subtitle', 'Work one task at a time.');
+    const sessionCountLabel = resolveText('pomodoro.sessionsDone', 'Focus sessions completed');
+    const switchPhaseLabel = resolveText('pomodoro.switchPhase', 'Switch phase');
+    const markDoneLabel = resolveText('pomodoro.markTaskDone', 'Mark done');
+    const noTaskLabel = resolveText('pomodoro.noTask', 'No available focus task');
+    const focusDoneLabel = resolveText('pomodoro.focusComplete', 'Focus session complete. Take a short break.');
+    const breakDoneLabel = resolveText('pomodoro.breakComplete', 'Break complete. Ready for the next focus session.');
 
     useEffect(() => {
         const previous = previousEventRef.current;
@@ -154,7 +142,7 @@ export function PomodoroPanel({ tasks }: PomodoroPanelProps) {
     const handleApplyPreset = (focusMinutes: number, breakMinutes: number) => {
         const nextDurations = { focusMinutes, breakMinutes };
         commitSnapshot((prev) => {
-            const reconciled = reconcileSnapshot(prev, Date.now());
+            const reconciled = reconcileSnapshot(prev, Date.now(), autoStartOptions);
             return {
                 ...reconciled,
                 durations: nextDurations,
@@ -167,7 +155,7 @@ export function PomodoroPanel({ tasks }: PomodoroPanelProps) {
 
     const handleToggleRun = () => {
         commitSnapshot((prev) => {
-            const reconciled = reconcileSnapshot(prev, Date.now());
+            const reconciled = reconcileSnapshot(prev, Date.now(), autoStartOptions);
             return {
                 ...reconciled,
                 timerState: { ...reconciled.timerState, isRunning: !reconciled.timerState.isRunning },
@@ -178,7 +166,7 @@ export function PomodoroPanel({ tasks }: PomodoroPanelProps) {
 
     const handleReset = () => {
         commitSnapshot((prev) => {
-            const reconciled = reconcileSnapshot(prev, Date.now());
+            const reconciled = reconcileSnapshot(prev, Date.now(), autoStartOptions);
             return {
                 ...reconciled,
                 timerState: resetPomodoroState(reconciled.timerState, reconciled.durations, reconciled.timerState.phase),
@@ -190,7 +178,7 @@ export function PomodoroPanel({ tasks }: PomodoroPanelProps) {
 
     const handleSwitchPhase = () => {
         commitSnapshot((prev) => {
-            const reconciled = reconcileSnapshot(prev, Date.now());
+            const reconciled = reconcileSnapshot(prev, Date.now(), autoStartOptions);
             return {
                 ...reconciled,
                 timerState: resetPomodoroState(
@@ -230,7 +218,7 @@ export function PomodoroPanel({ tasks }: PomodoroPanelProps) {
             </header>
 
             <div className="flex flex-wrap gap-2">
-                {POMODORO_PRESETS.map((preset) => {
+                {presetOptions.map((preset) => {
                     const active = durations.focusMinutes === preset.focusMinutes && durations.breakMinutes === preset.breakMinutes;
                     return (
                         <button

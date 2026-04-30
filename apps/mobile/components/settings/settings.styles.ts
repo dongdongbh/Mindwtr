@@ -218,6 +218,10 @@ export const styles = StyleSheet.create({
     },
     inputGroup: { padding: 16 },
     textInput: { marginTop: 8, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 },
+    inlineInputRow: { flexDirection: 'row', gap: 12 },
+    inlineInputGroup: { flex: 1 },
+    inlineInputLabel: { fontSize: 12, fontWeight: '600' },
+    inlineTextInput: { marginTop: 6 },
     manageColorPicker: {
         flexDirection: 'row',
         flexWrap: 'wrap',

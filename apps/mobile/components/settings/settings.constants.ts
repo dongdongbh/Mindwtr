@@ -13,6 +13,7 @@ export type SettingsScreen =
     | 'gtd-task-editor'
     | 'manage'
     | 'sync'
+    | 'data'
     | 'about';
 
 export const SETTINGS_SCREEN_SET: Record<SettingsScreen, true> = {
@@ -28,6 +29,7 @@ export const SETTINGS_SCREEN_SET: Record<SettingsScreen, true> = {
     'gtd-task-editor': true,
     manage: true,
     sync: true,
+    data: true,
     about: true,
 };
 

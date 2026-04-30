@@ -71,6 +71,44 @@
   <url type="bugtracker">https://github.com/dongdongbh/Mindwtr/issues</url>
   <url type="vcs-browser">https://github.com/dongdongbh/Mindwtr</url>
   <releases>
+    <release version="0.8.8" date="2026-04-26">
+      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v0.8.8</url>
+      <description translate="no">
+        <p>Mindwtr 0.8.8 expands desktop calendar planning and improves Linux desktop reliability.</p>
+        <ul>
+          <li>Added multi-view desktop calendar planning with month, day, week, and schedule views plus a scheduled-task composer.</li>
+          <li>Added a default schedule time and safer external-calendar handling by ignoring Mindwtr mirror calendars.</li>
+          <li>Added an Inbox Later shortcut and assignee search operator.</li>
+          <li>Hardened desktop sync with WebDAV retry recovery, cloud merge cleanup, attachment pre-sync orchestration, and fewer false conflict reports.</li>
+          <li>Restored Flatpak audio capture access.</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.8.7" date="2026-04-24">
+      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v0.8.7</url>
+      <description translate="no">
+        <p>Mindwtr 0.8.7 improves desktop task handling, import coverage, Pomodoro flow, and sync reliability.</p>
+        <ul>
+          <li>Added desktop task quick actions from right-click or the More button for due dates, contexts, duplicate, and delete.</li>
+          <li>Expanded OmniFocus import to JSON and ZIP exports, including folders, checklist children, and supported repeat rules.</li>
+          <li>Added Pomodoro auto-start options and restored desktop fullscreen state across launches.</li>
+          <li>Hardened desktop sync with better WebDAV collection handling, Dropbox read fallback, conflict cleanup, recurrence normalization, and SQLite indexes.</li>
+          <li>Updated desktop store screenshots/assets and kept Flathub release metadata from re-adding rejected single-instance D-Bus permissions.</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.8.6" date="2026-04-22">
+      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v0.8.6</url>
+      <description translate="no">
+        <p>Mindwtr 0.8.6 improves desktop planning, sync handling, and Linux release polish.</p>
+        <ul>
+          <li>Added recurrence end conditions, custom Pomodoro durations, and OmniFocus CSV import for desktop workflows.</li>
+          <li>Split Settings into clearer Sync and Data pages, improved dialog accessibility, and added confirmation before permanent archive or trash deletes.</li>
+          <li>Made desktop sync steadier with clearer conflict and status feedback, safer WebDAV folder creation, and more reliable queued reruns.</li>
+          <li>Refreshed AppStream and Flathub screenshots plus desktop install documentation.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.8.5" date="2026-04-19">
       <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v0.8.5</url>
       <description translate="no">

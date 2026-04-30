@@ -7,7 +7,7 @@ Supported sources:
 - a DGT GTD **JSON** export
 - a DGT GTD **ZIP** archive containing the exported JSON file
 
-Import is available on desktop and mobile from **Settings → Data & Sync / Sync → Import from DGT GTD**.
+Import is available on desktop and mobile from **Settings → Data → Import from DGT GTD**.
 
 ---
 

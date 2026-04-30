@@ -1,0 +1,5 @@
+El calendario suma vista semanal movil, mes renovado, programador de tareas, hora predeterminada y destino seleccionable para envios.
+Los avisos de Review ahora abren Review directamente.
+Los widgets Android son mas densos y siguen el tema.
+Captura rapida mantiene el texto dentro del panel y voz a texto evita un crash realtime en Android.
+Inbox agrega Later, la busqueda filtra por responsable y sync mejora WebDAV, merges cloud y falsos conflictos.

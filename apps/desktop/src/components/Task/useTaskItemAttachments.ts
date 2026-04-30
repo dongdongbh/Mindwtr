@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Attachment, DEFAULT_PROJECT_COLOR, buildTaskUpdatesFromSpeechResult, generateUUID, useTaskStore, validateAttachmentForUpload, type Task } from '@mindwtr/core';
+import { Attachment, DEFAULT_PROJECT_COLOR, buildTaskUpdatesFromSpeechResult, generateUUID, translateWithFallback, useTaskStore, validateAttachmentForUpload, type Task } from '@mindwtr/core';
 import { invoke } from '@tauri-apps/api/core';
 import { dataDir } from '@tauri-apps/api/path';
 import { BaseDirectory, readFile, readTextFile, size } from '@tauri-apps/plugin-fs';
@@ -47,8 +47,7 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         return t('attachments.fileNotSupported');
     }, [t]);
     const resolveText = useCallback((key: string, fallback: string) => {
-        const translated = t(key);
-        return translated === key ? fallback : translated;
+        return translateWithFallback(t, key, fallback);
     }, [t]);
 
     const resolveAudioBlobSource = useCallback(async (attachment: Attachment) => {

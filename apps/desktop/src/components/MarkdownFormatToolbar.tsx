@@ -2,6 +2,7 @@ import { useCallback, type RefObject } from 'react';
 import { CheckSquare, List, ListOrdered, Quote, Undo2 } from 'lucide-react';
 import {
     MARKDOWN_TOOLBAR_ACTIONS,
+    translateWithFallback,
     type MarkdownSelection,
     type MarkdownToolbarActionId,
     type MarkdownToolbarResult,
@@ -16,11 +17,6 @@ type MarkdownFormatToolbarProps = {
     canUndo: boolean;
     onUndo: () => MarkdownSelection | undefined;
     onApplyAction: (actionId: MarkdownToolbarActionId, selection: MarkdownSelection) => MarkdownToolbarResult | void;
-};
-
-const translateWithFallback = (t: (key: string) => string, key: string, fallback: string) => {
-    const translated = t(key);
-    return translated === key ? fallback : translated;
 };
 
 const renderActionLabel = (actionId: MarkdownToolbarActionId, shortLabel: string) => {

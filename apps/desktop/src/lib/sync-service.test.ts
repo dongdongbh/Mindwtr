@@ -108,7 +108,10 @@ describe('SyncService testability hooks', () => {
             lastResultAt: null,
         });
         expect((SyncService as any).syncListeners.size).toBe(0);
-        expect((SyncService as any).syncQueued).toBe(false);
+        expect((SyncService as any).syncOrchestrator.getState()).toEqual({
+            inFlight: false,
+            queued: false,
+        });
         expect((SyncService as any).externalSyncTimer).toBeNull();
     });
 
@@ -552,6 +555,50 @@ describe('SyncService orchestration', () => {
         expect(snapshots.some((status) => status.queued === true)).toBe(true);
     });
 
+    it('uses the latest queued sync options for the follow-up run', async () => {
+        const firstRun = createDeferred();
+        const backendSpy = vi.spyOn(SyncService as any, 'getSyncBackend');
+        let backendCalls = 0;
+        backendSpy.mockImplementation(async () => {
+            backendCalls += 1;
+            if (backendCalls === 1) {
+                await firstRun.promise;
+            }
+            return 'off';
+        });
+
+        const first = SyncService.performSync();
+        await waitForAssertion(() => {
+            expect(SyncService.getSyncStatus()).toMatchObject({
+                inFlight: true,
+                queued: false,
+            });
+        });
+        const second = SyncService.performSync({ backendOverride: 'cloud' });
+        const third = SyncService.performSync({ backendOverride: 'off' });
+        await waitForAssertion(() => {
+            expect(SyncService.getSyncStatus()).toMatchObject({
+                inFlight: true,
+                queued: true,
+            });
+        });
+        firstRun.resolve();
+
+        const [firstResult, secondResult, thirdResult] = await Promise.all([first, second, third]);
+        expect(firstResult.success).toBe(true);
+        expect(secondResult.success).toBe(true);
+        expect(thirdResult.success).toBe(true);
+        await waitForAssertion(() => {
+            expect(SyncService.getSyncStatus()).toMatchObject({
+                inFlight: false,
+                queued: false,
+                lastResult: 'success',
+            });
+        });
+
+        expect(backendCalls).toBe(1);
+    });
+
     it('runs a queued follow-up sync after an in-flight failure', async () => {
         const firstRun = createDeferred();
         const backendSpy = vi.spyOn(SyncService as any, 'getSyncBackend');
@@ -615,5 +662,64 @@ describe('SyncService orchestration', () => {
         expect(persisted).toBe(false);
         expect(updateSettings).toHaveBeenCalledTimes(1);
         expect((SyncService as any).lastSuccessfulSyncLocalChangeAt).toBe(0);
+    });
+
+    it('refreshes store data without overwriting synced settings after a successful sync', async () => {
+        const callOrder: string[] = [];
+        const storeState = {
+            lastDataChangeAt: 0,
+            settings: {},
+            fetchData: vi.fn(async () => {
+                callOrder.push('fetchData');
+            }),
+            updateSettings: vi.fn(async () => {
+                callOrder.push('updateSettings');
+            }),
+            setError: vi.fn(),
+        };
+        const prepareSpy = vi.spyOn(SyncService as any, 'prepareSyncExecutionContext').mockImplementation(
+            async (...args: unknown[]) => {
+                const context = args[0] as Record<string, unknown>;
+                context.backend = 'file';
+                context.fileBaseDir = '';
+            }
+        );
+        const preSyncSpy = vi.spyOn(SyncService as any, 'runPreSyncAttachmentPhase').mockResolvedValue(undefined);
+        const postMergeSpy = vi.spyOn(SyncService as any, 'runPostMergeAttachmentPhase').mockImplementation(
+            async (...args: unknown[]) => args[1] as AppData
+        );
+
+        try {
+            __syncServiceTestUtils.setDependenciesForTests({
+                flushPendingSave: vi.fn(async () => undefined),
+                getStoreState: () => storeState as any,
+                performSyncCycle: vi.fn(async () => ({
+                    data: {
+                        tasks: [],
+                        projects: [],
+                        sections: [],
+                        areas: [],
+                        settings: {},
+                    } satisfies AppData,
+                    status: 'success' as const,
+                    stats: {
+                        tasks: {},
+                        projects: {},
+                        sections: {},
+                        areas: {},
+                    } as any,
+                })),
+            });
+
+            const result = await SyncService.performSync();
+
+            expect(result.success).toBe(true);
+            expect(callOrder).toEqual(['fetchData']);
+            expect(storeState.updateSettings).not.toHaveBeenCalled();
+        } finally {
+            prepareSpy.mockRestore();
+            preSyncSpy.mockRestore();
+            postMergeSpy.mockRestore();
+        }
     });
 });

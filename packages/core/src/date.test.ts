@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     configureDateFormatting,
     isDueForReview,
+    normalizeClockTimeInput,
     normalizeDateFormatSetting,
     normalizeTimeFormatSetting,
     resolveDateLocaleTag,
@@ -57,6 +58,15 @@ describe('date utils', () => {
         expect(normalizeTimeFormatSetting('12h')).toBe('12h');
         expect(normalizeTimeFormatSetting('24-hour')).toBe('24h');
         expect(normalizeTimeFormatSetting('unknown')).toBe('system');
+    });
+
+    it('normalizes clock time inputs for stored schedule defaults', () => {
+        expect(normalizeClockTimeInput('9:05')).toBe('09:05');
+        expect(normalizeClockTimeInput('905')).toBe('09:05');
+        expect(normalizeClockTimeInput(' 1730 ')).toBe('17:30');
+        expect(normalizeClockTimeInput('')).toBe('');
+        expect(normalizeClockTimeInput('24:00')).toBeNull();
+        expect(normalizeClockTimeInput('9am')).toBeNull();
     });
 
     it('resolves locale tags from language + format preferences', () => {

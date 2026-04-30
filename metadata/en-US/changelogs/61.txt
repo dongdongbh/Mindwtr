@@ -1,0 +1,4 @@
+OmniFocus import now accepts JSON and ZIP exports, including folders as areas, nested tasks as checklist items, and supported repeat rules.
+Pomodoro can auto-start breaks or the next focus session, and Focus now includes review-due tasks.
+Android quick capture is steadier with non-sliding sheet animations, improved picker accessibility, and smoother medium task lists.
+Sync is sturdier with better WebDAV collection handling and conflict/tombstone cleanup.

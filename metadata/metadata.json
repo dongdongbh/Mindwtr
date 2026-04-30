@@ -30,7 +30,7 @@
           "完全离线可用，无需互联网连接",
           "完全开源，安全透明"
         ],
-        "ReleaseNotes": "• 新增桌面端回顾排序与详情控制，并让项目侧栏缩放与宽度同步更稳定。\n• 桌面端现可内联预览图片附件，并在任务编辑中支持撤销操作。\n• 改进桌面端附件路径与 CloudKit 自动同步行为，减少同步与附件相关的粗糙边缘。\n• 同步刷新截图、演示链接与发布元数据，保持桌面发布说明与当前体验一致。",
+        "ReleaseNotes": "• 桌面日历新增日/周/日程规划视图、任务计划编辑器、默认计划时间，并更安全地处理外部日历。\n• Inbox 增加稍后处理，搜索支持负责人筛选。\n• 桌面同步在 WebDAV 重试、云端合并、附件预同步和误报冲突处理上更稳定。",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -82,7 +82,7 @@
           "No internet connection required to function",
           "Open source and transparent"
         ],
-        "ReleaseNotes": "• Added desktop review sorting/details controls and made project sidebar resizing behave more smoothly.\n• Added inline image previews for desktop attachments and undo support in task editors.\n• Improved desktop attachment-path handling and CloudKit autosync reliability.\n• Refreshed screenshots, demo links, and store/release metadata to match the current desktop experience.",
+        "ReleaseNotes": "• Added desktop calendar day/week/schedule planning, a scheduled task composer, default schedule time, and safer external-calendar handling.\n• Inbox gains a Later shortcut and search supports assignee filters.\n• Desktop sync is sturdier around WebDAV retries, cloud merge cleanup, attachment pre-sync, and false conflict reports.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -130,7 +130,7 @@
           "No requiere conexión a internet para funcionar",
           "Código abierto y transparente"
         ],
-        "ReleaseNotes": "• Agregamos orden y control de detalles en la revision de escritorio, con un panel de proyectos que cambia de tamano con mas estabilidad.\n• El escritorio ahora puede previsualizar imagenes adjuntas en linea y admite deshacer dentro del editor de tareas.\n• Mejoramos el manejo de rutas de adjuntos y la fiabilidad del autosync con CloudKit en escritorio.\n• Tambien actualizamos capturas, enlaces de demo y metadatos de publicacion para reflejar mejor la experiencia actual.",
+        "ReleaseNotes": "• El calendario de escritorio suma vistas dia/semana/agenda, programador de tareas, hora predeterminada y manejo mas seguro de calendarios externos.\n• Inbox agrega Later y la busqueda filtra por responsable.\n• El sync de escritorio mejora reintentos WebDAV, merges cloud, presync de adjuntos y falsos conflictos.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",

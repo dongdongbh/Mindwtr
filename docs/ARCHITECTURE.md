@@ -48,10 +48,10 @@ Important properties:
 
 The detailed algorithm, edge cases, and tie-break rules are documented in the wiki:
 
-- [Wiki: Architecture](../wiki/Architecture.md)
-- [Wiki: Sync Algorithm](../wiki/Sync-Algorithm.md)
-- [Wiki: Data and Sync](../wiki/Data-and-Sync.md)
-- [Wiki: Performance Guide](../wiki/Performance-Guide.md)
+- [Wiki: Architecture](https://github.com/dongdongbh/Mindwtr/wiki/Architecture)
+- [Wiki: Sync Algorithm](https://github.com/dongdongbh/Mindwtr/wiki/Sync-Algorithm)
+- [Wiki: Data and Sync](https://github.com/dongdongbh/Mindwtr/wiki/Data-and-Sync)
+- [Wiki: Performance Guide](https://github.com/dongdongbh/Mindwtr/wiki/Performance-Guide)
 
 ## Boundaries and responsibilities
 

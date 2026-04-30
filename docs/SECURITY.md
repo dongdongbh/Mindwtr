@@ -43,6 +43,7 @@ Recommended deployment posture:
 
 - run behind HTTPS
 - keep the server on a private interface behind a reverse proxy
+- leave `MINDWTR_CLOUD_TRUST_PROXY_HEADERS=false` unless the proxy overwrites forwarded IP headers
 - store data on persistent storage with regular backups
 - rotate tokens deliberately and treat them like passwords
 

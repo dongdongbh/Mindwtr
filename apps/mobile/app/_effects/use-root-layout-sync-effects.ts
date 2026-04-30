@@ -67,28 +67,28 @@ const AUTO_SYNC_CADENCE_OFF: AutoSyncCadence = {
 const buildSyncUiCopy = (localize: Localize): SyncUiCopy => ({
     syncIssueTitle: localize('Sync issue', '同步异常'),
     syncIssueGenericMessage: localize(
-        'Background sync failed. Open Data & Sync to review the connection and retry.',
-        '后台同步失败。请打开“数据与同步”检查连接并重试。'
+        'Background sync failed. Open Settings → Sync to review the connection and retry.',
+        '后台同步失败。请打开“设置 → 同步”检查连接并重试。'
     ),
     syncIssueAuthMessage: localize(
-        'Background sync needs updated credentials. Open Data & Sync to re-authenticate and retry.',
-        '后台同步需要更新凭据。请打开“数据与同步”重新验证并重试。'
+        'Background sync needs updated credentials. Open Settings → Sync to re-authenticate and retry.',
+        '后台同步需要更新凭据。请打开“设置 → 同步”重新验证并重试。'
     ),
     syncIssuePermissionMessage: localize(
-        'Background sync cannot write to the selected file or folder. Re-select the sync location in Data & Sync.',
-        '后台同步无法写入当前选择的文件或文件夹。请在“数据与同步”中重新选择同步位置。'
+        'Background sync cannot write to the selected file or folder. Re-select the sync location in Settings → Sync.',
+        '后台同步无法写入当前选择的文件或文件夹。请在“设置 → 同步”中重新选择同步位置。'
     ),
     syncIssueRateLimitedMessage: localize(
-        'Background sync is being rate limited. Mindwtr will retry shortly; review Data & Sync if it keeps happening.',
-        '后台同步正在被限流。Mindwtr 将稍后重试；如果持续发生，请检查“数据与同步”。'
+        'Background sync is being rate limited. Mindwtr will retry shortly; review Settings → Sync if it keeps happening.',
+        '后台同步正在被限流。Mindwtr 将稍后重试；如果持续发生，请检查“设置 → 同步”。'
     ),
     syncIssueMisconfiguredMessage: localize(
-        'Background sync is missing required sync settings. Open Data & Sync to finish setup.',
-        '后台同步缺少必要的同步设置。请打开“数据与同步”完成配置。'
+        'Background sync is missing required sync settings. Open Settings → Sync to finish setup.',
+        '后台同步缺少必要的同步设置。请打开“设置 → 同步”完成配置。'
     ),
     syncIssueConflictMessage: localize(
-        'Background sync hit a sync conflict or stale remote state. Open Data & Sync to review and retry.',
-        '后台同步遇到冲突或远端状态已过期。请打开“数据与同步”检查后重试。'
+        'Background sync hit a sync conflict or stale remote state. Open Settings → Sync to review and retry.',
+        '后台同步遇到冲突或远端状态已过期。请打开“设置 → 同步”检查后重试。'
     ),
     notificationsDisabledTitle: localize('Notifications disabled', '通知已禁用'),
     notificationsDisabledMessage: localize(

@@ -28,6 +28,10 @@ The same cloud service handles both:
 - Sync traffic under `/v1/data`
 - Task automation endpoints such as `/v1/tasks`, `/v1/projects`, and `/v1/search`
 
+`PUT /v1/data` is merge-based, not a blind replacement. The server reads the current namespace snapshot, merges it with the uploaded snapshot using Mindwtr's normal revision-aware sync rules, validates the merged data, and then writes it back. A client that uploads an older or partial view should not expect to erase newer remote records simply by sending a full JSON payload.
+
+REST reference fields must point to live records. For example, creating or patching a project with an `areaId` whose area was soft-deleted returns `404 Area not found` rather than attaching the project to a tombstone.
+
 ## Environment Baseline
 
 Minimum production baseline:
@@ -95,7 +99,7 @@ Optional but useful:
 Operational guidance:
 
 - Keep proxy body limits aligned with `MINDWTR_CLOUD_MAX_BODY_BYTES` and `MINDWTR_CLOUD_MAX_ATTACHMENT_BYTES`.
-- If you enable `MINDWTR_CLOUD_TRUST_PROXY_HEADERS`, do so only behind a proxy that overwrites forwarded IP headers.
+- Leave `MINDWTR_CLOUD_TRUST_PROXY_HEADERS=false` unless your reverse proxy strips or overwrites all incoming forwarded IP headers. If clients can supply `X-Forwarded-For`, they can spoof auth-failure rate-limit identities.
 - If you rotate from `MINDWTR_CLOUD_TOKEN` to `MINDWTR_CLOUD_AUTH_TOKENS`, remember that token changes also change the namespace key.
 
 ## Docker Runbook
@@ -164,6 +168,21 @@ Restore:
 3. Start server.
 4. Check `GET /health` and run a client sync validation.
 
+## Attachment Cleanup
+
+When a user deletes an attachment, clients keep a `pendingRemoteDeletes` record until the backend delete succeeds. Those pending deletes are intentionally not aged out, because removing them before a successful remote delete can leave private files behind.
+
+Mindwtr Cloud also provides authenticated orphan cleanup for attachment files that are no longer referenced by the current `data.json` snapshot:
+
+```text
+POST /v1/attachments/orphans
+DELETE /v1/attachments/orphans
+```
+
+Run this after restore operations or as a periodic maintenance task if you want server-side cleanup of files that became unreachable outside the normal client delete flow. The endpoint scans the authenticated token namespace only and returns counts for scanned, kept, deleted, and failed file paths.
+
+The cleanup skips attachment files modified in the last five minutes so an upload followed by a later `/v1/data` reference cannot be deleted by a concurrent maintenance run.
+
 ## Upgrade Procedure
 
 Safe rolling procedure:
@@ -205,6 +224,11 @@ Add host/container metrics:
 - disk free space on data volume
 - p95 request latency
 - non-2xx response rate
+
+Clock note:
+
+- The server participates in merge and repair on `PUT /v1/data`, so host clock drift can still affect request logs and rate-limit windows. Keep NTP or equivalent time sync enabled.
+- Merge repair timestamps are chosen from payload timestamps when available, capped at five minutes beyond the server clock. This limits the effect of a drifting server clock without letting far-future client timestamps poison stored sync records.
 
 ## Failure Modes
 

@@ -74,8 +74,13 @@ export type SyncHistoryEntry = {
     error?: string;
 };
 
-// Log clock skew warnings if merges show >5 minutes drift.
+// Log clock skew warnings if conflicted merges show >5 minutes drift.
 export const CLOCK_SKEW_THRESHOLD_MS = 5 * 60 * 1000;
+
+// Reserved revBy marker for deterministic reference repairs. Multiple devices may
+// independently stamp this value; equal-repair ties intentionally fall through to
+// content-signature convergence.
+export const SYNC_REPAIR_REV_BY = 'sync-repair';
 
 export type SyncStep = 'read-local' | 'read-remote' | 'merge' | 'write-local' | 'write-remote';
 

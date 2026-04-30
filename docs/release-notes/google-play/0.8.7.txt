@@ -1,0 +1,18 @@
+<en-US>
+OmniFocus import now accepts JSON and ZIP exports, including folders as areas, nested tasks as checklist items, and supported repeat rules.
+Pomodoro can auto-start breaks or the next focus session, and Focus now includes review-due tasks.
+Android quick capture is steadier with non-sliding sheet animations, improved picker accessibility, and smoother medium task lists.
+Sync is sturdier with better WebDAV collection handling and conflict/tombstone cleanup.
+</en-US>
+<zh-CN>
+OmniFocus 导入现支持 JSON 与 ZIP 导出，可把文件夹转为领域、嵌套任务转为清单项，并保留可支持的重复规则。
+番茄钟可自动进入休息或下一轮专注，Focus 也会显示待回顾任务。
+Android 快速捕获更稳定：表单动画避免残影，选择器无障碍更好，中等长度任务列表滚动更顺。
+同步更稳，改进了 WebDAV 目录处理以及冲突和墓碑清理。
+</zh-CN>
+<es-ES>
+La importacion de OmniFocus acepta JSON y ZIP, con carpetas como areas, tareas anidadas como checklist y reglas de repeticion compatibles.
+Pomodoro puede iniciar descansos o el siguiente foco automaticamente, y Focus muestra tareas listas para revisar.
+La captura rapida en Android es mas estable con animacion sin rastros, mejores selectores accesibles y listas medianas mas fluidas.
+Sync es mas estable con mejor manejo WebDAV y limpieza de conflictos/tombstones.
+</es-ES>

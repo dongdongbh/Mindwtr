@@ -1,0 +1,5 @@
+Calendar planning now has a mobile week view, refreshed month view, scheduled task composer, default schedule time, and selectable calendar push target.
+Review reminders now open the Review page directly.
+Android widgets are denser and follow theme colors.
+Quick capture text stays inside the sheet, and speech-to-text avoids an Android realtime crash.
+Inbox adds a Later shortcut, search supports assignee filters, and sync is sturdier around WebDAV, cloud merges, and false conflicts.

@@ -62,6 +62,8 @@ Authorization: Bearer <token>
 | `POST`   | `/tasks/:id/archive`  | Mark as archived              |
 | `POST`   | `/tasks/:id/restore`  | Restore a soft-deleted task   |
 | `GET`    | `/projects`           | List projects                 |
+| `GET`    | `/areas`              | List areas                    |
+| `GET`    | `/v1/areas`           | Compatibility alias for areas |
 | `GET`    | `/search?query=...`   | Search tasks + projects       |
 
 ### Response Shapes
@@ -92,6 +94,19 @@ Authorization: Bearer <token>
   "createdAt": "2026-01-25T10:00:00.000Z",
   "updatedAt": "2026-01-25T10:00:00.000Z",
   "deletedAt": null
+}
+```
+
+**Area**
+```json
+{
+  "id": "uuid",
+  "name": "Area name",
+  "color": "#94a3b8",
+  "icon": "briefcase",
+  "order": 0,
+  "createdAt": "2026-01-25T10:00:00.000Z",
+  "updatedAt": "2026-01-25T10:00:00.000Z"
 }
 ```
 

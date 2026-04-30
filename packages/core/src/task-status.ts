@@ -1,4 +1,5 @@
 import type { Task, TaskStatus } from './types';
+import { normalizeRecurrenceForLoad } from './recurrence';
 
 export const TASK_STATUS_VALUES: TaskStatus[] = ['inbox', 'next', 'waiting', 'someday', 'reference', 'done', 'archived'];
 export const TASK_STATUS_SET = new Set<TaskStatus>(TASK_STATUS_VALUES);
@@ -90,6 +91,7 @@ export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toI
         areaId: resolvedAreaId,
         order: normalizedOrder,
         orderNum: normalizedOrder,
+        recurrence: normalizeRecurrenceForLoad(task.recurrence),
         rev,
         ...(revBy ? { revBy } : {}),
         ...(textDirection ? { textDirection } : {}),

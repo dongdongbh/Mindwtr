@@ -17,12 +17,15 @@ import {
   Link2,
   ListChecks,
   Monitor,
+  RefreshCw,
   Sparkles,
 } from "lucide-react";
 import {
   resolveDateLocaleTag,
   DEFAULT_ANTHROPIC_THINKING_BUDGET,
   safeFormatDate,
+  translateText,
+  translateWithFallback,
   useTaskStore,
   type AppData,
 } from "@mindwtr/core";
@@ -60,6 +63,7 @@ type SettingsPage =
   | "manage"
   | "notifications"
   | "sync"
+  | "data"
   | "integrations"
   | "ai"
   | "about";
@@ -110,6 +114,13 @@ const SettingsSyncPage = lazy(
   wrapSettingsOpenImport("page-chunk:sync", () =>
     import("./settings/SettingsSyncPage").then((m) => ({
       default: m.SettingsSyncPage,
+    })),
+  ),
+);
+const SettingsDataPage = lazy(
+  wrapSettingsOpenImport("page-chunk:data", () =>
+    import("./settings/SettingsDataPage").then((m) => ({
+      default: m.SettingsDataPage,
     })),
   ),
 );
@@ -203,6 +214,8 @@ export function SettingsView() {
     : 7;
   const loggingEnabled = settings?.diagnostics?.loggingEnabled === true;
   const attachmentsLastCleanupAt = settings?.attachments?.lastCleanupAt;
+  const pendingRemoteDeleteCount =
+    settings?.attachments?.pendingRemoteDeletes?.length ?? 0;
   const { requestConfirmation, confirmModal } = useConfirmDialog();
 
   const showSaved = useCallback(() => {
@@ -251,19 +264,13 @@ export function SettingsView() {
     enabled: true,
   });
   const selectSyncFolderTitle = useMemo(() => {
-    const key = "settings.selectSyncFolderTitle";
-    const translated = translate(key);
-    return translated === key ? "Select sync folder" : translated;
+    return translateWithFallback(translate, "settings.selectSyncFolderTitle", "Select sync folder");
   }, [translate]);
   const selectObsidianVaultTitle = useMemo(() => {
-    const key = "settings.selectObsidianVaultTitle";
-    const translated = translate(key);
-    return translated === key ? "Select Obsidian vault" : translated;
+    return translateWithFallback(translate, "settings.selectObsidianVaultTitle", "Select Obsidian vault");
   }, [translate]);
   const cancelLabel = useMemo(() => {
-    const key = "common.cancel";
-    const translated = translate(key);
-    return translated === key ? "Cancel" : translated;
+    return translateWithFallback(translate, "common.cancel", "Cancel");
   }, [translate]);
 
   // Heavy settings hooks are only needed when their page is active.
@@ -343,6 +350,33 @@ export function SettingsView() {
       setIsCleaningAttachments(false);
     }
   }, [isTauri]);
+
+  const handleClearPendingRemoteDeletes = useCallback(async () => {
+    if (pendingRemoteDeleteCount === 0) return;
+    const confirmed = await requestSettingsConfirmation({
+      title: t.attachmentsCleanupPendingDeletesConfirmTitle,
+      message: t.attachmentsCleanupPendingDeletesConfirm,
+    });
+    if (!confirmed) return;
+    await updateSettings({
+      attachments: {
+        ...(settings?.attachments ?? {}),
+        pendingRemoteDeletes: undefined,
+      },
+    })
+      .then(showSaved)
+      .catch((error) =>
+        reportError("Failed to clear pending attachment deletes", error),
+      );
+  }, [
+    pendingRemoteDeleteCount,
+    requestSettingsConfirmation,
+    settings?.attachments,
+    showSaved,
+    t.attachmentsCleanupPendingDeletesConfirm,
+    t.attachmentsCleanupPendingDeletesConfirmTitle,
+    updateSettings,
+  ]);
 
   const toggleLogging = async () => {
     const nextEnabled = !loggingEnabled;
@@ -424,6 +458,10 @@ export function SettingsView() {
         return t.ai;
       case "sync":
         return t.sync;
+      case "data":
+        if (language === "zh") return "数据";
+        if (language === "zh-Hant") return "數據";
+        return translateText("Data", language);
       case "integrations":
         return t.integrations;
       case "about":
@@ -431,7 +469,7 @@ export function SettingsView() {
       default:
         return t.general;
     }
-  }, [page, t]);
+  }, [language, page, t]);
 
   const navItems = useMemo<
     Array<{
@@ -501,14 +539,39 @@ export function SettingsView() {
       },
       {
         id: "sync",
-        icon: Database,
+        icon: RefreshCw,
         label: t.sync,
         keywords: [
           "file sync",
           "WebDAV",
           "cloud",
           "sync now",
+          "sync history",
+          "recovery snapshots",
+          "dropbox",
+          "self-hosted",
+          "iCloud",
+          "settings sync",
+        ],
+      },
+      {
+        id: "data",
+        icon: Database,
+        label:
+          language === "zh"
+            ? "数据"
+            : language === "zh-Hant"
+              ? "數據"
+              : translateText("Data", language),
+        keywords: [
+          "backup",
+          "restore",
+          "import",
+          "Todoist",
+          "DGT GTD",
+          "OmniFocus",
           "attachments",
+          "cleanup",
           "diagnostics",
           "logging",
         ],
@@ -550,7 +613,7 @@ export function SettingsView() {
         keywords: ["version", "update", "license", "sponsor"],
       },
     ],
-    [hasUpdateBadge, t],
+    [hasUpdateBadge, language, t],
   );
 
   const {
@@ -581,6 +644,7 @@ export function SettingsView() {
     dropboxConfigured,
     dropboxConnected,
     dropboxBusy,
+    dropboxAuthInProgress,
     dropboxRedirectUri,
     dropboxTestState,
     snapshots,
@@ -603,6 +667,7 @@ export function SettingsView() {
     handleRestoreBackup,
     handleImportTodoist,
     handleImportDgt,
+    handleImportOmniFocus,
   } = useSyncSettings({
     appVersion: aboutPageProps.appVersion,
     isTauri,
@@ -839,6 +904,7 @@ export function SettingsView() {
           dropboxConfigured={dropboxConfigured}
           dropboxConnected={dropboxConnected}
           dropboxBusy={dropboxBusy}
+          dropboxAuthInProgress={dropboxAuthInProgress}
           dropboxRedirectUri={dropboxRedirectUri}
           dropboxTestState={dropboxTestState}
           onCloudUrlChange={setCloudUrl}
@@ -863,6 +929,8 @@ export function SettingsView() {
           conflictCount={conflictCount}
           lastSyncError={settings?.lastSyncError}
           attachmentsLastCleanupDisplay={attachmentsLastCleanupDisplay}
+          pendingRemoteDeleteCount={pendingRemoteDeleteCount}
+          onClearPendingRemoteDeletes={handleClearPendingRemoteDeletes}
           onRunAttachmentsCleanup={handleAttachmentsCleanup}
           isCleaningAttachments={isCleaningAttachments}
           snapshots={snapshots}
@@ -874,6 +942,31 @@ export function SettingsView() {
           onRestoreBackup={handleRestoreBackup}
           onImportTodoist={handleImportTodoist}
           onImportDgt={handleImportDgt}
+          onImportOmniFocus={handleImportOmniFocus}
+        />
+      );
+    }
+
+    if (page === "data") {
+      return (
+        <SettingsDataPage
+          t={t}
+          isTauri={isTauri}
+          loggingEnabled={loggingEnabled}
+          logPath={logPath}
+          onToggleLogging={toggleLogging}
+          onClearLog={handleClearLog}
+          transferAction={transferAction}
+          onExportBackup={handleExportBackup}
+          onRestoreBackup={handleRestoreBackup}
+          onImportTodoist={handleImportTodoist}
+          onImportDgt={handleImportDgt}
+          onImportOmniFocus={handleImportOmniFocus}
+          attachmentsLastCleanupDisplay={attachmentsLastCleanupDisplay}
+          pendingRemoteDeleteCount={pendingRemoteDeleteCount}
+          onClearPendingRemoteDeletes={handleClearPendingRemoteDeletes}
+          onRunAttachmentsCleanup={handleAttachmentsCleanup}
+          isCleaningAttachments={isCleaningAttachments}
         />
       );
     }

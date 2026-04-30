@@ -1,5 +1,5 @@
 import { ArrowRight, BookOpen, CheckCircle, ClipboardList, Clock, Trash2, User, X } from 'lucide-react';
-import { DEFAULT_PROJECT_COLOR, type Area, type Project, type Task, type TaskPriority, type TimeEstimate } from '@mindwtr/core';
+import { DEFAULT_PROJECT_COLOR, tFallback, type Area, type Project, type Task, type TaskPriority, type TimeEstimate } from '@mindwtr/core';
 
 import { cn } from '../lib/utils';
 import {
@@ -9,7 +9,7 @@ import {
 } from './InboxProcessingScheduleFields';
 import { ProjectSelector } from './ui/ProjectSelector';
 
-type QuickActionabilityChoice = 'actionable' | 'trash' | 'someday' | 'reference';
+type QuickActionabilityChoice = 'actionable' | 'later' | 'trash' | 'someday' | 'reference';
 type QuickTwoMinuteChoice = 'yes' | 'no';
 type QuickExecutionChoice = 'defer' | 'delegate';
 
@@ -169,9 +169,12 @@ export function InboxProcessingQuickPanel({
     onSubmit,
 }: InboxProcessingQuickPanelProps) {
     const showActionFields = actionabilityChoice === 'actionable';
+    const showLaterFields = actionabilityChoice === 'later';
     const showDecisionFields = showActionFields && twoMinuteChoice === 'no';
     const showDelegationFields = showDecisionFields && executionChoice === 'delegate';
     const showNextActionFields = showDecisionFields && executionChoice === 'defer';
+    const laterLabel = tFallback(t, 'process.later', 'Later');
+    const laterHint = tFallback(t, 'process.laterHint', 'Set a start date and move this to Next.');
 
     return (
         <div className="bg-card border border-border rounded-xl animate-in fade-in overflow-hidden">
@@ -269,7 +272,7 @@ export function InboxProcessingQuickPanel({
                         <div className="text-sm font-medium">{t('process.actionable')}</div>
                         <div className="text-xs text-muted-foreground mt-1">{t('process.actionableDesc')}</div>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
                         <button
                             type="button"
                             onClick={() => setActionabilityChoice('actionable')}
@@ -282,6 +285,19 @@ export function InboxProcessingQuickPanel({
                         >
                             <CheckCircle className="w-3.5 h-3.5 inline mr-1.5" />
                             {t('process.yesActionable')}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setActionabilityChoice('later')}
+                            className={cn(
+                                'rounded-lg px-3 py-2 text-xs font-medium transition-colors border',
+                                actionabilityChoice === 'later'
+                                    ? 'bg-blue-500/15 text-blue-500 border-blue-500/40'
+                                    : 'bg-muted/40 border-border hover:bg-muted/70'
+                            )}
+                        >
+                            <Clock className="w-3.5 h-3.5 inline mr-1.5" />
+                            {laterLabel}
                         </button>
                         <button
                             type="button"
@@ -326,6 +342,18 @@ export function InboxProcessingQuickPanel({
                         ) : null}
                     </div>
                 </div>
+
+                {showLaterFields ? (
+                    <div className="space-y-3 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
+                        <div className="text-xs text-muted-foreground">{laterHint}</div>
+                        <InboxProcessingScheduleFields
+                            t={t}
+                            fields={scheduleFields}
+                            visibleFieldKeys={['start']}
+                            variant="quick"
+                        />
+                    </div>
+                ) : null}
 
                 {showActionFields ? (
                     <div className="space-y-3">

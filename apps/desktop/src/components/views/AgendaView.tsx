@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ErrorBoundary } from '../ErrorBoundary';
-import { shallow, useTaskStore, TaskPriority, TimeEstimate, getUsedTaskTokens, matchesHierarchicalToken, safeParseDate, safeParseDueDate, isDueForReview, isTaskInActiveProject, sortFocusNextActions } from '@mindwtr/core';
+import { shallow, useTaskStore, TaskPriority, TimeEstimate, getUsedTaskTokens, matchesHierarchicalToken, safeParseDate, safeParseDueDate, isDueForReview, isTaskInActiveProject, sortFocusNextActions, translateWithFallback } from '@mindwtr/core';
 import type { Task, TaskEnergyLevel } from '@mindwtr/core';
 import { useLanguage } from '../../contexts/language-context';
 import { cn } from '../../lib/utils';
@@ -279,8 +279,7 @@ export function AgendaView() {
         return title.toLowerCase().includes(normalizedSearchQuery);
     }, [normalizedSearchQuery]);
     const resolveText = useCallback((key: string, fallback: string) => {
-        const value = t(key);
-        return value === key ? fallback : value;
+        return translateWithFallback(t, key, fallback);
     }, [t]);
     const activeFilterChips = useMemo<AgendaActiveFilterChip[]>(() => {
         const chips: AgendaActiveFilterChip[] = [];

@@ -2,12 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ReactElement } from 'react';
 
 import type { TasksWidgetPayload } from '../lib/widget-data';
+import { buildTasksWidgetTree } from './TasksWidget';
+
 vi.mock('react-native-android-widget', () => ({
     FlexWidget: 'FlexWidget',
     TextWidget: 'TextWidget',
 }));
-
-import { buildTasksWidgetTree } from './TasksWidget';
 
 type WidgetElement = ReactElement<{
     children?: WidgetElement | WidgetElement[];
@@ -63,17 +63,24 @@ describe('TasksWidget', () => {
         expect(taskItem?.props.style.fontSize).toBe(13);
     });
 
+    it('anchors quick capture below the task content area', () => {
+        const tree = buildTasksWidgetTree(basePayload) as WidgetElement;
+        const [content, button] = asWidgetChildren(tree.props.children);
+
+        expect(content?.props.style?.flex).toBe(1);
+        expect(button?.props.text).toBe('Quick capture');
+    });
+
     it('uses a compact layout for narrow Android widgets', () => {
         const tree = buildTasksWidgetTree(basePayload, { layoutMode: 'compact' }) as WidgetElement;
         const children = asWidgetChildren(tree.props.children);
-        const [content, spacer, button] = children;
+        const [content, button] = children;
         const contentChildren = content ? asWidgetChildren(content.props.children) : [];
         const taskItem = contentChildren.find(
             (child) => (child as ReactElement<{ text?: string }>).props.text === '• Review waiting item'
         ) as ReactElement<{ style: { fontSize: number } }> | undefined;
 
-        expect(children).toHaveLength(3);
-        expect(spacer?.props.style?.flex).toBe(1);
+        expect(children).toHaveLength(2);
         expect(taskItem?.props.style.fontSize).toBe(12);
         expect(button?.props.style?.fontSize).toBe(10);
     });

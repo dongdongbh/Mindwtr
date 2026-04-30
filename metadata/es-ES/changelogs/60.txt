@@ -1,0 +1,3 @@
+Las tareas recurrentes ya pueden terminar en una fecha o despues de un numero fijo de repeticiones, con texto actualizado en toda la app.
+La captura y edicion en Android son mas estables con envio por teclado, reinicio mas seguro del editor al cerrar y listas de verificacion que se mantienen sincronizadas.
+Sync e importacion son mas fiables con importacion CSV de OmniFocus, creacion automatica de carpetas WebDAV, conservacion de borrados de calendario y mensajes mas claros.

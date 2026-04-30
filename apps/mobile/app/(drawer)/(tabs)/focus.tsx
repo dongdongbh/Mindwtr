@@ -15,7 +15,9 @@ import { SlidersHorizontal, X } from 'lucide-react-native';
 
 import {
   sortFocusNextActions,
+  translateWithFallback,
   useTaskStore,
+  isDueForReview,
   safeParseDate,
   safeParseDueDate,
   type Task,
@@ -68,6 +70,7 @@ export default function FocusScreen() {
     focus: true,
     schedule: true,
     next: true,
+    reviewDue: true,
   });
   const lastOpenedFromNotificationRef = useRef<string | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -127,8 +130,7 @@ export default function FocusScreen() {
     timeEstimatesEnabled,
   ]);
   const resolveText = useCallback((key: string, fallback: string) => {
-    const value = t(key);
-    return value === key ? fallback : value;
+    return translateWithFallback(t, key, fallback);
   }, [t]);
   const toggleToken = useCallback((token: string) => {
     setSelectedTokens((current) => (
@@ -253,7 +255,7 @@ export default function FocusScreen() {
     return firstIds;
   }, [filteredActiveTasks, sequentialProjectIds]);
 
-  const { focusedTasks, schedule, nextActions } = useMemo(() => {
+  const { focusedTasks, schedule, nextActions, reviewDue } = useMemo(() => {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
     const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
@@ -292,6 +294,15 @@ export default function FocusScreen() {
       return !scheduleIds.has(task.id);
     });
 
+    const reviewDueItems = nonFocusedTasks
+      .filter((task) => isDueForReview(task.reviewAt, now))
+      .sort((a, b) => {
+        const aReview = safeParseDate(a.reviewAt)?.getTime() ?? Number.POSITIVE_INFINITY;
+        const bReview = safeParseDate(b.reviewAt)?.getTime() ?? Number.POSITIVE_INFINITY;
+        if (aReview !== bReview) return aReview - bReview;
+        return a.title.localeCompare(b.title);
+      });
+
     return {
       focusedTasks: focusedItems,
       schedule: scheduleItems,
@@ -299,6 +310,7 @@ export default function FocusScreen() {
         now,
         prioritizeByPriority: prioritiesEnabled,
       }),
+      reviewDue: reviewDueItems,
     };
   }, [filteredActiveTasks, prioritiesEnabled, sequentialProjectIds, sequentialFirstTaskIds]);
 
@@ -329,12 +341,19 @@ export default function FocusScreen() {
         totalCount: nextActions.length,
         expanded: expandedSections.next,
         type: 'next' as const,
+      },
+      {
+        title: t('agenda.reviewDue') ?? 'Review Due',
+        data: expandedSections.reviewDue ? reviewDue : [],
+        totalCount: reviewDue.length,
+        expanded: expandedSections.reviewDue,
+        type: 'reviewDue' as const,
       }
     );
 
     return nextSections;
-  }, [expandedSections.focus, expandedSections.next, expandedSections.schedule, focusedTasks, schedule, nextActions, t]);
-  const hasTasks = focusedTasks.length > 0 || schedule.length > 0 || nextActions.length > 0;
+  }, [expandedSections.focus, expandedSections.next, expandedSections.reviewDue, expandedSections.schedule, focusedTasks, schedule, nextActions, reviewDue, t]);
+  const hasTasks = focusedTasks.length > 0 || schedule.length > 0 || nextActions.length > 0 || reviewDue.length > 0;
   const hasFilters = (
     selectedTokens.length > 0
     || selectedProjects.length > 0
@@ -416,12 +435,12 @@ export default function FocusScreen() {
   const emptySubtitle = hasFilters ? resolveText('filters.label', 'Filters') : t('agenda.noTasks');
   const pomodoroTasks = useMemo(() => {
     const byId = new Map<string, Task>();
-    [...focusedTasks, ...schedule, ...nextActions].forEach((task) => {
+    [...focusedTasks, ...schedule, ...nextActions, ...reviewDue].forEach((task) => {
       if (task.deletedAt) return;
       byId.set(task.id, task);
     });
     return Array.from(byId.values());
-  }, [focusedTasks, schedule, nextActions]);
+  }, [focusedTasks, schedule, nextActions, reviewDue]);
 
   const onEdit = useCallback((task: Task) => {
     setEditingTask(task);
@@ -432,7 +451,7 @@ export default function FocusScreen() {
     updateTask(taskId, updates);
   }, [updateTask]);
 
-  const toggleSection = useCallback((sectionType: 'focus' | 'schedule' | 'next') => {
+  const toggleSection = useCallback((sectionType: 'focus' | 'schedule' | 'next' | 'reviewDue') => {
     setExpandedSections((current) => ({
       ...current,
       [sectionType]: !current[sectionType],

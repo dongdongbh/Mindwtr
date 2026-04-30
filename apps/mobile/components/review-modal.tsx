@@ -16,6 +16,7 @@ import {
 } from 'lucide-react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
+import { useLanguage } from '../contexts/language-context';
 import { SwipeableTaskItem } from './swipeable-task-item';
 import { TaskEditModal } from './task-edit-modal';
 import {
@@ -34,6 +35,7 @@ interface ReviewModalProps {
 export const checkReviewTime = () => true;
 
 export function ReviewModal({ visible, onClose }: ReviewModalProps) {
+    const { t } = useLanguage();
     const {
         aiEnabled,
         aiError,
@@ -91,6 +93,8 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         toggleSuggestion,
         waitingTasks,
     } = useReviewModalController({ visible, onClose });
+    const closeLabel = t('common.close');
+    const closeText = closeLabel && closeLabel !== 'common.close' ? closeLabel : 'Close';
 
     const renderTaskList = (taskList: Task[]) => (
         <ScrollView style={styles.taskList}>
@@ -565,7 +569,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                             onPress={handleClose}
                             style={styles.closeButton}
                             accessibilityRole="button"
-                            accessibilityLabel="Close"
+                            accessibilityLabel={closeText}
                             hitSlop={8}
                         >
                             <X size={22} color={tc.text} strokeWidth={2} />

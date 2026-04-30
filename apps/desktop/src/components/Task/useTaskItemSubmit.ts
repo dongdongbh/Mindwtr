@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import {
     DEFAULT_PROJECT_COLOR,
     extractChecklistFromMarkdown,
+    getRecurrenceCompletedOccurrencesValue,
     parseQuickAdd,
     parseRRuleString,
     type Area,
@@ -132,6 +133,16 @@ export function useTaskItemSubmit({
             const parsed = parseRRuleString(editRecurrenceRRule);
             if (parsed.byDay && parsed.byDay.length > 0) {
                 recurrenceValue.byDay = parsed.byDay;
+            }
+            if (parsed.count) {
+                recurrenceValue.count = parsed.count;
+            }
+            if (parsed.until) {
+                recurrenceValue.until = parsed.until;
+            }
+            const completedOccurrences = getRecurrenceCompletedOccurrencesValue(task.recurrence);
+            if (typeof completedOccurrences === 'number') {
+                recurrenceValue.completedOccurrences = completedOccurrences;
             }
             recurrenceValue.rrule = editRecurrenceRRule;
         }

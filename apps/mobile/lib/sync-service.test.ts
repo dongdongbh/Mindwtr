@@ -123,7 +123,7 @@ describe('mobile sync-service test utils', () => {
 
   it('classifies auth and permission sync failures for actionable messaging', () => {
     expect(classifySyncFailure('WebDAV unauthorized (401). Check folder URL, username, and app password.')).toBe('auth');
-    expect(classifySyncFailure("Sync file is not writable. Re-select the sync folder in Settings -> Data & Sync, then sync again.")).toBe('permission');
+    expect(classifySyncFailure("Sync file is not writable. Re-select the sync folder in Settings -> Sync, then sync again.")).toBe('permission');
   });
 
   it('classifies rate-limited, misconfigured, and conflict sync failures', () => {

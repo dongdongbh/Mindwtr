@@ -1,22 +1,23 @@
 export type ThemePresetName = 'default' | 'eink' | 'nord' | 'sepia' | 'oled';
+export type ThemePresetColor = `#${string}`;
 
 export type ThemePresetColors = {
-    bg: string;
-    cardBg: string;
-    taskItemBg: string;
-    text: string;
-    secondaryText: string;
-    border: string;
-    tint: string;
-    onTint: string;
-    inputBg: string;
-    danger: string;
-    success: string;
-    warning: string;
-    filterBg: string;
-    icon: string;
-    tabIconDefault: string;
-    tabIconSelected: string;
+    bg: ThemePresetColor;
+    cardBg: ThemePresetColor;
+    taskItemBg: ThemePresetColor;
+    text: ThemePresetColor;
+    secondaryText: ThemePresetColor;
+    border: ThemePresetColor;
+    tint: ThemePresetColor;
+    onTint: ThemePresetColor;
+    inputBg: ThemePresetColor;
+    danger: ThemePresetColor;
+    success: ThemePresetColor;
+    warning: ThemePresetColor;
+    filterBg: ThemePresetColor;
+    icon: ThemePresetColor;
+    tabIconDefault: ThemePresetColor;
+    tabIconSelected: ThemePresetColor;
 };
 
 export const THEME_PRESETS: Record<Exclude<ThemePresetName, 'default'>, ThemePresetColors> = {

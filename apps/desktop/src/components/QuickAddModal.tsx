@@ -7,6 +7,7 @@ import {
     safeFormatDate,
     generateUUID,
     DEFAULT_PROJECT_COLOR,
+    tFallback,
     type Attachment,
     type Task,
 } from '@mindwtr/core';
@@ -539,7 +540,7 @@ export function QuickAddModal() {
     const scheduledLabel = initialProps?.startTime
         ? safeFormatDate(initialProps.startTime, 'Pp')
         : null;
-    const loadingLabel = t('common.loading') === 'common.loading' ? 'Loading...' : t('common.loading');
+    const loadingLabel = tFallback(t, 'common.loading', 'Loading...');
     const audioButtonLabel = recordingBusy
         ? loadingLabel
         : isRecording

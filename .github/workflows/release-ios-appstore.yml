@@ -18,6 +18,11 @@ on:
         required: false
         type: string
         default: 'external_testing'
+      skip_screenshots:
+        description: Skip App Store screenshot upload
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       upload:
@@ -35,6 +40,11 @@ on:
         required: false
         type: string
         default: 'external_testing'
+      skip_screenshots:
+        description: Skip App Store screenshot upload
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -824,6 +834,27 @@ jobs:
           scripts/ci/prepare-fastlane-metadata.sh
           echo "FASTLANE_METADATA_PATH=$FASTLANE_METADATA_DIR" >> "$GITHUB_ENV"
 
+      - name: Prepare Fastlane screenshots
+        if: ${{ inputs.upload && !inputs.skip_screenshots }}
+        run: |
+          set -euo pipefail
+          export FASTLANE_SCREENSHOTS_DIR="$RUNNER_TEMP/fastlane_screenshots"
+          bash scripts/ci/prepare-fastlane-screenshots.sh ios apps/mobile/screenshots
+          if find "$FASTLANE_SCREENSHOTS_DIR" -mindepth 2 -type f | grep -q .; then
+            echo "FASTLANE_SCREENSHOTS_PATH=$FASTLANE_SCREENSHOTS_DIR" >> "$GITHUB_ENV"
+            echo "SKIP_SCREENSHOTS_FOR_UPLOAD=false" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No iOS App Store screenshots found under apps/mobile/screenshots/{iphone,ipad}; skipping screenshot upload."
+            echo "FASTLANE_SCREENSHOTS_PATH=" >> "$GITHUB_ENV"
+            echo "SKIP_SCREENSHOTS_FOR_UPLOAD=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Skip Fastlane screenshots
+        if: ${{ inputs.upload && inputs.skip_screenshots }}
+        run: |
+          echo "FASTLANE_SCREENSHOTS_PATH=" >> "$GITHUB_ENV"
+          echo "SKIP_SCREENSHOTS_FOR_UPLOAD=true" >> "$GITHUB_ENV"
+
       - name: Resolve App Store review submission flag
         if: ${{ inputs.upload }}
         timeout-minutes: 10
@@ -911,6 +942,10 @@ jobs:
             echo "::warning::Found existing iOS App Store submission in state ${ACTIVE_REVIEW_STATE:-unknown} (version ${ACTIVE_REVIEW_VERSION:-unknown}). Upload will continue for TestFlight using version ${APP_VERSION} with build ${APP_BUILD_NUMBER}, and review submission is disabled."
             echo "EFFECTIVE_SUBMIT_FOR_REVIEW=false" >> "$GITHUB_ENV"
             echo "ENABLE_TESTFLIGHT_EXTERNAL_RELEASE=true" >> "$GITHUB_ENV"
+            echo "SKIP_APP_VERSION_UPDATE_FOR_UPLOAD=true" >> "$GITHUB_ENV"
+            echo "SKIP_METADATA_FOR_UPLOAD=true" >> "$GITHUB_ENV"
+            echo "FASTLANE_SCREENSHOTS_PATH=" >> "$GITHUB_ENV"
+            echo "SKIP_SCREENSHOTS_FOR_UPLOAD=true" >> "$GITHUB_ENV"
             exit 0
           fi
 
@@ -959,6 +994,7 @@ jobs:
           SUBMIT_FOR_REVIEW: ${{ env.EFFECTIVE_SUBMIT_FOR_REVIEW || 'false' }}
           SKIP_APP_VERSION_UPDATE: ${{ env.SKIP_APP_VERSION_UPDATE_FOR_UPLOAD || 'false' }}
           SKIP_METADATA: ${{ env.SKIP_METADATA_FOR_UPLOAD || 'false' }}
+          SKIP_SCREENSHOTS: ${{ env.SKIP_SCREENSHOTS_FOR_UPLOAD || 'true' }}
           FASTLANE_SKIP_UPDATE_CHECK: "1"
           FASTLANE_HIDE_CHANGELOG: "1"
           FASTLANE_OPT_OUT_USAGE: "1"
@@ -978,19 +1014,25 @@ jobs:
 
           platform :ios do
             lane :upload_app_store do
+              screenshots_path = ENV["FASTLANE_SCREENSHOTS_PATH"]
+              skip_screenshots = ENV.fetch("SKIP_METADATA", "false") == "true" || ENV.fetch("SKIP_SCREENSHOTS", "true") == "true"
               deliver_options = {
                 app_identifier: ENV.fetch("EXPECTED_BUNDLE_ID"),
                 app_version: ENV.fetch("APP_VERSION"),
                 ipa: ENV.fetch("IPA_PATH"),
                 metadata_path: ENV.fetch("FASTLANE_METADATA_PATH"),
                 skip_metadata: ENV.fetch("SKIP_METADATA", "false") == "true",
-                skip_screenshots: true,
+                skip_screenshots: skip_screenshots,
                 skip_app_version_update: ENV.fetch("SKIP_APP_VERSION_UPDATE", "false") == "true",
                 force: true,
                 run_precheck_before_submit: false,
                 submit_for_review: ENV.fetch("SUBMIT_FOR_REVIEW", "false") == "true",
                 automatic_release: true
               }
+              if screenshots_path && !screenshots_path.empty?
+                deliver_options[:screenshots_path] = screenshots_path
+                deliver_options[:overwrite_screenshots] = true unless skip_screenshots
+              end
               api_key = app_store_connect_api_key(
                 key_id: ENV.fetch("FASTLANE_ASC_KEY_ID"),
                 issuer_id: ENV.fetch("FASTLANE_ASC_ISSUER_ID"),

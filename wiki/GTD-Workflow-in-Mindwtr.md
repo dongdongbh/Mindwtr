@@ -61,7 +61,7 @@ flowchart TD
     C -->|Reference| F[Add to notes]
     B -->|Yes| G{Less than 2 min?}
     G -->|Yes| H[Do it now → Done]
-    G -->|No| I{What's next?}
+    G -->|No| I{Who should do it?}
     I -->|I'll do it| J[Add contexts → Next Actions]
     I -->|Delegate| K[Add note → Waiting For]
 ```
@@ -76,7 +76,7 @@ flowchart TD
 - Yes → Do it immediately, mark Done
 - No → Continue
 
-**What's next?**
+**Who should do it?**
 - I'll do it → Select contexts, move to Next Actions
 - Delegate → Add waiting note, move to Waiting For
 

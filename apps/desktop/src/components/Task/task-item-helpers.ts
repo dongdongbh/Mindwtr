@@ -7,6 +7,8 @@ import {
     type RecurrenceRule,
     type RecurrenceStrategy,
     buildRRuleString,
+    getRecurrenceCountValue,
+    getRecurrenceUntilValue,
     hasTimeComponent,
     safeFormatDate,
     safeParseDate,
@@ -186,6 +188,10 @@ export function getRecurrenceRRuleValue(recurrence: Task['recurrence']): string 
     if (!recurrence || typeof recurrence === 'string') return '';
     const rec = recurrence as Recurrence;
     if (rec.rrule) return rec.rrule;
-    if (rec.byDay && rec.byDay.length > 0) return buildRRuleString(rec.rule, rec.byDay);
-    return rec.rule ? buildRRuleString(rec.rule) : '';
+    const count = getRecurrenceCountValue(recurrence);
+    const until = getRecurrenceUntilValue(recurrence);
+    if (rec.byDay && rec.byDay.length > 0) {
+        return buildRRuleString(rec.rule, rec.byDay, undefined, { count, until });
+    }
+    return rec.rule ? buildRRuleString(rec.rule, undefined, undefined, { count, until }) : '';
 }

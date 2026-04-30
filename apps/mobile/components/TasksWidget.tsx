@@ -16,9 +16,9 @@ export function buildTasksWidgetTree(
     const isCompact = layoutMode === 'compact';
     const rootPadding = isCompact ? 10 : 12;
     const taskFontSize = isCompact ? COMPACT_TASK_ITEM_FONT_SIZE : TASK_ITEM_FONT_SIZE;
-    const taskMarginTop = isCompact ? 3 : 4;
-    const firstTaskMarginTop = isCompact ? 6 : 7;
-    const buttonMarginTop = isCompact ? 6 : 8;
+    const taskMarginTop = isCompact ? 2 : 3;
+    const firstTaskMarginTop = isCompact ? 5 : 6;
+    const buttonMarginTop = isCompact ? 8 : 9;
     const buttonFontSize = isCompact ? 10 : 11;
     const buttonPaddingVertical = isCompact ? 4 : 5;
     const buttonPaddingHorizontal = isCompact ? 8 : 9;
@@ -93,16 +93,11 @@ export function buildTasksWidgetTree(
                 key: 'content',
                 style: {
                     width: 'match_parent',
+                    flex: 1,
                 },
             },
             ...contentChildren
         ),
-        React.createElement(FlexWidget, {
-            key: 'spacer',
-            style: {
-                flex: 1,
-            },
-        }),
         React.createElement(TextWidget, {
             key: 'capture-bottom',
             text: captureLabel,

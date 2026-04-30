@@ -294,7 +294,7 @@ export function SearchView({ savedSearchId, onDelete }: SearchViewProps) {
                 isOpen={tagPromptOpen}
                 title={t('bulk.addTag')}
                 description={t('bulk.addTag')}
-                placeholder="#tag"
+                placeholder={t('bulk.tagPlaceholder')}
                 defaultValue=""
                 confirmLabel={t('common.save')}
                 cancelLabel={t('common.cancel')}
@@ -317,7 +317,7 @@ export function SearchView({ savedSearchId, onDelete }: SearchViewProps) {
                 isOpen={contextPromptOpen}
                 title={contextPromptMode === 'add' ? t('bulk.addContext') : t('bulk.removeContext')}
                 description={contextPromptMode === 'add' ? t('bulk.addContext') : t('bulk.removeContext')}
-                placeholder="@context"
+                placeholder={t('bulk.contextPlaceholder')}
                 defaultValue=""
                 confirmLabel={t('common.save')}
                 cancelLabel={t('common.cancel')}

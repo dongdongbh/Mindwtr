@@ -12,13 +12,13 @@ describe('getPreferredDesktopAudioCaptureBackend', () => {
         ).toBe('native');
     });
 
-    it('prefers the web recorder inside flatpak', () => {
+    it('prefers the native recorder inside flatpak tauri installs', () => {
         expect(
             getPreferredDesktopAudioCaptureBackend({
                 isTauriRuntime: true,
                 isFlatpakRuntime: true,
             })
-        ).toBe('web');
+        ).toBe('native');
     });
 
     it('uses the web recorder outside tauri', () => {

@@ -30,6 +30,46 @@ inline fun <T> startupSection(phase: String, block: () -> T): T {
 }
 `;
 
+const notificationCacheFunction = `  private fun cacheNotificationOpenPayload(intent: Intent?): LinkedHashMap<String, String>? {
+    val extras = intent?.extras ?: return null
+    val payload = LinkedHashMap<String, String>()
+    fun copyPayloadValue(key: String, value: Any?) {
+      if (value != null && value != JSONObject.NULL) payload[key] = value.toString()
+    }
+    fun copyNestedData(value: Any?) {
+      when (value) {
+        is Bundle -> {
+          listOf("alarmKey", "id", "taskId", "projectId", "kind").forEach { key ->
+            copyPayloadValue(key, value.get(key))
+          }
+        }
+        is String -> {
+          runCatching {
+            val json = JSONObject(value)
+            listOf("alarmKey", "id", "taskId", "projectId", "kind").forEach { key ->
+              copyPayloadValue(key, json.opt(key))
+            }
+          }
+        }
+        else -> {
+          runCatching {
+            val json = JSONObject(value.toString())
+            listOf("alarmKey", "id", "taskId", "projectId", "kind").forEach { key ->
+              copyPayloadValue(key, json.opt(key))
+            }
+          }
+        }
+      }
+    }
+    listOf("alarmKey", "id", "taskId", "projectId", "kind").forEach { key ->
+      copyPayloadValue(key, extras.get(key))
+    }
+    copyNestedData(extras.get("data"))
+    if (payload.isEmpty()) return null
+    NotificationOpenPayloadStore.cache(payload)
+    return payload
+  }`;
+
 const patchMainApplication = (source) => {
   let next = source;
 
@@ -165,21 +205,21 @@ const patchMainActivity = (source) => {
     );
   }
 
+  if (
+    next.includes('private fun cacheNotificationOpenPayload(intent: Intent?)')
+    && !next.includes('copyNestedData(extras.get("data"))')
+  ) {
+    next = next.replace(
+      /  private fun cacheNotificationOpenPayload\(intent: Intent\?\): LinkedHashMap<String, String>\? \{[\s\S]*?\n  \}\n\n  private fun emitNotificationOpenPayload/,
+      `${notificationCacheFunction}\n\n  private fun emitNotificationOpenPayload`
+    );
+  }
+
   if (!next.includes('private fun cacheNotificationOpenPayload(intent: Intent?)')) {
     next = next.replace(
       '\n}\n',
       `
-  private fun cacheNotificationOpenPayload(intent: Intent?): LinkedHashMap<String, String>? {
-    val extras = intent?.extras ?: return null
-    val payload = LinkedHashMap<String, String>()
-    listOf("alarmKey", "id", "taskId", "projectId", "kind").forEach { key ->
-      val value = extras.get(key) ?: return@forEach
-      payload[key] = value.toString()
-    }
-    if (payload.isEmpty()) return null
-    NotificationOpenPayloadStore.cache(payload)
-    return payload
-  }
+${notificationCacheFunction}
 
   private fun emitNotificationOpenPayload(payload: Map<String, String>) {
     val reactApplication = application as? ReactApplication ?: return

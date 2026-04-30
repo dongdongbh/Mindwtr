@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, type TextStyle } from 'react-native';
 import * as Linking from 'expo-linking';
 
 import type { ThemeColors } from '@/hooks/use-theme-colors';
-import { parseInlineMarkdown, parseMarkdownReferenceHref, shallow, useTaskStore } from '@mindwtr/core';
+import { parseInlineMarkdown, parseMarkdownReferenceHref, shallow, tFallback, useTaskStore } from '@mindwtr/core';
 import { useLanguage } from '@/contexts/language-context';
 import { openProjectScreen, openTaskScreen } from '@/lib/task-meta-navigation';
 
@@ -141,14 +141,8 @@ export function MarkdownText({
   const directionStyle: TextStyle | undefined = direction
     ? { writingDirection: direction, textAlign: direction === 'rtl' ? 'right' : 'left' }
     : undefined;
-  const deletedTaskLabel = (() => {
-    const translated = t('markdown.referenceDeletedTask');
-    return translated === 'markdown.referenceDeletedTask' ? 'deleted task' : translated;
-  })();
-  const deletedProjectLabel = (() => {
-    const translated = t('markdown.referenceDeletedProject');
-    return translated === 'markdown.referenceDeletedProject' ? 'deleted project' : translated;
-  })();
+  const deletedTaskLabel = tFallback(t, 'markdown.referenceDeletedTask', 'deleted task');
+  const deletedProjectLabel = tFallback(t, 'markdown.referenceDeletedProject', 'deleted project');
   const resolveTask = React.useCallback((id: string) => {
     const task = tasks.find((candidate) => candidate.id === id && !candidate.deletedAt);
     if (!task) return null;

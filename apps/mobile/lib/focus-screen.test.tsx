@@ -84,6 +84,7 @@ vi.mock('../contexts/language-context', () => ({
         'agenda.todaysFocus': "Today's Focus",
         'focus.schedule': 'Today',
         'focus.nextActions': 'Next Actions',
+        'agenda.reviewDue': 'Review Due',
         'agenda.allClear': 'All clear',
         'agenda.noTasks': 'No tasks',
       }[key] ?? key),
@@ -227,6 +228,40 @@ describe('FocusScreen', () => {
 
     expect(nextSectionButton.props.accessibilityState).toEqual({ expanded: false });
     expect(tree.root.findAllByType(SwipeableTaskItem)).toHaveLength(1);
+    expect(() => tree.root.findByProps({ children: 'All clear' })).toThrow();
+  });
+
+  it('renders review-due tasks in a dedicated Review Due section and allows collapsing it', () => {
+    storeState.tasks = [
+      makeTask('waiting-review', {
+        status: 'waiting',
+        title: 'Waiting review',
+        reviewAt: '2000-01-01T00:00:00.000Z',
+      }),
+    ];
+
+    let tree!: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<FocusScreen />);
+    });
+
+    expect(
+      tree.root.findAllByType(SwipeableTaskItem).map((node) => node.props.task.id),
+    ).toEqual(['waiting-review']);
+
+    const reviewDueButton = tree.root.find((node) =>
+      node.props.accessibilityLabel === 'Review Due' && typeof node.props.onPress === 'function'
+    );
+
+    expect(reviewDueButton.props.accessibilityState).toEqual({ expanded: true });
+
+    act(() => {
+      reviewDueButton.props.onPress();
+    });
+
+    expect(reviewDueButton.props.accessibilityState).toEqual({ expanded: false });
+    expect(tree.root.findAllByType(SwipeableTaskItem)).toHaveLength(0);
     expect(() => tree.root.findByProps({ children: 'All clear' })).toThrow();
   });
 

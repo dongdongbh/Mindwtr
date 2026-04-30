@@ -7,7 +7,7 @@ Mindwtr includes built-in diagnostics logging to help troubleshoot sync and cras
 ## Enable debug logging
 
 ### Desktop
-1. Open **Settings → Sync**
+1. Open **Settings → Data**
 2. Toggle **Debug logging**
 3. Reproduce the issue
 
@@ -21,7 +21,7 @@ MINDWTR_DIAGNOSTICS=1 ./src-tauri/target/release/mindwtr
 ```
 
 ### Mobile
-1. Open **Settings → Diagnostics**
+1. Open **Settings → Data**
 2. Toggle **Debug logging**
 3. Reproduce the issue
 
@@ -30,7 +30,7 @@ MINDWTR_DIAGNOSTICS=1 ./src-tauri/target/release/mindwtr
 ## Share or clear logs
 
 ### Desktop
-- The log file path is shown in **Settings → Sync → Diagnostics**
+- The log file path is shown in **Settings → Data**
 - You can clear logs from the same screen
 
 ### Mobile

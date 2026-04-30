@@ -93,3 +93,31 @@ describe('Layout Obsidian nav visibility', () => {
         expect(getByRole('button', { name: 'Obsidian' })).toBeInTheDocument();
     });
 });
+
+describe('Layout sync conflict surface', () => {
+    it('shows a toast when a new sync conflict status is present', () => {
+        const showToast = vi.fn();
+        act(() => {
+            useUiStore.setState((state) => ({
+                ...state,
+                showToast,
+            }));
+            useTaskStore.setState((state) => ({
+                ...state,
+                settings: {
+                    ...state.settings,
+                    lastSyncAt: '2026-04-22T12:00:00.000Z',
+                    lastSyncStatus: 'conflict',
+                },
+            }));
+        });
+
+        renderLayout();
+
+        expect(showToast).toHaveBeenCalledWith(
+            'Sync conflict resolved with last-write-wins. Open Settings → Sync to review the details.',
+            'info',
+            6000,
+        );
+    });
+});

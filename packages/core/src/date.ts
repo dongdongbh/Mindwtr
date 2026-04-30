@@ -127,6 +127,34 @@ export function normalizeTimeFormatSetting(value?: string | null): TimeFormatSet
     return 'system';
 }
 
+export function normalizeClockTimeInput(value?: string | null): string | null {
+    const trimmed = String(value ?? '').trim();
+    if (!trimmed) return '';
+    const compact = trimmed.replace(/\s+/g, '');
+    let hours: number;
+    let minutes: number;
+
+    if (/^\d{1,2}:\d{2}$/.test(compact)) {
+        const [h, m] = compact.split(':');
+        hours = Number(h);
+        minutes = Number(m);
+    } else if (/^\d{3,4}$/.test(compact)) {
+        if (compact.length === 3) {
+            hours = Number(compact.slice(0, 1));
+            minutes = Number(compact.slice(1));
+        } else {
+            hours = Number(compact.slice(0, 2));
+            minutes = Number(compact.slice(2));
+        }
+    } else {
+        return null;
+    }
+
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
 export function resolveDateLocaleTag(params: {
     language?: string | null;
     dateFormat?: string | null;

@@ -1,7 +1,7 @@
 {
   "name": "@mindwtr/core",
   "license": "AGPL-3.0-only",
-  "version": "0.8.5",
+  "version": "0.8.8",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "exports": {
@@ -25,6 +25,8 @@
     "./uuid": "./src/uuid.ts",
     "./date": "./src/date.ts",
     "./quick-add": "./src/quick-add.ts",
+    "./area-filter": "./src/area-filter.ts",
+    "./calendar-scheduling": "./src/calendar-scheduling.ts",
     "./schedule-utils": "./src/schedule-utils.ts",
     "./digest-utils": "./src/digest-utils.ts",
     "./search": "./src/search.ts",
@@ -43,6 +45,7 @@
     "./text-direction": "./src/text-direction.ts",
     "./todoist-import": "./src/todoist-import.ts",
     "./dgt-import": "./src/dgt-import.ts",
+    "./omnifocus-import": "./src/omnifocus-import.ts",
     "./ai/ai-service": "./src/ai/ai-service.ts",
     "./ai/types": "./src/ai/types.ts",
     "./ai/catalog": "./src/ai/catalog.ts",

@@ -27,7 +27,7 @@ export function useSwipeableChecklist(task: Task, updateTask: UpdateTask) {
         if (!pending) return;
         const { taskId } = pending;
         const checklist = pending.checklist ?? [];
-        const latestTask = useTaskStore.getState().tasks.find((item) => item.id === taskId);
+        const latestTask = useTaskStore.getState()._allTasks.find((item) => item.id === taskId);
         if (!latestTask || latestTask.deletedAt) {
             pendingChecklist.current = null;
             return;

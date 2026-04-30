@@ -52,6 +52,7 @@ Mindwtr is **simple by default and powerful when needed**. We focus on reducing 
 - [[Backup and Restore]] — Export backups, restore local data, and use recovery snapshots
 - [[Todoist Import]] — Import Todoist CSV or ZIP exports into Mindwtr
 - [[DGT GTD Import]] — Import DGT GTD JSON or ZIP exports into Mindwtr
+- [[OmniFocus Import]] — Import OmniFocus CSV, JSON, or ZIP exports into Mindwtr
 - [[iCloud Sync]] — Native Apple-only iCloud / CloudKit backend
 - [[Sync Algorithm]] — Conflict rules, tombstones, and merge behavior
 - Self-hosted cloud setup is split between [[Data and Sync]] (client setup) and [[Cloud Deployment]] (server operations)
@@ -71,6 +72,7 @@ Mindwtr is **simple by default and powerful when needed**. We focus on reducing 
 - [[MCP Server]] — Local MCP server setup and tool usage
 - [[Deployment Guide]] — Platform deployment entry points
 - [[Performance Guide]] — Performance-focused implementation notes
+- [[Testing Strategy]] — Test layers, release gates, and manual smoke checks
 - [Release Notes (Repository)](https://github.com/dongdongbh/Mindwtr/tree/main/docs/release-notes) — Version-by-version release notes
 - [Contributing (Repository Guide)](https://github.com/dongdongbh/Mindwtr/blob/main/docs/CONTRIBUTING.md) — How to contribute to Mindwtr
 

@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Constants from 'expo-constants';
-import { Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
+    translateText,
     useTaskStore,
 } from '@mindwtr/core';
 
@@ -32,6 +33,7 @@ import { SyncCloudKitBackendPanel } from './sync-settings-cloudkit-panel';
 import { SyncDropboxBackendPanel } from './sync-settings-dropbox-panel';
 import { SyncFileBackendPanel } from './sync-settings-file-panel';
 import {
+    RecoverySnapshotsCard,
     SyncBackupSection,
     SyncDiagnosticsCard,
     SyncLastStatusCard,
@@ -44,10 +46,12 @@ import { useSyncSettingsTransportActions, type CloudKitAccountStatus } from './u
 import { SettingsTopBar, SubHeader } from './settings.shell';
 import { styles } from './settings.styles';
 
-export function SyncSettingsScreen() {
+type SettingsScreenMode = 'sync' | 'data';
+
+function SyncSettingsView({ mode }: { mode: SettingsScreenMode }) {
     const tc = useThemeColors();
     const { showToast } = useToast();
-    const { localize, t } = useSettingsLocalization();
+    const { language, localize, t } = useSettingsLocalization();
     const scrollContentStyle = useSettingsScrollContent();
     const {
         tasks,
@@ -74,6 +78,7 @@ export function SyncSettingsScreen() {
     const syncPreferences = settings.syncPreferences ?? {};
     const syncAppearanceEnabled = syncPreferences.appearance === true;
     const syncLanguageEnabled = syncPreferences.language === true;
+    const syncGtdEnabled = syncPreferences.gtd === true;
     const syncExternalCalendarsEnabled = syncPreferences.externalCalendars === true;
     const syncAiEnabled = syncPreferences.ai === true;
     const syncHistory = settings.lastSyncHistory ?? [];
@@ -88,6 +93,7 @@ export function SyncSettingsScreen() {
         ...(lastSyncStats?.projects.conflictIds ?? []),
     ].slice(0, 6);
     const loggingEnabled = settings.diagnostics?.loggingEnabled === true;
+    const pendingRemoteDeleteCount = settings.attachments?.pendingRemoteDeletes?.length ?? 0;
     const isBackupBusy = backupAction !== null;
     const backendOptions: ('off' | 'file' | 'webdav' | 'cloud')[] = ['off', 'file', 'webdav', 'cloud'];
     const showSettingsWarning = useCallback((title: string, message: string, durationMs = 4200) => {
@@ -109,33 +115,21 @@ export function SyncSettingsScreen() {
     const getSyncFailureToastMessage = useCallback((error: unknown) => {
         switch (classifySyncFailure(error)) {
             case 'offline':
-                return localize('Check your internet connection and try again.', '请检查网络连接后重试。');
+                return t('settings.syncFailureOffline');
             case 'auth':
-                return localize(
-                    'Re-authenticate or review your sync credentials in Data & Sync.',
-                    '请在“数据与同步”中重新验证或检查同步凭据。'
-                );
+                return t('settings.syncFailureAuth');
             case 'permission':
-                return localize(
-                    'Re-select the sync file or folder, or grant access again in Data & Sync.',
-                    '请在“数据与同步”中重新选择同步文件/文件夹，或重新授予访问权限。'
-                );
+                return t('settings.syncFailurePermission');
             case 'rateLimited':
-                return localize('The sync backend is rate limiting requests. Wait a moment and try again.', '同步后端正在限流。请稍后再试。');
+                return t('settings.syncFailureRateLimited');
             case 'misconfigured':
-                return localize(
-                    'Finish configuring the selected sync backend in Data & Sync.',
-                    '请先在“数据与同步”中完成所选同步后端的配置。'
-                );
+                return t('settings.syncFailureMisconfigured');
             case 'conflict':
-                return localize(
-                    'Another device or backend reported a sync conflict. Retry after both sides finish syncing.',
-                    '另一台设备或后端报告了同步冲突。请等待双方完成同步后再重试。'
-                );
+                return t('settings.syncFailureConflict');
             default:
-                return localize('Review Data & Sync settings and try again.', '请检查“数据与同步”设置后重试。');
+                return t('settings.syncFailureGeneric');
         }
-    }, [localize]);
+    }, [t]);
 
     const resetSyncStatusForBackendSwitch = useCallback(() => {
         updateSettings({
@@ -147,6 +141,32 @@ export function SyncSettingsScreen() {
     const updateSyncPreferences = (partial: Partial<NonNullable<typeof settings.syncPreferences>>) => {
         updateSettings({ syncPreferences: { ...syncPreferences, ...partial } }).catch(logSettingsError);
     };
+
+    const handleClearPendingRemoteDeletes = useCallback(() => {
+        if (pendingRemoteDeleteCount === 0) return;
+        Alert.alert(
+            localize('Clear pending attachment deletes?', '清除待处理的附件删除？'),
+            localize(
+                'Only clear these if you no longer want Mindwtr to delete those files from the old sync backend. This does not delete any files.',
+                '仅当你不再希望 Mindwtr 从旧同步后端删除这些文件时才清除。此操作不会删除任何文件。'
+            ),
+            [
+                { text: t('common.cancel'), style: 'cancel' },
+                {
+                    text: localize('Clear', '清除'),
+                    style: 'destructive',
+                    onPress: () => {
+                        updateSettings({
+                            attachments: {
+                                ...(settings.attachments ?? {}),
+                                pendingRemoteDeletes: undefined,
+                            },
+                        }).catch(logSettingsError);
+                    },
+                },
+            ],
+        );
+    }, [localize, pendingRemoteDeleteCount, settings.attachments, t, updateSettings]);
 
     const refreshRecoverySnapshots = useCallback(async () => {
         setIsLoadingRecoverySnapshots(true);
@@ -254,6 +274,7 @@ export function SyncSettingsScreen() {
         handleBackup,
         handleClearLog,
         handleImportDgt,
+        handleImportOmniFocus,
         handleImportTodoist,
         handleRestoreBackup,
         handleRestoreRecoverySnapshot,
@@ -317,6 +338,11 @@ export function SyncSettingsScreen() {
     });
     const cloudKitStatusDetails = getCloudKitStatusDetails(cloudKitAccountStatus);
     const isCloudSyncSelected = syncBackend === 'cloud' || syncBackend === 'cloudkit';
+    const dataLabel = React.useMemo(() => {
+        if (language === 'zh') return '数据';
+        if (language === 'zh-Hant') return '數據';
+        return translateText('Data', language);
+    }, [language]);
 
     useEffect(() => {
         void refreshSyncBadgeConfig();
@@ -352,242 +378,288 @@ export function SyncSettingsScreen() {
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['bottom']}>
             <SettingsTopBar />
-            <SubHeader title={t('settings.dataSync')} />
+            <SubHeader title={mode === 'sync' ? t('settings.sync') : dataLabel} />
             <ScrollView style={styles.scrollView} contentContainerStyle={scrollContentStyle}>
-                <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginBottom: 12 }]}>
-                    <View style={styles.settingRowColumn}>
-                        <View style={styles.settingInfo}>
-                            <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.syncBackend')}</Text>
-                            <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                                {syncBackend === 'off'
-                                    ? t('settings.syncBackendOff')
-                                    : syncBackend === 'webdav'
-                                            ? t('settings.syncBackendWebdav')
-                                            : isCloudSyncSelected
-                                                ? cloudProvider === 'cloudkit'
-                                                    ? 'iCloud (CloudKit)'
-                                                    : t('settings.syncBackendCloud')
-                                                : t('settings.syncBackendFile')}
-                            </Text>
-                        </View>
-                        <View style={[styles.backendToggle, { marginTop: 8, width: '100%' }]}>
-                            {backendOptions.map((backend) => (
-                                <TouchableOpacity
-                                    key={backend}
-                                    style={[
-                                        styles.backendOption,
-                                        {
-                                            borderColor: tc.border,
-                                            backgroundColor: (backend === 'cloud' ? isCloudSyncSelected : syncBackend === backend)
-                                                ? tc.filterBg
-                                                : 'transparent',
-                                        },
-                                    ]}
-                                    onPress={() => {
-                                        handleSelectSyncBackend(backend);
-                                    }}
-                                >
-                                    <Text
-                                        style={[
-                                            styles.backendOptionText,
-                                            {
-                                                color: (backend === 'cloud' ? isCloudSyncSelected : syncBackend === backend)
-                                                    ? tc.tint
-                                                    : tc.secondaryText,
-                                            },
-                                        ]}
-                                    >
-                                        {backend === 'off'
-                                            ? t('settings.syncBackendOff')
-                                            : backend === 'file'
-                                                    ? t('settings.syncBackendFile')
-                                                    : backend === 'webdav'
-                                                        ? t('settings.syncBackendWebdav')
-                                                        : t('settings.syncBackendCloud')}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                    </View>
-                </View>
-
-                {syncBackend === 'off' && (
-                    <View style={[styles.helpBox, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
-                        <Text style={[styles.helpTitle, { color: tc.text }]}>{t('settings.syncOff')}</Text>
-                        <Text style={[styles.helpText, { color: tc.secondaryText }]}>{t('settings.syncOffDesc')}</Text>
-                    </View>
-                )}
-
-                {syncBackend === 'file' && (
-                    <SyncFileBackendPanel
-                        isSyncing={isSyncing}
-                        lastSyncCard={lastSyncCard}
-                        localize={localize}
-                        onSelectFolder={() => void handleSetSyncPath()}
-                        onSync={() => void handleSync({ backend: 'file' })}
-                        syncPath={syncPath}
-                        t={t}
-                        tc={tc}
-                    />
-                )}
-
-                {syncBackend === 'webdav' && (
-                    <SyncWebDavBackendPanel
-                        initialPassword={webdavPassword}
-                        initialUrl={webdavUrl}
-                        initialUsername={webdavUsername}
-                        isSyncing={isSyncing}
-                        isTestingConnection={isTestingConnection}
-                        lastSyncCard={lastSyncCard}
-                        localize={localize}
-                        onSave={(settings) => void handleSaveWebDavSettings(settings)}
-                        onSync={(settings) => void handleSync({ backend: 'webdav', webdav: settings })}
-                        onTestConnection={(settings) => void handleTestConnection('webdav', { webdav: settings })}
-                        t={t}
-                        tc={tc}
-                    />
-                )}
-
-                {isCloudSyncSelected && (
+                {mode === 'sync' ? (
                     <>
-                        <Text style={[styles.sectionTitle, { color: tc.text, marginTop: 16 }]}>{t('settings.syncBackendCloud')}</Text>
-                        <View style={[styles.settingCard, { backgroundColor: tc.cardBg }]}>
+                        <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginBottom: 12 }]}>
                             <View style={styles.settingRowColumn}>
-                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.cloudProvider')}</Text>
+                                <View style={styles.settingInfo}>
+                                    <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.syncBackend')}</Text>
+                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
+                                        {syncBackend === 'off'
+                                            ? t('settings.syncBackendOff')
+                                            : syncBackend === 'webdav'
+                                                    ? t('settings.syncBackendWebdav')
+                                                    : isCloudSyncSelected
+                                                        ? cloudProvider === 'cloudkit'
+                                                            ? 'iCloud (CloudKit)'
+                                                            : t('settings.syncBackendCloud')
+                                                        : t('settings.syncBackendFile')}
+                                    </Text>
+                                </View>
                                 <View style={[styles.backendToggle, { marginTop: 8, width: '100%' }]}>
-                                    <TouchableOpacity
-                                        style={[
-                                            styles.backendOption,
-                                            { borderColor: tc.border, backgroundColor: cloudProvider === 'selfhosted' ? tc.filterBg : 'transparent' },
-                                        ]}
-                                        onPress={() => {
-                                            handleSelectCloudProvider('selfhosted');
-                                        }}
-                                    >
-                                        <Text style={[styles.backendOptionText, { color: cloudProvider === 'selfhosted' ? tc.tint : tc.secondaryText }]}>
-                                            {t('settings.cloudProviderSelfHosted')}
-                                        </Text>
-                                    </TouchableOpacity>
-                                    {!isFossBuild && (
+                                    {backendOptions.map((backend) => (
                                         <TouchableOpacity
+                                            key={backend}
                                             style={[
                                                 styles.backendOption,
-                                                { borderColor: tc.border, backgroundColor: cloudProvider === 'dropbox' ? tc.filterBg : 'transparent' },
+                                                {
+                                                    borderColor: tc.border,
+                                                    backgroundColor: (backend === 'cloud' ? isCloudSyncSelected : syncBackend === backend)
+                                                        ? tc.filterBg
+                                                        : 'transparent',
+                                                },
                                             ]}
                                             onPress={() => {
-                                                handleSelectCloudProvider('dropbox');
+                                                handleSelectSyncBackend(backend);
                                             }}
                                         >
-                                            <Text style={[styles.backendOptionText, { color: cloudProvider === 'dropbox' ? tc.tint : tc.secondaryText }]}>
-                                                Dropbox
+                                            <Text
+                                                style={[
+                                                    styles.backendOptionText,
+                                                    {
+                                                        color: (backend === 'cloud' ? isCloudSyncSelected : syncBackend === backend)
+                                                            ? tc.tint
+                                                            : tc.secondaryText,
+                                                    },
+                                                ]}
+                                            >
+                                                {backend === 'off'
+                                                    ? t('settings.syncBackendOff')
+                                                    : backend === 'file'
+                                                            ? t('settings.syncBackendFile')
+                                                            : backend === 'webdav'
+                                                                ? t('settings.syncBackendWebdav')
+                                                                : t('settings.syncBackendCloud')}
                                             </Text>
                                         </TouchableOpacity>
-                                    )}
-                                    {supportsNativeICloudSync && (
-                                        <TouchableOpacity
-                                            style={[
-                                                styles.backendOption,
-                                                { borderColor: tc.border, backgroundColor: cloudProvider === 'cloudkit' ? tc.filterBg : 'transparent' },
-                                            ]}
-                                            onPress={() => {
-                                                handleSelectCloudProvider('cloudkit');
-                                            }}
-                                        >
-                                            <Text style={[styles.backendOptionText, { color: cloudProvider === 'cloudkit' ? tc.tint : tc.secondaryText }]}>
-                                                iCloud
-                                            </Text>
-                                        </TouchableOpacity>
-                                    )}
+                                    ))}
                                 </View>
                             </View>
                         </View>
 
-                        {cloudProvider === 'cloudkit' && supportsNativeICloudSync ? (
-                            <SyncCloudKitBackendPanel
-                                helpText={cloudKitStatusDetails.helpText}
-                                isSyncEnabled={cloudKitStatusDetails.syncEnabled}
+                        {syncBackend === 'off' && (
+                            <View style={[styles.helpBox, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
+                                <Text style={[styles.helpTitle, { color: tc.text }]}>{t('settings.syncOff')}</Text>
+                                <Text style={[styles.helpText, { color: tc.secondaryText }]}>{t('settings.syncOffDesc')}</Text>
+                            </View>
+                        )}
+
+                        {syncBackend === 'file' && (
+                            <SyncFileBackendPanel
                                 isSyncing={isSyncing}
                                 lastSyncCard={lastSyncCard}
                                 localize={localize}
-                                onSync={() => void handleSync({ backend: 'cloudkit', cloudProvider: 'cloudkit' })}
-                                statusLabel={cloudKitStatusDetails.label}
-                                t={t}
-                                tc={tc}
-                            />
-                        ) : cloudProvider === 'selfhosted' || isFossBuild ? (
-                            <SyncSelfHostedBackendPanel
-                                initialToken={cloudToken}
-                                initialUrl={cloudUrl}
-                                isSyncing={isSyncing}
-                                isTestingConnection={isTestingConnection}
-                                lastSyncCard={lastSyncCard}
-                                onSave={(settings) => void handleSaveSelfHostedSettings(settings)}
-                                onSync={(settings) => void handleSync({ backend: 'cloud', cloud: settings, cloudProvider: 'selfhosted' })}
-                                onTestConnection={(settings) => void handleTestConnection('cloud', { cloud: settings, cloudProvider: 'selfhosted' })}
-                                t={t}
-                                tc={tc}
-                            />
-                        ) : (
-                            <SyncDropboxBackendPanel
-                                dropboxBusy={dropboxBusy}
-                                dropboxConfigured={dropboxConfigured}
-                                dropboxConnected={dropboxConnected}
-                                isExpoGo={isExpoGo}
-                                isSyncing={isSyncing}
-                                isTestingConnection={isTestingConnection}
-                                lastSyncCard={lastSyncCard}
-                                localize={localize}
-                                onConnectToggle={() => void (dropboxConnected ? handleDisconnectDropbox() : handleConnectDropbox())}
-                                onSync={() => void handleSync({ backend: 'cloud', cloudProvider: 'dropbox' })}
-                                onTestConnection={() => void handleTestDropboxConnection()}
-                                redirectUri={getDropboxRedirectUri()}
+                                onSelectFolder={() => void handleSetSyncPath()}
+                                onSync={() => void handleSync({ backend: 'file' })}
+                                syncPath={syncPath}
                                 t={t}
                                 tc={tc}
                             />
                         )}
+
+                        {syncBackend === 'webdav' && (
+                            <SyncWebDavBackendPanel
+                                initialPassword={webdavPassword}
+                                initialUrl={webdavUrl}
+                                initialUsername={webdavUsername}
+                                isSyncing={isSyncing}
+                                isTestingConnection={isTestingConnection}
+                                lastSyncCard={lastSyncCard}
+                                onSave={(settings) => void handleSaveWebDavSettings(settings)}
+                                onSync={(settings) => void handleSync({ backend: 'webdav', webdav: settings })}
+                                onTestConnection={(settings) => void handleTestConnection('webdav', { webdav: settings })}
+                                t={t}
+                                tc={tc}
+                            />
+                        )}
+
+                        {isCloudSyncSelected && (
+                            <>
+                                <Text style={[styles.sectionTitle, { color: tc.text, marginTop: 16 }]}>{t('settings.syncBackendCloud')}</Text>
+                                <View style={[styles.settingCard, { backgroundColor: tc.cardBg }]}>
+                                    <View style={styles.settingRowColumn}>
+                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.cloudProvider')}</Text>
+                                        <View style={[styles.backendToggle, { marginTop: 8, width: '100%' }]}>
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.backendOption,
+                                                    { borderColor: tc.border, backgroundColor: cloudProvider === 'selfhosted' ? tc.filterBg : 'transparent' },
+                                                ]}
+                                                onPress={() => {
+                                                    handleSelectCloudProvider('selfhosted');
+                                                }}
+                                            >
+                                                <Text style={[styles.backendOptionText, { color: cloudProvider === 'selfhosted' ? tc.tint : tc.secondaryText }]}>
+                                                    {t('settings.cloudProviderSelfHosted')}
+                                                </Text>
+                                            </TouchableOpacity>
+                                            {!isFossBuild && (
+                                                <TouchableOpacity
+                                                    style={[
+                                                        styles.backendOption,
+                                                        { borderColor: tc.border, backgroundColor: cloudProvider === 'dropbox' ? tc.filterBg : 'transparent' },
+                                                    ]}
+                                                    onPress={() => {
+                                                        handleSelectCloudProvider('dropbox');
+                                                    }}
+                                                >
+                                                    <Text style={[styles.backendOptionText, { color: cloudProvider === 'dropbox' ? tc.tint : tc.secondaryText }]}>
+                                                        Dropbox
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            )}
+                                            {supportsNativeICloudSync && (
+                                                <TouchableOpacity
+                                                    style={[
+                                                        styles.backendOption,
+                                                        { borderColor: tc.border, backgroundColor: cloudProvider === 'cloudkit' ? tc.filterBg : 'transparent' },
+                                                    ]}
+                                                    onPress={() => {
+                                                        handleSelectCloudProvider('cloudkit');
+                                                    }}
+                                                >
+                                                    <Text style={[styles.backendOptionText, { color: cloudProvider === 'cloudkit' ? tc.tint : tc.secondaryText }]}>
+                                                        iCloud
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            )}
+                                        </View>
+                                    </View>
+                                </View>
+
+                                {cloudProvider === 'cloudkit' && supportsNativeICloudSync ? (
+                                    <SyncCloudKitBackendPanel
+                                        helpText={cloudKitStatusDetails.helpText}
+                                        isSyncEnabled={cloudKitStatusDetails.syncEnabled}
+                                        isSyncing={isSyncing}
+                                        lastSyncCard={lastSyncCard}
+                                        localize={localize}
+                                        onSync={() => void handleSync({ backend: 'cloudkit', cloudProvider: 'cloudkit' })}
+                                        statusLabel={cloudKitStatusDetails.label}
+                                        t={t}
+                                        tc={tc}
+                                    />
+                                ) : cloudProvider === 'selfhosted' || isFossBuild ? (
+                                    <SyncSelfHostedBackendPanel
+                                        initialToken={cloudToken}
+                                        initialUrl={cloudUrl}
+                                        isSyncing={isSyncing}
+                                        isTestingConnection={isTestingConnection}
+                                        lastSyncCard={lastSyncCard}
+                                        onSave={(settings) => void handleSaveSelfHostedSettings(settings)}
+                                        onSync={(settings) => void handleSync({ backend: 'cloud', cloud: settings, cloudProvider: 'selfhosted' })}
+                                        onTestConnection={(settings) => void handleTestConnection('cloud', { cloud: settings, cloudProvider: 'selfhosted' })}
+                                        t={t}
+                                        tc={tc}
+                                    />
+                                ) : (
+                                    <SyncDropboxBackendPanel
+                                        dropboxBusy={dropboxBusy}
+                                        dropboxConfigured={dropboxConfigured}
+                                        dropboxConnected={dropboxConnected}
+                                        isExpoGo={isExpoGo}
+                                        isSyncing={isSyncing}
+                                        isTestingConnection={isTestingConnection}
+                                        lastSyncCard={lastSyncCard}
+                                        localize={localize}
+                                        onConnectToggle={() => void (dropboxConnected ? handleDisconnectDropbox() : handleConnectDropbox())}
+                                        onSync={() => void handleSync({ backend: 'cloud', cloudProvider: 'dropbox' })}
+                                        onTestConnection={() => void handleTestDropboxConnection()}
+                                        redirectUri={getDropboxRedirectUri()}
+                                        t={t}
+                                        tc={tc}
+                                    />
+                                )}
+                            </>
+                        )}
+
+                        <SyncPreferencesCard
+                            syncAiEnabled={syncAiEnabled}
+                            syncAppearanceEnabled={syncAppearanceEnabled}
+                            syncExternalCalendarsEnabled={syncExternalCalendarsEnabled}
+                            syncGtdEnabled={syncGtdEnabled}
+                            syncLanguageEnabled={syncLanguageEnabled}
+                            syncOptionsOpen={syncOptionsOpen}
+                            t={t}
+                            tc={tc}
+                            toggleSyncOptionsOpen={() => setSyncOptionsOpen((prev) => !prev)}
+                            updateSyncPreferences={updateSyncPreferences}
+                        />
+
+                        <RecoverySnapshotsCard
+                            backupAction={backupAction}
+                            formatRecoverySnapshotLabel={formatRecoverySnapshotLabel}
+                            handleRestoreRecoverySnapshot={(snapshot) => void handleRestoreRecoverySnapshot(snapshot)}
+                            isBackupBusy={isBackupBusy}
+                            isLoadingRecoverySnapshots={isLoadingRecoverySnapshots}
+                            isSyncing={isSyncing}
+                            localize={localize}
+                            recoverySnapshots={recoverySnapshots}
+                            recoverySnapshotsOpen={recoverySnapshotsOpen}
+                            setRecoverySnapshotsOpen={setRecoverySnapshotsOpen}
+                            t={t}
+                            tc={tc}
+                        />
+                    </>
+                ) : (
+                    <>
+                        <SyncBackupSection
+                            backupAction={backupAction}
+                            handleBackup={() => void handleBackup()}
+                            handleImportDgt={() => void handleImportDgt()}
+                            handleImportOmniFocus={() => void handleImportOmniFocus()}
+                            handleImportTodoist={() => void handleImportTodoist()}
+                            handleRestoreBackup={() => void handleRestoreBackup()}
+                            isBackupBusy={isBackupBusy}
+                            isSyncing={isSyncing}
+                            localize={localize}
+                            t={t}
+                            tc={tc}
+                        />
+
+                        <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 16 }]}>
+                            <View style={styles.settingRow}>
+                                <View style={styles.settingInfo}>
+                                    <Text style={[styles.settingLabel, { color: tc.text }]}>
+                                        {localize('Pending remote deletes', '待处理远程删除')}
+                                    </Text>
+                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
+                                        {pendingRemoteDeleteCount}
+                                    </Text>
+                                </View>
+                                <TouchableOpacity
+                                    disabled={pendingRemoteDeleteCount === 0}
+                                    onPress={handleClearPendingRemoteDeletes}
+                                    style={{ opacity: pendingRemoteDeleteCount === 0 ? 0.45 : 1 }}
+                                >
+                                    <Text style={[styles.linkText, { color: pendingRemoteDeleteCount === 0 ? tc.secondaryText : tc.tint }]}>
+                                        {localize('Clear', '清除')}
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+
+                        <SyncDiagnosticsCard
+                            handleClearLog={() => void handleClearLog()}
+                            handleShareLog={() => void handleShareLog()}
+                            loggingEnabled={loggingEnabled}
+                            t={t}
+                            tc={tc}
+                            toggleDebugLogging={toggleDebugLogging}
+                        />
                     </>
                 )}
-
-                <SyncBackupSection
-                    backupAction={backupAction}
-                    formatRecoverySnapshotLabel={formatRecoverySnapshotLabel}
-                    handleBackup={() => void handleBackup()}
-                    handleImportDgt={() => void handleImportDgt()}
-                    handleImportTodoist={() => void handleImportTodoist()}
-                    handleRestoreBackup={() => void handleRestoreBackup()}
-                    handleRestoreRecoverySnapshot={(snapshot) => void handleRestoreRecoverySnapshot(snapshot)}
-                    isBackupBusy={isBackupBusy}
-                    isLoadingRecoverySnapshots={isLoadingRecoverySnapshots}
-                    isSyncing={isSyncing}
-                    localize={localize}
-                    recoverySnapshots={recoverySnapshots}
-                    recoverySnapshotsOpen={recoverySnapshotsOpen}
-                    setRecoverySnapshotsOpen={setRecoverySnapshotsOpen}
-                    t={t}
-                    tc={tc}
-                />
-
-                <SyncPreferencesCard
-                    syncAiEnabled={syncAiEnabled}
-                    syncAppearanceEnabled={syncAppearanceEnabled}
-                    syncExternalCalendarsEnabled={syncExternalCalendarsEnabled}
-                    syncLanguageEnabled={syncLanguageEnabled}
-                    syncOptionsOpen={syncOptionsOpen}
-                    t={t}
-                    tc={tc}
-                    toggleSyncOptionsOpen={() => setSyncOptionsOpen((prev) => !prev)}
-                    updateSyncPreferences={updateSyncPreferences}
-                />
-
-                <SyncDiagnosticsCard
-                    handleClearLog={() => void handleClearLog()}
-                    handleShareLog={() => void handleShareLog()}
-                    loggingEnabled={loggingEnabled}
-                    t={t}
-                    tc={tc}
-                    toggleDebugLogging={toggleDebugLogging}
-                />
             </ScrollView>
         </SafeAreaView>
     );
+}
+
+export function SyncSettingsScreen() {
+    return <SyncSettingsView mode="sync" />;
+}
+
+export function DataSettingsScreen() {
+    return <SyncSettingsView mode="data" />;
 }

@@ -14,6 +14,7 @@ import {
     getLocalizedWeekdayButtons,
     getLocalizedWeekdayLabels,
     getUsedTaskTokens,
+    normalizeClockTimeInput,
 } from '@mindwtr/core';
 import { useLanguage } from '../contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
@@ -339,6 +340,7 @@ function TaskEditModalInner({
         setPendingStartDate,
         setShowDatePicker,
         showDatePicker,
+        defaultScheduleTime: normalizeClockTimeInput(settings.gtd?.defaultScheduleTime) || '',
         t,
     });
 

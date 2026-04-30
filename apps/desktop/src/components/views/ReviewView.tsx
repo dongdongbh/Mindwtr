@@ -243,7 +243,7 @@ export function ReviewView() {
                     isOpen={tagPromptOpen}
                     title={t('bulk.addTag')}
                     description={t('bulk.addTag')}
-                    placeholder="#tag"
+                    placeholder={t('bulk.tagPlaceholder')}
                     defaultValue=""
                     confirmLabel={t('common.save')}
                     cancelLabel={t('common.cancel')}

@@ -311,6 +311,47 @@ describe('mobile sync-service runtime', () => {
     expect(logMocks.logSyncError).not.toHaveBeenCalled();
   });
 
+  it('continues remote sync when iOS reports connected with uncertain internet reachability', async () => {
+    networkMocks.getNetworkStateAsync.mockResolvedValue({
+      isConnected: true,
+      isInternetReachable: false,
+      isAirplaneModeEnabled: false,
+    });
+    coreMocks.webdavGetJson.mockResolvedValue(emptyData);
+
+    const result = await syncServiceModule.performMobileSync();
+
+    expect(result.success).toBe(true);
+    expect(result.skipped).toBeUndefined();
+    expect(coreMocks.performSyncCycle).toHaveBeenCalledTimes(1);
+    expect(coreMocks.webdavGetJson).toHaveBeenCalledTimes(1);
+    expect(logMocks.logSyncError).not.toHaveBeenCalled();
+  });
+
+  it('ignores connected reachability-false listener updates during remote sync', async () => {
+    networkMocks.addNetworkStateListener.mockImplementation((listener: (state: {
+      isConnected?: boolean | null;
+      isInternetReachable?: boolean | null;
+      isAirplaneModeEnabled?: boolean | null;
+    }) => void) => {
+      listener({
+        isConnected: true,
+        isInternetReachable: false,
+        isAirplaneModeEnabled: false,
+      });
+      return { remove: vi.fn() };
+    });
+    coreMocks.webdavGetJson.mockResolvedValue(emptyData);
+
+    const result = await syncServiceModule.performMobileSync();
+
+    expect(result.success).toBe(true);
+    expect(result.skipped).toBeUndefined();
+    expect(coreMocks.performSyncCycle).toHaveBeenCalledTimes(1);
+    expect(coreMocks.webdavGetJson).toHaveBeenCalledTimes(1);
+    expect(logMocks.logSyncError).not.toHaveBeenCalled();
+  });
+
   it('skips remote sync when the request fails with an offline network error', async () => {
     coreMocks.webdavGetJson.mockRejectedValue(new TypeError('Network request failed'));
 

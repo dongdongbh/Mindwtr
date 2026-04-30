@@ -17,13 +17,13 @@ This keeps restore simple and predictable. It is not a merge operation.
 
 ### Desktop
 
-1. Open **Settings → Sync**
+1. Open **Settings → Data**
 2. In **Data Transfer**, choose **Export Backup**
 3. Save the JSON file where you want
 
 ### Mobile
 
-1. Open **Settings → Data & Sync**
+1. Open **Settings → Data**
 2. Tap **Export Backup**
 3. Save or share the JSON file
 
@@ -35,7 +35,7 @@ The backup format is compatible with Mindwtr’s internal `data.json` structure.
 
 ### Desktop
 
-1. Open **Settings → Sync**
+1. Open **Settings → Data**
 2. In **Data Transfer**, choose **Restore Backup**
 3. Select a Mindwtr backup JSON file
 4. Review the summary and confirm restore
@@ -44,7 +44,7 @@ Before restore, desktop creates a data snapshot in the local snapshot directory 
 
 ### Mobile
 
-1. Open **Settings → Data & Sync**
+1. Open **Settings → Data**
 2. Tap **Restore Backup**
 3. Select a Mindwtr backup JSON file
 4. Review the summary and confirm restore
@@ -58,7 +58,7 @@ Before restore, mobile saves a local recovery snapshot in app storage.
 Mindwtr creates recovery snapshots automatically before restore and import operations.
 
 - **Desktop**: snapshots appear in **Settings → Sync → Recovery Snapshots**
-- **Mobile**: snapshots appear in **Settings → Data & Sync → Recovery Snapshots**
+- **Mobile**: snapshots appear in **Settings → Sync → Recovery Snapshots**
 
 Use these when you restored the wrong file or want to roll back a local import/restore operation.
 

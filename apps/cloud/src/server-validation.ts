@@ -1,10 +1,20 @@
 import {
+    filterNotDeleted,
     searchAll,
+    type Area,
     type AppData,
+    type Project,
+    type Section,
     type Task,
     type TaskStatus,
 } from '@mindwtr/core';
 import {
+    CLOUD_AREA_CREATION_ALLOWED_PROP_KEYS,
+    CLOUD_AREA_PATCH_ALLOWED_PROP_KEYS,
+    CLOUD_PROJECT_CREATION_ALLOWED_PROP_KEYS,
+    CLOUD_PROJECT_PATCH_ALLOWED_PROP_KEYS,
+    CLOUD_SECTION_CREATION_ALLOWED_PROP_KEYS,
+    CLOUD_SECTION_PATCH_ALLOWED_PROP_KEYS,
     CLOUD_TASK_CREATION_ALLOWED_PROP_KEYS,
     CLOUD_TASK_PATCH_ALLOWED_PROP_KEYS,
     MAX_ITEMS_PER_COLLECTION,
@@ -266,6 +276,90 @@ export function validateTaskPatchProps(
     return { ok: true, props: value as Partial<Task> };
 }
 
+export function validateProjectCreationProps(
+    value: unknown
+): { ok: true; props: Partial<Project> } | { ok: false; error: string } {
+    if (!isRecord(value)) return { ok: false, error: 'Invalid project props' };
+    const invalidKeys = Object.keys(value).filter((key) => !CLOUD_PROJECT_CREATION_ALLOWED_PROP_KEYS.has(key as keyof Project));
+    if (invalidKeys.length > 0) {
+        return {
+            ok: false,
+            error: `Unsupported project props: ${invalidKeys.slice(0, 10).join(', ')}`,
+        };
+    }
+    return { ok: true, props: value as Partial<Project> };
+}
+
+export function validateProjectPatchProps(
+    value: unknown
+): { ok: true; props: Partial<Project> } | { ok: false; error: string } {
+    if (!isRecord(value)) return { ok: false, error: 'Invalid project updates' };
+    const invalidKeys = Object.keys(value).filter((key) => !CLOUD_PROJECT_PATCH_ALLOWED_PROP_KEYS.has(key as keyof Project));
+    if (invalidKeys.length > 0) {
+        return {
+            ok: false,
+            error: `Unsupported project updates: ${invalidKeys.slice(0, 10).join(', ')}`,
+        };
+    }
+    return { ok: true, props: value as Partial<Project> };
+}
+
+export function validateSectionCreationProps(
+    value: unknown
+): { ok: true; props: Partial<Section> } | { ok: false; error: string } {
+    if (!isRecord(value)) return { ok: false, error: 'Invalid section props' };
+    const invalidKeys = Object.keys(value).filter((key) => !CLOUD_SECTION_CREATION_ALLOWED_PROP_KEYS.has(key as keyof Section));
+    if (invalidKeys.length > 0) {
+        return {
+            ok: false,
+            error: `Unsupported section props: ${invalidKeys.slice(0, 10).join(', ')}`,
+        };
+    }
+    return { ok: true, props: value as Partial<Section> };
+}
+
+export function validateSectionPatchProps(
+    value: unknown
+): { ok: true; props: Partial<Section> } | { ok: false; error: string } {
+    if (!isRecord(value)) return { ok: false, error: 'Invalid section updates' };
+    const invalidKeys = Object.keys(value).filter((key) => !CLOUD_SECTION_PATCH_ALLOWED_PROP_KEYS.has(key as keyof Section));
+    if (invalidKeys.length > 0) {
+        return {
+            ok: false,
+            error: `Unsupported section updates: ${invalidKeys.slice(0, 10).join(', ')}`,
+        };
+    }
+    return { ok: true, props: value as Partial<Section> };
+}
+
+export function validateAreaCreationProps(
+    value: unknown
+): { ok: true; props: Partial<Area> } | { ok: false; error: string } {
+    if (!isRecord(value)) return { ok: false, error: 'Invalid area props' };
+    const invalidKeys = Object.keys(value).filter((key) => !CLOUD_AREA_CREATION_ALLOWED_PROP_KEYS.has(key as keyof Area));
+    if (invalidKeys.length > 0) {
+        return {
+            ok: false,
+            error: `Unsupported area props: ${invalidKeys.slice(0, 10).join(', ')}`,
+        };
+    }
+    return { ok: true, props: value as Partial<Area> };
+}
+
+export function validateAreaPatchProps(
+    value: unknown
+): { ok: true; props: Partial<Area> } | { ok: false; error: string } {
+    if (!isRecord(value)) return { ok: false, error: 'Invalid area updates' };
+    const invalidKeys = Object.keys(value).filter((key) => !CLOUD_AREA_PATCH_ALLOWED_PROP_KEYS.has(key as keyof Area));
+    if (invalidKeys.length > 0) {
+        return {
+            ok: false,
+            error: `Unsupported area updates: ${invalidKeys.slice(0, 10).join(', ')}`,
+        };
+    }
+    return { ok: true, props: value as Partial<Area> };
+}
+
 export function pickTaskList(
     data: AppData,
     opts: { includeDeleted: boolean; includeCompleted: boolean; status?: TaskStatus | null; query?: string }
@@ -275,7 +369,7 @@ export function pickTaskList(
     if (!opts.includeCompleted) tasks = tasks.filter((t) => t.status !== 'done' && t.status !== 'archived');
     if (opts.status) tasks = tasks.filter((t) => t.status === opts.status);
     if (opts.query && opts.query.trim()) {
-        tasks = searchAll(tasks, data.projects.filter((p) => !p.deletedAt), opts.query).tasks;
+        tasks = searchAll(tasks, filterNotDeleted(data.projects), opts.query).tasks;
     }
     return tasks;
 }

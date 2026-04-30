@@ -1,5 +1,5 @@
 import * as chrono from 'chrono-node';
-import { isValid, set } from 'date-fns';
+import { format, isValid, set } from 'date-fns';
 import type { Area, Project, Task, TaskStatus } from './types';
 import { normalizeTaskStatus } from './task-status';
 
@@ -66,6 +66,11 @@ function restoreEscapes(input: string): string {
 
 type DateDefaultTimeMode = 'now' | 'startOfDay';
 
+type ParsedNaturalDate = {
+    date: Date;
+    hasExplicitTime: boolean;
+};
+
 function buildDefaultDate(now: Date, defaultTimeMode: DateDefaultTimeMode): Date {
     const fallbackHour = defaultTimeMode === 'startOfDay' ? 0 : now.getHours();
     const fallbackMinute = defaultTimeMode === 'startOfDay' ? 0 : now.getMinutes();
@@ -80,11 +85,12 @@ function resolveChronoDate(
     result: chrono.ParsedResult,
     now: Date,
     defaultTimeMode: DateDefaultTimeMode,
-): Date | null {
+): ParsedNaturalDate | null {
     let parsed = result.start.date();
     if (!isValid(parsed)) return null;
+    const hasExplicitTime = result.start.isCertain('hour') || hasNaturalTimeHint(result.text);
 
-    if (!result.start.isCertain('hour') && !hasNaturalTimeHint(result.text)) {
+    if (!hasExplicitTime) {
         const fallbackHour = defaultTimeMode === 'startOfDay' ? 0 : now.getHours();
         const fallbackMinute = defaultTimeMode === 'startOfDay' ? 0 : now.getMinutes();
         parsed = set(parsed, { hours: fallbackHour, minutes: fallbackMinute, seconds: 0, milliseconds: 0 });
@@ -92,12 +98,12 @@ function resolveChronoDate(
         parsed = set(parsed, { seconds: 0, milliseconds: 0 });
     }
 
-    return isValid(parsed) ? parsed : null;
+    return isValid(parsed) ? { date: parsed, hasExplicitTime } : null;
 }
 
-function parseNaturalDate(raw: string, now: Date, defaultTimeMode: DateDefaultTimeMode = 'now'): Date | null {
+function parseNaturalDate(raw: string, now: Date, defaultTimeMode: DateDefaultTimeMode = 'now'): ParsedNaturalDate | null {
     const text = raw.trim();
-    if (!text) return buildDefaultDate(now, defaultTimeMode);
+    if (!text) return { date: buildDefaultDate(now, defaultTimeMode), hasExplicitTime: defaultTimeMode === 'now' };
 
     const results = chrono.parse(text, { instant: now }, { forwardDate: true });
     const result = results[0];
@@ -107,6 +113,10 @@ function parseNaturalDate(raw: string, now: Date, defaultTimeMode: DateDefaultTi
     if (result.index !== 0 || matchedEnd !== text.length) return null;
 
     return resolveChronoDate(result, now, defaultTimeMode);
+}
+
+function formatDueDateValue(parsed: ParsedNaturalDate): string {
+    return parsed.hasExplicitTime ? parsed.date.toISOString() : format(parsed.date, 'yyyy-MM-dd');
 }
 
 function detectTrailingDate(title: string, now: Date): QuickAddDetectedDate | undefined {
@@ -128,7 +138,7 @@ function detectTrailingDate(title: string, now: Date): QuickAddDetectedDate | un
         if (!parsed) continue;
 
         return {
-            date: parsed.toISOString(),
+            date: formatDueDateValue(parsed),
             matchedText,
             titleWithoutDate,
         };
@@ -160,7 +170,7 @@ function parseDateCommand(
     }
     const nextWorking = stripToken(working, match[0]);
     return {
-        value: parsed.toISOString(),
+        value: command === 'due' ? formatDueDateValue(parsed) : parsed.date.toISOString(),
         working: nextWorking,
     };
 }

@@ -47,7 +47,7 @@ const sanitizeAiForSync = (
     return sanitized;
 };
 
-const SETTINGS_SYNC_GROUP_KEYS: SettingsSyncGroup[] = ['appearance', 'language', 'externalCalendars', 'ai'];
+const SETTINGS_SYNC_GROUP_KEYS: SettingsSyncGroup[] = ['appearance', 'language', 'gtd', 'externalCalendars', 'ai'];
 const SETTINGS_SYNC_UPDATED_AT_KEYS: Array<SettingsSyncGroup | 'preferences'> = ['preferences', ...SETTINGS_SYNC_GROUP_KEYS];
 
 const cloneSettingValue = <T>(value: T): T => {
@@ -192,7 +192,7 @@ const sanitizeAiSettings = (
     return sanitizeAiForSync(next, fallback);
 };
 
-const sanitizeMergedSettingsForSync = (
+export const sanitizeMergedSettingsForSync = (
     merged: AppData['settings'],
     localSettings: AppData['settings']
 ): AppData['settings'] => {
@@ -220,6 +220,7 @@ const sanitizeMergedSettingsForSync = (
         next.appearance = localSettings.appearance ? cloneSettingValue(localSettings.appearance) : undefined;
     } else if (next.appearance) {
         const fallbackAppearance = localSettings.appearance ? cloneSettingValue(localSettings.appearance) : {};
+        let didSanitizeAppearance = false;
 
         if (next.appearance.density !== undefined && !SETTINGS_DENSITY_VALUE_SET.has(next.appearance.density)) {
             next.appearance = {
@@ -227,6 +228,7 @@ const sanitizeMergedSettingsForSync = (
                 ...next.appearance,
                 density: localSettings.appearance?.density,
             };
+            didSanitizeAppearance = true;
         }
         const sanitizedAppearance = next.appearance;
         if (
@@ -239,6 +241,17 @@ const sanitizeMergedSettingsForSync = (
                 ...sanitizedAppearance,
                 textSize: localSettings.appearance?.textSize,
             };
+            didSanitizeAppearance = true;
+        }
+
+        const finalAppearance = next.appearance;
+        if (
+            didSanitizeAppearance
+            && finalAppearance
+            && finalAppearance.density === undefined
+            && finalAppearance.textSize === undefined
+        ) {
+            next.appearance = Object.keys(fallbackAppearance).length > 0 ? next.appearance : undefined;
         }
     }
 
@@ -258,10 +271,7 @@ export const mergeSettingsForSync = (
     incomingSettings: AppData['settings']
 ): AppData['settings'] => {
     const merged: AppData['settings'] = { ...localSettings };
-    const nextSyncUpdatedAt: NonNullable<AppData['settings']['syncPreferencesUpdatedAt']> = {
-        ...(localSettings.syncPreferencesUpdatedAt ?? {}),
-        ...(incomingSettings.syncPreferencesUpdatedAt ?? {}),
-    };
+    const nextSyncUpdatedAt: NonNullable<AppData['settings']['syncPreferencesUpdatedAt']> = {};
 
     const localPrefs = localSettings.syncPreferences ?? {};
     const incomingPrefs = incomingSettings.syncPreferences ?? {};
@@ -306,10 +316,12 @@ export const mergeSettingsForSync = (
     ) => {
         const localAt = localSettings.syncPreferencesUpdatedAt?.[key];
         const incomingAt = incomingSettings.syncPreferencesUpdatedAt?.[key];
-        const incomingWins = isIncomingNewer(localAt, incomingAt);
+        const localOptedOut = localSettings.syncPreferences?.[key] === false;
+        const incomingWins = localOptedOut ? false : isIncomingNewer(localAt, incomingAt);
+        const effectiveIncomingValue = localOptedOut ? localValue : incomingValue;
         const resolvedValue = mergeValues
-            ? mergeValues(localValue, incomingValue, incomingWins)
-            : (incomingWins ? incomingValue : localValue);
+            ? mergeValues(localValue, effectiveIncomingValue, incomingWins)
+            : (incomingWins ? effectiveIncomingValue : localValue);
         apply(cloneSettingValue(resolvedValue), incomingWins);
         const winnerAt = incomingWins ? incomingAt : localAt;
         if (winnerAt) nextSyncUpdatedAt[key] = winnerAt;
@@ -354,6 +366,29 @@ export const mergeSettingsForSync = (
             merged.weekStart = value.weekStart;
             merged.dateFormat = value.dateFormat;
             merged.timeFormat = value.timeFormat;
+        },
+        (localValue, incomingValue, incomingWins) => mergeRecordFields(localValue, incomingValue, incomingWins)
+    );
+
+    mergeGroup(
+        'gtd',
+        {
+            defaultScheduleTime: localSettings.gtd?.defaultScheduleTime,
+        },
+        {
+            defaultScheduleTime: incomingSettings.gtd?.defaultScheduleTime,
+        },
+        (value) => {
+            if (value.defaultScheduleTime === undefined) {
+                if (merged.gtd) {
+                    delete merged.gtd.defaultScheduleTime;
+                }
+            } else {
+                merged.gtd = {
+                    ...(merged.gtd ?? {}),
+                    defaultScheduleTime: value.defaultScheduleTime,
+                };
+            }
         },
         (localValue, incomingValue, incomingWins) => mergeRecordFields(localValue, incomingValue, incomingWins)
     );

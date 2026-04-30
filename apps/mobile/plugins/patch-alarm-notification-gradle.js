@@ -78,6 +78,18 @@ ${helperMarker}`
 
 const applyAlarmPendingIntentPatch = (filePath) => patchFile(filePath, applyAlarmPendingIntentPatchToSource);
 
+const applyAlarmDuplicateToastPatchToSource = (original) => original.replace(
+  `        if (contain) {
+            Toast.makeText(mContext, "You have already set this Alarm", Toast.LENGTH_SHORT).show();
+        }
+
+`,
+  `        // Duplicate alarms are reported to JS via promise rejection. Mindwtr retries silently.
+`
+);
+
+const applyAlarmDuplicateToastPatch = (filePath) => patchFile(filePath, applyAlarmDuplicateToastPatchToSource);
+
 const applyAlarmReminderBehaviorPatchToSource = (original) => {
   let next = original;
 
@@ -333,6 +345,9 @@ function withAlarmNotificationGradlePatch(config) {
         if (applyAlarmPendingIntentPatch(candidate)) {
           logPatchedCandidate('alarm-pending-intent-patch', candidate);
         }
+        if (applyAlarmDuplicateToastPatch(candidate)) {
+          logPatchedCandidate('alarm-duplicate-toast-patch', candidate);
+        }
         if (applyAlarmReminderBehaviorPatch(candidate)) {
           logPatchedCandidate('alarm-reminder-behavior-patch', candidate);
         }
@@ -366,6 +381,7 @@ module.exports = withAlarmNotificationGradlePatch;
 module.exports.__testables = {
   applyGradleCompatPatchToSource,
   applyAlarmPendingIntentPatchToSource,
+  applyAlarmDuplicateToastPatchToSource,
   applyAlarmReminderBehaviorPatchToSource,
   applyAlarmAudioInterfacePatchToSource,
   applyAlarmDismissReceiverPatchToSource,

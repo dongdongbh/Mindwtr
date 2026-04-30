@@ -1,5 +1,6 @@
 import React from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { translateWithFallback } from '@mindwtr/core';
 
 import type { TaskEditFieldRendererProps } from './TaskEditFieldRenderer.types';
 
@@ -50,8 +51,7 @@ export function TaskEditOrganizationField({
     ]);
     const getStatusLabel = (status: string) => {
         const key = `status.${status}` as const;
-        const translated = t(key);
-        return translated === key ? status : translated;
+        return translateWithFallback(t, key, status);
     };
 
     switch (fieldId) {

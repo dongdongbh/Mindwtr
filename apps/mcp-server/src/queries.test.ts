@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { addTask, deleteTask, listTasks, parseQuickAdd, updateTask, type Project } from './queries.js';
+import { addTask, deleteTask, listTasks, parseQuickAdd, updateTask, type ProjectRef } from './queries.js';
 import type { DbClient } from './db.js';
 
 const createMockDb = (
@@ -66,7 +66,7 @@ const createMockDb = (
 
 describe('mcp queries', () => {
     test('parseQuickAdd resolves project by +Title token', () => {
-        const projects: Project[] = [{ id: 'p1', title: 'Home' }];
+        const projects: ProjectRef[] = [{ id: 'p1', title: 'Home' }];
         const parsed = parseQuickAdd('Buy milk +Home @errands #weekly', projects);
         expect(parsed.title).toBe('Buy milk');
         expect(parsed.props.projectId).toBe('p1');

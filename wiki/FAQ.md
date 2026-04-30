@@ -75,8 +75,8 @@ Mindwtr supports File Sync, WebDAV, self-hosted Cloud Sync, and Dropbox sync (su
 
 Yes, on supported Apple builds.
 
-- **iPhone / iPad:** native **iCloud** backend is available in **Settings → Data & Sync**
-- **macOS desktop:** native **iCloud** backend is available in **Settings → Data & Sync**
+- **iPhone / iPad:** native **iCloud** backend is available in **Settings → Sync**
+- **macOS desktop:** native **iCloud** backend is available in **Settings → Sync**
 - **Android / Windows / Linux:** no native iCloud backend
 
 See [[iCloud Sync]] and [[Data and Sync]].
@@ -88,7 +88,7 @@ Mindwtr already works with OneDrive **via file sync**:
 - **Windows/macOS:** Put your Mindwtr `data.json` inside your OneDrive folder. OneDrive handles the sync automatically.
 - **Android:** The official OneDrive app does **not** provide true two‑way folder sync.  
   Use a helper “bridge” app such as **OneSync (Autosync for OneDrive)** or **FolderSync** to keep a local folder synced.  
-  Then point Mindwtr to that local folder in **Settings → Data & Sync** (Mindwtr uses `data.json` inside).
+  Then point Mindwtr to that local folder in **Settings → Sync** (Mindwtr uses `data.json` inside).
 
 This is the same approach used by local‑first apps like Obsidian.
 
@@ -167,7 +167,7 @@ Set recurrence in the task editor (daily/weekly/monthly/yearly), then enable **R
 Logging is off by default. Enable it only when you want to report a bug.
 
 **Desktop (Tauri):**
-1. Go to **Settings → Sync → Diagnostics**.
+1. Go to **Settings → Data**.
 2. Enable **Debug logging**.
 3. Reproduce the issue.
 4. Copy the **Log file** path and attach the file to your GitHub issue.
@@ -175,7 +175,7 @@ Logging is off by default. Enable it only when you want to report a bug.
 Linux log location (default): `~/.local/share/mindwtr/logs/mindwtr.log`
 
 **Mobile:**
-1. Go to **Settings → Data & Sync → Diagnostics**.
+1. Go to **Settings → Data**.
 2. Enable **Debug logging**.
 3. Reproduce the issue.
 4. Tap **Share log** and attach it to your GitHub issue.
@@ -227,7 +227,7 @@ Go to Settings → Appearance. Choose Light, Dark, or System.
 ### How do I sync with my phone?
 
 1. Configure a sync folder in Settings (point to Dropbox, Syncthing, etc.)
-2. On mobile, select the sync folder in Settings → Data & Sync
+2. On mobile, select the sync folder in Settings → Sync
 3. Both platforms auto-sync on data changes and when switching apps
 
 See [[Data and Sync]].
@@ -282,7 +282,7 @@ In the Inbox, swipe right on a task to mark it as Done. Other views may have dif
 ### How do I sync with desktop?
 
 1. Export backup to your sync folder (Google Drive, Syncthing, etc.)
-2. Select that folder in Settings → Data & Sync
+2. Select that folder in Settings → Sync
 3. The app auto-syncs on data changes and when going to background
 
 See [[Data and Sync]].
@@ -312,8 +312,8 @@ We recommend using one sync folder to avoid conflicts. Pick one service (Dropbox
 
 ### How do I backup my data?
 
-**Desktop:** Use **Settings → Sync → Data Transfer → Export Backup**, or back up `data.json` from the app data folder.
-**Mobile:** Use **Settings → Data & Sync → Export Backup** to save a copy.
+**Desktop:** Use **Settings → Data → Export Backup**, or back up `data.json` from the app data folder.
+**Mobile:** Use **Settings → Data → Export Backup** to save a copy.
 
 See [[Backup and Restore]].
 
@@ -325,7 +325,7 @@ See [[Backup and Restore]].
 
 ### Can I import from Todoist?
 
-Yes. Mindwtr can import Todoist CSV exports and ZIP backups from **Settings → Data & Sync / Sync → Import from Todoist**.
+Yes. Mindwtr can import Todoist CSV exports and ZIP backups from **Settings → Data → Import from Todoist**.
 
 - Todoist projects become Mindwtr projects
 - Subtasks become checklist items
@@ -335,7 +335,7 @@ See [[Todoist Import]].
 
 ### Can I import from DGT GTD?
 
-Yes. Mindwtr can import DGT GTD JSON exports and ZIP archives from **Settings → Data & Sync / Sync → Import from DGT GTD**.
+Yes. Mindwtr can import DGT GTD JSON exports and ZIP archives from **Settings → Data → Import from DGT GTD**.
 
 - DGT folders become Mindwtr areas
 - DGT projects become Mindwtr projects
@@ -345,6 +345,20 @@ Yes. Mindwtr can import DGT GTD JSON exports and ZIP archives from **Settings �
 Unsupported DGT repeat patterns are imported once and the original repeat text is preserved in the description.
 
 See [[DGT GTD Import]].
+
+### Can I import from OmniFocus?
+
+Yes. Mindwtr can import OmniFocus CSV exports and Omni Automation JSON / ZIP exports from **Settings → Data → Import from OmniFocus**.
+
+- OmniFocus folders can become Mindwtr areas when metadata is available
+- OmniFocus projects become Mindwtr projects when needed
+- Standalone OmniFocus actions stay outside projects
+- Supported notes, tags, defer dates, due dates, completion state, and recurrence from the JSON path are preserved
+- Simple nested tasks can become checklist items, while deeper hierarchy is flattened with the original path preserved
+
+If recurrence matters, use the Omni Automation JSON / ZIP export instead of CSV. Planned dates and duration text are kept in the description when Mindwtr does not have a direct field for them.
+
+See [[OmniFocus Import]].
 
 ---
 

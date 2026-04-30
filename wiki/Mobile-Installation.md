@@ -106,7 +106,7 @@ Mobile data is stored in app-internal storage with SQLite as the primary store, 
 ### Data Cleanup
 
 Uninstalling removes all local data. If you want to preserve your data:
-1. Export a backup first (**Settings → Data & Sync → Export Backup**)
+1. Export a backup first (**Settings → Data → Export Backup**)
 2. Save the exported file
 3. Uninstall the app
 

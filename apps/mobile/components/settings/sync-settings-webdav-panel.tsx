@@ -8,7 +8,6 @@ import { isValidHttpUrl } from './settings.constants';
 import { styles } from './settings.styles';
 
 type Translate = (key: string) => string;
-type Localize = (english: string, chinese: string) => string;
 
 export type WebDavSyncSettings = {
     password: string;
@@ -23,7 +22,6 @@ type SyncWebDavBackendPanelProps = {
     isSyncing: boolean;
     isTestingConnection: boolean;
     lastSyncCard: ReactNode;
-    localize: Localize;
     onSave: (settings: WebDavSyncSettings) => void;
     onSync: (settings: WebDavSyncSettings) => void;
     onTestConnection: (settings: WebDavSyncSettings) => void;
@@ -38,7 +36,6 @@ export function SyncWebDavBackendPanel({
     isSyncing,
     isTestingConnection,
     lastSyncCard,
-    localize,
     onSave,
     onSync,
     onTestConnection,
@@ -112,7 +109,7 @@ export function SyncWebDavBackendPanel({
                 </View>
                 {Platform.OS === 'web' && (
                     <Text style={[styles.settingDescription, { color: '#F59E0B' }]}>
-                        {localize('Web warning: WebDAV passwords are stored in browser storage. Use only on trusted devices.', 'Web 提示：WebDAV 密码会保存在浏览器本地存储中，请仅在可信设备使用。')}
+                        {t('settings.webdavBrowserStorageWarning')}
                     </Text>
                 )}
                 <TouchableOpacity

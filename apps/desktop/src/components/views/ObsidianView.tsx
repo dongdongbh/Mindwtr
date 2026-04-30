@@ -15,7 +15,7 @@ import {
     Tags,
 } from 'lucide-react';
 
-import { DEFAULT_TASKNOTES_FOLDER, safeFormatDate, type ObsidianTask } from '@mindwtr/core';
+import { DEFAULT_TASKNOTES_FOLDER, safeFormatDate, translateWithFallback, type ObsidianTask } from '@mindwtr/core';
 
 import { ObsidianService } from '../../lib/obsidian-service';
 import { dispatchNavigateEvent } from '../../lib/navigation-events';
@@ -91,8 +91,7 @@ export function ObsidianView() {
     const hiddenCompletedCount = Math.max(0, tasks.length - visibleTasks.length);
 
     const resolveText = useCallback((key: string, fallback: string) => {
-        const value = t(key);
-        return value === key ? fallback : value;
+        return translateWithFallback(t, key, fallback);
     }, [t]);
 
     useEffect(() => {

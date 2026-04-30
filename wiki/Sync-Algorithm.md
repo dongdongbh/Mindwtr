@@ -35,9 +35,10 @@ Revisit ADR 0008 only if snapshot files regularly exceed 5 MB, sync round-trips 
 5. Invalid `deletedAt` falls back to `updatedAt` for conservative operation timing.
 6. Attachments are merged per attachment `id` with the same LWW rules.
 7. Settings merge by sync preferences:
-   - Appearance/language/external calendars/AI can be merged independently.
-   - Conflict resolution uses group-level timestamps (`appearance`, `language`, `externalCalendars`, `ai`).
+   - Appearance/language/GTD scheduling/external calendars/AI can be merged independently.
+   - Conflict resolution uses group-level timestamps (`appearance`, `language`, `gtd`, `externalCalendars`, `ai`).
    - Concurrent edits to different fields inside the same group can still collapse to the newer group update.
+   - A local `syncPreferences` opt-out is bidirectional for that group: Mindwtr does not send that group to remote and does not accept incoming remote changes for it.
    - Secrets (API keys, local model paths) are never synced.
 8. Remote-write recovery is explicit:
    - Local data is first written with `pendingRemoteWriteAt`.
@@ -108,6 +109,19 @@ record sync history and diagnostics
 - Winner attachment URI/local status is preserved when usable.
 - If winner has no usable local URI, merge can fall back to the other side URI/status.
 - Missing local files are handled later by attachment sync/download.
+- `settings.attachments.pendingRemoteDeletes` records remote files that still need deletion after a local attachment delete.
+- Pending remote deletes are retained until the remote delete succeeds. They are not purged by age, because dropping them before success can leave deleted files orphaned on the backend.
+- Mindwtr Cloud also exposes an authenticated orphan cleanup endpoint that deletes attachment files not referenced by the current snapshot.
+
+## Cloud Server Merge
+
+Mindwtr Cloud is not a dumb object store for `/v1/data`. On authenticated `PUT /v1/data`, the server reads the existing namespace snapshot, runs the same merge algorithm with the incoming snapshot, validates the merged result, and writes that result back.
+
+Operational consequences:
+
+- Pushing a full snapshot is not a forced overwrite. Existing remote records with higher revisions, newer operation times, or winning tombstones can survive the PUT.
+- Server-side reference repair can create cascade updates, such as tombstoning sections under deleted projects.
+- Repair timestamps are derived from payload timestamps when possible, but capped at five minutes beyond the server wall clock. This avoids amplifying normal self-hosted clock drift while preventing far-future client timestamps from poisoning merged records.
 
 ## Retry Recovery
 

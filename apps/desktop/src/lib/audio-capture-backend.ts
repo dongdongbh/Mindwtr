@@ -4,7 +4,7 @@ export function getPreferredDesktopAudioCaptureBackend(options: {
     isTauriRuntime: boolean;
     isFlatpakRuntime: boolean;
 }): DesktopAudioCaptureBackend {
-    if (options.isTauriRuntime && !options.isFlatpakRuntime) {
+    if (options.isTauriRuntime) {
         return 'native';
     }
     return 'web';

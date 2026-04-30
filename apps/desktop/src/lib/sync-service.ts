@@ -26,11 +26,15 @@ import {
     CLOCK_SKEW_THRESHOLD_MS,
     appendSyncHistory,
     cloneAppData,
+    createSyncOrchestrator,
+    runPreSyncAttachmentPhase as runCorePreSyncAttachmentPhase,
     formatSyncErrorMessage,
     LocalSyncAbort,
     getInMemoryAppDataSnapshot,
     shouldRunAttachmentCleanup,
     createAbortableFetch,
+    getTranslationsSync,
+    isSupportedLanguage,
     type CloudProvider,
 } from '@mindwtr/core';
 import { isTauriRuntime } from './runtime';
@@ -132,7 +136,6 @@ const WEBDAV_READ_RETRY_OPTIONS = {
 };
 const ATTACHMENT_WARNING_TOAST_THRESHOLD = 2;
 const ATTACHMENT_WARNING_TOAST_COOLDOWN_MS = 10 * 60 * 1000;
-const ATTACHMENT_WARNING_TOAST_MESSAGE = 'Attachment sync is still failing. Files will retry in the background.';
 type SyncServiceDependencies = {
     isTauriRuntime: () => boolean;
     invoke: <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
@@ -197,6 +200,15 @@ let syncServiceDependencies: SyncServiceDependencies = {
 
 const isTauriRuntimeEnv = () => syncServiceDependencies.isTauriRuntime();
 const getStoreState = () => syncServiceDependencies.getStoreState();
+const fallbackSyncTranslations = getTranslationsSync('en');
+
+const resolveSyncText = (key: string, fallback: string): string => {
+    const language = getStoreState().settings?.language;
+    const translations = language && isSupportedLanguage(language)
+        ? getTranslationsSync(language)
+        : fallbackSyncTranslations;
+    return translations[key] || fallbackSyncTranslations[key] || fallback;
+};
 
 const logSyncWarning = (message: string, error?: unknown) => {
     const extra = error
@@ -389,9 +401,7 @@ type SyncExecutionHelpers = {
 
 export class SyncService {
     private static didMigrate = false;
-    private static syncInFlight: Promise<SyncRunResult> | null = null;
-    private static syncQueued = false;
-    private static syncQueueVersion = 0;
+    private static queuedSyncOptions: SyncRunOptions | null = null;
     private static syncStatus: {
         inFlight: boolean;
         queued: boolean;
@@ -405,6 +415,32 @@ export class SyncService {
         lastResult: null,
         lastResultAt: null,
     };
+    private static readonly syncOrchestrator = createSyncOrchestrator<SyncRunOptions, SyncRunResult>({
+        runCycle: async (options) => SyncService.runSyncCycle(options),
+        onQueueStateChange: (queued) => {
+            SyncService.updateSyncStatus({ queued });
+        },
+        onDrained: () => {
+            SyncService.queuedSyncOptions = null;
+        },
+        onQueuedRunComplete: (queuedResult) => {
+            if (!queuedResult.success) {
+                logSyncWarning('Queued sync failed', queuedResult.error);
+                try {
+                    useUiStore.getState().showToast(
+                        queuedResult.error || resolveSyncText('settings.queuedSyncFailed', 'Queued sync failed.'),
+                        'error',
+                        6000,
+                    );
+                } catch {
+                    // UI store may be unavailable during shutdown/tests.
+                }
+            }
+        },
+        onQueuedRunError: (error) => {
+            logSyncWarning('Queued sync crashed', error);
+        },
+    });
     private static syncListeners = new Set<(status: typeof SyncService.syncStatus) => void>();
     private static fileWatcherStop: (() => void) | null = null;
     private static fileWatcherPath: string | null = null;
@@ -427,10 +463,16 @@ export class SyncService {
         return Date.now();
     }
 
-    private static requestQueuedSyncRun() {
-        SyncService.syncQueued = true;
-        SyncService.syncQueueVersion += 1;
-        SyncService.updateSyncStatus({ queued: true });
+    private static requestQueuedSyncRun(nextOptions?: SyncRunOptions, preferLatest = true) {
+        if (nextOptions && (preferLatest || !SyncService.queuedSyncOptions)) {
+            SyncService.queuedSyncOptions = nextOptions;
+        }
+        const queuedOptions = SyncService.queuedSyncOptions ?? nextOptions;
+        if (queuedOptions) {
+            SyncService.syncOrchestrator.requestFollowUp(queuedOptions);
+            return;
+        }
+        SyncService.syncOrchestrator.requestFollowUp();
     }
 
     static getSyncStatus() {
@@ -465,9 +507,8 @@ export class SyncService {
     static async resetForTests(): Promise<void> {
         await SyncService.stopFileWatcher();
         SyncService.didMigrate = false;
-        SyncService.syncInFlight = null;
-        SyncService.syncQueued = false;
-        SyncService.syncQueueVersion = 0;
+        SyncService.syncOrchestrator.reset();
+        SyncService.queuedSyncOptions = null;
         SyncService.syncStatus = {
             inFlight: false,
             queued: false,
@@ -505,7 +546,14 @@ export class SyncService {
             }
             SyncService.lastAttachmentWarningToastAt = now;
             try {
-                useUiStore.getState().showToast(ATTACHMENT_WARNING_TOAST_MESSAGE, 'error', 6000);
+                useUiStore.getState().showToast(
+                    resolveSyncText(
+                        'settings.attachmentSyncRetryWarning',
+                        'Attachment sync is still failing. Files will retry in the background.',
+                    ),
+                    'error',
+                    6000,
+                );
             } catch {
                 // UI store may be unavailable during shutdown/tests.
             }
@@ -901,28 +949,33 @@ export class SyncService {
         await yieldToRenderer();
         try {
             const localData = await readLocalDataForSync();
-            let preMutated = false;
-            if (context.backend === 'webdav' && context.webdavConfig?.url) {
-                helpers.ensureNetworkStillAvailable();
-                const baseUrl = getBaseSyncUrl(context.webdavConfig.url);
-                const syncedData = await syncAttachments(localData, context.webdavConfig, baseUrl, attachmentBackendDeps);
-                preMutated = syncedData !== null;
-                if (syncedData) {
-                    context.preSyncedLocalData = syncedData;
-                }
-            } else if (context.backend === 'file' && context.fileBaseDir) {
-                preMutated = await syncFileAttachments(localData, context.fileBaseDir, attachmentBackendDeps);
-            } else if (context.backend === 'cloud' && context.cloudProvider === 'selfhosted' && context.cloudConfig?.url) {
-                helpers.ensureNetworkStillAvailable();
-                const baseUrl = getCloudBaseUrl(context.cloudConfig.url);
-                preMutated = await syncCloudAttachments(localData, context.cloudConfig, baseUrl, attachmentBackendDeps);
-            } else if (context.backend === 'cloud' && context.cloudProvider === 'dropbox') {
-                helpers.ensureNetworkStillAvailable();
-                preMutated = await syncDropboxAttachments(localData, helpers.resolveDropboxAccessToken, attachmentBackendDeps);
-            }
+            const result = await runCorePreSyncAttachmentPhase({
+                backend: context.backend,
+                cloudProvider: context.cloudProvider,
+                data: localData,
+                ensureNetworkStillAvailable: helpers.ensureNetworkStillAvailable,
+                webdav: context.webdavConfig?.url
+                    ? async (data) => {
+                        const baseUrl = getBaseSyncUrl(context.webdavConfig!.url);
+                        return syncAttachments(data, context.webdavConfig!, baseUrl, attachmentBackendDeps);
+                    }
+                    : undefined,
+                file: context.fileBaseDir
+                    ? async (data) => syncFileAttachments(data, context.fileBaseDir, attachmentBackendDeps)
+                    : undefined,
+                selfHostedCloud: context.cloudProvider === 'selfhosted' && context.cloudConfig?.url
+                    ? async (data) => {
+                        const baseUrl = getCloudBaseUrl(context.cloudConfig!.url);
+                        return syncCloudAttachments(data, context.cloudConfig!, baseUrl, attachmentBackendDeps);
+                    }
+                    : undefined,
+                dropbox: context.cloudProvider === 'dropbox'
+                    ? async (data) => syncDropboxAttachments(data, helpers.resolveDropboxAccessToken, attachmentBackendDeps)
+                    : undefined,
+            });
 
-            if (preMutated) {
-                context.preSyncedLocalData = context.preSyncedLocalData ?? localData;
+            if (result.mutated) {
+                context.preSyncedLocalData = result.data ?? localData;
                 helpers.ensureLocalSnapshotFresh();
             }
         } catch (error) {
@@ -1006,10 +1059,7 @@ export class SyncService {
                 throw new Error('Dropbox app key is not configured');
             }
             context.syncUrl = 'dropbox:///Apps/Mindwtr/data.json';
-            const fetcher = helpers.createFetchWithAbort((await getTauriFetch()) ?? fetch);
-            const remote = await helpers.runDropboxWithRetry((token) =>
-                downloadDropboxAppData(token, fetcher)
-            );
+            const remote = await SyncService.readDropboxRemoteData(context, helpers);
             context.dropboxDataRev = remote.rev;
             context.remoteDataForCompare = remote.data ?? null;
             return remote.data;
@@ -1020,6 +1070,41 @@ export class SyncService {
         const data = await tauriInvoke<AppData>('read_sync_file');
         context.remoteDataForCompare = data ?? null;
         return data;
+    }
+
+    private static async readDropboxRemoteData(
+        _context: SyncExecutionContext,
+        helpers: Pick<SyncExecutionHelpers, 'createFetchWithAbort' | 'runDropboxWithRetry'>
+    ): Promise<{ data: AppData | null; rev: string | null }> {
+        const nativeFetch = await getTauriFetch();
+        const browserFetcher = helpers.createFetchWithAbort(fetch);
+
+        if (!nativeFetch) {
+            return helpers.runDropboxWithRetry((token) => downloadDropboxAppData(token, browserFetcher));
+        }
+
+        const nativeFetcher = helpers.createFetchWithAbort(nativeFetch);
+        const nativeRemote = await helpers.runDropboxWithRetry((token) =>
+            downloadDropboxAppData(token, nativeFetcher)
+        );
+        if (nativeRemote.data !== null) {
+            return nativeRemote;
+        }
+
+        logSyncInfo('Retrying Dropbox remote read with browser fetch fallback');
+        try {
+            const browserRemote = await helpers.runDropboxWithRetry((token) =>
+                downloadDropboxAppData(token, browserFetcher)
+            );
+            if (browserRemote.data !== null) {
+                logSyncInfo('Recovered Dropbox remote read via browser fetch fallback');
+                return browserRemote;
+            }
+            return nativeRemote;
+        } catch (error) {
+            logSyncWarning('Dropbox browser fetch fallback failed', error);
+            return nativeRemote;
+        }
     }
 
     private static async prepareRemoteWriteData(
@@ -1513,24 +1598,14 @@ export class SyncService {
      * 4. Refresh Core Store
      */
     static async performSync(options: SyncRunOptions = {}): Promise<SyncRunResult> {
-        if (SyncService.syncInFlight) {
-            SyncService.requestQueuedSyncRun();
-            return SyncService.syncInFlight;
+        if (SyncService.syncOrchestrator.getState().inFlight) {
+            SyncService.queuedSyncOptions = options;
         }
-        // Consume queued follow-up requests by snapshotting the version at cycle start.
-        const cycleQueueVersion = SyncService.syncQueueVersion;
-        SyncService.syncQueued = false;
-        let inFlightSettled = false;
-        let resolveInFlight: ((value: SyncRunResult) => void) | null = null;
-        const inFlightPromise = new Promise<SyncRunResult>((resolve) => {
-            resolveInFlight = resolve;
-        });
-        const settleInFlight = (value: SyncRunResult) => {
-            if (inFlightSettled) return;
-            inFlightSettled = true;
-            resolveInFlight?.(value);
-        };
-        SyncService.syncInFlight = inFlightPromise;
+        return SyncService.syncOrchestrator.run(options);
+    }
+
+    private static async runSyncCycle(options: SyncRunOptions): Promise<SyncRunResult> {
+        SyncService.queuedSyncOptions = null;
         const context = SyncService.createSyncExecutionContext();
         const persistLocalDataWithTracking = async (data: AppData): Promise<void> => {
             if (isTauriRuntimeEnv()) {
@@ -1543,7 +1618,6 @@ export class SyncService {
 
         SyncService.updateSyncStatus({
             inFlight: true,
-            queued: false,
             step: context.step,
             lastResult: SyncService.syncStatus.lastResult,
             lastResultAt: SyncService.syncStatus.lastResultAt,
@@ -1568,7 +1642,7 @@ export class SyncService {
         };
         const ensureLocalSnapshotFresh = () => {
             if (getStoreState().lastDataChangeAt > context.localSnapshotChangeAt) {
-                SyncService.requestQueuedSyncRun();
+                SyncService.requestQueuedSyncRun(options, false);
                 throw new LocalSyncAbort();
             }
         };
@@ -1661,10 +1735,8 @@ export class SyncService {
             await yieldToRenderer();
             ensureLocalSnapshotFresh();
             await getStoreState().fetchData({ silent: true });
+            SyncService.lastSuccessfulSyncLocalChangeAt = getStoreState().lastDataChangeAt;
 
-            const syncStatus = syncResult.status;
-            const now = new Date().toISOString();
-            await SyncService.persistSuccessfulSyncStatus(syncStatus, now);
             SyncService.setPendingExternalSyncChange(null);
 
             getStoreState().setError(null);
@@ -1733,18 +1805,14 @@ export class SyncService {
                 logSyncWarning('Failed to unsubscribe network listener after sync', error);
             }
             SyncService.finalizeSyncWriteIgnoreWindow();
-            SyncService.syncInFlight = null;
         }
         const skippedRequeue = result.skipped === 'requeued';
         if (!skippedRequeue) {
             SyncService.finalizeAttachmentWarningState(context, result);
         }
-        const hasQueuedFollowUp = SyncService.syncQueueVersion > cycleQueueVersion;
-        SyncService.syncQueued = hasQueuedFollowUp;
         SyncService.updateSyncStatus({
             inFlight: false,
             step: null,
-            queued: SyncService.syncQueued,
             lastResult: skippedRequeue
                 ? SyncService.syncStatus.lastResult
                 : result.success
@@ -1755,24 +1823,10 @@ export class SyncService {
                 : new Date().toISOString(),
         });
 
-        if (hasQueuedFollowUp) {
-            void SyncService.performSync(options)
-                .then((queuedResult) => {
-                    if (!queuedResult.success) {
-                        logSyncWarning('Queued sync failed', queuedResult.error);
-                        try {
-                            useUiStore.getState().showToast(queuedResult.error || 'Queued sync failed.', 'error', 6000);
-                        } catch {
-                            // UI store may be unavailable during shutdown/tests.
-                        }
-                    }
-                })
-                .catch((error) => {
-                    logSyncWarning('Queued sync crashed', error);
-                });
+        if (!SyncService.syncOrchestrator.getState().queued) {
+            SyncService.queuedSyncOptions = null;
         }
 
-        settleInFlight(result);
         return result;
     }
 }

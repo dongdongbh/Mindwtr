@@ -134,6 +134,7 @@ describeSqlite('SqliteAdapter', () => {
                             uri: '/tmp/spec.pdf',
                             createdAt: now,
                             updatedAt: now,
+                            localStatus: 'available',
                         },
                     ],
                     createdAt: now,
@@ -204,6 +205,7 @@ describeSqlite('SqliteAdapter', () => {
         });
         expect(task.checklist?.[0]?.title).toBe('Outline');
         expect(task.attachments?.[0]?.title).toBe('spec.pdf');
+        expect(task.attachments?.[0]?.localStatus).toBe('available');
         expect(task.rev).toBe(5);
         expect(task.revBy).toBe('device-desktop');
 
@@ -226,6 +228,31 @@ describeSqlite('SqliteAdapter', () => {
         expect(area.order).toBe(0);
         expect(area.rev).toBe(3);
         expect(area.revBy).toBe('device-desktop');
+    });
+
+    it('normalizes legacy string recurrence values when loading tasks', async () => {
+        const now = new Date().toISOString();
+        await adapter.saveData({
+            tasks: [
+                {
+                    id: 'task-legacy-recurrence',
+                    title: 'Legacy recurring task',
+                    status: 'next',
+                    tags: [],
+                    contexts: [],
+                    recurrence: 'daily',
+                    createdAt: now,
+                    updatedAt: now,
+                },
+            ],
+            projects: [],
+            sections: [],
+            areas: [],
+            settings: {},
+        });
+
+        const loaded = await adapter.getData();
+        expect(loaded.tasks[0]?.recurrence).toEqual({ rule: 'daily' });
     });
 
     it('saves and deletes linked area, project, section, and task records without foreign key failures', async () => {
@@ -549,6 +576,11 @@ describeSqlite('SqliteAdapter', () => {
         expect(names).toContain('purgedAt');
         expect(names).toContain('rev');
         expect(names).toContain('revBy');
+        const taskIndexes = allSql<{ name: string }>(db, 'PRAGMA index_list(tasks)');
+        const taskIndexNames = new Set(taskIndexes.map((row) => row.name));
+        expect(taskIndexNames.has('idx_tasks_dueDate')).toBe(true);
+        expect(taskIndexNames.has('idx_tasks_status_deletedAt')).toBe(true);
+        expect(taskIndexNames.has('idx_tasks_project_deletedAt')).toBe(true);
 
         const projectColumns = allSql<{ name: string }>(db, 'PRAGMA table_info(projects)');
         const projectColumnNames = projectColumns.map((col) => col.name);
@@ -598,10 +630,23 @@ describeSqlite('SqliteAdapter', () => {
     it('creates composite indexes used by sync queries', async () => {
         await adapter.ensureSchema();
 
-        const indexes = allSql<{ name: string }>(db, 'PRAGMA index_list(tasks)');
-        const names = new Set(indexes.map((index) => index.name));
+        const taskIndexes = allSql<{ name: string }>(db, 'PRAGMA index_list(tasks)');
+        const projectIndexes = allSql<{ name: string }>(db, 'PRAGMA index_list(projects)');
+        const sectionIndexes = allSql<{ name: string }>(db, 'PRAGMA index_list(sections)');
+        const areaIndexes = allSql<{ name: string }>(db, 'PRAGMA index_list(areas)');
+        const names = new Set([
+            ...taskIndexes,
+            ...projectIndexes,
+            ...sectionIndexes,
+            ...areaIndexes,
+        ].map((index) => index.name));
 
         expect(names.has('idx_tasks_project_status_updatedAt')).toBe(true);
+        expect(names.has('idx_tasks_updatedAt_rev')).toBe(true);
+        expect(names.has('idx_projects_area_deletedAt')).toBe(true);
+        expect(names.has('idx_projects_updatedAt_rev')).toBe(true);
+        expect(names.has('idx_sections_updatedAt_rev')).toBe(true);
+        expect(names.has('idx_areas_updatedAt_rev')).toBe(true);
         expect(names.has('idx_tasks_area_deletedAt')).toBe(true);
     });
 });

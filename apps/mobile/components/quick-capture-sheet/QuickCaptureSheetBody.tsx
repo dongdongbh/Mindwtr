@@ -5,6 +5,8 @@ import { AtSign, CalendarDays, Flag, Folder, Mic, Square, X } from 'lucide-react
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { styles } from './quick-capture-sheet.styles';
 
+const COMPACT_TEXT_MAX_SCALE = 1.2;
+
 interface QuickCaptureSheetBodyProps {
   addAnother: boolean;
   areaLabel: string;
@@ -75,163 +77,233 @@ export function QuickCaptureSheetBody({
   visible,
 }: QuickCaptureSheetBodyProps) {
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
-      <Pressable
-        style={styles.backdrop}
-        onPress={handleClose}
-        accessibilityRole="button"
-        accessibilityLabel={t('common.close')}
-      />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={0}
-        style={styles.keyboardAvoiding}
-      >
-        <View
-          style={[
-            styles.sheet,
-            {
-              backgroundColor: tc.cardBg,
-              paddingBottom: Math.max(20, insetsBottom + 12),
-              maxHeight: sheetMaxHeight,
-            },
-          ]}
+    <Modal
+      visible={visible}
+      transparent
+      // Transparent Android modal animations can blend stale frames on some tablet GPUs.
+      animationType={Platform.OS === 'android' ? 'none' : 'slide'}
+      hardwareAccelerated={Platform.OS === 'android'}
+      navigationBarTranslucent={Platform.OS === 'android'}
+      statusBarTranslucent={Platform.OS === 'android'}
+      onRequestClose={handleClose}
+    >
+      <View style={styles.modalRoot} accessibilityViewIsModal>
+        <Pressable
+          style={styles.backdrop}
+          onPress={handleClose}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.close')}
+        />
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={0}
+          style={styles.keyboardAvoiding}
         >
-          <View style={styles.headerRow}>
-            <Text style={[styles.title, { color: tc.text }]}>{t('nav.addTask')}</Text>
-            <TouchableOpacity onPress={handleClose} accessibilityLabel={t('common.close')}>
-              <X size={18} color={tc.secondaryText} />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.inputRow}>
-            <TextInput
-              ref={inputRef}
-              style={[styles.input, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-              placeholder={t('quickAdd.placeholder')}
-              placeholderTextColor={tc.secondaryText}
-              value={value}
-              onChangeText={onValueChange}
-              onSubmitEditing={() => {
-                if (Platform.OS === 'ios') {
-                  inputRef.current?.blur();
-                  return;
-                }
-                handleSave();
-              }}
-              returnKeyType="done"
-              blurOnSubmit
-            />
-            <TouchableOpacity
-              onPress={onToggleRecording}
-              accessibilityRole="button"
-              accessibilityLabel={recording ? t('quickAdd.audioStop') : t('quickAdd.audioRecord')}
-              style={[
-                styles.recordButton,
-                {
-                  backgroundColor: recordingReady ? tc.danger : tc.filterBg,
-                  borderColor: tc.border,
-                  opacity: recordingBusy ? 0.6 : 1,
-                },
-              ]}
-              disabled={recordingBusy}
-            >
-              {recordingReady ? (
-                <Square size={16} color={tc.onTint} />
-              ) : (
-                <Mic size={16} color={tc.text} />
-              )}
-            </TouchableOpacity>
-          </View>
-
-          {recordingReady && (
-            <View style={styles.recordingRow}>
-              <View style={[styles.recordingDot, { backgroundColor: tc.danger }]} />
-              <Text style={[styles.recordingText, { color: tc.danger }]}>{t('quickAdd.audioRecording')}</Text>
+          <View
+            style={[
+              styles.sheet,
+              {
+                backgroundColor: tc.cardBg,
+                paddingBottom: Math.max(20, insetsBottom + 12),
+                maxHeight: sheetMaxHeight,
+              },
+            ]}
+          >
+            <View style={styles.headerRow}>
+              <Text
+                style={[styles.title, { color: tc.text }]}
+                numberOfLines={1}
+                maxFontSizeMultiplier={COMPACT_TEXT_MAX_SCALE}
+              >
+                {t('nav.addTask')}
+              </Text>
+              <TouchableOpacity onPress={handleClose} accessibilityLabel={t('common.close')}>
+                <X size={18} color={tc.secondaryText} />
+              </TouchableOpacity>
             </View>
-          )}
 
-          <View style={styles.optionsRow}>
-            <TouchableOpacity
-              style={[styles.optionChip, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
-              onPress={onOpenDueDatePicker}
-              onLongPress={onResetDueDate}
-              accessibilityRole="button"
-              accessibilityLabel={`${t('taskEdit.dueDate')}: ${dueLabel}`}
-            >
-              <CalendarDays size={16} color={tc.text} />
-              <Text style={[styles.optionText, { color: tc.text }]} numberOfLines={1}>{dueLabel}</Text>
-            </TouchableOpacity>
+            <View style={styles.inputRow}>
+              <TextInput
+                ref={inputRef}
+                style={[styles.input, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
+                placeholder={t('quickAdd.placeholder')}
+                placeholderTextColor={tc.secondaryText}
+                value={value}
+                onChangeText={onValueChange}
+                onSubmitEditing={() => {
+                  inputRef.current?.blur();
+                  handleSave();
+                }}
+                returnKeyType="done"
+                blurOnSubmit
+                numberOfLines={1}
+                textAlignVertical="center"
+                maxFontSizeMultiplier={COMPACT_TEXT_MAX_SCALE}
+              />
+              <TouchableOpacity
+                onPress={onToggleRecording}
+                accessibilityRole="button"
+                accessibilityLabel={recording ? t('quickAdd.audioStop') : t('quickAdd.audioRecord')}
+                style={[
+                  styles.recordButton,
+                  {
+                    backgroundColor: recordingReady ? tc.danger : tc.filterBg,
+                    borderColor: tc.border,
+                    opacity: recordingBusy ? 0.6 : 1,
+                  },
+                ]}
+                disabled={recordingBusy}
+              >
+                {recordingReady ? (
+                  <Square size={16} color={tc.onTint} />
+                ) : (
+                  <Mic size={16} color={tc.text} />
+                )}
+              </TouchableOpacity>
+            </View>
 
-            <TouchableOpacity
-              style={[styles.optionChip, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
-              onPress={onOpenContextPicker}
-              onLongPress={onResetContexts}
-              accessibilityRole="button"
-              accessibilityLabel={`${t('taskEdit.contextsLabel')}: ${contextLabel}`}
-            >
-              <AtSign size={16} color={tc.text} />
-              <Text style={[styles.optionText, { color: tc.text }]} numberOfLines={1}>{contextLabel}</Text>
-            </TouchableOpacity>
+            {recordingReady && (
+              <View style={styles.recordingRow}>
+                <View style={[styles.recordingDot, { backgroundColor: tc.danger }]} />
+                <Text
+                  style={[styles.recordingText, { color: tc.danger }]}
+                  numberOfLines={1}
+                  maxFontSizeMultiplier={COMPACT_TEXT_MAX_SCALE}
+                >
+                  {t('quickAdd.audioRecording')}
+                </Text>
+              </View>
+            )}
 
-            <TouchableOpacity
-              style={[styles.optionChip, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
-              onPress={onOpenAreaPicker}
-              onLongPress={onResetArea}
-              accessibilityRole="button"
-              accessibilityLabel={`${t('taskEdit.areaLabel')}: ${areaLabel}`}
-            >
-              <Text style={[styles.optionText, { color: tc.text }]} numberOfLines={1}>{areaLabel}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.optionChip, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
-              onPress={onOpenProjectPicker}
-              onLongPress={onResetProject}
-              accessibilityRole="button"
-              accessibilityLabel={`${t('taskEdit.project')}: ${projectLabel}`}
-            >
-              <Folder size={16} color={tc.text} />
-              <Text style={[styles.optionText, { color: tc.text }]} numberOfLines={1}>{projectLabel}</Text>
-            </TouchableOpacity>
-
-            {prioritiesEnabled && (
+            <View style={styles.optionsRow}>
               <TouchableOpacity
                 style={[styles.optionChip, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
-                onPress={onOpenPriorityPicker}
-                onLongPress={onResetPriority}
+                onPress={onOpenDueDatePicker}
+                onLongPress={onResetDueDate}
                 accessibilityRole="button"
-                accessibilityLabel={`${t('taskEdit.priorityLabel')}: ${priorityLabel}`}
+                accessibilityLabel={`${t('taskEdit.dueDate')}: ${dueLabel}`}
               >
-                <Flag size={16} color={tc.text} />
-                <Text style={[styles.optionText, { color: tc.text }]} numberOfLines={1}>{priorityLabel}</Text>
+                <CalendarDays size={16} color={tc.text} />
+                <Text
+                  style={[styles.optionText, { color: tc.text }]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                  maxFontSizeMultiplier={COMPACT_TEXT_MAX_SCALE}
+                >
+                  {dueLabel}
+                </Text>
               </TouchableOpacity>
-            )}
-          </View>
 
-          <View style={styles.footerRow}>
-            <View style={styles.toggleRow}>
-              <Switch
-                value={addAnother}
-                onValueChange={onToggleAddAnother}
-                thumbColor={addAnother ? tc.tint : tc.border}
-                trackColor={{ false: tc.border, true: `${tc.tint}55` }}
-                accessibilityLabel={t('quickAdd.addAnother')}
-              />
-              <Text style={[styles.toggleText, { color: tc.text }]}>{t('quickAdd.addAnother')}</Text>
+              <TouchableOpacity
+                style={[styles.optionChip, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
+                onPress={onOpenContextPicker}
+                onLongPress={onResetContexts}
+                accessibilityRole="button"
+                accessibilityLabel={`${t('taskEdit.contextsLabel')}: ${contextLabel}`}
+              >
+                <AtSign size={16} color={tc.text} />
+                <Text
+                  style={[styles.optionText, { color: tc.text }]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                  maxFontSizeMultiplier={COMPACT_TEXT_MAX_SCALE}
+                >
+                  {contextLabel}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.optionChip, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
+                onPress={onOpenAreaPicker}
+                onLongPress={onResetArea}
+                accessibilityRole="button"
+                accessibilityLabel={`${t('taskEdit.areaLabel')}: ${areaLabel}`}
+              >
+                <Text
+                  style={[styles.optionText, { color: tc.text }]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                  maxFontSizeMultiplier={COMPACT_TEXT_MAX_SCALE}
+                >
+                  {areaLabel}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.optionChip, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
+                onPress={onOpenProjectPicker}
+                onLongPress={onResetProject}
+                accessibilityRole="button"
+                accessibilityLabel={`${t('taskEdit.project')}: ${projectLabel}`}
+              >
+                <Folder size={16} color={tc.text} />
+                <Text
+                  style={[styles.optionText, { color: tc.text }]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                  maxFontSizeMultiplier={COMPACT_TEXT_MAX_SCALE}
+                >
+                  {projectLabel}
+                </Text>
+              </TouchableOpacity>
+
+              {prioritiesEnabled && (
+                <TouchableOpacity
+                  style={[styles.optionChip, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
+                  onPress={onOpenPriorityPicker}
+                  onLongPress={onResetPriority}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${t('taskEdit.priorityLabel')}: ${priorityLabel}`}
+                >
+                  <Flag size={16} color={tc.text} />
+                  <Text
+                    style={[styles.optionText, { color: tc.text }]}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                    maxFontSizeMultiplier={COMPACT_TEXT_MAX_SCALE}
+                  >
+                    {priorityLabel}
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
-            <TouchableOpacity
-              onPress={handleSave}
-              style={[styles.saveButton, { backgroundColor: tc.tint, opacity: value.trim() ? 1 : 0.5 }]}
-              disabled={!value.trim()}
-              accessibilityRole="button"
-              accessibilityLabel={t('common.save')}
-            >
-              <Text style={styles.saveText}>{t('common.save')}</Text>
-            </TouchableOpacity>
+
+            <View style={styles.footerRow}>
+              <View style={styles.toggleRow}>
+                <Switch
+                  value={addAnother}
+                  onValueChange={onToggleAddAnother}
+                  thumbColor={addAnother ? tc.tint : tc.border}
+                  trackColor={{ false: tc.border, true: `${tc.tint}55` }}
+                  accessibilityLabel={t('quickAdd.addAnother')}
+                />
+                <Text
+                  style={[styles.toggleText, { color: tc.text }]}
+                  numberOfLines={1}
+                  maxFontSizeMultiplier={COMPACT_TEXT_MAX_SCALE}
+                >
+                  {t('quickAdd.addAnother')}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={handleSave}
+                style={[styles.saveButton, { backgroundColor: tc.tint, opacity: value.trim() ? 1 : 0.5 }]}
+                disabled={!value.trim()}
+                accessibilityRole="button"
+                accessibilityLabel={t('common.save')}
+              >
+                <Text
+                  style={styles.saveText}
+                  numberOfLines={1}
+                  maxFontSizeMultiplier={COMPACT_TEXT_MAX_SCALE}
+                >
+                  {t('common.save')}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }

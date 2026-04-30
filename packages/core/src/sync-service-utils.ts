@@ -1,6 +1,16 @@
 import { isWebdavRateLimitedError } from './sync-runtime-utils';
 
 export type SyncBackend = 'off' | 'file' | 'webdav' | 'cloud' | 'cloudkit';
+export type SyncCloudProvider = 'dropbox' | 'selfhosted';
+export type AutoSyncConfig = {
+    backend: SyncBackend;
+    filePath?: string;
+    webdavUrl?: string;
+    cloudProvider?: SyncCloudProvider;
+    cloudUrl?: string;
+    dropboxAppKey?: string;
+    isDropboxConnected?: boolean;
+};
 
 const DEFAULT_SYNC_FILE_NAME = 'data.json';
 const DEFAULT_LEGACY_SYNC_FILE_NAME = 'mindwtr-sync.json';
@@ -50,6 +60,30 @@ export const normalizeSyncBackend = (raw: string | null): SyncBackend => {
     return 'off';
 };
 
+export const resolveSyncBackend = (value: string | null): SyncBackend => normalizeSyncBackend(value);
+
+export const coerceSupportedSyncBackend = (backend: SyncBackend, options?: { allowCloudKit?: boolean }): SyncBackend => (
+    backend === 'cloudkit' && options?.allowCloudKit === false ? 'off' : backend
+);
+
+export const isRemoteSyncBackend = (backend: SyncBackend): boolean => (
+    backend === 'webdav' || backend === 'cloud' || backend === 'cloudkit'
+);
+
+export const canAutoSync = (config: AutoSyncConfig): boolean => {
+    if (config.backend === 'off') return false;
+    if (config.backend === 'cloudkit') return true;
+    if (config.backend === 'file') return Boolean(config.filePath?.trim());
+    if (config.backend === 'webdav') return Boolean(config.webdavUrl?.trim());
+    if (config.backend === 'cloud') {
+        if (config.cloudProvider === 'dropbox') {
+            return Boolean(config.dropboxAppKey?.trim()) && config.isDropboxConnected === true;
+        }
+        return Boolean(config.cloudUrl?.trim());
+    }
+    return false;
+};
+
 export const getFileSyncDir = (
     syncPath: string,
     syncFileName = DEFAULT_SYNC_FILE_NAME,
@@ -78,7 +112,7 @@ export const formatSyncErrorMessage = (error: unknown, backend: SyncBackend): st
     const raw = sanitizeSyncErrorMessage(String(error));
     if (backend === 'file') {
         if (READONLY_ERROR_PATTERN.test(raw)) {
-            return 'Sync file is not writable. Re-select the sync folder in Settings -> Data & Sync, then sync again.';
+            return 'Sync file is not writable. Re-select the sync folder in Settings -> Sync, then sync again.';
         }
         return raw;
     }

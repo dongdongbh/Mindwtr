@@ -146,6 +146,9 @@ export function createMindwtrAutomationStorage(options: AutomationStorageOptions
         await sqlite.ensureSchema();
         const writeDb = openSqliteDatabase(paths.dbPath);
         try {
+            writeDb.exec('BEGIN IMMEDIATE;');
+            writeDb.exec('PRAGMA defer_foreign_keys = ON;');
+
             for (const task of data.tasks) {
                 const taskOrder = Number.isFinite(task.order) ? task.order : task.orderNum;
                 writeDb.prepare(
@@ -328,7 +331,13 @@ export function createMindwtrAutomationStorage(options: AutomationStorageOptions
             writeDb.prepare(
                 'INSERT INTO settings (id, data) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data',
             ).run(JSON.stringify(data.settings ?? {}));
+            writeDb.exec('COMMIT;');
         } catch (error) {
+            try {
+                writeDb.exec('ROLLBACK;');
+            } catch {
+                // Ignore rollback errors when SQLite has already closed the transaction.
+            }
             throw error;
         } finally {
             writeDb.close();

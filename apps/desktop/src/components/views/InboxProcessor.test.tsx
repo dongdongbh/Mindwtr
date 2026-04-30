@@ -249,6 +249,49 @@ describe('InboxProcessor', () => {
         expect(getByText('taskEdit.reviewDateLabel')).toBeTruthy();
     });
 
+    it('moves a task to next with a date-only start date from the guided Later shortcut', async () => {
+        const { getByRole, getByText, getByLabelText, updateTask } = renderInboxProcessor();
+
+        fireEvent.click(getByRole('button', { name: /process\.btn/i }));
+        fireEvent.click(getByText('process.refineNext'));
+        fireEvent.change(getByLabelText('taskEdit.startDateLabel'), {
+            target: { value: '2026-03-23' },
+        });
+        fireEvent.click(getByText('Later'));
+
+        await waitFor(() => {
+            expect(updateTask).toHaveBeenCalledWith(
+                'task-1',
+                expect.objectContaining({
+                    status: 'next',
+                    startTime: '2026-03-23',
+                }),
+            );
+        });
+    });
+
+    it('moves a task to next with a date-only start date from the quick Later outcome', async () => {
+        const { getByRole, getByText, getByLabelText, updateTask } = renderInboxProcessor();
+
+        fireEvent.click(getByRole('button', { name: /process\.btn/i }));
+        fireEvent.click(getByRole('button', { name: 'process.modeQuick' }));
+        fireEvent.click(getByText('Later'));
+        fireEvent.change(getByLabelText('taskEdit.startDateLabel'), {
+            target: { value: '2026-03-24' },
+        });
+        fireEvent.click(getByRole('button', { name: 'process.next' }));
+
+        await waitFor(() => {
+            expect(updateTask).toHaveBeenCalledWith(
+                'task-1',
+                expect.objectContaining({
+                    status: 'next',
+                    startTime: '2026-03-24',
+                }),
+            );
+        });
+    });
+
     it('hides organization fields when the task editor layout disables them', () => {
         const { getByRole, getByText, queryByLabelText } = renderInboxProcessor({
             gtd: {
@@ -342,6 +385,45 @@ describe('InboxProcessor', () => {
                     startTime: '2026-03-23',
                     dueDate: '2026-03-24',
                     reviewAt: '2026-03-25',
+                }),
+            );
+        });
+    });
+
+    it('prefills quick mode scheduling fields with the configured default time', async () => {
+        const { getByRole, getByLabelText, updateTask } = renderInboxProcessor({
+            gtd: {
+                defaultScheduleTime: '09:00',
+                inboxProcessing: {
+                    scheduleEnabled: true,
+                },
+                taskEditor: {
+                    hidden: [],
+                },
+            },
+        });
+
+        fireEvent.click(getByRole('button', { name: /process\.btn/i }));
+        fireEvent.click(getByRole('button', { name: 'process.modeQuick' }));
+        fireEvent.change(getByLabelText('taskEdit.startDateLabel'), {
+            target: { value: '2026-03-23' },
+        });
+        fireEvent.change(getByLabelText('taskEdit.dueDateLabel'), {
+            target: { value: '2026-03-24' },
+        });
+        fireEvent.change(getByLabelText('taskEdit.reviewDateLabel'), {
+            target: { value: '2026-03-25' },
+        });
+
+        fireEvent.click(getByRole('button', { name: 'process.next' }));
+
+        await waitFor(() => {
+            expect(updateTask).toHaveBeenCalledWith(
+                'task-1',
+                expect.objectContaining({
+                    startTime: '2026-03-23T09:00',
+                    dueDate: '2026-03-24T09:00',
+                    reviewAt: '2026-03-25T09:00',
                 }),
             );
         });

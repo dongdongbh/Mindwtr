@@ -1,0 +1,9 @@
+<en-US>
+Calendar planning adds mobile week view, refreshed month flow, scheduler, default time, and selectable calendar push target. Review reminders now open Review directly. Inbox adds Later, search supports assignee filters, Android widgets are denser and theme-aware, quick capture stays within bounds, speech-to-text avoids an Android realtime crash, and sync is sturdier around WebDAV/cloud merges.
+</en-US>
+<zh-CN>
+日历规划新增移动端周视图、改进月视图、任务计划编辑器、默认时间和日历推送目标选择。Review 提醒现在会直接打开 Review。Inbox 增加稍后处理，搜索支持负责人筛选，Android 小组件更紧凑并跟随主题，快速捕获不溢出，语音转文字避免 Android 实时崩溃，同步在 WebDAV 和云端合并上更稳定。
+</zh-CN>
+<es-ES>
+El calendario suma semana movil, mes renovado, programador, hora predeterminada y destino de envio. Los avisos de Review abren Review directamente. Inbox agrega Later, busqueda por responsable, widgets Android mas densos y con tema, captura rapida sin desbordes, voz a texto evita un crash realtime y sync mejora WebDAV/merges cloud.
+</es-ES>

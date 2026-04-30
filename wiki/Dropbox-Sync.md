@@ -22,7 +22,7 @@ If Dropbox is disabled in your build, use [[Data and Sync]] (File Sync) or [[Clo
 
 ## User Setup (Official Builds)
 
-1. Open **Settings → Data & Sync**.
+1. Open **Settings → Sync**.
 2. Set **Sync backend** to **Cloud**.
 3. Set **Cloud provider** to **Dropbox**.
 4. Click/Tap **Connect Dropbox** and complete OAuth in your browser.
@@ -58,6 +58,8 @@ In Dropbox App Console:
 
 - Desktop: `VITE_DROPBOX_APP_KEY=<your_app_key>`
 - Mobile: `DROPBOX_APP_KEY=<your_app_key>`
+
+For macOS App Store builds, the desktop OAuth callback uses a local loopback listener on `127.0.0.1:53682`, so the app entitlement set must include `com.apple.security.network.server`.
 
 In CI/release workflows, set repository variables or secrets:
 

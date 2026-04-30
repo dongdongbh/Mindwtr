@@ -2,7 +2,7 @@
   "expo": {
     "name": "Mindwtr",
     "slug": "mindwtr",
-    "version": "0.8.5",
+    "version": "0.8.8",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "mindwtr",
@@ -27,7 +27,7 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "versionCode": 59,
+      "versionCode": 62,
       "package": "tech.dongdongbh.mindwtr",
       "permissions": [
         "RECORD_AUDIO",
@@ -74,7 +74,9 @@
               "description": "Inbox, focus, and quick capture",
               "minWidth": "120dp",
               "minHeight": "120dp",
-              "targetCellWidth": 2,
+              "minResizeWidth": "120dp",
+              "minResizeHeight": "120dp",
+              "targetCellWidth": 3,
               "targetCellHeight": 2,
               "resizeMode": "horizontal|vertical",
               "previewImage": "./assets/images/widget-preview.png"

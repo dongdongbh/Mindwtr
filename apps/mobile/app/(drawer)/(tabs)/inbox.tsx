@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 
-import { useTaskStore, safeParseDate } from '@mindwtr/core';
+import { useTaskStore } from '@mindwtr/core';
 import { TaskList } from '../../../components/task-list';
 import { InboxProcessingModal } from '../../../components/inbox-processing-modal';
 import { ErrorBoundary } from '../../../components/ErrorBoundary';
@@ -20,12 +20,9 @@ export default function InboxScreen() {
   const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
 
   const inboxTasks = useMemo(() => {
-    const now = new Date();
     return tasks.filter(t => {
       if (t.deletedAt) return false;
       if (t.status !== 'inbox') return false;
-      const start = safeParseDate(t.startTime);
-      if (start && start > now) return false;
       if (!taskMatchesAreaFilter(t, resolvedAreaFilter, projectById, areaById)) return false;
       return true;
     });

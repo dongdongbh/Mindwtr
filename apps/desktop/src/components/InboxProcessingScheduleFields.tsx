@@ -1,4 +1,5 @@
 import { X } from 'lucide-react';
+import { tFallback } from '@mindwtr/core';
 
 import { cn } from '../lib/utils';
 
@@ -51,7 +52,7 @@ export function InboxProcessingScheduleFields({
     variant = 'quick',
 }: InboxProcessingScheduleFieldsProps) {
     const compact = variant === 'quick';
-    const clearText = t('common.clear') === 'common.clear' ? 'Clear' : t('common.clear');
+    const clearText = tFallback(t, 'common.clear', 'Clear');
     const renderedFieldConfig = visibleFieldKeys?.length
         ? FIELD_CONFIG.filter(({ key }) => visibleFieldKeys.includes(key))
         : FIELD_CONFIG;

@@ -15,6 +15,7 @@ const { updateTask, getChecklistProgress, storeState } = vi.hoisted(() => ({
     settings: { features: {} },
     getDerivedState: () => ({ focusedCount: 0 }),
     tasks: [] as any[],
+    _allTasks: [] as any[],
   },
 }));
 const hapticsMocks = vi.hoisted(() => ({
@@ -99,6 +100,7 @@ describe('SwipeableTaskItem', () => {
     vi.clearAllMocks();
     storeState.projects = [];
     storeState.tasks = [];
+    storeState._allTasks = [];
     getChecklistProgress.mockReturnValue(null);
   });
 
@@ -381,5 +383,72 @@ describe('SwipeableTaskItem', () => {
     });
 
     expect(() => tree.root.find((node) => node.props.accessibilityLabel === 'checklist.progress')).toThrow();
+  });
+
+  it('flushes checklist updates using the full task set, not only visible tasks', () => {
+    vi.useFakeTimers();
+    const task = {
+      id: 'task-1',
+      title: 'Pack samples',
+      status: 'next',
+      taskMode: 'list',
+      checklist: [{ id: 'item-1', title: 'Seal box', isCompleted: false }],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    } as any;
+    storeState.tasks = [];
+    storeState._allTasks = [task];
+    getChecklistProgress.mockImplementation((value: any) => {
+      const checklist = value?.checklist ?? [];
+      if (!checklist.length) return null;
+      const completed = checklist.filter((entry: any) => entry.isCompleted).length;
+      return {
+        completed,
+        total: checklist.length,
+        percent: completed / checklist.length,
+      };
+    });
+
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(
+        <SwipeableTaskItem
+          task={task}
+          isDark={false}
+          tc={{
+            taskItemBg: '#111111',
+            border: '#222222',
+            text: '#ffffff',
+            secondaryText: '#999999',
+            tint: '#3b82f6',
+            warning: '#f59e0b',
+          } as any}
+          onPress={vi.fn()}
+          onStatusChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+    });
+
+    const checklistProgressButton = tree.root.find((node) => node.props.accessibilityLabel === 'checklist.progress');
+    renderer.act(() => {
+      checklistProgressButton.props.onPress();
+    });
+
+    const checklistItemButton = tree.root.find(
+      (node) => node.props.accessibilityLabel === 'Seal box' && typeof node.props.onPress === 'function'
+    );
+    renderer.act(() => {
+      checklistItemButton.props.onPress();
+    });
+    renderer.act(() => {
+      tree.unmount();
+    });
+
+    expect(updateTask).toHaveBeenCalledWith('task-1', {
+      checklist: [{ id: 'item-1', title: 'Seal box', isCompleted: true }],
+      status: 'done',
+    });
+    vi.useRealTimers();
   });
 });

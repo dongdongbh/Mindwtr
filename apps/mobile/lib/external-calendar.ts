@@ -7,6 +7,9 @@ export const EXTERNAL_CALENDARS_KEY = 'mindwtr-external-calendars';
 export const SYSTEM_CALENDAR_SETTINGS_KEY = 'mindwtr-system-calendar-settings';
 
 const SYSTEM_CALENDAR_SOURCE_PREFIX = 'system';
+const MINDWTR_CALENDAR_TITLE = 'Mindwtr';
+const MINDWTR_CALENDAR_NAME = 'mindwtr';
+const MINDWTR_PUSHED_EVENT_PREFIX = 'Mindwtr: ';
 
 export type SystemCalendarPermissionStatus = 'undetermined' | 'granted' | 'denied';
 
@@ -73,6 +76,18 @@ function getCalendarDisplayName(calendar: Calendar.Calendar): string {
             ? legacyName
             : 'Calendar';
     return preferred.trim() || 'Calendar';
+}
+
+function isMindwtrNamedCalendar(calendar: Calendar.Calendar): boolean {
+    const title = getCalendarDisplayName(calendar).trim().toLowerCase();
+    const name = typeof calendar.name === 'string' ? calendar.name.trim().toLowerCase() : '';
+    return title === MINDWTR_CALENDAR_TITLE.toLowerCase() || name === MINDWTR_CALENDAR_NAME;
+}
+
+function isMindwtrPushedEvent(event: Calendar.Event, calendar: Calendar.Calendar | undefined): boolean {
+    if (calendar && isMindwtrNamedCalendar(calendar)) return true;
+    const title = typeof event.title === 'string' ? event.title.trim() : '';
+    return title.toLowerCase().startsWith(MINDWTR_PUSHED_EVENT_PREFIX.toLowerCase());
 }
 
 function getSystemCalendarSourceId(calendarId: string): string {
@@ -152,6 +167,7 @@ export async function getSystemCalendars(): Promise<SystemCalendarInfo[]> {
         const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
         return calendars
             .filter((calendar) => typeof calendar.id === 'string' && calendar.id.trim().length > 0)
+            .filter((calendar) => !isMindwtrNamedCalendar(calendar))
             .map((calendar) => ({
                 id: calendar.id,
                 name: getCalendarDisplayName(calendar),
@@ -305,7 +321,9 @@ async function fetchSystemCalendarEvents(rangeStart: Date, rangeEnd: Date, signa
     }
 
     const rawCalendars = await withAbortSignal(Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT), signal);
-    const availableCalendars = rawCalendars.filter((calendar) => typeof calendar.id === 'string' && calendar.id.trim().length > 0);
+    const availableCalendars = rawCalendars
+        .filter((calendar) => typeof calendar.id === 'string' && calendar.id.trim().length > 0)
+        .filter((calendar) => !isMindwtrNamedCalendar(calendar));
     if (availableCalendars.length === 0) {
         return { calendars: [], events: [] };
     }
@@ -340,6 +358,9 @@ async function fetchSystemCalendarEvents(rangeStart: Date, rangeEnd: Date, signa
         const eventCalendarId = typeof event.calendarId === 'string' && event.calendarId.trim().length > 0
             ? event.calendarId
             : selectedIds[0];
+        const eventCalendar = availableById.get(eventCalendarId);
+        if (isMindwtrPushedEvent(event, eventCalendar)) continue;
+
         const sourceId = getSystemCalendarSourceId(eventCalendarId);
         const start = toDateSafe(event.startDate);
         if (!start) continue;

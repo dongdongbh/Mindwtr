@@ -7,7 +7,7 @@ Supported sources:
 - a single Todoist **CSV** export
 - a Todoist **ZIP** backup containing multiple project CSV files
 
-Import is available on desktop and mobile from **Settings → Data & Sync / Sync → Import from Todoist**.
+Import is available on desktop and mobile from **Settings → Data → Import from Todoist**.
 
 ---
 

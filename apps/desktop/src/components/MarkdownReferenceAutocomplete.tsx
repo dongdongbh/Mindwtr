@@ -6,6 +6,7 @@ import {
     insertMarkdownReferenceAtQuery,
     searchMarkdownReferences,
     shallow,
+    tFallback,
     useTaskStore,
     type MarkdownReferenceSearchResult,
     type MarkdownSelection,
@@ -211,14 +212,8 @@ export function MarkdownReferenceAutocompleteMenu({
     if (!isOpen || suggestions.length === 0 || !position) return null;
     if (typeof document === 'undefined') return null;
 
-    const taskLabel = (() => {
-        const translated = t('taskEdit.tab.task');
-        return translated === 'taskEdit.tab.task' ? 'Task' : translated;
-    })();
-    const projectLabel = (() => {
-        const translated = t('taskEdit.projectLabel');
-        return translated === 'taskEdit.projectLabel' ? 'Project' : translated;
-    })();
+    const taskLabel = tFallback(t, 'taskEdit.tab.task', 'Task');
+    const projectLabel = tFallback(t, 'taskEdit.projectLabel', 'Project');
 
     return createPortal(
         <div

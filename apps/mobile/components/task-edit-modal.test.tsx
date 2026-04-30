@@ -308,6 +308,88 @@ describe('TaskEditModal', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('does not prompt after reopening a task that was just saved', () => {
+    const onClose = vi.fn();
+    const onSave = vi.fn();
+    const initialTask = {
+      id: 't1',
+      title: 'Test task',
+      status: 'inbox' as const,
+      tags: [],
+      contexts: [],
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+    };
+    const savedTask = {
+      ...initialTask,
+      title: 'Changed task',
+      updatedAt: '2025-01-02T00:00:00.000Z',
+    };
+    let tree: renderer.ReactTestRenderer;
+
+    act(() => {
+      tree = renderer.create(
+        <TaskEditModal
+          visible
+          task={initialTask}
+          onClose={onClose}
+          onSave={onSave}
+        />
+      );
+    });
+
+    const formTab = tree!.root.findAll((node) => typeof node.props.onTitleDraftChange === 'function')[0];
+    act(() => {
+      formTab.props.onTitleDraftChange('Changed task');
+    });
+
+    const firstModal = tree!.root.findAll((node) => node.props.visible === true && typeof node.props.onRequestClose === 'function')[0];
+    const alertSpy = vi.spyOn(Alert, 'alert');
+
+    act(() => {
+      firstModal!.props.onRequestClose();
+    });
+
+    const buttons = (alertSpy.mock.calls[0]?.[2] ?? []) as { text?: string; onPress?: () => void }[];
+    act(() => {
+      buttons[2]?.onPress?.();
+    });
+
+    expect(onSave).toHaveBeenCalledWith('t1', expect.objectContaining({ title: 'Changed task' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      tree!.update(
+        <TaskEditModal
+          visible={false}
+          task={savedTask}
+          onClose={onClose}
+          onSave={onSave}
+        />
+      );
+    });
+
+    act(() => {
+      tree!.update(
+        <TaskEditModal
+          visible
+          task={savedTask}
+          onClose={onClose}
+          onSave={onSave}
+        />
+      );
+    });
+
+    alertSpy.mockClear();
+    const reopenedModal = tree!.root.findAll((node) => node.props.visible === true && typeof node.props.onRequestClose === 'function')[0];
+    act(() => {
+      reopenedModal!.props.onRequestClose();
+    });
+
+    expect(alertSpy).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
   it('syncs the pager to the requested default tab on first open', () => {
     const onClose = vi.fn();
     const onSave = vi.fn();

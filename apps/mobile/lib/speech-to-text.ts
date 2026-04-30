@@ -1103,6 +1103,9 @@ export const startWhisperRealtimeCapture = async (
   if (isExpoGo()) {
     throw new Error('On-device Whisper requires a dev build or production build (not Expo Go).');
   }
+  if (Platform.OS === 'android') {
+    throw new Error('Whisper realtime capture is disabled on Android.');
+  }
   const whisperRealtime = getWhisperRealtimeModule();
   if (!whisperRealtime) {
     throw new Error('Whisper realtime transcription requires native audio stream modules.');
@@ -1143,7 +1146,7 @@ export const startWhisperRealtimeCapture = async (
   });
 
   const audioStream = new whisperRealtime.AudioPcmStreamAdapter();
-  const enableRealtimeTranscript = Platform.OS !== 'android';
+  const enableRealtimeTranscript = true;
   const transcriptBySlice = new Map<number, string>();
   let completed = false;
   let hasActivated = false;

@@ -62,6 +62,21 @@ describe('widget-data', () => {
         expect(payload.subtitle).toBe('Inbox: 0');
     });
 
+    it('keeps the widget palette aligned with Sepia theme settings', () => {
+        const payload = buildWidgetPayload(
+            {
+                ...baseData,
+                settings: { theme: 'sepia' },
+            },
+            'en'
+        );
+
+        expect(payload.palette.background).toBe('#FAF3E3');
+        expect(payload.palette.text).toBe('#3B2F2F');
+        expect(payload.palette.mutedText).toBe('#7A5C3E');
+        expect(payload.palette.accent).toBe('#9C6F3C');
+    });
+
     it('includes focus-page schedule/next tasks even when none are explicitly focused', () => {
         const now = new Date().toISOString();
         const data: AppData = {

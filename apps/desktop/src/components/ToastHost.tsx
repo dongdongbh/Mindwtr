@@ -1,10 +1,14 @@
 import { X } from 'lucide-react';
+import { useLanguage } from '../contexts/language-context';
 import { useUiStore } from '../store/ui-store';
 import { cn } from '../lib/utils';
 
 export function ToastHost() {
+    const { t } = useLanguage();
     const toasts = useUiStore((state) => state.toasts);
     const dismissToast = useUiStore((state) => state.dismissToast);
+    const dismissLabel = t('common.dismiss');
+    const dismissText = dismissLabel && dismissLabel !== 'common.dismiss' ? dismissLabel : 'Dismiss';
 
     if (toasts.length === 0) return null;
 
@@ -39,7 +43,7 @@ export function ToastHost() {
                         type="button"
                         onClick={() => dismissToast(toast.id)}
                         className="text-muted-foreground hover:text-foreground cursor-pointer transition-colors -mr-1"
-                        aria-label="Dismiss notification"
+                        aria-label={dismissText}
                     >
                         <X className="w-3.5 h-3.5" />
                     </button>

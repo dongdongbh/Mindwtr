@@ -17,14 +17,31 @@ const nativeModule = Platform.OS === 'android'
   ? requireOptionalNativeModule<NotificationOpenIntentsModule>('NotificationOpenIntents')
   : null;
 
+function parseNestedPayloadData(value: string | undefined): Record<string, string> {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const result: Record<string, string> = {};
+    for (const [key, item] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof item === 'string') result[key] = item;
+      else if (item !== undefined && item !== null) result[key] = String(item);
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
 export async function consumePendingNotificationOpenPayload(): Promise<NotificationOpenPayload | null> {
   const payload = nativeModule?.consumePendingOpenPayload?.();
   if (!payload) return null;
+  const nestedData = parseNestedPayloadData(payload.data);
   return {
-    notificationId: payload.alarmKey || payload.id,
+    notificationId: payload.alarmKey || payload.id || nestedData.alarmKey || nestedData.id,
     actionIdentifier: 'open',
-    taskId: payload.taskId,
-    projectId: payload.projectId,
-    kind: payload.kind,
+    taskId: payload.taskId || nestedData.taskId,
+    projectId: payload.projectId || nestedData.projectId,
+    kind: payload.kind || nestedData.kind,
   };
 }

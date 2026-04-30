@@ -337,7 +337,7 @@ The mobile app uses NativeWind v4 for Tailwind CSS styling.
 | `metro.config.js`     | CSS processing with `withNativeWind`  |
 | `nativewind-env.d.ts` | TypeScript types for `className` prop |
 
-## Data & Sync
+## Sync and Data
 
 ### Local Storage
 Data is stored in AsyncStorage and automatically synced with the shared Zustand store.
@@ -352,7 +352,7 @@ For frequent multi-device edits, WebDAV is recommended over folder sync tools.
 If you use Syncthing, prefer `Send & Receive` + `Watch for Changes`, keep scan intervals short, and run **Sync** before switching devices.
 
 ### WebDAV / Cloud
-Mindwtr also supports WebDAV and Cloud sync backends in **Settings → Data & Sync**:
+Mindwtr also supports WebDAV and Cloud sync backends in **Settings → Sync**:
 - `Self-hosted` (existing `/data` endpoint + token)
 - `Dropbox` OAuth (App Folder)
 
@@ -362,7 +362,7 @@ Mindwtr also supports WebDAV and Cloud sync backends in **Settings → Data & Sy
 3. Add redirect URI: `mindwtr://redirect`.
 4. Set env var before starting Expo:
    - `DROPBOX_APP_KEY=<your-dropbox-app-key>`
-5. Restart app and connect in **Settings → Data & Sync → Cloud → Dropbox**.
+5. Restart app and connect in **Settings → Sync → Cloud → Dropbox**.
 6. Use a development/release build for OAuth. Expo Go is not supported for Dropbox OAuth redirects.
 
 Dropbox backend syncs:

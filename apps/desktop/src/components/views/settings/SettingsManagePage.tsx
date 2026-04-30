@@ -3,7 +3,7 @@ import { DndContext, type DragEndEvent, closestCenter, useSensor, useSensors, Po
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, Trash2, ChevronDown, ChevronRight, Pencil, Check, X } from 'lucide-react';
-import { DEFAULT_AREA_COLOR, useTaskStore, type Area } from '@mindwtr/core';
+import { DEFAULT_AREA_COLOR, translateWithFallback, useTaskStore, type Area } from '@mindwtr/core';
 import { AreaColorPicker } from '../projects/AreaColorPicker';
 
 type Labels = {
@@ -277,8 +277,7 @@ export function SettingsManagePage({ t: _t, translate }: SettingsManagePageProps
     }, [sortedAreas, reorderAreas]);
 
     const resolveText = (key: string, fallback: string) => {
-        const value = translate(key);
-        return value === key ? fallback : value;
+        return translateWithFallback(translate, key, fallback);
     };
 
     return (

@@ -10,6 +10,7 @@ import {
     sortTasksBy,
 } from '@mindwtr/core';
 import type { ColorProp } from 'react-native-android-widget';
+import { THEME_PRESETS, type ThemePresetName } from '../constants/theme-presets';
 
 export const WIDGET_DATA_KEY = 'mindwtr-data';
 export const WIDGET_LANGUAGE_KEY = 'mindwtr-language';
@@ -22,7 +23,8 @@ export const IOS_WIDGET_KIND = 'MindwtrTasksWidget';
 export const WIDGET_FOCUS_URI = 'mindwtr:///focus';
 export const WIDGET_QUICK_CAPTURE_URI = 'mindwtr:///capture-quick?mode=text';
 const DARK_THEME_MODES = new Set(['dark', 'material3-dark', 'nord', 'oled']);
-const LIGHT_THEME_MODES = new Set(['light', 'material3-light', 'eink', 'sepia']);
+const LIGHT_THEME_MODES = new Set(['light', 'material3-light', 'eink']);
+type ConcreteThemePresetName = Exclude<ThemePresetName, 'default'>;
 
 export type WidgetSystemColorScheme = 'light' | 'dark' | null | undefined;
 
@@ -115,6 +117,19 @@ const resolveWidgetPalette = (
     systemColorScheme: WidgetSystemColorScheme,
 ): WidgetPalette => {
     const normalizedMode = (themeMode || '').toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(THEME_PRESETS, normalizedMode)) {
+        const preset = THEME_PRESETS[normalizedMode as ConcreteThemePresetName];
+        return {
+            background: preset.cardBg,
+            card: preset.taskItemBg,
+            border: preset.border,
+            text: preset.text,
+            mutedText: preset.secondaryText,
+            accent: preset.tint,
+            onAccent: preset.onTint,
+        };
+    }
+
     const isDark = DARK_THEME_MODES.has(normalizedMode)
         ? true
         : LIGHT_THEME_MODES.has(normalizedMode)

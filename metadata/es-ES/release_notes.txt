@@ -1,3 +1,5 @@
-- Los grupos de proyectos en movil ahora coinciden con escritorio y la seccion Manage conserva mejor su estado expandido.
-- Editar en movil es mas fluido con bloques Markdown con codigo, cambios rapidos de campos y mejor cierre del teclado al capturar contenido compartido.
-- Calendario y sync son mas estables con mejor comportamiento para tareas con fecha, WebDAV local mas seguro y mejor coordinacion entre revision y recordatorios.
+- El calendario suma vista semanal movil, mes renovado, programador de tareas y hora predeterminada.
+- La sincronizacion de calendario permite elegir destino y evita bucles con calendarios espejo de Mindwtr.
+- Los avisos de Review ahora abren Review directamente.
+- Inbox agrega Later, la busqueda filtra por responsable y los merges de sync/cloud son mas fiables.
+- Captura rapida mantiene el texto dentro del panel y voz a texto evita un crash realtime en Android.

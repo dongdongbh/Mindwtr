@@ -1,6 +1,9 @@
 import { StyleSheet } from 'react-native';
 
 export const styles = StyleSheet.create({
+  modalRoot: {
+    flex: 1,
+  },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.35)',
@@ -10,6 +13,9 @@ export const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
+    width: '100%',
+    maxWidth: 860,
+    alignSelf: 'center',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 16,
@@ -32,6 +38,7 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
+    minHeight: 44,
   },
   inputRow: {
     flexDirection: 'row',
@@ -75,31 +82,43 @@ export const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 999,
     borderWidth: 1,
+    minHeight: 36,
+    maxWidth: '48%',
+    overflow: 'hidden',
   },
   optionText: {
     fontSize: 12,
     fontWeight: '600',
     maxWidth: 120,
+    minWidth: 0,
+    flexShrink: 1,
   },
   footerRow: {
     marginTop: 14,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 12,
   },
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    minWidth: 0,
+    flexShrink: 1,
   },
   toggleText: {
     fontSize: 12,
     fontWeight: '600',
+    flexShrink: 1,
   },
   saveButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 999,
+    minHeight: 40,
+    justifyContent: 'center',
   },
   saveText: {
     color: '#FFFFFF',

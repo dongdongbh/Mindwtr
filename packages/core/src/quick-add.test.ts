@@ -32,7 +32,7 @@ describe('quick-add', () => {
         expect(result.props.status).toBe('next');
     });
 
-    it('parses /start and /review with the same natural date parser as /due', () => {
+    it('keeps due commands date-only when no time is explicit', () => {
         const now = new Date('2025-01-01T10:00:00Z');
         const result = parseQuickAdd(
             'Review proposal /start:tomorrow /review:friday /due:next week',
@@ -43,9 +43,7 @@ describe('quick-add', () => {
         expect(result.title).toBe('Review proposal');
         expect(result.props.startTime).toBe(new Date(2025, 0, 2, 0, 0, 0, 0).toISOString());
         expect(result.props.reviewAt).toBe(new Date(2025, 0, 3, 0, 0, 0, 0).toISOString());
-        const expectedHour = now.getHours();
-        const expectedMinute = now.getMinutes();
-        expect(result.props.dueDate).toBe(new Date(2025, 0, 8, expectedHour, expectedMinute, 0, 0).toISOString());
+        expect(result.props.dueDate).toBe('2025-01-08');
     });
 
     it('parses abbreviated weekday commands like /start:mon', () => {
@@ -60,7 +58,7 @@ describe('quick-add', () => {
         const result = parseQuickAdd('Task /start:monx /due:tomorrow', undefined, now);
         expect(result.invalidDateCommands).toEqual(['/start:monx']);
         expect(result.props.startTime).toBeUndefined();
-        expect(result.props.dueDate).toBe(new Date(2025, 0, 2, now.getHours(), now.getMinutes(), 0, 0).toISOString());
+        expect(result.props.dueDate).toBe('2025-01-02');
     });
 
     it('parses date commands without stripping unrelated quick-add tokens', () => {
@@ -89,14 +87,14 @@ describe('quick-add', () => {
         const now = new Date('2026-03-01T10:30:00Z');
         const result = parseQuickAdd('Task /due:in 3 days', undefined, now);
         expect(result.invalidDateCommands).toBeUndefined();
-        expect(result.props.dueDate).toBe(new Date(2026, 2, 4, now.getHours(), now.getMinutes(), 0, 0).toISOString());
+        expect(result.props.dueDate).toBe('2026-03-04');
     });
 
-    it('parses ISO due dates without corrupting the date token', () => {
+    it('parses ISO due dates as date-only without corrupting the date token', () => {
         const now = new Date('2026-03-01T10:30:00Z');
         const result = parseQuickAdd('Task /due:2026-03-15', undefined, now);
         expect(result.invalidDateCommands).toBeUndefined();
-        expect(result.props.dueDate).toBe(new Date(2026, 2, 15, now.getHours(), now.getMinutes(), 0, 0).toISOString());
+        expect(result.props.dueDate).toBe('2026-03-15');
     });
 
     it('parses richer chrono expressions in explicit date commands', () => {
@@ -107,12 +105,12 @@ describe('quick-add', () => {
         expect(result.props.dueDate).toBe(new Date(2026, 3, 17, 15, 0, 0, 0).toISOString());
     });
 
-    it('keeps the current fallback time for explicit calendar dates without a time', () => {
+    it('keeps explicit calendar due dates date-only without a time', () => {
         const now = new Date('2026-02-01T10:00:00Z');
         const result = parseQuickAdd('Submit report /due:march 15', undefined, now);
 
         expect(result.invalidDateCommands).toBeUndefined();
-        expect(result.props.dueDate).toBe(new Date(2026, 2, 15, now.getHours(), now.getMinutes(), 0, 0).toISOString());
+        expect(result.props.dueDate).toBe('2026-03-15');
     });
 
     it('detects a trailing natural-language due date without auto-applying it in core', () => {
@@ -167,7 +165,7 @@ describe('quick-add', () => {
         const result = parseQuickAdd('Tax deadline — April 15', undefined, now);
 
         expect(result.detectedDate).toEqual({
-            date: '2027-04-15T10:00:00.000Z',
+            date: '2027-04-15',
             matchedText: 'April 15',
             titleWithoutDate: 'Tax deadline',
         });
@@ -177,7 +175,7 @@ describe('quick-add', () => {
         const now = new Date('2026-04-06T10:00:00Z');
         const result = parseQuickAdd('Call mom tomorrow /due:friday', undefined, now);
 
-        expect(result.props.dueDate).toBe(new Date(2026, 3, 10, now.getHours(), now.getMinutes(), 0, 0).toISOString());
+        expect(result.props.dueDate).toBe('2026-04-10');
         expect(result.detectedDate).toBeUndefined();
         expect(result.title).toBe('Call mom tomorrow');
     });

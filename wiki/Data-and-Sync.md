@@ -4,6 +4,10 @@ Mindwtr stores data locally and supports multiple synchronization options betwee
 
 Mindwtr does **not** run a hosted cloud service. Sync is local‑first and user‑configured: you choose how the `data.json` file (and `attachments/`) moves between devices. It won’t happen automatically until you set up one of the options below—but once configured, it works smoothly.
 
+Current desktop and mobile builds split settings into two pages:
+- **Settings → Sync** for backend setup, sync options, history, and recovery snapshots
+- **Settings → Data** for backup/restore/import, attachment cleanup, and diagnostics
+
 For desktop vault import and note deep links, see [[Obsidian Integration]].
 
 ---
@@ -98,7 +102,7 @@ Recommended setup:
 2. In Mindwtr desktop, set **Sync Backend = File** and pick that folder.
 3. Export once to create `data.json` and `attachments/`.
 4. Wait for iCloud Drive to finish uploading.
-5. On iOS, in Mindwtr mobile **Settings → Data & Sync → Select Folder**, choose the same iCloud Drive folder in Files.
+5. On iOS, in Mindwtr mobile **Settings → Sync → Select Folder**, choose the same iCloud Drive folder in Files.
    - If a provider is greyed out in the iOS folder picker, select any JSON file inside the target folder. Mindwtr will still use that folder for `data.json` and `attachments/`.
 
 Important:
@@ -113,10 +117,10 @@ Devices must be able to reach each other: best on the same subnet/LAN, or via a 
 
 **Recommended flow:**
 1. Create a single Syncthing folder (e.g., `Mindwtr/`) and let it fully sync.
-2. On desktop, choose that folder in **Settings → Data & Sync → File Sync**.
+2. On desktop, choose that folder in **Settings → Sync** with the **File** backend selected.
 3. **Export Backup** to that folder to create `data.json` and `attachments/`.
 4. Wait for Syncthing to finish syncing to your phone.
-5. On mobile, select the same folder in **Settings → Data & Sync**.
+5. On mobile, select the same folder in **Settings → Sync**.
 
 **Why you see `attachments (1)` / `attachments (2)`**
 Syncthing creates duplicate folders when both devices create or modify the same folder at the same time. This often happens if both devices open Mindwtr before the initial sync completes.
@@ -140,7 +144,7 @@ Examples:
 - **Autosync** (Google Drive)
 - **FolderSync** (generic)
 
-Then point Mindwtr to the local synced folder in **Settings → Data & Sync**.
+Then point Mindwtr to the local synced folder in **Settings → Sync**.
 
 #### OneDrive on Android (Recommended Setup)
 
@@ -153,7 +157,7 @@ To use OneDrive reliably with Mindwtr on Android, install a “bridge” app:
 Then:
 1. Create a OneDrive folder for Mindwtr (on desktop).
 2. Use the bridge app to sync that folder to a local folder on Android.
-3. In Mindwtr, select that local folder in **Settings → Data & Sync** (Mindwtr will use `data.json` inside).
+3. In Mindwtr, select that local folder in **Settings → Sync** (Mindwtr will use `data.json` inside).
 
 ### 3. WebDAV Sync
 
@@ -163,6 +167,8 @@ Sync directly to a WebDAV server:
 - ownCloud
 - Fastmail
 - Any WebDAV-compatible server
+
+Mindwtr now creates missing parent folders automatically before the first `PUT`, so you can point it at a new empty folder without manually pre-creating every level.
 
 ### 4. Mindwtr Cloud (Self-Hosted)
 
@@ -204,7 +210,7 @@ Mindwtr automatically syncs in the following situations:
 
 ### Settings Sync Options
 
-Mindwtr can sync select preferences across devices. Configure in **Settings → Data & Sync → Settings sync options**.
+Mindwtr can sync select preferences across devices. Configure in **Settings → Sync → Settings sync options**.
 
 Available options include:
 - **Appearance** (theme)
@@ -246,7 +252,7 @@ On mobile, sync history entries are collapsed by default; tap to expand.
 
 - Attachments are synced **after** metadata merges.
 - Missing attachments remain as placeholders until downloaded.
-- Orphaned attachments are cleaned up automatically (and can be triggered manually on desktop in **Settings → Sync**).
+- Orphaned attachments are cleaned up automatically (and can be triggered manually on desktop in **Settings → Data**).
 
 ---
 
@@ -254,7 +260,7 @@ On mobile, sync history entries are collapsed by default; tap to expand.
 
 ### File Sync
 
-1. Open **Settings → Data & Sync**
+1. Open **Settings → Sync**
 2. Set **Sync Backend** to **File**
 3. Click **Change Location** and select a folder in your sync service
 4. Click **Save**
@@ -263,13 +269,15 @@ Mindwtr will automatically sync on startup and when data changes.
 
 ### WebDAV Sync
 
-1. Open **Settings → Data & Sync**
+1. Open **Settings → Sync**
 2. Set **Sync Backend** to **WebDAV**
 3. Enter your WebDAV server details:
    - **URL** — Folder URL; Mindwtr will store `data.json` inside (e.g., `https://nextcloud.example.com/remote.php/dav/files/user/Mindwtr`)
    - **Username** — Your WebDAV username
    - **Password** — Your WebDAV password
 4. Click **Save WebDAV**
+
+If the target folder path does not exist yet, Mindwtr will try to create the missing parent collections automatically before uploading `data.json`.
 
 > **Linux note:** If your desktop session does not provide a Secret Service keyring (for example `org.freedesktop.secrets` is unavailable), Mindwtr falls back to local secrets storage in `~/.config/mindwtr/secrets.toml`.
 
@@ -286,13 +294,13 @@ On iOS, some cloud providers may not expose folder selection in Files. In that c
 
 ### 1. Export Your Data First
 
-1. Go to **Settings → Data & Sync**
+1. Go to **Settings → Data**
 2. Tap **Export Backup**
 3. Save the file to your sync folder (e.g., Google Drive)
 
 ### 2. Select Sync Folder
 
-1. In **Settings → Data & Sync**
+1. In **Settings → Sync**
 2. Tap **Select Folder**
 3. Navigate to your sync folder
 4. Select the folder that contains (or will contain) `data.json`
@@ -359,11 +367,11 @@ The same workflow applies. Avoid editing on multiple devices simultaneously to p
 ### Export Data
 
 **Desktop:**
-- Use **Settings → Sync → Data Transfer → Export Backup**
+- Use **Settings → Data → Export Backup**
 - Sync backends also keep `data.json` updated automatically when sync is enabled
 
 **Mobile:**
-1. Go to **Settings → Data & Sync**
+1. Go to **Settings → Data**
 2. Tap **Export Backup**
 3. Save to your desired location
 
@@ -372,7 +380,7 @@ The same workflow applies. Avoid editing on multiple devices simultaneously to p
 Mindwtr can restore local data directly from a backup JSON file on both desktop and mobile.
 
 Flow:
-1. Open **Settings → Data & Sync / Sync**
+1. Open **Settings → Data**
 2. Choose **Restore Backup**
 3. Pick a Mindwtr backup JSON file
 4. Review the backup summary and confirm
@@ -387,7 +395,7 @@ See [[Backup and Restore]] for the detailed flow.
 
 ### Todoist CSV / ZIP Import
 
-Mindwtr can import Todoist exports from **Settings → Data & Sync / Sync → Import from Todoist**.
+Mindwtr can import Todoist exports from **Settings → Data → Import from Todoist**.
 
 - Supports a single Todoist CSV export or a ZIP backup containing multiple project CSVs
 - Creates Mindwtr projects from Todoist projects
@@ -401,7 +409,7 @@ See [[Todoist Import]] for details and supported mappings.
 
 ### DGT GTD JSON / ZIP Import
 
-Mindwtr can import DGT GTD exports from **Settings → Data & Sync / Sync → Import from DGT GTD**.
+Mindwtr can import DGT GTD exports from **Settings → Data → Import from DGT GTD**.
 
 - Supports a DGT GTD JSON export or a ZIP archive containing the exported JSON file
 - Creates Mindwtr areas from DGT folders
@@ -413,6 +421,22 @@ Mindwtr can import DGT GTD exports from **Settings → Data & Sync / Sync → Im
 Standalone DGT tasks stay in Mindwtr without forcing them into new projects, so you can organize them afterward if needed.
 
 See [[DGT GTD Import]] for details and supported mappings.
+
+### OmniFocus CSV / JSON / ZIP Import
+
+Mindwtr can import OmniFocus exports from **Settings → Data → Import from OmniFocus**.
+
+- Supports OmniFocus **CSV** exports, including UTF-8 and UTF-16 CSV files
+- Supports Omni Automation / Shortcuts **JSON** exports and **ZIP** archives
+- Creates Mindwtr areas from OmniFocus folders when metadata is available
+- Creates Mindwtr projects from OmniFocus projects or referenced project names
+- Keeps standalone OmniFocus actions outside projects so you can organize them later
+- Preserves supported OmniFocus notes, tags, defer dates, due dates, completion state, and recurrence from the JSON path
+- Converts simple nested tasks into checklist items when possible and flattens deeper hierarchy with the original path preserved
+
+If recurrence or hierarchy fidelity matters, prefer the Omni Automation JSON / ZIP path over CSV. Planned dates and duration text are preserved in the imported description when Mindwtr does not have a direct field for them.
+
+See [[OmniFocus Import]] for details and supported mappings.
 
 ### Backup Strategy
 
@@ -453,7 +477,7 @@ If you see unexpected data:
 ### Mobile Sync File Not Found
 
 1. Ensure the file exists in your cloud folder
-2. Re-select the file in Settings → Data & Sync
+2. Re-select the file in Settings → Sync
 3. Check file permissions
 
 ### Reset Sync

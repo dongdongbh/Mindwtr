@@ -1,5 +1,5 @@
+import { canAutoSync, type SyncBackend } from '@mindwtr/core';
 import type { CloudProvider } from './sync-service';
-import type { SyncBackend } from './sync-service-utils';
 
 type SyncServiceLike = {
     getSyncBackend: () => Promise<SyncBackend>;
@@ -13,30 +13,26 @@ type SyncServiceLike = {
 
 export async function canDesktopAutoSync(syncService: SyncServiceLike): Promise<boolean> {
     const backend = await syncService.getSyncBackend();
-    if (backend === 'off') return false;
-    if (backend === 'cloudkit') return true;
+    const filePath = backend === 'file' ? await syncService.getSyncPath() : undefined;
+    const webdavUrl = backend === 'webdav' ? (await syncService.getWebDavConfig()).url : undefined;
+    const cloudProvider = backend === 'cloud' ? await syncService.getCloudProvider() : undefined;
+    const dropboxAppKey = backend === 'cloud' && cloudProvider === 'dropbox'
+        ? (await syncService.getDropboxAppKey()).trim()
+        : undefined;
+    const isDropboxConnected = backend === 'cloud' && cloudProvider === 'dropbox' && dropboxAppKey
+        ? await syncService.isDropboxConnected(dropboxAppKey)
+        : undefined;
+    const cloudUrl = backend === 'cloud' && cloudProvider !== 'dropbox'
+        ? (await syncService.getCloudConfig()).url
+        : undefined;
 
-    if (backend === 'file') {
-        const path = await syncService.getSyncPath();
-        return Boolean(path);
-    }
-
-    if (backend === 'webdav') {
-        const { url } = await syncService.getWebDavConfig();
-        return Boolean(url);
-    }
-
-    if (backend === 'cloud') {
-        const provider = await syncService.getCloudProvider();
-        if (provider === 'dropbox') {
-            const appKey = (await syncService.getDropboxAppKey()).trim();
-            if (!appKey) return false;
-            return syncService.isDropboxConnected(appKey);
-        }
-
-        const { url } = await syncService.getCloudConfig();
-        return Boolean(url);
-    }
-
-    return false;
+    return canAutoSync({
+        backend,
+        filePath,
+        webdavUrl,
+        cloudProvider,
+        dropboxAppKey,
+        isDropboxConnected,
+        cloudUrl,
+    });
 }

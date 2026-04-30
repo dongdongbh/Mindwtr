@@ -18,6 +18,8 @@ export interface WebDavOptions {
     allowInsecureHttp?: boolean;
 }
 
+const MAX_WEBDAV_MKCOL_DEPTH = 32;
+
 function bytesToBase64(bytes: Uint8Array): string {
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
     let out = '';
@@ -76,11 +78,159 @@ function buildHeaders(options: WebDavOptions): Record<string, string> {
 const WEBDAV_HTTPS_ERROR = 'WebDAV requires HTTPS for public URLs (HTTP allowed for localhost, private IPs, and local hostnames).';
 const WEBDAV_INSECURE_OPTIONS = { allowAndroidEmulatorInDev: true, allowLocalHostnames: true, allowPrivateIpRanges: true };
 const WEBDAV_TIMEOUT_ERROR = 'WebDAV request timed out';
+const WEBDAV_AUTOMKCOL_HEADER = 'X-NC-WebDAV-AutoMkcol';
 const UTF8_BOM = '\uFEFF';
 
 const assertWebdavUrl = (url: string, options: WebDavOptions): void => {
     if (options.allowInsecureHttp) return;
     assertSecureUrl(url, WEBDAV_HTTPS_ERROR, WEBDAV_INSECURE_OPTIONS);
+};
+
+const getWebdavParentCollectionUrl = (url: string): string | null => {
+    try {
+        const parsed = new URL(url);
+        const trimmedPath = parsed.pathname.replace(/\/+$/, '');
+        const lastSlash = trimmedPath.lastIndexOf('/');
+        if (lastSlash <= 0) return null;
+        parsed.pathname = trimmedPath.slice(0, lastSlash);
+        parsed.search = '';
+        parsed.hash = '';
+        return parsed.toString().replace(/\/+$/, '');
+    } catch {
+        return null;
+    }
+};
+
+const normalizeWebdavCollectionUrl = (url: string): string => {
+    try {
+        const parsed = new URL(url);
+        parsed.pathname = `${parsed.pathname.replace(/\/+$/, '')}/`;
+        return parsed.toString();
+    } catch {
+        return `${url.replace(/\/+$/, '')}/`;
+    }
+};
+
+const createWebdavCollection = async (
+    url: string,
+    options: WebDavOptions,
+): Promise<Response> => {
+    const fetcher = options.fetcher ?? fetch;
+    return fetchWithTimeout(
+        normalizeWebdavCollectionUrl(url),
+        { method: 'MKCOL', headers: buildHeaders(options) },
+        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        fetcher,
+        WEBDAV_TIMEOUT_ERROR,
+    );
+};
+
+const webdavCollectionExists = async (
+    url: string,
+    options: WebDavOptions,
+): Promise<boolean> => {
+    const fetcher = options.fetcher ?? fetch;
+    const res = await fetchWithTimeout(
+        normalizeWebdavCollectionUrl(url),
+        {
+            method: 'PROPFIND',
+            headers: {
+                Depth: '0',
+                ...buildHeaders(options),
+            },
+        },
+        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        fetcher,
+        WEBDAV_TIMEOUT_ERROR,
+    );
+
+    if (res.status === 404) return false;
+    if (res.ok || res.status === 405) return true;
+    const error = new Error(`WebDAV PROPFIND failed (${res.status})`);
+    (error as { status?: number }).status = res.status;
+    throw error;
+};
+
+const probeWebdavCollectionExists = async (
+    url: string,
+    options: WebDavOptions,
+): Promise<boolean> => {
+    try {
+        return await webdavCollectionExists(url, options);
+    } catch {
+        return false;
+    }
+};
+
+const isWebdavMkcolConflictError = (error: unknown): boolean => (
+    error instanceof Error && error.message === 'WebDAV MKCOL failed (409)'
+);
+
+const ensureWebdavParentCollectionsBeforePut = async (
+    url: string,
+    options: WebDavOptions = {},
+): Promise<void> => {
+    try {
+        await ensureWebdavParentCollections(url, options);
+    } catch (error) {
+        // Some WebDAV servers report an ambiguous MKCOL 409 for an existing
+        // collection that cannot be verified with PROPFIND. Retry the PUT and
+        // let that final response decide whether the upload can proceed.
+        if (!isWebdavMkcolConflictError(error)) {
+            throw error;
+        }
+    }
+};
+
+const ensureWebdavCollectionExists = async (
+    url: string,
+    options: WebDavOptions = {},
+): Promise<void> => {
+    const pendingChildren: string[] = [];
+    let currentUrl = url;
+
+    while (true) {
+        const res = await createWebdavCollection(currentUrl, options);
+        if (res.ok || res.status === 405) {
+            break;
+        }
+        if (res.status === 409 && await probeWebdavCollectionExists(currentUrl, options)) {
+            break;
+        }
+        if (res.status !== 409) {
+            throw new Error(`WebDAV MKCOL failed (${res.status})`);
+        }
+        if (pendingChildren.length >= MAX_WEBDAV_MKCOL_DEPTH) {
+            throw new Error('WebDAV MKCOL failed (max depth exceeded)');
+        }
+        const parentUrl = getWebdavParentCollectionUrl(currentUrl);
+        if (!parentUrl || parentUrl === currentUrl) {
+            throw new Error(`WebDAV MKCOL failed (${res.status})`);
+        }
+        pendingChildren.push(currentUrl);
+        currentUrl = parentUrl;
+    }
+
+    while (pendingChildren.length > 0) {
+        const childUrl = pendingChildren.pop()!;
+        const res = await createWebdavCollection(childUrl, options);
+        if (res.ok || res.status === 405) {
+            continue;
+        }
+        if (res.status === 409 && await probeWebdavCollectionExists(childUrl, options)) {
+            continue;
+        }
+        throw new Error(`WebDAV MKCOL failed (${res.status})`);
+    }
+};
+
+const ensureWebdavParentCollections = async (
+    url: string,
+    options: WebDavOptions = {},
+): Promise<void> => {
+    const parentUrl = getWebdavParentCollectionUrl(url);
+    if (!parentUrl) return;
+    await ensureWebdavCollectionExists(parentUrl, options);
 };
 
 export async function webdavGetJson<T>(
@@ -127,18 +277,26 @@ export async function webdavPutJson(
     const fetcher = options.fetcher ?? fetch;
     const headers = buildHeaders(options);
     headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+    headers[WEBDAV_AUTOMKCOL_HEADER] = headers[WEBDAV_AUTOMKCOL_HEADER] || '1';
 
-    const res = await fetchWithTimeout(
+    const payload = JSON.stringify(data, null, 2);
+    const sendPut = async (): Promise<Response> => fetchWithTimeout(
         url,
         {
             method: 'PUT',
             headers,
-            body: JSON.stringify(data, null, 2),
+            body: payload,
         },
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         WEBDAV_TIMEOUT_ERROR,
     );
+
+    let res = await sendPut();
+    if (!res.ok && (res.status === 404 || res.status === 409)) {
+        await ensureWebdavParentCollectionsBeforePut(url, options);
+        res = await sendPut();
+    }
 
     if (!res.ok) {
         const text = await res.text().catch(() => '');
@@ -153,17 +311,7 @@ export async function webdavMakeDirectory(
     options: WebDavOptions = {}
 ): Promise<void> {
     assertWebdavUrl(url, options);
-    const fetcher = options.fetcher ?? fetch;
-    const res = await fetchWithTimeout(
-        url,
-        { method: 'MKCOL', headers: buildHeaders(options) },
-        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-        fetcher,
-        WEBDAV_TIMEOUT_ERROR,
-    );
-    if (!res.ok && res.status !== 405) {
-        throw new Error(`WebDAV MKCOL failed (${res.status})`);
-    }
+    await ensureWebdavCollectionExists(url, options);
 }
 
 export async function webdavPutFile(
@@ -174,26 +322,40 @@ export async function webdavPutFile(
 ): Promise<void> {
     assertWebdavUrl(url, options);
     const fetcher = options.fetcher ?? fetch;
-    const headers = buildHeaders(options);
-    headers['Content-Type'] = contentType || 'application/octet-stream';
+    const payloadBytes = await toUint8Array(data);
+    const buildRequest = (): { headers: Record<string, string>; body: BodyInit } => {
+        const headers = buildHeaders(options);
+        headers['Content-Type'] = contentType || 'application/octet-stream';
+        headers[WEBDAV_AUTOMKCOL_HEADER] = headers[WEBDAV_AUTOMKCOL_HEADER] || '1';
 
-    let body: BodyInit = data instanceof Uint8Array ? new Uint8Array(data) : data;
-    if (options.onProgress) {
-        const bytes = await toUint8Array(data);
-        const stream = createProgressStream(bytes, options.onProgress);
-        body = stream ?? bytes;
-        if (!headers['Content-Length']) {
-            headers['Content-Length'] = String(bytes.length);
+        const bodyBytes = new Uint8Array(payloadBytes);
+        let body: BodyInit = bodyBytes;
+        if (options.onProgress) {
+            const stream = createProgressStream(bodyBytes, options.onProgress);
+            body = stream ?? bodyBytes;
+            if (!headers['Content-Length']) {
+                headers['Content-Length'] = String(bodyBytes.length);
+            }
         }
-    }
 
-    const res = await fetchWithTimeout(
-        url,
-        { method: 'PUT', headers, body },
-        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-        fetcher,
-        WEBDAV_TIMEOUT_ERROR,
-    );
+        return { body, headers };
+    };
+    const sendPut = async (): Promise<Response> => {
+        const { headers, body } = buildRequest();
+        return fetchWithTimeout(
+            url,
+            { method: 'PUT', headers, body },
+            options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+            fetcher,
+            WEBDAV_TIMEOUT_ERROR,
+        );
+    };
+
+    let res = await sendPut();
+    if (!res.ok && (res.status === 404 || res.status === 409)) {
+        await ensureWebdavParentCollectionsBeforePut(url, options);
+        res = await sendPut();
+    }
 
     if (!res.ok) {
         const error = new Error(`WebDAV File PUT failed (${res.status})`);

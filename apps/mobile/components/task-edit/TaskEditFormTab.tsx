@@ -14,7 +14,7 @@ import {
     findNodeHandle,
 } from 'react-native';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import type { Task, TaskEditorFieldId, TaskEditorSectionId, TimeEstimate } from '@mindwtr/core';
+import { getRecurrenceUntilValue, type Task, type TaskEditorFieldId, type TaskEditorSectionId, type TimeEstimate } from '@mindwtr/core';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { CollapsibleSection } from './CollapsibleSection';
 
@@ -392,6 +392,9 @@ export function TaskEditFormTab({
                                     if (showDatePicker === 'start') return getSafePickerDateValue(editedTask.startTime);
                                     if (showDatePicker === 'start-time') return pendingStartDate ?? getSafePickerDateValue(editedTask.startTime);
                                     if (showDatePicker === 'review') return getSafePickerDateValue(editedTask.reviewAt);
+                                    if (showDatePicker === 'recurrence-end') {
+                                        return getSafePickerDateValue(getRecurrenceUntilValue(editedTask.recurrence));
+                                    }
                                     if (showDatePicker === 'due-time') return pendingDueDate ?? getSafePickerDateValue(editedTask.dueDate);
                                     return getSafePickerDateValue(editedTask.dueDate);
                                 })()}

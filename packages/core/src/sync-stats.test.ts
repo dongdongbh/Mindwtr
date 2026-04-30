@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { appendSyncHistory, filterDeleted, mergeAppDataWithStats } from './sync';
+import { filterNotDeleted } from './sync-helpers';
 import { createMockProject, createMockSection, createMockTask, mockAppData } from './sync-test-utils';
-import { AppData, Project, Section, Task } from './types';
+import { AppData, Attachment, Project, Section, Task } from './types';
 
 describe('Sync Logic', () => {
     describe('mergeAppDataWithStats', () => {
@@ -30,7 +31,7 @@ describe('Sync Logic', () => {
             expect(result.stats.tasks.resolvedUsingLocal).toBeGreaterThan(0);
         });
 
-        it('captures conflict diagnostics for content and revision drift', () => {
+        it('captures conflict diagnostics for unresolved content drift only', () => {
             const now = '2026-03-16T00:00:00.000Z';
             const local = mockAppData([
                 {
@@ -63,19 +64,14 @@ describe('Sync Logic', () => {
 
             expect(result.stats.tasks.conflictReasonCounts).toEqual({
                 content: 1,
-                revision: 1,
             });
             expect(contentSample).toMatchObject({
                 reasons: ['content'],
                 winner: 'local',
                 diffKeys: ['title'],
             });
-            expect(revisionSample).toMatchObject({
-                reasons: ['revision'],
-                winner: 'local',
-                diffKeys: [],
-            });
-            expect(revisionSample?.localComparableHash).not.toBe(revisionSample?.incomingComparableHash);
+            expect(revisionSample).toBeUndefined();
+            expect(result.data.tasks.find((task) => task.id === 'revision-conflict')?.title).toBe('Local title');
         });
 
         it('does not count conflict when only timestamp differs for legacy items', () => {
@@ -85,8 +81,31 @@ describe('Sync Logic', () => {
             const result = mergeAppDataWithStats(local, incoming);
 
             expect(result.stats.tasks.conflicts).toBe(0);
-            expect(result.stats.tasks.maxClockSkewMs).toBe(29000);
+            expect(result.stats.tasks.maxClockSkewMs).toBe(0);
             expect(result.data.tasks[0].updatedAt).toBe('2026-02-22T22:30:40.000Z');
+        });
+
+        it('does not count normal revision-forward updates as conflicts or clock skew', () => {
+            const localTask = {
+                ...createMockTask('task-1', '2026-04-24T11:22:00.000Z'),
+                title: 'Before sync',
+                rev: 1,
+                revBy: 'desktop',
+            } satisfies Task;
+            const incomingTask = {
+                ...createMockTask('task-1', '2026-04-24T11:29:00.000Z'),
+                title: 'Edited on Android',
+                rev: 2,
+                revBy: 'android',
+            } satisfies Task;
+
+            const result = mergeAppDataWithStats(mockAppData([localTask]), mockAppData([incomingTask]));
+
+            expect(result.stats.tasks.conflicts).toBe(0);
+            expect(result.stats.tasks.conflictIds).toHaveLength(0);
+            expect(result.stats.tasks.maxClockSkewMs).toBe(0);
+            expect(result.data.tasks[0].title).toBe('Edited on Android');
+            expect(result.data.tasks[0].rev).toBe(2);
         });
 
         it('does not count conflicts for legacy order-field shape differences', () => {
@@ -222,6 +241,147 @@ describe('Sync Logic', () => {
                 isFocused: false,
             });
         });
+
+        it('does not count conflicts for null-vs-missing optional fields with matching revisions', () => {
+            const now = '2026-04-23T21:42:31.000Z';
+            const localTask = {
+                ...createMockTask('task-nullish', now),
+                rev: 3,
+                revBy: 'device-a',
+                assignedTo: null,
+                completedAt: null,
+                deletedAt: null,
+                description: null,
+                energyLevel: null,
+                location: null,
+                priority: null,
+                recurrence: null,
+                reviewAt: null,
+            } as unknown as Task;
+            const incomingTask = {
+                ...createMockTask('task-nullish', now),
+                rev: 3,
+                revBy: 'device-a',
+            } satisfies Task;
+
+            const localProject = {
+                ...createMockProject('project-nullish', now),
+                rev: 1,
+                revBy: 'device-a',
+                deletedAt: null,
+                supportNotes: null,
+            } as unknown as Project;
+            const incomingProject = {
+                ...createMockProject('project-nullish', now),
+                rev: 1,
+                revBy: 'device-a',
+            } satisfies Project;
+
+            const result = mergeAppDataWithStats(
+                mockAppData([localTask], [localProject]),
+                mockAppData([incomingTask], [incomingProject])
+            );
+
+            expect(result.stats.tasks.conflicts).toBe(0);
+            expect(result.stats.projects.conflicts).toBe(0);
+        });
+
+        it('does not count conflicts for blank optional fields or empty collections', () => {
+            const now = '2026-04-24T00:00:00.000Z';
+            const localTask = {
+                ...createMockTask('task-blank', now),
+                rev: 4,
+                revBy: 'device-a',
+                assignedTo: '   ',
+                checklist: [],
+                description: '',
+                sectionId: '',
+            } as unknown as Task;
+            const incomingTask = {
+                ...createMockTask('task-blank', now),
+                rev: 4,
+                revBy: 'device-a',
+            } satisfies Task;
+
+            const localSection = {
+                ...createMockSection('section-blank', 'project-blank', now),
+                rev: 2,
+                revBy: 'device-a',
+                description: '   ',
+            } as unknown as Section;
+            const incomingSection = {
+                ...createMockSection('section-blank', 'project-blank', now),
+                rev: 2,
+                revBy: 'device-a',
+            } satisfies Section;
+
+            const result = mergeAppDataWithStats(
+                mockAppData([localTask], [], [localSection]),
+                mockAppData([incomingTask], [], [incomingSection])
+            );
+
+            expect(result.stats.tasks.conflicts).toBe(0);
+            expect(result.stats.sections.conflicts).toBe(0);
+        });
+
+        it('does not count deleted-parent attachment cleanup as task or project content conflicts', () => {
+            const deletedAt = '2026-04-27T13:29:30.105Z';
+            const localAttachment = {
+                id: 'attachment-1',
+                kind: 'file',
+                title: 'receipt.pdf',
+                uri: 'file:///data/user/0/app/files/receipt.pdf',
+                createdAt: deletedAt,
+                updatedAt: deletedAt,
+                deletedAt,
+                localStatus: 'available',
+            } satisfies Attachment;
+            const incomingAttachment = {
+                id: 'attachment-1',
+                kind: 'file',
+                title: 'receipt.pdf',
+                uri: '',
+                createdAt: deletedAt,
+                updatedAt: deletedAt,
+                cloudKey: 'attachments/receipt.pdf',
+                deletedAt,
+                localStatus: 'missing',
+            } satisfies Attachment;
+            const localTask = {
+                ...createMockTask('deleted-task', deletedAt, deletedAt),
+                rev: 3,
+                revBy: 'device-a',
+                attachments: [localAttachment],
+            } satisfies Task;
+            const incomingTask = {
+                ...createMockTask('deleted-task', deletedAt, deletedAt),
+                rev: 3,
+                revBy: 'device-a',
+                attachments: [incomingAttachment],
+            } satisfies Task;
+            const localProject = {
+                ...createMockProject('deleted-project', deletedAt, deletedAt),
+                rev: 2,
+                revBy: 'device-a',
+                attachments: [localAttachment],
+            } satisfies Project;
+            const incomingProject = {
+                ...createMockProject('deleted-project', deletedAt, deletedAt),
+                rev: 2,
+                revBy: 'device-a',
+                attachments: [incomingAttachment],
+            } satisfies Project;
+
+            const result = mergeAppDataWithStats(
+                mockAppData([localTask], [localProject]),
+                mockAppData([incomingTask], [incomingProject])
+            );
+
+            expect(result.stats.tasks.conflicts).toBe(0);
+            expect(result.stats.projects.conflicts).toBe(0);
+            expect(result.stats.tasks.conflictIds).toHaveLength(0);
+            expect(result.stats.projects.conflictIds).toHaveLength(0);
+        });
     });
 
     describe('appendSyncHistory', () => {
@@ -263,6 +423,15 @@ describe('Sync Logic', () => {
 
             expect(filtered).toHaveLength(1);
             expect(filtered[0].id).toBe('1');
+        });
+
+        it('exposes filterNotDeleted as the correctly named helper', () => {
+            const tasks = [
+                createMockTask('1', '2023-01-01'),
+                createMockTask('2', '2023-01-01', '2023-01-01'),
+            ];
+
+            expect(filterNotDeleted(tasks).map((task) => task.id)).toEqual(['1']);
         });
     });
 });

@@ -79,6 +79,51 @@ describe('mindwtr-cli', () => {
         expect(row?.title).toBe('JSON only task');
     });
 
+    test('preserves projectId when repairing JSON-only project tasks', () => {
+        const dir = makeTempDir();
+        const dataPath = join(dir, 'data.json');
+        const dbPath = join(dir, 'mindwtr.db');
+        const now = '2026-04-27T12:00:00.000Z';
+        const projectId = '11111111-1111-4111-8111-111111111111';
+        const taskId = '22222222-2222-4222-8222-222222222222';
+
+        writeFileSync(dataPath, JSON.stringify({
+            tasks: [{
+                id: taskId,
+                title: 'Project task',
+                status: 'next',
+                tags: [],
+                contexts: [],
+                projectId,
+                createdAt: now,
+                updatedAt: now,
+            }],
+            projects: [{
+                id: projectId,
+                title: 'Alpha Project',
+                status: 'active',
+                color: '#94a3b8',
+                order: 0,
+                tagIds: [],
+                createdAt: now,
+                updatedAt: now,
+            }],
+            sections: [],
+            areas: [],
+            settings: {},
+        }, null, 2));
+
+        const fetched = runCli(dataPath, ['get', taskId]);
+        expect(fetched.exitCode).toBe(0);
+        const task = JSON.parse(fetched.stdout) as { projectId?: string };
+        expect(task.projectId).toBe(projectId);
+
+        const db = new Database(dbPath, { readonly: true });
+        const row = db.prepare('SELECT projectId FROM tasks WHERE id = ?').get(taskId) as { projectId: string } | null;
+        db.close();
+        expect(row?.projectId).toBe(projectId);
+    });
+
     test('supports lifecycle commands and reference status updates', () => {
         const dir = makeTempDir();
         const dataPath = join(dir, 'data.json');

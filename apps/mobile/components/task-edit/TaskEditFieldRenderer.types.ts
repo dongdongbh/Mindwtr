@@ -24,7 +24,7 @@ import type { ThemeColors } from '@/hooks/use-theme-colors';
 
 import type { SetEditedTask } from './use-task-edit-state';
 
-export type ShowDatePickerMode = 'start' | 'start-time' | 'due' | 'due-time' | 'review' | null;
+export type ShowDatePickerMode = 'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'recurrence-end' | null;
 
 export type PickerOption<T extends string> = {
     value: T | '';

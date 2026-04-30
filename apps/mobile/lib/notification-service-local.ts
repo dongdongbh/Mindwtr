@@ -50,6 +50,7 @@ type AlarmNotificationsApi = {
 
 type LocalAlarmMapEntry = {
   id: AlarmId;
+  signature?: string;
 };
 
 type LocalAlarmMap = Record<string, LocalAlarmMapEntry>;
@@ -202,7 +203,13 @@ async function loadAlarmMapIfNeeded(): Promise<void> {
         if (!value || typeof value !== 'object') continue;
         const id = Number((value as LocalAlarmMapEntry).id);
         if (!Number.isFinite(id)) continue;
-        nextMap.set(key, { id: Math.floor(id) });
+        const signature = typeof (value as LocalAlarmMapEntry).signature === 'string'
+          ? (value as LocalAlarmMapEntry).signature
+          : undefined;
+        nextMap.set(key, { id: Math.floor(id), signature });
+        if (signature) {
+          configByKey.set(key, signature);
+        }
       }
       alarmMap = nextMap;
       loadedAlarmMap = true;
@@ -265,25 +272,20 @@ function nextWeeklyTime(dayOfWeekSundayFirst: number, hour: number, minute: numb
 }
 
 function parseEventPayload(value: unknown): Record<string, string> | null {
-  const raw = (() => {
-    if (typeof value === 'string') return value;
-    if (value && typeof value === 'object') {
-      try {
-        return JSON.stringify(value);
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  })();
-
-  if (!raw) return null;
+  const raw = typeof value === 'string' ? value : null;
   try {
-    const parsed = JSON.parse(raw) as unknown;
+    const parsed = raw ? JSON.parse(raw) as unknown : value;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     const result: Record<string, string> = {};
     for (const [key, item] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof item === 'string') {
+      if (key === 'data') {
+        const nested = parseEventPayload(item);
+        if (nested) {
+          for (const [nestedKey, nestedValue] of Object.entries(nested)) {
+            result[nestedKey] ??= nestedValue;
+          }
+        }
+      } else if (typeof item === 'string') {
         result[key] = item;
       } else if (item !== undefined && item !== null) {
         result[key] = String(item);
@@ -293,6 +295,10 @@ function parseEventPayload(value: unknown): Record<string, string> | null {
   } catch {
     return null;
   }
+}
+
+function isSameScheduleTime(left: Date | null, right: Date | null): boolean {
+  return Boolean(left && right && left.getTime() === right.getTime());
 }
 
 function attachNativeEventListeners(): void {
@@ -325,10 +331,19 @@ function attachNativeEventListeners(): void {
 }
 
 function buildAlarmConfigSignature(config: LocalAlarmConfig): string {
+  const repeatSchedule = (() => {
+    if (!config.repeatInterval) return config.fireAt.toISOString();
+    const hours = String(config.fireAt.getHours()).padStart(2, '0');
+    const minutes = String(config.fireAt.getMinutes()).padStart(2, '0');
+    if (config.repeatInterval === 'weekly') {
+      return `${config.repeatInterval}:${config.fireAt.getDay()}:${hours}:${minutes}`;
+    }
+    return `${config.repeatInterval}:${hours}:${minutes}`;
+  })();
   return JSON.stringify({
     title: config.title,
     message: config.message,
-    fireAt: config.fireAt.toISOString(),
+    fireAt: repeatSchedule,
     repeatInterval: config.repeatInterval ?? 'once',
     hasSnoozeAction: config.hasSnoozeAction === true,
     data: config.data ?? {},
@@ -367,9 +382,10 @@ async function cancelAlarmByKey(api: AlarmNotificationsApi, key: string): Promis
 
 async function scheduleAlarmForKey(api: AlarmNotificationsApi, key: string, config: LocalAlarmConfig): Promise<void> {
   const signature = buildAlarmConfigSignature(config);
-  const existingSignature = configByKey.get(key);
   const existingAlarm = alarmMap.get(key);
+  const existingSignature = configByKey.get(key) ?? existingAlarm?.signature;
   if (existingAlarm && existingSignature === signature) {
+    configByKey.set(key, signature);
     return;
   }
 
@@ -431,7 +447,7 @@ async function scheduleAlarmForKey(api: AlarmNotificationsApi, key: string, conf
     return;
   }
 
-  alarmMap.set(key, { id: scheduledId });
+  alarmMap.set(key, { id: scheduledId, signature });
   configByKey.set(key, signature);
 }
 
@@ -510,6 +526,10 @@ async function runRescheduleCycle(api: AlarmNotificationsApi): Promise<void> {
     for (const task of tasks) {
       const next = getNextScheduledAt(task, now, { includeReviewAt });
       if (!next || next.getTime() <= now.getTime()) continue;
+      const reviewAt = includeReviewAt && hasTimeComponent(task.reviewAt)
+        ? safeParseDate(task.reviewAt)
+        : null;
+      const kind = isSameScheduleTime(next, reviewAt) ? 'task-review' : 'task-reminder';
       const key = getTaskKey(task.id);
       activeKeys.add(key);
       await scheduleAlarmForKey(api, key, {
@@ -518,7 +538,7 @@ async function runRescheduleCycle(api: AlarmNotificationsApi): Promise<void> {
         fireAt: next,
         hasSnoozeAction: true,
         data: {
-          kind: 'task-reminder',
+          kind,
           taskId: task.id,
         },
       });

@@ -1,10 +1,12 @@
 import {
     addBreadcrumb,
     applyDgtImport,
+    applyOmniFocusImport,
     applyTodoistImport,
     createBackupFileName,
     parseDgtImportSource,
     flushPendingSave,
+    parseOmniFocusImportSource,
     parseTodoistImportSource,
     serializeBackupData,
     validateBackupJson,
@@ -13,6 +15,9 @@ import {
     type ParsedDgtImportData,
     type DgtImportExecutionResult,
     type DgtImportParseResult,
+    type OmniFocusImportExecutionResult,
+    type OmniFocusImportParseResult,
+    type ParsedOmniFocusImportData,
     type ParsedTodoistProject,
     type TodoistImportExecutionResult,
     type TodoistImportParseResult,
@@ -224,6 +229,20 @@ export const inspectDesktopDgtImport = async (): Promise<DgtImportParseResult | 
     });
 };
 
+export const inspectDesktopOmniFocusImport = async (): Promise<OmniFocusImportParseResult | null> => {
+    const document = await pickTransferDocument({
+        accept: '.csv,.json,.zip,text/csv,application/json,application/zip,application/octet-stream',
+        extensions: ['csv', 'json', 'zip'],
+        mode: 'binary',
+        title: 'OmniFocus Export',
+    });
+    if (!document) return null;
+    return parseOmniFocusImportSource({
+        bytes: document.bytes,
+        fileName: document.fileName,
+    });
+};
+
 export const restoreDesktopBackup = async (data: AppData): Promise<DesktopTransferResult> => {
     addBreadcrumb('transfer:restore');
     void logInfo('Backup restore started', {
@@ -324,6 +343,45 @@ export const importDesktopDgtData = async (
         };
     } catch (error) {
         void logError(error, { scope: 'transfer', extra: { operation: 'importDgt' } });
+        throw error;
+    }
+};
+
+export const importDesktopOmniFocusData = async (
+    parsedData: ParsedOmniFocusImportData
+): Promise<DesktopTransferResult & { result: OmniFocusImportExecutionResult }> => {
+    addBreadcrumb('transfer:restore');
+    void logInfo('OmniFocus import started', {
+        scope: 'transfer',
+        extra: {
+            operation: 'importOmniFocus',
+            source: 'omnifocus',
+        },
+    });
+    try {
+        await flushPendingSave();
+        const currentData = await getStorage().getData();
+        const snapshotName = isTauriRuntime() ? await SyncService.createDataSnapshot() : null;
+        const result = applyOmniFocusImport(currentData, parsedData);
+        await persistTransferredData(result.data);
+        void logInfo('OmniFocus import complete', {
+            scope: 'transfer',
+            extra: {
+                operation: 'importOmniFocus',
+                source: 'omnifocus',
+                areas: String(result.importedAreaCount),
+                checklistItems: String(result.importedChecklistItemCount),
+                tasks: String(result.importedTaskCount),
+                projects: String(result.importedProjectCount),
+                standaloneTasks: String(result.importedStandaloneTaskCount),
+            },
+        });
+        return {
+            snapshotName,
+            result,
+        };
+    } catch (error) {
+        void logError(error, { scope: 'transfer', extra: { operation: 'importOmniFocus' } });
         throw error;
     }
 };

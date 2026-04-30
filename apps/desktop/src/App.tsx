@@ -11,7 +11,7 @@ import { ArchiveView } from './components/views/ArchiveView';
 import { TrashView } from './components/views/TrashView';
 import { AgendaView } from './components/views/AgendaView';
 import { SearchView } from './components/views/SearchView';
-import { addBreadcrumb, useTaskStore, configureDateFormatting, flushPendingSave, isSupportedLanguage } from '@mindwtr/core';
+import { addBreadcrumb, useTaskStore, configureDateFormatting, flushPendingSave, isSupportedLanguage, translateWithFallback } from '@mindwtr/core';
 import { GlobalSearch } from './components/GlobalSearch';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useLanguage } from './contexts/language-context';
@@ -41,6 +41,7 @@ import {
     applyDesktopTextSize,
     coerceDesktopTextSize,
 } from './lib/text-size';
+import { saveStoredFullscreen } from './lib/window-state';
 import { subscribeNavigateEvent } from './lib/navigation-events';
 import { useUiStore } from './store/ui-store';
 import { useObsidianStore } from './store/obsidian-store';
@@ -210,8 +211,7 @@ function App() {
     }, [language, settingsDateFormat, settingsLanguage, settingsTimeFormat]);
 
     const translateOrFallback = useCallback((key: string, fallback: string) => {
-        const value = t(key);
-        return value === key ? fallback : value;
+        return translateWithFallback(t, key, fallback);
     }, [t]);
 
     const hideToTray = useCallback(async () => {
@@ -422,6 +422,43 @@ function App() {
             cancelled = true;
         };
     }, [windowDecorations]);
+
+    useEffect(() => {
+        if (!isTauriRuntime()) return;
+        let cancelled = false;
+        let unlistenResize: (() => void) | undefined;
+
+        const syncFullscreenState = async () => {
+            const { getCurrentWindow } = await import('@tauri-apps/api/window');
+            const isFullscreen = await getCurrentWindow().isFullscreen();
+            if (!cancelled) {
+                saveStoredFullscreen(isFullscreen, localStorage);
+            }
+        };
+
+        const setup = async () => {
+            const { getCurrentWindow } = await import('@tauri-apps/api/window');
+            const current = getCurrentWindow();
+            await syncFullscreenState();
+            const nextUnlisten = await current.onResized(() => {
+                void syncFullscreenState().catch((error) => {
+                    void logError(error, { scope: 'window', step: 'syncFullscreenState' });
+                });
+            });
+            if (cancelled) {
+                nextUnlisten();
+                return;
+            }
+            unlistenResize = nextUnlisten;
+        };
+
+        setup().catch((error) => void logError(error, { scope: 'window', step: 'setupFullscreenSync' }));
+
+        return () => {
+            cancelled = true;
+            if (unlistenResize) unlistenResize();
+        };
+    }, []);
 
     useEffect(() => {
         if (!isTauriRuntime()) return;

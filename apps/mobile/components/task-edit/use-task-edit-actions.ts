@@ -14,6 +14,7 @@ import {
     type RecurrenceStrategy,
     type RecurrenceWeekday,
     buildRRuleString,
+    getRecurrenceCompletedOccurrencesValue,
     parseRRuleString,
     parseQuickAdd,
     DEFAULT_PROJECT_COLOR,
@@ -239,23 +240,34 @@ export function useTaskEditActions({
 
         const recurrenceRule = recurrenceRuleValue || undefined;
         if (recurrenceRule) {
+            const completedOccurrences = getRecurrenceCompletedOccurrencesValue(editedTask.recurrence)
+                ?? getRecurrenceCompletedOccurrencesValue(task.recurrence);
             if (recurrenceRule === 'weekly' && customWeekdays.length > 0) {
-                const rrule = buildRRuleString('weekly', customWeekdays);
-                updates.recurrence = { rule: 'weekly', strategy: recurrenceStrategyValue, byDay: customWeekdays, rrule };
+                const parsed = parseRRuleString(recurrenceRRuleValue);
+                const rrule = buildRRuleString('weekly', customWeekdays, parsed.interval, {
+                    count: parsed.count,
+                    until: parsed.until,
+                });
+                updates.recurrence = buildRecurrenceValue('weekly', recurrenceStrategyValue, {
+                    byDay: customWeekdays,
+                    count: parsed.count,
+                    until: parsed.until,
+                    completedOccurrences,
+                    rrule,
+                });
             } else if (recurrenceRRuleValue) {
                 const parsed = parseRRuleString(recurrenceRRuleValue);
-                if (parsed.byDay?.length) {
-                    updates.recurrence = {
-                        rule: recurrenceRule,
-                        strategy: recurrenceStrategyValue,
-                        byDay: parsed.byDay,
-                        rrule: recurrenceRRuleValue,
-                    };
-                } else {
-                    updates.recurrence = { rule: recurrenceRule, strategy: recurrenceStrategyValue, rrule: recurrenceRRuleValue };
-                }
+                updates.recurrence = buildRecurrenceValue(recurrenceRule, recurrenceStrategyValue, {
+                    byDay: parsed.byDay,
+                    count: parsed.count,
+                    until: parsed.until,
+                    completedOccurrences,
+                    rrule: recurrenceRRuleValue,
+                });
             } else {
-                updates.recurrence = buildRecurrenceValue(recurrenceRule, recurrenceStrategyValue);
+                updates.recurrence = buildRecurrenceValue(recurrenceRule, recurrenceStrategyValue, {
+                    completedOccurrences,
+                });
             }
         } else {
             updates.recurrence = undefined;

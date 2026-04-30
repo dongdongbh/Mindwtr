@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildRRuleString, parseRRuleString, createNextRecurringTask } from './recurrence';
+import { buildRRuleString, parseRRuleString, createNextRecurringTask, normalizeRecurrenceForLoad } from './recurrence';
 import type { Task } from './types';
 
 describe('recurrence', () => {
@@ -10,6 +10,45 @@ describe('recurrence', () => {
         const parsed = parseRRuleString(rrule);
         expect(parsed.rule).toBe('weekly');
         expect(parsed.byDay).toEqual(['MO', 'WE']);
+    });
+
+    it('parses and preserves weekly WKST rules', () => {
+        const parsed = parseRRuleString('FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH;WKST=SU');
+        expect(parsed.weekStart).toBe('SU');
+
+        const rrule = buildRRuleString('weekly', ['TU', 'TH'], 2, { weekStart: 'SU' });
+        expect(rrule).toBe('FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH;WKST=SU');
+    });
+
+    it('builds and parses count and until options', () => {
+        const rrule = buildRRuleString('monthly', undefined, 2, {
+            byMonthDay: [15],
+            count: 4,
+            until: '2025-06-15',
+        });
+        expect(rrule).toBe('FREQ=MONTHLY;INTERVAL=2;BYMONTHDAY=15;COUNT=4;UNTIL=20250615');
+
+        const parsed = parseRRuleString(rrule);
+        expect(parsed.rule).toBe('monthly');
+        expect(parsed.interval).toBe(2);
+        expect(parsed.byMonthDay).toEqual([15]);
+        expect(parsed.count).toBe(4);
+        expect(parsed.until).toBe('2025-06-15');
+    });
+
+    it('normalizes legacy recurrence values to object form', () => {
+        expect(normalizeRecurrenceForLoad('daily')).toEqual({ rule: 'daily' });
+        expect(normalizeRecurrenceForLoad('FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4')).toEqual({
+            rule: 'weekly',
+            byDay: ['MO', 'WE'],
+            count: 4,
+            rrule: 'FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4',
+        });
+        expect(normalizeRecurrenceForLoad({ rrule: 'FREQ=MONTHLY;BYDAY=1MO' })).toEqual({
+            rule: 'monthly',
+            byDay: ['1MO'],
+            rrule: 'FREQ=MONTHLY;BYDAY=1MO',
+        });
     });
 
     it('creates next instance using weekly BYDAY (strict)', () => {
@@ -173,6 +212,41 @@ describe('recurrence', () => {
         expect(next?.dueDate).toBe('2025-01-20T10:00:00.000Z'); // Monday two weeks later
     });
 
+    it('uses Monday as the default weekly interval anchor per RFC 5545', () => {
+        const task: Task = {
+            id: 't5-rfc-week-start',
+            title: 'Every other Tue/Thu',
+            status: 'done',
+            tags: [],
+            contexts: [],
+            dueDate: '2025-01-05T10:00:00.000Z', // Sunday
+            recurrence: { rule: 'weekly', rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH', strategy: 'strict' },
+            createdAt: '2025-01-01T00:00:00.000Z',
+            updatedAt: '2025-01-01T00:00:00.000Z',
+        };
+
+        const next = createNextRecurringTask(task, '2025-01-05T12:00:00.000Z', 'done');
+        expect(next?.dueDate).toBe('2025-01-14T10:00:00.000Z');
+    });
+
+    it('honors explicit weekly WKST when interval is greater than 1', () => {
+        const task: Task = {
+            id: 't5-wkst',
+            title: 'Every other Tue/Thu with Sunday week start',
+            status: 'done',
+            tags: [],
+            contexts: [],
+            dueDate: '2025-01-05T10:00:00.000Z', // Sunday
+            recurrence: { rule: 'weekly', rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH;WKST=SU', strategy: 'strict' },
+            createdAt: '2025-01-01T00:00:00.000Z',
+            updatedAt: '2025-01-01T00:00:00.000Z',
+        };
+
+        const next = createNextRecurringTask(task, '2025-01-05T12:00:00.000Z', 'done');
+        expect(next?.dueDate).toBe('2025-01-07T10:00:00.000Z');
+        expect(typeof next?.recurrence === 'object' ? next.recurrence.rrule : undefined).toBe('FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH;WKST=SU');
+    });
+
     it('advances startTime by monthly BYDAY interval when interval is greater than 1', () => {
         const task: Task = {
             id: 't5b',
@@ -207,6 +281,79 @@ describe('recurrence', () => {
 
         const next = createNextRecurringTask(task, '2025-01-01T12:00:00.000Z', 'done');
         expect(next?.dueDate).toBe('2025-01-06T09:00:00.000Z');
+    });
+
+    it('checks the current month for monthly BYDAY rules with interval greater than 1', () => {
+        const task: Task = {
+            id: 't6-interval-current-month',
+            title: 'Third Monday every two months',
+            status: 'done',
+            tags: [],
+            contexts: [],
+            dueDate: '2025-01-10T09:00:00.000Z',
+            recurrence: { rule: 'monthly', rrule: 'FREQ=MONTHLY;INTERVAL=2;BYDAY=3MO', strategy: 'strict' },
+            createdAt: '2025-01-01T00:00:00.000Z',
+            updatedAt: '2025-01-01T00:00:00.000Z',
+        };
+
+        const next = createNextRecurringTask(task, '2025-01-10T12:00:00.000Z', 'done');
+        expect(next?.dueDate).toBe('2025-01-20T09:00:00.000Z');
+    });
+
+    it('stops generating tasks after the configured count', () => {
+        const task: Task = {
+            id: 't6-count',
+            title: 'Three-time reminder',
+            status: 'done',
+            tags: [],
+            contexts: [],
+            dueDate: '2025-01-01',
+            recurrence: {
+                rule: 'daily',
+                strategy: 'strict',
+                count: 3,
+                completedOccurrences: 1,
+                rrule: 'FREQ=DAILY;COUNT=3',
+            },
+            createdAt: '2025-01-01T00:00:00.000Z',
+            updatedAt: '2025-01-01T00:00:00.000Z',
+        };
+
+        const next = createNextRecurringTask(task, '2025-01-02T12:00:00.000Z', 'done');
+        expect(next?.dueDate).toBe('2025-01-02');
+        expect(next?.recurrence).toMatchObject({
+            count: 3,
+            completedOccurrences: 2,
+            rrule: 'FREQ=DAILY;COUNT=3',
+        });
+
+        const final = createNextRecurringTask(next as Task, '2025-01-03T12:00:00.000Z', 'done');
+        expect(final).toBeNull();
+    });
+
+    it('stops generating tasks after the until date', () => {
+        const task: Task = {
+            id: 't6-until',
+            title: 'Temporary habit',
+            status: 'done',
+            tags: [],
+            contexts: [],
+            dueDate: '2025-01-02',
+            recurrence: {
+                rule: 'daily',
+                strategy: 'strict',
+                until: '2025-01-03',
+                rrule: 'FREQ=DAILY;UNTIL=20250103',
+            },
+            createdAt: '2025-01-01T00:00:00.000Z',
+            updatedAt: '2025-01-01T00:00:00.000Z',
+        };
+
+        const next = createNextRecurringTask(task, '2025-01-02T12:00:00.000Z', 'done');
+        expect(next?.dueDate).toBe('2025-01-03');
+
+        const final = createNextRecurringTask(next as Task, '2025-01-03T12:00:00.000Z', 'done');
+        expect(final).toBeNull();
     });
 
     it('preserves date-only format for next occurrence', () => {

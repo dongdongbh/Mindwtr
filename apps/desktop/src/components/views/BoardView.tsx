@@ -13,7 +13,7 @@ import {
 } from '@dnd-kit/core';
 import { TaskItem } from '../TaskItem';
 import { ErrorBoundary } from '../ErrorBoundary';
-import { shallow, useTaskStore, sortTasksBy, safeParseDate } from '@mindwtr/core';
+import { shallow, useTaskStore, sortTasksBy, safeParseDate, translateWithFallback } from '@mindwtr/core';
 import type { Task, TaskStatus } from '@mindwtr/core';
 import type { TaskSortBy } from '@mindwtr/core';
 import { useLanguage } from '../../contexts/language-context';
@@ -371,8 +371,7 @@ export function BoardView() {
     }, [computeSequential, filteredTasks, projectMap, sequentialProjectFirstTasks, sortBy, sortByProjectOrder]);
 
     const resolveText = React.useCallback((key: string, fallback: string) => {
-        const value = t(key);
-        return value === key ? fallback : value;
+        return translateWithFallback(t, key, fallback);
     }, [t]);
 
     const openQuickAdd = (status: TaskStatus) => {
