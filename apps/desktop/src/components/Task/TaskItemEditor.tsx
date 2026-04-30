@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type FormEvent, type ReactNode } from 'react';
-import { Loader2, Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronRight, Loader2, Sparkles } from 'lucide-react';
 import {
     filterProjectsBySelectedArea,
     resolveAutoTextDirection,
@@ -420,7 +420,7 @@ export function TaskItemEditor({
                                 </span>
                             )}
                         </span>
-                        <span className="text-[10px]">{schedulingOpen ? '▾' : '▸'}</span>
+                        {schedulingOpen ? <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" /> : <ChevronRight className="w-3 h-3 text-muted-foreground shrink-0" />}
                     </button>
                     {schedulingOpen && (
                         <div className="mt-3 space-y-3">
@@ -451,7 +451,7 @@ export function TaskItemEditor({
                                 </span>
                             )}
                         </span>
-                        <span className="text-[10px]">{organizationOpen ? '▾' : '▸'}</span>
+                        {organizationOpen ? <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" /> : <ChevronRight className="w-3 h-3 text-muted-foreground shrink-0" />}
                     </button>
                     {organizationOpen && (
                         <div className="mt-3 space-y-3">
@@ -482,7 +482,7 @@ export function TaskItemEditor({
                                 </span>
                             )}
                         </span>
-                        <span className="text-[10px]">{detailsOpen ? '▾' : '▸'}</span>
+                        {detailsOpen ? <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" /> : <ChevronRight className="w-3 h-3 text-muted-foreground shrink-0" />}
                     </button>
                     {detailsOpen && (
                         <div className="mt-3 space-y-3">

@@ -486,7 +486,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                                                         {entry.tasks.length} {labels.activeTasks}
                                                     </Text>
                                                     <Text style={[styles.expandIcon, { color: tc.secondaryText }]}>
-                                                        {isExpanded ? '▼' : '▶'}
+                                                        {isExpanded ? '▾' : '▸'}
                                                     </Text>
                                                 </View>
                                             </TouchableOpacity>

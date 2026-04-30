@@ -270,7 +270,7 @@ export function ProjectDetailModal({
                                         onPress={() => onSetShowProjectMeta((prev) => !prev)}
                                     >
                                         <Text style={[styles.detailsToggleText, { color: tc.text }]}>
-                                            {showProjectMeta ? '▼' : '▶'} {t('taskEdit.details')}
+                                            {showProjectMeta ? '▾' : '▸'} {t('taskEdit.details')}
                                         </Text>
                                     </TouchableOpacity>
                                 </View>
@@ -309,7 +309,7 @@ export function ProjectDetailModal({
                                                     }}
                                                 >
                                                     <Text style={[styles.notesTitle, { color: tc.text }]}>
-                                                        {notesExpanded ? '▼' : '▶'} {t('project.notes')}
+                                                        {notesExpanded ? '▾' : '▸'} {t('project.notes')}
                                                     </Text>
                                                 </TouchableOpacity>
                                                 {notesExpanded && (

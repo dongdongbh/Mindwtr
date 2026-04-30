@@ -565,7 +565,7 @@ export default function FocusScreen() {
               style={styles.sectionHeader}
             >
               <Text style={[styles.sectionChevron, { color: tc.secondaryText }]}>
-                {section.expanded ? '▼' : '▶'}
+                {section.expanded ? '▾' : '▸'}
               </Text>
               <Text style={[styles.sectionTitle, { color: tc.tint }]}>{section.title}</Text>
               <Text style={[styles.sectionCount, { color: tc.secondaryText }]}>({section.totalCount})</Text>

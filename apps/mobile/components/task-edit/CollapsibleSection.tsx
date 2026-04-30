@@ -38,7 +38,7 @@ export function CollapsibleSection({
     return (
         <View style={[styles.container, { borderColor: tc.border }]}>
             <Pressable style={styles.header} onPress={toggle}>
-                <Text style={[styles.chevron, { color: tc.secondaryText }]}>{expanded ? '▼' : '▶'}</Text>
+                <Text style={[styles.chevron, { color: tc.secondaryText }]}>{expanded ? '▾' : '▸'}</Text>
                 <Text style={[styles.title, { color: tc.text }]}>{title}</Text>
                 {badge > 0 && (
                     <View style={[styles.badge, { backgroundColor: tc.tint }]}>
