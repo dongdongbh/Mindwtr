@@ -1,3 +1,4 @@
+import React from 'react';
 import type { RefObject } from 'react';
 import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from 'react-native';
 

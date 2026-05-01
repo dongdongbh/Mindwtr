@@ -1,3 +1,4 @@
+import React from 'react';
 import { ActivityIndicator, Modal, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { X } from 'lucide-react-native';
 import { tFallback } from '@mindwtr/core';
