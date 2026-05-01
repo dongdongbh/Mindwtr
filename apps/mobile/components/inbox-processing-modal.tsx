@@ -1,22 +1,19 @@
-import React from 'react';
-import {
-  ActivityIndicator,
-  Modal,
-  Platform,
-  ScrollView,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import { ActivityIndicator, Modal, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { X } from 'lucide-react-native';
-import { safeFormatDate, tFallback } from '@mindwtr/core';
+import { tFallback } from '@mindwtr/core';
 
 import { AIResponseModal } from './ai-response-modal';
 import { styles } from './inbox-processing-modal.styles';
 import { useInboxProcessingController } from './inbox-processing/useInboxProcessingController';
-import { formatTimeEstimateChipLabel } from './time-estimate-filter-utils';
+import { InboxActionabilitySection } from './inbox-processing/InboxActionabilitySection';
+import { InboxContextSection } from './inbox-processing/InboxContextSection';
+import { InboxDatePickers } from './inbox-processing/InboxDatePickers';
+import { InboxExecutionSection } from './inbox-processing/InboxExecutionSection';
+import { InboxOrganizationSection } from './inbox-processing/InboxOrganizationSection';
+import { InboxProjectSection } from './inbox-processing/InboxProjectSection';
+import { InboxSchedulingSection } from './inbox-processing/InboxSchedulingSection';
+import { InboxTitleSection } from './inbox-processing/InboxTitleSection';
+import { InboxTwoMinuteSection } from './inbox-processing/InboxTwoMinuteSection';
 
 type InboxProcessingModalProps = {
   visible: boolean;
@@ -139,6 +136,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
     PRIORITY_OPTIONS,
     processedCount,
   } = useInboxProcessingController({ visible, onClose });
+
   const aiWorkingLabel = t('ai.working');
   const aiWorkingText = aiWorkingLabel === 'ai.working' ? 'Working...' : aiWorkingLabel;
   const laterLabel = tFallback(t, 'process.later', 'Later');
@@ -197,460 +195,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
     );
   }
 
-  const renderDateSelector = (
-    label: string,
-    value: Date | null,
-    onOpen: () => void,
-    onClear: () => void,
-    options: {
-      dateOnly?: boolean;
-      onDateOnly?: () => void;
-      onUseDefaultTime?: () => void;
-    } = {},
-  ) => (
-    <View style={styles.startDateRow}>
-      <Text style={[styles.tokenSectionTitle, { color: tc.secondaryText }]}>{label}</Text>
-      <View style={styles.startDateActions}>
-        <TouchableOpacity
-          style={[styles.startDateButton, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
-          onPress={onOpen}
-        >
-          <Text style={[styles.startDateButtonText, { color: tc.text }]}>
-            {value ? safeFormatDate(value.toISOString(), 'P') : t('common.notSet')}
-          </Text>
-        </TouchableOpacity>
-        {value && (
-          <TouchableOpacity
-            style={[styles.startDateClear, { borderColor: tc.border }]}
-            onPress={onClear}
-          >
-            <Text style={[styles.startDateClearText, { color: tc.secondaryText }]}>{t('common.clear')}</Text>
-          </TouchableOpacity>
-        )}
-        {value && defaultScheduleTime && options.onDateOnly && options.onUseDefaultTime && (
-          <TouchableOpacity
-            style={[styles.startDateClear, { borderColor: tc.border }]}
-            onPress={options.dateOnly ? options.onUseDefaultTime : options.onDateOnly}
-          >
-            <Text style={[styles.startDateClearText, { color: tc.secondaryText }]}>
-              {options.dateOnly ? defaultScheduleTime : dateOnlyLabel}
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    </View>
-  );
-
-  const renderContextSection = () => {
-    if (!showContextSection) return null;
-
-    const visibleTokenSuggestions = tokenSuggestions.filter((token) => (
-      token.startsWith('#') ? showTagsField : showContextsField
-    ));
-    const tokenPlaceholder = showContextsField && !showTagsField
-      ? '@home'
-      : showTagsField && !showContextsField
-        ? '#deep-work'
-        : t('inbox.addContextPlaceholder');
-
-    return (
-      <View style={[styles.singleSection, { borderBottomColor: tc.border }]}>
-        <Text style={[styles.stepQuestion, { color: tc.text }]}>
-          {showContextsField ? t('inbox.whereDoIt') : t('taskEdit.tagsLabel')}
-          {showContextsField && showTagsField ? ` ${t('inbox.selectMultipleHint')}` : ''}
-        </Text>
-        {showContextsField && selectedContexts.length > 0 && (
-          <View style={[styles.selectedContextsContainer, { backgroundColor: '#3B82F620' }]}>
-            <Text style={{ fontSize: 12, color: '#3B82F6', marginBottom: 4 }}>{t('inbox.selectedLabel')}</Text>
-            <View style={styles.selectedTokensRow}>
-              {selectedContexts.map((ctx) => (
-                <TouchableOpacity
-                  key={ctx}
-                  onPress={() => toggleContext(ctx)}
-                  style={[styles.selectedTokenChip, styles.selectedContextChip]}
-                >
-                  <Text style={styles.selectedTokenText}>{ctx} x</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        )}
-        {showTagsField && selectedTags.length > 0 && (
-          <View style={[styles.selectedContextsContainer, { backgroundColor: '#8B5CF620' }]}>
-            <Text style={{ fontSize: 12, color: '#8B5CF6', marginBottom: 4 }}>{t('taskEdit.tagsLabel')}</Text>
-            <View style={styles.selectedTokensRow}>
-              {selectedTags.map((tag) => (
-                <TouchableOpacity
-                  key={tag}
-                  onPress={() => toggleTag(tag)}
-                  style={[styles.selectedTokenChip, styles.selectedTagChip]}
-                >
-                  <Text style={styles.selectedTokenText}>{tag} x</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        )}
-        <View style={styles.customContextContainer}>
-          <TextInput
-            style={[styles.contextInput, { borderColor: tc.border, color: tc.text }]}
-            placeholder={tokenPlaceholder}
-            placeholderTextColor={tc.secondaryText}
-            value={newContext}
-            onChangeText={setNewContext}
-            onSubmitEditing={addCustomContextMobile}
-          />
-          <TouchableOpacity
-            style={styles.addContextButton}
-            onPress={addCustomContextMobile}
-            disabled={!newContext.trim()}
-          >
-            <Text style={styles.addContextButtonText}>+</Text>
-          </TouchableOpacity>
-        </View>
-        {visibleTokenSuggestions.length > 0 && (
-          <View style={[styles.tokenSuggestionsContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
-            {visibleTokenSuggestions.map((token) => (
-              <TouchableOpacity
-                key={token}
-                style={styles.tokenSuggestionChip}
-                onPress={() => applyTokenSuggestion(token)}
-              >
-                <Text style={[styles.tokenSuggestionText, { color: tc.text }]}>{token}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-        {showContextsField && contextCopilotSuggestions.length > 0 && (
-          <View style={[styles.tokenSuggestionsContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
-            <Text style={[styles.tokenSectionTitle, { color: tc.secondaryText }]}>Suggested contexts</Text>
-            <View style={styles.tokenChipWrap}>
-              {contextCopilotSuggestions.map((token) => (
-                <TouchableOpacity
-                  key={`ctx-${token}`}
-                  style={[styles.suggestionChip, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
-                  onPress={() => applyTokenSuggestion(token)}
-                >
-                  <Text style={[styles.tokenSuggestionText, { color: tc.text }]}>{token}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        )}
-        {showTagsField && tagCopilotSuggestions.length > 0 && (
-          <View style={[styles.tokenSuggestionsContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
-            <Text style={[styles.tokenSectionTitle, { color: tc.secondaryText }]}>Suggested tags</Text>
-            <View style={styles.tokenChipWrap}>
-              {tagCopilotSuggestions.map((token) => (
-                <TouchableOpacity
-                  key={`tag-${token}`}
-                  style={[styles.suggestionChip, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
-                  onPress={() => applyTokenSuggestion(token)}
-                >
-                  <Text style={[styles.tokenSuggestionText, { color: tc.text }]}>{token}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        )}
-      </View>
-    );
-  };
-
-  const renderOrganizationSection = () => {
-    if (!showOrganizationSection) return null;
-
-    return (
-      <View style={[styles.singleSection, { borderBottomColor: tc.border }]}>
-        <Text style={[styles.stepQuestion, { color: tc.text }]}>
-          {t('taskEdit.organization')}
-        </Text>
-        {showPriorityField && (
-          <View style={styles.prioritySection}>
-            <Text style={[styles.tokenSectionTitle, { color: tc.secondaryText }]}>{t('taskEdit.priorityLabel')}</Text>
-            <View style={styles.tokenChipWrap}>
-              {PRIORITY_OPTIONS.map((priority) => {
-                const isSelected = selectedPriority === priority;
-                return (
-                  <TouchableOpacity
-                    key={priority}
-                    style={[
-                      styles.priorityChip,
-                      {
-                        borderColor: isSelected ? tc.tint : tc.border,
-                        backgroundColor: isSelected ? tc.tint : tc.filterBg,
-                      },
-                    ]}
-                    onPress={() => setSelectedPriority(isSelected ? undefined : priority)}
-                  >
-                    <Text style={[styles.priorityChipText, { color: isSelected ? tc.onTint : tc.text }]}>
-                      {t(`priority.${priority}`)}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-        )}
-        {showEnergyLevelField && (
-          <View style={styles.prioritySection}>
-            <Text style={[styles.tokenSectionTitle, { color: tc.secondaryText }]}>{t('taskEdit.energyLevel')}</Text>
-            <View style={styles.tokenChipWrap}>
-              <TouchableOpacity
-                style={[
-                  styles.priorityChip,
-                  {
-                    borderColor: !selectedEnergyLevel ? tc.tint : tc.border,
-                    backgroundColor: !selectedEnergyLevel ? tc.tint : tc.filterBg,
-                  },
-                ]}
-                onPress={() => setSelectedEnergyLevel(undefined)}
-              >
-                <Text style={[styles.priorityChipText, { color: !selectedEnergyLevel ? tc.onTint : tc.text }]}>
-                  {t('common.none')}
-                </Text>
-              </TouchableOpacity>
-              {ENERGY_LEVEL_OPTIONS.map((energyLevel) => {
-                const isSelected = selectedEnergyLevel === energyLevel;
-                return (
-                  <TouchableOpacity
-                    key={energyLevel}
-                    style={[
-                      styles.priorityChip,
-                      {
-                        borderColor: isSelected ? tc.tint : tc.border,
-                        backgroundColor: isSelected ? tc.tint : tc.filterBg,
-                      },
-                    ]}
-                    onPress={() => setSelectedEnergyLevel(isSelected ? undefined : energyLevel)}
-                  >
-                    <Text style={[styles.priorityChipText, { color: isSelected ? tc.onTint : tc.text }]}>
-                      {t(`energyLevel.${energyLevel}`)}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-        )}
-        {showTimeEstimateField && (
-          <View style={styles.prioritySection}>
-            <Text style={[styles.tokenSectionTitle, { color: tc.secondaryText }]}>{t('taskEdit.timeEstimateLabel')}</Text>
-            <View style={styles.tokenChipWrap}>
-              <TouchableOpacity
-                style={[
-                  styles.priorityChip,
-                  {
-                    borderColor: !selectedTimeEstimate ? tc.tint : tc.border,
-                    backgroundColor: !selectedTimeEstimate ? tc.tint : tc.filterBg,
-                  },
-                ]}
-                onPress={() => setSelectedTimeEstimate(undefined)}
-              >
-                <Text style={[styles.priorityChipText, { color: !selectedTimeEstimate ? tc.onTint : tc.text }]}>
-                  {t('common.none')}
-                </Text>
-              </TouchableOpacity>
-              {timeEstimateOptions.map((estimate) => {
-                const isSelected = selectedTimeEstimate === estimate;
-                return (
-                  <TouchableOpacity
-                    key={estimate}
-                    style={[
-                      styles.priorityChip,
-                      {
-                        borderColor: isSelected ? tc.tint : tc.border,
-                        backgroundColor: isSelected ? tc.tint : tc.filterBg,
-                      },
-                    ]}
-                    onPress={() => setSelectedTimeEstimate(isSelected ? undefined : estimate)}
-                  >
-                    <Text style={[styles.priorityChipText, { color: isSelected ? tc.onTint : tc.text }]}>
-                      {formatTimeEstimateChipLabel(estimate)}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-        )}
-        {showAssignedToField && (
-          <View style={styles.prioritySection}>
-            <Text style={[styles.tokenSectionTitle, { color: tc.secondaryText }]}>{t('taskEdit.assignedTo')}</Text>
-            <TextInput
-              style={[styles.waitingInput, { borderColor: tc.border, color: tc.text }]}
-              placeholder={t('taskEdit.assignedToPlaceholder')}
-              placeholderTextColor={tc.secondaryText}
-              value={selectedAssignedTo}
-              onChangeText={setSelectedAssignedTo}
-            />
-          </View>
-        )}
-      </View>
-    );
-  };
-
-  const renderSchedulingSection = () => {
-    if (!showSchedulingSection) return null;
-
-    return (
-      <View style={[styles.singleSection, { borderBottomColor: tc.border }]}>
-        <Text style={[styles.stepQuestion, { color: tc.text }]}>
-          {t('taskEdit.scheduling')}
-        </Text>
-        {showStartDateField && renderDateSelector(
-          t('taskEdit.startDateLabel'),
-          pendingStartDate,
-          () => setShowStartDatePicker(true),
-          () => {
-            setPendingStartDate(null);
-            setPendingStartDateOnly(false);
-          },
-          {
-            dateOnly: pendingStartDateOnly,
-            onDateOnly: () => setPendingStartDateOnly(true),
-            onUseDefaultTime: () => setPendingStartDateOnly(false),
-          },
-        )}
-        {showDueDateField && renderDateSelector(
-          t('taskEdit.dueDateLabel'),
-          pendingDueDate,
-          () => setShowDueDatePicker(true),
-          () => {
-            setPendingDueDate(null);
-            setPendingDueDateOnly(false);
-          },
-          {
-            dateOnly: pendingDueDateOnly,
-            onDateOnly: () => setPendingDueDateOnly(true),
-            onUseDefaultTime: () => setPendingDueDateOnly(false),
-          },
-        )}
-        {showReviewDateField && renderDateSelector(
-          t('taskEdit.reviewDateLabel'),
-          pendingReviewDate,
-          () => setShowReviewDatePicker(true),
-          () => {
-            setPendingReviewDate(null);
-            setPendingReviewDateOnly(false);
-          },
-          {
-            dateOnly: pendingReviewDateOnly,
-            onDateOnly: () => setPendingReviewDateOnly(true),
-            onUseDefaultTime: () => setPendingReviewDateOnly(false),
-          },
-        )}
-      </View>
-    );
-  };
-
-  const renderProjectSection = () => {
-    if (!showProjectSection) return null;
-
-    const areaOptions = Array.from(areaById.values());
-
-    return (
-      <View style={[styles.singleSection, { borderBottomColor: tc.border }]}>
-        <Text style={[styles.stepQuestion, { color: tc.text }]}>
-          📁 {t('inbox.assignProjectQuestion')}
-        </Text>
-        {showProjectField && currentProject && (
-          <TouchableOpacity
-            style={[styles.projectChip, { backgroundColor: tc.tint }]}
-            onPress={() => selectProjectEarly(currentProject.id)}
-          >
-            <Text style={styles.projectChipText}>✓ {currentProject.title}</Text>
-          </TouchableOpacity>
-        )}
-        {showAreaField && !selectedProjectId && currentArea && (
-          <TouchableOpacity
-            style={[styles.projectChip, { backgroundColor: currentArea.color || tc.tint }]}
-            onPress={() => setSelectedAreaId(currentArea.id)}
-          >
-            <Text style={styles.projectChipText}>✓ {currentArea.name}</Text>
-          </TouchableOpacity>
-        )}
-        {showAreaField && !selectedProjectId && (
-          <View style={styles.projectListContainer}>
-            <TouchableOpacity
-              style={[styles.projectChip, { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.border }]}
-              onPress={() => setSelectedAreaId(null)}
-            >
-              <Text style={[styles.projectChipText, { color: tc.text }]}>✓ {t('projects.noArea')}</Text>
-            </TouchableOpacity>
-            {areaOptions.map((area) => {
-              const isSelected = selectedAreaId === area.id;
-              return (
-                <TouchableOpacity
-                  key={area.id}
-                  style={[
-                    styles.projectChip,
-                    isSelected
-                      ? { backgroundColor: '#3B82F620', borderWidth: 1, borderColor: tc.tint }
-                      : { backgroundColor: tc.cardBg, borderWidth: 1, borderColor: tc.border },
-                  ]}
-                  onPress={() => setSelectedAreaId(area.id)}
-                >
-                  <View style={[styles.projectDot, { backgroundColor: area.color || '#6B7280' }]} />
-                  <Text style={[styles.projectChipText, { color: tc.text }]}>{area.name}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        )}
-        {showProjectField && (
-          <>
-            <View style={styles.projectSearchRow}>
-              <TextInput
-                value={projectSearch}
-                onChangeText={setProjectSearch}
-                placeholder={t('projects.addPlaceholder')}
-                placeholderTextColor={tc.secondaryText}
-                style={[styles.projectSearchInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-                onSubmitEditing={handleCreateProjectEarly}
-                returnKeyType="done"
-              />
-              {!hasExactProjectMatch && projectSearch.trim() && (
-                <TouchableOpacity
-                  style={[styles.createProjectButton, { backgroundColor: tc.tint }]}
-                  onPress={handleCreateProjectEarly}
-                >
-                  <Text style={styles.createProjectButtonText}>{t('projects.create')}</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-            <View style={styles.projectListContainer}>
-              <TouchableOpacity
-                style={[styles.projectChip, { backgroundColor: '#10B981' }]}
-                onPress={() => selectProjectEarly(null)}
-              >
-                <Text style={styles.projectChipText}>✓ {t('inbox.noProject')}</Text>
-              </TouchableOpacity>
-              {filteredProjects.map((project) => {
-                const projectColor = project.areaId ? areaById.get(project.areaId)?.color : undefined;
-                const isSelected = selectedProjectId === project.id;
-                return (
-                  <TouchableOpacity
-                    key={project.id}
-                    style={[
-                      styles.projectChip,
-                      isSelected
-                        ? { backgroundColor: '#3B82F620', borderWidth: 1, borderColor: tc.tint }
-                        : { backgroundColor: tc.cardBg, borderWidth: 1, borderColor: tc.border },
-                    ]}
-                    onPress={() => selectProjectEarly(project.id)}
-                  >
-                    <View style={[styles.projectDot, { backgroundColor: projectColor || '#6B7280' }]} />
-                    <Text style={[styles.projectChipText, { color: tc.text }]}>{project.title}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </>
-        )}
-      </View>
-    );
-  };
+  const sharedDateRowProps = { tc, defaultScheduleTime, dateOnlyLabel };
 
   return (
     <>
@@ -704,313 +249,222 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
               nestedScrollEnabled
               showsVerticalScrollIndicator={false}
             >
-              <View style={[styles.singleSection, { borderBottomColor: tc.border }]}>
-                <Text style={[styles.stepQuestion, { color: tc.text }]}>
-                  {t('inbox.refineTitle')}
-                </Text>
-                <Text style={[styles.stepHint, { color: tc.secondaryText }]}>
-                  {t('inbox.refineHint')}
-                </Text>
-                {aiEnabled && (
-                  <View style={styles.aiActionRow}>
-                    <TouchableOpacity
-                      style={[styles.aiActionButton, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
-                      onPress={handleAIClarifyInbox}
-                      disabled={isAIWorking}
-                      accessibilityState={{ disabled: isAIWorking, busy: isAIWorking }}
-                    >
-                      {isAIWorking && <ActivityIndicator size="small" color={tc.tint} />}
-                      <Text style={[styles.aiActionText, { color: tc.tint }]}>
-                        {isAIWorking ? aiWorkingText : t('taskEdit.aiClarify')}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-                <Text style={[styles.refineLabel, { color: tc.secondaryText }]}>{t('taskEdit.titleLabel')}</Text>
-                <TextInput
-                  ref={titleInputRef}
-                  style={[styles.refineTitleInput, titleDirectionStyle, { borderColor: tc.border, color: tc.text, backgroundColor: tc.cardBg }]}
-                  value={processingTitle}
-                  onChangeText={setProcessingTitle}
-                  placeholder={t('taskEdit.titleLabel')}
-                  placeholderTextColor={tc.secondaryText}
-                  onFocus={() => setProcessingTitleFocused(true)}
-                  onBlur={() => setProcessingTitleFocused(false)}
-                  selection={processingTitleFocused ? undefined : { start: 0, end: 0 }}
-                />
-                <Text style={[styles.refineLabel, { color: tc.secondaryText }]}>{t('taskEdit.descriptionLabel')}</Text>
-                <TextInput
-                  style={[styles.refineDescriptionInput, { borderColor: tc.border, color: tc.text, backgroundColor: tc.cardBg }]}
-                  value={processingDescription}
-                  onChangeText={setProcessingDescription}
-                  placeholder={t('taskEdit.descriptionPlaceholder')}
-                  placeholderTextColor={tc.secondaryText}
-                  multiline
-                  numberOfLines={4}
-                />
-              </View>
+              <InboxTitleSection
+                t={t}
+                tc={tc}
+                titleInputRef={titleInputRef}
+                processingTitle={processingTitle}
+                setProcessingTitle={setProcessingTitle}
+                processingDescription={processingDescription}
+                setProcessingDescription={setProcessingDescription}
+                processingTitleFocused={processingTitleFocused}
+                setProcessingTitleFocused={setProcessingTitleFocused}
+                titleDirectionStyle={titleDirectionStyle}
+                aiEnabled={aiEnabled}
+                isAIWorking={isAIWorking}
+                handleAIClarifyInbox={handleAIClarifyInbox}
+                aiWorkingText={aiWorkingText}
+              />
 
-              <View style={[styles.singleSection, { borderBottomColor: tc.border }]}>
-                <Text style={[styles.stepQuestion, { color: tc.text }]}>
-                  {t('inbox.isActionable')}
-                </Text>
-                <Text style={[styles.stepHint, { color: tc.secondaryText }]}>
-                  {t('inbox.actionableHint')}
-                </Text>
-                <View style={styles.buttonColumn}>
-                  <TouchableOpacity
-                    style={[
-                      styles.bigButton,
-                      actionabilityChoice === 'actionable' ? styles.buttonPrimary : { backgroundColor: tc.border },
-                    ]}
-                    onPress={() => setActionabilityChoice('actionable')}
-                  >
-                    <Text style={[styles.bigButtonText, actionabilityChoice !== 'actionable' && { color: tc.text }]}>
-                      ✅ {t('inbox.yesActionable')}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.bigButton,
-                      actionabilityChoice === 'later' ? styles.buttonPrimary : { backgroundColor: tc.border },
-                    ]}
-                    onPress={() => setActionabilityChoice('later')}
-                  >
-                    <Text style={[styles.bigButtonText, actionabilityChoice !== 'later' && { color: tc.text }]}>
-                      🕒 {laterLabel}
-                    </Text>
-                  </TouchableOpacity>
-                  <View style={styles.buttonRow}>
-                    <TouchableOpacity
-                      style={[styles.button, { backgroundColor: actionabilityChoice === 'trash' ? '#EF4444' : tc.border }]}
-                      onPress={() => setActionabilityChoice('trash')}
-                    >
-                      <Text style={[styles.buttonPrimaryText, actionabilityChoice !== 'trash' && { color: tc.text }]}>🗑️ {t('inbox.trash')}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.button, { backgroundColor: actionabilityChoice === 'someday' ? '#8B5CF6' : tc.border }]}
-                      onPress={() => setActionabilityChoice('someday')}
-                    >
-                      <Text style={[styles.buttonPrimaryText, actionabilityChoice !== 'someday' && { color: tc.text }]}>💭 {t('inbox.someday')}</Text>
-                    </TouchableOpacity>
-                    {referenceEnabled && (
-                      <TouchableOpacity
-                        style={[styles.button, { backgroundColor: actionabilityChoice === 'reference' ? '#3B82F6' : tc.border }]}
-                        onPress={() => setActionabilityChoice('reference')}
-                      >
-                        <Text style={[styles.buttonPrimaryText, actionabilityChoice !== 'reference' && { color: tc.text }]}>📚 {t('nav.reference')}</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                </View>
-              </View>
-
-              {actionabilityChoice === 'later' && (
-                <View style={[styles.singleSection, { borderBottomColor: tc.border }]}>
-                  <Text style={[styles.stepQuestion, { color: tc.text }]}>
-                    {laterLabel}
-                  </Text>
-                  <Text style={[styles.stepHint, { color: tc.secondaryText }]}>
-                    {laterHint}
-                  </Text>
-                  {renderDateSelector(
-                    t('taskEdit.startDateLabel'),
-                    pendingStartDate,
-                    () => setShowStartDatePicker(true),
-                    () => {
-                      setPendingStartDate(null);
-                      setPendingStartDateOnly(false);
-                    },
-                    {
-                      dateOnly: pendingStartDateOnly,
-                      onDateOnly: () => setPendingStartDateOnly(true),
-                      onUseDefaultTime: () => setPendingStartDateOnly(false),
-                    },
-                  )}
-                </View>
-              )}
+              <InboxActionabilitySection
+                t={t}
+                tc={tc}
+                actionabilityChoice={actionabilityChoice}
+                setActionabilityChoice={setActionabilityChoice}
+                referenceEnabled={referenceEnabled}
+                laterLabel={laterLabel}
+                laterHint={laterHint}
+                dateOnlyLabel={dateOnlyLabel}
+                pendingStartDate={pendingStartDate}
+                setPendingStartDate={setPendingStartDate}
+                pendingStartDateOnly={pendingStartDateOnly}
+                setPendingStartDateOnly={setPendingStartDateOnly}
+                setShowStartDatePicker={setShowStartDatePicker}
+                defaultScheduleTime={defaultScheduleTime}
+              />
 
               {actionabilityChoice === 'actionable' && twoMinuteEnabled && (
-                <View style={[styles.singleSection, { borderBottomColor: tc.border }]}>
-                  <Text style={[styles.stepQuestion, { color: tc.text }]}>
-                    ⏱️ {t('inbox.twoMinRule')}
-                  </Text>
-                  <Text style={[styles.stepHint, { color: tc.secondaryText }]}>
-                    {t('inbox.twoMinHint')}
-                  </Text>
-                  <View style={styles.buttonColumn}>
-                    <TouchableOpacity
-                      style={[styles.bigButton, twoMinuteChoice === 'yes' ? styles.buttonSuccess : { backgroundColor: tc.border }]}
-                      onPress={() => setTwoMinuteChoice('yes')}
-                    >
-                      <Text style={[styles.bigButtonText, twoMinuteChoice !== 'yes' && { color: tc.text }]}>✅ {t('inbox.doneIt')}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.bigButton, twoMinuteChoice === 'no' ? styles.buttonPrimary : { backgroundColor: tc.border }]}
-                      onPress={() => setTwoMinuteChoice('no')}
-                    >
-                      <Text style={[styles.bigButtonText, twoMinuteChoice !== 'no' && { color: tc.text }]}>
-                        {t('inbox.takesLonger')}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
+                <InboxTwoMinuteSection
+                  t={t}
+                  tc={tc}
+                  twoMinuteChoice={twoMinuteChoice}
+                  setTwoMinuteChoice={setTwoMinuteChoice}
+                />
               )}
 
               {showExecutionSection && (
                 <>
-                  {renderSchedulingSection()}
-                  {renderOrganizationSection()}
+                  <InboxSchedulingSection
+                    t={t}
+                    show={showSchedulingSection}
+                    showStartDateField={showStartDateField}
+                    showDueDateField={showDueDateField}
+                    showReviewDateField={showReviewDateField}
+                    pendingStartDate={pendingStartDate}
+                    setPendingStartDate={setPendingStartDate}
+                    pendingStartDateOnly={pendingStartDateOnly}
+                    setPendingStartDateOnly={setPendingStartDateOnly}
+                    setShowStartDatePicker={setShowStartDatePicker}
+                    pendingDueDate={pendingDueDate}
+                    setPendingDueDate={setPendingDueDate}
+                    pendingDueDateOnly={pendingDueDateOnly}
+                    setPendingDueDateOnly={setPendingDueDateOnly}
+                    setShowDueDatePicker={setShowDueDatePicker}
+                    pendingReviewDate={pendingReviewDate}
+                    setPendingReviewDate={setPendingReviewDate}
+                    pendingReviewDateOnly={pendingReviewDateOnly}
+                    setPendingReviewDateOnly={setPendingReviewDateOnly}
+                    setShowReviewDatePicker={setShowReviewDatePicker}
+                    {...sharedDateRowProps}
+                  />
 
-                  <View style={[styles.singleSection, { borderBottomColor: tc.border }]}>
-                    <Text style={[styles.stepQuestion, { color: tc.text }]}>
-                      {t('inbox.whoShouldDoIt')}
-                    </Text>
-                    <View style={styles.buttonColumn}>
-                      <TouchableOpacity
-                        style={[styles.bigButton, executionChoice === 'defer' ? styles.buttonPrimary : { backgroundColor: tc.border }]}
-                        onPress={() => setExecutionChoice('defer')}
-                      >
-                        <Text style={[styles.bigButtonText, executionChoice !== 'defer' && { color: tc.text }]}>
-                          📋 {t('inbox.illDoIt')}
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.bigButton, executionChoice === 'delegate' ? { backgroundColor: '#F59E0B' } : { backgroundColor: tc.border }]}
-                        onPress={() => setExecutionChoice('delegate')}
-                      >
-                        <Text style={[styles.bigButtonText, executionChoice !== 'delegate' && { color: tc.text }]}>
-                          👤 {t('inbox.delegate')}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
+                  <InboxOrganizationSection
+                    t={t}
+                    tc={tc}
+                    show={showOrganizationSection}
+                    showPriorityField={showPriorityField}
+                    selectedPriority={selectedPriority}
+                    setSelectedPriority={setSelectedPriority}
+                    showEnergyLevelField={showEnergyLevelField}
+                    selectedEnergyLevel={selectedEnergyLevel}
+                    setSelectedEnergyLevel={setSelectedEnergyLevel}
+                    showTimeEstimateField={showTimeEstimateField}
+                    selectedTimeEstimate={selectedTimeEstimate}
+                    setSelectedTimeEstimate={setSelectedTimeEstimate}
+                    showAssignedToField={showAssignedToField}
+                    selectedAssignedTo={selectedAssignedTo}
+                    setSelectedAssignedTo={setSelectedAssignedTo}
+                    PRIORITY_OPTIONS={PRIORITY_OPTIONS}
+                    ENERGY_LEVEL_OPTIONS={ENERGY_LEVEL_OPTIONS}
+                    timeEstimateOptions={timeEstimateOptions}
+                  />
 
-                  {executionChoice === 'delegate' ? (
-                    <View style={[styles.singleSection, { borderBottomColor: tc.border }]}>
-                      <Text style={[styles.stepQuestion, { color: tc.text }]}>
-                        👤 {t('process.delegateTitle')}
-                      </Text>
-                      <Text style={[styles.stepHint, { color: tc.secondaryText }]}>
-                        {t('process.delegateDesc')}
-                      </Text>
-                      <Text style={[styles.refineLabel, { color: tc.secondaryText }]}>{t('process.delegateWhoLabel')}</Text>
-                      <TextInput
-                        style={[styles.waitingInput, { borderColor: tc.border, color: tc.text }]}
-                        placeholder={t('process.delegateWhoPlaceholder')}
-                        placeholderTextColor={tc.secondaryText}
-                        value={delegateWho}
-                        onChangeText={setDelegateWho}
-                      />
-                      {!showReviewDateField && renderDateSelector(
-                        t('process.delegateFollowUpLabel'),
-                        delegateFollowUpDate,
-                        () => setShowDelegateDatePicker(true),
-                        () => {
-                          setDelegateFollowUpDate(null);
-                          setDelegateFollowUpDateOnly(false);
-                        },
-                        {
-                          dateOnly: delegateFollowUpDateOnly,
-                          onDateOnly: () => setDelegateFollowUpDateOnly(true),
-                          onUseDefaultTime: () => setDelegateFollowUpDateOnly(false),
-                        },
-                      )}
-                      <TouchableOpacity
-                        style={[styles.buttonSecondary, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
-                        onPress={handleSendDelegateRequest}
-                      >
-                        <Text style={[styles.buttonText, { color: tc.text }]}>{t('process.delegateSendRequest')}</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <>
-                      {projectFirst ? renderProjectSection() : renderContextSection()}
-                      {projectFirst ? renderContextSection() : renderProjectSection()}
-                    </>
+                  <InboxExecutionSection
+                    t={t}
+                    executionChoice={executionChoice}
+                    setExecutionChoice={setExecutionChoice}
+                    delegateWho={delegateWho}
+                    setDelegateWho={setDelegateWho}
+                    showReviewDateField={showReviewDateField}
+                    delegateFollowUpDate={delegateFollowUpDate}
+                    setDelegateFollowUpDate={setDelegateFollowUpDate}
+                    delegateFollowUpDateOnly={delegateFollowUpDateOnly}
+                    setDelegateFollowUpDateOnly={setDelegateFollowUpDateOnly}
+                    setShowDelegateDatePicker={setShowDelegateDatePicker}
+                    handleSendDelegateRequest={handleSendDelegateRequest}
+                    {...sharedDateRowProps}
+                  />
+
+                  {executionChoice !== 'delegate' && (
+                    projectFirst ? (
+                      <>
+                        <InboxProjectSection
+                          t={t} tc={tc}
+                          show={showProjectSection}
+                          showProjectField={showProjectField}
+                          showAreaField={showAreaField}
+                          currentProject={currentProject}
+                          currentArea={currentArea}
+                          selectedProjectId={selectedProjectId}
+                          selectedAreaId={selectedAreaId}
+                          setSelectedAreaId={setSelectedAreaId}
+                          projectSearch={projectSearch}
+                          setProjectSearch={setProjectSearch}
+                          filteredProjects={filteredProjects}
+                          areaById={areaById}
+                          hasExactProjectMatch={hasExactProjectMatch}
+                          handleCreateProjectEarly={handleCreateProjectEarly}
+                          selectProjectEarly={selectProjectEarly}
+                        />
+                        <InboxContextSection
+                          t={t} tc={tc}
+                          show={showContextSection}
+                          showContextsField={showContextsField}
+                          showTagsField={showTagsField}
+                          selectedContexts={selectedContexts}
+                          selectedTags={selectedTags}
+                          toggleContext={toggleContext}
+                          toggleTag={toggleTag}
+                          newContext={newContext}
+                          setNewContext={setNewContext}
+                          addCustomContextMobile={addCustomContextMobile}
+                          tokenSuggestions={tokenSuggestions}
+                          applyTokenSuggestion={applyTokenSuggestion}
+                          contextCopilotSuggestions={contextCopilotSuggestions}
+                          tagCopilotSuggestions={tagCopilotSuggestions}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <InboxContextSection
+                          t={t} tc={tc}
+                          show={showContextSection}
+                          showContextsField={showContextsField}
+                          showTagsField={showTagsField}
+                          selectedContexts={selectedContexts}
+                          selectedTags={selectedTags}
+                          toggleContext={toggleContext}
+                          toggleTag={toggleTag}
+                          newContext={newContext}
+                          setNewContext={setNewContext}
+                          addCustomContextMobile={addCustomContextMobile}
+                          tokenSuggestions={tokenSuggestions}
+                          applyTokenSuggestion={applyTokenSuggestion}
+                          contextCopilotSuggestions={contextCopilotSuggestions}
+                          tagCopilotSuggestions={tagCopilotSuggestions}
+                        />
+                        <InboxProjectSection
+                          t={t} tc={tc}
+                          show={showProjectSection}
+                          showProjectField={showProjectField}
+                          showAreaField={showAreaField}
+                          currentProject={currentProject}
+                          currentArea={currentArea}
+                          selectedProjectId={selectedProjectId}
+                          selectedAreaId={selectedAreaId}
+                          setSelectedAreaId={setSelectedAreaId}
+                          projectSearch={projectSearch}
+                          setProjectSearch={setProjectSearch}
+                          filteredProjects={filteredProjects}
+                          areaById={areaById}
+                          hasExactProjectMatch={hasExactProjectMatch}
+                          handleCreateProjectEarly={handleCreateProjectEarly}
+                          selectProjectEarly={selectProjectEarly}
+                        />
+                      </>
+                    )
                   )}
                 </>
               )}
 
-              {(showStartDateField || actionabilityChoice === 'later') && showStartDatePicker && (
-                <DateTimePicker
-                  value={pendingStartDate ?? new Date()}
-                  mode="date"
-                  display="default"
-                  onChange={(event, date) => {
-                    if (event.type === 'dismissed') {
-                      setShowStartDatePicker(false);
-                      return;
-                    }
-                    if (Platform.OS !== 'ios') setShowStartDatePicker(false);
-                    if (!date) return;
-                    const next = new Date(date);
-                    next.setHours(9, 0, 0, 0);
-                    setPendingStartDate(next);
-                    setPendingStartDateOnly(false);
-                  }}
-                />
-              )}
-
-              {showDueDateField && showDueDatePicker && (
-                <DateTimePicker
-                  value={pendingDueDate ?? new Date()}
-                  mode="date"
-                  display="default"
-                  onChange={(event, date) => {
-                    if (event.type === 'dismissed') {
-                      setShowDueDatePicker(false);
-                      return;
-                    }
-                    if (Platform.OS !== 'ios') setShowDueDatePicker(false);
-                    if (!date) return;
-                    const next = new Date(date);
-                    next.setHours(9, 0, 0, 0);
-                    setPendingDueDate(next);
-                    setPendingDueDateOnly(false);
-                  }}
-                />
-              )}
-
-              {showReviewDateField && showReviewDatePicker && (
-                <DateTimePicker
-                  value={pendingReviewDate ?? new Date()}
-                  mode="date"
-                  display="default"
-                  onChange={(event, date) => {
-                    if (event.type === 'dismissed') {
-                      setShowReviewDatePicker(false);
-                      return;
-                    }
-                    if (Platform.OS !== 'ios') setShowReviewDatePicker(false);
-                    if (!date) return;
-                    const next = new Date(date);
-                    next.setHours(9, 0, 0, 0);
-                    setPendingReviewDate(next);
-                    setPendingReviewDateOnly(false);
-                  }}
-                />
-              )}
-
-              {showDelegateDatePicker && (
-                <DateTimePicker
-                  value={delegateFollowUpDate ?? new Date()}
-                  mode="date"
-                  display="default"
-                  onChange={(event, date) => {
-                    if (event.type === 'dismissed') {
-                      setShowDelegateDatePicker(false);
-                      return;
-                    }
-                    if (Platform.OS !== 'ios') setShowDelegateDatePicker(false);
-                    if (!date) return;
-                    const next = new Date(date);
-                    next.setHours(9, 0, 0, 0);
-                    setDelegateFollowUpDate(next);
-                    setDelegateFollowUpDateOnly(false);
-                  }}
-                />
-              )}
+              <InboxDatePickers
+                configs={[
+                  {
+                    show: (showStartDateField || actionabilityChoice === 'later') && showStartDatePicker,
+                    value: pendingStartDate,
+                    onClose: () => setShowStartDatePicker(false),
+                    onSelect: (date) => { setPendingStartDate(date); setPendingStartDateOnly(false); },
+                  },
+                  {
+                    show: showDueDateField && showDueDatePicker,
+                    value: pendingDueDate,
+                    onClose: () => setShowDueDatePicker(false),
+                    onSelect: (date) => { setPendingDueDate(date); setPendingDueDateOnly(false); },
+                  },
+                  {
+                    show: showReviewDateField && showReviewDatePicker,
+                    value: pendingReviewDate,
+                    onClose: () => setShowReviewDatePicker(false),
+                    onSelect: (date) => { setPendingReviewDate(date); setPendingReviewDateOnly(false); },
+                  },
+                  {
+                    show: showDelegateDatePicker,
+                    value: delegateFollowUpDate,
+                    onClose: () => setShowDelegateDatePicker(false),
+                    onSelect: (date) => { setDelegateFollowUpDate(date); setDelegateFollowUpDateOnly(false); },
+                  },
+                ]}
+              />
 
               <View style={[styles.singleSection, { borderBottomColor: tc.border }]}>
                 <Text style={[styles.stepHint, { color: tc.secondaryText }]}>
