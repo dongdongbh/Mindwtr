@@ -3,6 +3,7 @@ import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 import { styles } from '../inbox-processing-modal.styles';
 import { formatTimeEstimateChipLabel } from '../time-estimate-filter-utils';
+import { InboxSuggestionList } from './InboxSuggestionList';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import type { TaskPriority, TaskEnergyLevel, TimeEstimate } from '@mindwtr/core';
 
@@ -175,19 +176,7 @@ export function InboxOrganizationSection({
             value={selectedAssignedTo}
             onChangeText={setSelectedAssignedTo}
           />
-          {assignedToSuggestions.length > 0 && (
-            <View style={[styles.tokenSuggestionsContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
-              {assignedToSuggestions.map((name) => (
-                <TouchableOpacity
-                  key={name}
-                  style={styles.tokenSuggestionChip}
-                  onPress={() => setSelectedAssignedTo(name)}
-                >
-                  <Text style={[styles.tokenSuggestionText, { color: tc.text }]}>{name}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
+          <InboxSuggestionList suggestions={assignedToSuggestions} onSelect={setSelectedAssignedTo} tc={tc} />
         </View>
       )}
     </View>

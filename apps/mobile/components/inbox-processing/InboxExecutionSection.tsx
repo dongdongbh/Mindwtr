@@ -3,6 +3,7 @@ import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 import { styles } from '../inbox-processing-modal.styles';
 import { InboxDateSelectorRow } from './InboxDateSelectorRow';
+import { InboxSuggestionList } from './InboxSuggestionList';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 
 type Props = {
@@ -84,19 +85,7 @@ export function InboxExecutionSection({
             value={delegateWho}
             onChangeText={setDelegateWho}
           />
-          {delegateWhoSuggestions.length > 0 && (
-            <View style={[styles.tokenSuggestionsContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
-              {delegateWhoSuggestions.map((name) => (
-                <TouchableOpacity
-                  key={name}
-                  style={styles.tokenSuggestionChip}
-                  onPress={() => setDelegateWho(name)}
-                >
-                  <Text style={[styles.tokenSuggestionText, { color: tc.text }]}>{name}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
+          <InboxSuggestionList suggestions={delegateWhoSuggestions} onSelect={setDelegateWho} tc={tc} />
           {!showReviewDateField && (
             <InboxDateSelectorRow
               label={t('process.delegateFollowUpLabel')}

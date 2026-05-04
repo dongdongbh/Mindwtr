@@ -2,6 +2,7 @@ import React from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 import { styles } from '../inbox-processing-modal.styles';
+import { InboxSuggestionList } from './InboxSuggestionList';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 
 type Props = {
@@ -112,19 +113,7 @@ export function InboxContextSection({
           <Text style={styles.addContextButtonText}>+</Text>
         </TouchableOpacity>
       </View>
-      {visibleTokenSuggestions.length > 0 && (
-        <View style={[styles.tokenSuggestionsContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
-          {visibleTokenSuggestions.map((token) => (
-            <TouchableOpacity
-              key={token}
-              style={styles.tokenSuggestionChip}
-              onPress={() => applyTokenSuggestion(token)}
-            >
-              <Text style={[styles.tokenSuggestionText, { color: tc.text }]}>{token}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
+      <InboxSuggestionList suggestions={visibleTokenSuggestions} onSelect={applyTokenSuggestion} tc={tc} />
       {showContextsField && visibleContextCopilotSuggestions.length > 0 && (
         <View style={[styles.tokenSuggestionsContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
           <Text style={[styles.tokenSectionTitle, { color: tc.secondaryText }]}>{suggestedContextsLabel}</Text>
