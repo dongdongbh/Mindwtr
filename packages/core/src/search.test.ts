@@ -1,8 +1,26 @@
 import { describe, it, expect } from 'vitest';
-import { filterTasksBySearch } from './search';
+import { filterTasksBySearch, searchAll } from './search';
 import type { Project, Task } from './types';
 
 describe('search', () => {
+    it('caps global search results to the shared search limit', () => {
+        const tasks: Task[] = Array.from({ length: 205 }, (_, index) => ({
+            id: `task-${index}`,
+            title: `Needle task ${index}`,
+            status: 'next',
+            tags: [],
+            contexts: [],
+            createdAt: '2025-01-01T00:00:00Z',
+            updatedAt: '2025-01-01T00:00:00Z',
+        }));
+
+        const results = searchAll(tasks, [], 'needle');
+
+        expect(results.tasks).toHaveLength(200);
+        expect(results.limited).toBe(true);
+        expect(results.limit).toBe(200);
+    });
+
     it('supports status, OR groups, and negation', () => {
         const now = new Date('2025-01-01T10:00:00Z');
 

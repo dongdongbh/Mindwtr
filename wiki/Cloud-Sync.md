@@ -8,13 +8,14 @@ Mindwtr's self-hosted cloud backend is a small sync server under `apps/cloud`. I
 
 - Use [[Data and Sync]] for choosing a sync backend and configuring the client.
 - Use [[Cloud Deployment]] for server setup, operations, and environment variables.
+- Use [[Cloud API]] for `/v1` endpoint details.
 - Use [[Docker Deployment]] if you want the Docker-based deployment path.
 
 ## Quick Orientation
 
 - The self-hosted cloud backend stores one JSON namespace per bearer token.
 - Clients point at the `/v1` base URL and sync through `GET/PUT /v1/data`.
-- `/v1/data` is the canonical sync contract; task routes are optional convenience APIs and clients should not depend on matching project or area CRUD routes.
+- `/v1/data` is the canonical sync contract; task, project, area, section, search, and attachment routes are optional convenience APIs.
 - Attachment APIs live under `/v1/attachments/...`.
 - Deploy it behind HTTPS and treat the bearer token like a password.
 - For normal device access, Mindwtr Cloud requires HTTPS. A local-network URL like `http://192.168.x.x` will not work in the mobile/desktop clients.
@@ -25,6 +26,7 @@ Keep this page only as a redirect for older links and bookmarks.
 ## See Also
 
 - [[Data and Sync]]
+- [[Cloud API]]
 - [[Cloud Deployment]]
 - [[Docker Deployment]]
 - [[Dropbox Sync]]

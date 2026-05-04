@@ -102,9 +102,9 @@ export interface TaskStore {
     addArea: (name: string, initialProps?: Partial<Area>) => Promise<Area | null>;
     /** Update an area */
     updateArea: (id: string, updates: Partial<Area>) => Promise<StoreActionResult>;
-    /** Delete an area and clear areaId on child projects/tasks */
+    /** Soft-delete an area and cascade matching tombstones to child projects/sections/tasks */
     deleteArea: (id: string) => Promise<StoreActionResult>;
-    /** Restore a soft-deleted area */
+    /** Restore a soft-deleted area and children from the same cascade */
     restoreArea: (id: string) => Promise<StoreActionResult>;
     /** Reorder areas by id list */
     reorderAreas: (orderedIds: string[]) => Promise<void>;

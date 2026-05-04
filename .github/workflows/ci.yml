@@ -102,8 +102,32 @@ jobs:
 
       - name: Install system dependencies (Tauri)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev
+          set -euo pipefail
+
+          # GitHub-hosted Ubuntu runners sometimes point apt at a flaky Azure
+          # mirror. Prefer the canonical Ubuntu archive when that mirror list
+          # is present, then retry the whole apt transaction for transient
+          # DNS/connection failures.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/apt-mirrors.txt
+          fi
+
+          for attempt in 1 2 3; do
+            if sudo apt-get -o Acquire::Retries=3 update && \
+              sudo apt-get -o Acquire::Retries=3 install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev; then
+              exit 0
+            fi
+
+            if [ "$attempt" -eq 3 ]; then
+              echo "Tauri system dependency install failed after $attempt attempts" >&2
+              exit 1
+            fi
+
+            echo "Tauri system dependency install failed on attempt $attempt, retrying..." >&2
+            sudo apt-get clean
+            sudo rm -rf /var/lib/apt/lists/*
+            sleep 10
+          done
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable

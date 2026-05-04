@@ -14,6 +14,8 @@ export function SyncActivityIndicator() {
     const tc = useThemeColors();
     const { language } = useLanguage();
     const pendingRemoteWriteAt = useTaskStore((state) => state.settings?.pendingRemoteWriteAt);
+    const lastSyncStatus = useTaskStore((state) => state.settings?.lastSyncStatus);
+    const lastSyncError = useTaskStore((state) => state.settings?.lastSyncError);
     const [activityState, setActivityState] = useState(getMobileSyncActivityState());
 
     useEffect(() => {
@@ -22,15 +24,24 @@ export function SyncActivityIndicator() {
 
     const copy = useMemo(() => {
         const isChinese = language === 'zh' || language === 'zh-Hant';
+        if (lastSyncStatus === 'error') {
+            return {
+                label: isChinese ? '同步异常' : 'Sync issue',
+                accessibilityLabel: isChinese
+                    ? '同步出现问题。点按可打开设置查看同步详情。'
+                    : 'Sync needs attention. Tap to open settings for sync details.',
+            };
+        }
         return {
             label: isChinese ? '同步中' : 'Syncing',
             accessibilityLabel: isChinese
                 ? '同步进行中。点按可打开设置查看同步详情。'
                 : 'Sync in progress. Tap to open settings for sync details.',
         };
-    }, [language]);
+    }, [language, lastSyncStatus]);
 
-    if (activityState !== 'syncing' && !pendingRemoteWriteAt) {
+    const hasSyncError = lastSyncStatus === 'error';
+    if (activityState !== 'syncing' && !pendingRemoteWriteAt && !hasSyncError) {
         return null;
     }
 
@@ -39,18 +50,23 @@ export function SyncActivityIndicator() {
             accessibilityLabel={copy.accessibilityLabel}
             accessibilityRole="button"
             hitSlop={8}
-            onPress={() => router.push('/settings')}
+            onPress={() => router.push({ pathname: '/settings', params: { settingsScreen: 'sync' } })}
             style={[
                 styles.badge,
                 {
                     top: insets.top + 10,
                     backgroundColor: tc.cardBg,
-                    borderColor: tc.border,
+                    borderColor: hasSyncError ? tc.danger : tc.border,
                 },
             ]}
         >
-            <ActivityIndicator color={tc.tint} size="small" />
+            {hasSyncError ? null : <ActivityIndicator color={tc.tint} size="small" />}
             <Text style={[styles.label, { color: tc.text }]}>{copy.label}</Text>
+            {hasSyncError && lastSyncError ? (
+                <Text numberOfLines={1} style={[styles.detail, { color: tc.secondaryText }]}>
+                    {lastSyncError}
+                </Text>
+            ) : null}
         </Pressable>
     );
 }
@@ -76,5 +92,10 @@ const styles = StyleSheet.create({
     label: {
         fontSize: 13,
         fontWeight: '700',
+    },
+    detail: {
+        maxWidth: 180,
+        fontSize: 11,
+        fontWeight: '600',
     },
 });

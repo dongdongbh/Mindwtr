@@ -20,11 +20,13 @@ import {
 } from '@mindwtr/core';
 import {
     getAuthFailureRateKey,
+    getAuthFailureTokenRateKey,
     getClientIp,
     getToken,
     isAuthorizedToken,
     parseAllowedAuthTokens,
     parseBoolEnv,
+    parseTrustedProxyIps,
     resolveAllowedAuthTokensFromEnv,
     toRateLimitRoute,
     tokenToKey,
@@ -38,11 +40,13 @@ import {
     logError,
     logInfo,
     logWarn,
+    LIST_MAX_LIMIT,
     MAX_TASK_QUICK_ADD_LENGTH,
     MAX_TASK_TITLE_LENGTH,
     normalizeRevision,
     parseArgs,
     parsePagination,
+    preflightResponse,
     RATE_LIMIT_MAX_KEYS,
     UUID_PATTERN,
 } from './server-config';
@@ -79,7 +83,9 @@ import {
 } from './server-validation';
 
 const normalizeAttachmentContentType = (value: string | null): string => value?.split(';', 1)[0]?.trim().toLowerCase() || '';
-const SERVER_MERGE_TIMESTAMP_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
+const ANY_TOKEN_NAMESPACE_LIMIT_DEFAULT = 32;
+const TOKEN_NAMESPACE_FILE_PATTERN = /^([a-f0-9]{64})\.json$/;
+const TOKEN_NAMESPACE_DIR_PATTERN = /^[a-f0-9]{64}$/;
 // Relies on POSIX mtime; do not lower below 1 minute without auditing filesystem timestamp resolution and batching.
 const ORPHAN_ATTACHMENT_GC_GRACE_MS = 5 * 60 * 1000;
 
@@ -114,19 +120,13 @@ const createInternalServerErrorResponse = (message: string, requestId: string): 
     )
 );
 
+const IS_MAIN_MODULE = typeof Bun !== 'undefined' && (import.meta as ImportMeta & { main?: boolean }).main === true;
+
 type RateLimitState = {
     count: number;
     resetAt: number;
     lastSeenAt: number;
 };
-
-const shutdown = (signal: string) => {
-    logInfo(`received ${signal}, shutting down`);
-    process.exit(0);
-};
-
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 function decodePathParam(rawValue: string): string | null {
     try {
@@ -171,6 +171,17 @@ function nextOrder(items: Array<{ order?: number }>): number {
     ), -1) + 1;
 }
 
+function parseSearchPaginationValue(searchParams: URLSearchParams, name: string, fallback: number): number | { error: string } {
+    const raw = searchParams.get(name);
+    if (raw == null) return fallback;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed < 0 || (name.toLowerCase().includes('limit') && parsed <= 0)) {
+        return { error: `Invalid ${name}` };
+    }
+    const value = Math.floor(parsed);
+    return name.toLowerCase().includes('limit') ? Math.min(LIST_MAX_LIMIT, value) : value;
+}
+
 function finalizeCloudDataForWrite(data: AppData, nowIso: string): AppData | { error: Response } {
     const repaired = repairMergedSyncReferences(data, nowIso);
     const validated = validateAppData(repaired);
@@ -180,54 +191,25 @@ function finalizeCloudDataForWrite(data: AppData, nowIso: string): AppData | { e
     return repaired;
 }
 
-function mergeTimestampCandidate(latest: number, value: unknown): number {
-    if (typeof value !== 'string') return latest;
-    const parsed = Date.parse(value);
-    return Number.isFinite(parsed) && parsed > latest ? parsed : latest;
+function namespaceExists(dataDir: string, key: string): boolean {
+    return existsSync(join(dataDir, `${key}.json`)) || existsSync(join(dataDir, key));
 }
 
-function collectLatestDataTimestamp(data: AppData, latest: number): number {
-    for (const item of [...data.tasks, ...data.projects]) {
-        latest = mergeTimestampCandidate(latest, item.createdAt);
-        latest = mergeTimestampCandidate(latest, item.updatedAt);
-        latest = mergeTimestampCandidate(latest, item.deletedAt);
-        const attachments = item.attachments ?? [];
-        for (const attachment of attachments) {
-            latest = mergeTimestampCandidate(latest, attachment.createdAt);
-            latest = mergeTimestampCandidate(latest, attachment.updatedAt);
-            latest = mergeTimestampCandidate(latest, attachment.deletedAt);
+function countTokenNamespaces(dataDir: string): number {
+    const namespaces = new Set<string>();
+    for (const entry of readdirSync(dataDir, { withFileTypes: true })) {
+        if (entry.isFile()) {
+            const match = entry.name.match(TOKEN_NAMESPACE_FILE_PATTERN);
+            if (match?.[1]) namespaces.add(match[1]);
+        } else if (entry.isDirectory() && TOKEN_NAMESPACE_DIR_PATTERN.test(entry.name)) {
+            namespaces.add(entry.name);
         }
     }
-    for (const item of data.sections) {
-        latest = mergeTimestampCandidate(latest, item.createdAt);
-        latest = mergeTimestampCandidate(latest, item.updatedAt);
-        latest = mergeTimestampCandidate(latest, item.deletedAt);
-    }
-    for (const item of data.areas) {
-        latest = mergeTimestampCandidate(latest, item.createdAt);
-        latest = mergeTimestampCandidate(latest, item.updatedAt);
-        latest = mergeTimestampCandidate(latest, item.deletedAt);
-    }
-    latest = mergeTimestampCandidate(latest, data.settings.pendingRemoteWriteAt);
-    latest = mergeTimestampCandidate(latest, data.settings.lastSyncAt);
-    for (const value of Object.values(data.settings.syncPreferencesUpdatedAt ?? {})) {
-        latest = mergeTimestampCandidate(latest, value);
-    }
-    for (const entry of data.settings.attachments?.pendingRemoteDeletes ?? []) {
-        latest = mergeTimestampCandidate(latest, entry.lastErrorAt);
-    }
-    return latest;
+    return namespaces.size;
 }
 
-function resolveServerMergeTimestamp(...dataSets: AppData[]): string {
-    let latest = Number.NEGATIVE_INFINITY;
-    dataSets.forEach((data) => {
-        latest = collectLatestDataTimestamp(data, latest);
-    });
-    const now = Date.now();
-    if (!Number.isFinite(latest)) return new Date(now).toISOString();
-    const ceiling = now + SERVER_MERGE_TIMESTAMP_FUTURE_TOLERANCE_MS;
-    return new Date(Math.min(latest, ceiling)).toISOString();
+function resolveServerMergeTimestamp(..._dataSets: AppData[]): string {
+    return new Date().toISOString();
 }
 
 function collectReferencedAttachmentCloudKeys(data: AppData): Set<string> {
@@ -319,10 +301,12 @@ export const __cloudTestUtils = {
     tokenToKey,
     parseAllowedAuthTokens,
     parseBoolEnv,
+    parseTrustedProxyIps,
     resolveAllowedAuthTokensFromEnv,
     isAuthorizedToken,
     getClientIp,
     getAuthFailureRateKey,
+    getAuthFailureTokenRateKey,
     toRateLimitRoute,
     validateAppData,
     asStatus,
@@ -351,6 +335,8 @@ type CloudServerOptions = {
     requestTimeoutMs?: number;
     allowedAuthTokens?: Set<string> | null;
     trustProxyHeaders?: boolean;
+    trustedProxyIps?: Set<string> | null;
+    maxAnyTokenNamespaces?: number;
 };
 
 type CloudServerHandle = {
@@ -374,8 +360,19 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
     const maxAttachmentBytes = Number(
         options.maxAttachmentBytes ?? process.env.MINDWTR_CLOUD_MAX_ATTACHMENT_BYTES ?? 50_000_000
     );
-    const allowedAuthTokens = options.allowedAuthTokens ?? resolveAllowedAuthTokensFromEnv(process.env);
+    const allowedAuthTokens = options.allowedAuthTokens === undefined
+        ? resolveAllowedAuthTokensFromEnv(process.env)
+        : options.allowedAuthTokens;
     const trustProxyHeaders = options.trustProxyHeaders ?? parseBoolEnv(process.env.MINDWTR_CLOUD_TRUST_PROXY_HEADERS);
+    const trustedProxyIps = options.trustedProxyIps ?? parseTrustedProxyIps(process.env.MINDWTR_CLOUD_TRUSTED_PROXY_IPS);
+    const rawMaxAnyTokenNamespaces = Number(
+        options.maxAnyTokenNamespaces
+        ?? process.env.MINDWTR_CLOUD_ANY_TOKEN_MAX_NAMESPACES
+        ?? ANY_TOKEN_NAMESPACE_LIMIT_DEFAULT
+    );
+    const maxAnyTokenNamespaces = Number.isFinite(rawMaxAnyTokenNamespaces) && rawMaxAnyTokenNamespaces >= 0
+        ? Math.floor(rawMaxAnyTokenNamespaces)
+        : ANY_TOKEN_NAMESPACE_LIMIT_DEFAULT;
     const withWriteLock = createWriteLockRunner(dataDir);
     const rateLimitCleanupMs = Number(process.env.MINDWTR_CLOUD_RATE_CLEANUP_MS || 60_000);
     const requestTimeoutMs = Number(options.requestTimeoutMs ?? process.env.MINDWTR_CLOUD_REQUEST_TIMEOUT_MS ?? 30_000);
@@ -436,6 +433,18 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
         return null;
     };
 
+    const ensureNamespaceWriteAllowed = (key: string): Response | null => {
+        if (allowedAuthTokens) return null;
+        if (namespaceExists(dataDir, key)) return null;
+        if (maxAnyTokenNamespaces <= 0) {
+            return errorResponse('Token namespace creation is disabled', 403);
+        }
+        if (countTokenNamespaces(dataDir) >= maxAnyTokenNamespaces) {
+            return errorResponse('Token namespace limit reached', 403);
+        }
+        return null;
+    };
+
     const unauthorizedResponse = (req: Request, token?: string | null): Response => {
         const requestIp = (() => {
             const bunServer = server as { requestIP?: (request: Request) => { address?: string | null } | null };
@@ -444,13 +453,21 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
         })();
         const authRateKey = getAuthFailureRateKey(req, {
             trustProxyHeaders,
+            trustedProxyIps,
             requestIpAddress: requestIp,
-            token,
-            authHeader: req.headers.get('authorization'),
         });
-        const authRateLimitResponse = checkRateLimit(authRateKey, AUTH_FAILURE_RATE_MAX);
-        if (authRateLimitResponse) {
-            return authRateLimitResponse;
+        const authRateLimitKeys = [
+            authRateKey,
+            getAuthFailureTokenRateKey({
+                token,
+                authHeader: req.headers.get('authorization'),
+            }),
+        ].filter((key): key is string => Boolean(key));
+        for (const key of authRateLimitKeys) {
+            const authRateLimitResponse = checkRateLimit(key, AUTH_FAILURE_RATE_MAX);
+            if (authRateLimitResponse) {
+                return authRateLimitResponse;
+            }
         }
         return errorResponse('Unauthorized', 401);
     };
@@ -478,12 +495,20 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
     } else {
         logInfo('token namespace mode enabled by explicit opt-in', {
             hint: 'set MINDWTR_CLOUD_AUTH_TOKENS to enforce a strict token allowlist',
+            maxNamespaces: String(maxAnyTokenNamespaces),
         });
     }
     if (trustProxyHeaders) {
-        logWarn('trusting proxy IP headers for auth failure rate limiting', {
-            hint: 'enable this only behind a trusted reverse proxy that overwrites forwarded IP headers; untrusted X-Forwarded-For values can spoof client IPs',
-        });
+        if (trustedProxyIps.size > 0) {
+            logWarn('trusting proxy IP headers for auth failure rate limiting', {
+                trustedProxyIps: String(trustedProxyIps.size),
+                hint: 'only requests from MINDWTR_CLOUD_TRUSTED_PROXY_IPS can supply forwarded client IP headers',
+            });
+        } else {
+            logWarn('MINDWTR_CLOUD_TRUST_PROXY_HEADERS is enabled but no trusted proxy IPs are configured; forwarded IP headers will be ignored', {
+                hint: 'set MINDWTR_CLOUD_TRUSTED_PROXY_IPS to the exact reverse-proxy source IPs',
+            });
+        }
     }
     if (!ensureWritableDir(dataDir)) {
         throw new Error(`Cloud data directory is not writable: ${dataDir}`);
@@ -501,7 +526,7 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
             }, requestTimeoutMs);
             try {
                 throwIfRequestAborted(requestAbortController.signal);
-                if (req.method === 'OPTIONS') return jsonResponse({ ok: true });
+                if (req.method === 'OPTIONS') return preflightResponse();
 
                 const url = new URL(req.url);
                 const pathname = url.pathname.replace(/\/+$/, '') || '/';
@@ -530,6 +555,10 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                     const rateLimitResponse = checkRateLimit(rateKey, maxPerWindow);
                     if (rateLimitResponse) return rateLimitResponse;
                     const filePath = join(dataDir, `${key}.json`);
+                    if (req.method !== 'GET') {
+                        const namespaceResponse = ensureNamespaceWriteAllowed(key);
+                        if (namespaceResponse) return namespaceResponse;
+                    }
 
                     if (req.method === 'GET' && pathname === '/v1/tasks') {
                         const query = url.searchParams.get('query') || '';
@@ -849,14 +878,19 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                                 return errorResponse(`Project title too long (max ${MAX_TASK_TITLE_LENGTH} characters)`, 400);
                             }
                             if (updates.status !== undefined && !asProjectStatus(updates.status)) return errorResponse('Invalid project status', 400);
-                            if (updates.areaId !== undefined && typeof updates.areaId !== 'string') return errorResponse('Invalid area id', 400);
+                            if (updates.areaId !== undefined && updates.areaId !== null && typeof updates.areaId !== 'string') return errorResponse('Invalid area id', 400);
+                            if (typeof updates.areaId === 'string' && updates.areaId.trim() === '') return errorResponse('Invalid area id', 400);
 
                             return await withWriteLock(key, async () => {
                                 throwIfRequestAborted(requestAbortController.signal);
                                 const data = loadAppData(filePath);
                                 const idx = data.projects.findIndex((item) => item.id === projectId && !item.deletedAt);
                                 if (idx < 0) return errorResponse('Project not found', 404);
-                                const areaId = typeof updates.areaId === 'string' ? updates.areaId.trim() : undefined;
+                                const areaId = updates.areaId === null
+                                    ? null
+                                    : typeof updates.areaId === 'string'
+                                        ? updates.areaId.trim()
+                                        : undefined;
                                 if (areaId && !data.areas.some((area) => area.id === areaId && !area.deletedAt)) {
                                     return errorResponse('Area not found', 404);
                                 }
@@ -866,7 +900,7 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                                     ...existing,
                                     ...updates,
                                     title: typeof updates.title === 'string' ? updates.title.trim() : existing.title,
-                                    areaId: areaId !== undefined ? areaId || undefined : existing.areaId,
+                                    areaId: areaId !== undefined ? areaId ?? undefined : existing.areaId,
                                     updatedAt: nowIso,
                                     rev: normalizeRevision(existing.rev) + 1,
                                     revBy: CLOUD_API_REV_BY,
@@ -1180,6 +1214,14 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                         const query = url.searchParams.get('query') || '';
                         const pagination = parsePagination(url.searchParams);
                         if ('error' in pagination) return errorResponse(pagination.error, 400);
+                        const taskOffset = parseSearchPaginationValue(url.searchParams, 'taskOffset', pagination.offset);
+                        if (typeof taskOffset !== 'number') return errorResponse(taskOffset.error, 400);
+                        const projectOffset = parseSearchPaginationValue(url.searchParams, 'projectOffset', pagination.offset);
+                        if (typeof projectOffset !== 'number') return errorResponse(projectOffset.error, 400);
+                        const taskLimit = parseSearchPaginationValue(url.searchParams, 'taskLimit', pagination.limit);
+                        if (typeof taskLimit !== 'number') return errorResponse(taskLimit.error, 400);
+                        const projectLimit = parseSearchPaginationValue(url.searchParams, 'projectLimit', pagination.limit);
+                        if (typeof projectLimit !== 'number') return errorResponse(projectLimit.error, 400);
                         const data = loadAppData(filePath);
                         const tasks = filterNotDeleted(data.tasks);
                         const projects = filterNotDeleted(data.projects);
@@ -1187,12 +1229,16 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                         const taskTotal = results.tasks.length;
                         const projectTotal = results.projects.length;
                         return jsonResponse({
-                            tasks: results.tasks.slice(pagination.offset, pagination.offset + pagination.limit),
-                            projects: results.projects.slice(pagination.offset, pagination.offset + pagination.limit),
+                            tasks: results.tasks.slice(taskOffset, taskOffset + taskLimit),
+                            projects: results.projects.slice(projectOffset, projectOffset + projectLimit),
                             taskTotal,
                             projectTotal,
                             limit: pagination.limit,
                             offset: pagination.offset,
+                            taskLimit,
+                            taskOffset,
+                            projectLimit,
+                            projectOffset,
                         });
                     }
 
@@ -1221,6 +1267,8 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                         return await withWriteLock(key, async () => {
                             throwIfRequestAborted(requestAbortController.signal);
                             if (!existsSync(filePath)) {
+                                const namespaceResponse = ensureNamespaceWriteAllowed(key);
+                                if (namespaceResponse) return namespaceResponse;
                                 const emptyData: AppData = { tasks: [], projects: [], sections: [], areas: [], settings: {} };
                                 throwIfRequestAborted(requestAbortController.signal);
                                 if (!existsSync(filePath)) writeData(filePath, emptyData);
@@ -1238,6 +1286,8 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                     }
 
                     if (req.method === 'PUT') {
+                        const namespaceResponse = ensureNamespaceWriteAllowed(key);
+                        if (namespaceResponse) return namespaceResponse;
                         const body = await readJsonBody(req, maxBodyBytes, requestAbortController.signal);
                         if (isBodyReadError(body)) {
                             const err = body.__mindwtrError;
@@ -1325,6 +1375,8 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
                     }
 
                     if (req.method === 'PUT') {
+                        const namespaceResponse = ensureNamespaceWriteAllowed(key);
+                        if (namespaceResponse) return namespaceResponse;
                         const contentType = normalizeAttachmentContentType(req.headers.get('content-type'));
                         if (contentType) {
                             const validation = await validateAttachmentForUpload({
@@ -1395,21 +1447,42 @@ export async function startCloudServer(options: CloudServerOptions = {}): Promis
         },
     });
 
+    let stopped = false;
+    const stopServer = async () => {
+        if (stopped) return;
+        stopped = true;
+        clearInterval(cleanupTimer);
+        try {
+            await Promise.resolve((server as { stop?: (closeIdleConnections?: boolean) => void | Promise<void> }).stop?.(true));
+        } catch {
+            // Ignore stop errors during teardown.
+        }
+    };
+    const signalHandlers: Array<[NodeJS.Signals, () => void]> = [];
+    if (IS_MAIN_MODULE) {
+        const handleSignal = (signal: NodeJS.Signals) => {
+            logInfo(`received ${signal}, shutting down`);
+            void stopServer().finally(() => process.exit(0));
+        };
+        for (const signal of ['SIGINT', 'SIGTERM'] as NodeJS.Signals[]) {
+            const handler = () => handleSignal(signal);
+            signalHandlers.push([signal, handler]);
+            process.once(signal, handler);
+        }
+    }
+
     return {
         port: server.port,
         stop: () => {
-            clearInterval(cleanupTimer);
-            try {
-                (server as { stop?: (closeIdleConnections?: boolean) => void }).stop?.(true);
-            } catch {
-                // Ignore stop errors during teardown.
+            for (const [signal, handler] of signalHandlers) {
+                process.off(signal, handler);
             }
+            void stopServer();
         },
     };
 }
 
-const isMainModule = typeof Bun !== 'undefined' && (import.meta as ImportMeta & { main?: boolean }).main === true;
-if (isMainModule) {
+if (IS_MAIN_MODULE) {
     startCloudServer().catch((err) => {
         logError('Failed to start server', err);
         process.exit(1);

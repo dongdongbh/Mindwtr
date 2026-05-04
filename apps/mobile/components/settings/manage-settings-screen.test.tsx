@@ -13,12 +13,18 @@ const storeState = vi.hoisted(() => ({
   areas: [
     { id: 'area-1', name: 'Design', order: 0, color: '#3b82f6' },
   ],
+  settings: {
+    appearance: {
+      density: 'compact',
+    },
+  },
   getDerivedState: () => ({
     allContexts: ['@office'],
     allTags: ['#design'],
   }),
   deleteArea: vi.fn().mockResolvedValue(undefined),
   updateArea: vi.fn().mockResolvedValue(undefined),
+  updateSettings: vi.fn().mockResolvedValue(undefined),
   deleteTag: vi.fn(),
   renameTag: vi.fn(),
   deleteContext: vi.fn(),
@@ -63,6 +69,7 @@ vi.mock('./settings.hooks', () => ({
         'settings.manage': 'Manage',
         'areas.manage': 'Manage areas',
         'contexts.title': 'Contexts',
+        'projects.changeColor': 'Change color',
         'projects.noArea': 'No area',
         'projects.noTags': 'No tags',
       }[key] ?? key),
@@ -86,6 +93,7 @@ describe('ManageSettingsScreen', () => {
     asyncStorageMocks.setItem.mockClear();
     storeState.deleteArea.mockClear();
     storeState.updateArea.mockClear();
+    storeState.updateSettings.mockClear();
     storeState.deleteTag.mockClear();
     storeState.renameTag.mockClear();
     storeState.deleteContext.mockClear();
@@ -132,5 +140,39 @@ describe('ManageSettingsScreen', () => {
       'mindwtr:settings:manage:openSections',
       JSON.stringify({ areas: true, contexts: false, tags: false }),
     );
+  });
+
+  it('stores the unassigned area color in appearance settings', async () => {
+    asyncStorageMocks.getItem.mockResolvedValue(JSON.stringify({ areas: true }));
+
+    let tree!: renderer.ReactTestRenderer;
+    await renderer.act(async () => {
+      tree = renderer.create(<ManageSettingsScreen />);
+      await flushEffects();
+    });
+
+    await renderer.act(async () => {
+      tree.root.findByProps({ testID: 'manage-unassigned-area-color' })
+        .findAll((node) => typeof node.props.onPress === 'function')[0]
+        .props.onPress();
+      await flushEffects();
+    });
+
+    await renderer.act(async () => {
+      tree.root.findByProps({ accessibilityLabel: 'Change color: #10b981' }).props.onPress();
+      await flushEffects();
+    });
+
+    await renderer.act(async () => {
+      tree.root.findByProps({ testID: 'manage-editor-save' }).props.onPress();
+      await flushEffects();
+    });
+
+    expect(storeState.updateSettings).toHaveBeenCalledWith({
+      appearance: {
+        density: 'compact',
+        unassignedAreaColor: '#10b981',
+      },
+    });
   });
 });

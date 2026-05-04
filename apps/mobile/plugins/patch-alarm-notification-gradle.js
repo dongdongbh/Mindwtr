@@ -201,10 +201,296 @@ const applyAlarmReceiverPatchToSource = (original) => {
 
 const applyAlarmReceiverPatch = (filePath) => patchFile(filePath, applyAlarmReceiverPatchToSource);
 
+const applyAlarmCompleteConstantsPatchToSource = (original) => {
+  if (original.includes('NOTIFICATION_ACTION_COMPLETE')) return original;
+  return original.replace(
+    '    static final String NOTIFICATION_ACTION_SNOOZE = "ACTION_SNOOZE";',
+    '    static final String NOTIFICATION_ACTION_SNOOZE = "ACTION_SNOOZE";\n    static final String NOTIFICATION_ACTION_COMPLETE = "ACTION_COMPLETE";'
+  );
+};
+
+const applyAlarmCompleteConstantsPatch = (filePath) => patchFile(filePath, applyAlarmCompleteConstantsPatchToSource);
+
+const applyAlarmCompleteUtilPatchToSource = (original) => {
+  let next = original;
+
+  if (!next.includes('NOTIFICATION_ACTION_COMPLETE')) {
+    next = next.replace(
+      'import static com.emekalites.react.alarm.notification.Constants.NOTIFICATION_ACTION_SNOOZE;',
+      'import static com.emekalites.react.alarm.notification.Constants.NOTIFICATION_ACTION_SNOOZE;\nimport static com.emekalites.react.alarm.notification.Constants.NOTIFICATION_ACTION_COMPLETE;'
+    );
+  }
+
+  if (next.includes('notificationActionComplete')) return next;
+
+  return next.replace(
+    `            if (alarm.isHasButton()) {
+                Intent dismissIntent = new Intent(mContext, AlarmReceiver.class);
+                dismissIntent.setAction(NOTIFICATION_ACTION_DISMISS);
+                dismissIntent.putExtra("AlarmId", alarm.getId());
+                PendingIntent pendingDismiss = PendingIntent.getBroadcast(mContext, notificationID, dismissIntent, getUpdateCurrentImmutableFlags());
+                NotificationCompat.Action dismissAction = new NotificationCompat.Action(android.R.drawable.ic_lock_idle_alarm, "DISMISS", pendingDismiss);
+                mBuilder.addAction(dismissAction);
+
+                Intent snoozeIntent = new Intent(mContext, AlarmReceiver.class);
+                snoozeIntent.setAction(NOTIFICATION_ACTION_SNOOZE);
+                snoozeIntent.putExtra("SnoozeAlarmId", alarm.getId());
+                PendingIntent pendingSnooze = PendingIntent.getBroadcast(mContext, notificationID, snoozeIntent, getUpdateCurrentImmutableFlags());
+                NotificationCompat.Action snoozeAction = new NotificationCompat.Action(R.drawable.ic_snooze, "SNOOZE", pendingSnooze);
+                mBuilder.addAction(snoozeAction);
+            }
+`,
+    `            if (alarm.isHasButton()) {
+                boolean hasCompleteAction = "true".equals(bundle.getString("notificationActionComplete"));
+                if (hasCompleteAction) {
+                    Intent completeIntent = new Intent(mContext, AlarmReceiver.class);
+                    completeIntent.setAction(NOTIFICATION_ACTION_COMPLETE);
+                    completeIntent.putExtra("AlarmId", alarm.getId());
+                    completeIntent.putExtras(bundle);
+                    PendingIntent pendingComplete = PendingIntent.getBroadcast(mContext, notificationID + 2, completeIntent, getUpdateCurrentImmutableFlags());
+                    NotificationCompat.Action completeAction = new NotificationCompat.Action(android.R.drawable.checkbox_on_background, "COMPLETE", pendingComplete);
+                    mBuilder.addAction(completeAction);
+                }
+
+                Intent snoozeIntent = new Intent(mContext, AlarmReceiver.class);
+                snoozeIntent.setAction(NOTIFICATION_ACTION_SNOOZE);
+                snoozeIntent.putExtra("SnoozeAlarmId", alarm.getId());
+                PendingIntent pendingSnooze = PendingIntent.getBroadcast(mContext, notificationID + 1, snoozeIntent, getUpdateCurrentImmutableFlags());
+                NotificationCompat.Action snoozeAction = new NotificationCompat.Action(R.drawable.ic_snooze, "SNOOZE", pendingSnooze);
+                mBuilder.addAction(snoozeAction);
+
+                Intent dismissIntent = new Intent(mContext, AlarmReceiver.class);
+                dismissIntent.setAction(NOTIFICATION_ACTION_DISMISS);
+                dismissIntent.putExtra("AlarmId", alarm.getId());
+                PendingIntent pendingDismiss = PendingIntent.getBroadcast(mContext, notificationID, dismissIntent, getUpdateCurrentImmutableFlags());
+                NotificationCompat.Action dismissAction = new NotificationCompat.Action(android.R.drawable.ic_lock_idle_alarm, "DISMISS", pendingDismiss);
+                mBuilder.addAction(dismissAction);
+            }
+`
+  );
+};
+
+const applyAlarmCompleteUtilPatch = (filePath) => patchFile(filePath, applyAlarmCompleteUtilPatchToSource);
+
+const applyAlarmCompleteReceiverPatchToSource = (original) => {
+  let next = original;
+
+  if (!next.includes('import android.os.Bundle;')) {
+    next = next.replace('import android.content.Intent;\n', 'import android.content.Intent;\nimport android.os.Bundle;\n');
+  }
+
+  if (next.includes('case Constants.NOTIFICATION_ACTION_COMPLETE')) return next;
+
+  return next.replace(
+    `                    case Constants.NOTIFICATION_ACTION_DISMISS:
+                        id = intent.getExtras().getInt("AlarmId");
+`,
+    `                    case Constants.NOTIFICATION_ACTION_COMPLETE:
+                        id = intent.getExtras().getInt("AlarmId");
+
+                        try {
+                            alarm = alarmDB.getAlarm(id);
+                            Bundle payload = new Bundle();
+                            if (intent.getExtras() != null) {
+                                payload.putAll(intent.getExtras());
+                            }
+                            payload.putString("id", String.valueOf(alarm.getId()));
+                            if (payload.getString("alarmKey") == null && payload.getString("taskId") != null) {
+                                payload.putString("alarmKey", "task:" + payload.getString("taskId"));
+                            }
+                            payload.putString("actionIdentifier", "complete");
+
+                            alarmUtil.removeFiredNotification(alarm.getId());
+                            alarmUtil.cancelAlarm(alarm, false);
+                            alarmUtil.stopAlarmSound();
+
+                            if (ANModule.getReactAppContext() != null) {
+                                ANModule.getReactAppContext().getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class).emit("OnNotificationOpened", BundleJSONConverter.convertToJSON(payload).toString());
+                            } else {
+                                Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
+                                if (launchIntent != null) {
+                                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                                    launchIntent.putExtras(payload);
+                                    context.startActivity(launchIntent);
+                                }
+                            }
+                        } catch (Exception e) {
+                            alarmUtil.stopAlarmSound();
+                            e.printStackTrace();
+                        }
+                        break;
+
+                    case Constants.NOTIFICATION_ACTION_DISMISS:
+                        id = intent.getExtras().getInt("AlarmId");
+`
+  );
+};
+
+const applyAlarmCompleteReceiverPatch = (filePath) => patchFile(filePath, applyAlarmCompleteReceiverPatchToSource);
+
 const getAndroidSourceCandidates = (projectRoot, fileName) => [
   path.join(projectRoot, 'node_modules', 'react-native-alarm-notification', 'android', 'src', 'main', 'java', 'com', 'emekalites', 'react', 'alarm', 'notification', fileName),
   path.join(projectRoot, '..', '..', 'node_modules', 'react-native-alarm-notification', 'android', 'src', 'main', 'java', 'com', 'emekalites', 'react', 'alarm', 'notification', fileName),
 ];
+
+const getIosSourceCandidates = (projectRoot) => [
+  path.join(projectRoot, 'node_modules', 'react-native-alarm-notification', 'ios', 'RnAlarmNotification.m'),
+  path.join(projectRoot, '..', '..', 'node_modules', 'react-native-alarm-notification', 'ios', 'RnAlarmNotification.m'),
+];
+
+const applyAlarmIosCompleteActionPatchToSource = (original) => {
+  let next = original;
+
+  if (!next.includes('pendingNotificationOpenPayload')) {
+    next = next.replace(
+      'static id _sharedInstance = nil;\n',
+      `static id _sharedInstance = nil;
+static NSMutableDictionary *pendingNotificationOpenPayload = nil;
+`
+    );
+  }
+
+  if (!next.includes('cachePendingNotificationOpenPayload')) {
+    next = next.replace(
+      'static NSString *stringify(NSDictionary *notification) {',
+      `static void cachePendingNotificationOpenPayload(NSDictionary *payload) {
+    @synchronized([RnAlarmNotification class]) {
+        pendingNotificationOpenPayload = [payload mutableCopy];
+    }
+}
+
+static NSString *stringify(NSDictionary *notification) {`
+    );
+  }
+
+  if (!next.includes('RCTFormatUNNotificationWithAction')) {
+    next = next.replace(
+      /API_AVAILABLE\(ios\(10\.0\)\)\nstatic NSDictionary \*RCTFormatUNNotification\(UNNotification \*notification\) \{[\s\S]*?\n\}\n\nstatic NSDateComponents \*parseDate/,
+      `API_AVAILABLE(ios(10.0))
+static NSDictionary *RCTFormatUNNotificationWithAction(UNNotification *notification, NSString *actionIdentifier) {
+    NSMutableDictionary *formattedNotification = [NSMutableDictionary dictionary];
+    UNNotificationContent *content = notification.request.content;
+
+    formattedNotification[@"id"] = notification.request.identifier;
+    formattedNotification[@"actionIdentifier"] = RCTNullIfNil(actionIdentifier);
+    formattedNotification[@"data"] = RCTNullIfNil([content.userInfo objectForKey:@"data"]);
+
+    return formattedNotification;
+}
+
+API_AVAILABLE(ios(10.0))
+static NSDictionary *RCTFormatUNNotification(UNNotification *notification) {
+    return RCTFormatUNNotificationWithAction(notification, @"open");
+}
+
+static NSDateComponents *parseDate`
+    );
+  }
+
+  if (!next.includes('RCT_EXPORT_METHOD(consumePendingNotificationOpenPayload')) {
+    next = next.replace(
+      'RCT_EXPORT_MODULE(RNAlarmNotification);\n',
+      `RCT_EXPORT_MODULE(RNAlarmNotification);
+
+RCT_EXPORT_METHOD(consumePendingNotificationOpenPayload:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+    @synchronized([RnAlarmNotification class]) {
+        if (pendingNotificationOpenPayload == nil) {
+            resolve([NSNull null]);
+            return;
+        }
+        NSDictionary *payload = [pendingNotificationOpenPayload copy];
+        pendingNotificationOpenPayload = nil;
+        resolve(payload);
+    }
+}
+`
+    );
+  }
+
+  next = next.replace(
+    /\+ \(void\)didReceiveNotificationResponse:\(UNNotificationResponse \*\)response\nAPI_AVAILABLE\(ios\(10\.0\)\) \{[\s\S]*?\n\}\n\n- \(void\)startObserving/,
+    `+ (void)didReceiveNotificationResponse:(UNNotificationResponse *)response
+API_AVAILABLE(ios(10.0)) {
+    NSLog(@"show notification");
+    [[UIApplication sharedApplication] setIdleTimerDisabled:NO];
+    NSString *mindwtrActionIdentifier = @"open";
+    if ([response.notification.request.content.categoryIdentifier isEqualToString:@"CUSTOM_ACTIONS"]) {
+       if ([response.actionIdentifier isEqualToString:@"COMPLETE_ACTION"]) {
+           mindwtrActionIdentifier = @"complete";
+           [RnAlarmNotification stopSound];
+           [[UNUserNotificationCenter currentNotificationCenter] removeDeliveredNotificationsWithIdentifiers:@[response.notification.request.identifier]];
+           [[UNUserNotificationCenter currentNotificationCenter] removePendingNotificationRequestsWithIdentifiers:@[response.notification.request.identifier]];
+       } else if ([response.actionIdentifier isEqualToString:@"SNOOZE_ACTION"]) {
+           mindwtrActionIdentifier = @"snooze";
+           [RnAlarmNotification snoozeAlarm:response.notification];
+       } else if ([response.actionIdentifier isEqualToString:@"DISMISS_ACTION"]) {
+           mindwtrActionIdentifier = @"dismiss";
+           NSLog(@"do dismiss");
+           [RnAlarmNotification stopSound];
+
+           NSMutableDictionary *notification = [NSMutableDictionary dictionary];
+           notification[@"id"] = response.notification.request.identifier;
+
+           [[NSNotificationCenter defaultCenter] postNotificationName:kLocalNotificationDismissed
+                                                               object:self
+                                                             userInfo:notification];
+       }
+    }
+
+    NSDictionary *formattedNotification = RCTFormatUNNotificationWithAction(response.notification, mindwtrActionIdentifier);
+    if ([mindwtrActionIdentifier isEqualToString:@"complete"]) {
+        cachePendingNotificationOpenPayload(formattedNotification);
+    }
+    [[NSNotificationCenter defaultCenter] postNotificationName:kLocalNotificationReceived
+                                                        object:self
+                                                      userInfo:formattedNotification];
+}
+
+- (void)startObserving`
+  );
+
+  next = next.replace(
+    /if\(\[has_button isEqualToNumber: \[NSNumber numberWithInt: 1\]\]\)\{\n                content\.categoryIdentifier = @"CUSTOM_ACTIONS";\n            \}/g,
+    'if([has_button isEqualToNumber: [NSNumber numberWithInt: 1]] || [[contentInfo.userInfo objectForKey:@"has_complete_action"] isEqualToNumber: [NSNumber numberWithInt: 1]]){\n                content.categoryIdentifier = @"CUSTOM_ACTIONS";\n            }'
+  );
+
+  next = next.replace(
+    /if\(\[details\[@"has_button"\] isEqualToNumber: \[NSNumber numberWithInt: 1\]\]\)\{\n                content\.categoryIdentifier = @"CUSTOM_ACTIONS";\n            \}/g,
+    'if([details[@"has_button"] isEqualToNumber: [NSNumber numberWithInt: 1]] || [details[@"has_complete_action"] isEqualToNumber: [NSNumber numberWithInt: 1]]){\n                content.categoryIdentifier = @"CUSTOM_ACTIONS";\n            }'
+  );
+
+  next = next.replace(
+    /@"has_button": \[contentInfo\.userInfo objectForKey:@"has_button"\],\n                @"schedule_type":/g,
+    '@"has_button": [contentInfo.userInfo objectForKey:@"has_button"],\n                @"has_complete_action": [contentInfo.userInfo objectForKey:@"has_complete_action"],\n                @"schedule_type":'
+  );
+
+  next = next.replace(
+    /@"has_button": details\[@"has_button"\],\n                @"schedule_type":/g,
+    '@"has_button": details[@"has_button"],\n                @"has_complete_action": details[@"has_complete_action"],\n                @"schedule_type":'
+  );
+
+  if (!next.includes('actionWithIdentifier:@"COMPLETE_ACTION"')) {
+    next = next.replace(
+      `        UNNotificationAction* snoozeAction = [UNNotificationAction
+              actionWithIdentifier:@"SNOOZE_ACTION"`,
+      `        UNNotificationAction* completeAction = [UNNotificationAction
+              actionWithIdentifier:@"COMPLETE_ACTION"
+              title:@"Complete"
+              options:UNNotificationActionOptionNone];
+
+        UNNotificationAction* snoozeAction = [UNNotificationAction
+              actionWithIdentifier:@"SNOOZE_ACTION"`
+    );
+    next = next.replace(
+      'actions:@[snoozeAction, stopAction]',
+      'actions:@[completeAction, snoozeAction, stopAction]'
+    );
+  }
+
+  return next;
+};
+
+const applyAlarmIosCompleteActionPatch = (filePath) => patchFile(filePath, applyAlarmIosCompleteActionPatchToSource);
 
 const logPatchedCandidate = (label, candidate) => {
   // eslint-disable-next-line no-console
@@ -321,7 +607,7 @@ function withAlarmNotificationGradlePatch(config) {
     return cfg;
   });
 
-  return withDangerousMod(withManifestEntries, [
+  const withAndroidPatches = withDangerousMod(withManifestEntries, [
     'android',
     async (cfg) => {
       const projectRoot = cfg.modRequest.projectRoot;
@@ -333,6 +619,7 @@ function withAlarmNotificationGradlePatch(config) {
       const alarmAudioCandidates = getAndroidSourceCandidates(projectRoot, 'AudioInterface.java');
       const dismissReceiverCandidates = getAndroidSourceCandidates(projectRoot, 'AlarmDismissReceiver.java');
       const alarmReceiverCandidates = getAndroidSourceCandidates(projectRoot, 'AlarmReceiver.java');
+      const alarmConstantsCandidates = getAndroidSourceCandidates(projectRoot, 'Constants.java');
 
       for (const candidate of gradleCandidates) {
         if (applyGradleCompatPatch(candidate)) {
@@ -350,6 +637,9 @@ function withAlarmNotificationGradlePatch(config) {
         }
         if (applyAlarmReminderBehaviorPatch(candidate)) {
           logPatchedCandidate('alarm-reminder-behavior-patch', candidate);
+        }
+        if (applyAlarmCompleteUtilPatch(candidate)) {
+          logPatchedCandidate('alarm-complete-action-util-patch', candidate);
         }
       }
 
@@ -369,6 +659,29 @@ function withAlarmNotificationGradlePatch(config) {
       for (const candidate of alarmReceiverCandidates) {
         if (applyAlarmReceiverPatch(candidate)) {
           logPatchedCandidate('alarm-receiver-patch', candidate);
+        }
+        if (applyAlarmCompleteReceiverPatch(candidate)) {
+          logPatchedCandidate('alarm-complete-action-receiver-patch', candidate);
+        }
+      }
+
+      for (const candidate of alarmConstantsCandidates) {
+        if (applyAlarmCompleteConstantsPatch(candidate)) {
+          logPatchedCandidate('alarm-complete-action-constants-patch', candidate);
+          break;
+        }
+      }
+      return cfg;
+    },
+  ]);
+
+  return withDangerousMod(withAndroidPatches, [
+    'ios',
+    async (cfg) => {
+      const projectRoot = cfg.modRequest.projectRoot;
+      for (const candidate of getIosSourceCandidates(projectRoot)) {
+        if (applyAlarmIosCompleteActionPatch(candidate)) {
+          logPatchedCandidate('alarm-ios-complete-action-patch', candidate);
           break;
         }
       }
@@ -386,4 +699,8 @@ module.exports.__testables = {
   applyAlarmAudioInterfacePatchToSource,
   applyAlarmDismissReceiverPatchToSource,
   applyAlarmReceiverPatchToSource,
+  applyAlarmCompleteConstantsPatchToSource,
+  applyAlarmCompleteUtilPatchToSource,
+  applyAlarmCompleteReceiverPatchToSource,
+  applyAlarmIosCompleteActionPatchToSource,
 };

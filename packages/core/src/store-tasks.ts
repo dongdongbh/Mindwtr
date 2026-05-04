@@ -5,6 +5,7 @@ import {
     applyTaskUpdates,
     buildSaveSnapshot,
     ensureDeviceId,
+    getNextDataChangeAt,
     getTaskOrder,
     getReferenceTaskFieldClears,
     isTaskVisible,
@@ -364,7 +365,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave }: TaskA
             return {
                 tasks: newVisibleTasks,
                 _allTasks: newAllTasks,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -454,7 +455,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave }: TaskA
             return {
                 tasks: updatedVisibleTasks,
                 _allTasks: updatedAllTasks,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -501,7 +502,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave }: TaskA
             return {
                 tasks: newVisibleTasks,
                 _allTasks: newAllTasks,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -545,7 +546,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave }: TaskA
             return {
                 tasks: newVisibleTasks,
                 _allTasks: newAllTasks,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -590,7 +591,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave }: TaskA
             return {
                 tasks: newVisibleTasks,
                 _allTasks: newAllTasks,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -632,7 +633,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave }: TaskA
             return {
                 tasks: state.tasks,
                 _allTasks: newAllTasks,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -706,7 +707,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave }: TaskA
             return {
                 tasks: newVisibleTasks,
                 _allTasks: newAllTasks,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -759,7 +760,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave }: TaskA
             return {
                 tasks: newVisibleTasks,
                 _allTasks: newAllTasks,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -876,7 +877,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave }: TaskA
             return {
                 tasks: newVisibleTasks,
                 _allTasks: newAllTasks,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -931,7 +932,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave }: TaskA
             return {
                 tasks: newVisibleTasks,
                 _allTasks: newAllTasks,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });

@@ -88,6 +88,7 @@ export type SyncCycleIO = {
     readLocal: () => Promise<AppData>;
     readRemote: () => Promise<AppData | null | undefined>;
     writeLocal: (data: AppData) => Promise<void>;
+    clearPendingRemoteWriteAfterLocalAbort?: (pendingAt: string) => Promise<void>;
     flushPendingLocalBeforeRetryRead?: () => Promise<void>;
     prepareRemoteWrite?: (data: AppData) => Promise<AppData | void>;
     writeRemote: (data: AppData) => Promise<void>;

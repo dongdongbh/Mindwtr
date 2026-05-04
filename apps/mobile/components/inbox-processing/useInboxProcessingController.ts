@@ -36,6 +36,7 @@ import { useLanguage } from '../../contexts/language-context';
 import { useTheme } from '../../contexts/theme-context';
 import { useToast } from '../../contexts/toast-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { getAssignedToSuggestions } from '../task-metadata-suggestions';
 import { buildAIConfig, isAIKeyRequired, loadAIKey } from '../../lib/ai-config';
 import { logWarn } from '../../lib/app-log';
 import { styles } from '../inbox-processing-modal.styles';
@@ -171,9 +172,10 @@ export function useInboxProcessingController({
   const totalCount = inboxTasks.length;
   const processedCount = totalCount - processingQueue.length + currentIndex;
   const formatProgressLabel = useCallback((current: number, total: number) => {
-    if (total <= 0) return 'Task 0 of 0';
-    return `Task ${Math.max(0, current)} of ${total}`;
-  }, []);
+    const taskLabel = t('common.tasks');
+    if (total <= 0) return `0/0 ${taskLabel}`;
+    return `${Math.max(0, current)}/${total} ${taskLabel}`;
+  }, [t]);
 
   const resolvedTitleDirection = useMemo(() => {
     if (!currentTask) return 'ltr';
@@ -219,17 +221,37 @@ export function useInboxProcessingController({
   }, [newContext, processingDescription, processingTitle]);
   const tokenDraft = newContext.trim();
   const tokenPrefix = tokenDraft.startsWith('#') ? '#' : tokenDraft.startsWith('@') ? '@' : '';
-  const tokenQuery = tokenPrefix ? tokenDraft.slice(1).toLowerCase() : '';
+  const tokenQuery = tokenDraft.replace(/^[@#]+/, '').trim().toLowerCase();
   const tokenSuggestions = useMemo(() => {
-    if (!tokenPrefix || tokenQuery.length === 0) return [];
-    const pool = tokenPrefix === '@' ? contextSuggestionPool : tagSuggestionPool;
-    const selected = new Set(tokenPrefix === '@' ? selectedContexts : selectedTags);
+    if (tokenQuery.length === 0) return [];
+    const pool = [
+      ...(tokenPrefix === '#' ? [] : showContextsField ? contextSuggestionPool : []),
+      ...(tokenPrefix === '@' ? [] : showTagsField ? tagSuggestionPool : []),
+    ];
+    const selected = new Set([...selectedContexts, ...selectedTags]);
     const normalizedQuery = tokenQuery.toLowerCase();
     return pool
       .filter((item) => !selected.has(item))
       .filter((item) => item.slice(1).toLowerCase().includes(normalizedQuery))
       .slice(0, MAX_TOKEN_SUGGESTIONS);
-  }, [contextSuggestionPool, selectedContexts, selectedTags, tagSuggestionPool, tokenPrefix, tokenQuery]);
+  }, [
+    contextSuggestionPool,
+    selectedContexts,
+    selectedTags,
+    showContextsField,
+    showTagsField,
+    tagSuggestionPool,
+    tokenPrefix,
+    tokenQuery,
+  ]);
+  const assignedToSuggestions = useMemo(
+    () => getAssignedToSuggestions(tasks, selectedAssignedTo, MAX_TOKEN_SUGGESTIONS),
+    [selectedAssignedTo, tasks],
+  );
+  const delegateWhoSuggestions = useMemo(
+    () => getAssignedToSuggestions(tasks, delegateWho, MAX_TOKEN_SUGGESTIONS),
+    [delegateWho, tasks],
+  );
   const contextCopilotSuggestions = useMemo(() => {
     const selected = new Set(selectedContexts);
     const candidates = contextSuggestionPool.filter((token) => !selected.has(token));
@@ -847,6 +869,7 @@ export function useInboxProcessingController({
     aiModal,
     applyTokenSuggestion,
     areaById,
+    assignedToSuggestions,
     closeAIModal,
     contextCopilotSuggestions,
     currentArea,
@@ -856,6 +879,7 @@ export function useInboxProcessingController({
     delegateFollowUpDate,
     delegateFollowUpDateOnly,
     delegateWho,
+    delegateWhoSuggestions,
     descriptionMaxHeight,
     displayDescription,
     executionChoice,

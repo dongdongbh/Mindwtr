@@ -34,7 +34,7 @@ This updates workspace package versions and bumps the Android `versionCode`.
 3. Run the release hard gates before tagging:
    - FOSS/static gate:
      - inspect `git diff vPREV..HEAD -- apps/mobile/package.json`
-     - inspect F-Droid/FOSS config files (`apps/mobile/plugins/android-manifest-fixes.js`, `apps/mobile/scripts/`, `.github/workflows/release-android-foss.yml`, `docs/izzyonandroid.yml`)
+     - inspect F-Droid/FOSS config files (`apps/mobile/plugins/android-manifest-fixes.js`, `apps/mobile/scripts/`, `.github/workflows/release-android-foss.yml`, `config/izzyonandroid.yml`)
      - run `python3 scripts/ci/repair-package-lock.py --check apps/desktop/package-lock.json`
    - CloudKit schema gate:
      - inspect synced schema files against the previous tag

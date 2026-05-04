@@ -60,6 +60,7 @@ export function useSettingsMainPage({
         settings?.appearance?.density === 'compact' ? 'compact' : 'comfortable'
     ) as MainPageProps['densityMode'];
     const textSizeMode = coerceDesktopTextSize(settings?.appearance?.textSize);
+    const showTaskAge = settings?.appearance?.showTaskAge === true;
     const dateFormat = normalizeDateFormatSetting(settings?.dateFormat);
     const timeFormat = normalizeTimeFormatSetting(settings?.timeFormat);
     const undoNotificationsEnabled = settings?.undoNotificationsEnabled !== false;
@@ -122,6 +123,17 @@ export function useSettingsMainPage({
         })
             .then(showSaved)
             .catch((error) => reportError('Failed to update text size', error));
+    }, [settings?.appearance, showSaved, updateSettings]);
+
+    const onShowTaskAgeChange = useCallback((enabled: boolean) => {
+        updateSettings({
+            appearance: {
+                ...(settings?.appearance ?? {}),
+                showTaskAge: enabled,
+            },
+        })
+            .then(showSaved)
+            .catch((error) => reportError('Failed to update task age display', error));
     }, [settings?.appearance, showSaved, updateSettings]);
 
     const onLanguageChange = useCallback((language: Language) => {
@@ -231,6 +243,7 @@ export function useSettingsMainPage({
         onKeybindingStyleChange,
         onLanguageChange,
         onOpenHelp: openHelp,
+        onShowTaskAgeChange,
         onTextSizeChange,
         onThemeChange,
         onTimeFormatChange,
@@ -239,6 +252,7 @@ export function useSettingsMainPage({
         onWeekStartChange,
         onWindowDecorationsChange,
         showCloseBehavior: isTauri && !isFlatpak,
+        showTaskAge,
         showTrayToggle: isTauri && !isFlatpak,
         showWindowDecorations: isLinux,
         textSizeMode,

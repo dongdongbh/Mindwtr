@@ -10,7 +10,7 @@
 
 *GTD 新手？可阅读 [15 分钟入门 GTD](https://hamberg.no/gtd)。*
 
-[立即安装](#安装) · [快速开始](https://github.com/dongdongbh/Mindwtr/wiki/Getting-Started) · [数据与同步](https://github.com/dongdongbh/Mindwtr/wiki/Data-and-Sync) · [云同步](https://github.com/dongdongbh/Mindwtr/wiki/Cloud-Sync) · [MCP 服务器](https://github.com/dongdongbh/Mindwtr/wiki/MCP-Server)
+[立即安装](#安装) · [快速开始](https://github.com/dongdongbh/Mindwtr/wiki/Getting-Started) · [数据与同步](https://github.com/dongdongbh/Mindwtr/wiki/Data-and-Sync) · [云端部署](https://github.com/dongdongbh/Mindwtr/wiki/Cloud-Deployment) · [MCP 服务器](https://github.com/dongdongbh/Mindwtr/wiki/MCP-Server)
 
 [![CI](https://github.com/dongdongbh/Mindwtr/actions/workflows/ci.yml/badge.svg)](https://github.com/dongdongbh/Mindwtr/actions/workflows/ci.yml)
 [![GitHub license](https://img.shields.io/github/license/dongdongbh/Mindwtr?color=brightgreen)](LICENSE)
@@ -113,7 +113,7 @@ Mindwtr **默认简单，需要时也足够强大**。我们专注于降低认�
 <summary>查看完整功能列表</summary>
 
 ### GTD 工作流
-- **收集** - 随时快速添加任务（全局快捷键、托盘、分享、语音）
+- **收集** - 随时快速添加任务（全局快捷键弹窗、托盘、分享、语音）
 - **澄清** - 2 分钟法则引导的收件箱处理
 - **组织** - 项目、分区、情境与状态清单
 - **回顾** - 带提醒的每周回顾向导
@@ -127,13 +127,13 @@ Mindwtr **默认简单，需要时也足够强大**。我们专注于降低认�
 - 🏷️ **情境** - 支持父级匹配的斜杠式情境（@work/meetings）
 - ⏳ **等待中** - 委派事项
 - 💭 **将来/也许** - 延后想法
-- 📅 **日历** - 基于时间的规划
+- 📅 **日历** - 基于时间的规划，移动端周视图密度可调
 - 📋 **看板** - 看板式拖拽
 - 📝 **回顾** - 每日 + 每周回顾流程
 - 📦 **归档** - 隐藏历史，按需搜索
 
 ### 生产力功能
-- 🔍 **全局搜索** - 搜索操作符（status:, context:, assigned:, due:<=7d）
+- 🔍 **全局搜索** - 全领域搜索，并支持搜索操作符（status:, context:, assigned:, due:<=7d）
 - 📦 **批量操作** - 多选、批量移动/打标签/删除
 - 📎 **附件** - 任务支持文件与链接
 - ✏️ **Markdown 备注** - 富文本描述与预览
@@ -143,8 +143,8 @@ Mindwtr **默认简单，需要时也足够强大**。我们专注于降低认�
 - ✅ **清单模式** - 清单任务快速勾选
 - ✅ **语音收集** - 语音快速记录、自动转写并创建任务
 - 🧭 **Copilot 建议** - 可选的情境/标签/时间提示
-- 🍅 **番茄专注（可选）** - 在聚焦视图使用 15/3、25/5、50/10 番茄钟面板
-- 🔔 **通知** - 截止提醒与稍后提醒
+- 🍅 **番茄专注（可选）** - 在聚焦视图使用 15/3、25/5、50/10 番茄钟面板，并可添加一个自定义预设
+- 🔔 **通知** - 开始提醒与截止提醒分开设置，并支持稍后提醒
 - 📊 **每日摘要** - 早间简报 + 晚间回顾
 - 📅 **每周回顾** - 可定制的每周提醒
 
@@ -358,8 +358,9 @@ Mindwtr 的发展离不开用户与贡献者的支持，感谢大家一起把它
 - 🚀 [快速开始](https://github.com/dongdongbh/Mindwtr/wiki/Getting-Started)
 - ❓ [FAQ](https://github.com/dongdongbh/Mindwtr/wiki/FAQ)
 - 🔄 [数据与同步](https://github.com/dongdongbh/Mindwtr/wiki/Data-and-Sync)
-- ☁️ [云同步](https://github.com/dongdongbh/Mindwtr/wiki/Cloud-Sync)
+- 🔗 [Markdown 链接](https://github.com/dongdongbh/Mindwtr/wiki/Markdown-Links)
 - 🛠️ [云端部署](https://github.com/dongdongbh/Mindwtr/wiki/Cloud-Deployment)
+- ☁️ [云端 API](https://github.com/dongdongbh/Mindwtr/wiki/Cloud-API)
 - 🧠 [MCP 服务器](https://github.com/dongdongbh/Mindwtr/wiki/MCP-Server)
 - 📝 [版本说明索引](docs/release-notes/README.md)
 

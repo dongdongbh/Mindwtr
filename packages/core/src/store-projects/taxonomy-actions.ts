@@ -1,4 +1,4 @@
-import { buildSaveSnapshot, ensureDeviceId, normalizeRevision, normalizeTagId, selectVisibleTasks } from '../store-helpers';
+import { buildSaveSnapshot, ensureDeviceId, getNextDataChangeAt, normalizeRevision, normalizeTagId, selectVisibleTasks } from '../store-helpers';
 import type { ProjectActionContext, TaxonomyActions } from './shared';
 import { dedupeTagValuesLastWins, formatTagIdPreservingCase } from './shared';
 
@@ -53,7 +53,7 @@ export const createTaxonomyActions = ({
                 projects: newVisibleProjects,
                 _allTasks: newAllTasks,
                 _allProjects: newAllProjects,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -116,7 +116,7 @@ export const createTaxonomyActions = ({
                 projects: newVisibleProjects,
                 _allTasks: newAllTasks,
                 _allProjects: newAllProjects,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -155,7 +155,7 @@ export const createTaxonomyActions = ({
             return {
                 tasks: newVisibleTasks,
                 _allTasks: newAllTasks,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -205,7 +205,7 @@ export const createTaxonomyActions = ({
             return {
                 tasks: newVisibleTasks,
                 _allTasks: newAllTasks,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });

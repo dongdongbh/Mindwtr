@@ -1,7 +1,7 @@
 import { Link, Tabs } from 'expo-router';
 import { CommonActions } from '@react-navigation/native';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { Search, Inbox, ArrowRightCircle, Folder, Menu, Mic, Plus } from 'lucide-react-native';
+import { Search, Inbox, ArrowRightCircle, ClipboardCheck, Folder, Menu, Mic, Plus } from 'lucide-react-native';
 import { Platform, StyleSheet, TouchableOpacity, View, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCallback, useRef, useState } from 'react';
@@ -9,6 +9,7 @@ import { useCallback, useRef, useState } from 'react';
 import { HapticTab } from '@/components/haptic-tab';
 import { MobileAreaSwitcher } from '@/components/mobile-area-switcher';
 import { MobileHeaderSyncBar } from '@/components/mobile-header-sync-bar';
+import { SyncActivityIndicator } from '@/components/SyncActivityIndicator';
 import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
 import { useMobileSyncBadge } from '@/hooks/use-mobile-sync-badge';
 import { useThemeColors } from '@/hooks/use-theme-colors';
@@ -46,7 +47,7 @@ function NativeTabBar({
   menuSyncIndicatorColor?: string;
 }) {
   const longPressRef = useRef(false);
-  const visibleTabNames = new Set(['inbox', 'focus', 'capture', 'projects', 'menu']);
+  const visibleTabNames = new Set(['inbox', 'focus', 'capture', 'review-tab', 'menu']);
   const visibleRoutes = state.routes.filter((route) => visibleTabNames.has(route.name));
 
   return (
@@ -369,6 +370,15 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="review-tab"
+        options={{
+          title: t('tab.review'),
+          tabBarIcon: ({ color, focused }) => (
+            <ClipboardCheck size={focused ? 26 : 24} color={color} strokeWidth={2} opacity={focused ? 1 : 0.8} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="menu"
         options={{
           title: t('tab.menu'),
@@ -381,6 +391,7 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
+    <SyncActivityIndicator />
     <QuickCaptureSheet
       visible={captureState.visible}
       initialValue={captureState.initialValue}

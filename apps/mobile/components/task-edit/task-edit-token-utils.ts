@@ -18,11 +18,12 @@ export const parseTokenList = (value: string | undefined, tokenPrefix: '@' | '#'
     return Array.from(new Set(tokens));
 };
 
-export const getActiveTokenQuery = (value: string | undefined, tokenPrefix: '@' | '#'): string => {
+export const getActiveTokenQuery = (value: string | undefined, _tokenPrefix: '@' | '#'): string => {
     if (!value) return '';
     const draft = value.split(',').pop()?.trim() ?? '';
-    if (!draft.startsWith(tokenPrefix)) return '';
-    return draft.slice(1).trim().toLowerCase();
+    const stripped = draft.replace(/^[@#]+/, '').trim();
+    if (!stripped) return '';
+    return stripped.toLowerCase();
 };
 
 export const replaceTrailingToken = (value: string | undefined, token: string): string => {

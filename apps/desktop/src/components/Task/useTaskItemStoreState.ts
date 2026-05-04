@@ -10,12 +10,14 @@ type UseTaskItemStoreStateParams = {
     task: Task;
     propProject?: Project;
     isEditing: boolean;
+    hasQuickActionMenu?: boolean;
 };
 
-export const useTaskItemStoreState = ({ task, propProject, isEditing }: UseTaskItemStoreStateParams) =>
+export const useTaskItemStoreState = ({ task, propProject, isEditing, hasQuickActionMenu = false }: UseTaskItemStoreStateParams) =>
     useTaskStore(
         (state) => {
             const derived = state.getDerivedState();
+            const includePickers = isEditing || hasQuickActionMenu;
             const project = propProject ?? (task.projectId ? derived.projectMap.get(task.projectId) : undefined);
             const projectArea = project?.areaId
                 ? state.areas.find((area) => area.id === project.areaId)
@@ -30,7 +32,7 @@ export const useTaskItemStoreState = ({ task, propProject, isEditing }: UseTaskI
             moveTask: state.moveTask,
             projects: isEditing ? state.projects : EMPTY_PROJECTS,
             sections: isEditing ? state.sections : EMPTY_SECTIONS,
-            areas: isEditing ? state.areas : EMPTY_AREAS,
+            areas: includePickers ? state.areas : EMPTY_AREAS,
             project,
             projectArea,
             taskArea,

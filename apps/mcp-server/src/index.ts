@@ -23,11 +23,7 @@ type LogEntry = {
 
 const writeLog = (entry: LogEntry) => {
   const line = `${JSON.stringify(entry)}\n`;
-  if (entry.level === 'error') {
-    process.stderr.write(line);
-  } else {
-    process.stdout.write(line);
-  }
+  process.stderr.write(line);
 };
 
 const logError = (message: string, error?: unknown) => {

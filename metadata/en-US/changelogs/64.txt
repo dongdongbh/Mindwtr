@@ -1,0 +1,3 @@
+Focus and scheduling are clearer with hidden future-start tasks, optional Pomodoro task linking, split start and due reminders, and adjustable week density.
+Task reminders can be completed from notifications, local notification rescheduling is capped, and sync errors stay visible.
+Settings, review controls, context selection, calendar swipes, and delete undo are smoother.

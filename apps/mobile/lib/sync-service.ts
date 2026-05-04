@@ -476,7 +476,7 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
         const storedCloudProvider = (await getCachedConfigValue(CLOUD_PROVIDER_KEY))?.trim() ?? null;
         cloudProvider = resolveCloudProvider(storedCloudProvider);
         if (!DROPBOX_SYNC_ENABLED && storedCloudProvider === CLOUD_PROVIDER_DROPBOX) {
-          logSyncInfo('Dropbox cloud provider disabled in FOSS build; using self-hosted backend');
+          throw new Error('Dropbox sync is unavailable in this build. Choose Self-hosted Cloud or install the Dropbox-enabled build.');
         }
         if (cloudProvider === CLOUD_PROVIDER_DROPBOX) {
           dropboxClientId = getDropboxAppKey();
@@ -760,6 +760,20 @@ const mobileSyncOrchestrator = createSyncOrchestrator<string | undefined, Mobile
         writeLocal: async (data) => {
           ensureLocalSnapshotFresh();
           await mobileStorage.saveData(data);
+          wroteLocal = true;
+        },
+        clearPendingRemoteWriteAfterLocalAbort: async (pendingAt) => {
+          const current = getInMemoryAppDataSnapshot();
+          if (current.settings.pendingRemoteWriteAt && current.settings.pendingRemoteWriteAt !== pendingAt) return;
+          await mobileStorage.saveData({
+            ...current,
+            settings: {
+              ...current.settings,
+              pendingRemoteWriteAt: undefined,
+              pendingRemoteWriteRetryAt: undefined,
+              pendingRemoteWriteAttempts: undefined,
+            },
+          });
           wroteLocal = true;
         },
         flushPendingLocalBeforeRetryRead: flushPendingSave,

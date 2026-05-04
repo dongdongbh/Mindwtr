@@ -194,13 +194,23 @@ export function parsePagination(searchParams: URLSearchParams): { limit: number;
     return { limit, offset };
 }
 
-export function jsonResponse(body: unknown, init: ResponseInit = {}) {
-    const headers = new Headers(init.headers);
-    headers.set('Content-Type', 'application/json; charset=utf-8');
+const applyCorsHeaders = (headers: Headers): Headers => {
     headers.set('Access-Control-Allow-Origin', corsOrigin);
     headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
     headers.set('Access-Control-Allow-Methods', 'GET,PUT,POST,PATCH,DELETE,OPTIONS');
+    return headers;
+};
+
+export function jsonResponse(body: unknown, init: ResponseInit = {}) {
+    const headers = new Headers(init.headers);
+    headers.set('Content-Type', 'application/json; charset=utf-8');
+    applyCorsHeaders(headers);
     return new Response(JSON.stringify(body, null, 2), { ...init, headers });
+}
+
+export function preflightResponse(init: ResponseInit = {}) {
+    const headers = applyCorsHeaders(new Headers(init.headers));
+    return new Response(null, { status: 204, ...init, headers });
 }
 
 export function errorResponse(message: string, status = 400) {

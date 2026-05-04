@@ -37,6 +37,10 @@ export interface Recurrence {
     count?: number; // Total occurrences in the series, including the current task
     until?: string; // ISO date/datetime when the series should stop
     completedOccurrences?: number; // Internal counter used to preserve COUNT across generated tasks
+    anchorDay?: number; // Original day-of-month anchor for clamped monthly/yearly recurrences
+    startAnchorDay?: number; // Field-specific anchor for startTime when it differs from dueDate
+    dueAnchorDay?: number; // Field-specific anchor for dueDate
+    reviewAnchorDay?: number; // Field-specific anchor for reviewAt
     rrule?: string; // Optional RFC 5545 fragment (e.g. FREQ=WEEKLY;BYDAY=MO,WE)
 }
 
@@ -231,11 +235,15 @@ export interface AppData {
             weeklyReview?: {
                 includeContextStep?: boolean;
             };
+            dailyReview?: {
+                includeFocusStep?: boolean;
+            };
             pomodoro?: {
                 customDurations?: {
                     focusMinutes?: number;
                     breakMinutes?: number;
                 };
+                linkTask?: boolean;
                 autoStartBreaks?: boolean;
                 autoStartFocus?: boolean;
             };
@@ -252,6 +260,9 @@ export interface AppData {
         appearance?: {
             density?: 'comfortable' | 'compact';
             textSize?: 'default' | 'large' | 'extra-large';
+            showTaskAge?: boolean;
+            showFutureStarts?: boolean;
+            unassignedAreaColor?: string;
         };
         theme?: 'light' | 'dark' | 'system' | 'eink' | 'nord' | 'sepia' | 'material3-light' | 'material3-dark' | 'oled';
         language?: 'en' | 'zh' | 'zh-Hant' | 'es' | 'hi' | 'ar' | 'de' | 'ru' | 'ja' | 'fr' | 'pt' | 'pl' | 'ko' | 'it' | 'tr' | 'nl' | 'system';
@@ -263,6 +274,7 @@ export interface AppData {
         externalCalendars?: ExternalCalendarSubscription[];
         calendar?: {
             viewMode?: 'month' | 'day' | 'week' | 'schedule';
+            weekVisibleDays?: number;
         };
         keybindingStyle?: 'vim' | 'emacs';
         globalQuickAddShortcut?: string;
@@ -273,6 +285,8 @@ export interface AppData {
         };
         notificationsEnabled?: boolean;
         undoNotificationsEnabled?: boolean;
+        startDateNotificationsEnabled?: boolean;
+        dueDateNotificationsEnabled?: boolean;
         reviewAtNotificationsEnabled?: boolean;
         dailyDigestMorningEnabled?: boolean;
         dailyDigestMorningTime?: string; // HH:mm

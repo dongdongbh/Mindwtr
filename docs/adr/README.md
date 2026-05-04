@@ -15,6 +15,9 @@ This folder contains small, focused decision documents that explain **why** we m
 - [ADR 0009: SQLite as primary store, JSON as sync snapshot bridge](0009-sqlite-json-sync-bridge.md)
 - [ADR 0010: Self-hosted cloud sync server](0010-self-hosted-cloud-sync-server.md)
 - [ADR 0011: Attachment sync model](0011-attachment-sync-model.md)
+- [ADR 0012: Area soft-delete cascade](0012-area-soft-delete-cascade.md)
+- [ADR 0013: Split start and due reminders](0013-start-due-reminder-split.md)
+- [ADR 0014: Shared sync orchestration ports](0014-sync-orchestration-ports.md)
 
 ## Template
 

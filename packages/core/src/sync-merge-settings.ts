@@ -243,13 +243,28 @@ export const sanitizeMergedSettingsForSync = (
             };
             didSanitizeAppearance = true;
         }
+        const appearanceWithTextSize = next.appearance;
+        if (
+            appearanceWithTextSize
+            && appearanceWithTextSize.showFutureStarts !== undefined
+            && typeof appearanceWithTextSize.showFutureStarts !== 'boolean'
+        ) {
+            next.appearance = {
+                ...fallbackAppearance,
+                ...appearanceWithTextSize,
+                showFutureStarts: localSettings.appearance?.showFutureStarts,
+            };
+            if (next.appearance.showFutureStarts === undefined) {
+                delete next.appearance.showFutureStarts;
+            }
+            didSanitizeAppearance = true;
+        }
 
         const finalAppearance = next.appearance;
         if (
             didSanitizeAppearance
             && finalAppearance
-            && finalAppearance.density === undefined
-            && finalAppearance.textSize === undefined
+            && Object.values(finalAppearance).every((value) => value === undefined)
         ) {
             next.appearance = Object.keys(fallbackAppearance).length > 0 ? next.appearance : undefined;
         }

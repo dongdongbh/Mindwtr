@@ -12,7 +12,7 @@ Mindwtr maps directly to GTD concepts:
 | ------------- | -------------------------------------- |
 | Inbox         | Inbox view                             |
 | Clarify       | Processing wizard                      |
-| Next Actions  | Focus view (Next Actions list)         |
+| Next Actions  | Focus view for available actions; Contexts/Projects/Search for full inventory |
 | Projects      | Projects view                          |
 | Waiting For   | Waiting For view (status: `waiting`)   |
 | Someday/Maybe | Someday/Maybe view (status: `someday`) |
@@ -137,7 +137,7 @@ Create projects for multi-step outcomes:
 ### Starting the Review
 
 - **Desktop:** Go to Weekly Review in sidebar
-- **Mobile:** Tap Review tab or access from drawer
+- **Mobile:** Tap the Review tab in the bottom bar
 
 ### The Steps
 
@@ -176,6 +176,8 @@ Use the **Focus** view to see:
 - Next Actions (context-filtered or general)
 - Overdue items
 - Due today
+
+Focus is not a full inventory view. It hides future-start tasks and later tasks in sequential projects so the list reflects actions that are available now. Use **Contexts**, **Projects**, or **Search** when you need to inspect all next actions, including deferred or blocked items.
 
 ### Context Filtering
 

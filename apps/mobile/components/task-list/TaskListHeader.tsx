@@ -98,7 +98,9 @@ export function TaskListHeader({
           </View>
         </View>
       ) : headerAccessory ? (
-        <View style={styles.headerAccessoryRow}>{headerAccessory}</View>
+        <View style={styles.headerAccessoryRow}>
+          {headerAccessory}
+        </View>
       ) : null}
 
       {showTimeEstimateFilters && (

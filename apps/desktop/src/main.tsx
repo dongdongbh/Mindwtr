@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
+import { QuickAddWindowApp } from './QuickAddWindowApp.tsx';
 import './index.css';
 
 import { type AppData, consoleLogger, generateUUID, sendDailyHeartbeat, setLogger, setStorageAdapter, SQLITE_SCHEMA_VERSION } from '@mindwtr/core';
@@ -13,6 +14,7 @@ import { isDiagnosticsEnabled, logError, logInfo, logWarn, setupGlobalErrorLoggi
 import { THEME_STORAGE_KEY, applyThemeMode, coerceDesktopThemeMode, resolveNativeTheme } from './lib/theme';
 import { TEXT_SIZE_STORAGE_KEY, applyDesktopTextSize, coerceDesktopTextSize } from './lib/text-size';
 import { loadStoredFullscreen } from './lib/window-state';
+import { isQuickAddWindowLocation } from './lib/quick-add-window';
 
 const ANALYTICS_DISTINCT_ID_KEY = 'mindwtr-analytics-distinct-id';
 const ANALYTICS_HEARTBEAT_URL = String(import.meta.env.VITE_ANALYTICS_HEARTBEAT_URL || '').trim();
@@ -226,6 +228,7 @@ const diagnosticsEnabled = isDiagnosticsEnabled();
 if (diagnosticsEnabled) {
     setupGlobalErrorLogging();
 }
+const isQuickAddWindow = isQuickAddWindowLocation();
 
 const nativeTheme = resolveNativeTheme(savedTheme);
 if (isTauriRuntime()) {
@@ -266,22 +269,28 @@ async function restoreFullscreenState() {
 async function bootstrap() {
     await initStorage();
     setupGlobalErrorLogging();
-    await logDesktopStartupContext().catch(() => undefined);
-    await restoreFullscreenState();
+    if (!isQuickAddWindow) {
+        await logDesktopStartupContext().catch(() => undefined);
+        await restoreFullscreenState();
+    }
 
-    if (!isTauriRuntime() && 'serviceWorker' in navigator) {
+    if (!isQuickAddWindow && !isTauriRuntime() && 'serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js').catch(() => undefined);
     }
+
+    const RootApp = isQuickAddWindow ? QuickAddWindowApp : App;
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
         <React.StrictMode>
             <LanguageProvider>
-                <App />
+                <RootApp />
             </LanguageProvider>
         </React.StrictMode>,
     );
 
-    void sendDesktopHeartbeat();
+    if (!isQuickAddWindow) {
+        void sendDesktopHeartbeat();
+    }
 }
 
 bootstrap().catch((error) => reportError('Failed to start app', error));

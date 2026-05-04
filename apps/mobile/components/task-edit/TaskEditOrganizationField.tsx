@@ -19,7 +19,9 @@ type TaskEditOrganizationFieldProps = TaskEditFieldRendererProps & {
 };
 
 export function TaskEditOrganizationField({
+    applyAssignedToSuggestion,
     areas,
+    assignedToSuggestions,
     availableStatusOptions,
     editedTask,
     energyLevelOptions,
@@ -220,6 +222,22 @@ export function TaskEditOrganizationField({
                         accessibilityLabel={t('taskEdit.assignedTo')}
                         accessibilityHint={t('taskEdit.assignedToPlaceholder')}
                     />
+                    {assignedToSuggestions.length > 0 && (
+                        <View style={[styles.tokenSuggestionsMenu, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
+                            {assignedToSuggestions.map((name, index) => (
+                                <TouchableOpacity
+                                    key={name}
+                                    style={[
+                                        styles.tokenSuggestionItem,
+                                        index === assignedToSuggestions.length - 1 ? styles.tokenSuggestionItemLast : null,
+                                    ]}
+                                    onPress={() => applyAssignedToSuggestion(name)}
+                                >
+                                    <Text style={[styles.tokenSuggestionText, { color: tc.text }]}>{name}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    )}
                 </View>
             );
         case 'timeEstimate':

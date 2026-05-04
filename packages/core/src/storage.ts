@@ -15,9 +15,13 @@ export type SearchTaskResult = Pick<
 
 export type SearchProjectResult = Pick<Project, 'id' | 'title' | 'status' | 'areaId'>;
 
+export const SEARCH_RESULT_LIMIT = 200;
+
 export type SearchResults = {
     tasks: SearchTaskResult[];
     projects: SearchProjectResult[];
+    limited?: boolean;
+    limit?: number;
 };
 
 export interface StorageAdapter {

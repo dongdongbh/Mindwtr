@@ -19,6 +19,7 @@ import {
 } from 'date-fns';
 import {
     CALENDAR_TIME_ESTIMATE_OPTIONS,
+    DEFAULT_CALENDAR_DAY_START_HOUR,
     findFreeSlotForDay as findCalendarFreeSlotForDay,
     isSlotFreeForDay as isCalendarSlotFreeForDay,
     isTaskInActiveProject,
@@ -44,8 +45,8 @@ import { fallbackHashString } from '../../../lib/sync-service-utils';
 import { reportError } from '../../../lib/report-error';
 import { getCalendarMonthNames, getCalendarWeekdayHeaders, resolveCalendarLocale } from '../calendar-locale';
 
-export const DESKTOP_DAY_START_HOUR = 8;
-export const DESKTOP_DAY_END_HOUR = 23;
+export const DESKTOP_DAY_START_HOUR = 0;
+export const DESKTOP_DAY_END_HOUR = 24;
 export const DESKTOP_HOUR_HEIGHT = 56;
 export const DESKTOP_GRID_SNAP_MINUTES = 15;
 
@@ -584,7 +585,7 @@ export function useDesktopCalendarController() {
         const durationMinutes = normalizeDurationMinutes(selectedTask ? timeEstimateToMinutes(selectedTask.timeEstimate) : 30);
         const slot = findFreeSlotForDay(date, durationMinutes, selectedTask?.id);
         const fallback = new Date(date);
-        fallback.setHours(DESKTOP_DAY_START_HOUR, 0, 0, 0);
+        fallback.setHours(DEFAULT_CALENDAR_DAY_START_HOUR, 0, 0, 0);
         openTaskComposerAt(slot ?? fallback, {
             durationMinutes,
             mode: options?.mode,

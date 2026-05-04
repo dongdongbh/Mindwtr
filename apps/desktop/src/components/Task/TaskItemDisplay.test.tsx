@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render } from '@testing-library/react';
 import type { Task } from '@mindwtr/core';
 import { useTaskStore } from '@mindwtr/core';
@@ -25,8 +25,45 @@ describe('TaskItemDisplay', () => {
         });
     });
 
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
     it('renders task age in Chinese when language is zh', () => {
         const { getByText } = render(
+            <LanguageProvider>
+                <TaskItemDisplay
+                    task={baseTask}
+                    language="zh"
+                    selectionMode={false}
+                    isViewOpen={false}
+                    actions={{
+                        onToggleView: vi.fn(),
+                        onEdit: vi.fn(),
+                        onDelete: vi.fn(),
+                        onDuplicate: vi.fn(),
+                        onStatusChange: vi.fn(),
+                        openAttachment: vi.fn(),
+                    }}
+                    visibleAttachments={[]}
+                    recurrenceRule=""
+                    recurrenceStrategy="strict"
+                    prioritiesEnabled={false}
+                    timeEstimatesEnabled={false}
+                    isStagnant={false}
+                    showQuickDone={false}
+                    showTaskAge
+                    readOnly={false}
+                    t={(key: string) => key}
+                />
+            </LanguageProvider>
+        );
+
+        expect(getByText('2周前')).toBeInTheDocument();
+    });
+
+    it('hides task age by default', () => {
+        const { queryByText } = render(
             <LanguageProvider>
                 <TaskItemDisplay
                     task={baseTask}
@@ -54,7 +91,7 @@ describe('TaskItemDisplay', () => {
             </LanguageProvider>
         );
 
-        expect(getByText('2周前')).toBeInTheDocument();
+        expect(queryByText('2周前')).not.toBeInTheDocument();
     });
 
     it('only renders the task description when the row is expanded', () => {
@@ -175,6 +212,46 @@ describe('TaskItemDisplay', () => {
         );
 
         expect(getByRole('button', { name: 'Referenced task' })).toBeInTheDocument();
+    });
+
+    it('opens external URL notes from expanded task details', () => {
+        const open = vi.fn(() => ({}));
+        vi.stubGlobal('open', open);
+
+        const { getByRole } = render(
+            <LanguageProvider>
+                <TaskItemDisplay
+                    task={{
+                        ...baseTask,
+                        description: 'https://example.com',
+                    }}
+                    language="en"
+                    selectionMode={false}
+                    isViewOpen
+                    actions={{
+                        onToggleView: vi.fn(),
+                        onEdit: vi.fn(),
+                        onDelete: vi.fn(),
+                        onDuplicate: vi.fn(),
+                        onStatusChange: vi.fn(),
+                        openAttachment: vi.fn(),
+                    }}
+                    visibleAttachments={[]}
+                    recurrenceRule=""
+                    recurrenceStrategy="strict"
+                    prioritiesEnabled={false}
+                    timeEstimatesEnabled={false}
+                    isStagnant={false}
+                    showQuickDone={false}
+                    readOnly={false}
+                    t={(key: string) => key}
+                />
+            </LanguageProvider>
+        );
+
+        fireEvent.click(getByRole('link', { name: 'https://example.com' }));
+
+        expect(open).toHaveBeenCalledWith('https://example.com', '_blank', 'noopener,noreferrer');
     });
 
     it('renders inline image attachment previews in expanded details', () => {

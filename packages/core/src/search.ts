@@ -2,7 +2,7 @@ import { addDays, addMonths, addWeeks, addYears, endOfDay, isAfter, isBefore, is
 import { safeParseDate, safeParseDueDate } from './date';
 import { matchesHierarchicalToken, normalizePrefixedToken } from './hierarchy-utils';
 import { normalizeTaskStatus, TASK_STATUS_SET } from './task-status';
-import type { SearchResults } from './storage';
+import { SEARCH_RESULT_LIMIT, type SearchResults } from './storage';
 import type { Project, Task } from './types';
 
 export type SearchComparator = '<' | '<=' | '>' | '>=' | '=';
@@ -280,8 +280,13 @@ export function filterProjectsBySearch(projects: Project[], query: string, now: 
 }
 
 export function searchAll(tasks: Task[], projects: Project[], query: string, now: Date = new Date()): SearchResults {
+    const matchedProjects = filterProjectsBySearch(projects, query, now);
+    const matchedTasks = filterTasksBySearch(tasks, projects, query, now);
+    const limited = matchedProjects.length > SEARCH_RESULT_LIMIT || matchedTasks.length > SEARCH_RESULT_LIMIT;
     return {
-        tasks: filterTasksBySearch(tasks, projects, query, now),
-        projects: filterProjectsBySearch(projects, query, now),
+        tasks: matchedTasks.slice(0, SEARCH_RESULT_LIMIT),
+        projects: matchedProjects.slice(0, SEARCH_RESULT_LIMIT),
+        limited: limited || undefined,
+        limit: limited ? SEARCH_RESULT_LIMIT : undefined,
     };
 }

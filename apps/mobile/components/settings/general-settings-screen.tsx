@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { Modal, Pressable, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { normalizeDateFormatSetting, normalizeTimeFormatSetting, useTaskStore } from '@mindwtr/core';
@@ -15,7 +15,7 @@ import { styles } from './settings.styles';
 
 export function GeneralSettingsScreen() {
     const { themeMode, setThemeMode } = useTheme();
-    const { language, setLanguage, t } = useSettingsLocalization();
+    const { language, localize, setLanguage, t } = useSettingsLocalization();
     const { settings, updateSettings } = useTaskStore();
     const tc = useThemeColors();
     const scrollContentStyle = useSettingsScrollContent();
@@ -28,6 +28,7 @@ export function GeneralSettingsScreen() {
     const weekStart = settings.weekStart === 'monday' ? 'monday' : 'sunday';
     const dateFormat = normalizeDateFormatSetting(settings.dateFormat);
     const timeFormat = normalizeTimeFormatSetting(settings.timeFormat);
+    const showTaskAge = settings.appearance?.showTaskAge === true;
     const themeOptions: { value: typeof themeMode; label: string }[] = [
         { value: 'system', label: t('settings.system') },
         { value: 'light', label: t('settings.light') },
@@ -73,6 +74,31 @@ export function GeneralSettingsScreen() {
                         </View>
                         <Ionicons color={tc.secondaryText} name="chevron-down" size={18} />
                     </TouchableOpacity>
+                    <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                        <View style={styles.settingInfo}>
+                            <Text style={[styles.settingLabel, { color: tc.text }]}>
+                                {localize('Show task age', '显示任务年龄')}
+                            </Text>
+                            <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
+                                {localize(
+                                    'Display how long ago a task was created in task metadata.',
+                                    '在任务元数据中显示任务创建距今多久。'
+                                )}
+                            </Text>
+                        </View>
+                        <Switch
+                            value={showTaskAge}
+                            onValueChange={(value) => {
+                                updateSettings({
+                                    appearance: {
+                                        ...(settings.appearance ?? {}),
+                                        showTaskAge: value,
+                                    },
+                                }).catch(console.error);
+                            }}
+                            trackColor={{ false: '#767577', true: '#3B82F6' }}
+                        />
+                    </View>
                 </View>
                 <Modal
                     transparent

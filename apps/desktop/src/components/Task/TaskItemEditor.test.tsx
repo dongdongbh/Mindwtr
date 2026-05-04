@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { TaskItemEditor } from './TaskItemEditor';
@@ -16,6 +16,7 @@ const translations: Record<string, string> = {
     'taskEdit.duplicateTask': 'Duplicate task',
     'taskEdit.aiAssistant': 'AI assistant',
     'ai.working': 'Working...',
+    'common.delete': 'Delete',
     'common.save': 'Save',
     'common.cancel': 'Cancel',
 };
@@ -112,5 +113,25 @@ describe('TaskItemEditor', () => {
 
         expect(getByRole('button', { name: 'AI assistant' })).toBeDisabled();
         expect(getByText('Working...')).toBeInTheDocument();
+    });
+
+    it('calls the edit-mode delete action when provided', () => {
+        const onDeleteTask = vi.fn();
+        const { getByRole } = render(
+            <TaskItemEditor
+                {...baseProps}
+                onDeleteTask={onDeleteTask}
+            />
+        );
+
+        fireEvent.click(getByRole('button', { name: 'Delete' }));
+
+        expect(onDeleteTask).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not show a delete action without an edit-mode delete handler', () => {
+        const { queryByRole } = render(<TaskItemEditor {...baseProps} />);
+
+        expect(queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
     });
 });

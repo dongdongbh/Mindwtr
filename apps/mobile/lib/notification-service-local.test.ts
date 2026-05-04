@@ -9,10 +9,12 @@ const {
   mockAlarmDeleteRepeatingAlarm,
   mockAlarmRemoveAllFiredNotifications,
   mockAlarmRemoveFiredNotification,
+  mockAlarmRequestPermissions,
   mockAlarmSendNotification,
   mockAlarmScheduleAlarm,
   mockGetNextScheduledAt,
   mockHasTimeComponent,
+  mockPlatform,
   mockPermissionsAndroidCheck,
   mockPermissionsAndroidRequest,
 } = vi.hoisted(() => ({
@@ -28,10 +30,15 @@ const {
   mockAlarmDeleteRepeatingAlarm: vi.fn(),
   mockAlarmRemoveAllFiredNotifications: vi.fn(),
   mockAlarmRemoveFiredNotification: vi.fn(),
+  mockAlarmRequestPermissions: vi.fn(async () => ({ alert: true })),
   mockAlarmSendNotification: vi.fn(),
   mockAlarmScheduleAlarm: vi.fn(async () => ({ id: 99 })),
   mockGetNextScheduledAt: vi.fn<(...args: unknown[]) => Date | null>(() => null),
   mockHasTimeComponent: vi.fn(() => false),
+  mockPlatform: {
+    OS: 'android',
+    Version: 34,
+  },
   mockPermissionsAndroidCheck: vi.fn(async () => true),
   mockPermissionsAndroidRequest: vi.fn(async () => 'granted'),
 }));
@@ -56,10 +63,7 @@ vi.mock('react-native', () => ({
     check: mockPermissionsAndroidCheck,
     request: mockPermissionsAndroidRequest,
   },
-  Platform: {
-    OS: 'android',
-    Version: 34,
-  },
+  Platform: mockPlatform,
 }));
 
 vi.mock('react-native-alarm-notification', () => ({
@@ -71,6 +75,7 @@ vi.mock('react-native-alarm-notification', () => ({
     deleteRepeatingAlarm: mockAlarmDeleteRepeatingAlarm,
     removeFiredNotification: mockAlarmRemoveFiredNotification,
     removeAllFiredNotifications: mockAlarmRemoveAllFiredNotifications,
+    requestPermissions: mockAlarmRequestPermissions,
   },
 }));
 
@@ -127,6 +132,8 @@ describe('notification-service-local', () => {
     mockAlarmDeleteRepeatingAlarm.mockReset();
     mockAlarmRemoveAllFiredNotifications.mockReset();
     mockAlarmRemoveFiredNotification.mockReset();
+    mockAlarmRequestPermissions.mockReset();
+    mockAlarmRequestPermissions.mockResolvedValue({ alert: true });
     mockAlarmSendNotification.mockReset();
     mockAlarmScheduleAlarm.mockReset();
     mockAlarmScheduleAlarm.mockResolvedValue({ id: 99 });
@@ -138,6 +145,8 @@ describe('notification-service-local', () => {
     mockPermissionsAndroidRequest.mockReset();
     mockPermissionsAndroidCheck.mockResolvedValue(true);
     mockPermissionsAndroidRequest.mockResolvedValue('granted');
+    mockPlatform.OS = 'android';
+    mockPlatform.Version = 34;
     __localNotificationTestUtils.resetForTests();
   });
 
@@ -202,12 +211,122 @@ describe('notification-service-local', () => {
         auto_cancel: true,
         channel: 'mindwtr_reminders_v2',
         has_button: true,
+        has_complete_action: true,
         loop_sound: false,
         message: 'Pay rent',
         play_sound: true,
         title: 'Pay rent',
         use_big_text: true,
         vibrate: false,
+        data: expect.objectContaining({
+          kind: 'task-reminder',
+          notificationActionComplete: 'true',
+          taskId: 'task-1',
+        }),
+      })
+    );
+  });
+
+  it('only schedules the next 60 upcoming task reminders on iOS', async () => {
+    const baseTime = new Date('2026-03-04T12:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(baseTime);
+    mockPlatform.OS = 'ios';
+
+    try {
+      mockStoreState.tasks = Array.from({ length: 65 }, (_, index) => ({
+        id: `task-${index}`,
+        title: `Task ${index}`,
+        description: '',
+      })).reverse();
+      mockGetNextScheduledAt.mockImplementation((task) => {
+        const id = String((task as { id: string }).id);
+        const index = Number(id.replace('task-', ''));
+        return new Date(baseTime.getTime() + (index + 1) * 60_000);
+      });
+
+      await startLocalMobileNotifications();
+
+      const alarmScheduleCalls = mockAlarmScheduleAlarm.mock.calls as unknown as Array<[
+        { data?: { taskId?: string } },
+      ]>;
+      const scheduledTaskIds = new Set(
+        alarmScheduleCalls
+          .map(([details]) => details.data?.taskId)
+          .filter((taskId): taskId is string => typeof taskId === 'string')
+      );
+
+      expect(scheduledTaskIds.size).toBe(60);
+      expect(scheduledTaskIds.has('task-0')).toBe(true);
+      expect(scheduledTaskIds.has('task-59')).toBe(true);
+      expect(scheduledTaskIds.has('task-60')).toBe(false);
+    } finally {
+      mockPlatform.OS = 'android';
+      vi.useRealTimers();
+    }
+  });
+
+  it('allows a larger one-shot reminder window on Android', async () => {
+    const baseTime = new Date('2026-03-04T12:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(baseTime);
+
+    try {
+      mockStoreState.tasks = Array.from({ length: 205 }, (_, index) => ({
+        id: `task-${index}`,
+        title: `Task ${index}`,
+        description: '',
+      })).reverse();
+      mockGetNextScheduledAt.mockImplementation((task) => {
+        const id = String((task as { id: string }).id);
+        const index = Number(id.replace('task-', ''));
+        return new Date(baseTime.getTime() + (index + 1) * 60_000);
+      });
+
+      await startLocalMobileNotifications();
+
+      const alarmScheduleCalls = mockAlarmScheduleAlarm.mock.calls as unknown as Array<[
+        { data?: { taskId?: string } },
+      ]>;
+      const scheduledTaskIds = new Set(
+        alarmScheduleCalls
+          .map(([details]) => details.data?.taskId)
+          .filter((taskId): taskId is string => typeof taskId === 'string')
+      );
+
+      expect(scheduledTaskIds.size).toBe(200);
+      expect(scheduledTaskIds.has('task-0')).toBe(true);
+      expect(scheduledTaskIds.has('task-199')).toBe(true);
+      expect(scheduledTaskIds.has('task-200')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('passes separate start and due reminder preferences into task scheduling', async () => {
+    mockStoreState.settings = {
+      notificationsEnabled: true,
+      startDateNotificationsEnabled: false,
+      dueDateNotificationsEnabled: true,
+    };
+    mockStoreState.tasks = [
+      {
+        id: 'task-1',
+        title: 'Pay rent',
+        description: '',
+      },
+    ];
+    mockGetNextScheduledAt.mockReturnValue(new Date(Date.now() + 5 * 60 * 1000));
+
+    await startLocalMobileNotifications();
+
+    expect(mockGetNextScheduledAt).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'task-1' }),
+      expect.any(Date),
+      expect.objectContaining({
+        includeStartTime: false,
+        includeDueDate: true,
+        includeReviewAt: true,
       })
     );
   });
@@ -237,6 +356,7 @@ describe('notification-service-local', () => {
           kind: 'task-review',
           taskId: 'task-1',
         }),
+        has_complete_action: false,
       })
     );
   });

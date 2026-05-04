@@ -152,7 +152,7 @@ export function SomedayView() {
               tc={tc}
               onPress={() => setEditingTask(task)}
               onStatusChange={(status) => handleStatusChange(task.id, status as TaskStatus)}
-              onDelete={() => deleteTask(task.id)}
+              onDelete={() => { void deleteTask(task.id); }}
               isHighlighted={task.id === highlightTaskId}
               onProjectPress={openProjectScreen}
               onContextPress={openContextsScreen}

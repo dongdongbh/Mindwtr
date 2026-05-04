@@ -41,6 +41,7 @@ interface SwipeableTaskItemContentProps {
     areas: Area[];
     selectionMode: boolean;
     showChecklist: boolean;
+    showTaskAge: boolean;
     t: (key: string) => string;
     task: Task;
     tc: ThemeColors;
@@ -74,6 +75,7 @@ export function SwipeableTaskItemContent({
     projects,
     selectionMode,
     showChecklist,
+    showTaskAge,
     t,
     task,
     tc,
@@ -112,7 +114,8 @@ export function SwipeableTaskItemContent({
     })();
     const staleness = getTaskStaleness(task.createdAt);
     const ageLabel = getTaskAgeLabel(task.createdAt, language as Language);
-    const showAge = task.status !== 'done'
+    const showAge = showTaskAge
+        && task.status !== 'done'
         && task.status !== 'reference'
         && (staleness === 'stale' || staleness === 'very-stale')
         && !!ageLabel;

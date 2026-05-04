@@ -5,7 +5,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { normalizeDateFormatSetting, resolveDateLocaleTag, useTaskStore } from '@mindwtr/core';
 
-import { areTaskRemindersEnabled, isWeeklyReviewReminderEnabled } from '@/lib/mobile-notification-settings';
+import {
+    areDueDateRemindersEnabled,
+    areStartDateRemindersEnabled,
+    areTaskRemindersEnabled,
+    isWeeklyReviewReminderEnabled,
+} from '@/lib/mobile-notification-settings';
 import { requestNotificationPermission, startMobileNotifications } from '@/lib/notification-service';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 
@@ -25,6 +30,8 @@ export function NotificationsSettingsScreen() {
     const [weeklyReviewDayPickerOpen, setWeeklyReviewDayPickerOpen] = useState(false);
 
     const notificationsEnabled = areTaskRemindersEnabled(settings);
+    const startDateNotificationsEnabled = areStartDateRemindersEnabled(settings);
+    const dueDateNotificationsEnabled = areDueDateRemindersEnabled(settings);
     const dailyDigestMorningEnabled = settings.dailyDigestMorningEnabled === true;
     const dailyDigestEveningEnabled = settings.dailyDigestEveningEnabled === true;
     const dailyDigestMorningTime = settings.dailyDigestMorningTime || '09:00';
@@ -149,6 +156,62 @@ export function NotificationsSettingsScreen() {
                                     .then((granted) => {
                                         if (!granted) return;
                                         updateSettings({ notificationsEnabled: true }).catch(console.error);
+                                    })
+                                    .catch(console.error);
+                            }}
+                            trackColor={{ false: '#767577', true: '#3B82F6' }}
+                        />
+                    </View>
+
+                    <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                        <View style={styles.settingInfo}>
+                            <Text style={[styles.settingLabel, { color: tc.text, opacity: notificationsEnabled ? 1 : 0.5 }]}>
+                                {t('settings.startDateNotifications')}
+                            </Text>
+                            <Text style={[styles.settingDescription, { color: tc.secondaryText, opacity: notificationsEnabled ? 1 : 0.5 }]}>
+                                {t('settings.startDateNotificationsDesc')}
+                            </Text>
+                        </View>
+                        <Switch
+                            value={startDateNotificationsEnabled}
+                            disabled={!notificationsEnabled}
+                            onValueChange={(value) => {
+                                if (!value) {
+                                    updateSettings({ startDateNotificationsEnabled: false }).catch(console.error);
+                                    return;
+                                }
+                                ensureNotificationsPermission()
+                                    .then((granted) => {
+                                        if (!granted) return;
+                                        updateSettings({ startDateNotificationsEnabled: true }).catch(console.error);
+                                    })
+                                    .catch(console.error);
+                            }}
+                            trackColor={{ false: '#767577', true: '#3B82F6' }}
+                        />
+                    </View>
+
+                    <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                        <View style={styles.settingInfo}>
+                            <Text style={[styles.settingLabel, { color: tc.text, opacity: notificationsEnabled ? 1 : 0.5 }]}>
+                                {t('settings.dueDateNotifications')}
+                            </Text>
+                            <Text style={[styles.settingDescription, { color: tc.secondaryText, opacity: notificationsEnabled ? 1 : 0.5 }]}>
+                                {t('settings.dueDateNotificationsDesc')}
+                            </Text>
+                        </View>
+                        <Switch
+                            value={dueDateNotificationsEnabled}
+                            disabled={!notificationsEnabled}
+                            onValueChange={(value) => {
+                                if (!value) {
+                                    updateSettings({ dueDateNotificationsEnabled: false }).catch(console.error);
+                                    return;
+                                }
+                                ensureNotificationsPermission()
+                                    .then((granted) => {
+                                        if (!granted) return;
+                                        updateSettings({ dueDateNotificationsEnabled: true }).catch(console.error);
                                     })
                                     .catch(console.error);
                             }}

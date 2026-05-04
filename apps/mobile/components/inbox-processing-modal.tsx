@@ -29,6 +29,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
     aiModal,
     applyTokenSuggestion,
     areaById,
+    assignedToSuggestions,
     closeAIModal,
     contextCopilotSuggestions,
     currentArea,
@@ -38,6 +39,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
     delegateFollowUpDate,
     delegateFollowUpDateOnly,
     delegateWho,
+    delegateWhoSuggestions,
     executionChoice,
     filteredProjects,
     formatProgressLabel,
@@ -220,13 +222,13 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
             </TouchableOpacity>
             <View style={styles.progressContainer}>
               <Text style={[styles.progressText, { color: tc.secondaryText }]}>
-                {formatProgressLabel(processedCount + 1, totalCount)}
+                {formatProgressLabel(processedCount, totalCount)}
               </Text>
               <View style={[styles.progressBar, { backgroundColor: tc.border }]}>
                 <View
                   style={[
                     styles.progressFill,
-                    { width: `${((processedCount + 1) / totalCount) * 100}%` },
+                    { width: totalCount > 0 ? `${(processedCount / totalCount) * 100}%` : '0%' },
                   ]}
                 />
               </View>
@@ -335,6 +337,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
                     showAssignedToField={showAssignedToField}
                     selectedAssignedTo={selectedAssignedTo}
                     setSelectedAssignedTo={setSelectedAssignedTo}
+                    assignedToSuggestions={assignedToSuggestions}
                     PRIORITY_OPTIONS={PRIORITY_OPTIONS}
                     ENERGY_LEVEL_OPTIONS={ENERGY_LEVEL_OPTIONS}
                     timeEstimateOptions={timeEstimateOptions}
@@ -346,6 +349,7 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
                     setExecutionChoice={setExecutionChoice}
                     delegateWho={delegateWho}
                     setDelegateWho={setDelegateWho}
+                    delegateWhoSuggestions={delegateWhoSuggestions}
                     showReviewDateField={showReviewDateField}
                     delegateFollowUpDate={delegateFollowUpDate}
                     setDelegateFollowUpDate={setDelegateFollowUpDate}

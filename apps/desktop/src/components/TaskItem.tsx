@@ -87,6 +87,8 @@ export const TaskItem = memo(function TaskItem({
     const [isEditing, setIsEditing] = useState(false);
     const [autoFocusTitle, setAutoFocusTitle] = useState(false);
     const [quickActionMenu, setQuickActionMenu] = useState<{ x: number; y: number } | null>(null);
+    const taskRootRef = useRef<HTMLDivElement | null>(null);
+    const quickActionReturnFocusRef = useRef<HTMLElement | null>(null);
     const modalEditorRef = useRef<HTMLDivElement | null>(null);
     const lastFocusedBeforeModalRef = useRef<HTMLElement | null>(null);
     const {
@@ -115,6 +117,7 @@ export const TaskItem = memo(function TaskItem({
         task,
         propProject,
         isEditing,
+        hasQuickActionMenu: Boolean(quickActionMenu),
     });
     const {
         setProjectView,
@@ -232,6 +235,7 @@ export const TaskItem = memo(function TaskItem({
     const prioritiesEnabled = settings?.features?.priorities !== false;
     const timeEstimatesEnabled = settings?.features?.timeEstimates !== false;
     const undoNotificationsEnabled = settings?.undoNotificationsEnabled !== false;
+    const showTaskAge = settings?.appearance?.showTaskAge === true;
     const isCompact = settings?.appearance?.density === 'compact';
     const isHighlighted = highlightTaskId === task.id;
     const recurrenceRule = getRecurrenceRuleValue(task.recurrence);
@@ -818,6 +822,8 @@ export const TaskItem = memo(function TaskItem({
         event.preventDefault();
         event.stopPropagation();
         onSelect?.();
+        quickActionReturnFocusRef.current = event.currentTarget.querySelector<HTMLElement>('[data-task-quick-actions-trigger]')
+            ?? event.currentTarget;
         setQuickActionMenu({
             x: event.clientX,
             y: event.clientY,
@@ -828,12 +834,20 @@ export const TaskItem = memo(function TaskItem({
         event.preventDefault();
         event.stopPropagation();
         onSelect?.();
+        quickActionReturnFocusRef.current = event.currentTarget;
         const rect = event.currentTarget.getBoundingClientRect();
         setQuickActionMenu({
             x: rect.left,
             y: rect.bottom + 4,
         });
     }, [isEditing, onSelect, selectionMode]);
+    const handleCloseQuickActionMenu = useCallback(() => {
+        setQuickActionMenu(null);
+        window.setTimeout(() => {
+            quickActionReturnFocusRef.current?.focus();
+            quickActionReturnFocusRef.current = null;
+        }, 0);
+    }, []);
     useEffect(() => {
         if (!isEditing) return;
         const handleGlobalCancel = (event: Event) => {
@@ -913,6 +927,7 @@ export const TaskItem = memo(function TaskItem({
             language={language}
             inputContexts={allContexts}
             onDuplicateTask={() => duplicateTask(task.id, false)}
+            onDeleteTask={task.status === 'inbox' ? () => setShowDeleteConfirm(true) : undefined}
             onCancel={handleEditorCancel}
             onSubmit={handleSubmit}
         />
@@ -951,7 +966,9 @@ export const TaskItem = memo(function TaskItem({
     return (
         <>
             <div
+                ref={taskRootRef}
                 data-task-id={task.id}
+                tabIndex={-1}
                 onClickCapture={onSelect ? () => onSelect?.() : undefined}
                 onDoubleClick={(event) => {
                     if (!enableDoubleClickEdit || selectionMode || effectiveReadOnly || isEditing) return;
@@ -996,6 +1013,7 @@ export const TaskItem = memo(function TaskItem({
                                 projectColor={projectColor}
                                 selectionMode={selectionMode}
                                 isViewOpen={isTaskExpanded}
+                                quickActionsOpen={Boolean(quickActionMenu)}
                                 actions={displayActions}
                                 visibleAttachments={visibleAttachments}
                                 recurrenceRule={recurrenceRule}
@@ -1011,6 +1029,7 @@ export const TaskItem = memo(function TaskItem({
                                 dense={isCompact}
                                 actionsOverlay={actionsOverlay}
                                 dragHandle={dragHandle}
+                                showTaskAge={showTaskAge}
                                 showHoverHint={showHoverHint}
                                 t={t}
                             />
@@ -1027,14 +1046,16 @@ export const TaskItem = memo(function TaskItem({
                     t={t}
                     nativeDateInputLocale={nativeDateInputLocale}
                     contextOptions={popularContextOptions}
+                    areas={areas}
                     readOnly={effectiveReadOnly}
-                    onClose={() => setQuickActionMenu(null)}
+                    onClose={handleCloseQuickActionMenu}
                     onDuplicate={() => {
                         duplicateTask(task.id, false);
                     }}
                     onDelete={() => {
                         setShowDeleteConfirm(true);
                     }}
+                    onCreateArea={handleCreateArea}
                     onUpdateTask={(updates) => updateTask(task.id, updates)}
                 />
             )}

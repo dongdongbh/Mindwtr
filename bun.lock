@@ -238,13 +238,10 @@
     },
   },
   "overrides": {
-    "@hono/node-server": "1.19.14",
     "@xmldom/xmldom": "0.8.13",
     "brace-expansion": "5.0.5",
     "esbuild": "0.25.12",
-    "express-rate-limit": "8.3.1",
     "flatted": "3.4.2",
-    "hono": "4.12.14",
     "lodash-es": "4.18.1",
     "minimatch": "10.2.3",
     "node-forge": "1.4.0",

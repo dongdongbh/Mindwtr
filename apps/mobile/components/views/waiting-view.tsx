@@ -233,7 +233,7 @@ export function WaitingView() {
               tc={tc}
               onPress={() => setEditingTask(task)}
               onStatusChange={(status) => handleStatusChange(task.id, status)}
-              onDelete={() => deleteTask(task.id)}
+              onDelete={() => { void deleteTask(task.id); }}
               isHighlighted={task.id === highlightTaskId}
               onProjectPress={openProjectScreen}
               onContextPress={openContextsScreen}

@@ -15,16 +15,54 @@ export function tokenToKey(token: string): string {
     return createHash('sha256').update(token).digest('hex');
 }
 
-export function getClientIp(req: Request, trustProxyHeaders = false): string {
+function normalizeProxyIp(value: string | null | undefined): string | null {
+    const trimmed = String(value || '').trim();
+    if (!trimmed || trimmed.toLowerCase() === 'unknown') return null;
+    return trimmed.startsWith('::ffff:') ? trimmed.slice('::ffff:'.length) : trimmed;
+}
+
+export function parseTrustedProxyIps(rawValue?: string): Set<string> {
+    return new Set(
+        String(rawValue || '')
+            .split(',')
+            .map((item) => normalizeProxyIp(item))
+            .filter((item): item is string => Boolean(item))
+    );
+}
+
+type ClientIpOptions = boolean | {
+    trustProxyHeaders?: boolean;
+    requestIpAddress?: string | null;
+    trustedProxyIps?: Set<string> | null;
+};
+
+const normalizeClientIpOptions = (options: ClientIpOptions) => (
+    typeof options === 'boolean'
+        ? { trustProxyHeaders: options, requestIpAddress: null, trustedProxyIps: null }
+        : {
+            trustProxyHeaders: options.trustProxyHeaders ?? false,
+            requestIpAddress: options.requestIpAddress ?? null,
+            trustedProxyIps: options.trustedProxyIps ?? null,
+        }
+);
+
+export function getClientIp(req: Request, options: ClientIpOptions = false): string {
+    const normalizedOptions = normalizeClientIpOptions(options);
+    const trustProxyHeaders = normalizedOptions.trustProxyHeaders;
     if (!trustProxyHeaders) return 'unknown';
+    const trustedProxyIps = normalizedOptions.trustedProxyIps;
+    const requestIpAddress = normalizeProxyIp(normalizedOptions.requestIpAddress);
+    if (!trustedProxyIps || trustedProxyIps.size === 0 || !requestIpAddress || !trustedProxyIps.has(requestIpAddress)) {
+        return 'unknown';
+    }
     const forwarded = req.headers.get('x-forwarded-for');
     if (forwarded) {
-        const first = forwarded.split(',')[0]?.trim();
+        const first = normalizeProxyIp(forwarded.split(',')[0]);
         if (first) return first;
     }
-    const cfIp = req.headers.get('cf-connecting-ip')?.trim();
+    const cfIp = normalizeProxyIp(req.headers.get('cf-connecting-ip'));
     if (cfIp) return cfIp;
-    const realIp = req.headers.get('x-real-ip')?.trim();
+    const realIp = normalizeProxyIp(req.headers.get('x-real-ip'));
     if (realIp) return realIp;
     return 'unknown';
 }
@@ -39,12 +77,15 @@ export function getAuthFailureRateKey(
     req: Request,
     options: {
         trustProxyHeaders?: boolean;
+        trustedProxyIps?: Set<string> | null;
         requestIpAddress?: string | null;
-        token?: string | null;
-        authHeader?: string | null;
     } = {},
 ): string {
-    const trustedProxyIp = normalizeRateLimitIdentity(getClientIp(req, options.trustProxyHeaders));
+    const trustedProxyIp = normalizeRateLimitIdentity(getClientIp(req, {
+        trustProxyHeaders: options.trustProxyHeaders,
+        requestIpAddress: options.requestIpAddress,
+        trustedProxyIps: options.trustedProxyIps,
+    }));
     if (trustedProxyIp) {
         return `auth-failure:ip:${trustedProxyIp}`;
     }
@@ -54,6 +95,13 @@ export function getAuthFailureRateKey(
         return `auth-failure:ip:${requestIpAddress}`;
     }
 
+    return 'auth-failure:ip:unknown';
+}
+
+export function getAuthFailureTokenRateKey(options: {
+    token?: string | null;
+    authHeader?: string | null;
+} = {}): string | null {
     const token = normalizeRateLimitIdentity(options.token);
     if (token) {
         return `auth-failure:token:${tokenToKey(token)}`;
@@ -64,7 +112,7 @@ export function getAuthFailureRateKey(
         return `auth-failure:header:${tokenToKey(authHeader)}`;
     }
 
-    return 'auth-failure:unknown';
+    return null;
 }
 
 export function parseAllowedAuthTokens(rawValue?: string): Set<string> | null {

@@ -199,6 +199,35 @@ describe('Sync Logic', () => {
             expect(merged.settings.appearance).toEqual({ density: 'compact', textSize: 'large' });
         });
 
+        it('merges synced future-start visibility preference', () => {
+            const local: AppData = {
+                ...mockAppData(),
+                settings: {
+                    appearance: { showFutureStarts: false },
+                    syncPreferences: { appearance: true },
+                    syncPreferencesUpdatedAt: {
+                        preferences: '2024-01-01T00:00:00.000Z',
+                        appearance: '2024-01-01T00:00:00.000Z',
+                    },
+                },
+            };
+            const incoming: AppData = {
+                ...mockAppData(),
+                settings: {
+                    appearance: { showFutureStarts: true },
+                    syncPreferences: { appearance: true },
+                    syncPreferencesUpdatedAt: {
+                        preferences: '2024-01-02T00:00:00.000Z',
+                        appearance: '2024-01-02T00:00:00.000Z',
+                    },
+                },
+            };
+
+            const merged = mergeAppData(local, incoming);
+
+            expect(merged.settings.appearance).toEqual({ showFutureStarts: true });
+        });
+
         it('deep-clones merged settings arrays to avoid shared references', () => {
             const incomingCalendars = [
                 { id: 'cal-1', name: 'Team', url: 'https://calendar.example.com/team.ics', enabled: true },

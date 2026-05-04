@@ -22,6 +22,7 @@ type Props = {
   showAssignedToField: boolean;
   selectedAssignedTo: string;
   setSelectedAssignedTo: (v: string) => void;
+  assignedToSuggestions: string[];
   PRIORITY_OPTIONS: TaskPriority[];
   ENERGY_LEVEL_OPTIONS: TaskEnergyLevel[];
   timeEstimateOptions: TimeEstimate[];
@@ -43,6 +44,7 @@ export function InboxOrganizationSection({
   showAssignedToField,
   selectedAssignedTo,
   setSelectedAssignedTo,
+  assignedToSuggestions,
   PRIORITY_OPTIONS,
   ENERGY_LEVEL_OPTIONS,
   timeEstimateOptions,
@@ -173,6 +175,19 @@ export function InboxOrganizationSection({
             value={selectedAssignedTo}
             onChangeText={setSelectedAssignedTo}
           />
+          {assignedToSuggestions.length > 0 && (
+            <View style={[styles.tokenSuggestionsContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
+              {assignedToSuggestions.map((name) => (
+                <TouchableOpacity
+                  key={name}
+                  style={styles.tokenSuggestionChip}
+                  onPress={() => setSelectedAssignedTo(name)}
+                >
+                  <Text style={[styles.tokenSuggestionText, { color: tc.text }]}>{name}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
         </View>
       )}
     </View>

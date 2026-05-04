@@ -1,4 +1,4 @@
-import { buildSaveSnapshot, ensureDeviceId, getTaskOrder, normalizeRevision, selectVisibleTasks } from '../store-helpers';
+import { buildSaveSnapshot, ensureDeviceId, getNextDataChangeAt, getTaskOrder, normalizeRevision, selectVisibleTasks } from '../store-helpers';
 import type { OrderingActions, Project, ProjectActionContext, Task } from './shared';
 
 export const createOrderingActions = ({
@@ -49,7 +49,7 @@ export const createOrderingActions = ({
             return {
                 projects: newVisibleProjects,
                 _allProjects: newAllProjects,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -115,7 +115,7 @@ export const createOrderingActions = ({
             return {
                 tasks: newVisibleTasks,
                 _allTasks: newAllTasks,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });

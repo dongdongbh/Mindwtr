@@ -22,6 +22,10 @@ let reservedProjectOrdersValue: Map<string, number> | null = null;
 
 export const normalizeRevision = (value?: number): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
 
+export const getNextDataChangeAt = (previous: number, now = Date.now()): number => (
+    Math.max(now, previous + 1)
+);
+
 export const ensureDeviceId = (settings: AppData['settings']): { settings: AppData['settings']; deviceId: string; updated: boolean } => {
     if (settings.deviceId) {
         return { settings, deviceId: settings.deviceId, updated: false };

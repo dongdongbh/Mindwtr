@@ -32,6 +32,7 @@ type TaskListScope = {
     selectFirst: () => void;
     selectLast: () => void;
     editSelected: () => void;
+    openQuickActions: () => void;
     toggleDoneSelected: () => void;
     deleteSelected: () => void;
     focusAddInput: () => void;
@@ -343,6 +344,17 @@ export function useListSelection({
         setPendingDeleteTask(task);
     }, [filteredTasks, selectedIndex]);
 
+    const openQuickActionsSelected = useCallback(() => {
+        const task = filteredTasks[selectedIndex];
+        if (!task) return;
+        const taskElement = Array.from(document.querySelectorAll<HTMLElement>('[data-task-id]'))
+            .find((element) => element.dataset.taskId === task.id);
+        const trigger = taskElement?.querySelector<HTMLElement>('[data-task-quick-actions-trigger]');
+        if (!trigger) return;
+        trigger.focus();
+        trigger.click();
+    }, [filteredTasks, selectedIndex]);
+
     useEffect(() => {
         if (isProcessing) {
             registerTaskListScope(null);
@@ -356,6 +368,7 @@ export function useListSelection({
             selectFirst,
             selectLast,
             editSelected,
+            openQuickActions: openQuickActionsSelected,
             toggleDoneSelected,
             deleteSelected,
             focusAddInput: () => {
@@ -373,6 +386,7 @@ export function useListSelection({
         deleteSelected,
         editSelected,
         isProcessing,
+        openQuickActionsSelected,
         registerTaskListScope,
         selectFirst,
         selectLast,

@@ -7,6 +7,8 @@ const {
     mockGetCalendarPermissionsAsync,
     mockRequestCalendarPermissionsAsync,
     mockGetEventsAsync,
+    mockEditEventInCalendarAsync,
+    mockOpenEventInCalendarAsync,
     mockPlatform,
 } = vi.hoisted(() => ({
     mockGetItem: vi.fn<(key: string) => Promise<string | null>>(async () => null),
@@ -29,6 +31,8 @@ const {
         notes?: string | null;
         location?: string | null;
     }>),
+    mockEditEventInCalendarAsync: vi.fn(async () => ({ action: 'done', id: null })),
+    mockOpenEventInCalendarAsync: vi.fn(async () => ({ action: 'done' })),
     mockPlatform: { OS: 'android' },
 }));
 
@@ -49,13 +53,17 @@ vi.mock('expo-calendar', () => ({
     getCalendarPermissionsAsync: mockGetCalendarPermissionsAsync,
     requestCalendarPermissionsAsync: mockRequestCalendarPermissionsAsync,
     getEventsAsync: mockGetEventsAsync,
+    editEventInCalendarAsync: mockEditEventInCalendarAsync,
+    openEventInCalendarAsync: mockOpenEventInCalendarAsync,
 }));
 
 import {
     EXTERNAL_CALENDARS_KEY,
     SYSTEM_CALENDAR_SETTINGS_KEY,
+    canOpenExternalCalendarEvent,
     fetchExternalCalendarEvents,
     getSystemCalendars,
+    openExternalCalendarEvent,
 } from '@/lib/external-calendar';
 
 beforeEach(() => {
@@ -117,5 +125,44 @@ describe('fetchExternalCalendarEvents', () => {
 
         expect(mockGetEventsAsync).toHaveBeenCalledWith(['google-primary'], rangeStart, rangeEnd);
         expect(result.events.map((event) => event.title)).toEqual(['Team meeting']);
+        expect(result.events[0]?.nativeEventId).toBe('external-meeting');
+    });
+
+    it('opens native device calendar events in the calendar app', async () => {
+        const event = {
+            id: 'system:google-primary:external-meeting:2026-04-20T11:00:00.000Z',
+            sourceId: 'system:google-primary',
+            nativeEventId: 'external-meeting',
+            title: 'Team meeting',
+            start: '2026-04-20T11:00:00.000Z',
+            end: '2026-04-20T11:30:00.000Z',
+            allDay: false,
+        };
+
+        await expect(openExternalCalendarEvent(event)).resolves.toBe(true);
+
+        expect(canOpenExternalCalendarEvent(event)).toBe(true);
+        expect(mockEditEventInCalendarAsync).toHaveBeenCalledWith(
+            { id: 'external-meeting', instanceStartDate: '2026-04-20T11:00:00.000Z' },
+            { startNewActivityTask: true },
+        );
+        expect(mockOpenEventInCalendarAsync).not.toHaveBeenCalled();
+    });
+
+    it('keeps ICS subscription events read-only', async () => {
+        const event = {
+            id: 'ics-1:uid-1:2026-04-20T11:00:00.000Z',
+            sourceId: 'ics-1',
+            title: 'Subscribed event',
+            start: '2026-04-20T11:00:00.000Z',
+            end: '2026-04-20T11:30:00.000Z',
+            allDay: false,
+        };
+
+        await expect(openExternalCalendarEvent(event)).resolves.toBe(false);
+
+        expect(canOpenExternalCalendarEvent(event)).toBe(false);
+        expect(mockEditEventInCalendarAsync).not.toHaveBeenCalled();
+        expect(mockOpenEventInCalendarAsync).not.toHaveBeenCalled();
     });
 });

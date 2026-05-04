@@ -28,6 +28,15 @@ describe('resolveMobileSyncBadgeState', () => {
         })).toBe('syncing');
     });
 
+    it('returns attention when a pending remote write has failed', () => {
+        expect(resolveMobileSyncBadgeState({
+            configured: true,
+            activityState: 'idle',
+            pendingRemoteWriteAt: '2026-03-04T00:00:00.000Z',
+            lastSyncStatus: 'error',
+        })).toBe('attention');
+    });
+
     it('returns healthy for successful sync', () => {
         expect(resolveMobileSyncBadgeState({
             configured: true,

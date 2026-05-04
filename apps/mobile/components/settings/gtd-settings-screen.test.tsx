@@ -191,11 +191,12 @@ describe('GtdSettingsScreen task editor layout', () => {
 
     let tree!: renderer.ReactTestRenderer;
     renderer.act(() => {
-      tree = renderer.create(<GtdSettingsScreen onNavigate={vi.fn()} screen="gtd" />);
+      tree = renderer.create(<GtdSettingsScreen onNavigate={vi.fn()} screen="gtd-pomodoro" />);
     });
 
-    const autoStartSwitches = tree.root.findAllByType(Switch).filter((node) => node.props.value === false);
-    expect(autoStartSwitches).toHaveLength(2);
+    const disabledPomodoroSwitches = tree.root.findAllByType(Switch).filter((node) => node.props.value === false);
+    expect(disabledPomodoroSwitches).toHaveLength(3);
+    const autoStartSwitches = disabledPomodoroSwitches.slice(1);
 
     await renderer.act(async () => {
       autoStartSwitches[0].props.onValueChange(true);
@@ -243,5 +244,35 @@ describe('GtdSettingsScreen task editor layout', () => {
         defaultScheduleTime: '09:30',
       }),
     }));
+  });
+
+  it('routes GTD feature areas to sub-screens from the hub', () => {
+    storeState.settings = {
+      features: {
+        priorities: true,
+        timeEstimates: true,
+        pomodoro: true,
+      },
+      gtd: {
+        taskEditor: {},
+      },
+    };
+    const onNavigate = vi.fn();
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(<GtdSettingsScreen onNavigate={onNavigate} screen="gtd" />);
+    });
+
+    renderer.act(() => {
+      const pomodoroRow = tree.root.findByProps({ testID: 'gtd-nav-pomodoro' });
+      expect(pomodoroRow.props.accessibilityRole).toBe('button');
+      pomodoroRow.props.onPress();
+      tree.root.findByProps({ testID: 'gtd-nav-capture' }).props.onPress();
+      tree.root.findByProps({ testID: 'gtd-nav-inbox' }).props.onPress();
+    });
+
+    expect(onNavigate).toHaveBeenCalledWith('gtd-pomodoro');
+    expect(onNavigate).toHaveBeenCalledWith('gtd-capture');
+    expect(onNavigate).toHaveBeenCalledWith('gtd-inbox');
   });
 });

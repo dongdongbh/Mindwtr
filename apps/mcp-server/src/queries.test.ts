@@ -118,6 +118,32 @@ describe('mcp queries', () => {
         expect(queryCall?.params[0]).toBe('project* alpha*');
     });
 
+    test('listTasks compares mixed date-only and datetime due filters as dates', () => {
+        const now = '2026-02-01T00:00:00.000Z';
+        const { db, calls } = createMockDb([
+            {
+                id: 't1',
+                title: 'Task',
+                status: 'inbox',
+                dueDate: '2026-02-01',
+                createdAt: now,
+                updatedAt: now,
+                isFocusedToday: 0,
+            },
+        ]);
+
+        listTasks(db, {
+            dueDateFrom: '2026-02-01T00:00:00.000Z',
+            dueDateTo: '2026-02-01T23:59:59.999Z',
+            includeDeleted: false,
+        });
+
+        const queryCall = calls.find((call) => call.sql.startsWith('SELECT') && call.sql.includes('FROM tasks '));
+        expect(queryCall).toBeTruthy();
+        expect(queryCall?.sql).toContain('date(dueDate) >= date(?)');
+        expect(queryCall?.sql).toContain('date(dueDate) <= date(?)');
+    });
+
     test('listTasks caches task column introspection per db client', () => {
         const now = '2026-02-01T00:00:00.000Z';
         const { db, calls } = createMockDb([

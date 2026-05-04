@@ -23,6 +23,7 @@
 * [[GTD Best Practices]]
 * [[GTD Workflow in Mindwtr]]
 * [[Contexts and Tags]]
+* [[Daily Review]]
 * [[Weekly Review]]
 
 ---
@@ -33,6 +34,7 @@
 * [[iCloud Sync]]
 * [[Sync Algorithm]]
 * [[Dropbox Sync]]
+* [[Cloud API]]
 * [[Cloud Deployment]]
 * [[Local API]]
 * [[MCP Server]]

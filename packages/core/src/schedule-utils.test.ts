@@ -41,4 +41,28 @@ describe('schedule-utils', () => {
 
         expect(next?.toISOString()).toBe('2026-03-17T14:30:00.000Z');
     });
+
+    it('can ignore start reminders while keeping due reminders', () => {
+        const task = buildTask({
+            startTime: '2026-03-17T14:30:00.000Z',
+            dueDate: '2026-03-18T09:00:00.000Z',
+        });
+        const now = new Date('2026-03-16T12:00:00.000Z');
+
+        const next = getNextScheduledAt(task, now, { includeStartTime: false });
+
+        expect(next?.toISOString()).toBe('2026-03-18T09:00:00.000Z');
+    });
+
+    it('can ignore due reminders while keeping start reminders', () => {
+        const task = buildTask({
+            startTime: '2026-03-17T14:30:00.000Z',
+            dueDate: '2026-03-16T14:00:00.000Z',
+        });
+        const now = new Date('2026-03-16T12:00:00.000Z');
+
+        const next = getNextScheduledAt(task, now, { includeDueDate: false });
+
+        expect(next?.toISOString()).toBe('2026-03-17T14:30:00.000Z');
+    });
 });

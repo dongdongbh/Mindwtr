@@ -31,9 +31,11 @@ import { TaskEditModalErrorBoundary } from './task-edit/TaskEditModalErrorBounda
 import { TaskEditOverlayStack } from './task-edit/TaskEditOverlayStack';
 import { TaskEditTabs } from './task-edit/TaskEditTabs';
 import {
+    MAX_VISIBLE_SUGGESTIONS,
     getRecurrenceRuleValue,
     getRecurrenceStrategyValue,
 } from './task-edit/recurrence-utils';
+import { getAssignedToSuggestions } from './task-metadata-suggestions';
 import { useTaskEditCopilot } from './task-edit/use-task-edit-copilot';
 import { logTaskError } from './task-edit/task-edit-modal.utils';
 import {
@@ -88,6 +90,7 @@ function TaskEditModalInner({
         addSection,
         addArea,
         deleteTask,
+        restoreTask,
     } = useTaskStore();
     const { t, language } = useLanguage();
     const tc = useThemeColors();
@@ -245,6 +248,10 @@ function TaskEditModalInner({
         contextInputDraft,
         tagInputDraft,
     });
+    const assignedToSuggestions = useMemo(
+        () => getAssignedToSuggestions(tasks, String(editedTask.assignedTo ?? ''), MAX_VISIBLE_SUGGESTIONS),
+        [editedTask.assignedTo, tasks]
+    );
 
     const closeAIModal = () => setAiModal(null);
     const setTitleImmediate = useCallback((text: string) => {
@@ -459,6 +466,9 @@ function TaskEditModalInner({
     const applyTagSuggestion = useCallback((token: string) => {
         updateTagInput(replaceTrailingToken(tagInputDraft, token));
     }, [tagInputDraft, updateTagInput]);
+    const applyAssignedToSuggestion = useCallback((assignedTo: string) => {
+        setEditedTask((prev) => ({ ...prev, assignedTo }));
+    }, [setEditedTask]);
     const toggleQuickContextToken = useCallback((token: string) => {
         const next = new Set(parseTokenList(contextInputDraft, '@'));
         if (next.has(token)) {
@@ -527,6 +537,7 @@ function TaskEditModalInner({
         recurrenceRRuleValue,
         recurrenceStrategyValue,
         resetTaskChecklist,
+        restoreTask,
         sections,
         setAiModal,
         setEditedTask,
@@ -553,9 +564,11 @@ function TaskEditModalInner({
     const fieldRendererProps = {
         addFileAttachment,
         addImageAttachment,
+        applyAssignedToSuggestion,
         applyContextSuggestion,
         applyTagSuggestion,
         areas,
+        assignedToSuggestions,
         availableStatusOptions,
         commitContextDraft,
         commitTagDraft,

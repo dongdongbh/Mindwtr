@@ -1,11 +1,11 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DailyReviewScreen } from './daily-review-modal';
 import { SwipeableTaskItem } from './swipeable-task-item';
 
-const storeState = {
+const storeState: any = {
   tasks: [
     {
       id: 'task-1',
@@ -43,7 +43,8 @@ vi.mock('../contexts/language-context', () => ({
         'dailyReview.todayStep': 'Today',
         'dailyReview.todayDesc': 'Review today.',
         'dailyReview.focusStep': "Today's Focus",
-        'dailyReview.focusDesc': 'Pick up to 3 focus tasks for today.',
+        'dailyReview.focusDesc': 'Optional focus.',
+        'dailyReview.focusSelected': 'focused',
         'dailyReview.inboxStep': 'Inbox',
         'dailyReview.inboxDesc': 'Review inbox.',
         'dailyReview.waitingStep': 'Waiting',
@@ -120,6 +121,11 @@ vi.mock('react-native-gesture-handler', () => ({
 }));
 
 describe('DailyReviewScreen', () => {
+  beforeEach(() => {
+    storeState.settings = {};
+    vi.clearAllMocks();
+  });
+
   it('shows the focus toggle on task rows during the focus step', async () => {
     let tree!: ReturnType<typeof create>;
 
@@ -145,5 +151,45 @@ describe('DailyReviewScreen', () => {
     expect(taskRows).toHaveLength(1);
     expect(taskRows[0].props.showFocusToggle).toBe(true);
     expect(taskRows[0].props.hideStatusBadge).toBe(true);
+  });
+
+  it('skips the focus step when daily review focus is disabled', async () => {
+    storeState.settings = {
+      gtd: {
+        dailyReview: {
+          includeFocusStep: false,
+        },
+      },
+    };
+    let tree!: ReturnType<typeof create>;
+
+    await act(async () => {
+      tree = create(<DailyReviewScreen onClose={vi.fn()} />);
+    });
+
+    const flattenText = (value: unknown): string => {
+      if (typeof value === 'string' || typeof value === 'number') return String(value);
+      if (Array.isArray(value)) return value.map((item) => flattenText(item)).join('');
+      return '';
+    };
+    const pressNextStep = async () => {
+      const nextStepLabel = tree.root.findByProps({ children: 'Next Step' });
+      const nextStepButton = nextStepLabel.parent;
+      if (!nextStepButton) {
+        throw new Error('Next step button not found');
+      }
+      await act(async () => {
+        nextStepButton.props.onPress();
+      });
+    };
+
+    await pressNextStep();
+    await pressNextStep();
+
+    const allText = tree.root.findAll((node) => Boolean(node.props?.children))
+      .map((node) => flattenText(node.props.children))
+      .join('\n');
+    expect(allText).toContain('Waiting');
+    expect(allText).not.toContain("Today's Focus");
   });
 });

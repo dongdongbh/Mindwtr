@@ -36,6 +36,10 @@ export const styles = StyleSheet.create({
     gap: 10,
   },
   headerAccessoryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: 8,
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 6,

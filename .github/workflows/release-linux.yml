@@ -239,9 +239,15 @@ jobs:
       - name: Build Snap
         timeout-minutes: 15
         id: snap_build
+        continue-on-error: true
         run: bash scripts/ci/build-snap.sh
 
+      - name: Report Snap build failure
+        if: steps.snap_build.outcome == 'failure'
+        run: echo "::warning::Snap build failed; continuing with AppImage, deb, and rpm artifacts."
+
       - name: Add Snap to artifacts
+        if: steps.snap_build.outcome == 'success' && steps.snap_build.outputs.snap != ''
         run: |
           mkdir -p release-artifacts
           cp "${{ steps.snap_build.outputs.snap }}" release-artifacts/ || true
@@ -249,7 +255,7 @@ jobs:
         shell: bash
 
       - name: Publish Snap (stable)
-        if: startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch'
+        if: startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && steps.snap_build.outcome == 'success' && steps.snap_build.outputs.snap != ''
         timeout-minutes: 10
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_TOKEN }}

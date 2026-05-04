@@ -14,6 +14,8 @@ import {
     PRESET_TAGS,
     matchesHierarchicalToken,
     safeParseDueDate,
+    shouldShowTaskForStart,
+    translateWithFallback,
 } from '@mindwtr/core';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useLanguage } from '../contexts/language-context';
@@ -35,6 +37,7 @@ export default function SearchScreen() {
     const [filtersOpen, setFiltersOpen] = useState(false);
     const [includeCompleted, setIncludeCompleted] = useState(false);
     const [includeReference, setIncludeReference] = useState(true);
+    const [hideFutureTasks, setHideFutureTasks] = useState(false);
     const [selectedStatuses, setSelectedStatuses] = useState<TaskStatus[]>([]);
     const [selectedArea, setSelectedArea] = useState<'all' | 'none' | string>('all');
     const [selectedTokens, setSelectedTokens] = useState<string[]>([]);
@@ -93,6 +96,8 @@ export default function SearchScreen() {
     ? ftsResults
     : fallbackResults;
   const { tasks: taskResults, projects: projectResults } = effectiveResults;
+    const sourceLimited = effectiveResults.limited === true;
+    const sourceLimit = effectiveResults.limit ?? 200;
     const hasStatusFilter = selectedStatuses.length > 0;
     const projectById = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
     const matchesArea = (areaId?: string | null) => {
@@ -151,6 +156,7 @@ export default function SearchScreen() {
             if (!includeCompleted && (task.status === 'done' || task.status === 'archived')) return false;
             if (!includeReference && task.status === 'reference') return false;
         }
+        if (!shouldShowTaskForStart(task, { showFutureStarts: !hideFutureTasks })) return false;
         if (scope === 'project_tasks' && !task.projectId) return false;
         if (!matchesTaskArea(task)) return false;
         if (!matchesTokens(task)) return false;
@@ -165,11 +171,12 @@ export default function SearchScreen() {
     const scopedProjects = scope === 'tasks' || scope === 'project_tasks' ? [] : filteredProjects;
     const scopedTasks = scope === 'projects' ? [] : filteredTasks;
     const totalResults = scopedProjects.length + scopedTasks.length;
+    const totalResultsLabel = sourceLimited ? `${sourceLimit}+` : String(totalResults);
     const results = trimmedQuery === '' ? [] : [
         ...scopedProjects.map(p => ({ type: 'project' as const, item: p })),
         ...scopedTasks.map(t => ({ type: 'task' as const, item: t })),
     ].slice(0, 50);
-    const isTruncated = totalResults > results.length;
+    const isTruncated = totalResults > results.length || sourceLimited;
 
     const savedSearches = settings?.savedSearches || [];
     const canSave = trimmedQuery.length > 0;
@@ -273,6 +280,7 @@ export default function SearchScreen() {
         setScope('all');
         setIncludeCompleted(false);
         setIncludeReference(true);
+        setHideFutureTasks(false);
     };
     const hasActiveFilters = (
         selectedStatuses.length > 0
@@ -282,8 +290,9 @@ export default function SearchScreen() {
         || scope !== 'all'
         || includeCompleted
         || !includeReference
+        || hideFutureTasks
     );
-    const activeChips: Array<{ key: string; label: string; onPress: () => void }> = [];
+    const activeChips: { key: string; label: string; onPress: () => void }[] = [];
     selectedStatuses.forEach((status) => {
         activeChips.push({
             key: `status:${status}`,
@@ -327,6 +336,14 @@ export default function SearchScreen() {
             key: 'includeCompleted',
             label: t('search.includeCompleted'),
             onPress: () => setIncludeCompleted(false),
+        });
+    }
+    const hideFutureTasksLabel = translateWithFallback(t, 'filters.hideFutureTasks', 'Hide future tasks');
+    if (hideFutureTasks) {
+        activeChips.push({
+            key: 'hideFutureTasks',
+            label: hideFutureTasksLabel,
+            onPress: () => setHideFutureTasks(false),
         });
     }
 
@@ -495,6 +512,11 @@ export default function SearchScreen() {
                                 includeReference,
                                 () => setIncludeReference((prev) => !prev)
                             )}
+                            {renderChip(
+                                hideFutureTasksLabel,
+                                hideFutureTasks,
+                                () => setHideFutureTasks((prev) => !prev)
+                            )}
                         </View>
                     </ScrollView>
                 </View>
@@ -503,7 +525,7 @@ export default function SearchScreen() {
                 <Text style={[styles.helpText, { color: tc.secondaryText }]}>
                     {t('search.showingFirst')
                         .replace('{shown}', String(results.length))
-                        .replace('{total}', String(totalResults))}
+                        .replace('{total}', totalResultsLabel)}
                 </Text>
             )}
             {ftsLoading && trimmedQuery !== '' && (

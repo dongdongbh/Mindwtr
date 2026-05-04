@@ -11,6 +11,7 @@ import {
     computeProjectDerivedState,
     computeTaskDerivedState,
     ensureDeviceId,
+    getNextDataChangeAt,
     normalizeAiSettingsForSync,
     normalizeRevision,
     reconcileEntityCollection,
@@ -650,7 +651,7 @@ export const createSettingsActions = ({
                                 || didArchiveSectionsForArchivedProjects
                                 || didRepairEntityReferences
                                 || didTombstoneCleanup
-                                ? Date.now()
+                                ? getNextDataChangeAt(state.lastDataChangeAt)
                                 : state.lastDataChangeAt,
                     };
                 });
@@ -784,7 +785,7 @@ export const createSettingsActions = ({
                         tasks: newVisibleTasks,
                         _allTasks: newAllTasks,
                         settings: newSettings,
-                        lastDataChangeAt: Date.now(),
+                        lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt),
                     };
                 }
             }
@@ -792,7 +793,7 @@ export const createSettingsActions = ({
             snapshot = buildSaveSnapshot(state, { settings: newSettings });
             return {
                 settings: newSettings,
-                lastDataChangeAt: shouldTrackChange ? Date.now() : state.lastDataChangeAt,
+                lastDataChangeAt: shouldTrackChange ? getNextDataChangeAt(state.lastDataChangeAt) : state.lastDataChangeAt,
             };
         });
 

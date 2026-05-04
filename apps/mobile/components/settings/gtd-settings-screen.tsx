@@ -34,12 +34,16 @@ import {
 
 import type { SettingsScreen } from './settings.constants';
 import { useSettingsLocalization, useSettingsScrollContent } from './settings.hooks';
-import { MenuItem, SettingsTopBar, SubHeader } from './settings.shell';
+import { SettingsTopBar, SubHeader } from './settings.shell';
 import { styles } from './settings.styles';
 
 type GtdScreen =
     | 'gtd'
     | 'gtd-archive'
+    | 'gtd-capture'
+    | 'gtd-inbox'
+    | 'gtd-pomodoro'
+    | 'gtd-review'
     | 'gtd-time-estimates'
     | 'gtd-task-editor';
 
@@ -56,7 +60,6 @@ export function GtdSettingsScreen({
     const { showToast } = useToast();
     const { settings, updateSettings } = useTaskStore();
     const scrollContentStyle = useSettingsScrollContent();
-    const [gtdInboxProcessingExpanded, setGtdInboxProcessingExpanded] = useState(false);
     const [taskEditorExpandedSections, setTaskEditorExpandedSections] = useState<Record<TaskEditorSectionId, boolean>>({
         basic: true,
         scheduling: false,
@@ -78,6 +81,7 @@ export function GtdSettingsScreen({
     const inboxContextStepEnabled = inboxProcessing.contextStepEnabled !== false;
     const inboxScheduleEnabled = inboxProcessing.scheduleEnabled === true;
     const includeContextStep = settings.gtd?.weeklyReview?.includeContextStep !== false;
+    const includeDailyFocusStep = settings.gtd?.dailyReview?.includeFocusStep !== false;
     const defaultScheduleTime = normalizeClockTimeInput(settings.gtd?.defaultScheduleTime) || '';
     const autoArchiveDays = Number.isFinite(settings.gtd?.autoArchiveDays)
         ? Math.max(0, Math.floor(settings.gtd?.autoArchiveDays as number))
@@ -86,6 +90,7 @@ export function GtdSettingsScreen({
     const timeEstimatesEnabled = settings.features?.timeEstimates !== false;
     const pomodoroEnabled = settings.features?.pomodoro === true;
     const pomodoroCustomDurations = sanitizePomodoroDurations(settings.gtd?.pomodoro?.customDurations);
+    const pomodoroLinkTask = settings.gtd?.pomodoro?.linkTask === true;
     const pomodoroAutoStartBreaks = settings.gtd?.pomodoro?.autoStartBreaks === true;
     const pomodoroAutoStartFocus = settings.gtd?.pomodoro?.autoStartFocus === true;
     const [pomodoroFocusDraft, setPomodoroFocusDraft] = useState(String(pomodoroCustomDurations.focusMinutes));
@@ -174,6 +179,10 @@ export function GtdSettingsScreen({
         }).catch(logSettingsError);
     };
 
+    const updateDefaultCaptureMethod = (method: 'text' | 'audio') => {
+        updateGtdSettings({ defaultCaptureMethod: method });
+    };
+
     const commitDefaultScheduleTime = () => {
         const normalized = normalizeClockTimeInput(defaultScheduleTimeDraft);
         if (normalized === null) {
@@ -229,6 +238,18 @@ export function GtdSettingsScreen({
         }).catch(logSettingsError);
     };
 
+    const updateDailyReviewConfig = (partial: NonNullable<NonNullable<AppData['settings']['gtd']>['dailyReview']>) => {
+        updateSettings({
+            gtd: {
+                ...(settings.gtd ?? {}),
+                dailyReview: {
+                    ...(settings.gtd?.dailyReview ?? {}),
+                    ...partial,
+                },
+            },
+        }).catch(logSettingsError);
+    };
+
     const formatTimeEstimateLabel = (value: TimeEstimate) => {
         if (value === '5min') return '5m';
         if (value === '10min') return '10m';
@@ -241,66 +262,114 @@ export function GtdSettingsScreen({
         return '4h+';
     };
 
-    if (screen === 'gtd') {
-        const featurePomodoroLabelRaw = t('settings.featurePomodoro');
-        const featurePomodoroDescRaw = t('settings.featurePomodoroDesc');
-        const featurePomodoroLabel = featurePomodoroLabelRaw === 'settings.featurePomodoro'
-            ? localize('Pomodoro timer', '番茄钟')
-            : featurePomodoroLabelRaw;
-        const featurePomodoroDesc = featurePomodoroDescRaw === 'settings.featurePomodoroDesc'
-            ? localize('Enable the optional Pomodoro panel in Focus view.', '在聚焦视图中启用可选的番茄钟面板。')
-            : featurePomodoroDescRaw;
-        const pomodoroCustomPresetLabelRaw = t('settings.pomodoroCustomPreset');
-        const pomodoroCustomPresetLabel = pomodoroCustomPresetLabelRaw === 'settings.pomodoroCustomPreset'
-            ? localize('Custom preset', '自定义预设')
-            : pomodoroCustomPresetLabelRaw;
-        const pomodoroCustomPresetDescRaw = t('settings.pomodoroCustomPresetDesc');
-        const pomodoroCustomPresetDesc = pomodoroCustomPresetDescRaw === 'settings.pomodoroCustomPresetDesc'
-            ? localize(
-                'Add one extra focus/break preset. Matching a built-in preset keeps the built-in chips only.',
-                '添加一个额外的专注/休息预设。若与内置预设相同，将继续只显示内置选项。'
-            )
-            : pomodoroCustomPresetDescRaw;
-        const pomodoroFocusMinutesLabelRaw = t('settings.pomodoroFocusMinutes');
-        const pomodoroFocusMinutesLabel = pomodoroFocusMinutesLabelRaw === 'settings.pomodoroFocusMinutes'
-            ? localize('Focus minutes', '专注分钟')
-            : pomodoroFocusMinutesLabelRaw;
-        const pomodoroBreakMinutesLabelRaw = t('settings.pomodoroBreakMinutes');
-        const pomodoroBreakMinutesLabel = pomodoroBreakMinutesLabelRaw === 'settings.pomodoroBreakMinutes'
-            ? localize('Break minutes', '休息分钟')
-            : pomodoroBreakMinutesLabelRaw;
-        const pomodoroAutoStartBreaksLabelRaw = t('settings.pomodoroAutoStartBreaks');
-        const pomodoroAutoStartBreaksLabel = pomodoroAutoStartBreaksLabelRaw === 'settings.pomodoroAutoStartBreaks'
-            ? localize('Auto-start breaks', '自动开始休息')
-            : pomodoroAutoStartBreaksLabelRaw;
-        const pomodoroAutoStartBreaksDescRaw = t('settings.pomodoroAutoStartBreaksDesc');
-        const pomodoroAutoStartBreaksDesc = pomodoroAutoStartBreaksDescRaw === 'settings.pomodoroAutoStartBreaksDesc'
-            ? localize(
-                'Start the break timer automatically when a focus session ends.',
-                '当专注阶段结束时，自动开始休息计时。'
-            )
-            : pomodoroAutoStartBreaksDescRaw;
-        const pomodoroAutoStartFocusLabelRaw = t('settings.pomodoroAutoStartFocus');
-        const pomodoroAutoStartFocusLabel = pomodoroAutoStartFocusLabelRaw === 'settings.pomodoroAutoStartFocus'
-            ? localize('Auto-start focus', '自动开始专注')
-            : pomodoroAutoStartFocusLabelRaw;
-        const pomodoroAutoStartFocusDescRaw = t('settings.pomodoroAutoStartFocusDesc');
-        const pomodoroAutoStartFocusDesc = pomodoroAutoStartFocusDescRaw === 'settings.pomodoroAutoStartFocusDesc'
-            ? localize(
-                'Start the next focus session automatically when a break ends.',
-                '当休息阶段结束时，自动开始下一轮专注计时。'
-            )
-            : pomodoroAutoStartFocusDescRaw;
-        const defaultScheduleTimeLabel = tFallback(t, 'settings.defaultScheduleTime', localize('Default schedule time', '默认安排时间'));
-        const defaultScheduleTimeDesc = tFallback(
-            t,
-            'settings.defaultScheduleTimeDesc',
-            localize(
-                'Optional. Pre-fills manual Start, Due, and Review time fields after you choose a date. Leave blank for date-only.',
-                '可选。选择日期后自动填入开始、截止和回顾时间。留空则保持仅日期。'
-            )
-        );
+    const featurePomodoroLabelRaw = t('settings.featurePomodoro');
+    const featurePomodoroDescRaw = t('settings.featurePomodoroDesc');
+    const featurePomodoroLabel = featurePomodoroLabelRaw === 'settings.featurePomodoro'
+        ? localize('Pomodoro timer', '番茄钟')
+        : featurePomodoroLabelRaw;
+    const featurePomodoroDesc = featurePomodoroDescRaw === 'settings.featurePomodoroDesc'
+        ? localize('Enable the optional Pomodoro panel in Focus view.', '在聚焦视图中启用可选的番茄钟面板。')
+        : featurePomodoroDescRaw;
+    const pomodoroSettingsLabel = tFallback(t, 'settings.pomodoroSettings', localize('Pomodoro settings', '番茄钟设置'));
+    const pomodoroCustomPresetLabelRaw = t('settings.pomodoroCustomPreset');
+    const pomodoroCustomPresetLabel = pomodoroCustomPresetLabelRaw === 'settings.pomodoroCustomPreset'
+        ? localize('Custom preset', '自定义预设')
+        : pomodoroCustomPresetLabelRaw;
+    const pomodoroCustomPresetDescRaw = t('settings.pomodoroCustomPresetDesc');
+    const pomodoroCustomPresetDesc = pomodoroCustomPresetDescRaw === 'settings.pomodoroCustomPresetDesc'
+        ? localize(
+            'Add one extra focus/break preset. Matching a built-in preset keeps the built-in chips only.',
+            '添加一个额外的专注/休息预设。若与内置预设相同，将继续只显示内置选项。'
+        )
+        : pomodoroCustomPresetDescRaw;
+    const pomodoroFocusMinutesLabelRaw = t('settings.pomodoroFocusMinutes');
+    const pomodoroFocusMinutesLabel = pomodoroFocusMinutesLabelRaw === 'settings.pomodoroFocusMinutes'
+        ? localize('Focus minutes', '专注分钟')
+        : pomodoroFocusMinutesLabelRaw;
+    const pomodoroBreakMinutesLabelRaw = t('settings.pomodoroBreakMinutes');
+    const pomodoroBreakMinutesLabel = pomodoroBreakMinutesLabelRaw === 'settings.pomodoroBreakMinutes'
+        ? localize('Break minutes', '休息分钟')
+        : pomodoroBreakMinutesLabelRaw;
+    const pomodoroLinkTaskLabel = tFallback(
+        t,
+        'settings.pomodoroLinkTask',
+        localize('Link timer to task', '将计时器关联到任务')
+    );
+    const pomodoroLinkTaskDesc = tFallback(
+        t,
+        'settings.pomodoroLinkTaskDesc',
+        localize(
+            'Show the Timer task picker and Task done action in Focus.',
+            '在聚焦中显示计时任务选择器和完成任务操作。'
+        )
+    );
+    const pomodoroAutoStartBreaksLabelRaw = t('settings.pomodoroAutoStartBreaks');
+    const pomodoroAutoStartBreaksLabel = pomodoroAutoStartBreaksLabelRaw === 'settings.pomodoroAutoStartBreaks'
+        ? localize('Auto-start breaks', '自动开始休息')
+        : pomodoroAutoStartBreaksLabelRaw;
+    const pomodoroAutoStartBreaksDescRaw = t('settings.pomodoroAutoStartBreaksDesc');
+    const pomodoroAutoStartBreaksDesc = pomodoroAutoStartBreaksDescRaw === 'settings.pomodoroAutoStartBreaksDesc'
+        ? localize(
+            'Start the break timer automatically when a focus session ends.',
+            '当专注阶段结束时，自动开始休息计时。'
+        )
+        : pomodoroAutoStartBreaksDescRaw;
+    const pomodoroAutoStartFocusLabelRaw = t('settings.pomodoroAutoStartFocus');
+    const pomodoroAutoStartFocusLabel = pomodoroAutoStartFocusLabelRaw === 'settings.pomodoroAutoStartFocus'
+        ? localize('Auto-start focus', '自动开始专注')
+        : pomodoroAutoStartFocusLabelRaw;
+    const pomodoroAutoStartFocusDescRaw = t('settings.pomodoroAutoStartFocusDesc');
+    const pomodoroAutoStartFocusDesc = pomodoroAutoStartFocusDescRaw === 'settings.pomodoroAutoStartFocusDesc'
+        ? localize(
+            'Start the next focus session automatically when a break ends.',
+            '当休息阶段结束时，自动开始下一轮专注计时。'
+        )
+        : pomodoroAutoStartFocusDescRaw;
+    const defaultScheduleTimeLabel = tFallback(t, 'settings.defaultScheduleTime', localize('Default schedule time', '默认安排时间'));
+    const defaultScheduleTimeDesc = tFallback(
+        t,
+        'settings.defaultScheduleTimeDesc',
+        localize(
+            'Optional. Pre-fills manual Start, Due, and Review time fields after you choose a date. Leave blank for date-only.',
+            '可选。选择日期后自动填入开始、截止和回顾时间。留空则保持仅日期。'
+        )
+    );
+    const captureSettingsTitle = tFallback(t, 'settings.captureSettings', localize('Capture defaults', '收集默认值'));
+    const reviewSettingsTitle = tFallback(t, 'settings.reviewSettings', localize('Review steps', '回顾步骤'));
+    const inboxSettingsTitle = tFallback(t, 'settings.inboxProcessing', localize('Inbox processing', '收件箱处理'));
+    const captureMethodOptions: { id: 'text' | 'audio'; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+        { id: 'text', label: t('settings.captureDefaultText'), icon: 'text-outline' },
+        { id: 'audio', label: t('settings.captureDefaultAudio'), icon: 'mic-outline' },
+    ];
 
+    const renderGtdNavigationRow = (
+        title: string,
+        description: string | null,
+        nextScreen: SettingsScreen,
+        options?: { first?: boolean; testID?: string }
+    ) => (
+        <TouchableOpacity
+            testID={options?.testID}
+            style={[
+                styles.gtdNavigationRow,
+                { borderTopColor: tc.border },
+                options?.first && { borderTopWidth: 0 },
+            ]}
+            accessibilityRole="button"
+            onPress={() => onNavigate(nextScreen)}
+            activeOpacity={0.75}
+        >
+            <View style={styles.settingInfo}>
+                <Text style={[styles.settingLabel, { color: tc.text }]}>{title}</Text>
+                {description ? (
+                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{description}</Text>
+                ) : null}
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={tc.secondaryText} />
+        </TouchableOpacity>
+    );
+
+    if (screen === 'gtd') {
         return (
             <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['bottom']}>
                 <SettingsTopBar />
@@ -325,65 +394,11 @@ export function GtdSettingsScreen({
                                 trackColor={{ false: '#767577', true: '#3B82F6' }}
                             />
                         </View>
-                        {pomodoroEnabled && (
-                            <View style={[styles.settingRowColumn, { borderTopWidth: 1, borderTopColor: tc.border, gap: 12 }]}>
-                                <View style={styles.settingInfo}>
-                                    <Text style={[styles.settingLabel, { color: tc.text }]}>{pomodoroCustomPresetLabel}</Text>
-                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{pomodoroCustomPresetDesc}</Text>
-                                </View>
-                                <View style={styles.inlineInputRow}>
-                                    <View style={styles.inlineInputGroup}>
-                                        <Text style={[styles.inlineInputLabel, { color: tc.secondaryText }]}>{pomodoroFocusMinutesLabel}</Text>
-                                        <TextInput
-                                            value={pomodoroFocusDraft}
-                                            onChangeText={setPomodoroFocusDraft}
-                                            onBlur={commitPomodoroMinutes}
-                                            keyboardType="number-pad"
-                                            style={[styles.textInput, styles.inlineTextInput, { borderColor: tc.border, color: tc.text }]}
-                                        />
-                                    </View>
-                                    <View style={styles.inlineInputGroup}>
-                                        <Text style={[styles.inlineInputLabel, { color: tc.secondaryText }]}>{pomodoroBreakMinutesLabel}</Text>
-                                        <TextInput
-                                            value={pomodoroBreakDraft}
-                                            onChangeText={setPomodoroBreakDraft}
-                                            onBlur={commitPomodoroMinutes}
-                                            keyboardType="number-pad"
-                                            style={[styles.textInput, styles.inlineTextInput, { borderColor: tc.border, color: tc.text }]}
-                                        />
-                                    </View>
-                                </View>
-                                <View style={[styles.settingCard, { backgroundColor: tc.bg, borderWidth: 1, borderColor: tc.border }]}>
-                                    <View style={styles.settingRow}>
-                                        <View style={styles.settingInfo}>
-                                            <Text style={[styles.settingLabel, { color: tc.text }]}>{pomodoroAutoStartBreaksLabel}</Text>
-                                            <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{pomodoroAutoStartBreaksDesc}</Text>
-                                        </View>
-                                        <Switch
-                                            value={pomodoroAutoStartBreaks}
-                                            onValueChange={(value) => updatePomodoroSettings(
-                                                { autoStartBreaks: value },
-                                                { showAutoStartNotice: value && !pomodoroAutoStartBreaks }
-                                            )}
-                                            trackColor={{ false: '#767577', true: '#3B82F6' }}
-                                        />
-                                    </View>
-                                    <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                        <View style={styles.settingInfo}>
-                                            <Text style={[styles.settingLabel, { color: tc.text }]}>{pomodoroAutoStartFocusLabel}</Text>
-                                            <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{pomodoroAutoStartFocusDesc}</Text>
-                                        </View>
-                                        <Switch
-                                            value={pomodoroAutoStartFocus}
-                                            onValueChange={(value) => updatePomodoroSettings(
-                                                { autoStartFocus: value },
-                                                { showAutoStartNotice: value && !pomodoroAutoStartFocus }
-                                            )}
-                                            trackColor={{ false: '#767577', true: '#3B82F6' }}
-                                        />
-                                    </View>
-                                </View>
-                            </View>
+                        {pomodoroEnabled && renderGtdNavigationRow(
+                            pomodoroSettingsLabel,
+                            localize('Custom preset, task linking, and auto-start behavior.', '自定义预设、任务关联和自动开始行为。'),
+                            'gtd-pomodoro',
+                            { testID: 'gtd-nav-pomodoro' }
                         )}
                     </View>
 
@@ -397,23 +412,169 @@ export function GtdSettingsScreen({
                                 value={defaultScheduleTimeDraft}
                                 onChangeText={setDefaultScheduleTimeDraft}
                                 onBlur={commitDefaultScheduleTime}
-                                placeholder="HH:MM"
+                                placeholder={localize('HH:MM', 'HH:MM')}
                                 placeholderTextColor={tc.secondaryText}
                                 keyboardType="numbers-and-punctuation"
-                                style={[styles.textInput, styles.inlineTextInput, { width: 96, marginTop: 0, borderColor: tc.border, color: tc.text }]}
+                                style={[
+                                    styles.textInput,
+                                    styles.inlineTextInput,
+                                    styles.gtdTimeInput,
+                                    { backgroundColor: tc.bg, borderColor: tc.border, color: tc.text },
+                                ]}
                             />
                         </View>
-                    </View>
-
-                    <View style={[styles.menuCard, { backgroundColor: tc.cardBg }]}>
-                        {timeEstimatesEnabled && (
-                            <MenuItem title={t('settings.timeEstimatePresets')} onPress={() => onNavigate('gtd-time-estimates')} />
+                        {timeEstimatesEnabled && renderGtdNavigationRow(
+                            t('settings.timeEstimatePresets'),
+                            t('settings.timeEstimatePresetsDesc'),
+                            'gtd-time-estimates',
+                            { testID: 'gtd-nav-time-estimates' }
                         )}
-                        <MenuItem title={t('settings.autoArchive')} onPress={() => onNavigate('gtd-archive')} />
-                        <MenuItem title={t('settings.taskEditorLayout')} onPress={() => onNavigate('gtd-task-editor')} />
+                        {renderGtdNavigationRow(
+                            t('settings.autoArchive'),
+                            t('settings.autoArchiveDesc'),
+                            'gtd-archive',
+                            { testID: 'gtd-nav-archive' }
+                        )}
                     </View>
 
                     <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 12 }]}>
+                        {renderGtdNavigationRow(
+                            t('settings.taskEditorLayout'),
+                            t('settings.taskEditorLayoutDesc'),
+                            'gtd-task-editor',
+                            { first: true, testID: 'gtd-nav-task-editor' }
+                        )}
+                        {renderGtdNavigationRow(
+                            captureSettingsTitle,
+                            t('settings.captureDefaultDesc'),
+                            'gtd-capture',
+                            { testID: 'gtd-nav-capture' }
+                        )}
+                    </View>
+
+                    <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 12 }]}>
+                        {renderGtdNavigationRow(
+                            reviewSettingsTitle,
+                            localize('Choose which optional steps appear in daily and weekly review.', '选择每日和每周回顾中显示的可选步骤。'),
+                            'gtd-review',
+                            { first: true, testID: 'gtd-nav-review' }
+                        )}
+                        {renderGtdNavigationRow(
+                            inboxSettingsTitle,
+                            t('settings.inboxProcessingDesc'),
+                            'gtd-inbox',
+                            { testID: 'gtd-nav-inbox' }
+                        )}
+                    </View>
+                </ScrollView>
+            </SafeAreaView>
+        );
+    }
+
+    if (screen === 'gtd-pomodoro') {
+        return (
+            <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['bottom']}>
+                <SettingsTopBar />
+                <SubHeader title={pomodoroSettingsLabel} />
+                <ScrollView style={styles.scrollView} contentContainerStyle={scrollContentStyle}>
+                    <Text style={[styles.description, { color: tc.secondaryText }]}>{featurePomodoroDesc}</Text>
+                    {!pomodoroEnabled ? (
+                        <TouchableOpacity
+                            style={[styles.settingCard, { backgroundColor: tc.cardBg }]}
+                            accessibilityRole="button"
+                            onPress={() => updateFeatureFlags({ pomodoro: true })}
+                            activeOpacity={0.75}
+                        >
+                            <View style={styles.settingRow}>
+                                <Text style={[styles.settingLabel, { color: tc.tint }]}>{featurePomodoroLabel}</Text>
+                            </View>
+                        </TouchableOpacity>
+                    ) : (
+                        <View style={[styles.settingCard, { backgroundColor: tc.cardBg }]}>
+                            <View style={[styles.settingRowColumn, { gap: 12 }]}>
+                                <View style={styles.settingInfo}>
+                                    <Text style={[styles.settingLabel, { color: tc.text }]}>{pomodoroCustomPresetLabel}</Text>
+                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{pomodoroCustomPresetDesc}</Text>
+                                </View>
+                                <View style={styles.inlineInputRow}>
+                                    <View style={styles.inlineInputGroup}>
+                                        <Text style={[styles.inlineInputLabel, { color: tc.secondaryText }]}>{pomodoroFocusMinutesLabel}</Text>
+                                        <TextInput
+                                            value={pomodoroFocusDraft}
+                                            onChangeText={setPomodoroFocusDraft}
+                                            onBlur={commitPomodoroMinutes}
+                                            keyboardType="number-pad"
+                                            accessibilityLabel={pomodoroFocusMinutesLabel}
+                                            style={[styles.textInput, styles.inlineTextInput, { borderColor: tc.border, color: tc.text }]}
+                                        />
+                                    </View>
+                                    <View style={styles.inlineInputGroup}>
+                                        <Text style={[styles.inlineInputLabel, { color: tc.secondaryText }]}>{pomodoroBreakMinutesLabel}</Text>
+                                        <TextInput
+                                            value={pomodoroBreakDraft}
+                                            onChangeText={setPomodoroBreakDraft}
+                                            onBlur={commitPomodoroMinutes}
+                                            keyboardType="number-pad"
+                                            accessibilityLabel={pomodoroBreakMinutesLabel}
+                                            style={[styles.textInput, styles.inlineTextInput, { borderColor: tc.border, color: tc.text }]}
+                                        />
+                                    </View>
+                                </View>
+                            </View>
+                            <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                                <View style={styles.settingInfo}>
+                                    <Text style={[styles.settingLabel, { color: tc.text }]}>{pomodoroLinkTaskLabel}</Text>
+                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{pomodoroLinkTaskDesc}</Text>
+                                </View>
+                                <Switch
+                                    value={pomodoroLinkTask}
+                                    onValueChange={(value) => updatePomodoroSettings({ linkTask: value })}
+                                    trackColor={{ false: '#767577', true: '#3B82F6' }}
+                                />
+                            </View>
+                            <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                                <View style={styles.settingInfo}>
+                                    <Text style={[styles.settingLabel, { color: tc.text }]}>{pomodoroAutoStartBreaksLabel}</Text>
+                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{pomodoroAutoStartBreaksDesc}</Text>
+                                </View>
+                                <Switch
+                                    value={pomodoroAutoStartBreaks}
+                                    onValueChange={(value) => updatePomodoroSettings(
+                                        { autoStartBreaks: value },
+                                        { showAutoStartNotice: value && !pomodoroAutoStartBreaks }
+                                    )}
+                                    trackColor={{ false: '#767577', true: '#3B82F6' }}
+                                />
+                            </View>
+                            <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                                <View style={styles.settingInfo}>
+                                    <Text style={[styles.settingLabel, { color: tc.text }]}>{pomodoroAutoStartFocusLabel}</Text>
+                                    <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{pomodoroAutoStartFocusDesc}</Text>
+                                </View>
+                                <Switch
+                                    value={pomodoroAutoStartFocus}
+                                    onValueChange={(value) => updatePomodoroSettings(
+                                        { autoStartFocus: value },
+                                        { showAutoStartNotice: value && !pomodoroAutoStartFocus }
+                                    )}
+                                    trackColor={{ false: '#767577', true: '#3B82F6' }}
+                                />
+                            </View>
+                        </View>
+                    )}
+                </ScrollView>
+            </SafeAreaView>
+        );
+    }
+
+    if (screen === 'gtd-capture') {
+        return (
+            <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['bottom']}>
+                <SettingsTopBar />
+                <SubHeader title={captureSettingsTitle} />
+                <ScrollView style={styles.scrollView} contentContainerStyle={scrollContentStyle}>
+                    <Text style={[styles.description, { color: tc.secondaryText }]}>{t('settings.captureDefaultDesc')}</Text>
+                    <View style={[styles.settingCard, { backgroundColor: tc.cardBg }]}>
                         <View style={styles.settingRow}>
                             <View style={styles.settingInfo}>
                                 <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.captureDefault')}</Text>
@@ -421,43 +582,35 @@ export function GtdSettingsScreen({
                             </View>
                         </View>
                         <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                            <View style={styles.backendToggle}>
-                                <TouchableOpacity
-                                    style={[
-                                        styles.backendOption,
-                                        { borderColor: tc.border, backgroundColor: defaultCaptureMethod === 'text' ? tc.filterBg : 'transparent' },
-                                    ]}
-                                    onPress={() => {
-                                        updateSettings({
-                                            gtd: {
-                                                ...(settings.gtd ?? {}),
-                                                defaultCaptureMethod: 'text',
-                                            },
-                                        }).catch(logSettingsError);
-                                    }}
-                                >
-                                    <Text style={[styles.backendOptionText, { color: defaultCaptureMethod === 'text' ? tc.tint : tc.secondaryText }]}>
-                                        {t('settings.captureDefaultText')}
-                                    </Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={[
-                                        styles.backendOption,
-                                        { borderColor: tc.border, backgroundColor: defaultCaptureMethod === 'audio' ? tc.filterBg : 'transparent' },
-                                    ]}
-                                    onPress={() => {
-                                        updateSettings({
-                                            gtd: {
-                                                ...(settings.gtd ?? {}),
-                                                defaultCaptureMethod: 'audio',
-                                            },
-                                        }).catch(logSettingsError);
-                                    }}
-                                >
-                                    <Text style={[styles.backendOptionText, { color: defaultCaptureMethod === 'audio' ? tc.tint : tc.secondaryText }]}>
-                                        {t('settings.captureDefaultAudio')}
-                                    </Text>
-                                </TouchableOpacity>
+                            <View style={[styles.gtdSegmentedControl, { backgroundColor: tc.bg, borderColor: tc.border }]}>
+                                {captureMethodOptions.map((option) => {
+                                    const selected = defaultCaptureMethod === option.id;
+                                    return (
+                                        <TouchableOpacity
+                                            key={option.id}
+                                            accessibilityRole="button"
+                                            accessibilityState={{ selected }}
+                                            style={[
+                                                styles.gtdSegmentedOption,
+                                                { backgroundColor: selected ? tc.filterBg : 'transparent' },
+                                            ]}
+                                            onPress={() => updateDefaultCaptureMethod(option.id)}
+                                            activeOpacity={0.8}
+                                        >
+                                            <Ionicons
+                                                name={option.icon}
+                                                size={16}
+                                                color={selected ? tc.tint : tc.secondaryText}
+                                            />
+                                            <Text
+                                                style={[styles.gtdSegmentedOptionText, { color: selected ? tc.tint : tc.secondaryText }]}
+                                                numberOfLines={1}
+                                            >
+                                                {option.label}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
                             </View>
                         </View>
                         {defaultCaptureMethod === 'audio' ? (
@@ -481,9 +634,41 @@ export function GtdSettingsScreen({
                             </View>
                         ) : null}
                     </View>
+                </ScrollView>
+            </SafeAreaView>
+        );
+    }
 
-                    <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 12 }]}>
+    if (screen === 'gtd-review') {
+        return (
+            <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['bottom']}>
+                <SettingsTopBar />
+                <SubHeader title={reviewSettingsTitle} />
+                <ScrollView style={styles.scrollView} contentContainerStyle={scrollContentStyle}>
+                    <Text style={[styles.description, { color: tc.secondaryText }]}>
+                        {localize('Choose which optional steps appear in daily and weekly review.', '选择每日和每周回顾中显示的可选步骤。')}
+                    </Text>
+                    <View style={[styles.settingCard, { backgroundColor: tc.cardBg }]}>
                         <View style={styles.settingRow}>
+                            <View style={styles.settingInfo}>
+                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.dailyReviewConfig')}</Text>
+                                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.dailyReviewConfigDesc')}</Text>
+                            </View>
+                        </View>
+                        <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                            <View style={styles.settingInfo}>
+                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.dailyReviewIncludeFocusStep')}</Text>
+                                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
+                                    {t('settings.dailyReviewIncludeFocusStepDesc')}
+                                </Text>
+                            </View>
+                            <Switch
+                                value={includeDailyFocusStep}
+                                onValueChange={(value) => updateDailyReviewConfig({ includeFocusStep: value })}
+                                trackColor={{ false: '#767577', true: '#3B82F6' }}
+                            />
+                        </View>
+                        <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
                             <View style={styles.settingInfo}>
                                 <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.weeklyReviewConfig')}</Text>
                                 <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.weeklyReviewConfigDesc')}</Text>
@@ -503,67 +688,59 @@ export function GtdSettingsScreen({
                             />
                         </View>
                     </View>
+                </ScrollView>
+            </SafeAreaView>
+        );
+    }
 
-                    <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginTop: 12 }]}>
+    if (screen === 'gtd-inbox') {
+        return (
+            <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['bottom']}>
+                <SettingsTopBar />
+                <SubHeader title={inboxSettingsTitle} />
+                <ScrollView style={styles.scrollView} contentContainerStyle={scrollContentStyle}>
+                    <Text style={[styles.description, { color: tc.secondaryText }]}>{t('settings.inboxProcessingDesc')}</Text>
+                    <View style={[styles.settingCard, { backgroundColor: tc.cardBg }]}>
                         <View style={styles.settingRow}>
-                            <TouchableOpacity
-                                style={styles.settingInfo}
-                                onPress={() => setGtdInboxProcessingExpanded((prev) => !prev)}
-                                activeOpacity={0.7}
-                            >
-                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.inboxProcessing')}</Text>
-                                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('settings.inboxProcessingDesc')}</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity onPress={() => setGtdInboxProcessingExpanded((prev) => !prev)} activeOpacity={0.7}>
-                                <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
-                                    {gtdInboxProcessingExpanded ? '▾' : '▸'}
-                                </Text>
-                            </TouchableOpacity>
+                            <View style={styles.settingInfo}>
+                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.inboxTwoMinuteEnabled')}</Text>
+                            </View>
+                            <Switch
+                                value={inboxTwoMinuteEnabled}
+                                onValueChange={(value) => updateInboxProcessing({ twoMinuteEnabled: value })}
+                                trackColor={{ false: '#767577', true: '#3B82F6' }}
+                            />
                         </View>
-                        {gtdInboxProcessingExpanded && (
-                            <>
-                                <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.inboxTwoMinuteEnabled')}</Text>
-                                    </View>
-                                    <Switch
-                                        value={inboxTwoMinuteEnabled}
-                                        onValueChange={(value) => updateInboxProcessing({ twoMinuteEnabled: value })}
-                                        trackColor={{ false: '#767577', true: '#3B82F6' }}
-                                    />
-                                </View>
-                                <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.inboxProjectFirst')}</Text>
-                                    </View>
-                                    <Switch
-                                        value={inboxProjectFirst}
-                                        onValueChange={(value) => updateInboxProcessing({ projectFirst: value })}
-                                        trackColor={{ false: '#767577', true: '#3B82F6' }}
-                                    />
-                                </View>
-                                <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.inboxContextStepEnabled')}</Text>
-                                    </View>
-                                    <Switch
-                                        value={inboxContextStepEnabled}
-                                        onValueChange={(value) => updateInboxProcessing({ contextStepEnabled: value })}
-                                        trackColor={{ false: '#767577', true: '#3B82F6' }}
-                                    />
-                                </View>
-                                <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                                    <View style={styles.settingInfo}>
-                                        <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.inboxScheduleEnabled')}</Text>
-                                    </View>
-                                    <Switch
-                                        value={inboxScheduleEnabled}
-                                        onValueChange={(value) => updateInboxProcessing({ scheduleEnabled: value })}
-                                        trackColor={{ false: '#767577', true: '#3B82F6' }}
-                                    />
-                                </View>
-                            </>
-                        )}
+                        <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                            <View style={styles.settingInfo}>
+                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.inboxProjectFirst')}</Text>
+                            </View>
+                            <Switch
+                                value={inboxProjectFirst}
+                                onValueChange={(value) => updateInboxProcessing({ projectFirst: value })}
+                                trackColor={{ false: '#767577', true: '#3B82F6' }}
+                            />
+                        </View>
+                        <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                            <View style={styles.settingInfo}>
+                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.inboxContextStepEnabled')}</Text>
+                            </View>
+                            <Switch
+                                value={inboxContextStepEnabled}
+                                onValueChange={(value) => updateInboxProcessing({ contextStepEnabled: value })}
+                                trackColor={{ false: '#767577', true: '#3B82F6' }}
+                            />
+                        </View>
+                        <View style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                            <View style={styles.settingInfo}>
+                                <Text style={[styles.settingLabel, { color: tc.text }]}>{t('settings.inboxScheduleEnabled')}</Text>
+                            </View>
+                            <Switch
+                                value={inboxScheduleEnabled}
+                                onValueChange={(value) => updateInboxProcessing({ scheduleEnabled: value })}
+                                trackColor={{ false: '#767577', true: '#3B82F6' }}
+                            />
+                        </View>
                     </View>
                 </ScrollView>
             </SafeAreaView>
@@ -686,6 +863,10 @@ export function GtdSettingsScreen({
                 </ScrollView>
             </SafeAreaView>
         );
+    }
+
+    if (screen !== 'gtd-task-editor') {
+        throw new Error(`Unhandled GTD settings screen: ${screen}`);
     }
 
     const featureHiddenFields = new Set<TaskEditorFieldId>();

@@ -42,7 +42,7 @@ Your capture zone. All new tasks land here before processing.
 
 ### 🎯 Focus
 
-Your unified dashboard combining daily planning and next actions.
+Your unified dashboard for daily engagement. Focus is not a full inventory of every task with status `next`; it narrows the list to work that is available now.
 
 - **Today's Focus** — Up to 3 starred priority tasks for deep work.
 - **Overdue** — Past due items.
@@ -50,17 +50,19 @@ Your unified dashboard combining daily planning and next actions.
 - **Next Actions** — Ready tasks without due dates, filtered by context.
 - **Review Due** — Items with tickler dates.
 
+Focus hides future-start tasks and later tasks in sequential projects. Use **Contexts**, **Projects**, or **Search** when you need to inspect broader task inventory.
+
 **Features:**
 - **Context Filters**: Filter Next Actions by context (e.g., @home, @work) or tag.
 - **Top 3 Only**: Toggle to hide everything except your top 3 focus tasks (Zen Mode).
-- **Pomodoro (Optional)**: Enable in **Settings → GTD → Features → Pomodoro timer** to show a task-linked focus/break timer panel (15/3, 25/5, 50/10, plus one optional custom preset).
+- **Pomodoro (Optional)**: Enable in **Settings → GTD → Features → Pomodoro timer** to show a focus/break timer panel (15/3, 25/5, 50/10, plus one optional custom preset). Leave it as **Timer only**, or turn on **Link timer to task** to show the Timer task picker and **Mark task done** action.
 
 ### 📁 Projects
 
 Multi-step outcomes containing related tasks.
 
-- **Sequential mode** — Only first incomplete task shows in the Next Actions list (Focus view)
-- **Parallel mode** — All tasks show in the Next Actions list
+- **Sequential mode** — Only the first available project task appears in Focus
+- **Parallel mode** — All available project tasks can appear in Focus
 - **Status** — Active, Waiting, Someday, Archived
 - **Areas of Focus** — Group projects by higher-level areas (e.g., Work, Health) to keep your sidebar organized.
 - **Project tags** — Tag projects and filter by tag

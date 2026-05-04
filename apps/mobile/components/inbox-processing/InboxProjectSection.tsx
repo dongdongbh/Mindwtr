@@ -87,12 +87,12 @@ export function InboxProjectSection({
                 style={[
                   styles.projectChip,
                   isSelected
-                    ? { backgroundColor: '#3B82F620', borderWidth: 1, borderColor: tc.tint }
+                    ? { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.tint }
                     : { backgroundColor: tc.cardBg, borderWidth: 1, borderColor: tc.border },
                 ]}
                 onPress={() => setSelectedAreaId(area.id)}
               >
-                <View style={[styles.projectDot, { backgroundColor: area.color || '#6B7280' }]} />
+                <View style={[styles.projectDot, { backgroundColor: area.color || tc.secondaryText }]} />
                 <Text style={[styles.projectChipText, { color: tc.text }]}>{area.name}</Text>
               </TouchableOpacity>
             );
@@ -122,10 +122,10 @@ export function InboxProjectSection({
           </View>
           <View style={styles.projectListContainer}>
             <TouchableOpacity
-              style={[styles.projectChip, { backgroundColor: '#10B981' }]}
+              style={[styles.projectChip, { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.border }]}
               onPress={() => selectProjectEarly(null)}
             >
-              <Text style={styles.projectChipText}>✓ {t('inbox.noProject')}</Text>
+              <Text style={[styles.projectChipText, { color: tc.text }]}>✓ {t('inbox.noProject')}</Text>
             </TouchableOpacity>
             {filteredProjects.map((project) => {
               const projectColor = project.areaId ? areaById.get(project.areaId)?.color : undefined;
@@ -136,12 +136,12 @@ export function InboxProjectSection({
                   style={[
                     styles.projectChip,
                     isSelected
-                      ? { backgroundColor: '#3B82F620', borderWidth: 1, borderColor: tc.tint }
+                      ? { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.tint }
                       : { backgroundColor: tc.cardBg, borderWidth: 1, borderColor: tc.border },
                   ]}
                   onPress={() => selectProjectEarly(project.id)}
                 >
-                  <View style={[styles.projectDot, { backgroundColor: projectColor || '#6B7280' }]} />
+                  <View style={[styles.projectDot, { backgroundColor: projectColor || tc.secondaryText }]} />
                   <Text style={[styles.projectChipText, { color: tc.text }]}>{project.title}</Text>
                 </TouchableOpacity>
               );

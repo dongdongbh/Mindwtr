@@ -39,14 +39,14 @@ const notificationCacheFunction = `  private fun cacheNotificationOpenPayload(in
     fun copyNestedData(value: Any?) {
       when (value) {
         is Bundle -> {
-          listOf("alarmKey", "id", "taskId", "projectId", "kind").forEach { key ->
-            copyPayloadValue(key, value.get(key))
-          }
+            listOf("alarmKey", "id", "taskId", "projectId", "kind", "actionIdentifier").forEach { key ->
+              copyPayloadValue(key, value.get(key))
+            }
         }
         is String -> {
           runCatching {
             val json = JSONObject(value)
-            listOf("alarmKey", "id", "taskId", "projectId", "kind").forEach { key ->
+            listOf("alarmKey", "id", "taskId", "projectId", "kind", "actionIdentifier").forEach { key ->
               copyPayloadValue(key, json.opt(key))
             }
           }
@@ -54,14 +54,14 @@ const notificationCacheFunction = `  private fun cacheNotificationOpenPayload(in
         else -> {
           runCatching {
             val json = JSONObject(value.toString())
-            listOf("alarmKey", "id", "taskId", "projectId", "kind").forEach { key ->
+            listOf("alarmKey", "id", "taskId", "projectId", "kind", "actionIdentifier").forEach { key ->
               copyPayloadValue(key, json.opt(key))
             }
           }
         }
       }
     }
-    listOf("alarmKey", "id", "taskId", "projectId", "kind").forEach { key ->
+    listOf("alarmKey", "id", "taskId", "projectId", "kind", "actionIdentifier").forEach { key ->
       copyPayloadValue(key, extras.get(key))
     }
     copyNestedData(extras.get("data"))

@@ -8,7 +8,7 @@ export default function WeeklyReviewRoute() {
       visible
       onClose={() => {
         if (router.canGoBack()) router.back();
-        else router.replace('/review');
+        else router.replace('/review-tab');
       }}
     />
   );

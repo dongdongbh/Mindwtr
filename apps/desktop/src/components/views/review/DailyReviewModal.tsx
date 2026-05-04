@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Calendar, Check, CheckSquare, ChevronLeft, Star, X, type LucideIcon } from 'lucide-react';
 import {
     getUsedTaskTokens,
@@ -21,9 +21,17 @@ import { TaskItem } from '../../TaskItem';
 import { fetchExternalCalendarEvents, summarizeExternalCalendarWarnings } from '../../../lib/external-calendar-events';
 
 type DailyReviewStep = 'today' | 'focus' | 'inbox' | 'waiting' | 'completed';
+const DAILY_REVIEW_STEP_STORAGE_KEY = 'mindwtr:dailyReview:currentStep';
+const DAILY_REVIEW_STEPS = new Set<DailyReviewStep>(['today', 'focus', 'inbox', 'waiting', 'completed']);
 
 function isSameDay(a: Date, b: Date): boolean {
     return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function loadStoredDailyReviewStep(): DailyReviewStep {
+    if (typeof window === 'undefined') return 'today';
+    const stored = window.localStorage.getItem(DAILY_REVIEW_STEP_STORAGE_KEY);
+    return stored && DAILY_REVIEW_STEPS.has(stored as DailyReviewStep) ? stored as DailyReviewStep : 'today';
 }
 
 interface DailyReviewGuideModalProps {
@@ -31,7 +39,7 @@ interface DailyReviewGuideModalProps {
 }
 
 export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
-    const [currentStep, setCurrentStep] = useState<DailyReviewStep>('today');
+    const [currentStep, setCurrentStep] = useState<DailyReviewStep>(() => loadStoredDailyReviewStep());
     const { tasks, projects, areas, settings, addProject, updateTask, deleteTask } = useTaskStore(
         (state) => ({
             tasks: state.tasks,
@@ -50,38 +58,44 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
     const [externalCalendarLoading, setExternalCalendarLoading] = useState(false);
     const [externalCalendarError, setExternalCalendarError] = useState<string | null>(null);
 
-    const today = new Date();
-    const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const today = useMemo(() => new Date(), []);
+    const startOfToday = useMemo(() => new Date(today.getFullYear(), today.getMonth(), today.getDate()), [today]);
     const sortBy = (settings?.taskSortBy ?? 'default') as TaskSortBy;
 
     const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
 
-    const activeTasks = tasks.filter((task) => !task.deletedAt && task.status !== 'reference' && isTaskInActiveProject(task, projectMap));
+    const activeTasks = useMemo(
+        () => tasks.filter((task) => !task.deletedAt && task.status !== 'reference' && isTaskInActiveProject(task, projectMap)),
+        [projectMap, tasks],
+    );
     const inboxTasks = useMemo(
         () => activeTasks.filter((task) => task.status === 'inbox'),
         [activeTasks],
     );
-    const focusedTasks = activeTasks.filter((task) => task.isFocusedToday && task.status !== 'done');
+    const focusedTasks = useMemo(
+        () => activeTasks.filter((task) => task.isFocusedToday && task.status !== 'done'),
+        [activeTasks],
+    );
     const waitingTasks = useMemo(
         () => sortTasksBy(activeTasks.filter((task) => task.status === 'waiting'), sortBy),
         [activeTasks, sortBy],
     );
 
-    const dueTodayTasks = activeTasks.filter((task) => {
+    const dueTodayTasks = useMemo(() => activeTasks.filter((task) => {
         if (task.status === 'done') return false;
         if (!task.dueDate) return false;
         const due = safeParseDueDate(task.dueDate);
         if (!due) return false;
         return isSameDay(due, today);
-    });
+    }), [activeTasks, today]);
 
-    const overdueTasks = activeTasks.filter((task) => {
+    const overdueTasks = useMemo(() => activeTasks.filter((task) => {
         if (task.status === 'done') return false;
         if (!task.dueDate) return false;
         const due = safeParseDueDate(task.dueDate);
         if (!due) return false;
         return due < startOfToday;
-    });
+    }), [activeTasks, startOfToday]);
 
     const allContexts = useMemo(() => {
         return getUsedTaskTokens(activeTasks, (task) => task.contexts, { prefix: '@' });
@@ -162,6 +176,10 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
     }, [currentStep, isProcessing]);
 
     useEffect(() => {
+        window.localStorage.setItem(DAILY_REVIEW_STEP_STORAGE_KEY, currentStep);
+    }, [currentStep]);
+
+    useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === 'Escape') {
                 event.preventDefault();
@@ -201,7 +219,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
         };
     }, []);
 
-    const getEventsForDay = (date: Date) => {
+    const getEventsForDay = useCallback((date: Date) => {
         const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
         const dayEnd = new Date(dayStart);
         dayEnd.setDate(dayEnd.getDate() + 1);
@@ -217,26 +235,48 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
                 const bStart = safeParseDate(b.start)?.getTime() ?? Number.POSITIVE_INFINITY;
                 return aStart - bStart;
             });
-    };
+    }, [externalCalendarEvents]);
 
     const tomorrow = useMemo(() => {
         const d = new Date(today);
         d.setDate(d.getDate() + 1);
         return d;
     }, [today]);
-    const todayCalendarEvents = useMemo(() => getEventsForDay(today), [externalCalendarEvents, today]);
-    const tomorrowCalendarEvents = useMemo(() => getEventsForDay(tomorrow), [externalCalendarEvents, tomorrow]);
+    const todayCalendarEvents = useMemo(() => getEventsForDay(today), [getEventsForDay, today]);
+    const tomorrowCalendarEvents = useMemo(() => getEventsForDay(tomorrow), [getEventsForDay, tomorrow]);
 
-    const steps: { id: DailyReviewStep; title: string; description: string; icon: LucideIcon }[] = [
-        { id: 'today', title: t('dailyReview.todayStep'), description: t('dailyReview.todayDesc'), icon: Calendar },
-        { id: 'inbox', title: t('dailyReview.inboxStep'), description: t('dailyReview.inboxDesc'), icon: CheckSquare },
-        { id: 'focus', title: t('dailyReview.focusStep'), description: t('dailyReview.focusDesc'), icon: CheckSquare },
-        { id: 'waiting', title: t('dailyReview.waitingStep'), description: t('dailyReview.waitingDesc'), icon: ArrowRight },
-        { id: 'completed', title: t('dailyReview.completeTitle'), description: t('dailyReview.completeDesc'), icon: Check },
-    ];
+    const includeFocusStep = settings?.gtd?.dailyReview?.includeFocusStep !== false;
+    const steps: { id: DailyReviewStep; title: string; description: string; icon: LucideIcon }[] = useMemo(() => {
+        const visibleSteps: { id: DailyReviewStep; title: string; description: string; icon: LucideIcon }[] = [
+            { id: 'today', title: t('dailyReview.todayStep'), description: t('dailyReview.todayDesc'), icon: Calendar },
+        ];
+        if (inboxTasks.length > 0) {
+            visibleSteps.push({ id: 'inbox', title: t('dailyReview.inboxStep'), description: t('dailyReview.inboxDesc'), icon: CheckSquare });
+        }
+        if (includeFocusStep) {
+            visibleSteps.push({ id: 'focus', title: t('dailyReview.focusStep'), description: t('dailyReview.focusDesc'), icon: CheckSquare });
+        }
+        visibleSteps.push(
+            { id: 'waiting', title: t('dailyReview.waitingStep'), description: t('dailyReview.waitingDesc'), icon: ArrowRight },
+            { id: 'completed', title: t('dailyReview.completeTitle'), description: t('dailyReview.completeDesc'), icon: Check },
+        );
+        return visibleSteps;
+    }, [inboxTasks.length, includeFocusStep, t]);
 
-    const currentStepIndex = steps.findIndex((s) => s.id === currentStep);
+    useEffect(() => {
+        if (!steps.some((step) => step.id === currentStep)) {
+            setCurrentStep(steps[0].id);
+        }
+    }, [currentStep, steps]);
+
+    const currentStepIndex = Math.max(0, steps.findIndex((s) => s.id === currentStep));
+    const activeStep = steps[currentStepIndex]?.id ?? 'today';
     const progress = ((currentStepIndex) / (steps.length - 1)) * 100;
+
+    const finishReview = () => {
+        window.localStorage.removeItem(DAILY_REVIEW_STEP_STORAGE_KEY);
+        onClose();
+    };
 
     const nextStep = () => {
         if (currentStepIndex < steps.length - 1) {
@@ -374,7 +414,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
     };
 
     const renderStepContent = () => {
-        switch (currentStep) {
+        switch (activeStep) {
             case 'today': {
                 const list = [...overdueTasks, ...dueTodayTasks];
                 return (
@@ -470,7 +510,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
                         <h2 className="text-3xl font-bold">{t('dailyReview.completeTitle')}</h2>
                         <p className="text-muted-foreground text-lg max-w-md mx-auto">{t('dailyReview.completeDesc')}</p>
                         <button
-                            onClick={onClose}
+                            onClick={finishReview}
                             className="bg-primary text-primary-foreground px-8 py-3 rounded-lg text-lg font-medium hover:bg-primary/90 transition-colors"
                         >
                             {t('review.finish')}
@@ -532,7 +572,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
                         {renderStepContent()}
                     </div>
 
-                    {currentStep !== 'completed' && (
+                    {activeStep !== 'completed' && (
                         <div className="flex justify-between items-center pt-3.5 border-t border-border mt-5">
                             <button
                                 onClick={prevStep}

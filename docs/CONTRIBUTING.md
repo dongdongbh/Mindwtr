@@ -20,13 +20,13 @@ Mindwtr is a Bun monorepo with:
 
 ### 1) Follow our community standards
 
-- Read and follow the [Code of Conduct](https://github.com/dongdongbh/Mindwtr/blob/main/docs/CODE_OF_CONDUCT.md).
+- Read and follow the [Code of Conduct](https://github.com/dongdongbh/Mindwtr/blob/main/.github/CODE_OF_CONDUCT.md).
 - Be respectful in issues, discussions, reviews, and commits.
 
 ### 2) Report security issues privately
 
 - Do not open public issues for security vulnerabilities.
-- Use [SECURITY.md](https://github.com/dongdongbh/Mindwtr/blob/main/docs/SECURITY.md) for responsible disclosure instructions.
+- Use [SECURITY.md](https://github.com/dongdongbh/Mindwtr/blob/main/.github/SECURITY.md) for responsible disclosure instructions.
 
 ### 3) Start with an issue for non-trivial changes
 

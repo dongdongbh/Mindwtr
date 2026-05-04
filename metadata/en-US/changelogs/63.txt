@@ -1,0 +1,6 @@
+Review is easier to use with collapsible groups, cleaner actions, and Inbox-first daily review.
+Calendar gestures, week scrolling, event details, and day timeline quick add are smoother.
+Task editing adds metadata suggestions for organization fields.
+Recurrence gains weekly intervals, quarterly repeats, and safer monthly repair.
+Sync preserves edits during refresh.
+Android alarms, quick capture, and widget placement are steadier.

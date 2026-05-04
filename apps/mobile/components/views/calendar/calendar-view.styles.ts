@@ -346,10 +346,6 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 4,
   },
-  dayModeNav: {
-    flexDirection: 'row',
-    gap: 8,
-  },
   dayNavButton: {
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -380,6 +376,9 @@ export const styles = StyleSheet.create({
   allDayItem: {
     fontSize: 13,
     paddingVertical: 2,
+  },
+  allDayPressable: {
+    borderRadius: 6,
   },
   timelineCard: {
     borderWidth: 1,
@@ -510,10 +509,16 @@ export const styles = StyleSheet.create({
     fontWeight: '800',
     textTransform: 'uppercase',
   },
+  weekDayNameCompact: {
+    fontSize: 9,
+  },
   weekDayNumber: {
     fontSize: 17,
     fontWeight: '900',
     marginTop: 2,
+  },
+  weekDayNumberCompact: {
+    fontSize: 14,
   },
   weekAllDayRow: {
     flexDirection: 'row',
@@ -532,15 +537,26 @@ export const styles = StyleSheet.create({
     padding: 5,
     gap: 3,
   },
+  weekAllDayCellCompact: {
+    paddingHorizontal: 2,
+    paddingVertical: 4,
+  },
   weekAllDayItem: {
     borderLeftWidth: 3,
     borderRadius: 5,
     paddingHorizontal: 5,
     paddingVertical: 2,
   },
+  weekAllDayItemCompact: {
+    borderLeftWidth: 2,
+    paddingHorizontal: 2,
+  },
   weekAllDayText: {
     fontSize: 10,
     fontWeight: '800',
+  },
+  weekAllDayTextCompact: {
+    fontSize: 8,
   },
   weekVertical: {
     flex: 1,
@@ -588,9 +604,27 @@ export const styles = StyleSheet.create({
     paddingVertical: 5,
     overflow: 'hidden',
   },
+  weekBlockCompact: {
+    left: 2,
+    right: 2,
+    borderLeftWidth: 3,
+    borderRadius: 6,
+    paddingHorizontal: 3,
+    paddingVertical: 3,
+  },
+  weekBlockUltraCompact: {
+    left: 1,
+    right: 1,
+    borderLeftWidth: 2,
+    paddingHorizontal: 2,
+  },
   weekBlockTitle: {
     fontSize: 12,
     fontWeight: '800',
+  },
+  weekBlockTitleCompact: {
+    fontSize: 9,
+    lineHeight: 11,
   },
   weekBlockTime: {
     fontSize: 10,
@@ -601,10 +635,72 @@ export const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#FFFFFF',
   },
+  weekTaskBlockTitleCompact: {
+    fontSize: 9,
+    lineHeight: 11,
+  },
   weekTaskBlockTime: {
     fontSize: 10,
     marginTop: 1,
     color: 'rgba(255,255,255,0.9)',
+  },
+  weekDensityBar: {
+    borderTopWidth: 1,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    gap: 8,
+  },
+  weekDensityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  weekDensityLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  weekDensityValue: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  weekDensityHint: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  weekDensityTrack: {
+    height: 4,
+    borderRadius: 999,
+    justifyContent: 'center',
+  },
+  weekDensityTrackFill: {
+    position: 'absolute',
+    left: 0,
+    height: 4,
+    borderRadius: 999,
+  },
+  weekDensityThumb: {
+    position: 'absolute',
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 3,
+    transform: [{ translateX: -11 }],
+  },
+  weekDensityTicks: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  weekDensityTick: {
+    minWidth: 32,
+    minHeight: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  weekDensityTickText: {
+    fontSize: 11,
+    fontWeight: '800',
   },
   scheduleScroll: {
     flex: 1,

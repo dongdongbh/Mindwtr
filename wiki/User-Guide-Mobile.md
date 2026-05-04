@@ -4,7 +4,7 @@ The Mindwtr mobile app is built with React Native and Expo. Android is fully sup
 
 ## Overview
 
-The mobile app uses tab navigation for main views and a drawer for additional views.
+The mobile app uses bottom tabs for core flows and a Menu page for additional views.
 
 ---
 
@@ -22,8 +22,9 @@ The mobile app uses tab navigation for main views and a drawer for additional vi
 | -------------- | ------------------------------------ |
 | 📥 **Inbox**    | Capture and process incoming items   |
 | 🎯 **Focus**    | Daily dashboard and next actions     |
-| 📁 **Projects** | Multi-step outcomes                  |
-| ☰ **Menu**     | Access Board, Review, Calendar, etc. |
+| ➕ **Quick Capture** | Add a task or audio note quickly |
+| 📝 **Review**  | Daily + weekly review                |
+| ☰ **Menu**     | Access Projects, Board, Calendar, etc. |
 
 ### Menu Tab
  
@@ -31,11 +32,14 @@ Tap the **Menu** tab to access additional views:
  
  - 📋 **Board** — Kanban board view
  - 🗓️ **Calendar** — Time-based view
- - 📝 **Review** — Daily + weekly review
+ - 📁 **Projects** — Multi-step outcomes
  - 🏷️ **Contexts** — Filter by context
  - ⏳ **Waiting For** — Delegated items
  - 💭 **Someday/Maybe** — Future ideas
+ - 📚 **Reference** — Reference material
+ - ✅ **Done** — Completed tasks
  - 📦 **Archived** — Archived tasks
+ - 🗑️ **Trash** — Deleted tasks
  - ⚙️ **Settings** — App preferences
 
 ---
@@ -67,7 +71,7 @@ Save frequently used searches:
 1. Enter your search query
 2. Tap **"Save Search"**
 3. Name your search
-4. Access from the drawer under **Saved Searches**
+4. Access from **Menu → Saved Searches**
 
 **To delete:** Open the saved search, tap the trash icon in the header.
 
@@ -153,7 +157,7 @@ Capture tasks using your voice with AI-powered transcription.
 
 ### Setup
 
-1. Go to **Settings → AI Assistant** (in the Settings tab).
+1. Go to **Menu → Settings → AI Assistant**.
 2. Enable **Speech to Text**.
 3. Choose a **Provider**:
    - **OpenAI / Gemini**: Cloud-based (requires API key).
@@ -208,21 +212,23 @@ Tap **Process Inbox** to start the clarify workflow:
 
 ## Focus
 
-Your primary dashboard for doing.
+Your primary dashboard for doing. Focus is an Engage dashboard, not a full inventory of every task with status `next`.
 
 ### Sections
 
 | Section      | Content                                                                 |
 | ------------ | ----------------------------------------------------------------------- |
 | **Today**    | Tasks focused for today, due today/overdue, or starting today           |
-| **Next**     | Context-filtered actionable tasks ready to be picked up                 |
+| **Next**     | Available next actions that are not blocked or deferred                 |
+
+Focus hides future-start tasks and later tasks in sequential projects so the list stays limited to what you can act on now. Use **Contexts**, **Projects**, or **Search** when you want to inspect the broader task inventory.
 
 ### Features
 
 - **Context filter** — Tap a context chip to filter the Next list.
 - **Swipe to Focus** — Swipe a task right to toggle "Focus" status (moves it to Today).
 - **Quick Status** — Tap the status badge to change status.
-- **Pomodoro (Optional)** — Enable in **Settings → GTD → Features → Pomodoro timer** to show a focus/break timer panel linked to your current task. You can also add one optional custom preset there.
+- **Pomodoro (Optional)** — Enable in **Settings → GTD → Features → Pomodoro timer** to show a compact focus/break timer. Leave it as **Timer only**, or turn on **Link timer to task** to show the Timer task picker and **Mark task done** action.
 
 ---
 
@@ -342,6 +348,8 @@ Subscribe to external calendars to see events alongside your tasks:
 
 Manage multi-step outcomes.
 
+Open Projects from **Menu → Projects**.
+
 ### Project List
 
 - View all active projects
@@ -365,8 +373,8 @@ Manage multi-step outcomes.
 
 | Mode           | Behavior                                             |
 | -------------- | ---------------------------------------------------- |
-| **Sequential** | Only the first incomplete task shows in the Next Actions list |
-| **Parallel**   | All project tasks show in the Next Actions list               |
+| **Sequential** | Only the first available project task appears in Focus |
+| **Parallel**   | All available project tasks can appear in Focus        |
 
 ---
 

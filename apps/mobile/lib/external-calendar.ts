@@ -94,6 +94,37 @@ function getSystemCalendarSourceId(calendarId: string): string {
     return `${SYSTEM_CALENDAR_SOURCE_PREFIX}:${calendarId}`;
 }
 
+export function canOpenExternalCalendarEvent(event: ExternalCalendarEvent): boolean {
+    return Platform.OS !== 'web'
+        && event.sourceId.startsWith(`${SYSTEM_CALENDAR_SOURCE_PREFIX}:`)
+        && typeof event.nativeEventId === 'string'
+        && event.nativeEventId.trim().length > 0;
+}
+
+export async function openExternalCalendarEvent(event: ExternalCalendarEvent): Promise<boolean> {
+    if (!canOpenExternalCalendarEvent(event)) return false;
+
+    const params = {
+        id: event.nativeEventId as string,
+        instanceStartDate: event.start,
+    };
+
+    if (typeof Calendar.editEventInCalendarAsync === 'function') {
+        await Calendar.editEventInCalendarAsync(params, { startNewActivityTask: Platform.OS === 'android' });
+        return true;
+    }
+
+    if (typeof Calendar.openEventInCalendarAsync === 'function') {
+        await Calendar.openEventInCalendarAsync(params, {
+            allowsEditing: true,
+            startNewActivityTask: Platform.OS === 'android',
+        });
+        return true;
+    }
+
+    return false;
+}
+
 function toDateSafe(value: unknown): Date | null {
     if (!value) return null;
     const date = value instanceof Date ? value : new Date(String(value));
@@ -377,6 +408,7 @@ async function fetchSystemCalendarEvents(rangeStart: Date, rangeEnd: Date, signa
         events.push({
             id: `${sourceId}:${eventId}:${startIso}`,
             sourceId,
+            nativeEventId: eventId,
             title: rawTitle || 'Event',
             start: startIso,
             end: endIso,

@@ -586,6 +586,33 @@ describe('performSyncCycle', () => {
         expect(localWrites[1].settings.pendingRemoteWriteAttempts).toBe(1);
     });
 
+    it('clears the pending remote write marker without retry backoff when a local abort requeues sync', async () => {
+        const localWrites: AppData[] = [];
+        let clearedPendingAt: string | null = null;
+        const abort = new Error('Local changes detected during sync');
+        abort.name = 'LocalSyncAbort';
+
+        await expect(performSyncCycle({
+            readLocal: async () => mockAppData([createMockTask('1', '2024-01-01T00:00:00.000Z')]),
+            readRemote: async () => mockAppData(),
+            writeLocal: async (data) => {
+                localWrites.push(data);
+            },
+            clearPendingRemoteWriteAfterLocalAbort: async (pendingAt) => {
+                clearedPendingAt = pendingAt;
+            },
+            writeRemote: async () => {
+                throw abort;
+            },
+            now: () => '2026-01-01T00:00:00.000Z',
+        })).rejects.toThrow('Local changes detected during sync');
+
+        expect(localWrites).toHaveLength(1);
+        expect(localWrites[0].settings.pendingRemoteWriteAt).toBe('2026-01-01T00:00:00.000Z');
+        expect(localWrites[0].settings.pendingRemoteWriteRetryAt).toBeUndefined();
+        expect(clearedPendingAt).toBe('2026-01-01T00:00:00.000Z');
+    });
+
     it('preserves remote-write preparation mutations across the pending-write lifecycle', async () => {
         const localWrites: AppData[] = [];
         let remoteWriteData: AppData | null = null;
@@ -690,6 +717,32 @@ describe('performSyncCycle', () => {
         expect(localWrites[1].settings.lastSyncStatus).toBe('error');
         expect(localWrites[1].settings.pendingRemoteWriteRetryAt).toBe('2026-01-01T00:00:10.000Z');
         expect(localWrites[1].settings.pendingRemoteWriteAttempts).toBe(2);
+    });
+
+    it('caps pending remote write attempts and records a visible error', async () => {
+        const localWrites: AppData[] = [];
+        const localWithPending = mockAppData([createMockTask('1', '2024-01-01T00:00:00.000Z')]);
+        localWithPending.settings.pendingRemoteWriteAt = '2025-12-31T23:59:59.000Z';
+        localWithPending.settings.pendingRemoteWriteRetryAt = '2025-12-31T23:59:59.000Z';
+        localWithPending.settings.pendingRemoteWriteAttempts = 12;
+
+        await expect(performSyncCycle({
+            readLocal: async () => localWithPending,
+            readRemote: async () => mockAppData(),
+            writeLocal: async (data) => {
+                localWrites.push(data);
+            },
+            writeRemote: async () => {
+                throw new Error('backend unavailable');
+            },
+            now: () => '2026-01-01T00:00:00.000Z',
+        })).rejects.toThrow('backend unavailable');
+
+        expect(localWrites).toHaveLength(2);
+        expect(localWrites[1].settings.lastSyncStatus).toBe('error');
+        expect(localWrites[1].settings.lastSyncError).toBe('Remote write failed after 12 attempts. Check your sync backend, then sync again.');
+        expect(localWrites[1].settings.pendingRemoteWriteRetryAt).toBe('2026-01-01T00:05:00.000Z');
+        expect(localWrites[1].settings.pendingRemoteWriteAttempts).toBe(12);
     });
 
     it('re-reads local data before retrying a pending remote write', async () => {

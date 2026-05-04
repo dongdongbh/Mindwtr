@@ -59,6 +59,7 @@ describe('TaskStore', () => {
             _allProjects: [],
             _allSections: [],
             _allAreas: [],
+            lastDataChangeAt: 0,
         });
         vi.useFakeTimers();
     });
@@ -634,6 +635,59 @@ describe('TaskStore', () => {
         expect(lastSaved?.tasks?.[0]?.title).toBe('Edited during sync');
     });
 
+    it('does not overwrite same-millisecond task completions made during an in-flight fetch', async () => {
+        const fixedNow = new Date('2026-03-22T10:00:00.000Z').getTime();
+        vi.setSystemTime(fixedNow);
+        const persistedData = {
+            tasks: [
+                {
+                    id: 'task-1',
+                    title: 'Complete during sync',
+                    status: 'next',
+                    tags: [],
+                    contexts: [],
+                    createdAt: '2026-03-22T09:00:00.000Z',
+                    updatedAt: '2026-03-22T09:00:00.000Z',
+                },
+            ],
+            projects: [],
+            sections: [],
+            areas: [],
+            settings: {},
+        };
+        let resolveFetch: ((value: typeof persistedData) => void) | null = null;
+        mockStorage.getData = vi.fn()
+            .mockResolvedValueOnce(persistedData)
+            .mockImplementationOnce(
+                () =>
+                    new Promise<typeof persistedData>((resolve) => {
+                        resolveFetch = resolve;
+                    })
+            );
+
+        await useTaskStore.getState().fetchData({ silent: true });
+        useTaskStore.setState({ lastDataChangeAt: fixedNow });
+
+        const slowFetch = useTaskStore.getState().fetchData({ silent: true });
+        await waitForExpectation(() => {
+            expect(mockStorage.getData).toHaveBeenCalledTimes(2);
+        });
+
+        await useTaskStore.getState().updateTask('task-1', { status: 'done' });
+        expect(useTaskStore.getState().lastDataChangeAt).toBeGreaterThan(fixedNow);
+        resolveFetch?.(persistedData);
+        await slowFetch;
+        await flushPendingSave();
+
+        const currentTask = useTaskStore.getState()._allTasks.find((task) => task.id === 'task-1');
+        expect(currentTask?.status).toBe('done');
+        expect(currentTask?.completedAt).toBe('2026-03-22T10:00:00.000Z');
+
+        const saveCalls = (mockStorage.saveData as unknown as { mock: { calls: any[][] } }).mock.calls;
+        const lastSaved = saveCalls[saveCalls.length - 1]?.[0];
+        expect(lastSaved?.tasks?.[0]?.status).toBe('done');
+    });
+
     it('purges expired tombstones during fetch even without sync', async () => {
         mockStorage.getData = vi.fn().mockResolvedValue({
             tasks: [
@@ -1170,8 +1224,8 @@ describe('TaskStore', () => {
         expect(projects[0].color).toBe('#ff0000');
     });
 
-    it('should soft-delete areas and clear area references from projects/tasks', async () => {
-        const { addArea, addProject, addTask, deleteArea } = useTaskStore.getState();
+    it('should soft-delete areas and cascade to projects/sections/tasks', async () => {
+        const { addArea, addProject, addSection, addTask, deleteArea } = useTaskStore.getState();
         const area = await addArea('Work');
         expect(area).not.toBeNull();
         if (!area) return;
@@ -1179,34 +1233,65 @@ describe('TaskStore', () => {
         const project = await addProject('Area Project', '#123456', { areaId: area.id });
         expect(project).not.toBeNull();
         if (!project) return;
-        addTask('Area Task', { areaId: area.id, status: 'next' });
+        const section = await addSection(project.id, 'Planning');
+        expect(section).not.toBeNull();
+        if (!section) return;
+        await addTask('Area Task', { areaId: area.id, status: 'next' });
+        await addTask('Project Task', { projectId: project.id, sectionId: section.id, status: 'next' });
 
         await deleteArea(area.id);
 
         const state = useTaskStore.getState();
         expect(state.areas).toHaveLength(0);
+        expect(state.projects).toHaveLength(0);
+        expect(state.sections).toHaveLength(0);
+        expect(state.tasks).toHaveLength(0);
         const tombstone = state._allAreas.find((item) => item.id === area.id);
         expect(tombstone?.deletedAt).toBeTruthy();
 
         const updatedProject = state._allProjects.find((item) => item.id === project.id)!;
-        expect(updatedProject.areaId).toBeUndefined();
+        expect(updatedProject.deletedAt).toBe(tombstone?.deletedAt);
+        expect(updatedProject.areaId).toBe(area.id);
+        const updatedSection = state._allSections.find((item) => item.id === section.id)!;
+        expect(updatedSection.deletedAt).toBe(tombstone?.deletedAt);
         const updatedTask = state._allTasks.find((item) => item.title === 'Area Task')!;
-        expect(updatedTask.areaId).toBeUndefined();
+        expect(updatedTask.deletedAt).toBe(tombstone?.deletedAt);
+        expect(updatedTask.areaId).toBe(area.id);
+        const updatedProjectTask = state._allTasks.find((item) => item.title === 'Project Task')!;
+        expect(updatedProjectTask.deletedAt).toBe(tombstone?.deletedAt);
+        expect(updatedProjectTask.projectId).toBe(project.id);
     });
 
-    it('restores a deleted area explicitly', async () => {
-        const { addArea, deleteArea, restoreArea } = useTaskStore.getState();
+    it('restores an area with children deleted by the area cascade', async () => {
+        const { addArea, addProject, addSection, addTask, deleteArea, restoreArea } = useTaskStore.getState();
         const area = await addArea('Work');
         expect(area).not.toBeNull();
         if (!area) return;
+        const project = await addProject('Area Project', '#123456', { areaId: area.id });
+        expect(project).not.toBeNull();
+        if (!project) return;
+        const section = await addSection(project.id, 'Planning');
+        expect(section).not.toBeNull();
+        if (!section) return;
+        await addTask('Area Task', { areaId: area.id, status: 'next' });
+        await addTask('Project Task', { projectId: project.id, sectionId: section.id, status: 'next' });
 
         await deleteArea(area.id);
 
         const result = await restoreArea(area.id);
         expect(result).toEqual({ success: true });
 
-        const restored = useTaskStore.getState().areas.find((item) => item.id === area.id);
+        const state = useTaskStore.getState();
+        const restored = state.areas.find((item) => item.id === area.id);
         expect(restored?.deletedAt).toBeUndefined();
+        const restoredProject = state.projects.find((item) => item.id === project.id);
+        expect(restoredProject?.areaId).toBe(area.id);
+        expect(restoredProject?.deletedAt).toBeUndefined();
+        expect(state.sections.find((item) => item.id === section.id)?.deletedAt).toBeUndefined();
+        expect(state.tasks.find((item) => item.title === 'Area Task')?.areaId).toBe(area.id);
+        const projectTask = state.tasks.find((item) => item.title === 'Project Task');
+        expect(projectTask?.projectId).toBe(project.id);
+        expect(projectTask?.sectionId).toBe(section.id);
     });
 
     it('propagates area color updates to linked projects', async () => {

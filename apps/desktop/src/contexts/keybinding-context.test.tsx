@@ -320,4 +320,55 @@ describe('KeybindingProvider (vim)', () => {
         fireEvent.keyDown(window, { key: 'e' });
         expect(onOpenTask2).toHaveBeenCalledTimes(1);
     });
+
+    it('shows an undo toast when fallback keyboard delete soft-deletes a task', async () => {
+        const deleteTask = vi.fn(async () => ({ success: true }));
+        const restoreTask = vi.fn(async () => ({ success: true }));
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast });
+        useTaskStore.setState((state) => ({
+            ...state,
+            tasks: [{
+                id: '1',
+                title: 'Task 1',
+                status: 'next',
+                tags: [],
+                contexts: [],
+                createdAt: '2026-01-01T00:00:00.000Z',
+                updatedAt: '2026-01-01T00:00:00.000Z',
+            }],
+            settings: {
+                ...state.settings,
+                keybindingStyle: 'vim',
+                undoNotificationsEnabled: true,
+            },
+            deleteTask,
+            restoreTask,
+        }));
+
+        render(
+            <LanguageProvider>
+                <KeybindingProvider currentView="projects" onNavigate={vi.fn()}>
+                    <FallbackTaskList onEditTask1={vi.fn()} onEditTask2={vi.fn()} />
+                </KeybindingProvider>
+            </LanguageProvider>
+        );
+
+        fireEvent.keyDown(window, { key: 'd' });
+        fireEvent.keyDown(window, { key: 'd' });
+
+        await waitFor(() => {
+            expect(deleteTask).toHaveBeenCalledWith('1');
+            expect(showToast).toHaveBeenCalledWith(
+                expect.any(String),
+                'info',
+                5000,
+                expect.objectContaining({ label: expect.any(String) })
+            );
+        });
+
+        const undoAction = showToast.mock.calls[0]?.[3];
+        undoAction.onClick();
+        expect(restoreTask).toHaveBeenCalledWith('1');
+    });
 });

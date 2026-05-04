@@ -3,6 +3,8 @@ import { parseMarkdownReferenceHref, tFallback, useTaskStore, shallow } from '@m
 
 import { useLanguage } from '../contexts/language-context';
 import { dispatchNavigateEvent } from '../lib/navigation-events';
+import { reportError } from '../lib/report-error';
+import { isTauriRuntime } from '../lib/runtime';
 import { cn } from '../lib/utils';
 import { resolveTaskNavigationView } from '../lib/task-navigation';
 import { useUiStore } from '../store/ui-store';
@@ -19,6 +21,26 @@ function isSafeExternalHref(href: string): boolean {
         return ['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol);
     } catch {
         return false;
+    }
+}
+
+async function openExternalHref(href: string): Promise<void> {
+    const nextHref = href.trim();
+    let openError: unknown = null;
+
+    if (isTauriRuntime()) {
+        try {
+            const { open } = await import('@tauri-apps/plugin-shell');
+            await open(nextHref);
+            return;
+        } catch (error) {
+            openError = error;
+        }
+    }
+
+    const opened = window.open(nextHref, '_blank', 'noopener,noreferrer');
+    if (!opened) {
+        reportError('Failed to open markdown link', openError ?? new Error('Popup blocked'));
     }
 }
 
@@ -49,7 +71,9 @@ export function InternalMarkdownLink({ href, className, children }: InternalMark
                 rel="noreferrer"
                 className={cn('text-primary underline underline-offset-2 hover:opacity-90', className)}
                 onClick={(event) => {
+                    event.preventDefault();
                     event.stopPropagation();
+                    void openExternalHref(href);
                 }}
             >
                 {children}

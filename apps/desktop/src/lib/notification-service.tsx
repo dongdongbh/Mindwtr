@@ -110,9 +110,11 @@ function checkDueAndNotify() {
 
     if (settings.notificationsEnabled === false) return;
 
+    const includeStartTime = settings.startDateNotificationsEnabled !== false;
+    const includeDueDate = settings.dueDateNotificationsEnabled !== false;
     const includeReviewAt = settings.reviewAtNotificationsEnabled !== false;
     tasks.forEach((task: Task) => {
-        const next = getNextScheduledAt(task, now, { includeReviewAt });
+        const next = getNextScheduledAt(task, now, { includeStartTime, includeDueDate, includeReviewAt });
         if (!next) return;
         const diffMs = next.getTime() - now.getTime();
         if (diffMs > CHECK_INTERVAL_MS) return;

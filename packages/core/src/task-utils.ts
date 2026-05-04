@@ -33,6 +33,11 @@ const TASK_PRIORITY_SORT_RANK: Record<TaskPriority, number> = {
 
 export const FOCUS_NEXT_DUE_SOON_WINDOW_DAYS = 30;
 
+type TaskStartVisibilityOptions = {
+    now?: Date;
+    showFutureStarts?: boolean;
+};
+
 const safeTime = (value: string | undefined, fallback: number): number => {
     if (!value) return fallback;
     const parsed = Date.parse(value);
@@ -98,6 +103,70 @@ export function getWaitingPerson(task: Pick<Task, 'assignedTo' | 'description'>)
     const assignedTo = task.assignedTo?.trim();
     if (assignedTo) return assignedTo;
     return extractWaitingPerson(task.description);
+}
+
+export function isTaskFutureStart(task: Pick<Task, 'startTime'>, now: Date = new Date()): boolean {
+    const start = safeParseDate(task.startTime);
+    if (!start) return false;
+
+    const endOfToday = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate(),
+        23,
+        59,
+        59,
+        999,
+    );
+    return start > endOfToday;
+}
+
+export function shouldShowTaskForStart(
+    task: Pick<Task, 'startTime'>,
+    options: TaskStartVisibilityOptions = {},
+): boolean {
+    if (options.showFutureStarts === true) return true;
+    return !isTaskFutureStart(task, options.now);
+}
+
+export function getSequentialFirstTaskIds<T extends Pick<Task, 'createdAt' | 'id' | 'order' | 'orderNum' | 'projectId'>>(
+    tasks: T[],
+    sequentialProjectIds: ReadonlySet<string>,
+): Set<string> {
+    const tasksByProject = new Map<string, T[]>();
+    for (const task of tasks) {
+        if (!task.projectId) continue;
+        if (!sequentialProjectIds.has(task.projectId)) continue;
+        const list = tasksByProject.get(task.projectId) ?? [];
+        list.push(task);
+        tasksByProject.set(task.projectId, list);
+    }
+
+    const firstTaskIds = new Set<string>();
+    tasksByProject.forEach((tasksForProject) => {
+        const hasOrder = tasksForProject.some((task) => Number.isFinite(task.order) || Number.isFinite(task.orderNum));
+        let firstTaskId: string | null = null;
+        let bestKey = Number.POSITIVE_INFINITY;
+
+        tasksForProject.forEach((task) => {
+            const taskOrder = Number.isFinite(task.order)
+                ? (task.order as number)
+                : Number.isFinite(task.orderNum)
+                    ? (task.orderNum as number)
+                    : Number.POSITIVE_INFINITY;
+            const key = hasOrder
+                ? taskOrder
+                : (safeParseDate(task.createdAt)?.getTime() ?? Number.POSITIVE_INFINITY);
+            if (!firstTaskId || key < bestKey) {
+                firstTaskId = task.id;
+                bestKey = key;
+            }
+        });
+
+        if (firstTaskId) firstTaskIds.add(firstTaskId);
+    });
+
+    return firstTaskIds;
 }
 
 /**

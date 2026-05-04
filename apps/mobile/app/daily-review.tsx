@@ -6,7 +6,7 @@ export default function DailyReviewRoute() {
     <DailyReviewScreen
       onClose={() => {
         if (router.canGoBack()) router.back();
-        else router.replace('/review');
+        else router.replace('/review-tab');
       }}
     />
   );

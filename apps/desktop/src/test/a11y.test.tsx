@@ -6,10 +6,11 @@ import { GlobalSearch } from '../components/GlobalSearch';
 import { KeybindingHelpModal } from '../components/KeybindingHelpModal';
 import { ToastHost } from '../components/ToastHost';
 import { TaskItemRecurrenceModal } from '../components/Task/TaskItemRecurrenceModal';
-import { Task } from '@mindwtr/core';
+import { Task, useTaskStore } from '@mindwtr/core';
 import { LanguageProvider } from '../contexts/language-context';
 import { useUiStore } from '../store/ui-store';
 import { GLOBAL_QUICK_ADD_SHORTCUT_DEFAULT } from '../lib/global-quick-add-shortcut';
+import { PomodoroPanel } from '../components/views/PomodoroPanel';
 
 const mockTask: Task = {
     id: '1',
@@ -138,6 +139,28 @@ describe('Accessibility', () => {
         expect(container.querySelector('[role="dialog"]')).not.toBeNull();
         vi.useRealTimers();
 
+        const results = await runAxe(container);
+        expect(results.violations).toHaveLength(0);
+    });
+
+    it('PomodoroPanel should have no violations with task linking enabled', async () => {
+        useTaskStore.setState((state) => ({
+            ...state,
+            settings: {
+                ...(state.settings ?? {}),
+                notificationsEnabled: false,
+                gtd: {
+                    ...(state.settings?.gtd ?? {}),
+                    pomodoro: {
+                        ...(state.settings?.gtd?.pomodoro ?? {}),
+                        linkTask: true,
+                    },
+                },
+            },
+            updateTask: vi.fn().mockResolvedValue(undefined),
+        }));
+
+        const { container } = renderWithLanguage(<PomodoroPanel tasks={[mockTask]} />);
         const results = await runAxe(container);
         expect(results.violations).toHaveLength(0);
     });

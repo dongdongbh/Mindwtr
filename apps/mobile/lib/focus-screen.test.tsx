@@ -20,9 +20,10 @@ const makeTask = (id: string, overrides: Partial<Task> = {}): Task => ({
 const storeState: {
   tasks: Task[];
   projects: unknown[];
-  settings: { features: Record<string, unknown> };
+  settings: { appearance: Record<string, unknown>; features: Record<string, unknown> };
   updateTask: ReturnType<typeof vi.fn>;
   deleteTask: ReturnType<typeof vi.fn>;
+  updateSettings: ReturnType<typeof vi.fn>;
   highlightTaskId: string | null;
   setHighlightTask: ReturnType<typeof vi.fn>;
 } = {
@@ -31,9 +32,10 @@ const storeState: {
     makeTask('next-task'),
   ],
   projects: [],
-  settings: { features: {} },
+  settings: { appearance: {}, features: {} },
   updateTask: vi.fn(),
   deleteTask: vi.fn(),
+  updateSettings: vi.fn(),
   highlightTaskId: null,
   setHighlightTask: vi.fn(),
 };
@@ -43,6 +45,8 @@ beforeEach(() => {
     makeTask('focus-task', { isFocusedToday: true, dueDate: '2000-01-01' }),
     makeTask('next-task'),
   ];
+  storeState.settings = { appearance: {}, features: {} };
+  storeState.updateSettings.mockClear();
   storeState.highlightTaskId = null;
 });
 

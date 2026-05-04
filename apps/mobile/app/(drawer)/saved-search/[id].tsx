@@ -33,7 +33,9 @@ export default function SavedSearchScreen() {
     if (!query) return [];
     const projectMap = new Map(projects.map((project) => [project.id, project]));
     return sortTasksBy(
-      filterTasksBySearch(tasks, projects, query).filter((task) => taskMatchesAreaFilter(task, resolvedAreaFilter, projectMap, areaById)),
+      filterTasksBySearch(tasks, projects, query).filter((task) => (
+        taskMatchesAreaFilter(task, resolvedAreaFilter, projectMap, areaById)
+      )),
       sortBy,
     );
   }, [tasks, projects, query, sortBy, resolvedAreaFilter, areaById]);
@@ -83,8 +85,8 @@ export default function SavedSearchScreen() {
         setEditingTask(item);
         setIsModalVisible(true);
       }}
-      onStatusChange={(status) => updateTask(item.id, { status: status as TaskStatus })}
-      onDelete={() => deleteTask(item.id)}
+      onStatusChange={(status) => { void updateTask(item.id, { status: status as TaskStatus }); }}
+      onDelete={() => { void deleteTask(item.id); }}
       onProjectPress={openProjectScreen}
       onContextPress={openContextsScreen}
       onTagPress={openContextsScreen}

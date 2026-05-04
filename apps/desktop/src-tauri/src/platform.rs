@@ -1,5 +1,95 @@
 use crate::*;
 
+fn strip_file_scheme(raw: &str) -> Result<String, String> {
+    if !raw.to_ascii_lowercase().starts_with("file://") {
+        return Ok(raw.to_string());
+    }
+
+    let without_scheme = &raw[7..];
+    if without_scheme.starts_with('/') {
+        #[cfg(target_os = "windows")]
+        {
+            let without_leading_slash = without_scheme.trim_start_matches('/');
+            if without_leading_slash.as_bytes().get(1) == Some(&b':') {
+                return Ok(without_leading_slash.to_string());
+            }
+        }
+        return Ok(without_scheme.to_string());
+    }
+
+    Err("Only local file paths can be opened.".to_string())
+}
+
+fn canonical_existing_dir(path: PathBuf) -> Option<PathBuf> {
+    path.canonicalize().ok().filter(|candidate| candidate.is_dir())
+}
+
+fn configured_obsidian_vault_path(config: &AppConfigToml) -> Option<PathBuf> {
+    #[derive(Deserialize, Default)]
+    struct VaultPathOnly {
+        vault_path: Option<String>,
+    }
+
+    let raw = config.obsidian_config.as_ref()?;
+    let parsed = serde_json::from_str::<VaultPathOnly>(raw).ok()?;
+    let vault_path = parsed.vault_path?.trim().to_string();
+    if vault_path.is_empty() {
+        return None;
+    }
+    canonical_existing_dir(PathBuf::from(vault_path))
+}
+
+fn allowed_open_roots(app: &tauri::AppHandle) -> Vec<PathBuf> {
+    let config = read_config(app);
+    let mut roots = vec![
+        get_data_dir(app),
+        get_data_dir(app).join("attachments"),
+        get_data_dir(app).join("audio-captures"),
+    ];
+
+    if let Some(sync_path) = config
+        .sync_path
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        roots.push(PathBuf::from(sync_path).join("attachments"));
+    }
+
+    if let Some(vault_path) = configured_obsidian_vault_path(&config) {
+        roots.push(vault_path);
+    }
+
+    roots
+        .into_iter()
+        .filter_map(canonical_existing_dir)
+        .fold(Vec::<PathBuf>::new(), |mut unique_roots, root| {
+            if !unique_roots.iter().any(|existing| existing == &root) {
+                unique_roots.push(root);
+            }
+            unique_roots
+        })
+}
+
+fn normalize_open_path(raw: &str) -> Result<PathBuf, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("Path is empty".to_string());
+    }
+    let without_file_scheme = strip_file_scheme(trimmed)?;
+    let candidate = PathBuf::from(without_file_scheme);
+    if !candidate.is_absolute() {
+        return Err("Only absolute local file paths can be opened.".to_string());
+    }
+    candidate
+        .canonicalize()
+        .map_err(|_| "File does not exist or cannot be accessed.".to_string())
+}
+
+fn path_is_under_allowed_root(path: &Path, allowed_roots: &[PathBuf]) -> bool {
+    allowed_roots.iter().any(|root| path == root || path.starts_with(root))
+}
+
 #[cfg(target_os = "macos")]
 fn parse_macos_eventkit_json(raw: *mut c_char) -> Result<Value, String> {
     if raw.is_null() {
@@ -284,18 +374,32 @@ pub(crate) fn cloudkit_register_for_notifications() -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub(crate) fn open_path(path: String) -> Result<bool, String> {
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        return Err("Path is empty".to_string());
+pub(crate) fn open_path(app: tauri::AppHandle, path: String) -> Result<bool, String> {
+    let normalized = normalize_open_path(&path)?;
+    let allowed_roots = allowed_open_roots(&app);
+    if !path_is_under_allowed_root(&normalized, &allowed_roots) {
+        return Err("Path is outside Mindwtr-managed locations.".to_string());
     }
-    let normalized = if trimmed.starts_with("file://") {
-        trimmed.trim_start_matches("file://")
-    } else {
-        trimmed
-    };
     open::that(normalized).map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_open_path_rejects_urls_and_relative_paths() {
+        assert!(normalize_open_path("https://example.com/file.txt").is_err());
+        assert!(normalize_open_path("../notes.txt").is_err());
+    }
+
+    #[test]
+    fn path_is_under_allowed_root_respects_boundaries() {
+        let root = PathBuf::from("/tmp/mindwtr");
+        assert!(path_is_under_allowed_root(Path::new("/tmp/mindwtr/attachments/a.pdf"), &[root.clone()]));
+        assert!(!path_is_under_allowed_root(Path::new("/tmp/mindwtr-other/a.pdf"), &[root]));
+    }
 }
 
 #[tauri::command]

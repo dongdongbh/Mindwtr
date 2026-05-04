@@ -57,7 +57,7 @@ pub(crate) fn apply_global_quick_add_shortcut(
     if let Some(next_shortcut) = normalized.as_ref() {
         app.global_shortcut()
             .on_shortcut(next_shortcut.as_str(), move |app, _shortcut, _event| {
-                show_main_and_emit(app);
+                show_quick_add_window(app);
             })
             .map_err(|error| format!("Failed to register global quick add shortcut: {error}"))?;
     }
@@ -130,4 +130,45 @@ pub(crate) fn show_main_and_emit(app: &tauri::AppHandle) {
     } else {
         let _ = app.emit("quick-add", ());
     }
+}
+
+pub(crate) fn create_quick_add_window(app: &tauri::AppHandle) -> Result<(), String> {
+    if app.get_webview_window(QUICK_ADD_WINDOW_LABEL).is_some() {
+        return Ok(());
+    }
+
+    tauri::WebviewWindowBuilder::new(
+        app,
+        QUICK_ADD_WINDOW_LABEL,
+        tauri::WebviewUrl::App(QUICK_ADD_WINDOW_URL.into()),
+    )
+    .title("Quick Add")
+    .inner_size(620.0, 420.0)
+    .resizable(false)
+    .decorations(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .visible(false)
+    .center()
+    .build()
+    .map(|_| ())
+    .map_err(|error| format!("Failed to create quick add window: {error}"))
+}
+
+pub(crate) fn show_quick_add_window(app: &tauri::AppHandle) {
+    app.state::<QuickAddPending>()
+        .0
+        .store(true, Ordering::SeqCst);
+
+    if let Some(window) = app.get_webview_window(QUICK_ADD_WINDOW_LABEL) {
+        let _ = window.set_skip_taskbar(true);
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        let _ = window.emit("quick-add", ());
+        return;
+    }
+
+    log::warn!("Quick add window unavailable; falling back to the main window.");
+    show_main_and_emit(app);
 }

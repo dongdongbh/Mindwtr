@@ -12,6 +12,7 @@ type Props = {
   setExecutionChoice: (v: 'defer' | 'delegate') => void;
   delegateWho: string;
   setDelegateWho: (v: string) => void;
+  delegateWhoSuggestions: string[];
   showReviewDateField: boolean;
   delegateFollowUpDate: Date | null;
   setDelegateFollowUpDate: (v: Date | null) => void;
@@ -30,6 +31,7 @@ export function InboxExecutionSection({
   setExecutionChoice,
   delegateWho,
   setDelegateWho,
+  delegateWhoSuggestions,
   showReviewDateField,
   delegateFollowUpDate,
   setDelegateFollowUpDate,
@@ -82,6 +84,19 @@ export function InboxExecutionSection({
             value={delegateWho}
             onChangeText={setDelegateWho}
           />
+          {delegateWhoSuggestions.length > 0 && (
+            <View style={[styles.tokenSuggestionsContainer, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
+              {delegateWhoSuggestions.map((name) => (
+                <TouchableOpacity
+                  key={name}
+                  style={styles.tokenSuggestionChip}
+                  onPress={() => setDelegateWho(name)}
+                >
+                  <Text style={[styles.tokenSuggestionText, { color: tc.text }]}>{name}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
           {!showReviewDateField && (
             <InboxDateSelectorRow
               label={t('process.delegateFollowUpLabel')}

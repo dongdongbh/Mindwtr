@@ -9,6 +9,10 @@ export type SettingsScreen =
     | 'advanced'
     | 'gtd'
     | 'gtd-archive'
+    | 'gtd-capture'
+    | 'gtd-inbox'
+    | 'gtd-pomodoro'
+    | 'gtd-review'
     | 'gtd-time-estimates'
     | 'gtd-task-editor'
     | 'manage'
@@ -25,6 +29,10 @@ export const SETTINGS_SCREEN_SET: Record<SettingsScreen, true> = {
     advanced: true,
     gtd: true,
     'gtd-archive': true,
+    'gtd-capture': true,
+    'gtd-inbox': true,
+    'gtd-pomodoro': true,
+    'gtd-review': true,
     'gtd-time-estimates': true,
     'gtd-task-editor': true,
     manage: true,

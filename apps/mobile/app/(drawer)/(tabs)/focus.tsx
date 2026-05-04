@@ -15,6 +15,8 @@ import { SlidersHorizontal, X } from 'lucide-react-native';
 
 import {
   sortFocusNextActions,
+  shouldShowTaskForStart,
+  getSequentialFirstTaskIds,
   translateWithFallback,
   useTaskStore,
   isDueForReview,
@@ -54,7 +56,7 @@ function filterSelectionStable<T>(current: T[], predicate: (item: T) => boolean)
 
 export default function FocusScreen() {
   const { taskId, openToken } = useLocalSearchParams<{ taskId?: string; openToken?: string }>();
-  const { tasks, projects, settings, updateTask, deleteTask, highlightTaskId, setHighlightTask } = useTaskStore();
+  const { tasks, projects, settings, updateTask, deleteTask, updateSettings, highlightTaskId, setHighlightTask } = useTaskStore();
   const { isDark } = useTheme();
   const { t } = useLanguage();
   const tc = useThemeColors();
@@ -66,6 +68,7 @@ export default function FocusScreen() {
   const [selectedPriorities, setSelectedPriorities] = useState<TaskPriority[]>([]);
   const [selectedEnergyLevels, setSelectedEnergyLevels] = useState<TaskEnergyLevel[]>([]);
   const [selectedTimeEstimates, setSelectedTimeEstimates] = useState<TimeEstimate[]>([]);
+  const showFutureStarts = settings?.appearance?.showFutureStarts === true;
   const [expandedSections, setExpandedSections] = useState({
     focus: true,
     schedule: true,
@@ -85,13 +88,20 @@ export default function FocusScreen() {
   const visibleTasks = useMemo(() => (
     tasks.filter((task) => taskMatchesAreaFilter(task, resolvedAreaFilter, projectById, areaById))
   ), [tasks, resolvedAreaFilter, projectById, areaById]);
-  const activeTasks = useMemo(() => (
+  const baseActiveTasks = useMemo(() => (
     visibleTasks.filter((task) => (
       !task.deletedAt
       && task.status !== 'done'
+      && task.status !== 'archived'
       && task.status !== 'reference'
     ))
   ), [visibleTasks]);
+  const activeTasks = useMemo(() => (
+    baseActiveTasks.filter((task) => shouldShowTaskForStart(task, { showFutureStarts }))
+  ), [baseActiveTasks, showFutureStarts]);
+  const hiddenFutureStartCount = useMemo(() => (
+    baseActiveTasks.filter((task) => !shouldShowTaskForStart(task, { showFutureStarts: false })).length
+  ), [baseActiveTasks]);
   const tokenOptions = useMemo(() => getFocusTokenOptions(activeTasks), [activeTasks]);
   const activeProjectIds = useMemo(() => (
     new Set(activeTasks.map((task) => task.projectId).filter((projectId): projectId is string => Boolean(projectId)))
@@ -132,6 +142,24 @@ export default function FocusScreen() {
   const resolveText = useCallback((key: string, fallback: string) => {
     return translateWithFallback(t, key, fallback);
   }, [t]);
+  const toggleFutureStarts = useCallback(() => {
+    void updateSettings({
+      appearance: {
+        ...(settings.appearance ?? {}),
+        showFutureStarts: !showFutureStarts,
+      },
+    }).catch(() => undefined);
+  }, [settings.appearance, showFutureStarts, updateSettings]);
+  const formatFutureStartNotice = useCallback((count: number, shown: boolean) => {
+    const template = shown
+      ? (count === 1
+        ? resolveText('agenda.futureStartsShownOne', '1 future-start task shown')
+        : resolveText('agenda.futureStartsShownMany', '{count} future-start tasks shown'))
+      : (count === 1
+        ? resolveText('agenda.futureStartsHiddenOne', '1 task hidden (future start)')
+        : resolveText('agenda.futureStartsHiddenMany', '{count} tasks hidden (future start)'));
+    return template.replace('{count}', String(count));
+  }, [resolveText]);
   const toggleToken = useCallback((token: string) => {
     setSelectedTokens((current) => (
       current.includes(token) ? current.filter((item) => item !== token) : [...current, token]
@@ -219,41 +247,10 @@ export default function FocusScreen() {
     return new Set(visibleProjects.filter((project) => project.isSequential).map((project) => project.id));
   }, [visibleProjects]);
 
-  const sequentialFirstTaskIds = useMemo(() => {
-    if (sequentialProjectIds.size === 0) return new Set<string>();
-    const tasksByProject = new Map<string, Task[]>();
-    filteredActiveTasks.forEach((task) => {
-      if (!task.projectId) return;
-      if (!sequentialProjectIds.has(task.projectId)) return;
-      const list = tasksByProject.get(task.projectId) ?? [];
-      list.push(task);
-      tasksByProject.set(task.projectId, list);
-    });
-
-    const firstIds = new Set<string>();
-    tasksByProject.forEach((projectTasks) => {
-      const hasOrder = projectTasks.some((task) => Number.isFinite(task.order) || Number.isFinite(task.orderNum));
-      let firstId: string | null = null;
-      let bestKey = Number.POSITIVE_INFINITY;
-      projectTasks.forEach((task) => {
-        const taskOrder = Number.isFinite(task.order)
-          ? (task.order as number)
-          : Number.isFinite(task.orderNum)
-            ? (task.orderNum as number)
-            : Number.POSITIVE_INFINITY;
-        const key = hasOrder
-          ? taskOrder
-          : (safeParseDate(task.createdAt)?.getTime() ?? Number.POSITIVE_INFINITY);
-        if (!firstId || key < bestKey) {
-          firstId = task.id;
-          bestKey = key;
-        }
-      });
-      if (firstId) firstIds.add(firstId);
-    });
-
-    return firstIds;
-  }, [filteredActiveTasks, sequentialProjectIds]);
+  const sequentialFirstTaskIds = useMemo(
+    () => getSequentialFirstTaskIds(activeTasks, sequentialProjectIds),
+    [activeTasks, sequentialProjectIds],
+  );
 
   const { focusedTasks, schedule, nextActions, reviewDue } = useMemo(() => {
     const now = new Date();
@@ -262,10 +259,6 @@ export default function FocusScreen() {
     const { focusedTasks: allFocusedTasks, otherTasks: nonFocusedTasks } = splitFocusedTasks(filteredActiveTasks);
     const focusedItems = allFocusedTasks.slice(0, 3);
 
-    const isPlannedForFuture = (task: Task) => {
-      const start = safeParseDate(task.startTime);
-      return Boolean(start && start > endOfToday);
-    };
     const isSequentialBlocked = (task: Task) => {
       if (!task.projectId) return false;
       if (!sequentialProjectIds.has(task.projectId)) return false;
@@ -289,7 +282,6 @@ export default function FocusScreen() {
 
     const nextItems = nonFocusedTasks.filter((task) => {
       if (task.status !== 'next') return false;
-      if (isPlannedForFuture(task)) return false;
       if (isSequentialBlocked(task)) return false;
       return !scheduleIds.has(task.id);
     });
@@ -369,7 +361,7 @@ export default function FocusScreen() {
     + selectedTimeEstimates.length
   );
   const activeFilterChips = useMemo(() => {
-    const chips: Array<{ id: string; label: string; onPress: () => void }> = [];
+    const chips: { id: string; label: string; onPress: () => void }[] = [];
     selectedTokens.forEach((token) => {
       chips.push({
         id: `token:${token}`,
@@ -482,8 +474,8 @@ export default function FocusScreen() {
         isDark={isDark}
         tc={tc}
         onPress={() => onEdit(item)}
-        onStatusChange={(status) => updateTask(item.id, { status: status as TaskStatus })}
-        onDelete={() => deleteTask(item.id)}
+        onStatusChange={(status) => { void updateTask(item.id, { status: status as TaskStatus }); }}
+        onDelete={() => { void deleteTask(item.id); }}
         isHighlighted={item.id === highlightTaskId}
         showFocusToggle
         hideStatusBadge
@@ -515,28 +507,30 @@ export default function FocusScreen() {
               <Text style={[styles.dateText, { color: tc.secondaryText }]}>
                 {format(new Date(), 'PPPP')}
               </Text>
-              <Pressable
-                accessibilityLabel={resolveText('filters.label', 'Filters')}
-                accessibilityRole="button"
-                onPress={() => setFiltersVisible(true)}
-                style={({ pressed }) => [
-                  styles.filterButton,
-                  {
-                    borderColor: hasFilters ? tc.tint : tc.border,
-                    backgroundColor: hasFilters ? tc.filterBg : 'transparent',
-                    opacity: pressed ? 0.78 : 1,
-                  },
-                ]}
-              >
-                <SlidersHorizontal size={16} color={hasFilters ? tc.tint : tc.secondaryText} />
-                {hasFilters ? (
-                  <View style={[styles.filterBadge, { backgroundColor: tc.tint }]}>
-                    <Text style={[styles.filterBadgeText, { color: tc.onTint }]}>
-                      {activeFilterCount}
-                    </Text>
-                  </View>
-                ) : null}
-              </Pressable>
+              <View style={styles.headerActions}>
+                <Pressable
+                  accessibilityLabel={resolveText('filters.label', 'Filters')}
+                  accessibilityRole="button"
+                  onPress={() => setFiltersVisible(true)}
+                  style={({ pressed }) => [
+                    styles.filterButton,
+                    {
+                      borderColor: hasFilters ? tc.tint : tc.border,
+                      backgroundColor: hasFilters ? tc.filterBg : 'transparent',
+                      opacity: pressed ? 0.78 : 1,
+                    },
+                  ]}
+                >
+                  <SlidersHorizontal size={16} color={hasFilters ? tc.tint : tc.secondaryText} />
+                  {hasFilters ? (
+                    <View style={[styles.filterBadge, { backgroundColor: tc.tint }]}>
+                      <Text style={[styles.filterBadgeText, { color: tc.onTint }]}>
+                        {activeFilterCount}
+                      </Text>
+                    </View>
+                  ) : null}
+                </Pressable>
+              </View>
             </View>
             {hasFilters ? (
               <ScrollView
@@ -552,6 +546,24 @@ export default function FocusScreen() {
                   </Text>
                 </TouchableOpacity>
               </ScrollView>
+            ) : null}
+            {hiddenFutureStartCount > 0 ? (
+              <View style={[styles.futureStartNotice, { borderColor: tc.border, backgroundColor: tc.cardBg }]}>
+                <Text style={[styles.futureStartText, { color: tc.secondaryText }]}>
+                  {formatFutureStartNotice(hiddenFutureStartCount, showFutureStarts)}
+                </Text>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  onPress={toggleFutureStarts}
+                  style={styles.futureStartButton}
+                >
+                  <Text style={[styles.futureStartButtonText, { color: tc.tint }]}>
+                    {showFutureStarts
+                      ? resolveText('agenda.hideFutureStarts', 'Hide')
+                      : resolveText('agenda.showFutureStarts', 'Show')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             ) : null}
           </View>
         )}
@@ -720,6 +732,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   activeChipsScroller: {
     marginTop: 8,
     marginHorizontal: -4,
@@ -771,7 +788,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  futureStartNotice: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  futureStartText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  futureStartButton: {
+    minHeight: 30,
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  futureStartButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
   dateText: {
+    flex: 1,
     fontSize: 12,
     fontWeight: '600',
     textTransform: 'uppercase',

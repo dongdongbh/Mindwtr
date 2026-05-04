@@ -1,0 +1,9 @@
+<en-US>
+Review is easier to use with collapsible groups, cleaner actions, and Inbox-first daily review. Calendar gestures and event details are smoother. Task editing adds metadata suggestions. Recurrence gains weekly intervals, quarterly repeats, and safer monthly repair. Sync preserves edits during refresh, and Android alarms, quick capture, and widget placement are steadier.
+</en-US>
+<zh-CN>
+Review 更易用，支持可折叠分组、更简洁操作和先处理 Inbox 的每日回顾。日历手势和事件详情更顺畅。任务编辑新增元数据建议。重复任务支持每周间隔、季度重复和更安全的月度修复。同步刷新时会保留编辑，Android 提醒、快速捕获和小组件位置更稳定。
+</zh-CN>
+<es-ES>
+Review es mas claro con grupos plegables, acciones simples y Daily Review que empieza por Inbox. El calendario mejora gestos y detalles. La edicion sugiere metadatos. Recurrence suma intervalos semanales, repeticion trimestral y reparacion mensual mas segura. Sync conserva ediciones y Android mejora alarmas, captura rapida y widget.
+</es-ES>

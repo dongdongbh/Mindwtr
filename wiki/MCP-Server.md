@@ -299,8 +299,8 @@ If you need more than 500 tasks, page with `limit` + `offset` instead of expecti
 - `limit`: number
 - `offset`: number
 - `search`: string
-- `dueDateFrom`: ISO string
-- `dueDateTo`: ISO string
+- `dueDateFrom`: ISO date or datetime string (compared by calendar date)
+- `dueDateTo`: ISO date or datetime string (compared by calendar date)
 - `sortBy`: `updatedAt | createdAt | dueDate | title | priority`
 - `sortOrder`: `asc | desc`
 
@@ -402,7 +402,7 @@ If you need more than 500 tasks, page with `limit` + `offset` instead of expecti
 
 - `title`: string (required if `quickAdd` omitted)
 - `quickAdd`: string (required if `title` omitted)
-- `status`: `inbox | next | waiting | someday | done | archived`
+- `status`: `inbox | next | waiting | someday | reference | done | archived`
 - `projectId`: string
 - `dueDate`: ISO string
 - `startTime`: ISO string

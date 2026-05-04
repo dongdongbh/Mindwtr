@@ -7,6 +7,10 @@ import { requestDesktopNotificationPermission } from '../../../lib/notification-
 type Labels = {
     notificationsDesc: string;
     notificationsEnable: string;
+    startDateNotifications: string;
+    startDateNotificationsDesc: string;
+    dueDateNotifications: string;
+    dueDateNotificationsDesc: string;
     reviewAtNotifications: string;
     reviewAtNotificationsDesc: string;
     weeklyReview: string;
@@ -24,6 +28,8 @@ type WeekdayOption = { value: number; label: string };
 type SettingsNotificationsPageProps = {
     t: Labels;
     notificationsEnabled: boolean;
+    startDateNotificationsEnabled: boolean;
+    dueDateNotificationsEnabled: boolean;
     reviewAtNotificationsEnabled: boolean;
     weeklyReviewEnabled: boolean;
     weeklyReviewDay: number;
@@ -40,6 +46,8 @@ type SettingsNotificationsPageProps = {
 export function SettingsNotificationsPage({
     t,
     notificationsEnabled,
+    startDateNotificationsEnabled,
+    dueDateNotificationsEnabled,
     reviewAtNotificationsEnabled,
     weeklyReviewEnabled,
     weeklyReviewDay,
@@ -87,6 +95,56 @@ export function SettingsNotificationsPage({
                         className={cn(
                             "inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform",
                             notificationsEnabled ? "translate-x-4" : "translate-x-1"
+                        )}
+                    />
+                </button>
+            </div>
+
+            <div className="flex items-start justify-between gap-4">
+                <div>
+                    <p className="text-sm font-medium">{t.startDateNotifications}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{t.startDateNotificationsDesc}</p>
+                </div>
+                <button
+                    type="button"
+                    role="switch"
+                    aria-checked={startDateNotificationsEnabled}
+                    onClick={() => handleUpdate({ startDateNotificationsEnabled: !startDateNotificationsEnabled })}
+                    disabled={!notificationsEnabled}
+                    className={cn(
+                        "relative inline-flex h-5 w-9 items-center rounded-full border transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+                        startDateNotificationsEnabled ? "bg-primary border-primary" : "bg-muted/50 border-border"
+                    )}
+                >
+                    <span
+                        className={cn(
+                            "inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform",
+                            startDateNotificationsEnabled ? "translate-x-4" : "translate-x-1"
+                        )}
+                    />
+                </button>
+            </div>
+
+            <div className="flex items-start justify-between gap-4">
+                <div>
+                    <p className="text-sm font-medium">{t.dueDateNotifications}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{t.dueDateNotificationsDesc}</p>
+                </div>
+                <button
+                    type="button"
+                    role="switch"
+                    aria-checked={dueDateNotificationsEnabled}
+                    onClick={() => handleUpdate({ dueDateNotificationsEnabled: !dueDateNotificationsEnabled })}
+                    disabled={!notificationsEnabled}
+                    className={cn(
+                        "relative inline-flex h-5 w-9 items-center rounded-full border transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+                        dueDateNotificationsEnabled ? "bg-primary border-primary" : "bg-muted/50 border-border"
+                    )}
+                >
+                    <span
+                        className={cn(
+                            "inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform",
+                            dueDateNotificationsEnabled ? "translate-x-4" : "translate-x-1"
                         )}
                     />
                 </button>

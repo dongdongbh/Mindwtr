@@ -3,6 +3,8 @@ import { hasTimeComponent, safeParseDate } from './date';
 import type { Task } from './types';
 
 type ScheduleOptions = {
+    includeStartTime?: boolean;
+    includeDueDate?: boolean;
     includeReviewAt?: boolean;
 };
 
@@ -22,8 +24,10 @@ export function getNextScheduledAt(task: Task, now: Date = new Date(), options: 
     if (task.status === 'done' || task.status === 'archived' || task.status === 'reference') return null;
 
     const candidates: Date[] = [];
-    const start = parseExplicitReminderDate(task.startTime);
-    const due = parseExplicitReminderDate(task.dueDate);
+    const includeStartTime = options.includeStartTime !== false;
+    const includeDueDate = options.includeDueDate !== false;
+    const start = includeStartTime ? parseExplicitReminderDate(task.startTime) : null;
+    const due = includeDueDate ? parseExplicitReminderDate(task.dueDate) : null;
     const review = options.includeReviewAt ? parseExplicitReminderDate(task.reviewAt) : null;
 
     if (start && isAfter(start, now)) candidates.push(start);

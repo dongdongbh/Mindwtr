@@ -126,7 +126,7 @@ export function ContextsView() {
     ? activeTasks.filter((t) => !hasContext(t))
     : selectedContexts.length > 0
       ? activeTasks.filter((t) => selectedContexts.every((ctx) => matchesSelected(t, ctx)))
-      : activeTasks.filter((t) => hasContext(t));
+      : activeTasks;
 
   const sortBy = (settings?.taskSortBy ?? 'default') as TaskSortBy;
   const sortedTasks = sortTasksBy(filteredTasks, sortBy);
@@ -178,6 +178,12 @@ export function ContextsView() {
       return next;
     });
   }, [sortedTasks]);
+
+  useEffect(() => {
+    if (selectionMode && multiSelectedIds.size === 0) {
+      setSelectionMode(false);
+    }
+  }, [multiSelectedIds.size, selectionMode]);
 
   const runBulkAction = async (label: string, action: () => Promise<void>) => {
     if (bulkActionLoading) return;
@@ -324,10 +330,10 @@ export function ContextsView() {
               ]}
             >
               <Text style={[styles.contextBadgeText, { color: selectedContexts.length === 0 ? '#FFFFFF' : tc.secondaryText }]}>
-              {activeTasks.filter((t) => (t.contexts?.length || 0) > 0 || (t.tags?.length || 0) > 0).length}
-            </Text>
-          </View>
-        </Pressable>
+                {activeTasks.length}
+              </Text>
+            </View>
+          </Pressable>
 
           <Pressable
             style={[
@@ -410,47 +416,38 @@ export function ContextsView() {
         </ScrollView>
 
         <View style={styles.content}>
-          <View style={[styles.contentHeader, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
-            <View style={styles.contentHeaderMain}>
-              <Text style={[styles.contentTitle, { color: tc.text }]}>
-                {noContextSelected
-                  ? t('contexts.none')
-                  : (selectedContexts.length > 0 ? selectedContexts.join(', ') : t('contexts.all'))}
-              </Text>
-              <Text style={[styles.contentCount, { color: tc.secondaryText }]}>
-                {sortedTasks.length} {t('common.tasks')}
-              </Text>
-            </View>
-            <TouchableOpacity
-              onPress={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}
-              style={[
-                styles.selectButton,
-                {
-                  borderColor: tc.border,
-                  backgroundColor: selectionMode ? tc.filterBg : 'transparent',
-                },
-              ]}
-            >
-              <Text style={[styles.selectButtonText, { color: tc.text }]}>
-                {selectionMode ? t('bulk.exitSelect') : t('bulk.select')}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
           {selectionMode ? (
             <View style={[styles.bulkBar, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
               <View style={styles.bulkHeaderRow}>
                 <Text style={[styles.bulkCount, { color: tc.secondaryText }]}>
                   {selectedIdsArray.length} {t('bulk.selected')}
                 </Text>
-                {bulkActionLoading ? (
-                  <View style={styles.bulkLoadingRow}>
-                    <ActivityIndicator size="small" color={tc.tint} />
-                    <Text style={[styles.bulkLoadingText, { color: tc.secondaryText }]}>
-                      {bulkActionLabel || t('common.loading')}
+                <View style={styles.bulkHeaderActions}>
+                  {bulkActionLoading ? (
+                    <View style={styles.bulkLoadingRow}>
+                      <ActivityIndicator size="small" color={tc.tint} />
+                      <Text style={[styles.bulkLoadingText, { color: tc.secondaryText }]}>
+                        {bulkActionLabel || t('common.loading')}
+                      </Text>
+                    </View>
+                  ) : null}
+                  <TouchableOpacity
+                    onPress={exitSelectionMode}
+                    disabled={bulkActionLoading}
+                    style={[
+                      styles.bulkDoneButton,
+                      {
+                        borderColor: tc.border,
+                        backgroundColor: tc.filterBg,
+                        opacity: bulkActionLoading ? 0.5 : 1,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.bulkDoneButtonText, { color: tc.text }]}>
+                      {t('bulk.exitSelect')}
                     </Text>
-                  </View>
-                ) : null}
+                  </TouchableOpacity>
+                </View>
               </View>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bulkRow}>
                 {(['inbox', 'next', 'waiting', 'someday', 'reference', 'done'] as TaskStatus[]).map((status) => (
@@ -678,39 +675,6 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
-  contentHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  contentHeaderMain: {
-    flex: 1,
-    marginRight: 12,
-    gap: 4,
-  },
-  contentTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  contentCount: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  selectButton: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  selectButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
   bulkBar: {
     borderBottomWidth: 1,
     paddingHorizontal: 16,
@@ -727,6 +691,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
+  bulkHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   bulkLoadingRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -734,6 +703,16 @@ const styles = StyleSheet.create({
   },
   bulkLoadingText: {
     fontSize: 12,
+  },
+  bulkDoneButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  bulkDoneButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   bulkRow: {
     gap: 8,

@@ -30,7 +30,7 @@
           "完全离线可用，无需互联网连接",
           "完全开源，安全透明"
         ],
-        "ReleaseNotes": "• 桌面日历新增日/周/日程规划视图、任务计划编辑器、默认计划时间，并更安全地处理外部日历。\n• Inbox 增加稍后处理，搜索支持负责人筛选。\n• 桌面同步在 WebDAV 重试、云端合并、附件预同步和误报冲突处理上更稳定。",
+        "ReleaseNotes": "• 全局快速添加会在独立弹窗中打开。\n• 搜索覆盖所有领域，大型资料库中也更稳定。\n• 聚焦和番茄钟控制更清晰，支持可选任务关联，并默认隐藏未来开始任务。\n• 同步诊断和 SQLite 清理更稳定。",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -82,7 +82,7 @@
           "No internet connection required to function",
           "Open source and transparent"
         ],
-        "ReleaseNotes": "• Added desktop calendar day/week/schedule planning, a scheduled task composer, default schedule time, and safer external-calendar handling.\n• Inbox gains a Later shortcut and search supports assignee filters.\n• Desktop sync is sturdier around WebDAV retries, cloud merge cleanup, attachment pre-sync, and false conflict reports.",
+        "ReleaseNotes": "• Global quick add opens in a focused popup.\n• Search now covers all areas and stays responsive on large libraries.\n• Focus and Pomodoro controls are clearer with optional task linking and hidden future-start tasks by default.\n• Sync diagnostics and SQLite cleanup are steadier.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",
@@ -130,7 +130,7 @@
           "No requiere conexión a internet para funcionar",
           "Código abierto y transparente"
         ],
-        "ReleaseNotes": "• El calendario de escritorio suma vistas dia/semana/agenda, programador de tareas, hora predeterminada y manejo mas seguro de calendarios externos.\n• Inbox agrega Later y la busqueda filtra por responsable.\n• El sync de escritorio mejora reintentos WebDAV, merges cloud, presync de adjuntos y falsos conflictos.",
+        "ReleaseNotes": "• Quick add global se abre en una ventana enfocada.\n• La busqueda cubre todas las areas y sigue rapida en bibliotecas grandes.\n• Focus y Pomodoro son mas claros, con vinculacion opcional de tareas y tareas futuras ocultas por defecto.\n• Sync y limpieza SQLite son mas estables.",
         "Images": [
           {
             "FileName": "2026-01-27_22-59-40.png",

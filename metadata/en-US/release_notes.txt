@@ -1,5 +1,3 @@
-- Calendar planning adds a mobile week view, refreshed month flow, scheduled task composer, and default schedule time.
-- Calendar sync can choose a push target while Mindwtr mirror calendars are ignored to prevent duplicate planning loops.
-- Review reminders now open the Review page directly.
-- Inbox gains a Later shortcut, search supports assignee filters, and sync/cloud merge handling is more reliable.
-- Quick capture text stays inside its sheet and speech-to-text avoids an Android realtime crash.
+- Focus and scheduling are clearer with hidden future-start tasks, optional Pomodoro task linking, split start and due reminders, and adjustable week density.
+- Sync errors stay visible, delete undo is steadier, and settings are easier to scan.
+- Search, capture, review controls, context selection, and calendar gestures are smoother.

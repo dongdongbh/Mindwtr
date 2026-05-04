@@ -1,0 +1,6 @@
+Review es mas claro con grupos plegables, acciones simples y Daily Review que empieza por Inbox.
+El calendario mejora gestos, semana, detalles y quick add diario.
+La edicion sugiere metadatos para organizar tareas.
+Recurrence suma intervalos semanales, repeticion trimestral y reparacion mensual mas segura.
+Sync conserva ediciones durante refrescos.
+Android mejora alarmas, captura rapida y widget.

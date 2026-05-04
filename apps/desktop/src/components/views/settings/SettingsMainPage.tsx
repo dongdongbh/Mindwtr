@@ -26,6 +26,8 @@ type Labels = {
     textSizeDefault: string;
     textSizeLarge: string;
     textSizeExtraLarge: string;
+    showTaskAge: string;
+    showTaskAgeDesc: string;
     system: string;
     light: string;
     dark: string;
@@ -75,6 +77,8 @@ export type SettingsMainPageProps = {
     onDensityChange: (mode: DensityMode) => void;
     textSizeMode: TextSizeMode;
     onTextSizeChange: (mode: TextSizeMode) => void;
+    showTaskAge: boolean;
+    onShowTaskAgeChange: (enabled: boolean) => void;
     language: Language;
     onLanguageChange: (lang: Language) => void;
     weekStart: WeekStart;
@@ -160,6 +164,8 @@ export function SettingsMainPage({
     onDensityChange,
     textSizeMode,
     onTextSizeChange,
+    showTaskAge,
+    onShowTaskAgeChange,
     language,
     onLanguageChange,
     weekStart,
@@ -236,6 +242,12 @@ export function SettingsMainPage({
                         <option value="large">{t.textSizeLarge}</option>
                         <option value="extra-large">{t.textSizeExtraLarge}</option>
                     </select>
+                </SettingsRow>
+                <SettingsRow title={t.showTaskAge} description={t.showTaskAgeDesc}>
+                    <Toggle
+                        enabled={showTaskAge}
+                        onChange={() => onShowTaskAgeChange(!showTaskAge)}
+                    />
                 </SettingsRow>
             </SettingsCard>
 

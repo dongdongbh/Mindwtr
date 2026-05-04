@@ -1,6 +1,7 @@
 import {
     buildSaveSnapshot,
     ensureDeviceId,
+    getNextDataChangeAt,
     normalizeRevision,
     selectVisibleTasks,
     toVisibleTask,
@@ -67,7 +68,7 @@ export const createProjectCoreActions = ({
             return {
                 projects: newVisibleProjects,
                 _allProjects: newAllProjects,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -181,7 +182,7 @@ export const createProjectCoreActions = ({
                 _allTasks: newAllTasks,
                 sections: newVisibleSections,
                 _allSections: newAllSections,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -265,7 +266,7 @@ export const createProjectCoreActions = ({
                 _allProjects: newAllProjects,
                 _allTasks: newAllTasks,
                 _allSections: newAllSections,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -368,7 +369,7 @@ export const createProjectCoreActions = ({
                 _allProjects: newAllProjects,
                 _allSections: newAllSections,
                 _allTasks: newAllTasks,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -496,7 +497,7 @@ export const createProjectCoreActions = ({
                 _allProjects: newAllProjects,
                 _allSections: newAllSections,
                 _allTasks: newAllTasks,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -543,7 +544,7 @@ export const createProjectCoreActions = ({
             return {
                 projects: newVisibleProjects,
                 _allProjects: newAllProjects,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });

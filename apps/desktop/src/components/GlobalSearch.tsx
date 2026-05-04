@@ -16,7 +16,6 @@ import { useLanguage } from '../contexts/language-context';
 import { cn } from '../lib/utils';
 import { PromptModal } from './PromptModal';
 import { useUiStore } from '../store/ui-store';
-import { AREA_FILTER_ALL, AREA_FILTER_NONE, resolveAreaFilter } from '../lib/area-filter';
 import { computeGlobalSearchResults, type DuePreset, type GlobalSearchScope } from './global-search-filtering';
 import { resolveTaskNavigationView } from '../lib/task-navigation';
 
@@ -35,6 +34,7 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
     const [savePromptDefault, setSavePromptDefault] = useState('');
     const [includeCompleted, setIncludeCompleted] = useState(false);
     const [includeReference, setIncludeReference] = useState(true);
+    const [hideFutureTasks, setHideFutureTasks] = useState(false);
     const [filtersOpen, setFiltersOpen] = useState(false);
     const [selectedStatuses, setSelectedStatuses] = useState<TaskStatus[]>([]);
     const [selectedArea, setSelectedArea] = useState<string>('all');
@@ -63,15 +63,10 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
     const setProjectView = useUiStore((state) => state.setProjectView);
     const { t } = useLanguage();
 
-    const globalAreaFilter = useMemo(
-        () => resolveAreaFilter(settings?.filters?.areaId, areas),
-        [settings?.filters?.areaId, areas],
-    );
-
     // Toggle search with Cmd+K / Ctrl+K
     useEffect(() => {
         isOpenRef.current = isOpen;
-    }, [isOpen, globalAreaFilter]);
+    }, [isOpen]);
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -103,14 +98,10 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
             setShowSavePrompt(false);
             setIncludeCompleted(false);
             setIncludeReference(true);
+            setHideFutureTasks(false);
             setFiltersOpen(false);
             setSelectedStatuses([]);
-            const initialArea = globalAreaFilter === AREA_FILTER_ALL
-                ? 'all'
-                : globalAreaFilter === AREA_FILTER_NONE
-                    ? 'none'
-                    : globalAreaFilter;
-            setSelectedArea(initialArea);
+            setSelectedArea('all');
             setSelectedTokens([]);
             setDuePreset('any');
             setScope('all');
@@ -173,14 +164,18 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
     const includeReferenceText = includeReferenceLabel === 'search.includeReference'
         ? 'Include Reference tasks'
         : includeReferenceLabel;
-    const { totalResults, results, isTruncated } = useMemo(() => computeGlobalSearchResults({
+    const hideFutureTasksLabel = t('filters.hideFutureTasks');
+    const hideFutureTasksText = hideFutureTasksLabel === 'filters.hideFutureTasks'
+        ? 'Hide future tasks'
+        : hideFutureTasksLabel;
+    const { totalResultsLabel, results, isTruncated } = useMemo(() => computeGlobalSearchResults({
         query,
         tasks: _allTasks,
         projects,
         areas,
-        globalAreaFilter,
         includeCompleted,
         includeReference,
+        hideFutureTasks,
         selectedStatuses,
         selectedArea,
         selectedTokens,
@@ -193,9 +188,9 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
         _allTasks,
         projects,
         areas,
-        globalAreaFilter,
         includeCompleted,
         includeReference,
+        hideFutureTasks,
         selectedStatuses,
         selectedArea,
         selectedTokens,
@@ -360,6 +355,13 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
             key: 'includeReference',
             label: includeReferenceText,
             onRemove: () => setIncludeReference(false),
+        });
+    }
+    if (hideFutureTasks) {
+        activeChips.push({
+            key: 'hideFutureTasks',
+            label: hideFutureTasksText,
+            onRemove: () => setHideFutureTasks(false),
         });
     }
 
@@ -557,6 +559,19 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
                             </button>
                             <button
                                 type="button"
+                                aria-pressed={hideFutureTasks}
+                                onClick={() => setHideFutureTasks((prev) => !prev)}
+                                className={cn(
+                                    "px-2 py-1 rounded-full border text-xs transition-colors",
+                                    hideFutureTasks
+                                        ? "bg-primary/15 text-primary border-primary/40"
+                                        : "bg-muted/40 text-muted-foreground border-border hover:bg-muted/60"
+                                )}
+                            >
+                                {hideFutureTasksText}
+                            </button>
+                            <button
+                                type="button"
                                 onClick={() => {
                                     setSelectedStatuses([]);
                                     setSelectedArea('all');
@@ -565,6 +580,7 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
                                     setScope('all');
                                     setIncludeCompleted(false);
                                     setIncludeReference(true);
+                                    setHideFutureTasks(false);
                                 }}
                                 className="text-xs text-muted-foreground hover:text-foreground"
                             >
@@ -579,7 +595,7 @@ export function GlobalSearch({ onNavigate }: GlobalSearchProps) {
                         <div className="px-3 pb-2 text-xs text-muted-foreground">
                             {t('search.showingFirst')
                                 .replace('{shown}', String(results.length))
-                                .replace('{total}', String(totalResults))}
+                                .replace('{total}', totalResultsLabel)}
                         </div>
                     )}
                     {ftsLoading && trimmedQuery !== '' && (

@@ -1,0 +1,3 @@
+Focus y agenda son mas claros con tareas futuras ocultas, Pomodoro opcional por tarea, avisos de inicio y vencimiento separados, y densidad semanal ajustable.
+Los avisos permiten completar tareas desde notificaciones, la reprogramacion se limita y Sync mantiene visibles los errores.
+Ajustes, Review, seleccion de contextos, gestos de calendario y deshacer eliminacion son mas fluidos.

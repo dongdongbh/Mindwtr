@@ -73,6 +73,12 @@ const normalizeMonthDays = (days?: string[] | null): number[] | undefined => {
     return unique.length > 0 ? unique : undefined;
 };
 
+const normalizeAnchorDay = (value: unknown): number | undefined => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+    const day = Math.floor(value);
+    return day >= 1 && day <= 31 ? day : undefined;
+};
+
 const parseUntilToken = (value: string | undefined): string | undefined => {
     const trimmed = String(value || '').trim();
     if (!trimmed) return undefined;
@@ -184,6 +190,10 @@ export function normalizeRecurrenceForLoad(value: unknown): Recurrence | undefin
         && recurrence.completedOccurrences >= 0
             ? Math.floor(recurrence.completedOccurrences)
             : undefined;
+    const anchorDay = normalizeAnchorDay(recurrence.anchorDay);
+    const startAnchorDay = normalizeAnchorDay(recurrence.startAnchorDay);
+    const dueAnchorDay = normalizeAnchorDay(recurrence.dueAnchorDay);
+    const reviewAnchorDay = normalizeAnchorDay(recurrence.reviewAnchorDay);
 
     return {
         rule,
@@ -193,6 +203,10 @@ export function normalizeRecurrenceForLoad(value: unknown): Recurrence | undefin
         ...(count ? { count } : {}),
         ...(until ? { until } : {}),
         ...(completedOccurrences !== undefined ? { completedOccurrences } : {}),
+        ...(anchorDay ? { anchorDay } : {}),
+        ...(startAnchorDay ? { startAnchorDay } : {}),
+        ...(dueAnchorDay ? { dueAnchorDay } : {}),
+        ...(reviewAnchorDay ? { reviewAnchorDay } : {}),
         ...(rrule ? { rrule } : {}),
     };
 }
@@ -346,16 +360,56 @@ export function getRecurrenceCompletedOccurrencesValue(value: Task['recurrence']
     return Math.floor(recurrence.completedOccurrences);
 }
 
-function addInterval(base: Date, rule: RecurrenceRule, interval: number = 1): Date {
+function getRecurrenceFieldAnchorDay(
+    value: Task['recurrence'],
+    field: 'startTime' | 'dueDate' | 'reviewAt'
+): number | undefined {
+    if (!value || typeof value === 'string') return undefined;
+    const recurrence = value as Recurrence;
+    const fieldAnchor = field === 'startTime'
+        ? recurrence.startAnchorDay
+        : field === 'dueDate'
+            ? recurrence.dueAnchorDay
+            : recurrence.reviewAnchorDay;
+    return normalizeAnchorDay(fieldAnchor) ?? normalizeAnchorDay(recurrence.anchorDay);
+}
+
+const getDateDay = (value: string | undefined): number | undefined => {
+    const parsed = safeParseDate(value);
+    return parsed ? parsed.getDate() : undefined;
+};
+
+function getNextRecurrenceAnchorDays(task: Task, rule: RecurrenceRule) {
+    if (rule !== 'monthly' && rule !== 'yearly') return {};
+
+    const startAnchorDay = getRecurrenceFieldAnchorDay(task.recurrence, 'startTime')
+        ?? getDateDay(task.startTime);
+    const dueAnchorDay = getRecurrenceFieldAnchorDay(task.recurrence, 'dueDate')
+        ?? getDateDay(task.dueDate);
+    const reviewAnchorDay = getRecurrenceFieldAnchorDay(task.recurrence, 'reviewAt')
+        ?? getDateDay(task.reviewAt);
+    const anchorDay = normalizeAnchorDay(
+        typeof task.recurrence === 'object' ? task.recurrence.anchorDay : undefined
+    ) ?? dueAnchorDay ?? startAnchorDay ?? reviewAnchorDay;
+
+    return {
+        ...(anchorDay ? { anchorDay } : {}),
+        ...(startAnchorDay ? { startAnchorDay } : {}),
+        ...(dueAnchorDay ? { dueAnchorDay } : {}),
+        ...(reviewAnchorDay ? { reviewAnchorDay } : {}),
+    };
+}
+
+function addInterval(base: Date, rule: RecurrenceRule, interval: number = 1, anchorDay?: number): Date {
     switch (rule) {
         case 'daily':
             return addDays(base, interval);
         case 'weekly':
             return addWeeks(base, interval);
         case 'monthly':
-            return addMonthsClamped(base, interval);
+            return addMonthsClamped(base, interval, anchorDay);
         case 'yearly':
-            return addYearsClamped(base, interval);
+            return addYearsClamped(base, interval, anchorDay);
     }
 }
 
@@ -377,7 +431,7 @@ const buildDateWithTime = (year: number, month: number, day: number, base: Date)
     );
 };
 
-const addMonthsClamped = (base: Date, interval: number): Date => {
+const addMonthsClamped = (base: Date, interval: number, anchorDay?: number): Date => {
     const seed = new Date(
         base.getFullYear(),
         base.getMonth() + interval,
@@ -390,15 +444,15 @@ const addMonthsClamped = (base: Date, interval: number): Date => {
     const year = seed.getFullYear();
     const month = seed.getMonth();
     const lastDay = getLastDayOfMonth(year, month);
-    const day = Math.min(base.getDate(), lastDay);
+    const day = Math.min(anchorDay ?? base.getDate(), lastDay);
     return buildDateWithTime(year, month, day, base);
 };
 
-const addYearsClamped = (base: Date, interval: number): Date => {
+const addYearsClamped = (base: Date, interval: number, anchorDay?: number): Date => {
     const year = base.getFullYear() + interval;
     const month = base.getMonth();
     const lastDay = getLastDayOfMonth(year, month);
-    const day = Math.min(base.getDate(), lastDay);
+    const day = Math.min(anchorDay ?? base.getDate(), lastDay);
     return buildDateWithTime(year, month, day, base);
 };
 
@@ -542,7 +596,8 @@ function nextIsoFrom(
     interval: number = 1,
     byMonthDay?: number[],
     weekStart?: RecurrenceWeekday,
-    searchBase?: Date
+    searchBase?: Date,
+    anchorDay?: number
 ): string | undefined {
     const parsed = safeParseDate(baseIso);
     const formatBase = parsed || fallbackBase;
@@ -555,7 +610,7 @@ function nextIsoFrom(
             ? nextMonthlyByDay(base, effectiveByDay, interval)
             : rule === 'monthly' && effectiveByMonthDay
                 ? nextMonthlyByMonthDay(base, effectiveByMonthDay, interval)
-                : addInterval(base, rule, interval);
+                : addInterval(base, rule, interval, anchorDay ?? formatBase.getDate());
 
     // Preserve existing storage format:
     // - If base has timezone/offset, keep ISO (Z/offset).
@@ -598,7 +653,7 @@ const shouldStopAtUntil = (nextIso: string | undefined, until: string | undefine
  *
  * - Advances dueDate only when the original task has a dueDate.
  * - Shifts startTime/reviewAt forward if present.
- * - For due/review-only recurrences, derives startTime to keep deferred instances out of Next until scheduled.
+ * - Keeps schedule fields independent: due-only tasks stay due-only, start-only tasks stay start-only.
  * - Resets checklist completion and IDs.
  * - New instance status is based on the previous status, with done -> next.
  */
@@ -617,6 +672,12 @@ export function createNextRecurringTask(
     const count = getRecurrenceCountValue(task.recurrence);
     const until = getRecurrenceUntilValue(task.recurrence);
     const completedOccurrences = getRecurrenceCompletedOccurrencesValue(task.recurrence) ?? 0;
+    const startAnchorDay = getRecurrenceFieldAnchorDay(task.recurrence, 'startTime')
+        ?? getDateDay(task.startTime);
+    const dueAnchorDay = getRecurrenceFieldAnchorDay(task.recurrence, 'dueDate')
+        ?? getDateDay(task.dueDate);
+    const reviewAnchorDay = getRecurrenceFieldAnchorDay(task.recurrence, 'reviewAt')
+        ?? getDateDay(task.reviewAt);
     const parsedCompletedAt = safeParseDate(completedAtIso);
     const fallbackCompletedAt = (() => {
         const candidate = new Date(completedAtIso);
@@ -624,26 +685,54 @@ export function createNextRecurringTask(
     })();
     const completedAtDate = parsedCompletedAt ?? fallbackCompletedAt;
     const nextDueDate = task.dueDate
-        ? nextIsoFrom(strategy === 'fluid' ? completedAtIso : task.dueDate, rule, completedAtDate, byDay, interval, byMonthDay, weekStart)
+        ? nextIsoFrom(
+            strategy === 'fluid' ? completedAtIso : task.dueDate,
+            rule,
+            completedAtDate,
+            byDay,
+            interval,
+            byMonthDay,
+            weekStart,
+            undefined,
+            strategy === 'fluid' ? undefined : dueAnchorDay
+        )
         : undefined;
     let nextStartTime = task.startTime
-        ? nextIsoFrom(strategy === 'fluid' ? completedAtIso : task.startTime, rule, completedAtDate, byDay, interval, byMonthDay, weekStart)
+        ? nextIsoFrom(
+            strategy === 'fluid' ? completedAtIso : task.startTime,
+            rule,
+            completedAtDate,
+            byDay,
+            interval,
+            byMonthDay,
+            weekStart,
+            undefined,
+            strategy === 'fluid' ? undefined : startAnchorDay
+        )
         : undefined;
     if (strategy === 'strict' && task.startTime && task.dueDate && nextStartTime) {
         const parsedNextStart = safeParseDate(nextStartTime);
         if (parsedNextStart && parsedNextStart <= completedAtDate) {
-            nextStartTime = nextIsoFrom(task.startTime, rule, completedAtDate, byDay, interval, byMonthDay, weekStart, completedAtDate);
+            nextStartTime = nextIsoFrom(task.startTime, rule, completedAtDate, byDay, interval, byMonthDay, weekStart, completedAtDate, startAnchorDay);
         }
     }
     const nextReviewAt = task.reviewAt
-        ? nextIsoFrom(strategy === 'fluid' ? completedAtIso : task.reviewAt, rule, completedAtDate, byDay, interval, byMonthDay, weekStart)
+        ? nextIsoFrom(
+            strategy === 'fluid' ? completedAtIso : task.reviewAt,
+            rule,
+            completedAtDate,
+            byDay,
+            interval,
+            byMonthDay,
+            weekStart,
+            undefined,
+            strategy === 'fluid' ? undefined : reviewAnchorDay
+        )
         : undefined;
     if (!nextStartTime && !nextDueDate && !nextReviewAt) {
         // When recurrence exists but no schedule fields are set, defer the next instance
         // from completion so it does not reappear in Next immediately.
         nextStartTime = nextIsoFrom(completedAtIso, rule, completedAtDate, byDay, interval, byMonthDay, weekStart);
-    } else if (!nextStartTime) {
-        nextStartTime = nextDueDate ?? nextReviewAt;
     }
 
     if (count && completedOccurrences + 1 >= count) {
@@ -672,10 +761,12 @@ export function createNextRecurringTask(
 
     const nextCompletedOccurrences = completedOccurrences + 1;
     let nextRecurrence = task.recurrence;
+    const nextAnchorDays = getNextRecurrenceAnchorDays(task, rule);
     if (task.recurrence && typeof task.recurrence === 'object') {
         const recurrence = task.recurrence as Recurrence;
         nextRecurrence = {
             ...recurrence,
+            ...nextAnchorDays,
             ...(typeof recurrence.count === 'number' || count ? { count } : {}),
             ...(typeof recurrence.until === 'string' || until ? { until } : {}),
             ...(count ? { completedOccurrences: nextCompletedOccurrences } : {}),
@@ -689,6 +780,11 @@ export function createNextRecurringTask(
                     }),
                 }
                 : {}),
+        };
+    } else if (Object.keys(nextAnchorDays).length > 0) {
+        nextRecurrence = {
+            rule,
+            ...nextAnchorDays,
         };
     }
 

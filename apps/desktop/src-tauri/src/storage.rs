@@ -4,6 +4,8 @@ const PORTABLE_MARKER_FILE_NAME: &str = "portable.txt";
 const PORTABLE_PROFILE_DIR_NAME: &str = "profile";
 const PORTABLE_CONFIG_DIR_NAME: &str = "config";
 const PORTABLE_DATA_DIR_NAME: &str = "data";
+const SEARCH_RESULT_LIMIT: usize = 200;
+const SEARCH_RESULT_QUERY_LIMIT: i64 = (SEARCH_RESULT_LIMIT as i64) + 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StorageMode {
@@ -1587,30 +1589,43 @@ pub(crate) fn search_fts(app: tauri::AppHandle, query: String) -> Result<Value, 
 
     let mut tasks: Vec<Value> = Vec::new();
     let mut projects: Vec<Value> = Vec::new();
+    let mut limited = false;
 
     let mut task_stmt = conn
-        .prepare("SELECT t.* FROM tasks_fts f JOIN tasks t ON f.id = t.id WHERE tasks_fts MATCH ? AND t.deletedAt IS NULL")
+        .prepare("SELECT t.* FROM tasks_fts f JOIN tasks t ON f.id = t.id WHERE tasks_fts MATCH ?1 AND t.deletedAt IS NULL LIMIT ?2")
         .map_err(|e| e.to_string())?;
     let task_rows = task_stmt
-        .query_map([fts_query.clone()], |row| row_to_task_value(row))
+        .query_map(params![fts_query.clone(), SEARCH_RESULT_QUERY_LIMIT], |row| row_to_task_value(row))
         .map_err(|e| e.to_string())?;
     for row in task_rows {
-        tasks.push(row.map_err(|e| e.to_string())?);
+        let value = row.map_err(|e| e.to_string())?;
+        if tasks.len() < SEARCH_RESULT_LIMIT {
+            tasks.push(value);
+        } else {
+            limited = true;
+        }
     }
 
     let mut project_stmt = conn
-        .prepare("SELECT p.* FROM projects_fts f JOIN projects p ON f.id = p.id WHERE projects_fts MATCH ? AND p.deletedAt IS NULL")
+        .prepare("SELECT p.* FROM projects_fts f JOIN projects p ON f.id = p.id WHERE projects_fts MATCH ?1 AND p.deletedAt IS NULL LIMIT ?2")
         .map_err(|e| e.to_string())?;
     let project_rows = project_stmt
-        .query_map([fts_query], |row| row_to_project_value(row))
+        .query_map(params![fts_query, SEARCH_RESULT_QUERY_LIMIT], |row| row_to_project_value(row))
         .map_err(|e| e.to_string())?;
     for row in project_rows {
-        projects.push(row.map_err(|e| e.to_string())?);
+        let value = row.map_err(|e| e.to_string())?;
+        if projects.len() < SEARCH_RESULT_LIMIT {
+            projects.push(value);
+        } else {
+            limited = true;
+        }
     }
 
     Ok(serde_json::json!({
         "tasks": tasks,
-        "projects": projects
+        "projects": projects,
+        "limited": if limited { Some(true) } else { None },
+        "limit": if limited { Some(SEARCH_RESULT_LIMIT) } else { None }
     }))
 }
 

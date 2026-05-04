@@ -13,9 +13,6 @@
     "lodash-es": "4.18.1",
     "rollup": "4.59.0",
     "brace-expansion": "5.0.5",
-    "hono": "4.12.14",
-    "@hono/node-server": "1.19.14",
-    "express-rate-limit": "8.3.1",
     "flatted": "3.4.2",
     "node-forge": "1.4.0",
     "path-to-regexp": "8.4.0",
@@ -48,9 +45,6 @@
     "brace-expansion": "5.0.5",
     "@isaacs/brace-expansion": "5.0.1",
     "esbuild": "0.25.12",
-    "hono": "4.12.14",
-    "@hono/node-server": "1.19.14",
-    "express-rate-limit": "8.3.1",
     "flatted": "3.4.2",
     "lodash-es": "4.18.1",
     "node-forge": "1.4.0",
@@ -145,5 +139,5 @@
     "webidl-conversions": "^8.0.0",
     "whatwg-url-without-unicode": "^8.0.0-3"
   },
-  "version": "0.8.8"
+  "version": "0.9.0"
 }

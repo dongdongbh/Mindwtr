@@ -15,19 +15,7 @@ import { ruOverrides } from './locales/ru';
 import { trOverrides } from './locales/tr';
 import { zhHans } from './locales/zh-Hans';
 import { zhHant } from './locales/zh-Hant';
-
-const requiredOverrideKeys = [
-    'recurrence.endsLabel',
-    'recurrence.endsNever',
-    'recurrence.endsOnDate',
-    'recurrence.endsAfterCount',
-    'recurrence.occurrenceUnit',
-    'settings.pomodoroCustomPreset',
-    'settings.pomodoroCustomPresetDesc',
-    'settings.pomodoroFocusMinutes',
-    'settings.pomodoroBreakMinutes',
-    'inbox.whoShouldDoIt',
-] as const;
+import { acceptedLocaleFallbacks } from './locale-fallbacks';
 
 const fullParityLocales: Record<string, Record<string, string>> = {
     zh: zhHans,
@@ -51,29 +39,31 @@ const overrideLocales: Record<string, Record<string, string>> = {
 };
 
 describe('locale parity', () => {
-    it('keeps full locale files in key parity with English', () => {
-        for (const [language, translations] of Object.entries(fullParityLocales)) {
-            for (const key of Object.keys(en)) {
-                expect(
-                    translations[key],
-                    `Missing ${key} in ${language}`
-                ).toBeTruthy();
-            }
+    it('keeps every shipped locale in key parity with English or an explicit fallback allowlist', () => {
+        const englishKeys = Object.keys(en);
+        const shippedLocales = {
+            ...fullParityLocales,
+            ...overrideLocales,
+        };
+
+        for (const [language, translations] of Object.entries(shippedLocales)) {
+            const acceptedFallbacks = new Set(acceptedLocaleFallbacks[language] ?? []);
+            const missing = englishKeys.filter((key) => !translations[key] && !acceptedFallbacks.has(key));
+            expect(missing, `Missing translations in ${language}`).toEqual([]);
+
+            const staleFallbacks = Array.from(acceptedFallbacks)
+                .filter((key) => translations[key] || !englishKeys.includes(key));
+            expect(staleFallbacks, `Stale accepted fallbacks in ${language}`).toEqual([]);
         }
     });
 
-    it('defines required workflow copy for every shipped language', () => {
-        for (const [language, translations] of Object.entries({
-            en,
-            ...fullParityLocales,
-            ...overrideLocales,
-        })) {
-            for (const key of requiredOverrideKeys) {
-                expect(
-                    translations[key],
-                    `Missing ${key} in ${language}`
-                ).toBeTruthy();
-            }
+    it('only allowlists fallbacks for shipped non-English locales', () => {
+        const shippedLocaleKeys = new Set([
+            ...Object.keys(fullParityLocales),
+            ...Object.keys(overrideLocales),
+        ]);
+        for (const language of Object.keys(acceptedLocaleFallbacks)) {
+            expect(shippedLocaleKeys.has(language), `Unknown locale fallback allowlist: ${language}`).toBe(true);
         }
     });
 });

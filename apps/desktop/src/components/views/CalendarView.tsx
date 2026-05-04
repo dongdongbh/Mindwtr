@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { format, getMonth, isSameDay, isSameMonth, isToday } from 'date-fns';
 import { CalendarDays, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { safeFormatDate } from '@mindwtr/core';
@@ -17,6 +18,7 @@ import {
 } from './calendar/useDesktopCalendarController';
 
 export function CalendarView() {
+    const timelineScrollRef = useRef<HTMLDivElement | null>(null);
     const controller = useDesktopCalendarController();
     const {
         calendarBodyRef,
@@ -56,6 +58,21 @@ export function CalendarView() {
         weekdayHeaders,
         yearOptions,
     } = controller;
+    const timelineScrollKey = viewMode === 'day' || viewMode === 'week'
+        ? `${viewMode}:${timelineDays.map(dayKey).join('|')}`
+        : '';
+
+    useEffect(() => {
+        if (!timelineScrollKey) return;
+        const now = new Date();
+        const minutes = (now.getHours() - DESKTOP_DAY_START_HOUR) * 60 + now.getMinutes();
+        const clampedMinutes = Math.max(0, Math.min((DESKTOP_DAY_END_HOUR - DESKTOP_DAY_START_HOUR) * 60, minutes));
+        const scrollTop = Math.max(0, (clampedMinutes / 60) * DESKTOP_HOUR_HEIGHT - 220);
+        const frame = window.requestAnimationFrame(() => {
+            timelineScrollRef.current?.scrollTo({ top: scrollTop });
+        });
+        return () => window.cancelAnimationFrame(frame);
+    }, [timelineScrollKey]);
 
     return (
         <ErrorBoundary>
@@ -163,16 +180,20 @@ export function CalendarView() {
                     </div>
                 </div>
             </header>
-            <div className="relative mb-4">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-                <input
-                    type="text"
-                    data-view-filter-input
-                    placeholder={t('common.search')}
-                    value={viewFilterQuery}
-                    onChange={(event) => setViewFilterQuery(event.target.value)}
-                    className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-                />
+            <div className="mb-4 space-y-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
+                    <div className="relative min-w-0 flex-1">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+                        <input
+                            type="text"
+                            data-view-filter-input
+                            placeholder={t('common.search')}
+                            value={viewFilterQuery}
+                            onChange={(event) => setViewFilterQuery(event.target.value)}
+                            className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                        />
+                    </div>
+                </div>
                 {visibleSearchMatchCount !== null && (
                     <div className="mt-2 text-xs text-muted-foreground" aria-live="polite">
                         {visibleSearchMatchCount > 0
@@ -398,97 +419,103 @@ export function CalendarView() {
                             })}
                         </div>
 
-                        <div className="grid" style={{ gridTemplateColumns: `4rem repeat(${timelineDays.length}, minmax(0, 1fr))` }}>
-                            <div className="relative border-r border-border bg-muted/20" style={{ height: (DESKTOP_DAY_END_HOUR - DESKTOP_DAY_START_HOUR) * DESKTOP_HOUR_HEIGHT }}>
-                                {Array.from({ length: DESKTOP_DAY_END_HOUR - DESKTOP_DAY_START_HOUR + 1 }, (_, index) => {
-                                    const hour = DESKTOP_DAY_START_HOUR + index;
+                        <div
+                            ref={timelineScrollRef}
+                            className="overflow-y-auto"
+                            style={{ height: 'clamp(28rem, calc(100vh - 20rem), 48rem)' }}
+                        >
+                            <div className="grid" style={{ gridTemplateColumns: `4rem repeat(${timelineDays.length}, minmax(0, 1fr))` }}>
+                                <div className="relative border-r border-border bg-muted/20" style={{ height: (DESKTOP_DAY_END_HOUR - DESKTOP_DAY_START_HOUR) * DESKTOP_HOUR_HEIGHT }}>
+                                    {Array.from({ length: DESKTOP_DAY_END_HOUR - DESKTOP_DAY_START_HOUR + 1 }, (_, index) => {
+                                        const hour = DESKTOP_DAY_START_HOUR + index;
+                                        return (
+                                            <div key={hour} className="absolute right-2 -translate-y-2 text-[11px] text-muted-foreground" style={{ top: index * DESKTOP_HOUR_HEIGHT }}>
+                                                {safeFormatDate(new Date(0, 0, 1, hour), 'p')}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                {timelineDays.map((day) => {
+                                    const now = new Date();
+                                    const nowMinutes = (now.getHours() - DESKTOP_DAY_START_HOUR) * 60 + now.getMinutes();
+                                    const nowTop = nowMinutes / 60 * DESKTOP_HOUR_HEIGHT;
+                                    const showNow = isToday(day) && nowMinutes >= 0 && nowMinutes <= (DESKTOP_DAY_END_HOUR - DESKTOP_DAY_START_HOUR) * 60;
                                     return (
-                                        <div key={hour} className="absolute right-2 -translate-y-2 text-[11px] text-muted-foreground" style={{ top: index * DESKTOP_HOUR_HEIGHT }}>
-                                            {safeFormatDate(new Date(0, 0, 1, hour), 'p')}
+                                        <div
+                                            key={dayKey(day)}
+                                            className={cn("relative border-r border-border last:border-r-0", isToday(day) && "bg-primary/5")}
+                                            style={{ height: (DESKTOP_DAY_END_HOUR - DESKTOP_DAY_START_HOUR) * DESKTOP_HOUR_HEIGHT }}
+                                            onClick={(event) => {
+                                                const rect = event.currentTarget.getBoundingClientRect();
+                                                const rawMinutes = ((event.clientY - rect.top) / DESKTOP_HOUR_HEIGHT) * 60;
+                                                const snapped = Math.round(rawMinutes / DESKTOP_GRID_SNAP_MINUTES) * DESKTOP_GRID_SNAP_MINUTES;
+                                                const maxMinutes = (DESKTOP_DAY_END_HOUR - DESKTOP_DAY_START_HOUR) * 60 - 30;
+                                                const clamped = Math.max(0, Math.min(maxMinutes, snapped));
+                                                const start = new Date(day);
+                                                start.setHours(DESKTOP_DAY_START_HOUR, clamped, 0, 0);
+                                                openQuickAddForStart(start);
+                                            }}
+                                        >
+                                            {Array.from({ length: DESKTOP_DAY_END_HOUR - DESKTOP_DAY_START_HOUR + 1 }, (_, index) => (
+                                                <div
+                                                    key={index}
+                                                    className="absolute left-0 right-0 border-t border-border/70"
+                                                    style={{ top: index * DESKTOP_HOUR_HEIGHT }}
+                                                />
+                                            ))}
+                                            {showNow && (
+                                                <div className="absolute left-0 right-0 z-20 flex items-center" style={{ top: nowTop }}>
+                                                    <span className="h-2 w-2 -translate-x-1 rounded-full bg-red-500" />
+                                                    <span className="h-0.5 flex-1 bg-red-500" />
+                                                </div>
+                                            )}
+                                            {layoutTimedItems(day).map((item) => {
+                                                const timeLabel = `${safeFormatDate(item.start, 'p')}-${safeFormatDate(item.end, 'p')}`;
+                                                const commonStyle = {
+                                                    height: item.height,
+                                                    left: `calc(${item.leftPercent}% + 3px)`,
+                                                    top: item.top,
+                                                    width: `calc(${item.widthPercent}% - 6px)`,
+                                                };
+                                                if (item.kind === 'event') {
+                                                    return (
+                                                        <div
+                                                            key={item.id}
+                                                            data-calendar-block
+                                                            className="absolute z-10 overflow-hidden rounded border-l-[4px] bg-muted/80 px-2 py-1 text-xs text-muted-foreground shadow-sm"
+                                                            style={{ ...commonStyle, borderLeftColor: externalCalendarColor(item.event.sourceId) }}
+                                                            title={`${item.title} ${timeLabel}`}
+                                                            onClick={(event) => event.stopPropagation()}
+                                                        >
+                                                            <div className="truncate font-medium text-foreground">{item.title}</div>
+                                                            <div className="truncate">{timeLabel}</div>
+                                                        </div>
+                                                    );
+                                                }
+                                                return (
+                                                    <button
+                                                        key={item.id}
+                                                        type="button"
+                                                        data-calendar-block
+                                                        data-task-id={item.task.id}
+                                                        data-task-edit-trigger
+                                                        className="absolute z-10 overflow-hidden rounded bg-primary px-2 py-1 text-left text-xs text-primary-foreground shadow-sm hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                                        style={commonStyle}
+                                                        title={`${item.title} ${timeLabel}`}
+                                                        onClick={(event) => {
+                                                            event.stopPropagation();
+                                                            openTaskFromCalendar(item.task);
+                                                        }}
+                                                    >
+                                                        <div className="truncate font-semibold">{item.title}</div>
+                                                        <div className="truncate opacity-90">{timeLabel}</div>
+                                                    </button>
+                                                );
+                                            })}
                                         </div>
                                     );
                                 })}
                             </div>
-                            {timelineDays.map((day) => {
-                                const now = new Date();
-                                const nowMinutes = (now.getHours() - DESKTOP_DAY_START_HOUR) * 60 + now.getMinutes();
-                                const nowTop = nowMinutes / 60 * DESKTOP_HOUR_HEIGHT;
-                                const showNow = isToday(day) && nowMinutes >= 0 && nowMinutes <= (DESKTOP_DAY_END_HOUR - DESKTOP_DAY_START_HOUR) * 60;
-                                return (
-                                    <div
-                                        key={dayKey(day)}
-                                        className={cn("relative border-r border-border last:border-r-0", isToday(day) && "bg-primary/5")}
-                                        style={{ height: (DESKTOP_DAY_END_HOUR - DESKTOP_DAY_START_HOUR) * DESKTOP_HOUR_HEIGHT }}
-                                        onClick={(event) => {
-                                            const rect = event.currentTarget.getBoundingClientRect();
-                                            const rawMinutes = ((event.clientY - rect.top) / DESKTOP_HOUR_HEIGHT) * 60;
-                                            const snapped = Math.round(rawMinutes / DESKTOP_GRID_SNAP_MINUTES) * DESKTOP_GRID_SNAP_MINUTES;
-                                            const maxMinutes = (DESKTOP_DAY_END_HOUR - DESKTOP_DAY_START_HOUR) * 60 - 30;
-                                            const clamped = Math.max(0, Math.min(maxMinutes, snapped));
-                                            const start = new Date(day);
-                                            start.setHours(DESKTOP_DAY_START_HOUR, clamped, 0, 0);
-                                            openQuickAddForStart(start);
-                                        }}
-                                    >
-                                        {Array.from({ length: DESKTOP_DAY_END_HOUR - DESKTOP_DAY_START_HOUR + 1 }, (_, index) => (
-                                            <div
-                                                key={index}
-                                                className="absolute left-0 right-0 border-t border-border/70"
-                                                style={{ top: index * DESKTOP_HOUR_HEIGHT }}
-                                            />
-                                        ))}
-                                        {showNow && (
-                                            <div className="absolute left-0 right-0 z-20 flex items-center" style={{ top: nowTop }}>
-                                                <span className="h-2 w-2 -translate-x-1 rounded-full bg-red-500" />
-                                                <span className="h-0.5 flex-1 bg-red-500" />
-                                            </div>
-                                        )}
-                                        {layoutTimedItems(day).map((item) => {
-                                            const timeLabel = `${safeFormatDate(item.start, 'p')}-${safeFormatDate(item.end, 'p')}`;
-                                            const commonStyle = {
-                                                height: item.height,
-                                                left: `calc(${item.leftPercent}% + 3px)`,
-                                                top: item.top,
-                                                width: `calc(${item.widthPercent}% - 6px)`,
-                                            };
-                                            if (item.kind === 'event') {
-                                                return (
-                                                    <div
-                                                        key={item.id}
-                                                        data-calendar-block
-                                                        className="absolute z-10 overflow-hidden rounded border-l-[4px] bg-muted/80 px-2 py-1 text-xs text-muted-foreground shadow-sm"
-                                                        style={{ ...commonStyle, borderLeftColor: externalCalendarColor(item.event.sourceId) }}
-                                                        title={`${item.title} ${timeLabel}`}
-                                                        onClick={(event) => event.stopPropagation()}
-                                                    >
-                                                        <div className="truncate font-medium text-foreground">{item.title}</div>
-                                                        <div className="truncate">{timeLabel}</div>
-                                                    </div>
-                                                );
-                                            }
-                                            return (
-                                                <button
-                                                    key={item.id}
-                                                    type="button"
-                                                    data-calendar-block
-                                                    data-task-id={item.task.id}
-                                                    data-task-edit-trigger
-                                                    className="absolute z-10 overflow-hidden rounded bg-primary px-2 py-1 text-left text-xs text-primary-foreground shadow-sm hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                                    style={commonStyle}
-                                                    title={`${item.title} ${timeLabel}`}
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        openTaskFromCalendar(item.task);
-                                                    }}
-                                                >
-                                                    <div className="truncate font-semibold">{item.title}</div>
-                                                    <div className="truncate opacity-90">{timeLabel}</div>
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                );
-                            })}
                         </div>
                     </div>
                 )}

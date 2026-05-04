@@ -7,7 +7,7 @@ export type CalendarSyncEntry = {
     platform: string;
     lastSyncedAt: string;
 };
-import type { SearchProjectResult, SearchResults, SearchTaskResult, TaskQueryOptions } from './storage';
+import { SEARCH_RESULT_LIMIT, type SearchProjectResult, type SearchResults, type SearchTaskResult, type TaskQueryOptions } from './storage';
 import { SQLITE_BASE_SCHEMA, SQLITE_FTS_SCHEMA, SQLITE_INDEX_SCHEMA } from './sqlite-schema';
 import { normalizeTaskStatus } from './task-status';
 import { normalizeRecurrenceForLoad } from './recurrence';
@@ -50,6 +50,7 @@ const fromBool = (value: unknown) => Boolean(value);
 const READ_PAGE_SIZE = 1000;
 const FTS_LOCK_TTL_MS = 5 * 60 * 1000;
 const FTS_LOCK_REFRESH_INTERVAL_MS = Math.max(15_000, Math.floor(FTS_LOCK_TTL_MS / 3));
+const SQLITE_ID_INSERT_BATCH_SIZE = 500;
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const SEARCH_TASK_SELECT = [
     't.id AS id',
@@ -71,6 +72,15 @@ const SEARCH_PROJECT_SELECT = [
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && !Array.isArray(value);
+
+let tempIdTableCounter = 0;
+
+const createTempIdTableName = (table: 'tasks' | 'projects' | 'sections' | 'areas'): string => {
+    tempIdTableCounter = (tempIdTableCounter + 1) % Number.MAX_SAFE_INTEGER;
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).slice(2, 10) || '0';
+    return `temp_${table}_ids_${timestamp}_${tempIdTableCounter.toString(36)}_${random}`;
+};
 
 const normalizeProjectStatus = (value: unknown): Project['status'] => {
     if (value === 'active' || value === 'someday' || value === 'waiting' || value === 'archived') {
@@ -801,16 +811,19 @@ export class SqliteAdapter {
         const ftsQuery = tokens.map((token) => `${token}*`).join(' ');
         const runSearch = async (): Promise<SearchResults> => {
             const taskRows = await this.client.all<Record<string, unknown>>(
-                `SELECT ${SEARCH_TASK_SELECT} FROM tasks_fts f JOIN tasks t ON f.id = t.id WHERE tasks_fts MATCH ? AND t.deletedAt IS NULL`,
-                [ftsQuery]
+                `SELECT ${SEARCH_TASK_SELECT} FROM tasks_fts f JOIN tasks t ON f.id = t.id WHERE tasks_fts MATCH ? AND t.deletedAt IS NULL LIMIT ?`,
+                [ftsQuery, SEARCH_RESULT_LIMIT + 1]
             );
             const projectRows = await this.client.all<Record<string, unknown>>(
-                `SELECT ${SEARCH_PROJECT_SELECT} FROM projects_fts f JOIN projects p ON f.id = p.id WHERE projects_fts MATCH ? AND p.deletedAt IS NULL`,
-                [ftsQuery]
+                `SELECT ${SEARCH_PROJECT_SELECT} FROM projects_fts f JOIN projects p ON f.id = p.id WHERE projects_fts MATCH ? AND p.deletedAt IS NULL LIMIT ?`,
+                [ftsQuery, SEARCH_RESULT_LIMIT + 1]
             );
+            const limited = taskRows.length > SEARCH_RESULT_LIMIT || projectRows.length > SEARCH_RESULT_LIMIT;
             return {
-                tasks: taskRows.map((row) => this.mapSearchTaskRow(row)),
-                projects: projectRows.map((row) => this.mapSearchProjectRow(row)),
+                tasks: taskRows.slice(0, SEARCH_RESULT_LIMIT).map((row) => this.mapSearchTaskRow(row)),
+                projects: projectRows.slice(0, SEARCH_RESULT_LIMIT).map((row) => this.mapSearchProjectRow(row)),
+                limited: limited || undefined,
+                limit: limited ? SEARCH_RESULT_LIMIT : undefined,
             };
         };
 
@@ -866,11 +879,15 @@ export class SqliteAdapter {
             };
 
             const syncIds = async (table: 'tasks' | 'projects' | 'sections' | 'areas', ids: string[]) => {
-                const tempTable = `temp_${table}_ids_${Date.now()}`;
+                const tempTable = createTempIdTableName(table);
                 try {
                     await this.client.run(`CREATE TEMP TABLE ${tempTable} (id TEXT PRIMARY KEY)`);
-                    for (const id of ids) {
-                        await this.client.run(`INSERT OR IGNORE INTO ${tempTable} (id) VALUES (?)`, [id]);
+                    for (const batch of chunkArray(ids, SQLITE_ID_INSERT_BATCH_SIZE)) {
+                        const placeholders = batch.map(() => '(?)').join(', ');
+                        await this.client.run(
+                            `INSERT OR IGNORE INTO ${tempTable} (id) VALUES ${placeholders}`,
+                            batch
+                        );
                     }
                     await this.client.run(`DELETE FROM ${table} WHERE id NOT IN (SELECT id FROM ${tempTable})`);
                 } finally {

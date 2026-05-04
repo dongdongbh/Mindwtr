@@ -88,7 +88,8 @@ use sync::{
 };
 use ui::{
     acknowledge_close_request, apply_global_quick_add_shortcut, consume_quick_add_pending,
-    quit_app, set_global_quick_add_shortcut, set_tray_visible, show_main, show_main_and_emit,
+    create_quick_add_window, quit_app, set_global_quick_add_shortcut, set_tray_visible, show_main,
+    show_quick_add_window,
 };
 
 #[cfg(test)]
@@ -136,6 +137,8 @@ const DROPBOX_OAUTH_TIMEOUT_SECS: u64 = 180;
 const DROPBOX_TOKEN_REFRESH_SKEW_MS: i64 = 60_000;
 const DROPBOX_DEFAULT_TOKEN_LIFETIME_SECS: i64 = 4 * 60 * 60;
 const QUICK_ADD_CLI_FLAG: &str = "--quick-add";
+const QUICK_ADD_WINDOW_LABEL: &str = "quick-add";
+const QUICK_ADD_WINDOW_URL: &str = "index.html?quickAddWindow=1";
 const GLOBAL_QUICK_ADD_SHORTCUT_DEFAULT: &str = "Control+Alt+M";
 const GLOBAL_QUICK_ADD_SHORTCUT_ALTERNATE_N: &str = "Control+Alt+N";
 const GLOBAL_QUICK_ADD_SHORTCUT_ALTERNATE_Q: &str = "Control+Alt+Q";
@@ -543,7 +546,7 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if launch_requests_quick_add(args.iter()) {
-                show_main_and_emit(app);
+                show_quick_add_window(app);
             } else {
                 show_main(app);
             }
@@ -597,6 +600,10 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
+                if window.label() == QUICK_ADD_WINDOW_LABEL {
+                    let _ = window.hide();
+                    return;
+                }
                 window
                     .app_handle()
                     .state::<CloseRequestHandled>()
@@ -688,6 +695,9 @@ pub fn run() {
             }
 
             let handle = app.handle();
+            if let Err(error) = create_quick_add_window(&handle) {
+                log::warn!("{error}");
+            }
             if !(cfg!(target_os = "linux") && is_flatpak()) && !is_windows_store {
                 let tray_init_result: tauri::Result<()> = (|| {
                     let quick_add_item =
@@ -709,7 +719,7 @@ pub fn run() {
                             .show_menu_on_left_click(false)
                             .on_menu_event(move |app, event| match event.id().as_ref() {
                                 "quick_add" => {
-                                    show_main_and_emit(app);
+                                    show_quick_add_window(app);
                                 }
                                 "show" => {
                                     show_main(app);
@@ -760,9 +770,11 @@ pub fn run() {
             }
 
             if initial_launch_requests_quick_add {
-                app.state::<QuickAddPending>()
-                    .0
-                    .store(true, Ordering::SeqCst);
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_skip_taskbar(true);
+                    let _ = window.hide();
+                }
+                show_quick_add_window(&handle);
             }
 
             if cfg!(debug_assertions) || diagnostics_enabled {

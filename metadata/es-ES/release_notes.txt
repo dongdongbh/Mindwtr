@@ -1,5 +1,3 @@
-- El calendario suma vista semanal movil, mes renovado, programador de tareas y hora predeterminada.
-- La sincronizacion de calendario permite elegir destino y evita bucles con calendarios espejo de Mindwtr.
-- Los avisos de Review ahora abren Review directamente.
-- Inbox agrega Later, la busqueda filtra por responsable y los merges de sync/cloud son mas fiables.
-- Captura rapida mantiene el texto dentro del panel y voz a texto evita un crash realtime en Android.
+- Focus y agenda son mas claros con tareas futuras ocultas, Pomodoro opcional por tarea, avisos de inicio y vencimiento separados, y densidad semanal ajustable.
+- Sync mantiene visibles los errores, deshacer eliminacion es mas estable y los ajustes se leen mejor.
+- Busqueda, captura, Review, contextos y gestos de calendario son mas fluidos.

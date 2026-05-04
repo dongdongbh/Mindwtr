@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, 
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { AppData } from '@mindwtr/core';
-import { corsOrigin, errorResponse } from './server-config';
+import { corsOrigin, errorResponse, preflightResponse } from './server-config';
 import { __cloudTestUtils, startCloudServer } from './server';
 
 const expireFileForOrphanGc = (path: string): void => {
@@ -115,7 +115,24 @@ describe('cloud server utils', () => {
         });
 
         expect(__cloudTestUtils.getClientIp(req)).toBe('unknown');
-        expect(__cloudTestUtils.getClientIp(req, true)).toBe('203.0.113.10');
+        expect(__cloudTestUtils.getClientIp(req, true)).toBe('unknown');
+        expect(__cloudTestUtils.getClientIp(req, {
+            trustProxyHeaders: true,
+            requestIpAddress: '198.51.100.1',
+            trustedProxyIps: new Set(['10.0.0.1']),
+        })).toBe('unknown');
+        expect(__cloudTestUtils.getClientIp(req, {
+            trustProxyHeaders: true,
+            requestIpAddress: '10.0.0.1',
+            trustedProxyIps: new Set(['10.0.0.1']),
+        })).toBe('203.0.113.10');
+    });
+
+    test('parses trusted proxy IP allowlists', () => {
+        expect(Array.from(__cloudTestUtils.parseTrustedProxyIps(' 10.0.0.1, ::ffff:127.0.0.1 ,, '))).toEqual([
+            '10.0.0.1',
+            '127.0.0.1',
+        ]);
     });
 
     test('derives auth failure rate keys from the best available client identity', () => {
@@ -129,29 +146,41 @@ describe('cloud server utils', () => {
 
         expect(__cloudTestUtils.getAuthFailureRateKey(req, {
             trustProxyHeaders: true,
+            trustedProxyIps: new Set(['127.0.0.1']),
             requestIpAddress: '127.0.0.1',
-            token,
         })).toBe('auth-failure:ip:203.0.113.10');
 
         expect(__cloudTestUtils.getAuthFailureRateKey(req, {
-            trustProxyHeaders: false,
+            trustProxyHeaders: true,
+            trustedProxyIps: new Set(['10.0.0.1']),
             requestIpAddress: '127.0.0.1',
-            token,
         })).toBe('auth-failure:ip:127.0.0.1');
 
         expect(__cloudTestUtils.getAuthFailureRateKey(req, {
             trustProxyHeaders: false,
-            requestIpAddress: null,
-            token,
-        })).toBe(`auth-failure:token:${__cloudTestUtils.tokenToKey(token)}`);
+            requestIpAddress: '127.0.0.1',
+        })).toBe('auth-failure:ip:127.0.0.1');
 
-        expect(__cloudTestUtils.getAuthFailureRateKey(new Request('http://localhost/v1/data', {
-            headers: {
-                authorization: 'Bearer malformed',
-            },
+        expect(__cloudTestUtils.getAuthFailureRateKey(req, {
+            trustProxyHeaders: false,
+            requestIpAddress: '127.0.0.1',
+        })).toBe(__cloudTestUtils.getAuthFailureRateKey(new Request('http://localhost/v1/data', {
+            headers: { authorization: 'Bearer another-invalid-token-1234567890' },
         }), {
             trustProxyHeaders: false,
+            requestIpAddress: '127.0.0.1',
+        }));
+
+        expect(__cloudTestUtils.getAuthFailureRateKey(req, {
+            trustProxyHeaders: false,
             requestIpAddress: null,
+        })).toBe('auth-failure:ip:unknown');
+
+        expect(__cloudTestUtils.getAuthFailureTokenRateKey({ token })).toBe(
+            `auth-failure:token:${__cloudTestUtils.tokenToKey(token)}`
+        );
+
+        expect(__cloudTestUtils.getAuthFailureTokenRateKey({
             authHeader: 'Bearer malformed',
         })).toBe(`auth-failure:header:${__cloudTestUtils.tokenToKey('Bearer malformed')}`);
     });
@@ -169,6 +198,16 @@ describe('cloud server utils', () => {
         expect(response.headers.get('Access-Control-Allow-Origin')).toBe(corsOrigin);
         expect(response.headers.get('Access-Control-Allow-Headers')).toBe('Authorization, Content-Type');
         expect(response.headers.get('Access-Control-Allow-Methods')).toBe('GET,PUT,POST,PATCH,DELETE,OPTIONS');
+    });
+
+    test('returns no-content CORS preflight responses', async () => {
+        const response = preflightResponse();
+
+        expect(response.status).toBe(204);
+        expect(response.headers.get('Access-Control-Allow-Origin')).toBe(corsOrigin);
+        expect(response.headers.get('Access-Control-Allow-Headers')).toBe('Authorization, Content-Type');
+        expect(response.headers.get('Access-Control-Allow-Methods')).toBe('GET,PUT,POST,PATCH,DELETE,OPTIONS');
+        expect(await response.text()).toBe('');
     });
 
     test('includes a request id in internal server error responses', async () => {
@@ -508,7 +547,8 @@ describe('cloud server utils', () => {
         rmSync(dir, { recursive: true, force: true });
     });
 
-    test('resolves large server merge timestamp sets without spreading arguments', () => {
+    test('uses server time for merge repair timestamps without spreading large payloads', () => {
+        const startedAt = Date.now();
         const iso = '2026-01-01T00:00:00.000Z';
         const data: AppData = {
             tasks: Array.from({ length: 60_000 }, (_, index) => ({
@@ -524,10 +564,13 @@ describe('cloud server utils', () => {
             settings: {},
         };
 
-        expect(__cloudTestUtils.resolveServerMergeTimestamp(data)).toBe('2026-01-02T00:00:00.000Z');
+        const resolved = Date.parse(__cloudTestUtils.resolveServerMergeTimestamp(data));
+        expect(Number.isFinite(resolved)).toBe(true);
+        expect(resolved).toBeGreaterThanOrEqual(startedAt);
+        expect(resolved).toBeLessThanOrEqual(Date.now());
     });
 
-    test('caps server merge timestamp at five minutes beyond now', () => {
+    test('does not trust future payload timestamps for server merge repairs', () => {
         const startedAt = Date.now();
         const iso = '2026-01-01T00:00:00.000Z';
         const farFuture = new Date(startedAt + 365 * 24 * 60 * 60 * 1000).toISOString();
@@ -547,8 +590,54 @@ describe('cloud server utils', () => {
 
         const resolved = Date.parse(__cloudTestUtils.resolveServerMergeTimestamp(data));
         expect(Number.isFinite(resolved)).toBe(true);
-        expect(resolved).toBeGreaterThanOrEqual(startedAt + 4 * 60 * 1000);
-        expect(resolved).toBeLessThanOrEqual(Date.now() + 5 * 60 * 1000 + 1000);
+        expect(resolved).toBeGreaterThanOrEqual(startedAt);
+        expect(resolved).toBeLessThanOrEqual(Date.now());
+    });
+});
+
+describe('cloud server namespace mode', () => {
+    test('caps new namespace creation when any-token mode is enabled', async () => {
+        const tempDataDir = mkdtempSync(join(tmpdir(), 'mindwtr-cloud-namespace-test-'));
+        const firstToken = 'namespace-token-one-1234567890';
+        const secondToken = 'namespace-token-two-1234567890';
+        const server = await startCloudServer({
+            host: '127.0.0.1',
+            port: 0,
+            dataDir: tempDataDir,
+            allowedAuthTokens: null,
+            maxAnyTokenNamespaces: 1,
+        });
+        const url = `http://127.0.0.1:${server.port}`;
+        try {
+            const firstResponse = await fetch(`${url}/v1/data`, {
+                headers: { Authorization: `Bearer ${firstToken}` },
+            });
+            expect(firstResponse.status).toBe(200);
+
+            const secondResponse = await fetch(`${url}/v1/data`, {
+                method: 'PUT',
+                headers: {
+                    Authorization: `Bearer ${secondToken}`,
+                    'content-type': 'application/json',
+                },
+                body: JSON.stringify({ tasks: [], projects: [], sections: [], areas: [], settings: {} }),
+            });
+            expect(secondResponse.status).toBe(403);
+            expect((await secondResponse.json()).error).toBe('Token namespace limit reached');
+
+            const existingNamespaceResponse = await fetch(`${url}/v1/data`, {
+                method: 'PUT',
+                headers: {
+                    Authorization: `Bearer ${firstToken}`,
+                    'content-type': 'application/json',
+                },
+                body: JSON.stringify({ tasks: [], projects: [], sections: [], areas: [], settings: {} }),
+            });
+            expect(existingNamespaceResponse.status).toBe(200);
+        } finally {
+            server.stop();
+            rmSync(tempDataDir, { recursive: true, force: true });
+        }
     });
 });
 
@@ -585,6 +674,23 @@ describe('cloud server api', () => {
         }
         dataDir = '';
         baseUrl = '';
+    });
+
+    test('handles CORS preflight without requiring auth or returning JSON', async () => {
+        const response = await fetch(`${baseUrl}/v1/tasks`, {
+            method: 'OPTIONS',
+            headers: {
+                Origin: corsOrigin,
+                'Access-Control-Request-Method': 'POST',
+                'Access-Control-Request-Headers': 'Authorization, Content-Type',
+            },
+        });
+
+        expect(response.status).toBe(204);
+        expect(response.headers.get('Access-Control-Allow-Origin')).toBe(corsOrigin);
+        expect(response.headers.get('Access-Control-Allow-Headers')).toBe('Authorization, Content-Type');
+        expect(response.headers.get('Access-Control-Allow-Methods')).toBe('GET,PUT,POST,PATCH,DELETE,OPTIONS');
+        expect(await response.text()).toBe('');
     });
 
     test('supports task CRUD and soft delete flow', async () => {
@@ -718,6 +824,16 @@ describe('cloud server api', () => {
         expect(body.projectTotal).toBe(3);
         expect((body.tasks as Array<{ id: string }>).map((task) => task.id)).toEqual(['task-2', 'task-3']);
         expect((body.projects as Array<{ id: string }>).map((project) => project.id)).toEqual(['project-2', 'project-3']);
+
+        const independentResponse = await fetch(`${baseUrl}/v1/search?query=Alpha&limit=2&taskOffset=2&projectOffset=0`, {
+            headers: authHeaders,
+        });
+        expect(independentResponse.status).toBe(200);
+        const independentBody = await independentResponse.json();
+        expect(independentBody.taskOffset).toBe(2);
+        expect(independentBody.projectOffset).toBe(0);
+        expect((independentBody.tasks as Array<{ id: string }>).map((task) => task.id)).toEqual(['task-3']);
+        expect((independentBody.projects as Array<{ id: string }>).map((project) => project.id)).toEqual(['project-1', 'project-2']);
     });
 
     test('supports REST create and patch for areas, projects, and sections', async () => {
@@ -768,6 +884,28 @@ describe('cloud server api', () => {
         });
         expect(patchProject.status).toBe(200);
         expect((await patchProject.json()).project.title).toBe('Launch v2');
+
+        const rejectEmptyArea = await fetch(`${baseUrl}/v1/projects/${encodeURIComponent(projectId)}`, {
+            method: 'PATCH',
+            headers: {
+                ...authHeaders,
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({ areaId: '' }),
+        });
+        expect(rejectEmptyArea.status).toBe(400);
+        expect((await rejectEmptyArea.json()).error).toBe('Invalid area id');
+
+        const clearArea = await fetch(`${baseUrl}/v1/projects/${encodeURIComponent(projectId)}`, {
+            method: 'PATCH',
+            headers: {
+                ...authHeaders,
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({ areaId: null }),
+        });
+        expect(clearArea.status).toBe(200);
+        expect((await clearArea.json()).project.areaId).toBeUndefined();
 
         const patchSection = await fetch(`${baseUrl}/v1/sections/${encodeURIComponent(sectionId)}`, {
             method: 'PATCH',
@@ -1383,7 +1521,7 @@ describe('cloud server api', () => {
         }
     });
 
-    test('uses payload timestamps for server-side merge repairs', async () => {
+    test('uses server timestamps for server-side merge repairs', async () => {
         const deletedProjectAt = '2026-01-01T00:00:00.000Z';
         const sectionAt = '2026-01-02T00:00:00.000Z';
         const key = __cloudTestUtils.tokenToKey(integrationToken);
@@ -1402,6 +1540,7 @@ describe('cloud server api', () => {
             settings: {},
         }));
 
+        const startedAt = Date.now();
         const putSection = await fetch(`${baseUrl}/v1/data`, {
             method: 'PUT',
             headers: {
@@ -1435,8 +1574,12 @@ describe('cloud server api', () => {
         expect(getResponse.status).toBe(200);
         const body = await getResponse.json();
         const section = (body.sections as Array<{ id: string; deletedAt?: string; updatedAt: string }>).find((item) => item.id === 'section-stale');
-        expect(section?.deletedAt).toBe(sectionAt);
-        expect(section?.updatedAt).toBe(sectionAt);
+        const repairedAt = Date.parse(section?.updatedAt ?? '');
+        expect(Number.isFinite(repairedAt)).toBe(true);
+        expect(section?.deletedAt).toBe(section?.updatedAt);
+        expect(section?.updatedAt).not.toBe(sectionAt);
+        expect(repairedAt).toBeGreaterThanOrEqual(startedAt);
+        expect(repairedAt).toBeLessThanOrEqual(Date.now() + 1000);
     });
 
     test('clamps adversarial future payload timestamps for server-side repairs', async () => {
@@ -1496,7 +1639,8 @@ describe('cloud server api', () => {
         expect(Number.isFinite(repairedAt)).toBe(true);
         expect(section?.deletedAt).toBe(section?.updatedAt);
         expect(section?.updatedAt).not.toBe(futureSectionAt);
-        expect(repairedAt).toBeLessThanOrEqual(startedAt + 5 * 60 * 1000 + 10_000);
+        expect(repairedAt).toBeGreaterThanOrEqual(startedAt);
+        expect(repairedAt).toBeLessThanOrEqual(Date.now() + 1000);
     });
 
     test('serializes concurrent /v1/data edits to the same task with record-level merge rules', async () => {

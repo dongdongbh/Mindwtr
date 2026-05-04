@@ -82,6 +82,8 @@ type Labels = {
     pomodoroCustomPresetDesc: string;
     pomodoroFocusMinutes: string;
     pomodoroBreakMinutes: string;
+    pomodoroLinkTask: string;
+    pomodoroLinkTaskDesc: string;
     pomodoroAutoStartBreaks: string;
     pomodoroAutoStartBreaksDesc: string;
     pomodoroAutoStartFocus: string;
@@ -220,6 +222,7 @@ export function SettingsGtdPage({
     const defaultScheduleTime = normalizeClockTimeInput(safeSettings.gtd?.defaultScheduleTime) || '';
     const pomodoroEnabled = safeSettings.features?.pomodoro === true;
     const pomodoroCustomDurations = sanitizePomodoroDurations(safeSettings.gtd?.pomodoro?.customDurations);
+    const pomodoroLinkTask = safeSettings.gtd?.pomodoro?.linkTask === true;
     const pomodoroAutoStartBreaks = safeSettings.gtd?.pomodoro?.autoStartBreaks === true;
     const pomodoroAutoStartFocus = safeSettings.gtd?.pomodoro?.autoStartFocus === true;
     const [pomodoroFocusDraft, setPomodoroFocusDraft] = useState(String(pomodoroCustomDurations.focusMinutes));
@@ -589,6 +592,29 @@ export function SettingsGtdPage({
                             </label>
                         </div>
                         <div className="rounded-lg border border-border divide-y divide-border">
+                            <div className="p-3 flex items-center justify-between gap-6">
+                                <div className="min-w-0">
+                                    <div className="text-sm font-medium">{t.pomodoroLinkTask}</div>
+                                    <div className="text-xs text-muted-foreground mt-1">{t.pomodoroLinkTaskDesc}</div>
+                                </div>
+                                <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={pomodoroLinkTask}
+                                    onClick={() => updatePomodoroSettings({ linkTask: !pomodoroLinkTask })}
+                                    className={cn(
+                                        'relative inline-flex h-5 w-9 items-center rounded-full border transition-colors',
+                                        pomodoroLinkTask ? 'bg-primary border-primary' : 'bg-muted/50 border-border'
+                                    )}
+                                >
+                                    <span
+                                        className={cn(
+                                            'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                                            pomodoroLinkTask ? 'translate-x-4' : 'translate-x-1'
+                                        )}
+                                    />
+                                </button>
+                            </div>
                             <div className="p-3 flex items-center justify-between gap-6">
                                 <div className="min-w-0">
                                     <div className="text-sm font-medium">{t.pomodoroAutoStartBreaks}</div>

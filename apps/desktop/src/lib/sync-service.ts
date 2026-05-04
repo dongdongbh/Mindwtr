@@ -1696,6 +1696,19 @@ export class SyncService {
                     ensureLocalSnapshotFresh();
                     await persistLocalDataWithTracking(data);
                 },
+                clearPendingRemoteWriteAfterLocalAbort: async (pendingAt) => {
+                    const current = getInMemoryAppDataSnapshot();
+                    if (current.settings.pendingRemoteWriteAt && current.settings.pendingRemoteWriteAt !== pendingAt) return;
+                    await persistLocalDataWithTracking({
+                        ...current,
+                        settings: {
+                            ...current.settings,
+                            pendingRemoteWriteAt: undefined,
+                            pendingRemoteWriteRetryAt: undefined,
+                            pendingRemoteWriteAttempts: undefined,
+                        },
+                    });
+                },
                 flushPendingLocalBeforeRetryRead: syncServiceDependencies.flushPendingSave,
                 prepareRemoteWrite: (data) => SyncService.prepareRemoteWriteData(context, data, helpers),
                 writeRemote: async (data) => {

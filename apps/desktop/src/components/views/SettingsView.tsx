@@ -201,6 +201,10 @@ export function SettingsView() {
   }, [isTauri]);
   const [saved, setSaved] = useState(false);
   const notificationsEnabled = settings?.notificationsEnabled !== false;
+  const startDateNotificationsEnabled =
+    settings?.startDateNotificationsEnabled !== false;
+  const dueDateNotificationsEnabled =
+    settings?.dueDateNotificationsEnabled !== false;
   const reviewAtNotificationsEnabled =
     settings?.reviewAtNotificationsEnabled !== false;
   const dailyDigestMorningEnabled =
@@ -806,6 +810,8 @@ export function SettingsView() {
         <SettingsNotificationsPage
           t={t}
           notificationsEnabled={notificationsEnabled}
+          startDateNotificationsEnabled={startDateNotificationsEnabled}
+          dueDateNotificationsEnabled={dueDateNotificationsEnabled}
           reviewAtNotificationsEnabled={reviewAtNotificationsEnabled}
           weeklyReviewEnabled={weeklyReviewEnabled}
           weeklyReviewDay={weeklyReviewDay}

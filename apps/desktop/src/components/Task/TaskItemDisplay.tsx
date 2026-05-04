@@ -42,6 +42,7 @@ interface TaskItemDisplayProps {
     projectColor?: string;
     selectionMode: boolean;
     isViewOpen: boolean;
+    quickActionsOpen?: boolean;
     actions: TaskItemDisplayActions;
     visibleAttachments: Attachment[];
     recurrenceRule: RecurrenceRule | '';
@@ -57,6 +58,7 @@ interface TaskItemDisplayProps {
     dense?: boolean;
     actionsOverlay?: boolean;
     dragHandle?: ReactNode;
+    showTaskAge?: boolean;
     showHoverHint?: boolean;
     t: (key: string) => string;
 }
@@ -87,6 +89,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     projectColor,
     selectionMode,
     isViewOpen,
+    quickActionsOpen = false,
     actions,
     visibleAttachments,
     recurrenceRule,
@@ -102,6 +105,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     dense = false,
     actionsOverlay = false,
     dragHandle,
+    showTaskAge = false,
     showHoverHint = true,
     t,
 }: TaskItemDisplayProps) {
@@ -140,7 +144,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
         : '';
     const ageLabel = getTaskAgeLabel(task.createdAt, language);
     const showCompactMeta = compactMetaEnabled && !isViewOpen;
-    const showAgeBadge = task.status !== 'done' && Boolean(ageLabel);
+    const showAgeBadge = showTaskAge && task.status !== 'done' && Boolean(ageLabel);
     const hasMetadata = Boolean(
         project
         || area
@@ -664,6 +668,9 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                         <button
                             type="button"
                             onClick={onOpenQuickActions}
+                            data-task-quick-actions-trigger
+                            aria-haspopup="dialog"
+                            aria-expanded={quickActionsOpen}
                             aria-label={moreOptionsLabel}
                             title={moreOptionsLabel}
                             className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-muted-foreground hover:text-foreground p-1 rounded hover:bg-muted/50"

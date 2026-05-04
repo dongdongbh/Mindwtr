@@ -183,12 +183,31 @@ interface AppData {
     areas: Area[];
     settings: {
         theme?: 'light' | 'dark' | 'system';
-        language?: 'en' | 'zh' | 'system';
-        // ... many other settings
+        language?: 'en' | 'zh' | 'zh-Hant' | 'es' | 'hi' | 'ar' | 'de' | 'ru' | 'ja' | 'fr' | 'pt' | 'pl' | 'ko' | 'it' | 'tr' | 'nl' | 'system';
+        weekStart?: 'monday' | 'sunday';
+        dateFormat?: string;
+        timeFormat?: string;
+        filters?: { areaId?: string };
+        syncPreferences?: SettingsSyncPreferences;
+        attachments?: {
+            lastCleanupAt?: string;
+            pendingRemoteDeletes?: PendingRemoteAttachmentDelete[];
+        };
+        externalCalendars?: ExternalCalendarSubscription[];
+        calendar?: { viewMode?: 'month' | 'day' | 'week' | 'schedule' };
+        gtd?: {
+            defaultScheduleTime?: string;
+            inboxProcessing?: InboxProcessingSettings;
+            weeklyReview?: { includeContextStep?: boolean };
+            dailyReview?: { includeFocusStep?: boolean };
+            pomodoro?: PomodoroSettings;
+        };
         ai?: {
             enabled?: boolean;
             provider?: 'gemini' | 'openai' | 'anthropic';
-            // ...
+            model?: string;
+            reasoningEffort?: 'low' | 'medium' | 'high';
+            speechToText?: SpeechToTextSettings;
         };
     };
 }
@@ -224,47 +243,60 @@ function MyComponent() {
 
 ### Store Actions
 
+Most mutating store actions return a structured result instead of throwing for ordinary validation failures:
+
+```typescript
+type StoreActionResult = {
+    success: boolean;
+    error?: string;
+    id?: string;
+};
+```
+
 #### Task Operations
 
 ```typescript
 // Create
-addTask(title: string, initialProps?: Partial<Task>): Promise<void>;
+addTask(title: string, initialProps?: Partial<Task>): Promise<StoreActionResult>;
 
 // Update
-updateTask(id: string, updates: Partial<Task>): Promise<void>;
+updateTask(id: string, updates: Partial<Task>): Promise<StoreActionResult>;
 
 // Move
-moveTask(id: string, newStatus: TaskStatus): Promise<void>;
+moveTask(id: string, newStatus: TaskStatus): Promise<StoreActionResult>;
 
 // Delete (Soft)
-deleteTask(id: string): Promise<void>;
+deleteTask(id: string): Promise<StoreActionResult>;
 
 // Restore
-restoreTask(id: string): Promise<void>;
+restoreTask(id: string): Promise<StoreActionResult>;
 
 // Duplicate
-duplicateTask(id: string, asNextAction?: boolean): Promise<void>;
+duplicateTask(id: string, asNextAction?: boolean): Promise<StoreActionResult>;
 
 // Reset Checklist
-resetTaskChecklist(id: string): Promise<void>;
+resetTaskChecklist(id: string): Promise<StoreActionResult>;
 
 // Batch Operations
-batchUpdateTasks(updates: Array<{ id: string; updates: Partial<Task> }>): Promise<void>;
-batchMoveTasks(ids: string[], newStatus: TaskStatus): Promise<void>;
-batchDeleteTasks(ids: string[]): Promise<void>;
+batchUpdateTasks(updates: Array<{ id: string; updates: Partial<Task> }>): Promise<StoreActionResult>;
+batchMoveTasks(ids: string[], newStatus: TaskStatus): Promise<StoreActionResult>;
+batchDeleteTasks(ids: string[]): Promise<StoreActionResult>;
 ```
 
 #### Project Operations
 
 ```typescript
 // Create
-addProject(title: string, color: string, initialProps?: Partial<Project>): Promise<Project>;
+addProject(title: string, color: string, initialProps?: Partial<Project>): Promise<Project | null>;
 
 // Update
-updateProject(id: string, updates: Partial<Project>): Promise<void>;
+updateProject(id: string, updates: Partial<Project>): Promise<StoreActionResult>;
 
 // Delete
-deleteProject(id: string): Promise<void>;
+deleteProject(id: string): Promise<StoreActionResult>;
+
+// Restore
+restoreProject(id: string): Promise<StoreActionResult>;
 
 // Toggle Focus
 toggleProjectFocus(id: string): Promise<void>;
@@ -278,17 +310,22 @@ reorderProjectTasks(projectId: string, orderedIds: string[], sectionId?: string 
 
 ```typescript
 // Create
-addArea(name: string, initialProps?: Partial<Area>): Promise<void>;
+addArea(name: string, initialProps?: Partial<Area>): Promise<Area | null>;
 
 // Update
-updateArea(id: string, updates: Partial<Area>): Promise<void>;
+updateArea(id: string, updates: Partial<Area>): Promise<StoreActionResult>;
 
-// Delete
-deleteArea(id: string): Promise<void>;
+// Delete (soft, cascades to child projects/sections/tasks)
+deleteArea(id: string): Promise<StoreActionResult>;
+
+// Restore (restores children deleted by the same cascade)
+restoreArea(id: string): Promise<StoreActionResult>;
 
 // Reorder
 reorderAreas(orderedIds: string[]): Promise<void>;
 ```
+
+Area delete/restore is intentionally cascading. A child project, section, or task that was deleted separately keeps its own tombstone when the area is restored.
 
 #### Section Operations
 
@@ -297,10 +334,13 @@ reorderAreas(orderedIds: string[]): Promise<void>;
 addSection(projectId: string, title: string, initialProps?: Partial<Section>): Promise<Section | null>;
 
 // Update
-updateSection(id: string, updates: Partial<Section>): Promise<void>;
+updateSection(id: string, updates: Partial<Section>): Promise<StoreActionResult>;
 
 // Delete
-deleteSection(id: string): Promise<void>;
+deleteSection(id: string): Promise<StoreActionResult>;
+
+// Restore
+restoreSection(id: string): Promise<StoreActionResult>;
 ```
 
 #### Tag Operations

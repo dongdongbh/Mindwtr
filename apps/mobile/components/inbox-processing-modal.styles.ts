@@ -292,10 +292,8 @@ export const styles = StyleSheet.create({
     borderRadius: 12,
   },
   selectedContextChip: {
-    backgroundColor: '#3B82F6',
   },
   selectedTagChip: {
-    backgroundColor: '#8B5CF6',
   },
   selectedTokenText: {
     color: '#FFFFFF',

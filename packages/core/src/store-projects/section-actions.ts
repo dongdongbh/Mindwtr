@@ -1,4 +1,4 @@
-import { buildSaveSnapshot, ensureDeviceId, normalizeRevision, selectVisibleTasks } from '../store-helpers';
+import { buildSaveSnapshot, ensureDeviceId, getNextDataChangeAt, normalizeRevision, selectVisibleTasks } from '../store-helpers';
 import { logWarn } from '../logger';
 import { generateUUID as uuidv4 } from '../uuid';
 import type { ProjectActionContext, Section, SectionActions } from './shared';
@@ -46,7 +46,7 @@ export const createSectionActions = ({
             return {
                 sections: newVisibleSections,
                 _allSections: newAllSections,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -96,7 +96,7 @@ export const createSectionActions = ({
             return {
                 sections: newVisibleSections,
                 _allSections: newAllSections,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });
@@ -167,7 +167,7 @@ export const createSectionActions = ({
                 _allSections: newAllSections,
                 tasks: newVisibleTasks,
                 _allTasks: newAllTasks,
-                lastDataChangeAt: changeAt,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
                 ...(deviceState.updated ? { settings: deviceState.settings } : {}),
             };
         });

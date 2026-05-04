@@ -229,11 +229,11 @@ export function listTasks(db: DbClient, input: ListTasksInput): TaskRow[] {
     }
   }
   if (input.dueDateFrom) {
-    where.push('dueDate >= ?');
+    where.push('date(dueDate) >= date(?)');
     params.push(input.dueDateFrom);
   }
   if (input.dueDateTo) {
-    where.push('dueDate <= ?');
+    where.push('date(dueDate) <= date(?)');
     params.push(input.dueDateTo);
   }
 

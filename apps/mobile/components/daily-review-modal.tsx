@@ -55,6 +55,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
     const [externalError, setExternalError] = useState<string | null>(null);
 
     const sortBy = (settings?.taskSortBy ?? 'default') as TaskSortBy;
+    const includeFocusStep = settings.gtd?.dailyReview?.includeFocusStep !== false;
 
     const today = useMemo(() => new Date(), []);
     const tomorrow = useMemo(() => {
@@ -180,16 +181,29 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
         return sortTasksBy(waiting, sortBy);
     }, [activeTasks, sortBy]);
 
-    const steps: { id: DailyReviewStep; title: string; description: string }[] = [
-        { id: 'today', title: t('dailyReview.todayStep'), description: t('dailyReview.todayDesc') },
-        { id: 'inbox', title: t('dailyReview.inboxStep'), description: t('dailyReview.inboxDesc') },
-        { id: 'focus', title: t('dailyReview.focusStep'), description: t('dailyReview.focusDesc') },
-        { id: 'waiting', title: t('dailyReview.waitingStep'), description: t('dailyReview.waitingDesc') },
-        { id: 'complete', title: t('dailyReview.completeTitle'), description: t('dailyReview.completeDesc') },
-    ];
+    const steps: { id: DailyReviewStep; title: string; description: string }[] = useMemo(() => {
+        const list: { id: DailyReviewStep; title: string; description: string }[] = [
+            { id: 'today', title: t('dailyReview.todayStep'), description: t('dailyReview.todayDesc') },
+            { id: 'inbox', title: t('dailyReview.inboxStep'), description: t('dailyReview.inboxDesc') },
+        ];
+        if (includeFocusStep) {
+            list.push({ id: 'focus', title: t('dailyReview.focusStep'), description: t('dailyReview.focusDesc') });
+        }
+        list.push(
+            { id: 'waiting', title: t('dailyReview.waitingStep'), description: t('dailyReview.waitingDesc') },
+            { id: 'complete', title: t('dailyReview.completeTitle'), description: t('dailyReview.completeDesc') },
+        );
+        return list;
+    }, [includeFocusStep, t]);
 
     const currentIndex = steps.findIndex((s) => s.id === currentStep);
-    const progress = (currentIndex / (steps.length - 1)) * 100;
+    const safeCurrentIndex = Math.max(0, currentIndex);
+    const progress = (safeCurrentIndex / Math.max(1, steps.length - 1)) * 100;
+
+    useEffect(() => {
+        if (steps.some((step) => step.id === currentStep)) return;
+        setCurrentStep(steps[0].id);
+    }, [currentStep, steps]);
 
     const next = () => {
         if (currentIndex < steps.length - 1) setCurrentStep(steps[currentIndex + 1].id);
@@ -228,8 +242,8 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                     isDark={isDark}
                     tc={tc}
                     onPress={() => openTask(task)}
-                    onStatusChange={(status) => updateTask(task.id, { status: status as TaskStatus })}
-                    onDelete={() => deleteTask(task.id)}
+                    onStatusChange={(status) => { void updateTask(task.id, { status: status as TaskStatus }); }}
+                    onDelete={() => { void deleteTask(task.id); }}
                     showFocusToggle={options?.showFocusToggle}
                     hideStatusBadge={options?.hideStatusBadge}
                     onProjectPress={handleNavigateToProject}
@@ -324,7 +338,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                         </View>
                         <View style={[styles.infoBox, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                             <Text style={[styles.infoText, { color: tc.text }]}>
-                                <Text style={{ fontWeight: '700' }}>{focusedTasks.length}</Text> / 3
+                                <Text style={{ fontWeight: '700' }}>{focusedTasks.length}</Text> {t('dailyReview.focusSelected')}
                             </Text>
                             <Text style={[styles.guideText, { color: tc.secondaryText }]}>{t('dailyReview.focusDesc')}</Text>
                         </View>

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { View, FlatList, TouchableOpacity, Text, RefreshControl, ActivityIndicator, Keyboard } from 'react-native';
+import { View, FlatList, Text, RefreshControl, Keyboard } from 'react-native';
 import { router } from 'expo-router';
 import {
   useTaskStore,
@@ -681,8 +681,8 @@ function TaskListComponent({
         selectionMode={enableBulkActions ? selectionMode : false}
         isMultiSelected={enableBulkActions && multiSelectedIds.has(item.id)}
         onToggleSelect={enableBulkActions ? () => toggleMultiSelect(item.id) : undefined}
-        onStatusChange={(status) => updateTask(item.id, { status: status as TaskStatus })}
-        onDelete={() => deleteTask(item.id)}
+        onStatusChange={(status) => { void updateTask(item.id, { status: status as TaskStatus }); }}
+        onDelete={() => { void deleteTask(item.id); }}
         isHighlighted={item.id === highlightTaskId}
         hideStatusBadge={hideStatusBadgeForList}
         hideChecklistProgress={hideChecklistProgressForList}

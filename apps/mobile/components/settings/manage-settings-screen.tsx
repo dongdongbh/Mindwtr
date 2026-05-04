@@ -78,9 +78,11 @@ export function ManageSettingsScreen() {
     const { localize, t } = useSettingsLocalization();
     const scrollContentStyle = useSettingsScrollContent();
     const areas = useTaskStore((state) => state.areas);
+    const settings = useTaskStore((state) => state.settings);
     const derivedState = useTaskStore((state) => state.getDerivedState());
     const deleteArea = useTaskStore((state) => state.deleteArea);
     const updateArea = useTaskStore((state) => state.updateArea);
+    const updateSettings = useTaskStore((state) => state.updateSettings);
     const deleteTag = useTaskStore((state) => state.deleteTag);
     const renameTag = useTaskStore((state) => state.renameTag);
     const deleteContext = useTaskStore((state) => state.deleteContext);
@@ -89,6 +91,7 @@ export function ManageSettingsScreen() {
     const { allContexts, allTags } = derivedState;
     const [editorTarget, setEditorTarget] = useState<
         | { type: 'area'; id: string; name: string; color?: string }
+        | { type: 'unassignedArea'; color?: string }
         | { type: 'context' | 'tag'; name: string }
         | null
     >(null);
@@ -127,6 +130,14 @@ export function ManageSettingsScreen() {
     }, [openSections]);
 
     const localize2 = (en: string, zh: string) => localize(en, zh);
+    const resolveText = (key: string, fallback: string) => {
+        const value = t(key);
+        return value && value !== key ? value : fallback;
+    };
+    const unassignedAreaLabel = resolveText('review.unassigned', 'Unassigned');
+    const unassignedAreaColorLabel = localize2('Unassigned color', '未分配颜色');
+    const unassignedAreaDescription = localize2('Used for tasks and projects without an area.', '用于没有领域的任务和项目。');
+    const unassignedAreaColor = settings.appearance?.unassignedAreaColor || DEFAULT_AREA_COLOR;
     const confirmDelete = (label: string, onConfirm: () => void) => {
         Alert.alert(
             localize2('Delete', '删除'),
@@ -144,6 +155,12 @@ export function ManageSettingsScreen() {
         setEditorColor(DEFAULT_AREA_COLOR);
     };
 
+    const openUnassignedAreaEditor = () => {
+        setEditorTarget({ type: 'unassignedArea', color: unassignedAreaColor });
+        setEditorName('');
+        setEditorColor(unassignedAreaColor);
+    };
+
     const openValueEditor = (type: 'context' | 'tag', name: string) => {
         setEditorTarget({ type, name });
         setEditorName(name);
@@ -159,6 +176,18 @@ export function ManageSettingsScreen() {
     const saveEditor = async () => {
         if (!editorTarget) return;
         const trimmed = editorName.trim();
+
+        if (editorTarget.type === 'unassignedArea') {
+            await updateSettings({
+                appearance: {
+                    ...(settings.appearance ?? {}),
+                    unassignedAreaColor: editorColor,
+                },
+            });
+            closeEditor();
+            return;
+        }
+
         if (!trimmed) return;
 
         if (editorTarget.type === 'area') {
@@ -203,9 +232,30 @@ export function ManageSettingsScreen() {
         </View>
     );
 
+    const UnassignedAreaRow = () => (
+        <View
+            testID="manage-unassigned-area-color"
+            style={[styles.settingRow, { borderBottomWidth: 1, borderBottomColor: tc.border }]}
+        >
+            <View style={{ width: 24, height: 24, borderRadius: 6, backgroundColor: unassignedAreaColor, marginRight: 12 }} />
+            <View style={{ flex: 1 }}>
+                <Text style={[styles.settingLabel, { color: tc.text }]} numberOfLines={1}>{unassignedAreaLabel}</Text>
+                <Text style={[styles.settingDescription, { color: tc.secondaryText }]} numberOfLines={2}>
+                    {unassignedAreaDescription}
+                </Text>
+            </View>
+            <TouchableOpacity
+                onPress={openUnassignedAreaEditor}
+                style={{ padding: 8 }}
+            >
+                <Ionicons name="pencil-outline" size={18} color={tc.secondaryText} />
+            </TouchableOpacity>
+        </View>
+    );
+
     const AreaRow = ({ area }: { area: typeof sortedAreas[number] }) => (
         <View style={[styles.settingRow, { borderBottomWidth: 1, borderBottomColor: tc.border }]}>
-            <View style={{ width: 24, height: 24, borderRadius: 6, backgroundColor: area.color || '#94a3b8', marginRight: 12 }} />
+            <View style={{ width: 24, height: 24, borderRadius: 6, backgroundColor: area.color || DEFAULT_AREA_COLOR, marginRight: 12 }} />
             <Text style={[styles.settingLabel, { color: tc.text, flex: 1 }]} numberOfLines={1}>{area.name}</Text>
             <TouchableOpacity
                 onPress={() => openAreaEditor(area)}
@@ -235,6 +285,7 @@ export function ManageSettingsScreen() {
                     onToggle={() => setOpenSections((current) => ({ ...current, areas: !current.areas }))}
                     tc={tc}
                 >
+                    <UnassignedAreaRow />
                     {sortedAreas.length === 0 && (
                         <View style={styles.settingRow}>
                             <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>{t('projects.noArea')}</Text>
@@ -307,29 +358,33 @@ export function ManageSettingsScreen() {
                         <Text style={[styles.pickerTitle, { color: tc.text }]}>
                             {editorTarget?.type === 'area'
                                 ? localize2('Edit area', '编辑领域')
+                                : editorTarget?.type === 'unassignedArea'
+                                    ? unassignedAreaColorLabel
                                 : localize2('Rename', '重命名')}
                         </Text>
-                        <TextInput
-                            value={editorName}
-                            onChangeText={setEditorName}
-                            placeholder={
-                                editorTarget?.type === 'area'
-                                    ? t('projects.areaLabel')
-                                    : localize2('Name', '名称')
-                            }
-                            placeholderTextColor={tc.secondaryText}
-                            style={[
-                                styles.textInput,
-                                {
-                                    marginTop: 0,
-                                    backgroundColor: tc.bg,
-                                    borderColor: tc.border,
-                                    color: tc.text,
-                                },
-                            ]}
-                            autoFocus
-                        />
-                        {editorTarget?.type === 'area' ? (
+                        {editorTarget?.type !== 'unassignedArea' ? (
+                            <TextInput
+                                value={editorName}
+                                onChangeText={setEditorName}
+                                placeholder={
+                                    editorTarget?.type === 'area'
+                                        ? t('projects.areaLabel')
+                                        : localize2('Name', '名称')
+                                }
+                                placeholderTextColor={tc.secondaryText}
+                                style={[
+                                    styles.textInput,
+                                    {
+                                        marginTop: 0,
+                                        backgroundColor: tc.bg,
+                                        borderColor: tc.border,
+                                        color: tc.text,
+                                    },
+                                ]}
+                                autoFocus
+                            />
+                        ) : null}
+                        {editorTarget?.type === 'area' || editorTarget?.type === 'unassignedArea' ? (
                             <View style={styles.manageColorPicker}>
                                 {AREA_PRESET_COLORS.map((color) => (
                                     <TouchableOpacity
@@ -360,14 +415,15 @@ export function ManageSettingsScreen() {
                                 </Text>
                             </TouchableOpacity>
                             <TouchableOpacity
-                                disabled={!editorName.trim()}
+                                testID="manage-editor-save"
+                                disabled={editorTarget?.type !== 'unassignedArea' && !editorName.trim()}
                                 onPress={() => {
                                     void saveEditor();
                                 }}
                                 style={[
                                     styles.manageEditorButton,
                                     styles.manageEditorButtonPrimary,
-                                    !editorName.trim() && styles.manageEditorButtonDisabled,
+                                    editorTarget?.type !== 'unassignedArea' && !editorName.trim() && styles.manageEditorButtonDisabled,
                                 ]}
                             >
                                 <Text style={[styles.manageEditorButtonText, styles.manageEditorButtonPrimaryText]}>

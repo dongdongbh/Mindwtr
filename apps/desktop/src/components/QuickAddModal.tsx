@@ -3,6 +3,7 @@ import {
     shallow,
     useTaskStore,
     buildTaskUpdatesFromSpeechResult,
+    flushPendingSave,
     parseQuickAdd,
     safeFormatDate,
     generateUUID,
@@ -30,7 +31,11 @@ import { AREA_FILTER_ALL, AREA_FILTER_NONE, resolveAreaFilter } from '../lib/are
 const AUDIO_CAPTURE_DIR = 'mindwtr/audio-captures';
 const TARGET_SAMPLE_RATE = 16_000;
 
-export function QuickAddModal() {
+type QuickAddModalProps = {
+    standaloneWindow?: boolean;
+};
+
+export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) {
     const getDerivedState = useTaskStore((state) => state.getDerivedState);
     const { addTask, addProject, projects, areas, settings } = useTaskStore(
         (state) => ({
@@ -83,11 +88,17 @@ export function QuickAddModal() {
     const hasProjectOverride = Boolean(initialProps?.projectId || parsedInput.props.projectId || parsedInput.projectTitle);
     const showAreaSelector = !hasProjectOverride;
 
+    const refreshStandaloneData = useCallback(async () => {
+        if (!standaloneWindow) return;
+        await useTaskStore.getState().fetchData({ silent: true });
+    }, [standaloneWindow]);
+
     useEffect(() => {
         if (!isTauriRuntime()) return;
 
         let unlisten: (() => void) | undefined;
         const openFromTauri = async () => {
+            await refreshStandaloneData().catch((error) => reportError('Failed to refresh quick add data', error));
             setIsOpen(true);
             try {
                 const { invoke } = await import('@tauri-apps/api/core');
@@ -109,6 +120,7 @@ export function QuickAddModal() {
 
             const pending = await invoke<boolean>('consume_quick_add_pending');
             if (pending) {
+                await refreshStandaloneData().catch((error) => reportError('Failed to refresh quick add data', error));
                 setIsOpen(true);
             }
         };
@@ -118,20 +130,24 @@ export function QuickAddModal() {
         return () => {
             if (unlisten) unlisten();
         };
-    }, []);
+    }, [refreshStandaloneData]);
 
     useEffect(() => {
         type QuickAddDetail = { initialProps?: Partial<Task>; initialValue?: string; captureMode?: 'text' | 'audio' };
         const handler: EventListener = (event) => {
             const detail = (event as CustomEvent<QuickAddDetail>).detail;
-            setInitialProps(detail?.initialProps ?? null);
-            setValue(detail?.initialValue ?? '');
-            setForcedCaptureMode(detail?.captureMode ?? null);
-            setIsOpen(true);
+            const open = async () => {
+                await refreshStandaloneData().catch((error) => reportError('Failed to refresh quick add data', error));
+                setInitialProps(detail?.initialProps ?? null);
+                setValue(detail?.initialValue ?? '');
+                setForcedCaptureMode(detail?.captureMode ?? null);
+                setIsOpen(true);
+            };
+            open().catch((error) => reportError('Failed to open quick add', error));
         };
         window.addEventListener('mindwtr:quick-add', handler);
         return () => window.removeEventListener('mindwtr:quick-add', handler);
-    }, []);
+    }, [refreshStandaloneData]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -188,14 +204,22 @@ export function QuickAddModal() {
         }
     }, []);
 
-    const close = () => {
+    const hideStandaloneWindow = useCallback(() => {
+        if (!standaloneWindow || !isTauriRuntime()) return;
+        import('@tauri-apps/api/window')
+            .then(({ getCurrentWindow }) => getCurrentWindow().hide())
+            .catch((error) => reportError('Failed to hide quick add window', error));
+    }, [standaloneWindow]);
+
+    const close = useCallback(() => {
         setIsOpen(false);
         setInitialProps(null);
         setValue('');
         setSelectedAreaId('');
         setForcedCaptureMode(null);
         lastActiveElementRef.current?.focus();
-    };
+        hideStandaloneWindow();
+    }, [hideStandaloneWindow]);
 
     const startRecording = useCallback(async () => {
         if (recordingBusy || isRecording) return;
@@ -392,7 +416,13 @@ export function QuickAddModal() {
             };
             if (!props.status) props.status = 'inbox';
 
+            if (standaloneWindow) {
+                await refreshStandaloneData().catch((error) => reportError('Failed to refresh quick add data', error));
+            }
             const addTaskResult = await addTask(displayTitle, props);
+            if (addTaskResult.success && standaloneWindow) {
+                await flushPendingSave().catch((error) => reportError('Failed to save quick add task', error));
+            }
             close();
 
             if (!addTaskResult.success || !addTaskResult.id) return;
@@ -482,6 +512,8 @@ export function QuickAddModal() {
         isRecording,
         recordingBusy,
         recordingBackend,
+        refreshStandaloneData,
+        standaloneWindow,
         settings.ai?.model,
         settings.ai?.provider,
         settings.ai?.speechToText,
@@ -510,7 +542,15 @@ export function QuickAddModal() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!value.trim()) return;
-        const { title, props, projectTitle, invalidDateCommands, detectedDate } = parseQuickAdd(value, projects, new Date(), areas);
+        let currentProjects = projects;
+        let currentAreas = areas;
+        if (standaloneWindow) {
+            await refreshStandaloneData().catch((error) => reportError('Failed to refresh quick add data', error));
+            const currentState = useTaskStore.getState();
+            currentProjects = currentState.projects;
+            currentAreas = currentState.areas;
+        }
+        const { title, props, projectTitle, invalidDateCommands, detectedDate } = parseQuickAdd(value, currentProjects, new Date(), currentAreas);
         if (invalidDateCommands && invalidDateCommands.length > 0) {
             return;
         }
@@ -533,7 +573,11 @@ export function QuickAddModal() {
         const mergedProps: Partial<Task> = { status: 'inbox', ...baseProps, projectId };
         if (projectId) mergedProps.areaId = undefined;
         if (!baseProps.status) mergedProps.status = 'inbox';
-        addTask(finalTitle, mergedProps);
+        const addTaskResult = await addTask(finalTitle, mergedProps);
+        if (!addTaskResult.success) return;
+        if (standaloneWindow) {
+            await flushPendingSave().catch((error) => reportError('Failed to save quick add task', error));
+        }
         close();
     };
 
@@ -556,7 +600,10 @@ export function QuickAddModal() {
 
     return (
         <div
-            className="fixed inset-0 bg-black/50 flex items-start justify-center pt-[20vh] z-50"
+            className={cn(
+                'fixed inset-0 flex items-start justify-center z-50',
+                standaloneWindow ? 'bg-background px-3 pt-4' : 'bg-black/50 pt-[20vh]',
+            )}
             role="button"
             tabIndex={0}
             aria-label={t('common.close')}

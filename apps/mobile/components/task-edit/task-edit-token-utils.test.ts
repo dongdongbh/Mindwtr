@@ -14,7 +14,9 @@ describe('task-edit token utils', () => {
 
     it('derives active token query from trailing draft token', () => {
         expect(getActiveTokenQuery('@home, @wo', '@')).toBe('wo');
-        expect(getActiveTokenQuery('@home, work', '@')).toBe('');
+        expect(getActiveTokenQuery('@home, work', '@')).toBe('work');
+        expect(getActiveTokenQuery('#urgent, idea', '#')).toBe('idea');
+        expect(getActiveTokenQuery('@home, ', '@')).toBe('');
     });
 
     it('replaces trailing token draft while preserving prior entries', () => {

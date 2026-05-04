@@ -328,6 +328,22 @@ describe('mobile sync-service runtime', () => {
     expect(logMocks.logSyncError).not.toHaveBeenCalled();
   });
 
+  it('reports Dropbox as unavailable in FOSS builds instead of falling through to self-hosted config', async () => {
+    asyncStorageMocks.getItem.mockImplementation(async (key: string) => {
+      const values: Record<string, string | null> = {
+        '@mindwtr_sync_backend': 'cloud',
+        '@mindwtr_cloud_provider': 'dropbox',
+      };
+      return values[key] ?? null;
+    });
+
+    const result = await syncServiceModule.performMobileSync();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Dropbox sync is unavailable in this build');
+    expect(coreMocks.performSyncCycle).not.toHaveBeenCalled();
+  });
+
   it('ignores connected reachability-false listener updates during remote sync', async () => {
     networkMocks.addNetworkStateListener.mockImplementation((listener: (state: {
       isConnected?: boolean | null;

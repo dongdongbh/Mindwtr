@@ -721,14 +721,16 @@ export function ProjectWorkspace({
             <div className="flex-1 min-w-0 h-full flex">
                 <div className="flex h-full min-h-0 w-full max-w-none flex-col">
                     <div className="mb-4">
-                        <input
-                            type="text"
-                            data-view-filter-input
-                            placeholder={t('common.search')}
-                            value={searchQuery}
-                            onChange={(event) => setSearchQuery(event.target.value)}
-                            className="w-full rounded border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-                        />
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                            <input
+                                type="text"
+                                data-view-filter-input
+                                placeholder={t('common.search')}
+                                value={searchQuery}
+                                onChange={(event) => setSearchQuery(event.target.value)}
+                                className="min-w-0 flex-1 rounded border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                            />
+                        </div>
                     </div>
                     {selectedProject ? (
                         <div className="flex-1 min-h-0 overflow-y-auto pr-2">

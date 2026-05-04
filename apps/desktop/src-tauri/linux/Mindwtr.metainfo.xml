@@ -71,6 +71,32 @@
   <url type="bugtracker">https://github.com/dongdongbh/Mindwtr/issues</url>
   <url type="vcs-browser">https://github.com/dongdongbh/Mindwtr</url>
   <releases>
+    <release version="0.9.0" date="2026-05-04">
+      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v0.9.0</url>
+      <description translate="no">
+        <p>Mindwtr 0.9.0 improves desktop focus, search, quick capture, and sync responsiveness.</p>
+        <ul>
+          <li>Opened global quick add in a focused popup from shortcuts and tray actions.</li>
+          <li>Made global search cover all areas while limiting very large result sets to keep the desktop responsive.</li>
+          <li>Clarified Pomodoro controls with optional task linking and separated timer and task actions.</li>
+          <li>Added hidden future-start task behavior and task-age visibility controls.</li>
+          <li>Improved sync diagnostics and SQLite pruning performance for large local libraries.</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.8.9" date="2026-05-01">
+      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v0.8.9</url>
+      <description translate="no">
+        <p>Mindwtr 0.8.9 improves desktop review, recurrence, sync, and Linux release reliability.</p>
+        <ul>
+          <li>Added desktop review and area quick actions, smoother review interactions, and working task detail links.</li>
+          <li>Added weekly recurrence interval controls and a quarterly preset while improving monthly recurrence repair.</li>
+          <li>Preserved edits during active sync refreshes and ignored deleted-parent attachment cleanup conflicts.</li>
+          <li>Added local area automation support and preserved project IDs during local repair.</li>
+          <li>Kept Linux desktop release builds steadier by retrying Tauri apt dependency installation.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.8.8" date="2026-04-26">
       <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v0.8.8</url>
       <description translate="no">

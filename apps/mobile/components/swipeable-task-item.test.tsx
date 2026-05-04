@@ -5,14 +5,19 @@ import { Alert } from 'react-native';
 
 import { SwipeableTaskItem } from './swipeable-task-item';
 
-const { updateTask, getChecklistProgress, storeState } = vi.hoisted(() => ({
+const { updateTask, restoreTask, showToast, getChecklistProgress, getTaskAgeLabel, getTaskStaleness, storeState } = vi.hoisted(() => ({
   updateTask: vi.fn(),
+  restoreTask: vi.fn(),
+  showToast: vi.fn(),
   getChecklistProgress: vi.fn((_value: any): any => null),
+  getTaskAgeLabel: vi.fn(() => '3 weeks old'),
+  getTaskStaleness: vi.fn(() => 'stale'),
   storeState: {
     updateTask: vi.fn(),
+    restoreTask: vi.fn(),
     projects: [] as any[],
     areas: [] as any[],
-    settings: { features: {} },
+    settings: { features: {}, appearance: {} },
     getDerivedState: () => ({ focusedCount: 0 }),
     tasks: [] as any[],
     _allTasks: [] as any[],
@@ -24,6 +29,7 @@ const hapticsMocks = vi.hoisted(() => ({
 
 vi.mock('@mindwtr/core', () => {
   storeState.updateTask = updateTask;
+  storeState.restoreTask = restoreTask;
   const useTaskStore = Object.assign(
     (selector?: (state: typeof storeState) => unknown) =>
       selector ? selector(storeState) : storeState,
@@ -36,8 +42,8 @@ vi.mock('@mindwtr/core', () => {
     useTaskStore,
     shallow: (value: unknown) => value,
     getChecklistProgress,
-    getTaskAgeLabel: () => '',
-    getTaskStaleness: () => 'fresh',
+    getTaskAgeLabel,
+    getTaskStaleness,
     getStatusColor: () => ({ bg: '#111111', border: '#222222', text: '#333333' }),
     hasTimeComponent: () => false,
     safeFormatDate: () => '',
@@ -54,6 +60,9 @@ vi.mock('../contexts/language-context', () => ({
         'common.cancel': 'Cancel',
         'common.delete': 'Delete',
         'common.edit': 'Edit',
+        'common.notice': 'Notice',
+        'common.undo': 'Undo',
+        'list.taskDeleted': 'Task deleted',
         'status.inbox': 'Inbox',
         'status.next': 'Next',
         'task.aria.delete': 'Delete task',
@@ -83,7 +92,7 @@ vi.mock('expo-haptics', () => ({
 
 vi.mock('../contexts/toast-context', () => ({
   useToast: () => ({
-    showToast: vi.fn(),
+    showToast,
     dismissToast: vi.fn(),
   }),
 }));
@@ -96,15 +105,28 @@ vi.mock('lucide-react-native', () => ({
 }));
 
 describe('SwipeableTaskItem', () => {
+  const flattenText = (value: unknown): string => {
+    if (typeof value === 'string' || typeof value === 'number') return String(value);
+    if (Array.isArray(value)) return value.map((item) => flattenText(item)).join('');
+    return '';
+  };
+
+  const hasText = (tree: renderer.ReactTestRenderer, text: string) =>
+    tree.root.findAll((node) => flattenText(node.props?.children).includes(text)).length > 0;
+
   beforeEach(() => {
     vi.clearAllMocks();
     storeState.projects = [];
+    storeState.areas = [];
+    storeState.settings = { features: {}, appearance: {} };
     storeState.tasks = [];
     storeState._allTasks = [];
+    getTaskAgeLabel.mockReturnValue('3 weeks old');
+    getTaskStaleness.mockReturnValue('stale');
     getChecklistProgress.mockReturnValue(null);
   });
 
-  it('confirms deletion before invoking onDelete', () => {
+  it('confirms deletion before invoking onDelete', async () => {
     const alertSpy = vi.spyOn(Alert, 'alert');
     const onDelete = vi.fn();
 
@@ -158,12 +180,18 @@ describe('SwipeableTaskItem', () => {
     const destructiveAction = alertButtons.find((button) => button.text === 'Delete');
     expect(destructiveAction?.onPress).toBeTypeOf('function');
 
-    renderer.act(() => {
+    await renderer.act(async () => {
       destructiveAction?.onPress?.();
+      await Promise.resolve();
     });
 
     expect(onDelete).toHaveBeenCalledTimes(1);
     expect(hapticsMocks.notificationAsync).toHaveBeenCalledWith('warning');
+    expect(showToast).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Task deleted',
+      actionLabel: 'Undo',
+      onAction: expect.any(Function),
+    }));
   });
 
   it('navigates from project, context, and tag meta labels', () => {
@@ -220,6 +248,70 @@ describe('SwipeableTaskItem', () => {
     expect(onProjectPress).toHaveBeenCalledWith('project-1');
     expect(onContextPress).toHaveBeenCalledWith('@work');
     expect(onTagPress).toHaveBeenCalledWith('#urgent');
+  });
+
+  it('hides stale task age when the appearance setting is off by default', () => {
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(
+        <SwipeableTaskItem
+          task={{
+            id: 'task-1',
+            title: 'Defer filing',
+            status: 'inbox',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          } as any}
+          isDark={false}
+          tc={{
+            taskItemBg: '#111111',
+            border: '#222222',
+            text: '#ffffff',
+            secondaryText: '#999999',
+            tint: '#3b82f6',
+            warning: '#f59e0b',
+          } as any}
+          onPress={vi.fn()}
+          onStatusChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+    });
+
+    expect(hasText(tree, '3 weeks old')).toBe(false);
+  });
+
+  it('shows stale task age when enabled in appearance settings', () => {
+    storeState.settings = { features: {}, appearance: { showTaskAge: true } };
+
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(
+        <SwipeableTaskItem
+          task={{
+            id: 'task-1',
+            title: 'Defer filing',
+            status: 'inbox',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          } as any}
+          isDark={false}
+          tc={{
+            taskItemBg: '#111111',
+            border: '#222222',
+            text: '#ffffff',
+            secondaryText: '#999999',
+            tint: '#3b82f6',
+            warning: '#f59e0b',
+          } as any}
+          onPress={vi.fn()}
+          onStatusChange={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+    });
+
+    expect(hasText(tree, '3 weeks old')).toBe(true);
   });
 
   it('announces swipe directions and triggers haptics for status actions', () => {

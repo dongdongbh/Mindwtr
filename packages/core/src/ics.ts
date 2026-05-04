@@ -11,6 +11,8 @@ export interface ExternalCalendarEvent {
     /** Stable id: `${sourceId}:${uid}:${startIso}` */
     id: string;
     sourceId: string;
+    /** Device calendar event id when the event came from the OS calendar provider. */
+    nativeEventId?: string;
     title: string;
     start: string; // ISO string
     end: string; // ISO string

@@ -1,0 +1,9 @@
+<en-US>
+Focus and scheduling are clearer: future-start tasks stay hidden by default, Pomodoro task linking is optional, start and due reminders are split, and week density explains its 2-7 day scale. Notification rescheduling is capped for performance, completion actions are steadier, and sync errors stay visible.
+</en-US>
+<zh-CN>
+聚焦与日程更清晰：未来开始任务默认隐藏，番茄钟任务关联可选，开始提醒与截止提醒分开，周视图密度说明 2-7 天范围。通知重排限制在最近提醒以提升性能，完成操作更稳定，同步错误会持续显示。
+</zh-CN>
+<es-ES>
+Focus y agenda son mas claros: tareas con inicio futuro quedan ocultas, Pomodoro puede vincular tareas de forma opcional, avisos de inicio y vencimiento van separados y la densidad semanal explica su escala 2-7. Las notificaciones se reprograman con limite, completar tareas es mas estable y Sync mantiene visibles los errores.
+</es-ES>

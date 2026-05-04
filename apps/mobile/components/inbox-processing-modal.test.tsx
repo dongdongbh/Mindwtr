@@ -43,7 +43,23 @@ vi.mock('@mindwtr/core', () => {
   return {
     addBreadcrumb: vi.fn(),
     DEFAULT_PROJECT_COLOR: '#3b82f6',
-    collectTaskTokenUsage: vi.fn(() => []),
+    collectTaskTokenUsage: vi.fn((tasks: any[], selector: (task: any) => string[] | undefined, options?: { prefix?: string }) => {
+      const usage = new Map<string, { token: string; count: number; lastUsedAt: number }>();
+      for (const task of tasks) {
+        for (const token of selector(task) ?? []) {
+          if (options?.prefix && !token.startsWith(options.prefix)) continue;
+          const current = usage.get(token);
+          const lastUsedAt = Date.parse(task.updatedAt || task.createdAt || '') || 0;
+          if (current) {
+            current.count += 1;
+            current.lastUsedAt = Math.max(current.lastUsedAt, lastUsedAt);
+          } else {
+            usage.set(token, { token, count: 1, lastUsedAt });
+          }
+        }
+      }
+      return Array.from(usage.values());
+    }),
     createAIProvider: vi.fn(() => ({
       clarifyTask,
     })),
@@ -248,6 +264,84 @@ describe('InboxProcessingModal', () => {
     const root = tree!.root;
 
     expect(root.findAllByProps({ placeholder: 'inbox.addContextPlaceholder' })).toHaveLength(0);
+  });
+
+  it('suggests existing contexts and tags while typing without a prefix', () => {
+    mockSettings.gtd.taskEditor = { hidden: [] };
+    storeState.tasks = [
+      { ...baseInboxTask },
+      {
+        id: 'metadata-task',
+        title: 'Metadata task',
+        status: 'next',
+        contexts: ['@office'],
+        tags: ['#urgent'],
+        createdAt: '2025-01-02T00:00:00.000Z',
+        updatedAt: '2025-01-02T00:00:00.000Z',
+      },
+    ];
+    const onClose = vi.fn();
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={onClose} />);
+    });
+
+    const root = tree!.root;
+    const tokenInput = root.findByProps({ placeholder: 'inbox.addContextPlaceholder' });
+
+    act(() => {
+      tokenInput.props.onChangeText('off');
+    });
+
+    const contextSuggestion = findNodeWithText(root, '@office');
+    expect(contextSuggestion).toBeTruthy();
+    expect(typeof contextSuggestion.parent?.props.onPress).toBe('function');
+
+    const updatedTokenInput = root.findByProps({ placeholder: 'inbox.addContextPlaceholder' });
+    act(() => {
+      updatedTokenInput.props.onChangeText('urg');
+    });
+
+    expect(findNodeWithText(root, '#urgent')).toBeTruthy();
+  });
+
+  it('suggests existing assignees in the assigned-to field', () => {
+    storeState.tasks = [
+      { ...baseInboxTask },
+      {
+        id: 'waiting-1',
+        title: 'Waiting task',
+        status: 'waiting',
+        assignedTo: 'Alexandra',
+        contexts: [],
+        tags: [],
+        createdAt: '2025-01-02T00:00:00.000Z',
+        updatedAt: '2025-01-02T00:00:00.000Z',
+      },
+    ];
+    const onClose = vi.fn();
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={onClose} />);
+    });
+
+    const root = tree!.root;
+    const assignedToInput = root.findByProps({ placeholder: 'taskEdit.assignedToPlaceholder' });
+
+    act(() => {
+      assignedToInput.props.onChangeText('alex');
+    });
+
+    const suggestion = findNodeWithText(root, 'Alexandra');
+    expect(suggestion).toBeTruthy();
+
+    act(() => {
+      suggestion.parent?.props.onPress();
+    });
+
+    expect(root.findByProps({ placeholder: 'taskEdit.assignedToPlaceholder' }).props.value).toBe('Alexandra');
   });
 
   it('still shows reference during inbox processing when the old setting is disabled', () => {

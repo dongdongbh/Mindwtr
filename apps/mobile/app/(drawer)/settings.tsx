@@ -78,6 +78,10 @@ export default function SettingsPage() {
     if (
         currentScreen === 'gtd'
         || currentScreen === 'gtd-archive'
+        || currentScreen === 'gtd-capture'
+        || currentScreen === 'gtd-inbox'
+        || currentScreen === 'gtd-pomodoro'
+        || currentScreen === 'gtd-review'
         || currentScreen === 'gtd-time-estimates'
         || currentScreen === 'gtd-task-editor'
     ) {

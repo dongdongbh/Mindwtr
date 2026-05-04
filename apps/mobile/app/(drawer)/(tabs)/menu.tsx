@@ -52,7 +52,7 @@ export default function MenuScreen() {
   const iconColors = {
     board: '#4F8CF7',
     calendar: '#35B8B1',
-    review: '#F39C4A',
+    projects: '#10B981',
     contexts: '#8B5CF6',
     waiting: '#F2B705',
     someday: '#6366F1',
@@ -70,7 +70,7 @@ export default function MenuScreen() {
       <View style={[styles.card, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
         <MenuRow label={t('nav.board')} icon="square.grid.2x2.fill" iconColor={iconColors.board} tc={tc} onPress={() => router.push('/board')} />
         <MenuRow label={t('nav.calendar')} icon="calendar" iconColor={iconColors.calendar} tc={tc} onPress={() => router.push('/calendar')} />
-        <MenuRow label={t('nav.review')} icon="paperplane.fill" iconColor={iconColors.review} tc={tc} onPress={() => router.push('/review')} />
+        <MenuRow label={t('nav.projects')} icon="folder.fill" iconColor={iconColors.projects} tc={tc} onPress={() => router.push('/projects-screen')} />
         <MenuRow label={t('nav.contexts')} icon="circle" iconColor={iconColors.contexts} tc={tc} onPress={() => router.push('/contexts')} />
         <MenuRow label={t('nav.waiting')} icon="pause.circle.fill" iconColor={iconColors.waiting} tc={tc} onPress={() => router.push('/waiting')} />
         <MenuRow label={t('nav.someday')} icon="arrow.up.circle.fill" iconColor={iconColors.someday} tc={tc} onPress={() => router.push('/someday')} />

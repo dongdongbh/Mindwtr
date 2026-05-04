@@ -83,8 +83,8 @@ Mindwtr is **simple by default and powerful when needed**. We focus on reducing 
 | Feature               | Description                                        |
 | --------------------- | -------------------------------------------------- |
 | 📥 **Inbox**           | Capture everything with quick-add                  |
-| 🎯 **Focus**           | Combined daily agenda and next actions             |
-| 🍅 **Pomodoro Focus**  | Optional task-linked focus/break timer in Focus view |
+| 🎯 **Focus**           | Daily agenda and available next actions            |
+| 🍅 **Pomodoro Focus**  | Optional focus/break timer in Focus view            |
 | 📁 **Projects**        | Multi-step outcomes with sequential/parallel modes |
 | 🧭 **Areas of Focus**  | Group projects by higher-level areas               |
 | 🏷️ **Contexts & Tags** | @home, @work, #focused, #lowenergy                 |
@@ -109,7 +109,7 @@ Mindwtr is **simple by default and powerful when needed**. We focus on reducing 
 | :--- | :---: | :---: |
 | **Core GTD Views** | ✅ | ✅ |
 | **Inbox & Capture** | ✅ (Global Hotkey) | ✅ (Share Sheet, Widget) |
-| **Focus View** | ✅ (Top 3 + Next) | ✅ (Zen Mode) |
+| **Focus View** | ✅ (Top 3 + available Next) | ✅ (Zen Mode) |
 | **Projects** | ✅ | ✅ |
 | **Areas of Focus** | ✅ | ✅ |
 | **Contexts & Tags** | ✅ | ✅ |

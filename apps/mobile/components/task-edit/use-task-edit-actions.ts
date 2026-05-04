@@ -39,6 +39,8 @@ type ShowToast = (options: {
     message: string;
     tone: 'warning' | 'error' | 'success' | 'info';
     durationMs?: number;
+    actionLabel?: string;
+    onAction?: () => void | Promise<void>;
 }) => void;
 
 type TaskEditActionsParams = {
@@ -71,6 +73,7 @@ type TaskEditActionsParams = {
     recurrenceRuleValue: RecurrenceRule | '';
     recurrenceStrategyValue: RecurrenceStrategy;
     resetTaskChecklist: (taskId: string) => Promise<unknown>;
+    restoreTask: (taskId: string) => Promise<unknown>;
     sections: Array<{ id: string; projectId?: string; deletedAt?: string | null }>;
     setAiModal: React.Dispatch<React.SetStateAction<AIResponseModalState>>;
     setEditedTask: React.Dispatch<React.SetStateAction<Partial<Task>>>;
@@ -117,6 +120,7 @@ export function useTaskEditActions({
     recurrenceRRuleValue,
     recurrenceStrategyValue,
     resetTaskChecklist,
+    restoreTask,
     sections,
     setAiModal,
     setEditedTask,
@@ -486,8 +490,18 @@ export function useTaskEditActions({
     const handleDeleteTask = useCallback(async () => {
         if (!task) return;
         await deleteTask(task.id).catch((error) => logTaskError('Failed to delete task', error));
+        if (settings.undoNotificationsEnabled !== false) {
+            showToast({
+                title: t('common.notice') || 'Notice',
+                message: t('list.taskDeleted') || 'Task deleted',
+                tone: 'info',
+                actionLabel: t('common.undo') || 'Undo',
+                onAction: () => { void restoreTask(task.id); },
+                durationMs: 5200,
+            });
+        }
         onClose();
-    }, [deleteTask, onClose, task]);
+    }, [deleteTask, onClose, restoreTask, settings.undoNotificationsEnabled, showToast, t, task]);
 
     const handleConvertToReference = useCallback(() => {
         if (!task) return;
