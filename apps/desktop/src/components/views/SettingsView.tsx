@@ -186,6 +186,7 @@ const LANGUAGES: { id: Language; label: string; native: string }[] = [
   { id: "fr", label: "French", native: "Français" },
   { id: "pt", label: "Portuguese", native: "Português" },
   { id: "pl", label: "Polish", native: "Polski" },
+  { id: "cs", label: "Czech", native: "Čeština" },
   { id: "ko", label: "Korean", native: "한국어" },
   { id: "it", label: "Italian", native: "Italiano" },
   { id: "tr", label: "Turkish", native: "Türkçe" },

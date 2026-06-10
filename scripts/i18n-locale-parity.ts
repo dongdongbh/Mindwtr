@@ -14,6 +14,7 @@ type LocaleTarget = {
 
 const LOCALES: LocaleTarget[] = [
     { locale: 'ar', path: 'packages/core/src/i18n/locales/ar.ts' },
+    { locale: 'cs', path: 'packages/core/src/i18n/locales/cs.ts' },
     { locale: 'de', path: 'packages/core/src/i18n/locales/de.ts' },
     { locale: 'es', path: 'packages/core/src/i18n/locales/es.ts' },
     { locale: 'fr', path: 'packages/core/src/i18n/locales/fr.ts' },

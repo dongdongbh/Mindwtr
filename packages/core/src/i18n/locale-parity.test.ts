@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { arOverrides } from './locales/ar';
+import { csOverrides } from './locales/cs';
 import { deOverrides } from './locales/de';
 import { en } from './locales/en';
 import { esOverrides } from './locales/es';
@@ -24,6 +25,7 @@ const fullParityLocales: Record<string, Record<string, string>> = {
 
 const overrideLocales: Record<string, Record<string, string>> = {
     ar: arOverrides,
+    cs: csOverrides,
     de: deOverrides,
     es: esOverrides,
     fr: frOverrides,
@@ -48,6 +50,7 @@ const nonLatinOverrideLocales: Record<string, Record<string, string>> = {
 
 const overrideLocaleCoverageFloors: Record<string, number> = {
     ar: 69,
+    cs: 99,
     de: 71,
     es: 64,
     fr: 70,
