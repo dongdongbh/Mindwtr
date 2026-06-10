@@ -203,7 +203,7 @@ export function listTasks(db: DbClient, input: ListTasksInput): TaskRow[] {
   if (input.search) {
     const ftsQuery = buildTasksFtsQuery(input.search);
     if (ftsQuery && hasTasksFts(db)) {
-      where.push("id IN (SELECT id FROM tasks_fts WHERE tasks_fts MATCH ?)");
+      where.push("rowid IN (SELECT rowid FROM tasks_fts WHERE tasks_fts MATCH ?)");
       params.push(ftsQuery);
     } else {
       where.push("(title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')");

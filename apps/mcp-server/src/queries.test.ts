@@ -122,6 +122,10 @@ describe('mcp queries', () => {
         const queryCall = calls.find((call) => call.sql.startsWith('SELECT') && call.sql.includes('FROM tasks '));
         expect(queryCall).toBeTruthy();
         expect(queryCall?.sql.includes('tasks_fts MATCH ?')).toBe(true);
+        // tasks_fts is a contentless FTS5 table (content=''), so its id column is
+        // always NULL; the lookup must join on rowid or it matches nothing.
+        expect(queryCall?.sql.includes('rowid IN (SELECT rowid FROM tasks_fts')).toBe(true);
+        expect(queryCall?.sql.includes('id IN (SELECT id FROM tasks_fts')).toBe(false);
         expect(queryCall?.params[0]).toBe('project* alpha*');
     });
 
