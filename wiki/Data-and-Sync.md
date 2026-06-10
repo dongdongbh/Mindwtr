@@ -572,14 +572,14 @@ The `data.json` file structure:
     }
   ],
   "sections": [
-    { 
+    {
       "id": "uuid",
-      "title": "section title",
       "projectId": "project-uuid",
-      "createdAt": "2025-01-01T10:00:00Z",
-      "updatedAt": "2025-01-10T15:30:00Z",
+      "title": "Section title",
       "order": 1,
-    },
+      "createdAt": "2025-01-01T10:00:00Z",
+      "updatedAt": "2025-01-10T15:30:00Z"
+    }
   ],
   "areas": [
     {
