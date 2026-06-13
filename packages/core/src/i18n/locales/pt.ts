@@ -1,6 +1,9 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const ptOverrides: Record<string, string> = {
+        // App
         'app.name': 'Mindwtr',
+        
+        // Navigation
         'nav.main': 'Principal',
         'nav.inbox': 'Caixa de entrada',
         'nav.board': 'Visualização do quadro',
@@ -22,35 +25,13 @@ export const ptOverrides: Record<string, string> = {
         'nav.sectionLists': 'Listas',
         'nav.sectionOrganize': 'Organizar',
         'nav.sectionArchive': 'Arquivo',
+        
+        // Quick Add
         'quickAdd.help': 'A adição rápida suporta /start:<when>, /due:<when>, /review:<when>, /note:<text>, /link:<url>, /next, /area:<name> ou !Area, @context, #tag, +Project.',
         'quickAdd.example': 'Exemplo: Ligue para a mãe /start:tomorrow /due:tomorrow 5pm @phone #family',
         'quickAdd.placeholder': 'Adicione uma tarefa… use @context +Project #tag /start:tomorrow /due:tomorrow',
         'quickAdd.inputLabel': 'Adição rápida',
         'quickAdd.inputHint': 'Digite uma tarefa e pressione Enter para salvar.',
-        'list.groupByArea': 'Área',
-        'recurrence.weekUnit': 'Semanas',
-        'recurrence.ordinalSelectLabel': 'Ordem',
-        'recurrence.weekdaySelectLabel': 'Dia da semana',
-        'mobileHelp.title': 'Ajuda móvel',
-        'mobileHelp.gesturesTitle': 'Gestos',
-        'mobileHelp.swipeRight': 'Deslize para a direita',
-        'mobileHelp.swipeLeft': 'Deslize para a esquerda',
-        'mobileHelp.longPressCapture': 'Pressione e segure para capturar',
-        'mobileHelp.shortcutsTitle': 'Atalhos',
-        'calendar.tasksAndEvents': 'Tarefas e eventos',
-        'calendar.today': 'Hoje',
-        'calendar.day': 'Dia',
-        'calendar.week': 'Semana',
-        'calendar.month': 'Mês',
-        'calendar.schedule': 'Agenda',
-        'calendar.prevMonth': 'Mês anterior',
-        'calendar.nextMonth': 'Próximo mês',
-        'calendar.year': 'Ano',
-        'calendar.searchMatches': 'Resultados da pesquisa',
-        'calendar.noSearchMatches': 'Sem resultados da pesquisa',
-        'calendar.visibleCalendars': 'Calendários visíveis',
-        'calendar.openDayView': 'Abrir vista do dia',
-        'calendar.more': 'Mais',
         'quickAdd.addAnother': 'Adicionar outro',
         'quickAdd.audioCaptureLabel': 'Captura rápida de voz',
         'quickAdd.audioRecord': 'Comece a gravar',
@@ -68,8 +49,11 @@ export const ptOverrides: Record<string, string> = {
         'quickDate.nextWeek': 'Próxima semana',
         'quickDate.nextMonth': 'Próximo mês',
         'quickDate.noDate': 'Sem data',
-        'mobileHelp.appShortcuts': 'Mantenha pressionado o ícone do app para atalhos de Adicionar tarefa, Foco e Calendário.',
+
+        // Checklist
         'checklist.progress': 'Progresso da lista de verificação',
+
+        // Keybindings (Desktop)
         'keybindings.helpTitle': 'Atalhos de teclado',
         'keybindings.helpSubtitle': 'Pressione Esc para fechar',
         'keybindings.styleLabel': 'Estilo de atalho de teclado',
@@ -106,11 +90,15 @@ export const ptOverrides: Record<string, string> = {
         'keybindings.list.newTask': 'Foco na entrada de adição de tarefa',
         'keybindings.list.toggleDetails': 'Alternar detalhes da lista',
         'keybindings.list.toggleDensity': 'Alternar densidade',
+
+        // Tabs (Mobile)
         'tab.inbox': 'Caixa de entrada',
         'tab.next': 'Foco',
         'tab.board': 'Quadro',
         'tab.calendar': 'Calendário',
         'tab.review': 'Revisão',
+
+        // List Views
         'list.inbox': 'Caixa de entrada',
         'list.todo': 'Pendência',
         'list.inProgress': 'Em andamento',
@@ -130,8 +118,12 @@ export const ptOverrides: Record<string, string> = {
         'list.compact': 'Compactar',
         'list.density': 'Densidade',
         'list.densityComfortable': 'Confortável',
-        'list.densityCompact': 'Compactar',
+        'list.densityCompact': 'Compacto',
+        'list.groupByArea': 'Área',
         'reference.empty': 'Ainda não há itens de referência.',
+        'reference.emptyHint': 'Guarde notas, links e materiais de apoio aqui.',
+
+        // Status Labels
         'status.inbox': 'Caixa de entrada',
         'status.todo': 'Pendência',
         'status.next': 'Próximo',
@@ -142,10 +134,14 @@ export const ptOverrides: Record<string, string> = {
         'status.done': 'Feito',
         'status.archived': 'Arquivado',
         'status.active': 'Ativo',
+
+        // Priority Labels
         'priority.low': 'Baixo',
         'priority.medium': 'Médio',
         'priority.high': 'Alto',
         'priority.urgent': 'Urgente',
+
+        // Task Edit
         'taskEdit.editTask': 'Editar tarefa',
         'taskEdit.checklist': 'Lista de verificação',
         'taskEdit.tab.task': 'Tarefa',
@@ -184,6 +180,7 @@ export const ptOverrides: Record<string, string> = {
         'taskEdit.organizationEmpty': 'Todos os campos da organização estão ocultos. Mostre-os em Configurações > GTD > Layout do editor de tarefas.',
         'taskEdit.details': 'Detalhes',
         'taskEdit.detailsEmpty': 'Todos os campos de detalhes estão ocultos. Mostre-os em Configurações > GTD > Layout do editor de tarefas.',
+
         'markdown.preview': 'Visualização',
         'markdown.edit': 'Editar',
         'markdown.toolbar.heading': 'Inserir título',
@@ -195,6 +192,7 @@ export const ptOverrides: Record<string, string> = {
         'markdown.toolbar.link': 'Inserir link',
         'markdown.toolbar.code': 'Código em linha',
         'markdown.toolbar.codeBlock': 'Bloco de código',
+
         'attachments.title': 'Anexos',
         'attachments.addFile': 'Adicionar arquivo',
         'attachments.addPhoto': 'Adicionar foto',
@@ -211,6 +209,7 @@ export const ptOverrides: Record<string, string> = {
         'attachments.invalidLink': 'Insira um URL válido.',
         'attachments.photoUnavailableTitle': 'Seletor de fotos indisponível',
         'attachments.photoUnavailableBody': 'Recrie o aplicativo para ativar anexos de fotos.',
+
         'taskEdit.locationLabel': 'Localização',
         'taskEdit.locationPlaceholder': 'por exemplo Escritório',
         'taskEdit.projectLabel': 'Projeto',
@@ -245,6 +244,11 @@ export const ptOverrides: Record<string, string> = {
         'task.aria.dueDate': 'Data de vencimento',
         'task.aria.dueTime': 'Prazo devido',
         'task.aria.location': 'Localização',
+
+        // Recurrence Labels
+        'recurrence.weekUnit': 'Semanas',
+        'recurrence.ordinalSelectLabel': 'Ordem',
+        'recurrence.weekdaySelectLabel': 'Dia da semana',
         'recurrence.none': 'Nenhum',
         'recurrence.daily': 'Diário',
         'recurrence.weekly': 'Semanalmente',
@@ -252,7 +256,7 @@ export const ptOverrides: Record<string, string> = {
         'recurrence.yearly': 'Anual',
         'recurrence.custom': 'Personalizado…',
         'recurrence.customTitle': 'Recorrência personalizada',
-        'recurrence.repeatEvery': 'Repetir a cada',
+        'recurrence.repeatEvery': 'A cada',
         'recurrence.repeatOn': 'Repetir em',
         'recurrence.endsLabel': 'Termina',
         'recurrence.endsNever': 'Nunca',
@@ -260,7 +264,7 @@ export const ptOverrides: Record<string, string> = {
         'recurrence.endsAfterCount': 'Após',
         'recurrence.occurrenceUnit': 'ocorrência(s)',
         'recurrence.dayUnit': 'dia(s)',
-        'recurrence.monthUnit': 'meses)',
+        'recurrence.monthUnit': 'mese(s)',
         'recurrence.onLabel': 'Sobre',
         'recurrence.onDayOfMonth': 'Dia {day}',
         'recurrence.onNthWeekday': 'O {ordinal} {weekday}',
@@ -268,12 +272,12 @@ export const ptOverrides: Record<string, string> = {
         'recurrence.ordinal.second': 'Segundo',
         'recurrence.ordinal.third': 'Terceiro',
         'recurrence.ordinal.fourth': 'Quarto',
-        'recurrence.ordinal.last': 'Durar',
+        'recurrence.ordinal.last': 'Último',
         'recurrence.monthlyOnDay': 'No mesmo dia de cada mês',
-        'recurrence.monthlyOnLastWeekday': 'Último {weekday}',
+        'recurrence.monthlyOnLastWeekday': 'No último {weekday}',
         'recurrence.strategyLabel': 'Estratégia',
-        'recurrence.strategyStrict': 'Estrito',
-        'recurrence.strategyFluid': 'Fluido',
+        'recurrence.strategyStrict': 'Fixo',
+        'recurrence.strategyFluid': 'Variável',
         'recurrence.strategyStrictDesc': 'Vencimento na data programada (por exemplo, contas)',
         'recurrence.strategyFluidDesc': 'Vencimento após a conclusão (por exemplo, lavanderia)',
         'recurrence.afterCompletion': 'Repetir após a conclusão',
@@ -288,6 +292,13 @@ export const ptOverrides: Record<string, string> = {
         'inbox.empty': 'Nenhuma tarefa na caixa de entrada',
         'inbox.emptyAddHint': 'A caixa de entrada está limpa. Toque em + para capturar.',
         'inbox.emptyAddHintVoice': 'A caixa de entrada está limpa. Toque no microfone para capturar.',
+        'mobileHelp.title': 'Ajuda móvel',
+        'mobileHelp.gesturesTitle': 'Gestos',
+        'mobileHelp.swipeRight': 'Deslize para a direita',
+        'mobileHelp.swipeLeft': 'Deslize para a esquerda',
+        'mobileHelp.longPressCapture': 'Pressione e segure para capturar',
+        'mobileHelp.shortcutsTitle': 'Atalhos',
+        'mobileHelp.appShortcuts': 'Mantenha pressionado o ícone do app para atalhos de Adicionar tarefa, Foco e Calendário.',
         'inbox.refineTitle': 'Refinar esta tarefa',
         'inbox.refineHint': 'Esclareça o título e os detalhes antes de decidir o que fazer a seguir.',
         'inbox.refineNext': 'Próximo',
@@ -317,6 +328,8 @@ export const ptOverrides: Record<string, string> = {
         'inbox.assignProjectQuestion': 'Atribuir a um projeto? (Opcional)',
         'inbox.noProject': 'Nenhum projeto',
         'inbox.skip': 'Pular',
+
+        // Next Actions (Mobile)
         'next.title': 'Próximas ações',
         'next.ready': 'tarefas prontas para serem executadas',
         'next.current': 'Ações Atuais',
@@ -326,6 +339,8 @@ export const ptOverrides: Record<string, string> = {
         'next.noContext': 'Nenhuma próxima ação com',
         'next.warningCount': 'itens em Próximas Ações',
         'next.warningHint': 'Considere focar em menos projetos. GTD recomenda manter as Próximas Ações em 10 a 15 itens para maior clareza.',
+
+        // Contact / Contexts (Mobile updates)
         'contexts.title': 'Contextos',
         'contexts.filter': 'Filtrar tarefas por contexto',
         'filters.label': 'Filtros',
@@ -353,6 +368,8 @@ export const ptOverrides: Record<string, string> = {
         'contexts.none': 'Sem contexto',
         'contexts.noContexts': 'Nenhum contexto encontrado. Adicione contextos como @home, @work, @computer às suas tarefas',
         'contexts.noTasks': 'Nenhuma tarefa ativa para este contexto',
+
+        // Board
         'board.title': 'Visualização do quadro',
         'board.next': 'Próximas ações',
         'board.todo': 'Pendência',
@@ -362,7 +379,23 @@ export const ptOverrides: Record<string, string> = {
         'board.hint': 'Segure para arrastar • Deslize para a esquerda para excluir',
         'board.dragTask': 'Arrastar tarefa',
         'board.delete': 'Excluir',
+
+        // Calendar
         'calendar.title': 'Calendário',
+        'calendar.tasksAndEvents': 'Tarefas e eventos',
+        'calendar.today': 'Hoje',
+        'calendar.day': 'Dia',
+        'calendar.week': 'Semana',
+        'calendar.month': 'Mês',
+        'calendar.schedule': 'Agenda',
+        'calendar.prevMonth': 'Mês anterior',
+        'calendar.nextMonth': 'Próximo mês',
+        'calendar.year': 'Ano',
+        'calendar.searchMatches': 'Resultados da pesquisa',
+        'calendar.noSearchMatches': 'Sem resultados da pesquisa',
+        'calendar.visibleCalendars': 'Calendários visíveis',
+        'calendar.openDayView': 'Abrir vista do dia',
+        'calendar.more': 'Mais',
         'calendar.addTask': 'Adicionar nova tarefa...',
         'calendar.schedulePlaceholder': 'Pesquisar tarefas para agendar...',
         'calendar.scheduleResults': 'Agendar',
@@ -394,6 +427,8 @@ export const ptOverrides: Record<string, string> = {
         'share.readFailed': 'O Mindwtr não conseguiu ler texto ou URL do item compartilhado.',
         'shortcuts.captureUnavailable': 'Atalho de captura indisponível',
         'shortcuts.missingTitle': 'O Mindwtr não conseguiu ler um título de tarefa desse link de atalho.',
+
+        // Projects
         'projects.title': 'Projetos',
         'projects.activeSection': 'Projetos Ativos',
         'projects.noProjects': 'Nenhum projeto ainda.',
@@ -594,10 +629,12 @@ export const ptOverrides: Record<string, string> = {
         'process.quickDesc': 'Revise os detalhes, escolha o resultado e siga direto para o próximo item.',
         'process.quickApplyHint': 'Aplique essas escolhas e continue para o próximo item da caixa de entrada.',
         'process.quickMoveHint': 'Mova este item e continue para o próximo item da caixa de entrada.',
+
+        // Settings
         'settings.title': 'Configurações',
         'settings.subtitle': 'Personalize sua experiência Mindwtr',
         'settings.appearance': 'Aparência',
-        'settings.general': 'Em geral',
+        'settings.general': 'Geral',
         'settings.system': 'Sistema',
         'settings.systemDesc': 'Siga a preferência do sistema',
         'settings.light': 'Luz',
@@ -650,6 +687,8 @@ export const ptOverrides: Record<string, string> = {
         'settings.logMissing': 'Arquivo de log ainda não encontrado. Ative o registro e reproduza o problema primeiro.',
         'settings.logCleared': 'Arquivo de log limpo.',
         'settings.shareUnavailable': 'O compartilhamento não está disponível neste dispositivo.',
+
+        // Mobile Settings
         'settings.useSystem': 'Usar tema do sistema',
         'settings.followDevice': 'Siga as configurações de aparência do dispositivo',
         'settings.darkMode': 'Modo escuro',
@@ -889,6 +928,8 @@ export const ptOverrides: Record<string, string> = {
         'digest.focus': 'Foco',
         'digest.reviewDue': 'Revisão vencida',
         'digest.noItems': 'Não há itens urgentes hoje.',
+
+        // Common
         'common.tasks': 'tarefas',
         'common.days': 'dias',
         'common.cancel': 'Cancelar',
@@ -940,7 +981,7 @@ export const ptOverrides: Record<string, string> = {
         'bulk.delete': 'Excluir selecionado',
         'bulk.confirmDeleteTitle': 'Excluir tarefas',
         'bulk.confirmDeleteBody': 'Excluir tarefas selecionadas?',
-        'sort.label': 'Organizar',
+        'sort.label': 'Ordenar',
         'sort.default': 'Padrão',
         'sort.due': 'Data de vencimento',
         'sort.start': 'Data de início',
@@ -1004,10 +1045,12 @@ export const ptOverrides: Record<string, string> = {
         'someday.archive': 'Arquivo',
         'someday.empty': 'Nenhum item algum dia/talvez',
         'someday.emptyHint': 'Use o status "Algum dia" para ideias, metas e projetos que você possa querer realizar no futuro',
-        'search.title': 'Procurar',
+
+        // Search
+        'search.title': 'Pesquisar',
         'search.placeholder': 'Pesquisar tarefas e projetos...',
         'search.noResults': 'Nenhum resultado encontrado',
-        'search.searching': 'Procurando…',
+        'search.searching': 'Pesquisando…',
         'search.typeToSearch': 'Digite para pesquisar...',
         'search.resultProject': 'Projeto',
         'search.resultTask': 'Tarefa',
@@ -1171,7 +1214,7 @@ export const ptOverrides: Record<string, string> = {
         'list.groupBy': 'Agrupar por',
         'list.groupByNone': 'Sem agrupamento',
         'list.groupByContext': 'Contexto',
-        'reference.emptyHint': 'Guarde notas, links e materiais de apoio aqui.',
+        
         'bulk.contextPlaceholder': '@context',
         'bulk.tagPlaceholder': '#tag',
         'settings.cloudUrlPlaceholder': 'https://example.com',
