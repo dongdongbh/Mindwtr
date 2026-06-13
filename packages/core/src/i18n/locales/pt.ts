@@ -264,7 +264,7 @@ export const ptOverrides: Record<string, string> = {
         'recurrence.endsAfterCount': 'Após',
         'recurrence.occurrenceUnit': 'ocorrência(s)',
         'recurrence.dayUnit': 'dia(s)',
-        'recurrence.monthUnit': 'mese(s)',
+        'recurrence.monthUnit': 'mês(es)',
         'recurrence.onLabel': 'Sobre',
         'recurrence.onDayOfMonth': 'Dia {day}',
         'recurrence.onNthWeekday': 'O {ordinal} {weekday}',
