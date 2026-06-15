@@ -2500,6 +2500,8 @@ describe('TaskStore', () => {
     });
 
     it('does not append a duplicate recurring follow-up when one already exists', async () => {
+        vi.setSystemTime(new Date('2026-06-09T00:00:00.000Z'));
+
         const current: Task = {
             id: 'weekly-current',
             title: 'Timeblock',
