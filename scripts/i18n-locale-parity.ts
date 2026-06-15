@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { en } from '../packages/core/src/i18n/locales/en';
-import { hasTranslatableEnglishText } from '../packages/core/src/i18n/locale-quality';
+import { hasTranslatableEnglishText, isAllowedEnglishMirrorKey } from '../packages/core/src/i18n/locale-quality';
 
 type Dictionary = Record<string, string>;
 
@@ -75,7 +75,9 @@ for (const target of LOCALES) {
 
     const unknownKeys = Object.keys(dictionary).filter((key) => !englishKeySet.has(key));
     const mirroredEnglishKeys = Object.keys(dictionary)
-        .filter((key) => dictionary[key] === en[key] && hasTranslatableEnglishText(en[key]));
+        .filter((key) => dictionary[key] === en[key]
+            && hasTranslatableEnglishText(en[key])
+            && !isAllowedEnglishMirrorKey(target.locale, key));
     const mixedEnglishKeys = !target.fullParity && NON_LATIN_PARTIAL_LOCALES.has(target.locale)
         ? Object.keys(dictionary).filter((key) => hasTranslatableEnglishText(dictionary[key]))
         : [];

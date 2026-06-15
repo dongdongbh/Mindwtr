@@ -16,7 +16,7 @@ import { ruOverrides } from './locales/ru';
 import { trOverrides } from './locales/tr';
 import { zhHans } from './locales/zh-Hans';
 import { zhHant } from './locales/zh-Hant';
-import { hasTranslatableEnglishText } from './locale-quality';
+import { allowedEnglishMirrorKeysByLocale, hasTranslatableEnglishText, isAllowedEnglishMirrorKey } from './locale-quality';
 
 const fullParityLocales: Record<string, Record<string, string>> = {
     zh: zhHans,
@@ -102,9 +102,23 @@ describe('locale parity', () => {
     it('does not hide untranslated copy behind verbatim English placeholders', () => {
         for (const [language, translations] of Object.entries(shippedLocales)) {
             const placeholders = Object.keys(translations).filter((key) => (
-                translations[key] === en[key] && hasTranslatableEnglishText(en[key])
+                translations[key] === en[key]
+                && hasTranslatableEnglishText(en[key])
+                && !isAllowedEnglishMirrorKey(language, key)
             ));
             expect(placeholders, `Verbatim English placeholders in ${language}`).toEqual([]);
+        }
+    });
+
+    it('keeps mirrored-English allow-lists limited to reviewed matching keys', () => {
+        for (const [language, allowedKeys] of Object.entries(allowedEnglishMirrorKeysByLocale)) {
+            const translations = shippedLocales[language];
+            expect(translations, `Known locale for mirrored-English allow-list ${language}`).toBeDefined();
+
+            const staleKeys = allowedKeys.filter((key) => (
+                !translations?.[key] || translations[key] !== en[key] || !hasTranslatableEnglishText(en[key])
+            ));
+            expect(staleKeys, `Stale mirrored-English allow-list keys in ${language}`).toEqual([]);
         }
     });
 
