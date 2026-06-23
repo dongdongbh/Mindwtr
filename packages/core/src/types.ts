@@ -290,7 +290,7 @@ export interface PendingRemoteAttachmentDelete {
 import type { MergeStats, SyncHistoryEntry } from './sync';
 
 export type AppTheme = 'light' | 'dark' | 'system' | 'eink' | 'nord' | 'sepia' | 'material3-light' | 'material3-dark' | 'oled';
-export type AppLanguage = 'en' | 'zh' | 'zh-Hant' | 'es' | 'hi' | 'ar' | 'de' | 'ru' | 'ja' | 'fr' | 'pt' | 'pl' | 'ko' | 'cs' | 'it' | 'tr' | 'nl' | 'system';
+export type AppLanguage = 'en' | 'vi' | 'zh' | 'zh-Hant' | 'es' | 'hi' | 'ar' | 'de' | 'ru' | 'ja' | 'fr' | 'pt' | 'pl' | 'ko' | 'cs' | 'it' | 'tr' | 'nl' | 'system';
 export type MobileQuickAccessView = 'review' | 'projects' | 'calendar' | 'contexts';
 
 export interface GtdSettings {

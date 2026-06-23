@@ -15,7 +15,7 @@ import {
     startOfMonth as startOfGregorianMonth,
     type Locale,
 } from 'date-fns';
-import { ar, cs, de, enGB, enUS, es, fr, hi, it, ja, ko, nl, pl, ptBR, ru, tr, zhCN, zhTW } from 'date-fns/locale';
+import { ar, cs, de, enGB, enUS, es, fr, hi, it, ja, ko, nl, pl, ptBR, ru, tr, vi, zhCN, zhTW } from 'date-fns/locale';
 import {
     addMonths as addJalaliMonths,
     endOfMonth as endOfJalaliMonth,
@@ -44,6 +44,7 @@ const DEFAULT_LOCALE = enUS;
 const DMY_EN_REGIONS = new Set(['GB', 'IE', 'AU', 'NZ', 'ZA']);
 const DATE_LOCALE_BY_LANGUAGE: Record<Language, Locale> = {
     en: enUS,
+    vi,
     zh: zhCN,
     'zh-Hant': zhTW,
     es,
@@ -63,6 +64,7 @@ const DATE_LOCALE_BY_LANGUAGE: Record<Language, Locale> = {
 };
 const LOCALE_TAG_BY_LANGUAGE: Record<Language, string> = {
     en: 'en-US',
+    vi: 'vi-VN',
     zh: 'zh-CN',
     'zh-Hant': 'zh-TW',
     es: 'es-ES',

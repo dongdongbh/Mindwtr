@@ -14,6 +14,7 @@ import { plOverrides } from './locales/pl';
 import { ptOverrides } from './locales/pt';
 import { ruOverrides } from './locales/ru';
 import { trOverrides } from './locales/tr';
+import { viOverrides } from './locales/vi';
 import { zhHans } from './locales/zh-Hans';
 import { zhHant } from './locales/zh-Hant';
 import { allowedEnglishMirrorKeysByLocale, hasTranslatableEnglishText, isAllowedEnglishMirrorKey } from './locale-quality';
@@ -38,6 +39,7 @@ const overrideLocales: Record<string, Record<string, string>> = {
     pt: ptOverrides,
     ru: ruOverrides,
     tr: trOverrides,
+    vi: viOverrides,
 };
 
 const nonLatinOverrideLocales: Record<string, Record<string, string>> = {
@@ -63,6 +65,7 @@ const overrideLocaleCoverageFloors: Record<string, number> = {
     pt: 71,
     ru: 69,
     tr: 71,
+    vi: 99,
 };
 
 const shippedLocales: Record<string, Record<string, string>> = {

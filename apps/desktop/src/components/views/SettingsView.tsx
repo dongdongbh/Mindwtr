@@ -176,6 +176,7 @@ const SettingsAboutPage = lazy(
 
 const LANGUAGES: { id: Language; label: string; native: string }[] = [
   { id: "en", label: "English", native: "English" },
+  { id: "vi", label: "Vietnamese", native: "Tiếng Việt" },
   { id: "zh", label: "Chinese (Simplified)", native: "中文（简体）" },
   { id: "zh-Hant", label: "Chinese (Traditional)", native: "中文（繁體）" },
   { id: "es", label: "Spanish", native: "Español" },

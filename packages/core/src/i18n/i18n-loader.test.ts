@@ -13,6 +13,12 @@ describe('i18n-loader sync fallback', () => {
         expect(nl['app.name']).toBe('Mindwtr');
     });
 
+    it('loads Vietnamese overrides on demand', async () => {
+        const vi = await loadTranslations('vi');
+        expect(vi['settings.language']).toBe('Ngôn ngữ');
+        expect(vi['nav.inbox']).toBe('Hộp thư đến');
+    });
+
     it('loads Traditional Chinese translations on demand', async () => {
         const zhHant = await loadTranslations('zh-Hant');
         expect(zhHant['nav.settings']).toBe('設置');

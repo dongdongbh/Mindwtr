@@ -43,6 +43,7 @@ export const SETTINGS_SCREEN_SET: Record<SettingsScreen, true> = {
 
 export const LANGUAGES: { id: Language; native: string }[] = [
     { id: 'en', native: 'English' },
+    { id: 'vi', native: 'Tiếng Việt' },
     { id: 'zh', native: '中文（简体）' },
     { id: 'zh-Hant', native: '中文（繁體）' },
     { id: 'es', native: 'Español' },
