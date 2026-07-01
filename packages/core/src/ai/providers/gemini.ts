@@ -27,6 +27,62 @@ const resolveTimeoutMs = (value?: number) =>
 // Gemini 2.5+ (and 3.x) support `thinkingConfig`; sending it to older models can be rejected.
 const modelSupportsThinking = (model: string): boolean => /gemini-(2\.[5-9]|[3-9])/i.test(model);
 
+async function buildGeminiError(response: Response, usingOfficialGemini: boolean): Promise<Error> {
+    const httpStatus = response.status;
+    let message = '';
+    let status = '';
+    let raw = '';
+    try {
+        raw = await response.text();
+    } catch {
+        raw = '';
+    }
+    if (raw) {
+        try {
+            const data = JSON.parse(raw) as { error?: { message?: string; status?: string } };
+            if (data?.error) {
+                message = data.error.message ?? '';
+                status = data.error.status ?? '';
+                raw = '';
+            }
+        } catch {
+            // Not JSON; fall back to the raw body text below.
+        }
+    }
+
+    if (httpStatus === 400 && /api key not valid/i.test(message)) {
+        return new Error('Gemini API key is invalid.');
+    }
+    if (httpStatus === 401) {
+        return usingOfficialGemini
+            ? new Error('Gemini API key is invalid or missing.')
+            : new Error('Gemini-compatible endpoint rejected the request. Check the custom base URL, API key, and model.');
+    }
+    if (httpStatus === 403) {
+        return usingOfficialGemini
+            ? new Error('Gemini access denied for this model or key.')
+            : new Error('Gemini-compatible endpoint denied access. Check the API key and model permissions.');
+    }
+    if (httpStatus === 404) {
+        return usingOfficialGemini
+            ? new Error('Gemini model not found or unavailable for this key.')
+            : new Error('Gemini-compatible endpoint or model not found. Check the custom base URL and model.');
+    }
+    if (httpStatus === 429) {
+        return usingOfficialGemini
+            ? new Error('Gemini rate limit or quota exceeded. Please try again later.')
+            : new Error('Gemini-compatible endpoint rate limit or quota exceeded. Please try again later.');
+    }
+
+    const parts = [
+        `Gemini request failed (${httpStatus})`,
+        status ? `[${status}]` : '',
+        message ? `: ${message}` : '',
+        !message && raw ? `: ${raw}` : '',
+    ].filter(Boolean);
+    return new Error(parts.join(' ').trim());
+}
+
 const CLARIFY_SCHEMA: GeminiSchema = {
     type: 'object',
     required: ['question', 'options'],
@@ -99,7 +155,10 @@ const COPILOT_SCHEMA: GeminiSchema = {
 
 async function requestGemini(config: AIProviderConfig, prompt: { system: string; user: string }, schema?: GeminiSchema, options?: AIRequestOptions) {
     const endpoint = config.endpoint || GEMINI_BASE_URL;
-    if (!config.apiKey) {
+    const usingOfficialGemini = endpoint === GEMINI_BASE_URL;
+    // Trim to tolerate keys pasted with a trailing newline or spaces (parity with OpenAI).
+    const apiKey = String(config.apiKey || '').trim();
+    if (!apiKey) {
         throw new Error('Gemini API key is required.');
     }
     const rawUrl = `${endpoint.replace(/\/+$/, '')}/${config.model}:generateContent`;
@@ -158,7 +217,7 @@ async function requestGemini(config: AIProviderConfig, prompt: { system: string;
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'x-goog-api-key': config.apiKey,
+                        'x-goog-api-key': apiKey,
                     },
                     body: JSON.stringify(body),
                 },
@@ -180,7 +239,7 @@ async function requestGemini(config: AIProviderConfig, prompt: { system: string;
                 await sleep(400 * Math.pow(2, attempt));
                 continue;
             }
-            throw new Error('Gemini request failed. Please try again.');
+            throw await buildGeminiError(response, usingOfficialGemini);
         }
         break;
     }

@@ -405,7 +405,10 @@ export interface AiSettings {
     baseUrl?: string;
     model?: string;
     openAIExtraBodyParams?: Record<string, unknown>;
-    reasoningEffort?: 'low' | 'medium' | 'high';
+    // Mirrors AIReasoningEffort (kept inline to avoid a types <-> ai/types import cycle).
+    // 'minimal' is used internally for the low-latency copilot path; the main-model
+    // settings UI exposes low/medium/high.
+    reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high';
     thinkingBudget?: number;
     copilotModel?: string;
     speechToText?: SpeechToTextSettings;

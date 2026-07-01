@@ -14,12 +14,13 @@ export const isClarifyResponse = (value: unknown): value is ClarifyResponse => {
     if (value.options.some((option) => !isRecord(option) || typeof option.label !== 'string' || typeof option.action !== 'string')) {
         return false;
     }
-    if (value.suggestedAction !== undefined) {
+    // Treat null like absent: Structured Outputs returns null for omitted optional fields.
+    if (value.suggestedAction != null) {
         if (!isRecord(value.suggestedAction)) return false;
-        if (value.suggestedAction.title !== undefined && typeof value.suggestedAction.title !== 'string') return false;
-        if (value.suggestedAction.context !== undefined && typeof value.suggestedAction.context !== 'string') return false;
-        if (value.suggestedAction.timeEstimate !== undefined && typeof value.suggestedAction.timeEstimate !== 'string') return false;
-        if (value.suggestedAction.isProject !== undefined && typeof value.suggestedAction.isProject !== 'boolean') return false;
+        if (value.suggestedAction.title != null && typeof value.suggestedAction.title !== 'string') return false;
+        if (value.suggestedAction.context != null && typeof value.suggestedAction.context !== 'string') return false;
+        if (value.suggestedAction.timeEstimate != null && typeof value.suggestedAction.timeEstimate !== 'string') return false;
+        if (value.suggestedAction.isProject != null && typeof value.suggestedAction.isProject !== 'boolean') return false;
     }
     return true;
 };
@@ -44,8 +45,9 @@ export const isReviewAnalysisResponse = (value: unknown): value is ReviewAnalysi
 
 export const isCopilotResponse = (value: unknown): value is CopilotResponse => {
     if (!isRecord(value)) return false;
-    if (value.context !== undefined && typeof value.context !== 'string') return false;
-    if (value.timeEstimate !== undefined && typeof value.timeEstimate !== 'string') return false;
-    if (value.tags !== undefined && !isStringArray(value.tags)) return false;
+    // Treat null like absent: Structured Outputs returns null for omitted optional fields.
+    if (value.context != null && typeof value.context !== 'string') return false;
+    if (value.timeEstimate != null && typeof value.timeEstimate !== 'string') return false;
+    if (value.tags != null && !isStringArray(value.tags)) return false;
     return true;
 };

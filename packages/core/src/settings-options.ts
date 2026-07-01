@@ -88,6 +88,7 @@ const AI_PROVIDER_VALUE_FLAGS: Record<AIProviderId, true> = {
 };
 
 const AI_REASONING_EFFORT_VALUE_FLAGS: Record<AIReasoningEffort, true> = {
+    minimal: true,
     low: true,
     medium: true,
     high: true,

@@ -6,6 +6,11 @@ import { SettingsAiPage } from './SettingsAiPage';
 const t = {
     aiEnable: 'Enable AI assistant',
     aiDesc: 'Optional help to clarify and break down tasks.',
+    aiUsageTitle: 'Where and how to use AI',
+    aiUsageClarify: 'Clarify: open a task, click the ✨ sparkle button in its editor, and choose Clarify to turn a vague task into a clear next action.',
+    aiUsageBreakdown: 'Break down: in that same ✨ menu, choose Break down to split a task or project into concrete steps.',
+    aiUsageSuggestions: 'Suggestions: as you type a task title or notes, a ✨ suggestion for context, time estimate, and tags appears below — click it to apply.',
+    aiUsageReview: 'Weekly review: open the Weekly Review, go to the AI step, and click Run to get suggested actions for stale tasks.',
     aiProvider: 'Provider',
     aiProviderOpenAI: 'OpenAI',
     aiProviderGemini: 'Gemini',

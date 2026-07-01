@@ -25,15 +25,87 @@ const DEFAULT_MAX_TOKENS = 1024;
 const resolveTimeoutMs = (value?: number) =>
     typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : DEFAULT_TIMEOUT_MS;
 
+async function buildAnthropicError(response: Response, usingOfficialAnthropic: boolean): Promise<Error> {
+    const status = response.status;
+    let message = '';
+    let type = '';
+    let raw = '';
+    // The request id is the handle Anthropic support and logs key off; prefer the
+    // response header (present even when the body isn't JSON) and fall back to the body.
+    let requestId = response.headers.get('request-id') ?? '';
+    try {
+        raw = await response.text();
+    } catch {
+        raw = '';
+    }
+    if (raw) {
+        try {
+            const data = JSON.parse(raw) as { error?: { message?: string; type?: string }; request_id?: string };
+            if (typeof data?.request_id === 'string' && data.request_id) {
+                requestId = data.request_id;
+            }
+            if (data?.error) {
+                message = data.error.message ?? '';
+                type = data.error.type ?? '';
+                raw = '';
+            }
+        } catch {
+            // Not JSON; fall back to the raw body text below.
+        }
+    }
+
+    // Keep Anthropic's own explanation (and request id) on the friendly messages —
+    // e.g. a 401 may be "invalid x-api-key" vs a disabled org, which changes the fix.
+    const detail = [
+        message || raw,
+        requestId ? `request-id: ${requestId}` : '',
+    ].filter(Boolean).join(', ');
+    const withDetail = (friendly: string) => new Error(detail ? `${friendly} (${detail})` : friendly);
+
+    if (status === 401) {
+        return usingOfficialAnthropic
+            ? withDetail('Anthropic API key is invalid or missing.')
+            : withDetail('Anthropic-compatible endpoint rejected the request. Check the custom base URL, API key, and model.');
+    }
+    if (status === 403) {
+        return usingOfficialAnthropic
+            ? withDetail('Anthropic access denied for this model or key.')
+            : withDetail('Anthropic-compatible endpoint denied access. Check the API key and model permissions.');
+    }
+    if (status === 404) {
+        return usingOfficialAnthropic
+            ? withDetail('Anthropic model not found or unavailable for this key.')
+            : withDetail('Anthropic-compatible endpoint or model not found. Check the custom base URL and model.');
+    }
+    if (status === 429) {
+        return usingOfficialAnthropic
+            ? withDetail('Anthropic rate limit or quota exceeded. Please try again later.')
+            : withDetail('Anthropic-compatible endpoint rate limit or quota exceeded. Please try again later.');
+    }
+
+    const parts = [
+        `Anthropic request failed (${status})`,
+        type ? `[${type}]` : '',
+        requestId ? `(${requestId})` : '',
+        message ? `: ${message}` : '',
+        !message && raw ? `: ${raw}` : '',
+    ].filter(Boolean);
+    return new Error(parts.join(' ').trim());
+}
+
 async function requestAnthropic(
     config: AIProviderConfig,
     prompt: { system: string; user: string },
     options?: AIRequestOptions
 ) {
-    if (!config.apiKey) {
+    // Trim to tolerate keys pasted with a trailing newline or spaces, which
+    // Anthropic otherwise rejects with a 401 (see OpenAI provider for parity).
+    const apiKey = String(config.apiKey || '').trim();
+    if (!apiKey) {
         throw new Error('Anthropic API key is required.');
     }
     const url = config.endpoint || ANTHROPIC_BASE_URL;
+    const usingOfficialAnthropic = url === ANTHROPIC_BASE_URL;
     const thinkingBudget = typeof config.thinkingBudget === 'number' ? config.thinkingBudget : 0;
     const maxTokens =
         thinkingBudget > 0 ? Math.max(DEFAULT_MAX_TOKENS, thinkingBudget + 256) : DEFAULT_MAX_TOKENS;
@@ -64,8 +136,12 @@ async function requestAnthropic(
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'x-api-key': config.apiKey,
+                        'x-api-key': apiKey,
                         'anthropic-version': '2023-06-01',
+                        // Requests carry a browser Origin (Tauri webview / web build), which
+                        // Anthropic blocks unless this header opts in. Safe here: the key is
+                        // user-supplied and stored locally, not exposed in a public web page.
+                        'anthropic-dangerous-direct-browser-access': 'true',
                     },
                     body: JSON.stringify(body),
                 },
@@ -87,7 +163,7 @@ async function requestAnthropic(
                 await sleep(400 * Math.pow(2, attempt));
                 continue;
             }
-            throw new Error('Anthropic request failed. Please try again.');
+            throw await buildAnthropicError(response, usingOfficialAnthropic);
         }
         break;
     }

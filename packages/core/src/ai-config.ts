@@ -1,6 +1,6 @@
 import type { AppData } from './types';
 import type { AIProviderConfig, AIProviderId, AIRequestExtraBodyParams } from './ai/types';
-import { DEFAULT_ANTHROPIC_THINKING_BUDGET, DEFAULT_GEMINI_THINKING_BUDGET, DEFAULT_REASONING_EFFORT, getDefaultAIConfig, getDefaultCopilotModel } from './ai/catalog';
+import { COPILOT_REASONING_EFFORT, DEFAULT_ANTHROPIC_THINKING_BUDGET, DEFAULT_GEMINI_THINKING_BUDGET, DEFAULT_REASONING_EFFORT, getDefaultAIConfig, getDefaultCopilotModel } from './ai/catalog';
 
 const AI_KEY_PREFIX = 'mindwtr-ai-key';
 const OPENAI_CHAT_COMPLETIONS_PATH = '/chat/completions';
@@ -127,7 +127,7 @@ export function buildCopilotConfig(settings: AppData['settings'], apiKey: string
         provider,
         apiKey,
         model: settings.ai?.copilotModel ?? getDefaultCopilotModel(provider),
-        reasoningEffort: DEFAULT_REASONING_EFFORT,
+        reasoningEffort: COPILOT_REASONING_EFFORT,
         ...(provider === 'gemini' ? { thinkingBudget: DEFAULT_GEMINI_THINKING_BUDGET } : {}),
         ...(provider === 'anthropic' ? { thinkingBudget: DEFAULT_ANTHROPIC_THINKING_BUDGET } : {}),
         ...(endpoint ? { endpoint } : {}),

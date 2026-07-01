@@ -1,20 +1,25 @@
 import type { AIProviderConfig, AIProviderId, AIReasoningEffort } from './types';
 
-export const OPENAI_DEFAULT_MODEL = 'gpt-4o-mini';
+// GPT-5.4/5.5 family (current as of 2026-07). mini is the cost-efficient default
+// for well-defined task work, nano the fast/high-frequency tier (copilot metadata),
+// and 5.5 the smart tier for harder planning. Older gpt-4o/gpt-5 ids still work if a
+// user types them into the model field — they are just no longer suggested.
+export const OPENAI_DEFAULT_MODEL = 'gpt-5.4-mini';
+export const OPENAI_FAST_MODEL = 'gpt-5.4-nano';
+export const OPENAI_SMART_MODEL = 'gpt-5.5';
 export const GEMINI_DEFAULT_MODEL = 'gemini-2.5-flash';
 export const ANTHROPIC_DEFAULT_MODEL = 'claude-sonnet-4-5';
-export const OPENAI_COPILOT_DEFAULT_MODEL = 'gpt-4o-mini';
+export const OPENAI_COPILOT_DEFAULT_MODEL = OPENAI_FAST_MODEL;
 export const GEMINI_COPILOT_DEFAULT_MODEL = 'gemini-2.0-flash-lite';
 export const ANTHROPIC_COPILOT_DEFAULT_MODEL = 'claude-haiku-4-5';
 export const DEFAULT_GEMINI_THINKING_BUDGET = 0;
 export const DEFAULT_ANTHROPIC_THINKING_BUDGET = 0;
 
 export const OPENAI_MODEL_OPTIONS = [
-    'gpt-4o-mini',
-    'gpt-4.1-mini',
-    'gpt-4.1-nano',
-    'gpt-5-mini',
-    'gpt-5-nano',
+    OPENAI_SMART_MODEL,
+    'gpt-5.4',
+    OPENAI_DEFAULT_MODEL,
+    OPENAI_FAST_MODEL,
 ];
 export const GEMINI_MODEL_OPTIONS = [
     'gemini-2.5-flash',
@@ -35,6 +40,9 @@ export const ANTHROPIC_MODEL_OPTIONS = [
 ];
 
 export const DEFAULT_REASONING_EFFORT: AIReasoningEffort = 'low';
+// The copilot runs on every debounced keystroke, so keep reasoning minimal to
+// protect type-ahead latency on GPT-5 reasoning models (the fast/copilot default).
+export const COPILOT_REASONING_EFFORT: AIReasoningEffort = 'minimal';
 
 export function getDefaultAIConfig(provider: AIProviderId): AIProviderConfig {
     return {

@@ -9,6 +9,11 @@ import { ConfirmModal } from '../../ConfirmModal';
 type Labels = {
     aiEnable: string;
     aiDesc: string;
+    aiUsageTitle: string;
+    aiUsageClarify: string;
+    aiUsageBreakdown: string;
+    aiUsageSuggestions: string;
+    aiUsageReview: string;
     aiProvider: string;
     aiProviderOpenAI: string;
     aiProviderGemini: string;
@@ -294,6 +299,18 @@ export function SettingsAiPage({
 
                 {aiOpen && (
                     <>
+                        <div className="border-t border-border p-4">
+                            <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+                                <div className="text-sm font-medium">{t.aiUsageTitle}</div>
+                                <ul className="list-disc pl-4 space-y-1 text-xs text-muted-foreground">
+                                    <li>{t.aiUsageClarify}</li>
+                                    <li>{t.aiUsageBreakdown}</li>
+                                    <li>{t.aiUsageSuggestions}</li>
+                                    <li>{t.aiUsageReview}</li>
+                                </ul>
+                            </div>
+                        </div>
+
                         <div className="border-t border-border p-4 space-y-3">
                             <div className="flex items-center justify-between gap-4">
                                 <div className="text-sm font-medium">{t.aiProvider}</div>
