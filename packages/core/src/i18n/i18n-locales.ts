@@ -24,6 +24,14 @@ type LocaleDescriptorCommon = {
     nonLatin: boolean;
 };
 
+// Coverage at which a non-Latin partial locale stops being checked for mixed-in English.
+// Below it, Latin text in a value is almost always an untranslated leftover. At or above it
+// the locale is essentially complete and the English still in it is deliberate — brand names,
+// protocols, search operators, file extensions — so the check only yields false positives.
+// Compared against coverageFloor (the ratcheted commitment) rather than measured coverage, so
+// a locale can't fall back under the check the moment en.ts grows.
+export const MIXED_ENGLISH_COVERAGE_CEILING = 90;
+
 export type LocaleDescriptor =
     // A complete, standalone translation dictionary, checked for 100% key parity with
     // English. No coverage floor: it's expected to have every key, not a percentage of them.
@@ -172,7 +180,9 @@ export const LOCALES = {
         mode: 'overrides',
         native: '한국어',
         nonLatin: true,
-        coverageFloor: 64,
+        // Rewritten end to end by a native speaker in #934 (64 -> ~100%), replacing a machine
+        // translation that rendered brand names as common nouns ('Gemini' as the constellation).
+        coverageFloor: 98,
     },
     it: {
         loadSync: () => require('./locales/it') as typeof import('./locales/it'),

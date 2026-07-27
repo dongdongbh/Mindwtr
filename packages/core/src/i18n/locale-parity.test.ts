@@ -18,7 +18,7 @@ import { viOverrides } from './locales/vi';
 import { zhHans } from './locales/zh-Hans';
 import { zhHant } from './locales/zh-Hant';
 import { allowedEnglishMirrorKeysByLocale, hasTranslatableEnglishText, isAllowedEnglishMirrorKey } from './locale-quality';
-import { LOCALES, type Locale } from './i18n-locales';
+import { LOCALES, MIXED_ENGLISH_COVERAGE_CEILING, type Locale } from './i18n-locales';
 
 // The one hand-kept binding left in this file: LOCALES (i18n-locales.ts) describes each
 // locale's mode/coverageFloor/nonLatin, but the concrete translation object still has to come
@@ -36,7 +36,9 @@ const translationsByLocale: Record<Locale, Record<string, string>> = {
 const locales = Object.entries(LOCALES) as Array<[Locale, (typeof LOCALES)[Locale]]>;
 const fullParityLocales = locales.filter(([, descriptor]) => descriptor.mode === 'full');
 const overrideLocales = locales.filter(([, descriptor]) => descriptor.mode === 'overrides');
-const nonLatinOverrideLocales = overrideLocales.filter(([, descriptor]) => descriptor.nonLatin);
+const nonLatinOverrideLocales = overrideLocales.filter(([, descriptor]) => (
+    descriptor.nonLatin && descriptor.coverageFloor < MIXED_ENGLISH_COVERAGE_CEILING
+));
 
 describe('locale parity', () => {
     it.each(fullParityLocales)('keeps %s in full key parity with English', (lang) => {

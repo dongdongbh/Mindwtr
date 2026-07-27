@@ -31,7 +31,10 @@ const LOCALES: LocaleTarget[] = [
     { locale: 'zh-Hans', path: 'packages/core/src/i18n/locales/zh-Hans.ts', fullParity: true },
     { locale: 'zh-Hant', path: 'packages/core/src/i18n/locales/zh-Hant.ts', fullParity: true },
 ];
-const NON_LATIN_PARTIAL_LOCALES = new Set(['ar', 'hi', 'ja', 'ko', 'ru']);
+// Mirrors locale-parity.test.ts: non-Latin locales still meaningfully partial, i.e. whose
+// coverageFloor in i18n-locales.ts sits under MIXED_ENGLISH_COVERAGE_CEILING. A locale that
+// has been translated through drops out — the English left in it is then deliberate.
+const NON_LATIN_PARTIAL_LOCALES = new Set(['ar', 'hi', 'ja', 'ru']);
 
 const args = new Set(process.argv.slice(2));
 const shouldFix = args.has('--fix');

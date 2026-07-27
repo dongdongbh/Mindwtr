@@ -2662,6 +2662,41 @@ describe('TaskStore', () => {
         expect(useTaskStore.getState()._allTasks.find((task) => task.id === legacyProcessTask.id)?.deletedAt).toBeTruthy();
     });
 
+    it('repairs korean lessons seeded under the pre-rewrite titles', async () => {
+        const existingProject = createStoreProject('starter-project', { title: '시작하기' });
+        const legacyKoreanTasks = [
+            '여기서 시작: 첫 수집함 항목 처리하기',
+            '한 줄로 작업 기록하기',
+            '오늘의 포커스에 작업을 최대 3개 별표하기',
+            'Mindwtr를 내 것으로: 안 쓰는 것 숨기기',
+            '다른 앱에서 작업 가져오기',
+        ].map((title, index) => createStoreTask(`legacy-ko-${index}`, {
+            title,
+            status: 'next',
+            projectId: existingProject.id,
+            order: index,
+            orderNum: index,
+        }));
+        useTaskStore.setState({
+            tasks: legacyKoreanTasks,
+            projects: [existingProject],
+            _allTasks: legacyKoreanTasks,
+            _allProjects: [existingProject],
+        });
+
+        const result = await useTaskStore.getState().seedGettingStarted({ language: 'ko' });
+        await flushPendingSave();
+
+        expect(result).toEqual({ success: true, id: existingProject.id });
+        const starterTasks = useTaskStore.getState().tasks
+            .filter((task) => task.projectId === existingProject.id);
+        // Renamed in place, so the seven lessons stay seven rather than doubling.
+        expect(starterTasks).toHaveLength(7);
+        expect(starterTasks.map((task) => task.id)).toEqual(
+            expect.arrayContaining(legacyKoreanTasks.map((task) => task.id))
+        );
+    });
+
     it('seeds getting started content in the app language and repairs across language switches', async () => {
         const german = await useTaskStore.getState().seedGettingStarted({ language: 'de' });
         await flushPendingSave();

@@ -44,6 +44,12 @@ export const allowedEnglishMirrorKeysByLocale: Record<string, readonly string[]>
     it: [
         'keybindings.style.standard',
     ],
+    ko: [
+        // Korean UI writes the e-ink theme in Latin, and there is no localized
+        // convention for an example address.
+        'settings.eink',
+        'settings.feedbackEmailPlaceholder',
+    ],
     fr: [
         'calendar.date',
         'keybindings.style.standard',
