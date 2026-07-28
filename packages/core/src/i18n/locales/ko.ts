@@ -400,7 +400,7 @@ export const koOverrides: Record<string, string> = {
         'mobileHelp.swipeRight': '할 일을 오른쪽으로 쓸어서 다음 단계로 넘기세요.',
         'mobileHelp.swipeLeft': '할 일을 왼쪽으로 쓸어서 삭제, 복원 또는 되돌리세요.',
         'mobileHelp.longPressCapture': '+ 버튼을 길게 눌러 다른 수집 모드를 사용하세요.',
-		'mobileHelp.shortcutsTitle': '바로가기',
+        'mobileHelp.shortcutsTitle': '바로가기',
         'mobileHelp.appShortcuts': '앱 아이콘을 길게 눌러 할 일 추가, Focus 및 캘린더 단축키를 사용할 수 있습니다.',
         'inbox.refineTitle': '이 할 일 구체화',
         'inbox.refineHint': '다음에 무엇을 할지 결정하기 전에 제목과 세부 사항을 명확히 하세요.',
