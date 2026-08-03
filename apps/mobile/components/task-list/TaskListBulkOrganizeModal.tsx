@@ -205,21 +205,20 @@ export function TaskListBulkOrganizeModal({
   };
 
   return (
-    <>
-      <Modal
-        visible={visible}
-        transparent
-        animationType="fade"
-        onRequestClose={onClose}
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <Pressable
+        style={keyboardInset > 0 ? [styles.modalOverlay, { paddingBottom: keyboardInset }] : styles.modalOverlay}
+        onPress={onClose}
       >
         <Pressable
-          style={keyboardInset > 0 ? [styles.modalOverlay, { paddingBottom: keyboardInset }] : styles.modalOverlay}
-          onPress={onClose}
+          style={[styles.bulkOrganizeCard, { backgroundColor: themeColors.cardBg, borderColor: themeColors.border }]}
+          onPress={(event) => event.stopPropagation()}
         >
-          <Pressable
-            style={[styles.bulkOrganizeCard, { backgroundColor: themeColors.cardBg, borderColor: themeColors.border }]}
-            onPress={(event) => event.stopPropagation()}
-          >
             <View style={styles.bulkOrganizeHeader}>
               <View style={styles.bulkOrganizeTitleRow}>
                 <ClipboardCheck size={18} color={themeColors.tint} />
@@ -433,9 +432,8 @@ export function TaskListBulkOrganizeModal({
                 </Text>
               </TouchableOpacity>
             </View>
-          </Pressable>
         </Pressable>
-      </Modal>
+      </Pressable>
 
       <TaskEditProjectPicker
         visible={projectPickerVisible}
@@ -481,6 +479,6 @@ export function TaskListBulkOrganizeModal({
         }}
         onCreateArea={async () => null}
       />
-    </>
+    </Modal>
   );
 }
