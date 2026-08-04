@@ -219,219 +219,219 @@ export function TaskListBulkOrganizeModal({
           style={[styles.bulkOrganizeCard, { backgroundColor: themeColors.cardBg, borderColor: themeColors.border }]}
           onPress={(event) => event.stopPropagation()}
         >
-            <View style={styles.bulkOrganizeHeader}>
-              <View style={styles.bulkOrganizeTitleRow}>
-                <ClipboardCheck size={18} color={themeColors.tint} />
-                <View style={styles.bulkOrganizeTitleBlock}>
-                  <Text style={[styles.bulkOrganizeTitle, { color: themeColors.text }]}>
-                    {tFallback(t, 'bulk.organize', 'Bulk organize')}
-                  </Text>
-                  <Text style={[styles.bulkOrganizeSubtitle, { color: themeColors.secondaryText }]}>
-                    {selectedCount} {tFallback(t, 'bulk.selected', 'selected')} - {tFallback(t, 'bulk.organizeHintShort', 'Titles and descriptions stay unchanged.')}
-                  </Text>
-                </View>
+          <View style={styles.bulkOrganizeHeader}>
+            <View style={styles.bulkOrganizeTitleRow}>
+              <ClipboardCheck size={18} color={themeColors.tint} />
+              <View style={styles.bulkOrganizeTitleBlock}>
+                <Text style={[styles.bulkOrganizeTitle, { color: themeColors.text }]}>
+                  {tFallback(t, 'bulk.organize', 'Bulk organize')}
+                </Text>
+                <Text style={[styles.bulkOrganizeSubtitle, { color: themeColors.secondaryText }]}>
+                  {selectedCount} {tFallback(t, 'bulk.selected', 'selected')} - {tFallback(t, 'bulk.organizeHintShort', 'Titles and descriptions stay unchanged.')}
+                </Text>
               </View>
-              <TouchableOpacity
-                accessibilityRole="button"
-                accessibilityLabel={tFallback(t, 'common.close', 'Close')}
-                hitSlop={8}
-                onPress={onClose}
-                style={styles.bulkOrganizeCloseButton}
-              >
-                <X size={20} color={themeColors.secondaryText} />
-              </TouchableOpacity>
             </View>
-
-            <ScrollView
-              style={styles.bulkOrganizeScroll}
-              contentContainerStyle={styles.bulkOrganizeContent}
-              keyboardShouldPersistTaps="handled"
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={tFallback(t, 'common.close', 'Close')}
+              hitSlop={8}
+              onPress={onClose}
+              style={styles.bulkOrganizeCloseButton}
             >
-              <View style={styles.bulkOrganizeSection}>
-                <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
-                  {tFallback(t, 'bulk.organizeStatus', 'Status')}
-                </Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bulkOrganizeChipRow}>
-                  {renderChip(
-                    tFallback(t, 'bulk.keepStatus', 'Keep status'),
-                    status === KEEP_VALUE,
-                    () => {
-                      setStatus(KEEP_VALUE);
-                      setShowValidation(false);
-                    },
-                  )}
-                  {STATUS_OPTIONS.map((option) => renderChip(
-                    tFallback(t, `status.${option}`, option),
-                    status === option,
-                    () => {
-                      setStatus(option);
-                      setShowValidation(false);
-                    },
-                  ))}
-                </ScrollView>
-              </View>
+              <X size={20} color={themeColors.secondaryText} />
+            </TouchableOpacity>
+          </View>
 
-              <View style={styles.bulkOrganizeSection}>
-                <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
-                  {tFallback(t, 'taskEdit.projectLabel', 'Project')}
-                </Text>
-                {renderPickerRow({
-                  label: tFallback(t, 'taskEdit.projectLabel', 'Project'),
-                  onPress: () => setProjectPickerVisible(true),
-                  testID: 'bulk-organize-project-picker-row',
-                  value: projectChoiceLabel,
-                })}
-              </View>
-
-              <View style={styles.bulkOrganizeSection}>
-                <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
-                  {tFallback(t, 'projects.areaLabel', 'Area')}
-                </Text>
-                {renderPickerRow({
-                  disabled: Boolean(selectedProjectId),
-                  label: tFallback(t, 'projects.areaLabel', 'Area'),
-                  onPress: () => setAreaPickerVisible(true),
-                  testID: 'bulk-organize-area-picker-row',
-                  value: areaChoiceLabel,
-                })}
-              </View>
-
-              {isWaiting && (
-                <View style={styles.bulkOrganizeSection}>
-                  <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
-                    {tFallback(t, 'process.delegateWhoLabel', 'Waiting for')}
-                  </Text>
-                  <TextInput
-                    value={delegateWho}
-                    onChangeText={(value) => {
-                      setDelegateWho(value);
-                      setShowValidation(false);
-                    }}
-                    placeholder={tFallback(t, 'process.delegateWhoPlaceholder', 'Person or team')}
-                    placeholderTextColor={themeColors.secondaryText}
-                    style={[
-                      styles.bulkOrganizeInput,
-                      { backgroundColor: themeColors.inputBg, borderColor: themeColors.border, color: themeColors.text },
-                    ]}
-                  />
-                </View>
-              )}
-
-              <View style={styles.bulkOrganizeDateGrid}>
-                <View style={styles.bulkOrganizeDateField}>
-                  <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
-                    {tFallback(t, 'taskEdit.startDateLabel', 'Start')}
-                  </Text>
-                  <TextInput
-                    value={startDate}
-                    onChangeText={setStartDate}
-                    placeholder="YYYY-MM-DD"
-                    placeholderTextColor={themeColors.secondaryText}
-                    style={[
-                      styles.bulkOrganizeInput,
-                      { backgroundColor: themeColors.inputBg, borderColor: themeColors.border, color: themeColors.text },
-                    ]}
-                  />
-                </View>
-                <View style={styles.bulkOrganizeDateField}>
-                  <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
-                    {tFallback(t, 'taskEdit.dueDateLabel', 'Due')}
-                  </Text>
-                  <TextInput
-                    value={dueDate}
-                    onChangeText={setDueDate}
-                    placeholder="YYYY-MM-DD"
-                    placeholderTextColor={themeColors.secondaryText}
-                    style={[
-                      styles.bulkOrganizeInput,
-                      { backgroundColor: themeColors.inputBg, borderColor: themeColors.border, color: themeColors.text },
-                    ]}
-                  />
-                </View>
-                <View style={styles.bulkOrganizeDateField}>
-                  <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
-                    {isWaiting ? tFallback(t, 'process.followUpLabel', 'Follow-up') : tFallback(t, 'taskEdit.reviewDateLabel', 'Review')}
-                  </Text>
-                  <TextInput
-                    value={reviewDate}
-                    onChangeText={setReviewDate}
-                    placeholder="YYYY-MM-DD"
-                    placeholderTextColor={themeColors.secondaryText}
-                    style={[
-                      styles.bulkOrganizeInput,
-                      { backgroundColor: themeColors.inputBg, borderColor: themeColors.border, color: themeColors.text },
-                    ]}
-                  />
-                </View>
-              </View>
-
-              <View style={styles.bulkOrganizeSection}>
-                <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
-                  {tFallback(t, 'taskEdit.contextsLabel', 'Contexts')}
-                </Text>
-                <TextInput
-                  value={contextsInput}
-                  onChangeText={setContextsInput}
-                  placeholder="@computer, @office"
-                  placeholderTextColor={themeColors.secondaryText}
-                  style={[
-                    styles.bulkOrganizeInput,
-                    { backgroundColor: themeColors.inputBg, borderColor: themeColors.border, color: themeColors.text },
-                  ]}
-                />
-              </View>
-
-              <View style={styles.bulkOrganizeSection}>
-                <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
-                  {tFallback(t, 'taskEdit.tagsLabel', 'Tags')}
-                </Text>
-                <TextInput
-                  value={tagsInput}
-                  onChangeText={setTagsInput}
-                  placeholder="#project, #admin"
-                  placeholderTextColor={themeColors.secondaryText}
-                  style={[
-                    styles.bulkOrganizeInput,
-                    { backgroundColor: themeColors.inputBg, borderColor: themeColors.border, color: themeColors.text },
-                  ]}
-                />
-              </View>
-
-              {showValidation && (
-                <Text style={[styles.bulkOrganizeValidation, { color: themeColors.danger }]}>
-                  {tFallback(t, 'bulk.waitingPersonRequired', 'Choose who these items are waiting for.')}
-                </Text>
-              )}
-            </ScrollView>
-
-            <View style={[styles.bulkOrganizeFooter, { borderTopColor: themeColors.border }]}>
-              <TouchableOpacity
-                onPress={onClose}
-                disabled={isApplying}
-                style={styles.bulkOrganizeFooterButton}
-                accessibilityRole="button"
-              >
-                <Text style={[styles.bulkOrganizeFooterText, { color: themeColors.secondaryText }]}>
-                  {tFallback(t, 'common.cancel', 'Cancel')}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={apply}
-                disabled={isApplying || selectedCount === 0}
-                style={[
-                  styles.bulkOrganizeApplyButton,
-                  { backgroundColor: filledButton.backgroundColor, opacity: isApplying || selectedCount === 0 ? 0.6 : 1 },
-                ]}
-                accessibilityRole="button"
-              >
-                {isApplying ? (
-                  <ActivityIndicator size="small" color={filledButton.textColor ?? themeColors.onTint} />
-                ) : null}
-                <Text style={[styles.bulkOrganizeApplyText, { color: filledButton.textColor ?? themeColors.onTint }]}>
-                  {tFallback(t, 'bulk.applyToSelected', 'Apply to selected')}
-                </Text>
-              </TouchableOpacity>
+          <ScrollView
+            style={styles.bulkOrganizeScroll}
+            contentContainerStyle={styles.bulkOrganizeContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.bulkOrganizeSection}>
+              <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
+                {tFallback(t, 'bulk.organizeStatus', 'Status')}
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bulkOrganizeChipRow}>
+                {renderChip(
+                  tFallback(t, 'bulk.keepStatus', 'Keep status'),
+                  status === KEEP_VALUE,
+                  () => {
+                    setStatus(KEEP_VALUE);
+                    setShowValidation(false);
+                  },
+                )}
+                {STATUS_OPTIONS.map((option) => renderChip(
+                  tFallback(t, `status.${option}`, option),
+                  status === option,
+                  () => {
+                    setStatus(option);
+                    setShowValidation(false);
+                  },
+                ))}
+              </ScrollView>
             </View>
+
+            <View style={styles.bulkOrganizeSection}>
+              <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
+                {tFallback(t, 'taskEdit.projectLabel', 'Project')}
+              </Text>
+              {renderPickerRow({
+                label: tFallback(t, 'taskEdit.projectLabel', 'Project'),
+                onPress: () => setProjectPickerVisible(true),
+                testID: 'bulk-organize-project-picker-row',
+                value: projectChoiceLabel,
+              })}
+            </View>
+
+            <View style={styles.bulkOrganizeSection}>
+              <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
+                {tFallback(t, 'projects.areaLabel', 'Area')}
+              </Text>
+              {renderPickerRow({
+                disabled: Boolean(selectedProjectId),
+                label: tFallback(t, 'projects.areaLabel', 'Area'),
+                onPress: () => setAreaPickerVisible(true),
+                testID: 'bulk-organize-area-picker-row',
+                value: areaChoiceLabel,
+              })}
+            </View>
+
+            {isWaiting && (
+              <View style={styles.bulkOrganizeSection}>
+                <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
+                  {tFallback(t, 'process.delegateWhoLabel', 'Waiting for')}
+                </Text>
+                <TextInput
+                  value={delegateWho}
+                  onChangeText={(value) => {
+                    setDelegateWho(value);
+                    setShowValidation(false);
+                  }}
+                  placeholder={tFallback(t, 'process.delegateWhoPlaceholder', 'Person or team')}
+                  placeholderTextColor={themeColors.secondaryText}
+                  style={[
+                    styles.bulkOrganizeInput,
+                    { backgroundColor: themeColors.inputBg, borderColor: themeColors.border, color: themeColors.text },
+                  ]}
+                />
+              </View>
+            )}
+
+            <View style={styles.bulkOrganizeDateGrid}>
+              <View style={styles.bulkOrganizeDateField}>
+                <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
+                  {tFallback(t, 'taskEdit.startDateLabel', 'Start')}
+                </Text>
+                <TextInput
+                  value={startDate}
+                  onChangeText={setStartDate}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={themeColors.secondaryText}
+                  style={[
+                    styles.bulkOrganizeInput,
+                    { backgroundColor: themeColors.inputBg, borderColor: themeColors.border, color: themeColors.text },
+                  ]}
+                />
+              </View>
+              <View style={styles.bulkOrganizeDateField}>
+                <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
+                  {tFallback(t, 'taskEdit.dueDateLabel', 'Due')}
+                </Text>
+                <TextInput
+                  value={dueDate}
+                  onChangeText={setDueDate}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={themeColors.secondaryText}
+                  style={[
+                    styles.bulkOrganizeInput,
+                    { backgroundColor: themeColors.inputBg, borderColor: themeColors.border, color: themeColors.text },
+                  ]}
+                />
+              </View>
+              <View style={styles.bulkOrganizeDateField}>
+                <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
+                  {isWaiting ? tFallback(t, 'process.followUpLabel', 'Follow-up') : tFallback(t, 'taskEdit.reviewDateLabel', 'Review')}
+                </Text>
+                <TextInput
+                  value={reviewDate}
+                  onChangeText={setReviewDate}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={themeColors.secondaryText}
+                  style={[
+                    styles.bulkOrganizeInput,
+                    { backgroundColor: themeColors.inputBg, borderColor: themeColors.border, color: themeColors.text },
+                  ]}
+                />
+              </View>
+            </View>
+
+            <View style={styles.bulkOrganizeSection}>
+              <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
+                {tFallback(t, 'taskEdit.contextsLabel', 'Contexts')}
+              </Text>
+              <TextInput
+                value={contextsInput}
+                onChangeText={setContextsInput}
+                placeholder="@computer, @office"
+                placeholderTextColor={themeColors.secondaryText}
+                style={[
+                  styles.bulkOrganizeInput,
+                  { backgroundColor: themeColors.inputBg, borderColor: themeColors.border, color: themeColors.text },
+                ]}
+              />
+            </View>
+
+            <View style={styles.bulkOrganizeSection}>
+              <Text style={[styles.bulkOrganizeLabel, { color: themeColors.secondaryText }]}>
+                {tFallback(t, 'taskEdit.tagsLabel', 'Tags')}
+              </Text>
+              <TextInput
+                value={tagsInput}
+                onChangeText={setTagsInput}
+                placeholder="#project, #admin"
+                placeholderTextColor={themeColors.secondaryText}
+                style={[
+                  styles.bulkOrganizeInput,
+                  { backgroundColor: themeColors.inputBg, borderColor: themeColors.border, color: themeColors.text },
+                ]}
+              />
+            </View>
+
+            {showValidation && (
+              <Text style={[styles.bulkOrganizeValidation, { color: themeColors.danger }]}>
+                {tFallback(t, 'bulk.waitingPersonRequired', 'Choose who these items are waiting for.')}
+              </Text>
+            )}
+          </ScrollView>
+
+          <View style={[styles.bulkOrganizeFooter, { borderTopColor: themeColors.border }]}>
+            <TouchableOpacity
+              onPress={onClose}
+              disabled={isApplying}
+              style={styles.bulkOrganizeFooterButton}
+              accessibilityRole="button"
+            >
+              <Text style={[styles.bulkOrganizeFooterText, { color: themeColors.secondaryText }]}>
+                {tFallback(t, 'common.cancel', 'Cancel')}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={apply}
+              disabled={isApplying || selectedCount === 0}
+              style={[
+                styles.bulkOrganizeApplyButton,
+                { backgroundColor: filledButton.backgroundColor, opacity: isApplying || selectedCount === 0 ? 0.6 : 1 },
+              ]}
+              accessibilityRole="button"
+            >
+              {isApplying ? (
+                <ActivityIndicator size="small" color={filledButton.textColor ?? themeColors.onTint} />
+              ) : null}
+              <Text style={[styles.bulkOrganizeApplyText, { color: filledButton.textColor ?? themeColors.onTint }]}>
+                {tFallback(t, 'bulk.applyToSelected', 'Apply to selected')}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </Pressable>
       </Pressable>
 
