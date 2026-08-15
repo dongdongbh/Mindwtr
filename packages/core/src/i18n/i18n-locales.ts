@@ -161,7 +161,9 @@ export const LOCALES = {
         mode: 'overrides',
         native: '日本語',
         nonLatin: true,
-        translatedKeyFloor: 1430,
+        // Rewritten end to end with every English key translated. Keep this at full
+        // parity so new English UI copy cannot silently fall back in Japanese.
+        translatedKeyFloor: 'all',
     },
     fr: {
         loadSync: () => require('./locales/fr') as typeof import('./locales/fr'),

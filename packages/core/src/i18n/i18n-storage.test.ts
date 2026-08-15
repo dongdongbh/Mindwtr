@@ -8,6 +8,8 @@ describe('i18n-storage locale defaults', () => {
         expect(resolveLanguageFromLocale('zh-TW')).toBe('zh-Hant');
         expect(resolveLanguageFromLocale('zh-Hant-HK')).toBe('zh-Hant');
         expect(resolveLanguageFromLocale('es-ES')).toBe('es');
+        expect(resolveLanguageFromLocale('ja-JP')).toBe('ja');
+        expect(resolveLanguageFromLocale('ja_JP')).toBe('ja');
         expect(resolveLanguageFromLocale('ko-KR')).toBe('ko');
     });
 

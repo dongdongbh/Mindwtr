@@ -11,7 +11,7 @@ type KeyValueStorageAsync = {
     setItem: (key: string, value: string) => Promise<void>;
 };
 
-const WELL_SUPPORTED_DEFAULT_LANGUAGES = new Set<Language>(['en', 'zh', 'zh-Hant', 'es', 'ko']);
+const WELL_SUPPORTED_DEFAULT_LANGUAGES = new Set<Language>(['en', 'zh', 'zh-Hant', 'es', 'ja', 'ko']);
 
 /**
  * Resolve app language from a locale string.
