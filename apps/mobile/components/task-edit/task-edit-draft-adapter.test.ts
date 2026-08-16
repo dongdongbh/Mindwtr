@@ -151,4 +151,31 @@ describe('mobile task edit draft', () => {
         });
         expect(buildTaskEditUpdatePatch(state, baseTask)).not.toHaveProperty('description');
     });
+
+    it('drops blank checklist rows at save so return-minted empties never persist (#1045)', () => {
+        const state = {
+            ...createTaskEditDraft(baseTask),
+            checklist: [
+                ...(baseTask.checklist ?? []),
+                { id: 'blank-1', title: '   ', isCompleted: false },
+            ],
+        };
+
+        expect(buildTaskEditUpdatePatch(state, baseTask)).not.toHaveProperty('checklist');
+
+        const withRealEdit = {
+            ...createTaskEditDraft(baseTask),
+            checklist: [
+                ...(baseTask.checklist ?? []),
+                { id: 'new-1', title: 'Real item', isCompleted: false },
+                { id: 'blank-2', title: '', isCompleted: false },
+            ],
+        };
+        expect(buildTaskEditUpdatePatch(withRealEdit, baseTask)).toMatchObject({
+            checklist: [
+                ...(baseTask.checklist ?? []),
+                { id: 'new-1', title: 'Real item', isCompleted: false },
+            ],
+        });
+    });
 });

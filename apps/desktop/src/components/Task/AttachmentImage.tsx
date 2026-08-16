@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Attachment } from '@mindwtr/core';
 import { cn } from '../../lib/utils';
-import { normalizeAttachmentPathForUrl, resolveAttachmentOpenTarget } from '../../lib/attachment-paths';
+import { normalizeAttachmentPathForUrl, resolveAttachmentReadPath } from '../../lib/attachment-paths';
 import { isTauriRuntime } from '../../lib/runtime';
 import { resolveAttachmentSource } from './task-item-attachment-utils';
 
@@ -27,7 +27,7 @@ const inferImageMimeType = (attachment: Attachment): string => {
 };
 
 const loadTauriImageSource = async (attachment: Attachment): Promise<string | null> => {
-    const uri = resolveAttachmentOpenTarget(attachment.uri);
+    const uri = await resolveAttachmentReadPath(attachment.uri);
     if (!uri || /^https?:\/\//i.test(uri)) return resolveAttachmentSource(attachment.uri);
 
     const [{ dataDir }, { BaseDirectory, readFile }] = await Promise.all([

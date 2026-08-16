@@ -26,6 +26,15 @@ const fsMocks = vi.hoisted(() => ({
     writeFile: vi.fn(),
 }));
 
+// #1037: the file backend must reach the sync folder through the async Rust
+// commands, never the fs plugin's main-thread exists/mkdir/remove/rename.
+const syncFsMocks = vi.hoisted(() => ({
+    exists: vi.fn(),
+    mkdir: vi.fn(),
+    remove: vi.fn(),
+    rename: vi.fn(),
+}));
+
 const pathMocks = vi.hoisted(() => ({
     dataDir: vi.fn(),
     join: vi.fn(),
@@ -47,6 +56,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
     };
 });
 vi.mock('@tauri-apps/plugin-fs', () => fsMocks);
+vi.mock('./sync-fs', () => syncFsMocks);
 vi.mock('@tauri-apps/api/path', () => pathMocks);
 vi.mock('./cloudkit-sync', () => cloudKitMocks);
 
@@ -102,6 +112,9 @@ describe('desktop sync attachment backends', () => {
         pathMocks.dataDir.mockResolvedValue('/app-data');
         pathMocks.join.mockImplementation(async (...parts: string[]) => parts.join('/'));
         fsMocks.mkdir.mockResolvedValue(undefined);
+        syncFsMocks.mkdir.mockResolvedValue(undefined);
+        syncFsMocks.rename.mockResolvedValue(undefined);
+        syncFsMocks.remove.mockResolvedValue(undefined);
     });
 
     afterEach(() => {
@@ -309,7 +322,7 @@ describe('desktop sync attachment backends', () => {
             logSyncWarning: vi.fn(),
             resolveWebdavPassword: vi.fn(),
         };
-        fsMocks.exists.mockResolvedValue(true);
+        syncFsMocks.exists.mockResolvedValue(true);
         fsMocks.readFile.mockResolvedValue(bytes);
 
         await syncFileAttachments(
@@ -323,7 +336,10 @@ describe('desktop sync attachment backends', () => {
             expect.stringMatching(/^\/candidate-sync\/attachments\/attachment-1\.txt\.tmp-/),
             bytes,
         );
-        expect(fsMocks.rename).toHaveBeenCalledWith(
+        // Never the fs plugin's rename: it is a main-thread command and the
+        // sync folder may be a slow mount (#1037).
+        expect(fsMocks.rename).not.toHaveBeenCalled();
+        expect(syncFsMocks.rename).toHaveBeenCalledWith(
             expect.stringMatching(/^\/candidate-sync\/attachments\/attachment-1\.txt\.tmp-/),
             '/candidate-sync/attachments/attachment-1.txt',
         );
@@ -343,17 +359,20 @@ describe('desktop sync attachment backends', () => {
             logSyncWarning: vi.fn(),
             resolveWebdavPassword: vi.fn(),
         };
-        fsMocks.exists.mockImplementation(async (path: string) => !String(path).startsWith('/candidate-sync/'));
+        syncFsMocks.exists.mockImplementation(async (path: string) => !String(path).startsWith('/candidate-sync/'));
         fsMocks.readFile.mockResolvedValue(bytes);
 
         const mutated = await syncFileAttachments(appData, '/candidate-sync', deps);
 
-        expect(fsMocks.rename).toHaveBeenCalledWith(
+        expect(syncFsMocks.rename).toHaveBeenCalledWith(
             expect.stringMatching(/^\/candidate-sync\/attachments\/attachment-1\.txt\.tmp-/),
             '/candidate-sync/attachments/attachment-1.txt',
         );
         expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
         expect(mutated).toBe(true);
+        // The sync folder is only ever touched off the main thread (#1037).
+        expect(fsMocks.exists).not.toHaveBeenCalled();
+        expect(fsMocks.mkdir).not.toHaveBeenCalled();
     });
 
     it('keeps an attachment cloud key when its local copy is missing, even if the sync folder lacks the file', async () => {
@@ -365,12 +384,15 @@ describe('desktop sync attachment backends', () => {
             logSyncWarning: vi.fn(),
             resolveWebdavPassword: vi.fn(),
         };
-        fsMocks.exists.mockResolvedValue(false);
+        syncFsMocks.exists.mockResolvedValue(false);
 
         await syncFileAttachments(appData, '/candidate-sync', deps);
 
         expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
         expect(fsMocks.writeFile).not.toHaveBeenCalled();
+        // The sync folder is only ever stat'd off the main thread (#1037).
+        expect(fsMocks.exists).not.toHaveBeenCalled();
+        expect(fsMocks.mkdir).not.toHaveBeenCalled();
     });
 
     it('keeps WebDAV attachment sync in cooldown across repeated sync runs after rate limiting', async () => {

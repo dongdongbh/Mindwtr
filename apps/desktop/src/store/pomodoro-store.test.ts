@@ -7,6 +7,11 @@ import {
     reconcilePomodoroSnapshot,
     usePomodoroStore,
 } from './pomodoro-store';
+import { armPomodoroCompletionSound } from '../lib/pomodoro-alert';
+
+vi.mock('../lib/pomodoro-alert', () => ({
+    armPomodoroCompletionSound: vi.fn(),
+}));
 
 const NOW_ISO = new Date().toISOString();
 
@@ -106,6 +111,27 @@ describe('pomodoro store', () => {
 
         expect(updates).toEqual([]);
         expect(usePomodoroStore.getState().snapshot.sessionHistory.totalCompletedFocusSessions).toBe(1);
+    });
+
+    // The Start click is the only moment WebKit lets an audible AudioContext be
+    // created, so every stopped→running commit must arm the chime (#528).
+    it('arms the completion chime on the stopped-to-running transition only', () => {
+        vi.mocked(armPomodoroCompletionSound).mockClear();
+        usePomodoroStore.getState().hydratePomodoro({});
+        usePomodoroStore.getState().commitPomodoro((prev) => ({
+            ...prev,
+            timerState: { ...prev.timerState, isRunning: true },
+            updatedAtMs: Date.now(),
+        }));
+        expect(armPomodoroCompletionSound).toHaveBeenCalledTimes(1);
+
+        // A running-to-running tick is not a gesture; no re-arm.
+        usePomodoroStore.getState().commitPomodoro((prev) => ({
+            ...prev,
+            timerState: { ...prev.timerState, remainingSeconds: prev.timerState.remainingSeconds - 1 },
+            updatedAtMs: Date.now(),
+        }));
+        expect(armPomodoroCompletionSound).toHaveBeenCalledTimes(1);
     });
 
     it('starts a linked focus session from a task via quick start', () => {

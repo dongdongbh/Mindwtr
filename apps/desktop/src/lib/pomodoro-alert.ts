@@ -20,12 +20,38 @@ const getAudioContextConstructor = (): AudioContextConstructorLike | undefined =
     return audioGlobal.AudioContext ?? audioGlobal.webkitAudioContext;
 };
 
+// WebKit (macOS WKWebView) keeps an AudioContext created outside a user
+// gesture suspended, and resume() outside a gesture is a no-op — so a chime
+// constructed at completion time is silent exactly when the timer is useful:
+// with the user working somewhere else (#528). Arming during the Start click
+// captures the gesture; the running context is kept and reused by the alert.
+let armedAudioContext: AudioContextLike | null = null;
+
+export function armPomodoroCompletionSound(): void {
+    const AudioContextConstructor = getAudioContextConstructor();
+    if (!AudioContextConstructor) return;
+    try {
+        if (armedAudioContext && armedAudioContext.state !== 'closed') {
+            if (armedAudioContext.state === 'suspended') void armedAudioContext.resume?.();
+            return;
+        }
+        const context = new AudioContextConstructor();
+        if (context.state === 'suspended') void context.resume?.();
+        armedAudioContext = context;
+    } catch {
+        // Best-effort; completion falls back to constructing a context in place.
+    }
+}
+
 export async function playPomodoroCompletionSound(): Promise<void> {
     const AudioContextConstructor = getAudioContextConstructor();
     if (!AudioContextConstructor) return;
 
     try {
-        const context = new AudioContextConstructor();
+        const armed = armedAudioContext && armedAudioContext.state === 'running'
+            ? armedAudioContext
+            : null;
+        const context = armed ?? new AudioContextConstructor();
         if (context.state === 'suspended' && context.resume) {
             await context.resume();
         }

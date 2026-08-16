@@ -84,8 +84,13 @@ export function buildTaskEditUpdatePatch(
             delete narrowed[key];
         }
     }
-    if (areChecklistsDirty(finalState, task)) {
-        narrowed.checklist = finalState.checklist;
+    // Blank rows are a typing convenience (return mints the next row before it
+    // has text) and never content — they are dropped at save, so a saved task
+    // keeps no trailing empty item (#1045).
+    const cleanedChecklist = finalState.checklist?.filter((item) => item.title.trim() !== '');
+    const bothEmpty = (cleanedChecklist?.length ?? 0) === 0 && (task.checklist?.length ?? 0) === 0;
+    if (!bothEmpty && areChecklistsDirty({ ...finalState, checklist: cleanedChecklist }, task)) {
+        narrowed.checklist = cleanedChecklist;
     }
     return narrowed;
 }

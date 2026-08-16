@@ -3,10 +3,12 @@ import { LocalSyncAbort, type AppData } from '@mindwtr/core';
 
 import {
     cleanupOrphanedAttachments,
+    deleteAttachmentFile,
     type AttachmentCleanupDeps,
 } from './sync-attachment-cleanup';
 
 const fsMocks = vi.hoisted(() => ({
+    exists: vi.fn(),
     readDir: vi.fn(),
     remove: vi.fn(),
 }));
@@ -17,6 +19,9 @@ const pathMocks = vi.hoisted(() => ({
 
 vi.mock('@tauri-apps/plugin-fs', () => fsMocks);
 vi.mock('@tauri-apps/api/path', () => pathMocks);
+vi.mock('./managed-paths', () => ({
+    getManagedPath: async (...segments: string[]) => ['/new-profile', ...segments].join('/'),
+}));
 
 const buildData = (): AppData => ({
     tasks: [],
@@ -68,6 +73,45 @@ describe('desktop attachment cleanup freshness', () => {
 
         expect(pathMocks.join).toHaveBeenCalled();
         expect(ensureLocalSnapshotFresh).toHaveBeenCalledTimes(2);
+        expect(fsMocks.remove).not.toHaveBeenCalled();
+    });
+});
+
+describe('deleteAttachmentFile', () => {
+    const attachment = (uri: string) => ({
+        id: 'a1',
+        kind: 'file' as const,
+        title: 'a1.pdf',
+        uri,
+        createdAt: '2026-08-16T00:00:00.000Z',
+        updatedAt: '2026-08-16T00:00:00.000Z',
+    });
+
+    it('removes the profile copy a relocated portable install left under a stale path', async () => {
+        // #1038: the recorded path names the previous profile location, so the
+        // managed-dir check missed the copy and it stayed there forever.
+        fsMocks.remove.mockReset();
+        fsMocks.exists.mockImplementation(async (path: string) => path === '/new-profile/attachments/a1.pdf');
+
+        await deleteAttachmentFile(
+            attachment('/old-profile/attachments/a1.pdf'),
+            buildDeps(),
+            { ensureLocalSnapshotFresh: vi.fn() },
+        );
+
+        expect(fsMocks.remove).toHaveBeenCalledWith('/new-profile/attachments/a1.pdf');
+    });
+
+    it('never removes a pointer target outside the managed dir', async () => {
+        fsMocks.remove.mockReset();
+        fsMocks.exists.mockResolvedValue(true);
+
+        await deleteAttachmentFile(
+            attachment('/home/demo/Documents/spec.pdf'),
+            buildDeps(),
+            { ensureLocalSnapshotFresh: vi.fn() },
+        );
+
         expect(fsMocks.remove).not.toHaveBeenCalled();
     });
 });

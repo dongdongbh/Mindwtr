@@ -96,11 +96,19 @@ const createTouchedTransportFields = (): TouchedTransportFields => ({
     cloudProvider: false,
 });
 
+// The prior secret is only needed when the candidate has none of its own to
+// write: `writeCandidateTransport` carries it forward. Demanding a readable
+// prior for a candidate that replaces it made re-entering credentials
+// impossible once the secret authority went away — the exact dead end #1043
+// reported on a keyring-less sandbox ("I re-enter my username and password,
+// but the error persists"). The post-write verification below still requires
+// the new secret to read back exactly.
 const getCandidateSecretRequirements = (
     candidate: DesktopSyncConfigOverride,
     previous: PersistedDesktopSyncConfiguration,
 ): SyncConfigurationSecretRequirements => ({
     requireWebdavPassword: candidate.backend === 'webdav'
+        && !candidate.webdav?.password?.trim()
         && (
             previous.backend === 'webdav'
             || Boolean(previous.webdav.url.trim())
@@ -109,6 +117,7 @@ const getCandidateSecretRequirements = (
         ),
     requireCloudToken: candidate.backend === 'cloud'
         && (candidate.cloudProvider ?? 'selfhosted') === 'selfhosted'
+        && !candidate.cloud?.token?.trim()
         && (
             (previous.backend === 'cloud' && previous.cloudProvider === 'selfhosted')
             || Boolean(previous.cloud.url.trim())

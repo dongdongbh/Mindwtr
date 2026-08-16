@@ -37,6 +37,12 @@ import {
 } from './sync-service-utils';
 import { getManagedPath } from './managed-paths';
 import {
+    exists as syncFsExists,
+    mkdir as syncFsMkdir,
+    remove as syncFsRemove,
+    rename as syncFsRename,
+} from './sync-fs';
+import {
     clearAttachmentValidationFailure,
     handleAttachmentValidationFailure,
     markAttachmentUnrecoverable,
@@ -290,6 +296,7 @@ export async function syncWebdavAttachments(
         dataBaseDir: BaseDirectory.Data,
         exists,
         readFile,
+        managedAttachmentsDir,
     });
 
     let abortedByRateLimit = false;
@@ -580,6 +587,7 @@ export async function syncCloudAttachments(
         dataBaseDir: BaseDirectory.Data,
         exists,
         readFile,
+        managedAttachmentsDir,
     });
 
     return await syncBasicRemoteAttachments({
@@ -741,6 +749,7 @@ export async function syncDropboxAttachments(
         dataBaseDir: BaseDirectory.Data,
         exists,
         readFile,
+        managedAttachmentsDir,
     });
 
     return await syncBasicRemoteAttachments({
@@ -883,7 +892,7 @@ export async function syncCloudKitAttachments(
 
     const { readLocalFile, localFileExists } = createLocalAttachmentFs(
         deps.logSyncWarning,
-        { baseDataDir, dataBaseDir: BaseDirectory.Data, exists, readFile },
+        { baseDataDir, dataBaseDir: BaseDirectory.Data, exists, readFile, managedAttachmentsDir },
         'Failed to check CloudKit attachment file',
     );
 
@@ -983,18 +992,21 @@ export async function syncFileAttachments(
 ): Promise<boolean> {
     if (!deps.isTauriRuntimeEnv() || !baseSyncDir) return false;
 
-    const { BaseDirectory, exists, mkdir, readFile, writeFile, rename, remove } = await import('@tauri-apps/plugin-fs');
+    // #1037: every fs call below can land on the sync folder, which may be a
+    // slow mount, so the ones the plugin runs on the main thread come from
+    // ./sync-fs instead. The plugin's own readFile/writeFile are already async.
+    const { BaseDirectory, exists, readFile, writeFile } = await import('@tauri-apps/plugin-fs');
     const { dataDir, join } = await import('@tauri-apps/api/path');
 
     const attachmentsDir = await join(baseSyncDir, ATTACHMENTS_DIR_NAME);
     try {
-        await mkdir(attachmentsDir, { recursive: true });
+        await syncFsMkdir(attachmentsDir);
     } catch (error) {
         deps.logSyncWarning('Failed to ensure sync attachments directory', error);
     }
 
     try {
-        await mkdir(await getManagedPath(ATTACHMENTS_DIR_NAME), { recursive: true });
+        await syncFsMkdir(await getManagedPath(ATTACHMENTS_DIR_NAME));
     } catch (error) {
         deps.logSyncWarning('Failed to ensure local attachments directory', error);
     }
@@ -1006,8 +1018,11 @@ export async function syncFileAttachments(
     const { readLocalFile, localFileExists } = createLocalAttachmentFs(deps.logSyncWarning, {
         baseDataDir,
         dataBaseDir: BaseDirectory.Data,
-        exists,
+        // An absolute attachment uri can point at the slow mount too; only the
+        // base-directory-relative branch is guaranteed to be local app data.
+        exists: (path, options) => (options ? exists(path, options) : syncFsExists(path)),
         readFile,
+        managedAttachmentsDir,
     });
 
     // Mirror the WebDAV presence pre-pass: a cloudKey recorded against a
@@ -1022,7 +1037,7 @@ export async function syncFileAttachments(
         if (!(await localFileExists(rawUri))) continue;
         try {
             const remotePath = await resolveFileBackendPath(join, baseSyncDir, attachment.cloudKey);
-            if (!(await exists(remotePath))) {
+            if (!(await syncFsExists(remotePath))) {
                 attachment.cloudKey = undefined;
                 preMutated = true;
             }
@@ -1053,8 +1068,8 @@ export async function syncFileAttachments(
             clearAttachmentValidationFailure(attachment.id);
             await writeFileSafelyAbsolute(await resolveFileBackendPath(join, baseSyncDir, cloudKey), fileData, {
                 writeFile,
-                rename,
-                remove,
+                rename: syncFsRename,
+                remove: syncFsRemove,
             });
             attachment.cloudKey = cloudKey;
             attachment.localStatus = 'available';
@@ -1066,7 +1081,7 @@ export async function syncFileAttachments(
         onDownload: async (attachment) => {
             if (!attachment.cloudKey) return false;
             const sourcePath = await resolveFileBackendPath(join, baseSyncDir, attachment.cloudKey);
-            if (!(await exists(sourcePath))) return false;
+            if (!(await syncFsExists(sourcePath))) return false;
             const fileData = await readFile(sourcePath);
             await validateAttachmentHash(attachment, fileData);
             const filename =
@@ -1074,8 +1089,8 @@ export async function syncFileAttachments(
             const targetPath = await join(managedAttachmentsDir, filename);
             await writeFileSafelyAbsolute(targetPath, fileData, {
                 writeFile,
-                rename,
-                remove,
+                rename: syncFsRename,
+                remove: syncFsRemove,
             });
             attachment.uri = targetPath;
             const statusChanged = attachment.localStatus !== 'available';

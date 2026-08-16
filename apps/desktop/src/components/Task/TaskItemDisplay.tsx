@@ -604,7 +604,11 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     );
 
     return (
-        <div className={cn("task-item-display flex-1 min-w-0 flex items-start gap-3", actionsOverlay && "relative")}>
+        // `isolate` keeps the row's internal z-10/z-20 layers (overlays, the
+        // hover action cluster) from joining the page stacking context, where
+        // they painted over open toolbar menus in views whose toolbar sits at
+        // a lower z-index (#1040).
+        <div className={cn("task-item-display isolate flex-1 min-w-0 flex items-start gap-3", actionsOverlay && "relative")}>
             {overlayDragHandle && (
                 <div
                     className="absolute left-0 top-2 flex items-center -translate-x-2 z-10"

@@ -78,7 +78,7 @@ fn allowed_open_roots(app: &tauri::AppHandle) -> Vec<PathBuf> {
     )
 }
 
-fn normalize_open_path(raw: &str) -> Result<PathBuf, String> {
+fn normalize_open_path(raw: &str, managed_attachments_dir: Option<&Path>) -> Result<PathBuf, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err("Path is empty".to_string());
@@ -88,11 +88,20 @@ fn normalize_open_path(raw: &str) -> Result<PathBuf, String> {
     if !candidate.is_absolute() {
         return Err("Only absolute local file paths can be opened.".to_string());
     }
-    candidate
-        .canonicalize()
+    if let Ok(resolved) = candidate.canonicalize() {
+        return Ok(resolved);
+    }
+    // A portable profile travels with the install, so an attachment URI recorded
+    // at the previous location is stale even though the file moved along inside
+    // the profile's attachments dir. Retry the same file name there before
+    // giving up — the recorded path always wins when it still resolves (#1038).
+    managed_attachments_dir
+        .zip(candidate.file_name())
+        .map(|(dir, name)| dir.join(name))
+        .and_then(|fallback| fallback.canonicalize().ok())
         // The path is the one clue a user has for repairing a broken
         // reference (moved file, relocated portable profile) — name it (#1001).
-        .map_err(|_| format!("File does not exist or cannot be accessed: {}", candidate.display()))
+        .ok_or_else(|| format!("File does not exist or cannot be accessed: {}", candidate.display()))
 }
 
 fn path_is_under_allowed_root(path: &Path, allowed_roots: &[PathBuf]) -> bool {
@@ -783,7 +792,8 @@ pub(crate) fn migrate_portable_attachments(
 // command, no shared state to race (B1).
 #[tauri::command(async)]
 pub(crate) fn open_path(app: tauri::AppHandle, path: String) -> Result<bool, String> {
-    let normalized = normalize_open_path(&path)?;
+    let managed_attachments_dir = get_data_dir(&app).join("attachments");
+    let normalized = normalize_open_path(&path, Some(&managed_attachments_dir))?;
     let allowed_roots = allowed_open_roots(&app);
     if !path_is_openable(&normalized, &allowed_roots) {
         return Err("Path does not exist or cannot be opened.".to_string());
@@ -798,8 +808,35 @@ mod tests {
 
     #[test]
     fn normalize_open_path_rejects_urls_and_relative_paths() {
-        assert!(normalize_open_path("https://example.com/file.txt").is_err());
-        assert!(normalize_open_path("../notes.txt").is_err());
+        assert!(normalize_open_path("https://example.com/file.txt", None).is_err());
+        assert!(normalize_open_path("../notes.txt", None).is_err());
+    }
+
+    #[test]
+    fn normalize_open_path_falls_back_to_the_current_managed_attachments_dir() {
+        // #1038: a portable profile that moved leaves every stored URI pointing
+        // at the old location, though the file travelled inside attachments/.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let managed_dir = dir.path().join("new-profile").join("attachments");
+        std::fs::create_dir_all(&managed_dir).expect("create managed dir");
+        let managed_file = managed_dir.join("id-1.txt");
+        std::fs::write(&managed_file, b"attachment").expect("write attachment");
+        let stale = dir
+            .path()
+            .join("old-profile")
+            .join("attachments")
+            .join("id-1.txt");
+
+        let resolved = normalize_open_path(&stale.to_string_lossy(), Some(&managed_dir))
+            .expect("stale portable path resolves against the current profile");
+        assert_eq!(resolved, managed_file.canonicalize().expect("canonicalize"));
+
+        // A path with no counterpart in the managed dir still fails, and names
+        // the recorded path so the user can repair the reference (#1001).
+        let missing = dir.path().join("elsewhere").join("report.pdf");
+        let error = normalize_open_path(&missing.to_string_lossy(), Some(&managed_dir))
+            .expect_err("unrelated missing file must not resolve");
+        assert!(error.contains(&missing.display().to_string()), "{error}");
     }
 
     #[test]

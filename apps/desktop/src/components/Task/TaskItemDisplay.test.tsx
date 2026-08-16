@@ -74,6 +74,40 @@ describe('TaskItemDisplay', () => {
         expect(getByText('2周前')).toBeInTheDocument();
     });
 
+    it('isolates the row stacking context so hover actions cannot paint over open toolbar menus (#1040)', () => {
+        const { container } = render(
+            <LanguageProvider>
+                <TaskItemDisplay
+                    task={baseTask}
+                    language="en"
+                    selectionMode={false}
+                    isViewOpen={false}
+                    actions={{
+                        onToggleView: vi.fn(),
+                        onEdit: vi.fn(),
+                        onDelete: vi.fn(),
+                        onDuplicate: vi.fn(),
+                        onStatusChange: vi.fn(),
+                        openAttachment: vi.fn(),
+                    }}
+                    visibleAttachments={[]}
+                    recurrenceRule=""
+                    recurrenceStrategy="strict"
+                    prioritiesEnabled={false}
+                    timeEstimatesEnabled={false}
+                    isStagnant={false}
+                    showQuickDone={false}
+                    readOnly={false}
+                    t={(key: string) => key}
+                />
+            </LanguageProvider>
+        );
+
+        const root = container.querySelector('.task-item-display');
+        expect(root).not.toBeNull();
+        expect(root!.classList.contains('isolate')).toBe(true);
+    });
+
     const renderWithRename = (props: {
         onRenameTitle: ReturnType<typeof vi.fn>;
         onEdit?: ReturnType<typeof vi.fn>;

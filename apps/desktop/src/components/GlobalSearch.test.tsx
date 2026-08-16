@@ -143,6 +143,27 @@ describe('GlobalSearch', () => {
         expect(screen.getByText('Type to search...')).toBeInTheDocument();
     });
 
+    // Queries are operators and partial words; macOS WebKit applied system
+    // auto-capitalization to the query input when nothing declared otherwise
+    // (#1019). jsdom cannot exercise the OS behavior, so pin the declarations.
+    it('declares the query input off-limits to OS autocorrect and auto-capitalization', async () => {
+        render(
+            <LanguageProvider>
+                <GlobalSearch onNavigate={vi.fn()} />
+            </LanguageProvider>
+        );
+
+        await act(async () => {
+            window.dispatchEvent(new Event('mindwtr:open-search'));
+            await vi.advanceTimersByTimeAsync(50);
+        });
+
+        const input = screen.getByRole('textbox');
+        expect(input).toHaveAttribute('autocorrect', 'off');
+        expect(input).toHaveAttribute('autocapitalize', 'none');
+        expect(input).toHaveAttribute('spellcheck', 'false');
+    });
+
     it('searches all areas when opened from an active area filter', async () => {
         render(
             <LanguageProvider>

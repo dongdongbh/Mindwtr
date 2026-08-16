@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { playPomodoroCompletionSound, requestPomodoroWindowAttention } from './pomodoro-alert';
+import { armPomodoroCompletionSound, playPomodoroCompletionSound, requestPomodoroWindowAttention } from './pomodoro-alert';
 
 const attentionMocks = vi.hoisted(() => ({
     isTauriRuntime: vi.fn<() => boolean>(),
@@ -108,5 +108,50 @@ describe('pomodoro-alert', () => {
 
         expect(attentionMocks.isFocused).not.toHaveBeenCalled();
         expect(attentionMocks.requestUserAttention).not.toHaveBeenCalled();
+    });
+
+    // macOS WKWebView never lets a context constructed at completion time make
+    // sound (no gesture); only the context armed during the Start click can
+    // play (#528). Keep this test last: the armed context is module state, and
+    // marking it closed at the end releases it for any test added after.
+    it('reuses the AudioContext armed during the Start gesture instead of constructing one at completion (#528)', async () => {
+        const gainNode = {
+            connect: vi.fn(),
+            gain: {
+                cancelScheduledValues: vi.fn(),
+                setValueAtTime: vi.fn(),
+                exponentialRampToValueAtTime: vi.fn(),
+            },
+        };
+        const armedContext = {
+            currentTime: 5,
+            destination: {},
+            state: 'running',
+            resume: vi.fn(),
+            createGain: vi.fn(() => gainNode),
+            createOscillator: vi.fn(() => ({
+                frequency: { setValueAtTime: vi.fn() },
+                connect: vi.fn(),
+                start: vi.fn(),
+                stop: vi.fn(),
+                type: undefined,
+            })),
+        };
+        const startClickConstructor = vi.fn(() => armedContext);
+        globalThis.AudioContext = startClickConstructor as unknown as typeof AudioContext;
+
+        armPomodoroCompletionSound();
+        expect(startClickConstructor).toHaveBeenCalledTimes(1);
+
+        // Completion fires with no gesture available: a context constructed
+        // here would be suspended for good, so none must be constructed.
+        const completionTimeConstructor = vi.fn();
+        globalThis.AudioContext = completionTimeConstructor as unknown as typeof AudioContext;
+        await playPomodoroCompletionSound();
+
+        expect(completionTimeConstructor).not.toHaveBeenCalled();
+        expect(armedContext.createOscillator).toHaveBeenCalledTimes(2);
+
+        armedContext.state = 'closed';
     });
 });

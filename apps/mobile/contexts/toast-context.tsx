@@ -46,6 +46,8 @@ type ToastRenderState = {
     topViewportId: number | null;
     registerViewport: (id: number) => void;
     unregisterViewport: (id: number) => void;
+    bottomOffset: number;
+    setBottomOffset: (offset: number) => void;
 };
 
 const TOAST_DEFAULT_DURATION_MS = 3200;
@@ -81,6 +83,10 @@ const getToastSwipeExitTranslateX = (gestureState: PanResponderGestureState): nu
 
 export function ToastProvider({ children }: { children: ReactNode }) {
     const [queue, setQueue] = useState<ToastState[]>([]);
+    // Lift the root overlay above a persistent bottom bar (the tab bar) so an
+    // undo toast never covers it (#1044). ponytail: single value, not a stack —
+    // only the tabs layout registers one; add a stack if a second caller appears.
+    const [bottomOffset, setBottomOffset] = useState(0);
     // Native <Modal> windows cover the root overlay, so modal content mounts a
     // ToastViewport and the toast renders in the topmost registered one (#834).
     const [viewportStack, setViewportStack] = useState<number[]>([]);
@@ -255,24 +261,32 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         topViewportId,
         registerViewport,
         unregisterViewport,
-    }), [dismissToast, opacity, panResponder, registerViewport, showToast, toast, topViewportId, translateX, translateY, unregisterViewport]);
+        bottomOffset,
+        setBottomOffset,
+    }), [bottomOffset, dismissToast, opacity, panResponder, registerViewport, showToast, toast, topViewportId, translateX, translateY, unregisterViewport]);
 
     return (
         <ToastContext.Provider value={value}>
             <ToastRenderContext.Provider value={renderState}>
                 {children}
-                {topViewportId === null && <ToastOverlay />}
+                {topViewportId === null && <ToastOverlay respectBottomOffset />}
             </ToastRenderContext.Provider>
         </ToastContext.Provider>
     );
 }
 
-function ToastOverlay() {
+function ToastOverlay({ respectBottomOffset = false }: { respectBottomOffset?: boolean }) {
     const renderState = useContext(ToastRenderContext);
     const insets = useSafeAreaInsets();
     const tc = useThemeColors();
     if (!renderState?.toast) return null;
     const { toast, opacity, translateX, translateY, panHandlers, showToast, dismissToast } = renderState;
+    // The registered offset (tab bar height) already contains the bottom safe
+    // area; modal viewports have no tab bar, so they keep the plain inset.
+    const bottomOffset = respectBottomOffset ? renderState.bottomOffset : 0;
+    const paddingBottom = bottomOffset > 0
+        ? bottomOffset + 12
+        : Math.max(insets.bottom, 16) + 16;
 
     const accentColor = toast.tone === 'success'
         ? tc.success
@@ -288,7 +302,7 @@ function ToastOverlay() {
                 pointerEvents="box-none"
                 style={[
                     styles.viewport,
-                    { paddingBottom: Math.max(insets.bottom, 16) + 16 },
+                    { paddingBottom },
                 ]}
             >
                 <Animated.View
@@ -368,6 +382,19 @@ export function ToastViewport() {
 
     if (!renderState || renderState.topViewportId !== id) return null;
     return <ToastOverlay />;
+}
+
+// Mount where a persistent bottom bar lives (the tabs layout) so root-overlay
+// toasts render above the bar instead of covering it (#1044). Pass the bar's
+// full height including its safe-area inset.
+export function useToastBottomOffset(offset: number) {
+    const renderState = useContext(ToastRenderContext);
+    const setBottomOffset = renderState?.setBottomOffset;
+    useEffect(() => {
+        if (!setBottomOffset) return undefined;
+        setBottomOffset(offset);
+        return () => setBottomOffset(0);
+    }, [offset, setBottomOffset]);
 }
 
 export function useToast(): ToastContextValue {

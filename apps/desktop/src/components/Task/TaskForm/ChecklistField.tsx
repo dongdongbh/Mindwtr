@@ -198,11 +198,32 @@ export function ChecklistField({
         commitChecklistUpdate(payload);
     }, [commitChecklistUpdate]);
 
-    useEffect(() => () => {
-        if (checklistDirtyRef.current) {
-            commitChecklistUpdate(checklistDraftRef.current);
-        }
+    // Blank rows are a typing convenience (Enter mints the next row before it
+    // has text), not content — they are dropped when editing moves on, so a
+    // saved task never keeps a trailing empty item (#1045).
+    const dropEmptyChecklistItems = useCallback(() => {
+        const list = checklistDraftRef.current || [];
+        const filtered = list.filter((item) => item.title.trim() !== '');
+        if (filtered.length === list.length) return false;
+        setChecklistDraft(filtered);
+        checklistDraftRef.current = filtered;
+        checklistDirtyRef.current = false;
+        commitChecklistUpdate(filtered);
+        return true;
     }, [commitChecklistUpdate]);
+
+    // True unmount-only flush (deps intentionally empty, latest committer kept
+    // in a ref): keying this on commitChecklistUpdate would re-run the cleanup
+    // on every parent re-render and strip the blank row mid-typing.
+    const commitChecklistUpdateRef = useRef(commitChecklistUpdate);
+    commitChecklistUpdateRef.current = commitChecklistUpdate;
+    useEffect(() => () => {
+        const list = checklistDraftRef.current || [];
+        const filtered = list.filter((item) => item.title.trim() !== '');
+        if (checklistDirtyRef.current || filtered.length !== list.length) {
+            commitChecklistUpdateRef.current(filtered);
+        }
+    }, []);
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -325,7 +346,17 @@ export function ChecklistField({
     const canReorderChecklist = checklistItems.length > 1;
 
     return (
-        <div className="flex flex-col gap-2 w-full pt-2 border-t border-border/50">
+        <div
+            className="flex flex-col gap-2 w-full pt-2 border-t border-border/50"
+            onBlur={(event) => {
+                // Only when focus leaves the checklist entirely — moving between
+                // rows (Enter, Tab, clicks) must keep the just-minted blank row.
+                if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+                if (!dropEmptyChecklistItems()) {
+                    commitChecklistDraft();
+                }
+            }}
+        >
             <label className={taskEditorLabelClassName}>{t('taskEdit.checklist')}</label>
             <div className="space-y-2 pr-3">
                 <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleChecklistDragEnd}>

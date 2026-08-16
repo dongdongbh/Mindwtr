@@ -105,6 +105,14 @@ const fsMocks = vi.hoisted(() => ({
     remove: vi.fn(),
     readDir: vi.fn(),
 }));
+// The sync folder's exists/mkdir/remove/rename go through async Rust commands,
+// not the fs plugin's main-thread ones (#1037).
+const syncFsMocks = vi.hoisted(() => ({
+    exists: vi.fn(),
+    mkdir: vi.fn(),
+    remove: vi.fn(),
+    rename: vi.fn(),
+}));
 const pathMocks = vi.hoisted(() => ({
     dataDir: vi.fn(),
     join: vi.fn(),
@@ -125,6 +133,8 @@ const storeStateRef = vi.hoisted(() => ({
 }));
 
 vi.mock('@tauri-apps/plugin-fs', () => fsMocks);
+
+vi.mock('./sync-fs', () => syncFsMocks);
 
 vi.mock('@tauri-apps/api/path', () => pathMocks);
 
@@ -195,6 +205,10 @@ describe('desktop sync-service runtime', () => {
         fsMocks.rename.mockResolvedValue(undefined);
         fsMocks.remove.mockResolvedValue(undefined);
         fsMocks.readDir.mockResolvedValue([]);
+        syncFsMocks.exists.mockImplementation(async (path: string) => path === '/local/doc.txt');
+        syncFsMocks.mkdir.mockResolvedValue(undefined);
+        syncFsMocks.rename.mockResolvedValue(undefined);
+        syncFsMocks.remove.mockResolvedValue(undefined);
         pathMocks.dataDir.mockResolvedValue('/data');
         pathMocks.join.mockImplementation(async (...parts: string[]) => parts.join('/'));
 
@@ -883,7 +897,7 @@ describe('desktop sync-service runtime', () => {
             expect.stringMatching(/^\\\\\?\\C:\\Users\\Pjuter\\Documents\\Mindwtr_sync\\attachments\\att-1\.txt\.tmp-/),
             expect.any(Uint8Array),
         );
-        expect(fsMocks.rename).toHaveBeenCalledWith(
+        expect(syncFsMocks.rename).toHaveBeenCalledWith(
             expect.stringMatching(/^\\\\\?\\C:\\Users\\Pjuter\\Documents\\Mindwtr_sync\\attachments\\att-1\.txt\.tmp-/),
             '\\\\?\\C:\\Users\\Pjuter\\Documents\\Mindwtr_sync\\attachments\\att-1.txt',
         );

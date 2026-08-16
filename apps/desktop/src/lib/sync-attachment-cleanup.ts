@@ -11,6 +11,7 @@ import {
     webdavDeleteFile,
 } from '@mindwtr/core';
 
+import { resolveAttachmentReadPath } from './attachment-paths';
 import { deleteDropboxFile, DropboxFileNotFoundError, DropboxUnauthorizedError } from './dropbox-sync';
 import { getBaseSyncUrl, getCloudBaseUrl } from './sync-attachments';
 import type { CloudConfig, WebDavConfig } from './sync-attachment-backends';
@@ -78,7 +79,10 @@ export const deleteAttachmentFile = async (
     try {
         const { remove } = await import('@tauri-apps/plugin-fs');
         const normalizePath = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/, '');
-        const normalizedRawUri = normalizePath(rawUri);
+        // Same fallback the read paths use: a relocated portable profile leaves
+        // the recorded path stale, and the copy it names would otherwise stay in
+        // the current managed dir forever (#1038).
+        const normalizedRawUri = normalizePath(await resolveAttachmentReadPath(rawUri));
         const normalizedAttachmentsDir = normalizePath(await getManagedPath(ATTACHMENTS_DIR_NAME));
         if (
             normalizedRawUri === normalizedAttachmentsDir
@@ -177,7 +181,9 @@ export const cleanupOrphanedAttachments = async (
             } else if (backend === 'cloud' && cloudProvider === 'dropbox') {
                 await deleteDropboxAttachment(target.cloudKey);
             } else if (backend === 'file' && fileBaseDir) {
-                const { remove } = await import('@tauri-apps/plugin-fs');
+                // Off the main thread: this delete lands on the sync folder,
+                // which may be a slow mount (#1037).
+                const { remove } = await import('./sync-fs');
                 const { join } = await import('@tauri-apps/api/path');
                 const targetPath = await resolveFileBackendPath(join, fileBaseDir, target.cloudKey);
                 guards.ensureLocalSnapshotFresh();

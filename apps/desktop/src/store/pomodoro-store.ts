@@ -1,4 +1,5 @@
 import { createWithEqualityFn } from 'zustand/traditional';
+import { armPomodoroCompletionSound } from '../lib/pomodoro-alert';
 import {
     addTimeSpentMinutes,
     advancePomodoroState,
@@ -238,6 +239,12 @@ export const usePomodoroStore = createWithEqualityFn<PomodoroStoreState>((set, g
     commitPomodoro: (updater) => {
         const prev = get().snapshot;
         const next = updater(prev);
+        // Every manual start passes through here inside the click's call stack —
+        // the only window WebKit allows an audible AudioContext to be created
+        // in, so the completion chime can sound later without a gesture (#528).
+        if (!prev.timerState.isRunning && next.timerState.isRunning) {
+            armPomodoroCompletionSound();
+        }
         creditCompletedFocusSessions(prev, next);
         if (!isCountdownTickOnly(prev, next)) saveStoredPomodoroSnapshot(next);
         set({ snapshot: next });

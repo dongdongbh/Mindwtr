@@ -332,8 +332,9 @@ function SwipeableTaskItemInner({
                 if (status === 'done' && previousStatus !== 'done') {
                     // Completing mirrors deleting: immediate, with an undo toast
                     // instead of a confirmation (matches the desktop undo).
+                    // No title: the one-line message plus Undo is the whole point,
+                    // and a "Notice" header just makes the toast taller (#1044).
                     showToast({
-                        title: tFallback(t, 'common.notice', 'Notice'),
                         message: (tFallback(t, 'task.markedDone', '{title} marked Done')).replace('{title}', task.title),
                         tone: 'info',
                         actionLabel: tFallback(t, 'common.undo', 'Undo'),
@@ -577,7 +578,6 @@ function SwipeableTaskItemInner({
                     return;
                 }
                 showToast({
-                    title: tFallback(t, 'common.notice', 'Notice'),
                     message: tFallback(t, 'list.taskDeleted', 'Task deleted'),
                     tone: 'info',
                     actionLabel: tFallback(t, 'common.undo', 'Undo'),

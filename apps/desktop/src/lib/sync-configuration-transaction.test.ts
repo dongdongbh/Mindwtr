@@ -239,7 +239,6 @@ describe('commitProvenSyncConfiguration', () => {
                 webdav: {
                     url: 'https://new-dav.example.com',
                     username: 'new-user',
-                    password: 'replacement-password',
                 },
             },
         },
@@ -251,11 +250,11 @@ describe('commitProvenSyncConfiguration', () => {
                 cloudProvider: 'selfhosted' as const,
                 cloud: {
                     url: 'https://new-cloud.example.com',
-                    token: 'replacement-token',
+                    token: '',
                 },
             },
         },
-    ])('fails a $label overwrite before mutation when its prior secret is opaque', async ({
+    ])('fails a $label edit that must reuse an opaque prior secret before mutation', async ({
         candidate,
         expectedError,
     }) => {
@@ -277,6 +276,58 @@ describe('commitProvenSyncConfiguration', () => {
 
         expect(harness.events).toEqual(['read', 'read']);
         expect(harness.getState()).toEqual(initial);
+    });
+
+    // #1043: on a sandbox without a Secret Service the prior secret can become
+    // unreadable while its endpoint stays configured. Re-entering the secret is
+    // the only recovery, so it must not be gated on reading the one it replaces.
+    it.each([
+        {
+            label: 'WebDAV',
+            candidate: {
+                backend: 'webdav' as const,
+                webdav: {
+                    url: 'https://old-dav.example.com',
+                    username: 'old-user',
+                    password: 're-entered-password',
+                },
+            },
+            expectedSecret: (state: PersistedDesktopSyncConfiguration) => state.webdav.password,
+        },
+        {
+            label: 'self-hosted',
+            candidate: {
+                backend: 'cloud' as const,
+                cloudProvider: 'selfhosted' as const,
+                cloud: {
+                    url: 'https://old-cloud.example.com',
+                    token: 're-entered-token',
+                },
+            },
+            expectedSecret: (state: PersistedDesktopSyncConfiguration) => state.cloud.token,
+        },
+    ])('re-enters a $label secret over an opaque prior one', async ({ candidate, expectedSecret }) => {
+        const initial = baselineConfiguration();
+        initial.webdav = {
+            ...initial.webdav,
+            password: null,
+            passwordAuthority: 'opaque',
+            hasPassword: null,
+        };
+        initial.cloud = {
+            ...initial.cloud,
+            token: null,
+            tokenAuthority: 'opaque',
+        };
+        const harness = createTransactionHarness(initial);
+
+        await expect(commitProvenSyncConfiguration(candidate, harness.dependencies)).resolves.toEqual(COMMITTED_RESULT);
+
+        const state = harness.getState();
+        expect(state.backend).toBe(candidate.backend);
+        expect(expectedSecret(state)).toBe(
+            candidate.backend === 'webdav' ? 're-entered-password' : 're-entered-token',
+        );
     });
 
     it.each([
@@ -488,8 +539,9 @@ describe('commitProvenSyncConfiguration', () => {
             },
         }, harness.dependencies);
 
+        // One opening read: a candidate carrying its own token never needs the
+        // strict re-read of the secret it is about to replace (#1043).
         expect(harness.events).toEqual([
-            'read',
             'read',
             'backend:off',
             'read',

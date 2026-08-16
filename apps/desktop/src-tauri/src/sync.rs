@@ -2623,6 +2623,20 @@ fn resolve_sync_dir(app: &tauri::AppHandle, path: Option<String>) -> Result<Path
     validate_sync_dir(&candidate)
 }
 
+// A candidate dir reaches the sync-file commands through the activation
+// probe BEFORE set_sync_path has granted it to the webview fs scope, and the
+// probe's attachment step runs through the fs plugin (scope-checked) — without
+// this grant every candidate probe dies on "forbidden path" and a new sync
+// folder can never be verified or saved (#1001).
+fn resolve_sync_dir_granting_scope(
+    app: &tauri::AppHandle,
+    path: String,
+) -> Result<PathBuf, String> {
+    let dir = resolve_sync_dir(app, Some(path))?;
+    expand_tauri_fs_scope(app, &dir);
+    Ok(dir)
+}
+
 fn configured_sync_dir(app: &tauri::AppHandle) -> Result<Option<PathBuf>, String> {
     let config = read_config(app);
     let Some(sync_path) = config
@@ -4169,6 +4183,86 @@ mod tests {
                  silently revert this function's change to config.toml"
             );
         }
+    }
+
+    // The activation probe hands these commands a candidate dir BEFORE
+    // set_sync_path has granted it to the webview fs scope, while the probe's
+    // attachment step goes through the scope-checked fs plugin. Every
+    // override branch must therefore resolve through the scope-granting
+    // helper, or candidate probes die on "forbidden path" and a new sync
+    // folder can never be saved (#1001). Red-checked by swapping one call
+    // back to plain resolve_sync_dir.
+    #[test]
+    fn sync_file_commands_grant_fs_scope_for_override_paths() {
+        let source = include_str!("sync.rs");
+        for name in ["read_sync_file", "read_sync_file_versioned", "write_sync_file"] {
+            let body = find_function_body(source, name);
+            assert!(
+                body.contains("resolve_sync_dir_granting_scope"),
+                "sync.rs: {name} must resolve its path override via \
+                 resolve_sync_dir_granting_scope so the candidate dir is usable \
+                 by the fs plugin during the activation probe (#1001)"
+            );
+        }
+    }
+
+    // #1037: tauri-plugin-fs declares exists/mkdir/remove/rename as plain
+    // `#[tauri::command]`, so the file-sync attachment step ran hundreds of
+    // syscalls on the Tauri main thread and froze the window against a slow
+    // mount. The webview only has an off-thread replacement if these four are
+    // registered — their (async) declaration is enforced separately by
+    // every_plain_tauri_command_is_explicitly_allowed_on_the_main_thread.
+    #[test]
+    fn sync_folder_fs_commands_are_registered() {
+        let source = include_str!("lib.rs");
+        let handler = source
+            .split_once("tauri::generate_handler![")
+            .and_then(|(_, rest)| rest.split_once("])").map(|(commands, _)| commands))
+            .expect("Tauri command handler should be present");
+        for name in [
+            "sync_fs_exists",
+            "sync_fs_create_dir",
+            "sync_fs_remove_file",
+            "sync_fs_rename",
+        ] {
+            assert!(
+                handler.contains(&format!("{name},")),
+                "lib.rs: {name} must stay registered — without it the sync path \
+                 falls back to the fs plugin's main-thread commands (#1037)"
+            );
+        }
+    }
+
+    #[test]
+    fn sync_fs_paths_are_confined_to_the_managed_dir_and_the_granted_scope() {
+        let managed = Path::new("/home/u/.local/share/mindwtr");
+        assert!(sync_fs_path_is_allowed(
+            &managed.join("attachments/a.txt"),
+            managed,
+            false
+        ));
+        // The sync folder is only ever reachable through the runtime fs scope.
+        assert!(sync_fs_path_is_allowed(
+            Path::new("/mnt/rclone/sync/attachments/a.txt"),
+            managed,
+            true
+        ));
+        assert!(!sync_fs_path_is_allowed(
+            Path::new("/home/u/.ssh/id_ed25519"),
+            managed,
+            false
+        ));
+        // Traversal must not walk out of the managed dir, scope or no scope.
+        assert!(!sync_fs_path_is_allowed(
+            &managed.join("../../.ssh/id_ed25519"),
+            managed,
+            false
+        ));
+        assert!(!sync_fs_path_is_allowed(
+            &managed.join("../../.ssh/id_ed25519"),
+            managed,
+            true
+        ));
     }
 
     /// (name, is_async) for every `#[tauri::command...]` declaration found in
@@ -8336,7 +8430,7 @@ pub(crate) fn read_sync_file(
     path: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let sync_dir = match path {
-        Some(path) => resolve_sync_dir(&app, Some(path))?,
+        Some(path) => resolve_sync_dir_granting_scope(&app, path)?,
         None => {
             configured_sync_dir(&app)?.ok_or_else(|| "Sync path is not configured".to_string())?
         }
@@ -8350,7 +8444,7 @@ pub(crate) fn read_sync_file_versioned(
     path: Option<String>,
 ) -> Result<SyncFileReadResult, String> {
     let sync_dir = match path {
-        Some(path) => resolve_sync_dir(&app, Some(path))?,
+        Some(path) => resolve_sync_dir_granting_scope(&app, path)?,
         None => {
             configured_sync_dir(&app)?.ok_or_else(|| "Sync path is not configured".to_string())?
         }
@@ -8498,10 +8592,74 @@ pub(crate) fn write_sync_file(
     expected_fingerprint: Option<String>,
 ) -> Result<bool, String> {
     let sync_dir = match path {
-        Some(path) => resolve_sync_dir(&app, Some(path))?,
+        Some(path) => resolve_sync_dir_granting_scope(&app, path)?,
         None => {
             configured_sync_dir(&app)?.ok_or_else(|| "Sync path is not configured".to_string())?
         }
     };
     write_sync_file_to_dir(&sync_dir, data, expected_fingerprint.as_deref())
+}
+
+// tauri-plugin-fs declares `exists`, `mkdir`, `remove` and `rename` as plain
+// `#[tauri::command]`, so each of those runs its syscall on the Tauri main
+// thread. The attachment step of a file sync makes one `exists` per attachment
+// plus a mkdir/rename/remove per copy against the sync folder, and on a slow
+// mount (rclone/WinFSP, network share) that starves the Win32 message pump for
+// the whole run — Windows paints "Mindwtr (Not Responding)" (#1037). These are
+// the same four operations off the UI thread. Absolute paths only: the
+// base-directory-relative plugin calls all land on local app data, which is
+// never the slow side.
+// The same two path families the fs plugin accepts for these calls: the runtime
+// scope (the sync folder, granted by expand_tauri_fs_scope) and the managed data
+// dir (granted through the static capability, which a non-plugin command cannot
+// read back). `..` is rejected outright so the managed-dir prefix check cannot
+// be walked out of.
+fn sync_fs_path_is_allowed(path: &Path, managed_dir: &Path, scope_allows: bool) -> bool {
+    if path
+        .components()
+        .any(|component| component == std::path::Component::ParentDir)
+    {
+        return false;
+    }
+    path.starts_with(managed_dir) || scope_allows
+}
+
+fn sync_fs_path(app: &tauri::AppHandle, path: String) -> Result<PathBuf, String> {
+    let path = PathBuf::from(path);
+    if sync_fs_path_is_allowed(
+        &path,
+        &crate::storage::get_data_dir(app),
+        app.fs_scope().is_allowed(&path),
+    ) {
+        Ok(path)
+    } else {
+        Err(format!("forbidden path: {}", path.display()))
+    }
+}
+
+#[tauri::command(async)]
+pub(crate) fn sync_fs_exists(app: tauri::AppHandle, path: String) -> Result<bool, String> {
+    sync_fs_path(&app, path)?
+        .try_exists()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(async)]
+pub(crate) fn sync_fs_create_dir(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    fs::create_dir_all(sync_fs_path(&app, path)?).map_err(|error| error.to_string())
+}
+
+#[tauri::command(async)]
+pub(crate) fn sync_fs_remove_file(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    fs::remove_file(sync_fs_path(&app, path)?).map_err(|error| error.to_string())
+}
+
+#[tauri::command(async)]
+pub(crate) fn sync_fs_rename(
+    app: tauri::AppHandle,
+    from: String,
+    to: String,
+) -> Result<(), String> {
+    fs::rename(sync_fs_path(&app, from)?, sync_fs_path(&app, to)?)
+        .map_err(|error| error.to_string())
 }

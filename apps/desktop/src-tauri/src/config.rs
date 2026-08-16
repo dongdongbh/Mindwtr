@@ -5029,4 +5029,173 @@ mod tests {
             state
         );
     }
+
+    // #1043: a Flatpak/NixOS profile has no Secret Service at all, so every
+    // keyring read AND write errors. The whole first-setup sequence — the
+    // settings snapshot, the activation commit, and the native sync read that
+    // follows it — has to survive on the secrets.toml fallback alone.
+    #[test]
+    fn keyring_less_first_setup_commits_and_resolves_through_the_secrets_fallback() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config_path = dir.path().join("config.toml");
+        let secrets_path = dir.path().join("secrets.toml");
+        let dropbox_state_path = dropbox_credential_state_path_from_secrets_path(&secrets_path);
+        let keyring_read = || Err("keyring unavailable".to_string());
+        let keyring_write = |_: Option<String>| Err("keyring unavailable".to_string());
+
+        // Opening sync settings resolves BOTH services. Neither has a binding
+        // yet, so an intolerant snapshot fails the whole screen (and every
+        // auto-sync eligibility check) before any backend can be configured.
+        for service in [CredentialService::Webdav, CredentialService::Cloud] {
+            let config = read_config_files_verified(&config_path, &secrets_path).unwrap_or_default();
+            assert_eq!(
+                resolve_sync_snapshot_secret_unlocked(
+                    &config_path,
+                    &secrets_path,
+                    &config,
+                    service,
+                    keyring_read(),
+                )
+                .expect("an unconfigured service must not fail the snapshot"),
+                SyncSnapshotSecret::Opaque,
+            );
+        }
+
+        // The activation transaction: disable, write the proven candidate,
+        // verify its secret reads back exactly, then activate.
+        publish_sync_backend_paths_with(
+            &config_path,
+            &secrets_path,
+            &dropbox_state_path,
+            "off",
+            || Ok(()),
+        )
+        .expect("disable sync before mutating credentials");
+        update_bound_credential_paths_with(
+            &config_path,
+            &secrets_path,
+            CredentialService::Webdav,
+            CredentialSecretUpdate::Replace(Some("dav-password".to_string())),
+            |config| {
+                config.webdav_url = Some("https://dav.example/mindwtr".to_string());
+                config.webdav_username = Some("dav-user".to_string());
+                config.webdav_allow_insecure_http = Some("false".to_string());
+            },
+            keyring_read,
+            keyring_write,
+            |_| Ok(()),
+        )
+        .expect("first save must commit through the fallback");
+        let committed =
+            read_config_files_verified(&config_path, &secrets_path).expect("read committed config");
+        assert_eq!(
+            resolve_sync_snapshot_secret_unlocked(
+                &config_path,
+                &secrets_path,
+                &committed,
+                CredentialService::Webdav,
+                keyring_read(),
+            )
+            .expect("verification snapshot"),
+            SyncSnapshotSecret::Known("dav-password".to_string()),
+        );
+        publish_sync_backend_paths_with(
+            &config_path,
+            &secrets_path,
+            &dropbox_state_path,
+            "webdav",
+            || Ok(()),
+        )
+        .expect("activate the proven backend");
+
+        // What every later native sync request does (webdav_get_json).
+        let (config, password) = read_bound_credential_paths_with(
+            &config_path,
+            &secrets_path,
+            CredentialService::Webdav,
+            keyring_read,
+        )
+        .expect("native sync must resolve the committed credential");
+        assert_eq!(
+            config.webdav_url.as_deref(),
+            Some("https://dav.example/mindwtr")
+        );
+        assert_eq!(password.as_deref(), Some("dav-password"));
+        assert_eq!(
+            read_config_toml(&secrets_path).webdav_password.as_deref(),
+            Some("dav-password"),
+        );
+    }
+
+    // #1043 follow-on: the keyring held the secret when it was saved and later
+    // stopped answering. The binding stays fail-closed (it must not silently
+    // fall back to a weaker authority), but re-entering the secret has to be a
+    // way out rather than a dead end.
+    #[test]
+    fn reentered_secret_recommits_a_binding_whose_authority_disappeared() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config_path = dir.path().join("config.toml");
+        let secrets_path = dir.path().join("secrets.toml");
+        let keyring = std::cell::RefCell::new(None::<String>);
+        write_config_files(&config_path, &secrets_path, &AppConfigToml::default())
+            .expect("seed config");
+        update_bound_credential_paths_with(
+            &config_path,
+            &secrets_path,
+            CredentialService::Cloud,
+            CredentialSecretUpdate::Replace(Some("first-token".to_string())),
+            |config| config.cloud_url = Some("https://cloud.example".to_string()),
+            || Ok(keyring.borrow().clone()),
+            |secret| {
+                *keyring.borrow_mut() = secret;
+                Ok(())
+            },
+            |_| Ok(()),
+        )
+        .expect("seed a keyring-backed binding");
+        assert!(read_config_toml(&secrets_path).cloud_token.is_none());
+
+        let dead_keyring = || Err("keyring unavailable".to_string());
+        let config = read_config_files_verified(&config_path, &secrets_path).expect("read config");
+        assert_eq!(
+            resolve_sync_snapshot_secret_unlocked(
+                &config_path,
+                &secrets_path,
+                &config,
+                CredentialService::Cloud,
+                dead_keyring(),
+            )
+            .expect("an unreadable authority stays opaque"),
+            SyncSnapshotSecret::Opaque,
+        );
+        assert!(read_bound_credential_paths_with(
+            &config_path,
+            &secrets_path,
+            CredentialService::Cloud,
+            dead_keyring,
+        )
+        .is_err());
+
+        update_bound_credential_paths_with(
+            &config_path,
+            &secrets_path,
+            CredentialService::Cloud,
+            CredentialSecretUpdate::Replace(Some("re-entered-token".to_string())),
+            |config| config.cloud_url = Some("https://cloud.example".to_string()),
+            dead_keyring,
+            |_| Err("keyring unavailable".to_string()),
+            |_| Ok(()),
+        )
+        .expect("a re-entered secret replaces an unreadable binding");
+
+        let (config, token) = read_bound_credential_paths_with(
+            &config_path,
+            &secrets_path,
+            CredentialService::Cloud,
+            dead_keyring,
+        )
+        .expect("the re-entered credential resolves");
+        assert_eq!(config.cloud_url.as_deref(), Some("https://cloud.example"));
+        assert_eq!(token.as_deref(), Some("re-entered-token"));
+    }
 }

@@ -512,6 +512,12 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
                 <input
                     ref={inputRef}
                     aria-label={t('search.title')}
+                    // Queries are operators and partial words, not prose — the
+                    // OS must not capitalize or "fix" them (macOS WebKit applied
+                    // system auto-capitalization here, #1019).
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
                     value={query}
                     onChange={e => {
                         setQuery(e.target.value);

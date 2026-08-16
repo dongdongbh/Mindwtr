@@ -276,6 +276,29 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
 
         expect(removeMock).not.toHaveBeenCalled();
     });
+
+    it('keeps a local file path added through the link prompt a pointer', async () => {
+        // #1001: "Add link" and "Link to file…" promise a reference, no copy.
+        // A kind:'file' record here hands the user's own file to attachment
+        // sync, which uploads the bytes and re-homes the attachment onto its
+        // own copy the first time the original moves.
+        const { result } = renderHook(() => useTaskItemAttachments({ task, t }));
+
+        act(() => {
+            result.current.addLinkAttachment();
+        });
+        act(() => {
+            result.current.handleAddLinkAttachment('/home/demo/spec.pdf');
+        });
+
+        expect(result.current.editAttachments[0]).toMatchObject({
+            kind: 'link',
+            title: 'spec.pdf',
+            uri: '/home/demo/spec.pdf',
+        });
+        expect(invokeMock).not.toHaveBeenCalledWith('import_attachment_file', expect.anything());
+        expect(writeFileMock).not.toHaveBeenCalled();
+    });
 });
 
 // The overlays take the hook's result whole, so they can be rendered over the

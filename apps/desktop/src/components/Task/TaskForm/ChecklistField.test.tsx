@@ -197,6 +197,53 @@ describe('ChecklistField', () => {
         expect(shiftTabEvent.defaultPrevented).toBe(true);
     });
 
+    it('drops blank checklist rows when focus leaves the checklist (#1045)', async () => {
+        const updates: Partial<Task>[] = [];
+        const { getAllByRole, getByRole } = render(
+            <div>
+                <ChecklistHarness
+                    initial={[{ id: '1', title: 'Item 1', isCompleted: false }]}
+                    onUpdateTask={(next) => updates.push(next)}
+                />
+                <button type="button">outside</button>
+            </div>
+        );
+
+        const input = getAllByRole('textbox')[0];
+        fireEvent.focus(input);
+        fireEvent.keyDown(input, { key: 'Enter' });
+        await waitFor(() => {
+            expect(getAllByRole('textbox')).toHaveLength(2);
+        }, { timeout: 500 });
+
+        const blankInput = getAllByRole('textbox')[1];
+        fireEvent.blur(blankInput, { relatedTarget: getByRole('button', { name: 'outside' }) });
+
+        await waitFor(() => {
+            expect(getAllByRole('textbox')).toHaveLength(1);
+        }, { timeout: 500 });
+        expect(updates[updates.length - 1]).toEqual({
+            checklist: [{ id: '1', title: 'Item 1', isCompleted: false }],
+        });
+    });
+
+    it('keeps the blank row minted by Enter while focus moves between checklist rows (#1045)', async () => {
+        const { getAllByRole } = render(
+            <ChecklistHarness initial={[{ id: '1', title: 'Item 1', isCompleted: false }]} />
+        );
+
+        const input = getAllByRole('textbox')[0];
+        fireEvent.focus(input);
+        fireEvent.keyDown(input, { key: 'Enter' });
+        await waitFor(() => {
+            expect(getAllByRole('textbox')).toHaveLength(2);
+        }, { timeout: 500 });
+
+        fireEvent.blur(getAllByRole('textbox')[0], { relatedTarget: getAllByRole('textbox')[1] });
+
+        expect(getAllByRole('textbox')).toHaveLength(2);
+    });
+
     it('focuses inserted checklist items without scrolling the editor container', async () => {
         const focusSpy = vi.spyOn(HTMLInputElement.prototype, 'focus').mockImplementation(() => {});
         try {

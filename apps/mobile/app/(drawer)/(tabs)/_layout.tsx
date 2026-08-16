@@ -18,6 +18,7 @@ import { MOBILE_HOME_TAB_ROUTE } from '@/lib/home-route';
 import { useLanguage } from '../../../contexts/language-context';
 import { QuickCaptureSheet } from '@/components/quick-capture-sheet';
 import { QuickCaptureProvider, useQuickCapture, type QuickCaptureOptions } from '../../../contexts/quick-capture-context';
+import { useToastBottomOffset } from '../../../contexts/toast-context';
 import { getDefaultTaskAreaMode, useTaskStore, type MobileQuickAccessView, type SavedSearch, type Task } from '@mindwtr/core';
 import {
   coerceMobileQuickAccessView,
@@ -574,6 +575,8 @@ export default function TabLayout() {
   const tabItemTopOffset = Platform.OS === 'ios' ? 0 : -2;
   const tabBarHeight = 66 + tabBarBottomInset;
   const iconLift = 0;
+  // Undo toasts must sit above the tab bar, not on top of it (#1044).
+  useToastBottomOffset(tabBarHeight + tabBarBottomOffset);
   const [captureState, setCaptureState] = useState<{
     visible: boolean;
     openRequestId: number;

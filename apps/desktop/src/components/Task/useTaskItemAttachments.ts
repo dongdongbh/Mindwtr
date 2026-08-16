@@ -3,7 +3,7 @@ import { Attachment, DEFAULT_PROJECT_COLOR, buildTaskUpdatesFromSpeechResult, fi
 import { dataDir } from '@tauri-apps/api/path';
 import { BaseDirectory, readFile, readTextFile } from '@tauri-apps/plugin-fs';
 import { importDroppedFileAttachment, importPickedFileAttachment } from '../../lib/attachment-import';
-import { normalizeAttachmentPathForUrl, resolveAttachmentOpenTarget } from '../../lib/attachment-paths';
+import { normalizeAttachmentPathForUrl, resolveAttachmentReadPath } from '../../lib/attachment-paths';
 import { normalizeAttachmentInput } from '../../lib/attachment-utils';
 import { openAttachmentTarget } from '../../lib/open-attachment-target';
 import { isTauriRuntime } from '../../lib/runtime';
@@ -98,7 +98,7 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
 
     const resolveAudioBlobSource = useCallback(async (attachment: Attachment) => {
         if (!isTauriRuntime()) return null;
-        const uri = resolveAttachmentOpenTarget(attachment.uri);
+        const uri = await resolveAttachmentReadPath(attachment.uri);
         try {
             // Blob playback is limited to app-managed files (attachments and
             // audio captures under the managed data dir, portable-aware).
@@ -124,7 +124,7 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         if (!isTauriRuntime()) {
             throw new Error(resolveText('attachments.fileNotSupported', 'File not supported.'));
         }
-        const uri = resolveAttachmentOpenTarget(attachment.uri);
+        const uri = await resolveAttachmentReadPath(attachment.uri);
         if (/^https?:\/\//i.test(uri)) {
             throw new Error(resolveText('attachments.fileNotSupported', 'File not supported.'));
         }
@@ -150,7 +150,7 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         if (!isTauriRuntime()) {
             throw new Error(t('attachments.fileNotSupported'));
         }
-        const uri = resolveAttachmentOpenTarget(attachment.uri);
+        const uri = await resolveAttachmentReadPath(attachment.uri);
         if (/^https?:\/\//i.test(uri)) {
             throw new Error(t('attachments.fileNotSupported'));
         }

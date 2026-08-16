@@ -61,7 +61,7 @@ vi.mock('react-native', async () => {
     };
 });
 
-import { ToastProvider, ToastViewport, useToast } from './toast-context';
+import { ToastProvider, ToastViewport, useToast, useToastBottomOffset } from './toast-context';
 
 const QUEUE_GAP_MS = 120;
 const TOAST_SWIPE_TARGET_TEST_ID = 'toast-swipe-dismiss-target';
@@ -205,5 +205,58 @@ describe('ToastProvider', () => {
         });
 
         expect(getRenderedText(renderedTree)).toContain('Modal toast');
+    });
+
+    it('lifts the root overlay above a registered bottom bar, but not modal viewports (#1044)', () => {
+        let controls: ToastControls | null = null;
+        let tree: ReactTestRenderer | null = null;
+
+        function TabBarStub() {
+            useToastBottomOffset(88);
+            return null;
+        }
+
+        const render = (withViewport: boolean) => (
+            <ToastProvider>
+                <ToastHarness onReady={(value) => {
+                    controls = value;
+                }}
+                />
+                <TabBarStub />
+                {withViewport && <ToastViewport />}
+            </ToastProvider>
+        );
+
+        act(() => {
+            tree = create(render(false));
+        });
+        expect(controls).not.toBeNull();
+        expect(tree).not.toBeNull();
+        if (!controls || !tree) return;
+        const toastControls = controls as ToastControls;
+        const renderedTree = tree as ReactTestRenderer;
+
+        act(() => {
+            toastControls.showToast({ message: 'Offset toast', durationMs: 10_000 });
+        });
+
+        // Root overlay: offset (88) + gap, not the plain safe-area padding.
+        const viewport = renderedTree.root
+            .findByProps({ testID: TOAST_SWIPE_TARGET_TEST_ID })
+            .parent!;
+        const paddingOf = (node: typeof viewport) => Object.assign(
+            {},
+            ...[node.props.style].flat(Infinity).filter(Boolean),
+        ).paddingBottom;
+        expect(paddingOf(viewport)).toBe(100);
+
+        // A modal viewport has no tab bar under it: plain padding again.
+        act(() => {
+            renderedTree.update(render(true));
+        });
+        const modalViewport = renderedTree.root
+            .findByProps({ testID: TOAST_SWIPE_TARGET_TEST_ID })
+            .parent!;
+        expect(paddingOf(modalViewport)).toBe(32);
     });
 });

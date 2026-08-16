@@ -107,6 +107,9 @@ export const createLocalAttachmentFs = (
         dataBaseDir: any;
         exists: (path: string, options?: { baseDir: any }) => Promise<boolean>;
         readFile: (path: string, options?: { baseDir: any }) => Promise<Uint8Array>;
+        /** Current managed attachments dir, used to recover from stale absolute
+         *  paths left behind by a relocated portable profile (#1038). */
+        managedAttachmentsDir?: string;
     },
     warningMessage = 'Failed to check attachment file',
 ): {
@@ -115,11 +118,30 @@ export const createLocalAttachmentFs = (
 } => {
     const toRelative = (path: string): string => path.slice(deps.baseDataDir.length).replace(/^[\\/]/, '');
 
+    // A portable profile travels with the install, so a URI recorded at its
+    // previous location is stale even though the file moved along inside
+    // attachments/. Only consulted after the recorded path fails (#1038).
+    const managedFallbackPath = (path: string): string | null => {
+        if (!deps.managedAttachmentsDir) return null;
+        const normalized = normalizeAttachmentFsPath(path);
+        const fileName = normalized.split('/').pop();
+        if (!fileName) return null;
+        const dir = normalizeAttachmentFsPath(deps.managedAttachmentsDir).replace(/\/+$/, '');
+        const fallback = `${dir}/${fileName}`;
+        return fallback === normalized ? null : fallback;
+    };
+
     const readLocalFile = async (path: string): Promise<Uint8Array> => {
         if (path.startsWith(deps.baseDataDir)) {
             return await deps.readFile(toRelative(path), { baseDir: deps.dataBaseDir });
         }
-        return await deps.readFile(normalizeAttachmentFsPath(path));
+        try {
+            return await deps.readFile(normalizeAttachmentFsPath(path));
+        } catch (error) {
+            const fallback = managedFallbackPath(path);
+            if (!fallback) throw error;
+            return await deps.readFile(fallback);
+        }
     };
 
     const localFileExists = async (path: string): Promise<boolean> => {
@@ -127,7 +149,14 @@ export const createLocalAttachmentFs = (
             if (path.startsWith(deps.baseDataDir)) {
                 return await deps.exists(toRelative(path), { baseDir: deps.dataBaseDir });
             }
-            return await deps.exists(normalizeAttachmentFsPath(path));
+            if (await deps.exists(normalizeAttachmentFsPath(path))) return true;
+        } catch (error) {
+            logSyncWarning(warningMessage, error);
+        }
+        const fallback = managedFallbackPath(path);
+        if (!fallback) return false;
+        try {
+            return await deps.exists(fallback);
         } catch (error) {
             logSyncWarning(warningMessage, error);
             return false;
