@@ -1200,6 +1200,7 @@ export const en: Record<string, string> = {
         'settings.aiProviderOpenAI': 'OpenAI',
         'settings.aiProviderGemini': 'Gemini',
         'settings.aiProviderAnthropic': 'Anthropic (Claude)',
+        'settings.aiProviderOrcaRouter': 'OrcaRouter',
         'settings.aiEffortLow': 'Low',
         'settings.aiEffortMedium': 'Medium',
         'settings.aiEffortHigh': 'High',

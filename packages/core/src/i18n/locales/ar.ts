@@ -937,6 +937,7 @@ export const arOverrides: Record<string, string> = {
         'settings.aiProviderOpenAI': 'OpenAI',
         'settings.aiProviderGemini': 'تَوأَم',
         'settings.aiProviderAnthropic': 'أنثروبي (كلود)',
+        'settings.aiProviderOrcaRouter': 'OrcaRouter',
         'settings.aiEffortLow': 'قليل',
         'settings.aiEffortMedium': 'واسطة',
         'settings.aiEffortHigh': 'عالي',

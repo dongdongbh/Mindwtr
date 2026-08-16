@@ -886,6 +886,7 @@ export const plOverrides: Record<string, string> = {
         'settings.aiReasoningHintFoss': 'Używany przez obsługiwane modele.',
         'settings.aiProviderOpenAI': 'OpenAI',
         'settings.aiProviderGemini': 'Gemini',
+        'settings.aiProviderOrcaRouter': 'OrcaRouter',
         'settings.aiEffortLow': 'Niski',
         'settings.aiEffortMedium': 'Średni',
         'settings.aiEffortHigh': 'Wysoki',

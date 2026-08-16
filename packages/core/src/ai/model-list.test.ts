@@ -218,6 +218,24 @@ describe('fetchProviderModels: anthropic', () => {
     });
 });
 
+describe('fetchProviderModels: orcarouter', () => {
+    it('hits the gateway /v1/models root, sends the bearer key, and applies the chat filter', async () => {
+        const { fetchImpl, calls } = captureFetch(() => jsonResponse({
+            data: [
+                { id: 'orcarouter/fusion', created: 5 },
+                { id: 'openai/text-embedding-3-small', created: 4 },
+                { id: 'openai/gpt-5.6-terra', created: 3 },
+            ],
+        }));
+
+        const models = await fetchProviderModels('orcarouter', { fetchImpl, apiKey: 'sk-orca-test' });
+
+        expect(models).toEqual(['orcarouter/fusion', 'openai/gpt-5.6-terra']);
+        expect(calls[0].url).toBe('https://api.orcarouter.ai/v1/models');
+        expect(calls[0].init.headers).toEqual({ Authorization: 'Bearer sk-orca-test' });
+    });
+});
+
 describe('fetchProviderModels: timeout', () => {
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());

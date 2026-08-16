@@ -901,6 +901,7 @@ export const trOverrides: Record<string, string> = {
         'settings.aiProviderOpenAI': 'OpenAI',
         'settings.aiProviderGemini': 'İkizler burcu',
         'settings.aiProviderAnthropic': 'Antropik (Claude)',
+        'settings.aiProviderOrcaRouter': 'OrcaRouter',
         'settings.aiEffortLow': 'Düşük',
         'settings.aiEffortMedium': 'Orta',
         'settings.aiEffortHigh': 'Yüksek',

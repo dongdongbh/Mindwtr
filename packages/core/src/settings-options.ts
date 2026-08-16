@@ -97,6 +97,7 @@ const AI_PROVIDER_VALUE_FLAGS: Record<AIProviderId, true> = {
     gemini: true,
     openai: true,
     anthropic: true,
+    orcarouter: true,
 };
 
 const AI_REASONING_EFFORT_VALUE_FLAGS: Record<AIReasoningEffort, true> = {

@@ -15,6 +15,7 @@ const t = {
     aiProviderOpenAI: 'OpenAI',
     aiProviderGemini: 'Gemini',
     aiProviderAnthropic: 'Anthropic (Claude)',
+    aiProviderOrcaRouter: 'OrcaRouter',
     aiModel: 'Model',
     aiBaseUrl: 'Custom OpenAI-compatible base URL',
     aiBaseUrlHint: 'Leave blank for official OpenAI. Set this for local or third-party OpenAI-compatible APIs such as llama.cpp, Ollama, LM Studio, GLM, or vLLM.',

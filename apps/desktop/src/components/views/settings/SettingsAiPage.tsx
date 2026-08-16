@@ -20,6 +20,7 @@ type Labels = {
     aiProviderOpenAI: string;
     aiProviderGemini: string;
     aiProviderAnthropic: string;
+    aiProviderOrcaRouter: string;
     aiModel: string;
     aiBaseUrl: string;
     aiBaseUrlHint: string;
@@ -325,6 +326,7 @@ export function SettingsAiPage({
                                     <option value="openai">{t.aiProviderOpenAI}</option>
                                     <option value="gemini">{t.aiProviderGemini}</option>
                                     <option value="anthropic">{t.aiProviderAnthropic}</option>
+                                    <option value="orcarouter">{t.aiProviderOrcaRouter}</option>
                                 </select>
                             </SettingRow>
 

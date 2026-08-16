@@ -927,6 +927,7 @@ export const deOverrides: Record<string, string> = {
         'settings.aiReasoningHintFoss': 'Von unterstützten Modellen benutzt.',
         'settings.aiProviderOpenAI': 'OpenAI',
         'settings.aiProviderGemini': 'Gemini',
+        'settings.aiProviderOrcaRouter': 'OrcaRouter',
         'settings.aiEffortLow': 'Niedrig',
         'settings.aiEffortMedium': 'Mittel',
         'settings.aiEffortHigh': 'Hoch',

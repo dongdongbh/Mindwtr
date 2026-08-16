@@ -14,6 +14,14 @@ export const ANTHROPIC_DEFAULT_MODEL = 'claude-sonnet-5';
 export const OPENAI_COPILOT_DEFAULT_MODEL = OPENAI_FAST_MODEL;
 export const GEMINI_COPILOT_DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 export const ANTHROPIC_COPILOT_DEFAULT_MODEL = 'claude-haiku-4-5';
+// OrcaRouter is an OpenAI-compatible routing gateway: the `orcarouter/*` ids
+// it exposes are gateway-level routes (fusion = flagship, fusion-mini = fast
+// tier), not a single vendor's model. Verified live on the gateway's
+// /v1/chat/completions endpoint before adding. Brand-named vendor ids are
+// listed as suggestions too; the live /v1/models fetch in model-list.ts
+// replaces this list whenever an API key is present.
+export const ORCAROUTER_DEFAULT_MODEL = 'orcarouter/fusion';
+export const ORCAROUTER_COPILOT_DEFAULT_MODEL = 'orcarouter/fusion-mini';
 export const DEFAULT_GEMINI_THINKING_BUDGET = 0;
 export const DEFAULT_ANTHROPIC_THINKING_BUDGET = 0;
 
@@ -36,6 +44,15 @@ export const ANTHROPIC_MODEL_OPTIONS = [
     'claude-haiku-4-5',
     'claude-opus-5',
     'claude-opus-4-8',
+];
+export const ORCAROUTER_MODEL_OPTIONS = [
+    ORCAROUTER_DEFAULT_MODEL,
+    ORCAROUTER_COPILOT_DEFAULT_MODEL,
+    'orcarouter/fusion-flash',
+    'orcarouter/free',
+    'openai/gpt-5.6-terra',
+    'anthropic/claude-sonnet-5',
+    'google/gemini-3.6-flash',
 ];
 
 
@@ -104,7 +121,9 @@ export function getDefaultAIConfig(provider: AIProviderId): AIProviderConfig {
                 ? OPENAI_DEFAULT_MODEL
                 : provider === 'anthropic'
                     ? ANTHROPIC_DEFAULT_MODEL
-                    : GEMINI_DEFAULT_MODEL,
+                    : provider === 'orcarouter'
+                        ? ORCAROUTER_DEFAULT_MODEL
+                        : GEMINI_DEFAULT_MODEL,
         reasoningEffort: DEFAULT_REASONING_EFFORT,
         ...(provider === 'gemini' ? { thinkingBudget: DEFAULT_GEMINI_THINKING_BUDGET } : {}),
         ...(provider === 'anthropic' ? { thinkingBudget: DEFAULT_ANTHROPIC_THINKING_BUDGET } : {}),
@@ -114,12 +133,14 @@ export function getDefaultAIConfig(provider: AIProviderId): AIProviderConfig {
 export function getModelOptions(provider: AIProviderId): string[] {
     if (provider === 'openai') return OPENAI_MODEL_OPTIONS;
     if (provider === 'anthropic') return ANTHROPIC_MODEL_OPTIONS;
+    if (provider === 'orcarouter') return ORCAROUTER_MODEL_OPTIONS;
     return GEMINI_MODEL_OPTIONS;
 }
 
 export function getDefaultCopilotModel(provider: AIProviderId): string {
     if (provider === 'openai') return OPENAI_COPILOT_DEFAULT_MODEL;
     if (provider === 'anthropic') return ANTHROPIC_COPILOT_DEFAULT_MODEL;
+    if (provider === 'orcarouter') return ORCAROUTER_COPILOT_DEFAULT_MODEL;
     return GEMINI_COPILOT_DEFAULT_MODEL;
 }
 

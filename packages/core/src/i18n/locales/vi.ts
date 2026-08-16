@@ -1197,6 +1197,7 @@ export const viOverrides: Record<string, string> = {
         'settings.aiProviderOpenAI': 'OpenAI',
         'settings.aiProviderGemini': 'Gemini',
         'settings.aiProviderAnthropic': 'Anthropic (Claude)',
+        'settings.aiProviderOrcaRouter': 'OrcaRouter',
         'settings.aiEffortLow': 'Thấp',
         'settings.aiEffortMedium': 'Trung bình',
         'settings.aiEffortHigh': 'Cao',

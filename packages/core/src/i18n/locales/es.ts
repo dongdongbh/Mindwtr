@@ -841,6 +841,7 @@ export const esOverrides: Record<string, string> = {
         'settings.aiReasoningHint': 'Usado por modelos GPT-5.',
         'settings.aiProviderOpenAI': 'OpenAI',
         'settings.aiProviderGemini': 'Gemini',
+        'settings.aiProviderOrcaRouter': 'OrcaRouter',
         'settings.aiEffortLow': 'Bajo',
         'settings.aiEffortMedium': 'Medio',
         'settings.aiEffortHigh': 'Alto',

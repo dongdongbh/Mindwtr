@@ -889,6 +889,7 @@ export const jaOverrides: Record<string, string> = {
         'settings.aiProviderOpenAI': 'OpenAI',
         'settings.aiProviderGemini': 'ジェミニ',
         'settings.aiProviderAnthropic': '人間性（クロード）',
+        'settings.aiProviderOrcaRouter': 'OrcaRouter',
         'settings.aiEffortLow': '低い',
         'settings.aiEffortMedium': '中くらい',
         'settings.aiEffortHigh': '高い',

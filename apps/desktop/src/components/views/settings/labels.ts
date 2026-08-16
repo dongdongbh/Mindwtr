@@ -211,6 +211,7 @@ export const SETTINGS_LABEL_KEYS = [
     'aiProviderOpenAI',
     'aiProviderGemini',
     'aiProviderAnthropic',
+    'aiProviderOrcaRouter',
     'aiModel',
     'aiBaseUrl',
     'aiBaseUrlHint',

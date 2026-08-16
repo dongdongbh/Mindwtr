@@ -62,6 +62,34 @@ describe('ai-config endpoint mapping', () => {
         expect(config.endpoint).toBeUndefined();
     });
 
+    it('points the OrcaRouter provider at the fixed gateway chat completions endpoint', () => {
+        const config = buildAIConfig(
+            createSettings({
+                provider: 'orcarouter',
+                model: 'orcarouter/fusion',
+                baseUrl: 'http://localhost:11434/v1',
+            }),
+            'sk-orca-test',
+        );
+        expect(config.endpoint).toBe('https://api.orcarouter.ai/v1/chat/completions');
+        expect(config.model).toBe('orcarouter/fusion');
+        // A stray base URL from a previous OpenAI config must not leak into the
+        // named gateway route, and OpenAI extra body params do not apply either.
+        expect(config.extraBodyParams).toBeUndefined();
+    });
+
+    it('uses the same fixed endpoint for the OrcaRouter copilot config', () => {
+        const config = buildCopilotConfig(
+            createSettings({
+                provider: 'orcarouter',
+                copilotModel: 'orcarouter/fusion-mini',
+            }),
+            'sk-orca-test',
+        );
+        expect(config.endpoint).toBe('https://api.orcarouter.ai/v1/chat/completions');
+        expect(config.reasoningEffort).toBe('minimal');
+    });
+
     it('applies OpenAI endpoint mapping to copilot config', () => {
         const config = buildCopilotConfig(
             createSettings({

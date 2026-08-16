@@ -519,6 +519,7 @@ export const nlOverrides: Record<string, string> = {
         'settings.speechBaseUrl': 'URL van transcriptieserver',
         'settings.speechBaseUrlHint': 'Laat leeg voor officiële OpenAI. Stel dit in voor een zelf gehoste OpenAI-compatibele transcriptieserver. API-sleutel is optioneel.',
         'settings.aiProviderGemini': 'Gemini',
+        'settings.aiProviderOrcaRouter': 'OrcaRouter',
         'settings.aiProviderOpenAI': 'OpenAI',
         'settings.gtd': 'GTD',
         'settings.notificationsDisabled': 'Meldingen uitgeschakeld',

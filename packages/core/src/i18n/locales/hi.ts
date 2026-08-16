@@ -889,6 +889,7 @@ export const hiOverrides: Record<string, string> = {
         'settings.aiProviderOpenAI': 'ओपनएआई',
         'settings.aiProviderGemini': 'मिथुन',
         'settings.aiProviderAnthropic': 'एंथ्रोपिक (क्लाउड)',
+        'settings.aiProviderOrcaRouter': 'OrcaRouter',
         'settings.aiEffortLow': 'कम',
         'settings.aiEffortMedium': 'मध्यम',
         'settings.aiEffortHigh': 'उच्च',

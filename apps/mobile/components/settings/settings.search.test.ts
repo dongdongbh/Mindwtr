@@ -74,6 +74,7 @@ const PREVIOUS_SETTINGS_MENU_KEYWORD_KEYS: Record<SettingsMenuRowId, readonly st
     advanced: [
         'settings.advanced', 'settings.ai', 'settings.aiProvider', 'settings.aiModel', 'settings.aiApiKey',
         'settings.aiProviderOpenAI', 'settings.aiProviderAnthropic', 'settings.aiProviderGemini',
+        'settings.aiProviderOrcaRouter',
         'settings.calendar', 'settings.calendarMobile.icsSubscriptions',
     ],
     about: ['settings.about', 'settings.changelog', 'settings.checkForUpdates', 'settings.documentation'],

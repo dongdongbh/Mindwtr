@@ -6,6 +6,9 @@ const AI_KEY_PREFIX = 'mindwtr-ai-key';
 const OPENAI_CHAT_COMPLETIONS_PATH = '/chat/completions';
 const OPENAI_TRANSCRIBE_PATH = '/audio/transcriptions';
 const OPENAI_TRANSCRIBE_URL = `https://api.openai.com/v1${OPENAI_TRANSCRIBE_PATH}`;
+// Fixed endpoint for the named OrcaRouter provider. Unlike the OpenAI provider's
+// user-pasted base URL, a gateway's own route is not something the user configures.
+const ORCAROUTER_CHAT_COMPLETIONS_URL = 'https://api.orcarouter.ai/v1/chat/completions';
 
 export function getAIKeyStorageKey(provider: AIProviderId): string {
     return `${AI_KEY_PREFIX}:${provider}`;
@@ -124,7 +127,9 @@ export function buildAIConfig(settings: AppData['settings'], apiKey: string): AI
     const defaults = getDefaultAIConfig(provider);
     const endpoint = provider === 'openai'
         ? resolveOpenAIEndpoint(settings.ai?.baseUrl)
-        : undefined;
+        : provider === 'orcarouter'
+            ? ORCAROUTER_CHAT_COMPLETIONS_URL
+            : undefined;
     const extraBodyParams = provider === 'openai'
         ? normalizeOpenAIExtraBodyParams(settings.ai?.openAIExtraBodyParams)
         : undefined;
@@ -143,7 +148,9 @@ export function buildCopilotConfig(settings: AppData['settings'], apiKey: string
     const provider = (settings.ai?.provider ?? 'openai') as AIProviderId;
     const endpoint = provider === 'openai'
         ? resolveOpenAIEndpoint(settings.ai?.baseUrl)
-        : undefined;
+        : provider === 'orcarouter'
+            ? ORCAROUTER_CHAT_COMPLETIONS_URL
+            : undefined;
     const extraBodyParams = provider === 'openai'
         ? normalizeOpenAIExtraBodyParams(settings.ai?.openAIExtraBodyParams)
         : undefined;

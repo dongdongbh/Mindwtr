@@ -7,6 +7,12 @@ import {
     OPENAI_COPILOT_DEFAULT_MODEL,
     OPENAI_DEFAULT_MODEL,
     OPENAI_MODEL_OPTIONS,
+    ORCAROUTER_COPILOT_DEFAULT_MODEL,
+    ORCAROUTER_DEFAULT_MODEL,
+    ORCAROUTER_MODEL_OPTIONS,
+    getDefaultAIConfig,
+    getDefaultCopilotModel,
+    getModelOptions,
     resolveAnthropicModel,
     resolveGeminiModel,
 } from './catalog';
@@ -22,6 +28,21 @@ describe('current model lineup (#985)', () => {
         expect(ANTHROPIC_MODEL_OPTIONS).toContain('claude-opus-5');
         expect(ANTHROPIC_MODEL_OPTIONS).toContain(ANTHROPIC_DEFAULT_MODEL);
         expect(ANTHROPIC_MODEL_OPTIONS).toContain('claude-haiku-4-5');
+    });
+});
+
+describe('OrcaRouter provider', () => {
+    it('defaults to the gateway fusion route with fusion-mini as the copilot tier', () => {
+        expect(ORCAROUTER_DEFAULT_MODEL).toBe('orcarouter/fusion');
+        expect(ORCAROUTER_COPILOT_DEFAULT_MODEL).toBe('orcarouter/fusion-mini');
+        expect(ORCAROUTER_MODEL_OPTIONS).toContain(ORCAROUTER_DEFAULT_MODEL);
+        expect(ORCAROUTER_MODEL_OPTIONS).toContain(ORCAROUTER_COPILOT_DEFAULT_MODEL);
+    });
+
+    it('resolves the orcarouter provider defaults and options through the catalog helpers', () => {
+        expect(getDefaultAIConfig('orcarouter').model).toBe(ORCAROUTER_DEFAULT_MODEL);
+        expect(getModelOptions('orcarouter')).toEqual(ORCAROUTER_MODEL_OPTIONS);
+        expect(getDefaultCopilotModel('orcarouter')).toBe(ORCAROUTER_COPILOT_DEFAULT_MODEL);
     });
 });
 

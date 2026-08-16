@@ -9,6 +9,7 @@ import { CompactText } from '@/components/compact-text';
 import { AiSettingsAssistantAnthropicPanel } from './ai-settings-assistant-anthropic-panel';
 import { AiSettingsAssistantGeminiPanel } from './ai-settings-assistant-gemini-panel';
 import { AiSettingsAssistantOpenAiPanel } from './ai-settings-assistant-openai-panel';
+import { AiSettingsAssistantOrcaRouterPanel } from './ai-settings-assistant-orcarouter-panel';
 import { styles } from './settings.styles';
 
 type SettingsTranslator = (key: string, values?: Record<string, string | number | boolean | null | undefined>) => string;
@@ -164,6 +165,22 @@ export function AiSettingsAssistantCard({
                                     </CompactText>
                                 </TouchableOpacity>
                             )}
+                            {!isFossBuild && (
+                                <TouchableOpacity
+                                    style={[
+                                        styles.backendOption,
+                                        { borderColor: tc.border, backgroundColor: aiProvider === 'orcarouter' ? tc.filterBg : 'transparent' },
+                                    ]}
+                                    onPress={() => onAiProviderChange('orcarouter')}
+                                >
+                                    <CompactText
+                                        style={[styles.backendOptionText, { color: aiProvider === 'orcarouter' ? tc.tint : tc.secondaryText }]}
+                                        numberOfLines={2}
+                                    >
+                                        {t('settings.aiProviderOrcaRouter')}
+                                    </CompactText>
+                                </TouchableOpacity>
+                            )}
                         </View>
                     </View>
 
@@ -254,7 +271,7 @@ export function AiSettingsAssistantCard({
                             t={t}
                             tc={tc}
                         />
-                    ) : (
+                    ) : aiProvider === 'anthropic' ? (
                         <AiSettingsAssistantAnthropicPanel
                             aiApiKey={aiApiKey}
                             aiThinkingBudget={aiThinkingBudget}
@@ -262,6 +279,13 @@ export function AiSettingsAssistantCard({
                             onAiApiKeyChange={onAiApiKeyChange}
                             onAiThinkingBudgetChange={onAiThinkingBudgetChange}
                             onAnthropicThinkingEnabledChange={onAnthropicThinkingEnabledChange}
+                            t={t}
+                            tc={tc}
+                        />
+                    ) : (
+                        <AiSettingsAssistantOrcaRouterPanel
+                            aiApiKey={aiApiKey}
+                            onAiApiKeyChange={onAiApiKeyChange}
                             t={t}
                             tc={tc}
                         />

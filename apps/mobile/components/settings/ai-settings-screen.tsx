@@ -140,7 +140,9 @@ export function AISettingsScreen() {
                 ? t('settings.aiProviderOpenAI')
                 : provider === 'gemini'
                     ? t('settings.aiProviderGemini')
-                    : t('settings.aiProviderAnthropic')
+                    : provider === 'anthropic'
+                        ? t('settings.aiProviderAnthropic')
+                        : t('settings.aiProviderOrcaRouter')
     );
 
     const getAIProviderPolicyUrl = (provider: AIProviderId): string => (
@@ -150,7 +152,9 @@ export function AISettingsScreen() {
                 ? 'https://openai.com/policies/privacy-policy'
                 : provider === 'gemini'
                     ? 'https://policies.google.com/privacy'
-                    : 'https://www.anthropic.com/privacy'
+                    : provider === 'anthropic'
+                        ? 'https://www.anthropic.com/privacy'
+                        : 'https://www.orcarouter.ai/privacy-policy'
     );
 
     const loadAIProviderConsent = async (): Promise<Record<string, boolean>> => {

@@ -5,7 +5,7 @@
 // something the caller degrades from — see mergeModelOptions.
 import { fetchWithTimeout } from './utils';
 
-export type ModelListProviderId = 'openai' | 'gemini' | 'anthropic';
+export type ModelListProviderId = 'openai' | 'gemini' | 'anthropic' | 'orcarouter';
 export type ModelListKind = 'chat' | 'transcription';
 
 export type FetchProviderModelsOptions = {
@@ -50,6 +50,7 @@ async function readJsonBody(response: Response, label: string): Promise<unknown>
 // --- OpenAI --------------------------------------------------------------
 
 const OPENAI_DEFAULT_ROOT = 'https://api.openai.com/v1';
+const ORCAROUTER_DEFAULT_ROOT = 'https://api.orcarouter.ai/v1';
 const OPENAI_CHAT_EXCLUDE = /(embed|tts|audio|whisper|transcribe|realtime|image|dall-e|moderation)/i;
 const OPENAI_TRANSCRIBE_INCLUDE = /(whisper|transcribe)/i;
 
@@ -185,6 +186,12 @@ export function fetchProviderModels(
     options: FetchProviderModelsOptions = {}
 ): Promise<string[]> {
     const resolved = resolveOptions(options);
+    // OrcaRouter is OpenAI-compatible, so it reuses the OpenAI list parser with
+    // the gateway's own root. Its /v1/models payload is namespaced
+    // (`vendor/model` and `orcarouter/*`), which the chat filter handles fine.
+    if (provider === 'orcarouter') {
+        return fetchOpenAIModels({ ...resolved, baseUrl: resolved.baseUrl || ORCAROUTER_DEFAULT_ROOT });
+    }
     if (provider === 'openai') return fetchOpenAIModels(resolved);
     if (provider === 'gemini') return fetchGeminiModels(resolved);
     return fetchAnthropicModels(resolved);

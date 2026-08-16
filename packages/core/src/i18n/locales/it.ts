@@ -1002,6 +1002,7 @@ export const itOverrides: Record<string, string> = {
         'settings.aiReasoningHintFoss': 'Usato dai modelli supportati.',
         'settings.aiProviderOpenAI': 'OpenAI',
         'settings.aiProviderGemini': 'Gemini',
+        'settings.aiProviderOrcaRouter': 'OrcaRouter',
         'settings.aiEffortLow': 'Basso',
         'settings.aiEffortMedium': 'Medio',
         'settings.aiEffortHigh': 'Alto',
