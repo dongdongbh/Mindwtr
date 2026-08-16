@@ -771,7 +771,7 @@ describe('TaskItemDisplay', () => {
             </LanguageProvider>
         );
 
-        expect(queryByRole('link', { name: 'spec' })).toBeNull();
+        expect(queryByRole('link', { name: 'spec' })).toBeInTheDocument();
         expect(container.textContent).toContain('Draft spec');
         expect(container.textContent).not.toContain('**');
         expect(container.textContent).not.toContain('](');
