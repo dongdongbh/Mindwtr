@@ -843,37 +843,48 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                                     onPointerDown={(e) => e.stopPropagation()}
                                 >
                                     {(task.checklist || []).map((item, index) => (
-                                        <button
+                                        <div
                                             key={item.id || index}
-                                            type="button"
                                             className={cn(
                                                 "w-full flex items-center gap-2 text-left text-xs text-muted-foreground rounded px-1.5 py-1 hover:bg-muted/60 transition-colors",
                                                 readOnly && "hover:bg-transparent cursor-default"
                                             )}
-                                            onClick={(event) => {
-                                                event.stopPropagation();
-                                                if (readOnly) return;
-                                                onToggleChecklistItem?.(index);
-                                            }}
-                                            aria-pressed={item.isCompleted}
-                                            disabled={readOnly || !onToggleChecklistItem}
                                         >
-                                            <span
+                                            <button
+                                                type="button"
                                                 className={cn(
                                                     "w-3 h-3 shrink-0 border rounded flex items-center justify-center",
                                                     item.isCompleted
                                                         ? "bg-primary border-primary text-primary-foreground"
                                                         : "border-muted-foreground"
                                                 )}
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    if (readOnly) return;
+                                                    onToggleChecklistItem?.(index);
+                                                }}
+                                                aria-pressed={item.isCompleted}
+                                                disabled={readOnly || !onToggleChecklistItem}
                                             >
                                                 {item.isCompleted && <Check className="w-2 h-2" />}
-                                            </span>
-                                            <InlineMarkdown
-                                                markdown={item.title}
-                                                className={cn(item.isCompleted && "line-through")}
-                                                interactiveLinks={false}
-                                            />
-                                        </button>
+                                            </button>
+                                            <div
+                                                className="flex-1 cursor-pointer"
+                                                onClick={(event) => {
+                                                    if ((event.target as HTMLElement).closest('a')) {
+                                                        return;
+                                                    }
+                                                    event.stopPropagation();
+                                                    if (readOnly) return;
+                                                    onToggleChecklistItem?.(index);
+                                                }}
+                                            >
+                                                <InlineMarkdown
+                                                    markdown={item.title}
+                                                    className={cn(item.isCompleted && "line-through")}
+                                                />
+                                            </div>
+                                        </div>
                                     ))}
                                 </div>
                             )}
