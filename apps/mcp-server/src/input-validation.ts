@@ -37,6 +37,8 @@ const recurrenceByDaySchema = z.string().regex(
   'Expected an RFC 5545 weekday'
 );
 const recurrenceAnchorDaySchema = z.number().int().min(1).max(31);
+// byMonthDay additionally accepts -1: RFC 5545's "last day of the month".
+const recurrenceMonthDaySchema = z.union([recurrenceAnchorDaySchema, z.literal(-1)]);
 const recurrenceUntilPattern =
   /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})?)?$/;
 const recurrenceObjectSchema = z.object({
@@ -44,7 +46,7 @@ const recurrenceObjectSchema = z.object({
   seriesId: z.string().trim().min(1).max(MAX_TASK_TITLE_LENGTH).optional(),
   strategy: z.enum(['strict', 'fluid']).optional(),
   byDay: z.array(recurrenceByDaySchema).optional(),
-  byMonthDay: z.array(recurrenceAnchorDaySchema).max(31).optional(),
+  byMonthDay: z.array(recurrenceMonthDaySchema).max(31).optional(),
   weekStart: z.enum(['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']).optional(),
   count: z.number().int().positive().optional(),
   until: z.string().regex(recurrenceUntilPattern, 'Expected ISO date (YYYY-MM-DD) or ISO datetime').optional(),

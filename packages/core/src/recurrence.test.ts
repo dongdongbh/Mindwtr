@@ -641,6 +641,75 @@ describe('recurrence', () => {
         expect(next?.dueDate).toBeUndefined();
     });
 
+    // RFC 5545 BYMONTHDAY=-1: "last day of the month" — the end-of-month rule
+    // that needs no 31st-anchor ritual (Discord ask). The matrix below walks
+    // strict/fluid × short/long months × interval × date-only.
+    it('advances a strict last-day-of-month rule through short and long months', () => {
+        const task: Task = {
+            id: 'lastday-1',
+            title: 'Close the books',
+            status: 'next',
+            tags: [],
+            contexts: [],
+            dueDate: '2026-08-31',
+            recurrence: { rule: 'monthly', strategy: 'strict', byMonthDay: [-1], rrule: 'FREQ=MONTHLY;BYMONTHDAY=-1' },
+            createdAt: '2026-08-01T00:00:00.000Z',
+            updatedAt: '2026-08-01T00:00:00.000Z',
+        };
+
+        const sept = createNextRecurringTask(task, '2026-08-31T10:00:00.000Z', 'done');
+        expect(sept?.dueDate).toBe('2026-09-30');
+        const oct = createNextRecurringTask({ ...task, dueDate: '2026-09-30' }, '2026-09-30T10:00:00.000Z', 'done');
+        expect(oct?.dueDate).toBe('2026-10-31');
+        const feb = createNextRecurringTask({ ...task, dueDate: '2027-01-31' }, '2027-01-31T10:00:00.000Z', 'done');
+        expect(feb?.dueDate).toBe('2027-02-28');
+        const leapFeb = createNextRecurringTask({ ...task, dueDate: '2028-01-31' }, '2028-01-31T10:00:00.000Z', 'done');
+        expect(leapFeb?.dueDate).toBe('2028-02-29');
+    });
+
+    it('lands a fluid last-day-of-month rule on the last day after the completion', () => {
+        const task: Task = {
+            id: 'lastday-2',
+            title: 'Invoice run',
+            status: 'next',
+            tags: [],
+            contexts: [],
+            dueDate: '2026-08-31',
+            recurrence: { rule: 'monthly', strategy: 'fluid', byMonthDay: [-1], rrule: 'FREQ=MONTHLY;BYMONTHDAY=-1' },
+            createdAt: '2026-08-01T00:00:00.000Z',
+            updatedAt: '2026-08-01T00:00:00.000Z',
+        };
+
+        // Completed mid-September: the next last-day after Sep 15 is Sep 30.
+        const next = createNextRecurringTask(task, '2026-09-15T09:00:00.000Z', 'done');
+        expect(next?.dueDate).toBe('2026-09-30');
+    });
+
+    it('respects the interval for last-day-of-month rules', () => {
+        const task: Task = {
+            id: 'lastday-3',
+            title: 'Quarterly close',
+            status: 'next',
+            tags: [],
+            contexts: [],
+            dueDate: '2026-08-31',
+            recurrence: { rule: 'monthly', strategy: 'strict', interval: 2, byMonthDay: [-1], rrule: 'FREQ=MONTHLY;INTERVAL=2;BYMONTHDAY=-1' },
+            createdAt: '2026-08-01T00:00:00.000Z',
+            updatedAt: '2026-08-01T00:00:00.000Z',
+        };
+
+        const next = createNextRecurringTask(task, '2026-08-31T10:00:00.000Z', 'done');
+        expect(next?.dueDate).toBe('2026-10-31');
+    });
+
+    it('round-trips BYMONTHDAY=-1 through the rrule string', () => {
+        const rrule = buildRRuleString('monthly', undefined, 1, { byMonthDay: [-1] });
+        expect(rrule).toBe('FREQ=MONTHLY;BYMONTHDAY=-1');
+        const parsed = parseRRuleString(rrule);
+        expect(parsed.rule).toBe('monthly');
+        expect(parsed.byMonthDay).toEqual([-1]);
+    });
+
     it('falls back to weekly interval when BYDAY is empty', () => {
         const task: Task = {
             id: 't4',

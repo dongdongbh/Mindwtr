@@ -367,7 +367,8 @@ function parseRRule(raw: string): ParsedRRule | null {
         ? map.BYMONTHDAY
             .split(',')
             .map((token) => parseInt(token.trim(), 10))
-            .filter((d) => Number.isFinite(d) && d > 0 && d <= 31)
+            // -1 = RFC 5545 "last day of the month"; other negatives stay out.
+            .filter((d) => Number.isFinite(d) && ((d > 0 && d <= 31) || d === -1))
         : undefined;
 
     return {
@@ -413,7 +414,10 @@ function getMonthlyCandidates(
 
     if (rule.byMonthDay && rule.byMonthDay.length > 0) {
         return rule.byMonthDay
-            .map((monthDay) => new Date(year, month, monthDay, eventTime.h, eventTime.m, eventTime.s, eventTime.ms))
+            // -1 = last day of this month (day 0 of the next one).
+            .map((monthDay) => (monthDay === -1
+                ? new Date(year, month + 1, 0, eventTime.h, eventTime.m, eventTime.s, eventTime.ms)
+                : new Date(year, month, monthDay, eventTime.h, eventTime.m, eventTime.s, eventTime.ms)))
             .filter((candidate) => candidate.getMonth() === month)
             .sort((a, b) => a.getTime() - b.getTime());
     }
@@ -462,7 +466,9 @@ function getYearlyCandidates(
 
         if (rule.byMonthDay && rule.byMonthDay.length > 0) {
             for (const monthDay of rule.byMonthDay) {
-                const candidate = new Date(year, month, monthDay, eventTime.h, eventTime.m, eventTime.s, eventTime.ms);
+                const candidate = monthDay === -1
+                    ? new Date(year, month + 1, 0, eventTime.h, eventTime.m, eventTime.s, eventTime.ms)
+                    : new Date(year, month, monthDay, eventTime.h, eventTime.m, eventTime.s, eventTime.ms);
                 if (candidate.getMonth() === month) {
                     candidates.set(candidate.getTime(), candidate);
                 }

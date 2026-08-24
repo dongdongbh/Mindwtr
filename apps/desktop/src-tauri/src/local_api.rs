@@ -2919,7 +2919,9 @@ fn valid_recurrence(value: &Value) -> bool {
             items.len() <= 31
                 && items
                     .iter()
-                    .all(|item| item.as_i64().is_some_and(|day| (1..=31).contains(&day)))
+                    // -1 = RFC 5545 "last day of the month", the one negative
+                    // ordinal the core engine supports.
+                    .all(|item| item.as_i64().is_some_and(|day| (1..=31).contains(&day) || day == -1))
         }),
         "weekStart" => value.as_str().is_some_and(valid_recurrence_weekday),
         "count" => value.as_i64().is_some_and(|count| count > 0),
@@ -3106,9 +3108,11 @@ fn parse_supported_rrule(value: &str) -> Option<RecurrenceSchedule> {
             "BYMONTHDAY" => {
                 let mut days = raw
                     .split(',')
-                    .map(parse_positive_integer)
+                    .map(|token| token.trim().parse::<i64>().ok())
                     .collect::<Option<Vec<_>>>()?;
-                if days.iter().any(|day| !(1..=31).contains(day)) {
+                // -1 = RFC 5545 "last day of the month"; other values keep the
+                // positive 1..=31 contract.
+                if days.iter().any(|day| !(1..=31).contains(day) && *day != -1) {
                     return None;
                 }
                 days.sort_unstable();

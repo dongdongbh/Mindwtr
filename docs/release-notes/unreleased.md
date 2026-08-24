@@ -6,6 +6,7 @@ Changes collected after `v1.2.1` and before the next version tag.
 
 ## Full Change List
 
+- Recurrence: monthly repeats can now target the true last day of the month (RFC 5545's BYMONTHDAY=-1) — no more starting a repeat on a 31st to get end-of-month behavior. Works in the repeat engine, calendar preview, ICS import, and the local automation API; the editors gain a "Last day" choice.
 - Desktop: the Calendar toolbar gained a "Starts" toggle next to "Completed" — turn it off to hide start-date entries and read the calendar as deadlines only. On by default, remembered per device.
 - Desktop: grouping a list by project no longer shows a gray header dot over rows whose project chips are colored — the group header now uses the same color the chips do: the project's area color, with the project's own color as the fallback.
 - Desktop: status pills now wear their Board View colors everywhere — the status badge on task rows (lists and the review flows) and the selected status in the task editor show amber for Waiting, purple for Someday, and so on, instead of one uniform accent.

@@ -136,7 +136,10 @@ const normalizeMonthDays = (days?: string[] | null): number[] | undefined => {
     if (!days || days.length === 0) return undefined;
     const normalized = days
         .map((day) => Number(day))
-        .filter((day) => Number.isFinite(day) && day >= 1 && day <= 31);
+        // -1 is RFC 5545's "last day of the month" (BYMONTHDAY=-1) — the only
+        // negative ordinal supported; deeper counts from the end stay rejected
+        // until someone actually asks for them.
+        .filter((day) => Number.isFinite(day) && ((day >= 1 && day <= 31) || day === -1));
     const unique = Array.from(new Set(normalized)).sort((a, b) => a - b);
     return unique.length > 0 ? unique : undefined;
 };
@@ -742,8 +745,9 @@ function nextMonthlyByMonthDay(base: Date, byMonthDay: number[], interval: numbe
         const month = monthDate.getMonth();
         const candidates = normalized.map((day) => new Date(
             year,
-            month,
-            day,
+            // -1 = last day of this month, via day 0 of the following month.
+            day === -1 ? month + 1 : month,
+            day === -1 ? 0 : day,
             base.getHours(),
             base.getMinutes(),
             base.getSeconds(),
