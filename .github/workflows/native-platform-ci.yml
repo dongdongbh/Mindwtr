@@ -144,6 +144,13 @@ jobs:
       - name: Check macOS Rust and Objective-C bridge
         run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
 
+      - name: Link release macOS Rust and Swift bridges
+        run: cargo build --release --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "10.15"
+          CMAKE_OSX_DEPLOYMENT_TARGET: "10.15"
+          APPLE_TEAM_ID: DEVTEAM
+
       - name: Run macOS native library tests
         run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
 

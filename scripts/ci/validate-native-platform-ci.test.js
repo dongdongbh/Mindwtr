@@ -54,3 +54,17 @@ test("desktop Rust pull requests run a stable Windows cargo check", () => {
     "run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml",
   );
 });
+
+test("macOS native CI links the release Rust and Swift bridges", () => {
+  const workflow = readFileSync(".github/workflows/native-platform-ci.yml", "utf8");
+  const macosJob = workflow.match(
+    /\n  macos-rust:\n([\s\S]*?)(?=\n  [a-z][a-z-]+:\n|$)/,
+  )?.[1];
+
+  expect(macosJob).toBeDefined();
+  expect(macosJob).toContain("name: Link release macOS Rust and Swift bridges");
+  expect(macosJob).toContain(
+    "run: cargo build --release --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib",
+  );
+  expect(macosJob).toContain('MACOSX_DEPLOYMENT_TARGET: "10.15"');
+});

@@ -70,6 +70,17 @@ fn main() {
             .ok()
             .filter(|output| output.status.success())
             .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string());
+        let swiftc_path = std::process::Command::new("xcrun")
+            .args(["--find", "swiftc"])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| std::path::PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()));
+        let swift_runtime_path = swiftc_path.as_ref().and_then(|path| {
+            path.parent()
+                .and_then(std::path::Path::parent)
+                .map(|usr| usr.join("lib/swift/macosx"))
+        });
 
         let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR is set by cargo");
         let reload_lib_path = format!("{out_dir}/libmindwtr_widget_reload.a");
@@ -89,13 +100,31 @@ fn main() {
         swiftc_args.push(reload_lib_path);
         swiftc_args.push("src/macos_widget_reload.swift".into());
 
-        let swiftc_ok = std::process::Command::new("swiftc")
+        let swiftc = swiftc_path
+            .as_deref()
+            .unwrap_or_else(|| std::path::Path::new("swiftc"));
+        let swiftc_ok = std::process::Command::new(swiftc)
             .args(&swiftc_args)
             .status()
             .map(|status| status.success())
             .unwrap_or(false);
         if swiftc_ok {
             println!("cargo:rustc-link-search=native={out_dir}");
+            let swift_runtime_path = swift_runtime_path
+                .filter(|path| path.is_dir())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "could not locate the macOS Swift runtime libraries beside {}",
+                        swiftc.display()
+                    )
+                });
+            // Static Swift shims carry autolink entries for compatibility
+            // libraries. Cargo invokes clang for the final Rust cdylib link, so
+            // it does not inherit swiftc's runtime search paths automatically.
+            println!(
+                "cargo:rustc-link-search=native={}",
+                swift_runtime_path.display()
+            );
             println!("cargo:rustc-link-lib=static=mindwtr_widget_reload");
             // Weak, not `cargo:rustc-link-lib=framework=WidgetKit`: the app's own
             // deployment target stays macOS 10.15 (MACOSX_DEPLOYMENT_TARGET in
