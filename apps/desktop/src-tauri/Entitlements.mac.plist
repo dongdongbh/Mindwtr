@@ -23,7 +23,7 @@
     <!-- Shared with the macOS widget extension (#1054). The placeholder is
          resolved to "$APPLE_TEAM_ID.tech.dongdongbh.mindwtr" and the app
          re-signed by scripts/build-macos-widget.sh, which runs after `tauri
-         build`'s own first signature -- see that script for why the
+         build`'s own first signature; see that script for why the
          placeholder here never needs to be a real value. -->
     <key>com.apple.security.application-groups</key>
     <array>
