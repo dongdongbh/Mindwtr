@@ -39,7 +39,7 @@ export function useTaskItemRecurrence({
 
     const [showCustomRecurrence, setShowCustomRecurrence] = useState(false);
     const [customInterval, setCustomInterval] = useState(1);
-    const [customMode, setCustomMode] = useState<'date' | 'nth'>('date');
+    const [customMode, setCustomMode] = useState<'date' | 'nth' | 'lastDay'>('date');
     const [customOrdinal, setCustomOrdinal] = useState<'1' | '2' | '3' | '4' | '-1'>('1');
     const [customWeekday, setCustomWeekday] = useState<RecurrenceWeekday>(monthlyWeekdayCode);
     const [customMonthDay, setCustomMonthDay] = useState<number>(monthlyAnchorDate.getDate());
@@ -47,11 +47,13 @@ export function useTaskItemRecurrence({
     const openCustomRecurrence = useCallback(() => {
         const parsed = parseRRuleString(editRecurrenceRRule);
         const interval = parsed.interval && parsed.interval > 0 ? parsed.interval : 1;
-        let mode: 'date' | 'nth' = 'date';
+        let mode: 'date' | 'nth' | 'lastDay' = 'date';
         let ordinal: '1' | '2' | '3' | '4' | '-1' = '1';
         let weekday: RecurrenceWeekday = monthlyWeekdayCode;
         const monthDay = parsed.byMonthDay?.[0];
-        if (monthDay) {
+        if (monthDay === -1) {
+            mode = 'lastDay';
+        } else if (monthDay) {
             mode = 'date';
             setCustomMonthDay(Math.min(Math.max(monthDay, 1), 31));
         }
@@ -68,7 +70,7 @@ export function useTaskItemRecurrence({
         setCustomMode(mode);
         setCustomOrdinal(ordinal);
         setCustomWeekday(weekday);
-        if (!monthDay) {
+        if (!monthDay || monthDay === -1) {
             setCustomMonthDay(monthlyAnchorDate.getDate());
         }
         setShowCustomRecurrence(true);
@@ -85,7 +87,7 @@ export function useTaskItemRecurrence({
                 until: parsed.until,
             })
             : buildRRuleString('monthly', undefined, safeInterval, {
-                byMonthDay: [safeMonthDay],
+                byMonthDay: [customMode === 'lastDay' ? -1 : safeMonthDay],
                 count: parsed.count,
                 until: parsed.until,
             });

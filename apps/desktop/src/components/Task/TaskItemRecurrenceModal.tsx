@@ -9,12 +9,12 @@ type TaskItemRecurrenceModalProps = {
     weekdayOrder: RecurrenceWeekday[];
     weekdayLabels: Record<RecurrenceWeekday, string>;
     customInterval: number;
-    customMode: 'date' | 'nth';
+    customMode: 'date' | 'nth' | 'lastDay';
     customOrdinal: '1' | '2' | '3' | '4' | '-1';
     customWeekday: RecurrenceWeekday;
     customMonthDay: number;
     onIntervalChange: (value: number) => void;
-    onModeChange: (value: 'date' | 'nth') => void;
+    onModeChange: (value: 'date' | 'nth' | 'lastDay') => void;
     onOrdinalChange: (value: '1' | '2' | '3' | '4' | '-1') => void;
     onWeekdayChange: (value: RecurrenceWeekday) => void;
     onMonthDayChange: (value: number) => void;
@@ -102,6 +102,18 @@ export function TaskItemRecurrenceModal({
                             )}
                         >
                             {onDayLabel}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => onModeChange('lastDay')}
+                            className={cn(
+                                'text-[10px] px-2 py-1 rounded border transition-colors',
+                                customMode === 'lastDay'
+                                    ? 'bg-primary text-primary-foreground border-primary'
+                                    : 'bg-transparent text-muted-foreground border-border hover:bg-accent'
+                            )}
+                        >
+                            {resolveText('recurrence.lastDay', 'Last day')}
                         </button>
                         <button
                             type="button"

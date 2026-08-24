@@ -440,7 +440,7 @@ function TaskEditModalInner({
 
     const [customRecurrenceVisible, setCustomRecurrenceVisible] = useState(false);
     const [customInterval, setCustomInterval] = useState(1);
-    const [customMode, setCustomMode] = useState<'date' | 'nth'>('date');
+    const [customMode, setCustomMode] = useState<'date' | 'nth' | 'lastDay'>('date');
     const [customOrdinal, setCustomOrdinal] = useState<'1' | '2' | '3' | '4' | '-1'>('1');
     const [customWeekday, setCustomWeekday] = useState<RecurrenceWeekday>(monthlyWeekdayCode);
     const [customMonthDay, setCustomMonthDay] = useState<number>(monthlyAnchorDate.getDate());
@@ -459,11 +459,13 @@ function TaskEditModalInner({
     const openCustomRecurrence = useCallback(() => {
         const parsed = parseRRuleString(recurrenceRRuleValue);
         const interval = parsed.interval && parsed.interval > 0 ? parsed.interval : 1;
-        let mode: 'date' | 'nth' = 'date';
+        let mode: 'date' | 'nth' | 'lastDay' = 'date';
         let ordinal: '1' | '2' | '3' | '4' | '-1' = '1';
         let weekday: RecurrenceWeekday = monthlyWeekdayCode;
         const monthDay = parsed.byMonthDay?.[0];
-        if (monthDay) {
+        if (monthDay === -1) {
+            mode = 'lastDay';
+        } else if (monthDay) {
             mode = 'date';
             setCustomMonthDay(Math.min(Math.max(monthDay, 1), 31));
         }
@@ -480,7 +482,7 @@ function TaskEditModalInner({
         setCustomMode(mode);
         setCustomOrdinal(ordinal);
         setCustomWeekday(weekday);
-        if (!monthDay) {
+        if (!monthDay || monthDay === -1) {
             setCustomMonthDay(monthlyAnchorDate.getDate());
         }
         setCustomRecurrenceVisible(true);
@@ -495,7 +497,7 @@ function TaskEditModalInner({
             : [
                 'FREQ=MONTHLY',
                 safeInterval > 1 ? `INTERVAL=${safeInterval}` : null,
-                `BYMONTHDAY=${safeMonthDay}`,
+                `BYMONTHDAY=${customMode === 'lastDay' ? -1 : safeMonthDay}`,
             ].filter(Boolean).join(';');
         setDraftField('recurrence', 'monthly');
         setDraftField('recurrenceStrategy', recurrenceStrategyValue);

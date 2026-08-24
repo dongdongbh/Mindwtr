@@ -13,7 +13,7 @@ const getOrdinalTranslationKey = (value: '1' | '2' | '3' | '4' | '-1'): 'first' 
 
 type TaskEditCustomRecurrenceModalProps = {
     customInterval: number;
-    customMode: 'date' | 'nth';
+    customMode: 'date' | 'nth' | 'lastDay';
     customMonthDay: number;
     customOrdinal: '1' | '2' | '3' | '4' | '-1';
     customWeekday: string;
@@ -22,7 +22,7 @@ type TaskEditCustomRecurrenceModalProps = {
     recurrenceWeekdayButtons: { key: string; label: string }[];
     recurrenceWeekdayLabels: Record<string, string>;
     setCustomInterval: (value: number) => void;
-    setCustomMode: (value: 'date' | 'nth') => void;
+    setCustomMode: (value: 'date' | 'nth' | 'lastDay') => void;
     setCustomMonthDay: (value: number) => void;
     setCustomOrdinal: (value: '1' | '2' | '3' | '4' | '-1') => void;
     setCustomWeekday: (value: string) => void;
@@ -102,6 +102,14 @@ export function TaskEditCustomRecurrenceModal({
                             >
                                 <Text style={getStatusTextStyle(customMode === 'date')}>
                                     {t('recurrence.onDayOfMonth').replace('{day}', String(customMonthDay))}
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={getStatusChipStyle(customMode === 'lastDay')}
+                                onPress={() => setCustomMode('lastDay')}
+                            >
+                                <Text style={getStatusTextStyle(customMode === 'lastDay')}>
+                                    {t('recurrence.lastDay')}
                                 </Text>
                             </TouchableOpacity>
                             <TouchableOpacity

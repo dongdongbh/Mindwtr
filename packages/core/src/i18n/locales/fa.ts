@@ -390,6 +390,8 @@ export const faOverrides: Record<string, string> = {
         'recurrence.onLabel': 'در',
         'recurrence.summaryOnDays': 'در {{days}}',
         'recurrence.onDayOfMonth': 'روز {day}',
+        'recurrence.lastDay': 'آخرین روز',
+        'recurrence.lastDayOfMonth': 'آخرین روز ماه',
         'recurrence.onNthWeekday': '{ordinal} {weekday}',
         'recurrence.ordinalSelectLabel': 'ترتیب تکرار',
         'recurrence.weekdaySelectLabel': 'روز هفته تکرار',

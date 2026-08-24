@@ -78,7 +78,9 @@ export function formatRecurrenceSummary(
         })).join(', '));
     } else if ((input.byMonthDay ?? []).length > 0) {
         segments.push((input.byMonthDay ?? [])
-            .map((day) => formatI18nTemplate(t('recurrence.onDayOfMonth'), { day }))
+            .map((day) => (day === -1
+                ? t('recurrence.lastDayOfMonth')
+                : formatI18nTemplate(t('recurrence.onDayOfMonth'), { day })))
             .join(', '));
     }
 

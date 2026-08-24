@@ -14,6 +14,7 @@ const labels: Record<string, string> = {
     'recurrence.yearUnit': 'year(s)',
     'recurrence.summaryOnDays': 'on {{days}}',
     'recurrence.onDayOfMonth': 'Day {day}',
+    'recurrence.lastDayOfMonth': 'Last day of the month',
     'recurrence.onNthWeekday': 'The {ordinal} {weekday}',
     'recurrence.ordinal.first': 'first',
     'recurrence.ordinal.last': 'last',
@@ -46,6 +47,11 @@ describe('formatRecurrenceSummary', () => {
     it('names the month day of a BYMONTHDAY rule', () => {
         expect(summarize({ rule: 'monthly', strategy: 'strict', byMonthDay: [15] }))
             .toBe('Monthly · Day 15 · Ends: Never');
+    });
+
+    it('reads a BYMONTHDAY of -1 as the last day of the month', () => {
+        expect(summarize({ rule: 'monthly', strategy: 'strict', byMonthDay: [-1] }))
+            .toBe('Monthly · Last day of the month · Ends: Never');
     });
 
     it('names the ordinal weekday of a monthly BYDAY rule', () => {

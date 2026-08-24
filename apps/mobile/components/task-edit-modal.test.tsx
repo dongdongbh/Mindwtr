@@ -3,7 +3,10 @@ import { Alert, Modal, Text } from 'react-native';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import renderer, { act } from 'react-test-renderer';
 
+import type { Task } from '@mindwtr/core';
+
 import { TaskEditModal } from './task-edit-modal';
+import { TaskEditCustomRecurrenceModal } from './task-edit/TaskEditCustomRecurrenceModal';
 import { MarkdownFormatToolbar } from './markdown-format-toolbar';
 import { syncTaskEditPagerPosition } from './task-edit/task-edit-modal.utils';
 
@@ -1099,5 +1102,75 @@ describe('TaskEditModal', () => {
     expect(onProjectNavigate).toHaveBeenCalledWith('project-1');
     expect(onContextNavigate).toHaveBeenCalledWith('@home');
     expect(onTagNavigate).toHaveBeenCalledWith('#urgent');
+  });
+
+  describe('custom monthly recurrence', () => {
+    const monthlyTask = (recurrence: Task['recurrence']): Task => ({
+      id: 't1',
+      title: 'Pay rent',
+      status: 'next',
+      tags: [],
+      contexts: [],
+      dueDate: '2026-06-10',
+      recurrence,
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+    });
+
+    const openEditor = async (recurrence: Task['recurrence']) => {
+      let tree!: renderer.ReactTestRenderer;
+      await act(async () => {
+        tree = renderer.create(
+          <TaskEditModal visible task={monthlyTask(recurrence)} onClose={vi.fn()} onSave={vi.fn()} />
+        );
+        await Promise.resolve();
+      });
+      // The form tab is mocked, so the field props (the editor's recurrence seam)
+      // are read off the element renderField would have mounted.
+      const fieldProps = () => tree.root
+        .find((node) => Array.isArray(node.props.basicFields))
+        .props.renderField('recurrence').props;
+      act(() => {
+        fieldProps().openCustomRecurrence();
+      });
+      return { tree, fieldProps };
+    };
+
+    const pressChip = (tree: renderer.ReactTestRenderer, label: string) => {
+      const chip = tree.root
+        .findByType(TaskEditCustomRecurrenceModal)
+        .findAll((node) => typeof node.props.onPress === 'function'
+          && node.findAll((child) => child.props.children === label, { deep: true }).length > 0)
+        .pop();
+      act(() => {
+        chip!.props.onPress();
+      });
+    };
+
+    it('emits BYMONTHDAY=-1 when the last-day choice is saved', async () => {
+      const { tree, fieldProps } = await openEditor({ rule: 'monthly', strategy: 'strict' });
+
+      pressChip(tree, 'recurrence.lastDay');
+      expect(tree.root.findByType(TaskEditCustomRecurrenceModal).props.customMode).toBe('lastDay');
+
+      pressChip(tree, 'common.save');
+
+      expect(fieldProps().recurrenceRRuleValue).toBe('FREQ=MONTHLY;BYMONTHDAY=-1');
+    });
+
+    it('reopens a last-day rule with the choice still selected', async () => {
+      const { tree, fieldProps } = await openEditor({
+        rule: 'monthly',
+        strategy: 'strict',
+        byMonthDay: [-1],
+        rrule: 'FREQ=MONTHLY;BYMONTHDAY=-1',
+      });
+
+      expect(tree.root.findByType(TaskEditCustomRecurrenceModal).props.customMode).toBe('lastDay');
+
+      pressChip(tree, 'common.save');
+
+      expect(fieldProps().recurrenceRRuleValue).toBe('FREQ=MONTHLY;BYMONTHDAY=-1');
+    });
   });
 });

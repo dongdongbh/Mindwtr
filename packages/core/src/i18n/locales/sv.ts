@@ -390,6 +390,8 @@ export const svOverrides: Record<string, string> = {
         'recurrence.onLabel': 'På',
         'recurrence.summaryOnDays': 'på {{days}}',
         'recurrence.onDayOfMonth': 'Dag {day}',
+        'recurrence.lastDay': 'Sista dagen',
+        'recurrence.lastDayOfMonth': 'Sista dagen i månaden',
         'recurrence.onNthWeekday': 'Den {ordinal} {weekday}',
         'recurrence.ordinalSelectLabel': 'Upprepningens ordningstal',
         'recurrence.weekdaySelectLabel': 'Upprepningens veckodag',

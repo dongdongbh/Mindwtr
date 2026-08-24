@@ -403,6 +403,8 @@ export const en: Record<string, string> = {
         'recurrence.onLabel': 'On',
         'recurrence.summaryOnDays': 'on {{days}}',
         'recurrence.onDayOfMonth': 'Day {day}',
+        'recurrence.lastDay': 'Last day',
+        'recurrence.lastDayOfMonth': 'Last day of the month',
         'recurrence.onNthWeekday': 'The {ordinal} {weekday}',
         'recurrence.ordinalSelectLabel': 'Recurrence ordinal',
         'recurrence.weekdaySelectLabel': 'Recurrence weekday',

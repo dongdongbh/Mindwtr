@@ -404,6 +404,8 @@ export const zhHant: Record<string, string> = {
         'recurrence.onLabel': '在',
         'recurrence.summaryOnDays': '{{days}}',
         'recurrence.onDayOfMonth': '每月第{day}天',
+        'recurrence.lastDay': '最後一天',
+        'recurrence.lastDayOfMonth': '每月最後一天',
         'recurrence.onNthWeekday': '{ordinal}{weekday}',
         'recurrence.ordinal.first': '第一',
         'recurrence.ordinal.second': '第二',

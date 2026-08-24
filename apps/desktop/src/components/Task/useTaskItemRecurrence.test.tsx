@@ -50,4 +50,44 @@ describe('useTaskItemRecurrence', () => {
         expect(setField).toHaveBeenCalledWith('recurrence', 'monthly');
         expect(setField).toHaveBeenCalledWith('recurrenceRRule', 'FREQ=MONTHLY;BYDAY=1TH');
     });
+
+    it('emits BYMONTHDAY=-1 for the last-day choice and reopens with it selected', () => {
+        const setField = vi.fn();
+        const task: Task = { ...baseTask, dueDate: '2026-06-10' };
+        const draft = {
+            ...createTaskDraft(task),
+            dueDate: '2026-06-10',
+            recurrence: 'monthly' as const,
+            recurrenceRRule: '',
+        };
+        const { result, rerender } = renderHook(
+            (props: { recurrenceRRule: string }) => useTaskItemRecurrence({
+                task,
+                draft: { ...draft, recurrenceRRule: props.recurrenceRRule },
+                setField,
+            }),
+            { initialProps: { recurrenceRRule: '' } },
+        );
+
+        act(() => {
+            result.current.openCustomRecurrence();
+        });
+        act(() => {
+            result.current.setCustomMode('lastDay');
+        });
+        act(() => {
+            result.current.applyCustomRecurrence();
+        });
+
+        expect(setField).toHaveBeenCalledWith('recurrenceRRule', 'FREQ=MONTHLY;BYMONTHDAY=-1');
+
+        rerender({ recurrenceRRule: 'FREQ=MONTHLY;BYMONTHDAY=-1' });
+        act(() => {
+            result.current.openCustomRecurrence();
+        });
+
+        expect(result.current.customMode).toBe('lastDay');
+        // The day-of-month input falls back to the anchor rather than clamping -1 to 1.
+        expect(result.current.customMonthDay).toBe(10);
+    });
 });

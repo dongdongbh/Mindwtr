@@ -413,6 +413,8 @@ export const jaOverrides: Record<string, string> = {
         'recurrence.onLabel': '対象',
         'recurrence.summaryOnDays': '{{days}}',
         'recurrence.onDayOfMonth': '{day}日',
+        'recurrence.lastDay': '月末',
+        'recurrence.lastDayOfMonth': '毎月末日',
         'recurrence.onNthWeekday': '{ordinal}{weekday}',
         'recurrence.ordinalSelectLabel': '第何週かを選ぶ',
         'recurrence.weekdaySelectLabel': '曜日を選ぶ',
