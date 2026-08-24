@@ -176,6 +176,12 @@ beforeEach(() => {
     __localDataWatcherTestUtils.setDependenciesForTests({
         now: () => nowMs,
         readDataJson: async () => externalData,
+        // Legacy refresh tests exercise the refresh lane itself; the no-op
+        // probe fails open so they keep their original semantics. The probe's
+        // own behavior has dedicated tests below.
+        readStorageSnapshot: async () => {
+            throw new Error('storage snapshot probe unavailable');
+        },
         schedule: scheduleMock,
         cancelSchedule: cancelScheduleMock,
         hashPayload: async (payload) => payload,
@@ -769,6 +775,44 @@ describe('local-data-watcher', () => {
         await __localDataWatcherTestUtils.triggerSqliteChangeForTests();
 
         expect(useTaskStore.getState().lastDataChangeAt).toBe(41);
+    });
+
+    it('skips the store refresh entirely when the SQLite snapshot matches the in-memory data', async () => {
+        const refreshStorageData = vi.fn(async () => undefined);
+        const logInfo = vi.fn();
+        __localDataWatcherTestUtils.setDependenciesForTests({
+            refreshStorageData,
+            readStorageSnapshot: async () => emptyData(),
+            logInfo,
+        });
+
+        await __localDataWatcherTestUtils.triggerSqliteChangeForTests();
+
+        expect(refreshStorageData).not.toHaveBeenCalled();
+        expect(
+            logInfo.mock.calls.some(([message]) =>
+                String(message).includes('SQLite refresh no data changes'),
+            ),
+        ).toBe(true);
+    });
+
+    it('still refreshes when the SQLite snapshot differs from the in-memory data', async () => {
+        const changedTask = {
+            id: 'probe-diff',
+            title: 'Probe diff',
+            status: 'inbox' as const,
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+        } as AppData['tasks'][number];
+        const refreshStorageData = vi.fn(async () => undefined);
+        __localDataWatcherTestUtils.setDependenciesForTests({
+            refreshStorageData,
+            readStorageSnapshot: async () => ({ ...emptyData(), tasks: [changedTask] }),
+        });
+
+        await __localDataWatcherTestUtils.triggerSqliteChangeForTests();
+
+        expect(refreshStorageData).toHaveBeenCalledTimes(1);
     });
 
     it('keeps an editor-blocked SQLite refresh pending until editing unlocks', async () => {

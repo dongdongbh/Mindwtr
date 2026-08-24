@@ -36,6 +36,9 @@ type FsEvent = {
 
 export type LocalDataWatcherDependencies = {
     readDataJson: () => Promise<AppData>;
+    /** Read-only storage snapshot for the pre-apply no-op check — never applies
+     *  anything to the store. */
+    readStorageSnapshot: () => Promise<AppData>;
     refreshStorageData: (isResultStillRelevant?: () => boolean) => Promise<void>;
     watchFile: (path: string, callback: (event: FsEvent) => void) => Promise<unknown>;
     now: () => number;
@@ -83,6 +86,7 @@ const persistMergedDataThroughStore = async (
 
 const createDefaultDependencies = (now: () => number): LocalDataWatcherDependencies => ({
     readDataJson: () => invokeNative<AppData>('read_data_json'),
+    readStorageSnapshot: () => invokeNative<AppData>('get_data'),
     refreshStorageData: async (isResultStillRelevant) => {
         await useTaskStore.getState().fetchData({
             silent: true,
@@ -752,6 +756,31 @@ export const createLocalDataWatcherController = (
                     '[local-data-watcher] SQLite refresh start',
                     prefixSnapshotTraceSummary('before', beforeSummary),
                 );
+                // Compare BEFORE applying: fetchData replaces every store
+                // object identity even when the content is byte-identical,
+                // which re-rendered and re-measured the visible list — the
+                // Inbox "flicker" of #1079 (launch, window restore, and the
+                // sync self-write echoes this watcher chases). A read-only
+                // snapshot costs less than the fetch it replaces. Fail open:
+                // a failed probe falls through to the normal refresh.
+                try {
+                    const candidateSummary = await buildSnapshotTraceSummary(
+                        await localDataWatcherDependencies.readStorageSnapshot(),
+                    );
+                    if (!isCurrentWatcherGeneration(generation)) return;
+                    if (candidateSummary.dataSig === beforeSummary.dataSig) {
+                        clearSqliteRefreshRetry();
+                        extendSqliteIgnoreWindow(SQLITE_NOOP_REFRESH_IGNORE_MS);
+                        localDataWatcherDependencies.logInfo(
+                            '[local-data-watcher] SQLite refresh no data changes',
+                            { comparedBeforeApply: 'true' },
+                        );
+                        return;
+                    }
+                } catch {
+                    // Probe unavailable — refresh as before the probe existed.
+                }
+                if (!isCurrentWatcherGeneration(generation)) return;
                 await localDataWatcherDependencies.refreshStorageData(
                     () => isCurrentWatcherGeneration(generation),
                 );
