@@ -88,6 +88,23 @@
   <url type="bugtracker">https://github.com/dongdongbh/Mindwtr/issues</url>
   <url type="vcs-browser">https://github.com/dongdongbh/Mindwtr</url>
   <releases>
+    <release version="1.2.5-rc.1" date="2026-08-24">
+      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.2.5-rc.1</url>
+      <description>
+        <p>Mindwtr 1.2.5-rc.1 adds encrypted file-based sync, richer recurrence, safer attachments, and faster everyday planning.</p>
+        <p xml:lang="de">Mindwtr 1.2.5-rc.1 bringt verschluesselte dateibasierte Synchronisierung, vielseitigere Wiederholungen, sicherere Anhaenge und schnellere Alltagsplanung.</p>
+        <ul>
+          <li>File Sync, WebDAV, and Dropbox can encrypt sync data, backups, snapshots, and attachments with a passphrase.</li>
+          <li xml:lang="de">Dateisynchronisierung, WebDAV und Dropbox koennen Sync-Daten, Backups, Snapshots und Anhaenge mit einer Passphrase verschluesseln.</li>
+          <li>Monthly recurrence supports multiple days and the true last day of the month, with progress for count-limited series.</li>
+          <li xml:lang="de">Monatliche Wiederholungen unterstuetzen mehrere Tage und den echten letzten Monatstag sowie Fortschritt bei begrenzten Serien.</li>
+          <li>Attachment edits propagate through sync, downloads are checksum-verified, and removed copies are cleaned up safely.</li>
+          <li xml:lang="de">Aenderungen an Anhaengen werden synchronisiert, Downloads per Pruefsumme geprueft und entfernte Kopien sicher bereinigt.</li>
+          <li>Desktop planning gains Upcoming work, clearer calendar and status controls, faster large lists, and more resilient storage and sync recovery.</li>
+          <li xml:lang="de">Die Desktop-Planung bietet anstehende Aufgaben, klarere Kalender- und Statussteuerung, schnellere grosse Listen sowie robustere Speicher- und Sync-Wiederherstellung.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.2.1" date="2026-08-16">
       <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.2.1</url>
       <description>
