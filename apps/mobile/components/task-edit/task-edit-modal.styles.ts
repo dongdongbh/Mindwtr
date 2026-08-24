@@ -102,6 +102,17 @@ export const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    // 31 day chips laid out exactly 7 across; the cell (not the chip) is the
+    // touch target so it stays 44pt tall.
+    monthDayGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+    monthDayCell: { width: '14.28%', padding: 2 },
+    monthDayButton: {
+        height: 40,
+        borderRadius: 12,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     ordinalButton: {
         minWidth: 54,
         paddingHorizontal: 12,

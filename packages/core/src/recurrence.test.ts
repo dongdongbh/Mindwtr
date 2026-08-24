@@ -722,6 +722,108 @@ describe('recurrence', () => {
         expect(next?.dueDate).toBe('2026-10-31');
     });
 
+    // BYMONTHDAY lists (#1078): the engine picks the earliest remaining day in
+    // each candidate month and skips months where none of the days exist.
+    it('walks a strict multi-day month rule through both of its days', () => {
+        const task: Task = {
+            id: 'multiday-1',
+            title: 'Pay the halves',
+            status: 'next',
+            tags: [],
+            contexts: [],
+            dueDate: '2026-06-01',
+            recurrence: { rule: 'monthly', strategy: 'strict', byMonthDay: [1, 16], rrule: 'FREQ=MONTHLY;BYMONTHDAY=1,16' },
+            createdAt: '2026-06-01T00:00:00.000Z',
+            updatedAt: '2026-06-01T00:00:00.000Z',
+        };
+
+        expect(createNextRecurringTask(task, '2026-06-01T10:00:00.000Z', 'done')?.dueDate).toBe('2026-06-16');
+        expect(createNextRecurringTask({ ...task, dueDate: '2026-06-16' }, '2026-06-16T10:00:00.000Z', 'done')?.dueDate)
+            .toBe('2026-07-01');
+    });
+
+    it('lands a fluid multi-day month rule on the next day after the completion', () => {
+        const task: Task = {
+            id: 'multiday-2',
+            title: 'Water the plants',
+            status: 'next',
+            tags: [],
+            contexts: [],
+            dueDate: '2026-06-01T09:00',
+            recurrence: { rule: 'monthly', strategy: 'fluid', byMonthDay: [1, 16], rrule: 'FREQ=MONTHLY;BYMONTHDAY=1,16' },
+            createdAt: '2026-06-01T00:00:00.000Z',
+            updatedAt: '2026-06-01T00:00:00.000Z',
+        };
+
+        // Completed on the 10th: the next listed day after that is the 16th.
+        // Fluid rules search from the completion instant, so the regenerated
+        // datetime carries that instant's clock rather than the old 09:00.
+        expect(createNextRecurringTask(task, '2026-06-10T12:00:00.000Z', 'done')?.dueDate)
+            .toBe('2026-06-16T12:00:00.000Z');
+    });
+
+    it('keeps the clock time of a strict multi-day datetime rule', () => {
+        const task: Task = {
+            id: 'multiday-2b',
+            title: 'Standup prep',
+            status: 'next',
+            tags: [],
+            contexts: [],
+            dueDate: '2026-06-01T09:00',
+            recurrence: { rule: 'monthly', strategy: 'strict', byMonthDay: [1, 16], rrule: 'FREQ=MONTHLY;BYMONTHDAY=1,16' },
+            createdAt: '2026-06-01T00:00:00.000Z',
+            updatedAt: '2026-06-01T00:00:00.000Z',
+        };
+
+        expect(createNextRecurringTask(task, '2026-06-01T10:00:00.000Z', 'done')?.dueDate).toBe('2026-06-16T09:00');
+    });
+
+    it('respects the interval for multi-day month rules', () => {
+        const task: Task = {
+            id: 'multiday-3',
+            title: 'Bi-monthly review',
+            status: 'next',
+            tags: [],
+            contexts: [],
+            dueDate: '2026-06-16',
+            recurrence: {
+                rule: 'monthly',
+                strategy: 'strict',
+                interval: 2,
+                byMonthDay: [1, 16],
+                rrule: 'FREQ=MONTHLY;INTERVAL=2;BYMONTHDAY=1,16',
+            },
+            createdAt: '2026-06-01T00:00:00.000Z',
+            updatedAt: '2026-06-01T00:00:00.000Z',
+        };
+
+        // Nothing left in June after the 16th, so the interval carries it to August's 1st.
+        expect(createNextRecurringTask(task, '2026-06-16T10:00:00.000Z', 'done')?.dueDate).toBe('2026-08-01');
+    });
+
+    it('skips a month where none of the listed days exist', () => {
+        const task: Task = {
+            id: 'multiday-4',
+            title: 'Late-month chore',
+            status: 'next',
+            tags: [],
+            contexts: [],
+            dueDate: '2027-01-31',
+            recurrence: { rule: 'monthly', strategy: 'strict', byMonthDay: [30, 31], rrule: 'FREQ=MONTHLY;BYMONTHDAY=30,31' },
+            createdAt: '2027-01-01T00:00:00.000Z',
+            updatedAt: '2027-01-01T00:00:00.000Z',
+        };
+
+        // February 2027 has neither a 30th nor a 31st, so the series falls through to March.
+        expect(createNextRecurringTask(task, '2027-01-31T10:00:00.000Z', 'done')?.dueDate).toBe('2027-03-30');
+    });
+
+    it('round-trips a BYMONTHDAY list through the rrule string', () => {
+        const rrule = buildRRuleString('monthly', undefined, 1, { byMonthDay: [16, 1, 16] });
+        expect(rrule).toBe('FREQ=MONTHLY;BYMONTHDAY=1,16');
+        expect(parseRRuleString(rrule).byMonthDay).toEqual([1, 16]);
+    });
+
     it('round-trips BYMONTHDAY=-1 through the rrule string', () => {
         const rrule = buildRRuleString('monthly', undefined, 1, { byMonthDay: [-1] });
         expect(rrule).toBe('FREQ=MONTHLY;BYMONTHDAY=-1');

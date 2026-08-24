@@ -4,6 +4,8 @@ import { translateWithFallback, type RecurrenceWeekday } from '@mindwtr/core';
 import { cn } from '../../lib/utils';
 import { Dialog, DialogBody, DialogFooter, DialogHeader } from '../ui/Dialog';
 
+const MONTH_DAYS = Array.from({ length: 31 }, (_, index) => index + 1);
+
 type TaskItemRecurrenceModalProps = {
     t: (key: string) => string;
     weekdayOrder: RecurrenceWeekday[];
@@ -12,12 +14,12 @@ type TaskItemRecurrenceModalProps = {
     customMode: 'date' | 'nth' | 'lastDay';
     customOrdinal: '1' | '2' | '3' | '4' | '-1';
     customWeekday: RecurrenceWeekday;
-    customMonthDay: number;
+    customMonthDays: number[];
     onIntervalChange: (value: number) => void;
     onModeChange: (value: 'date' | 'nth' | 'lastDay') => void;
     onOrdinalChange: (value: '1' | '2' | '3' | '4' | '-1') => void;
     onWeekdayChange: (value: RecurrenceWeekday) => void;
-    onMonthDayChange: (value: number) => void;
+    onMonthDayToggle: (value: number) => void;
     onClose: () => void;
     onApply: () => void;
 };
@@ -30,12 +32,12 @@ export function TaskItemRecurrenceModal({
     customMode,
     customOrdinal,
     customWeekday,
-    customMonthDay,
+    customMonthDays,
     onIntervalChange,
     onModeChange,
     onOrdinalChange,
     onWeekdayChange,
-    onMonthDayChange,
+    onMonthDayToggle,
     onClose,
     onApply,
 }: TaskItemRecurrenceModalProps) {
@@ -43,7 +45,6 @@ export function TaskItemRecurrenceModal({
     const intervalInputId = useId();
     const ordinalSelectId = useId();
     const weekdaySelectId = useId();
-    const monthDayInputId = useId();
     const resolveText = (key: string, fallback: string) => {
         return translateWithFallback(t, key, fallback);
     };
@@ -58,7 +59,7 @@ export function TaskItemRecurrenceModal({
                     : 'fourth';
     const ordinalLabel = t(`recurrence.ordinal.${ordinalKey}`);
     const weekdayLabel = weekdayLabels[customWeekday] ?? customWeekday;
-    const onDayLabel = t('recurrence.onDayOfMonth').replace('{day}', String(customMonthDay));
+    const onDayLabel = t('recurrence.onDayOfMonth').replace('{day}', customMonthDays.join(', '));
     const onNthLabel = t('recurrence.onNthWeekday')
         .replace('{ordinal}', ordinalLabel)
         .replace('{weekday}', weekdayLabel);
@@ -159,19 +160,26 @@ export function TaskItemRecurrenceModal({
                         </div>
                     )}
                     {customMode === 'date' && (
-                        <div className="flex items-center gap-2">
-                            <label htmlFor={monthDayInputId} className="text-xs text-muted-foreground">
-                                {t('recurrence.onDayOfMonth').replace('{day}', '')}
-                            </label>
-                            <input
-                                id={monthDayInputId}
-                                type="number"
-                                min={1}
-                                max={31}
-                                value={customMonthDay}
-                                onChange={(event) => onMonthDayChange(event.target.valueAsNumber || 1)}
-                                className="w-20 text-sm bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
-                            />
+                        <div className="grid grid-cols-7 gap-1">
+                            {MONTH_DAYS.map((day) => {
+                                const isActive = customMonthDays.includes(day);
+                                return (
+                                    <button
+                                        key={day}
+                                        type="button"
+                                        aria-pressed={isActive}
+                                        onClick={() => onMonthDayToggle(day)}
+                                        className={cn(
+                                            'text-[10px] px-2 py-1 rounded border transition-colors',
+                                            isActive
+                                                ? 'bg-primary text-primary-foreground border-primary'
+                                                : 'bg-transparent text-muted-foreground border-border hover:bg-accent'
+                                        )}
+                                    >
+                                        {day}
+                                    </button>
+                                );
+                            })}
                         </div>
                     )}
                 </div>

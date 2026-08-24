@@ -32,7 +32,10 @@ export function useTaskItemRecurrence({
         const hasNth = parsed.byDay?.some((day) => /^[1-4]/.test(String(day)));
         const hasByMonthDay = parsed.byMonthDay && parsed.byMonthDay.length > 0;
         const interval = parsed.interval && parsed.interval > 0 ? parsed.interval : 1;
-        const isCustomDay = hasByMonthDay && parsed.byMonthDay?.[0] !== monthlyAnchorDate.getDate();
+        // A multi-day list is always custom, even when its first day happens to
+        // match the anchor.
+        const isCustomDay = hasByMonthDay
+            && (parsed.byMonthDay!.length > 1 || parsed.byMonthDay![0] !== monthlyAnchorDate.getDate());
         const pattern: 'custom' | 'date' = hasNth || hasLast || isCustomDay ? 'custom' : 'date';
         return { pattern, interval };
     }, [editRecurrence, editRecurrenceRRule, monthlyAnchorDate]);
@@ -42,7 +45,15 @@ export function useTaskItemRecurrence({
     const [customMode, setCustomMode] = useState<'date' | 'nth' | 'lastDay'>('date');
     const [customOrdinal, setCustomOrdinal] = useState<'1' | '2' | '3' | '4' | '-1'>('1');
     const [customWeekday, setCustomWeekday] = useState<RecurrenceWeekday>(monthlyWeekdayCode);
-    const [customMonthDay, setCustomMonthDay] = useState<number>(monthlyAnchorDate.getDate());
+    const [customMonthDays, setCustomMonthDays] = useState<number[]>([monthlyAnchorDate.getDate()]);
+
+    const toggleCustomMonthDay = useCallback((day: number) => {
+        setCustomMonthDays((current) => {
+            if (!current.includes(day)) return [...current, day].sort((a, b) => a - b);
+            // The rule needs at least one day, so ignore the tap that would empty it.
+            return current.length > 1 ? current.filter((value) => value !== day) : current;
+        });
+    }, []);
 
     const openCustomRecurrence = useCallback(() => {
         const parsed = parseRRuleString(editRecurrenceRRule);
@@ -50,12 +61,12 @@ export function useTaskItemRecurrence({
         let mode: 'date' | 'nth' | 'lastDay' = 'date';
         let ordinal: '1' | '2' | '3' | '4' | '-1' = '1';
         let weekday: RecurrenceWeekday = monthlyWeekdayCode;
-        const monthDay = parsed.byMonthDay?.[0];
-        if (monthDay === -1) {
+        const monthDays = (parsed.byMonthDay ?? []).filter((day) => day >= 1 && day <= 31);
+        if (parsed.byMonthDay?.includes(-1)) {
             mode = 'lastDay';
-        } else if (monthDay) {
+        } else if (monthDays.length > 0) {
             mode = 'date';
-            setCustomMonthDay(Math.min(Math.max(monthDay, 1), 31));
+            setCustomMonthDays(monthDays);
         }
         const token = parsed.byDay?.find((day) => /^(-?1|2|3|4)/.test(String(day)));
         if (token) {
@@ -70,8 +81,8 @@ export function useTaskItemRecurrence({
         setCustomMode(mode);
         setCustomOrdinal(ordinal);
         setCustomWeekday(weekday);
-        if (!monthDay || monthDay === -1) {
-            setCustomMonthDay(monthlyAnchorDate.getDate());
+        if (monthDays.length === 0) {
+            setCustomMonthDays([monthlyAnchorDate.getDate()]);
         }
         setShowCustomRecurrence(true);
     }, [editRecurrenceRRule, monthlyAnchorDate, monthlyWeekdayCode]);
@@ -80,14 +91,15 @@ export function useTaskItemRecurrence({
         const parsed = parseRRuleString(editRecurrenceRRule);
         const intervalValue = Number(customInterval);
         const safeInterval = Number.isFinite(intervalValue) && intervalValue > 0 ? intervalValue : 1;
-        const safeMonthDay = Math.min(Math.max(Math.round(customMonthDay || 1), 1), 31);
+        // buildRRuleString clamps, dedupes and sorts the list.
+        const safeMonthDays = customMonthDays.length > 0 ? customMonthDays : [1];
         const rrule = customMode === 'nth'
             ? buildRRuleString('monthly', [`${customOrdinal}${customWeekday}` as RecurrenceByDay], safeInterval, {
                 count: parsed.count,
                 until: parsed.until,
             })
             : buildRRuleString('monthly', undefined, safeInterval, {
-                byMonthDay: [customMode === 'lastDay' ? -1 : safeMonthDay],
+                byMonthDay: customMode === 'lastDay' ? [-1] : safeMonthDays,
                 count: parsed.count,
                 until: parsed.until,
             });
@@ -97,7 +109,7 @@ export function useTaskItemRecurrence({
     }, [
         customInterval,
         customMode,
-        customMonthDay,
+        customMonthDays,
         customOrdinal,
         customWeekday,
         editRecurrenceRRule,
@@ -116,8 +128,8 @@ export function useTaskItemRecurrence({
         setCustomOrdinal,
         customWeekday,
         setCustomWeekday,
-        customMonthDay,
-        setCustomMonthDay,
+        customMonthDays,
+        toggleCustomMonthDay,
         openCustomRecurrence,
         applyCustomRecurrence,
     };

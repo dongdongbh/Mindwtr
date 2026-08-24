@@ -117,7 +117,10 @@ export function useTaskEditDerivedState({
         const hasLast = parsed.byDay?.some((day) => String(day).startsWith('-1'));
         const hasNth = parsed.byDay?.some((day) => /^[1-4]/.test(String(day)));
         const hasByMonthDay = parsed.byMonthDay && parsed.byMonthDay.length > 0;
-        const isCustomDay = hasByMonthDay && parsed.byMonthDay?.[0] !== monthlyAnchorDate.getDate();
+        // A multi-day list is always custom, even when its first day happens to
+        // match the anchor.
+        const isCustomDay = hasByMonthDay
+            && (parsed.byMonthDay!.length > 1 || parsed.byMonthDay![0] !== monthlyAnchorDate.getDate());
         return hasNth || hasLast || isCustomDay ? 'custom' : 'date';
     }, [monthlyAnchorDate, recurrenceRRuleValue, recurrenceRuleValue]);
 

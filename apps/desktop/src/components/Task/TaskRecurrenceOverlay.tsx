@@ -21,8 +21,8 @@ export function TaskRecurrenceOverlay({ recurrence, weekdayLabels, t }: TaskRecu
         setCustomOrdinal,
         customWeekday,
         setCustomWeekday,
-        setCustomMonthDay,
-        customMonthDay,
+        toggleCustomMonthDay,
+        customMonthDays,
         applyCustomRecurrence,
     } = recurrence;
     if (!showCustomRecurrence) return null;
@@ -36,15 +36,12 @@ export function TaskRecurrenceOverlay({ recurrence, weekdayLabels, t }: TaskRecu
             customMode={customMode}
             customOrdinal={customOrdinal}
             customWeekday={customWeekday}
-            customMonthDay={customMonthDay}
+            customMonthDays={customMonthDays}
             onIntervalChange={setCustomInterval}
             onModeChange={setCustomMode}
             onOrdinalChange={setCustomOrdinal}
             onWeekdayChange={setCustomWeekday}
-            onMonthDayChange={(value) => {
-                const safe = Number.isFinite(value) ? Math.min(Math.max(value, 1), 31) : 1;
-                setCustomMonthDay(safe);
-            }}
+            onMonthDayToggle={toggleCustomMonthDay}
             onClose={() => setShowCustomRecurrence(false)}
             onApply={applyCustomRecurrence}
         />

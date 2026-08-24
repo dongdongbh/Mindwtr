@@ -3,7 +3,9 @@ import { Modal, Pressable, Text, TextInput, TouchableOpacity, View } from 'react
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { useAndroidKeyboardInset } from '../../lib/use-android-keyboard-inset';
 
-const getOrdinalTranslationKey = (value: '1' | '2' | '3' | '4' | '-1'): 'first' | 'second' | 'third' | 'fourth' | 'last' => {
+const MONTH_DAYS = Array.from({ length: 31 }, (_, index) => index + 1);
+
+const getOrdinalTranslationKey =(value: '1' | '2' | '3' | '4' | '-1'): 'first' | 'second' | 'third' | 'fourth' | 'last' => {
     if (value === '-1') return 'last';
     if (value === '1') return 'first';
     if (value === '2') return 'second';
@@ -14,7 +16,7 @@ const getOrdinalTranslationKey = (value: '1' | '2' | '3' | '4' | '-1'): 'first' 
 type TaskEditCustomRecurrenceModalProps = {
     customInterval: number;
     customMode: 'date' | 'nth' | 'lastDay';
-    customMonthDay: number;
+    customMonthDays: number[];
     customOrdinal: '1' | '2' | '3' | '4' | '-1';
     customWeekday: string;
     onClose: () => void;
@@ -23,7 +25,7 @@ type TaskEditCustomRecurrenceModalProps = {
     recurrenceWeekdayLabels: Record<string, string>;
     setCustomInterval: (value: number) => void;
     setCustomMode: (value: 'date' | 'nth' | 'lastDay') => void;
-    setCustomMonthDay: (value: number) => void;
+    toggleCustomMonthDay: (value: number) => void;
     setCustomOrdinal: (value: '1' | '2' | '3' | '4' | '-1') => void;
     setCustomWeekday: (value: string) => void;
     styles: Record<string, any>;
@@ -35,7 +37,7 @@ type TaskEditCustomRecurrenceModalProps = {
 export function TaskEditCustomRecurrenceModal({
     customInterval,
     customMode,
-    customMonthDay,
+    customMonthDays,
     customOrdinal,
     customWeekday,
     onClose,
@@ -44,7 +46,7 @@ export function TaskEditCustomRecurrenceModal({
     recurrenceWeekdayLabels,
     setCustomInterval,
     setCustomMode,
-    setCustomMonthDay,
+    toggleCustomMonthDay,
     setCustomOrdinal,
     setCustomWeekday,
     styles,
@@ -101,7 +103,7 @@ export function TaskEditCustomRecurrenceModal({
                                 onPress={() => setCustomMode('date')}
                             >
                                 <Text style={getStatusTextStyle(customMode === 'date')}>
-                                    {t('recurrence.onDayOfMonth').replace('{day}', String(customMonthDay))}
+                                    {t('recurrence.onDayOfMonth').replace('{day}', customMonthDays.join(', '))}
                                 </Text>
                             </TouchableOpacity>
                             <TouchableOpacity
@@ -168,25 +170,32 @@ export function TaskEditCustomRecurrenceModal({
                             </>
                         )}
                         {customMode === 'date' && (
-                            <View style={[styles.customRow, { marginTop: 10 }]}>
-                                <Text style={[styles.modalLabel, { color: tc.secondaryText }]}>
-                                    {t('recurrence.onDayOfMonth').replace('{day}', '')}
-                                </Text>
-                                <TextInput
-                                    value={String(customMonthDay)}
-                                    onChangeText={(value) => {
-                                        const parsed = Number.parseInt(value, 10);
-                                        if (!Number.isFinite(parsed)) {
-                                            setCustomMonthDay(1);
-                                        } else {
-                                            setCustomMonthDay(Math.min(Math.max(parsed, 1), 31));
-                                        }
-                                    }}
-                                    keyboardType="number-pad"
-                                    style={[styles.customInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-                                    accessibilityLabel={t('recurrence.onDayOfMonth').replace('{day}', '')}
-                                    accessibilityHint={t('recurrence.monthlyOnDay')}
-                                />
+                            <View style={[styles.monthDayGrid, { marginTop: 10 }]}>
+                                {MONTH_DAYS.map((day) => {
+                                    const active = customMonthDays.includes(day);
+                                    return (
+                                        <TouchableOpacity
+                                            key={day}
+                                            style={styles.monthDayCell}
+                                            onPress={() => toggleCustomMonthDay(day)}
+                                            accessibilityRole="button"
+                                            accessibilityState={{ selected: active }}
+                                            accessibilityLabel={t('recurrence.onDayOfMonth').replace('{day}', String(day))}
+                                        >
+                                            <View
+                                                style={[
+                                                    styles.monthDayButton,
+                                                    {
+                                                        borderColor: active ? tc.tint : tc.border,
+                                                        backgroundColor: active ? tc.tint : tc.cardBg,
+                                                    },
+                                                ]}
+                                            >
+                                                <Text style={[styles.weekdayButtonText, { color: active ? tc.onTint : tc.text }]}>{day}</Text>
+                                            </View>
+                                        </TouchableOpacity>
+                                    );
+                                })}
                             </View>
                         )}
                     </View>

@@ -33,12 +33,12 @@ const baseProps = {
     customMode: 'date',
     customOrdinal: '1',
     customWeekday: 'MO',
-    customMonthDay: 1,
+    customMonthDays: [1],
     onIntervalChange: vi.fn(),
     onModeChange: vi.fn(),
     onOrdinalChange: vi.fn(),
     onWeekdayChange: vi.fn(),
-    onMonthDayChange: vi.fn(),
+    onMonthDayToggle: vi.fn(),
     onClose: vi.fn(),
     onApply: vi.fn(),
 } satisfies React.ComponentProps<typeof TaskItemRecurrenceModal>;
@@ -64,7 +64,28 @@ describe('TaskItemRecurrenceModal', () => {
         rerender(<TaskItemRecurrenceModal {...baseProps} customMode="lastDay" onModeChange={onModeChange} />);
 
         expect(screen.getByRole('button', { name: 'Last day' }).className).toContain('bg-primary');
-        // Only the interval input is left: the day-of-month input belongs to the 'date' choice.
+        // Only the interval input is left: the day grid belongs to the 'date' choice.
         expect(screen.getAllByRole('spinbutton')).toHaveLength(1);
+        expect(screen.queryByRole('button', { name: '16', pressed: false })).toBeNull();
+    });
+
+    it('marks every selected month day pressed and toggles the one that was clicked', () => {
+        const onMonthDayToggle = vi.fn();
+        render(
+            <TaskItemRecurrenceModal
+                {...baseProps}
+                customMonthDays={[1, 16]}
+                onMonthDayToggle={onMonthDayToggle}
+            />,
+        );
+
+        expect(screen.getByRole('button', { name: '1', pressed: true })).toBeTruthy();
+        expect(screen.getByRole('button', { name: '16', pressed: true })).toBeTruthy();
+        expect(screen.getByRole('button', { name: '2', pressed: false })).toBeTruthy();
+        // The mode chip reads back the whole list, not just the first day.
+        expect(screen.getByRole('button', { name: 'Day 1, 16' })).toBeTruthy();
+
+        fireEvent.click(screen.getByRole('button', { name: '16', pressed: true }));
+        expect(onMonthDayToggle).toHaveBeenCalledWith(16);
     });
 });

@@ -50,6 +50,11 @@ describe('formatRecurrenceSummary', () => {
             .toBe('Monthly · Day 15 · Ends: Never');
     });
 
+    it('collapses a BYMONTHDAY list into one "on" phrase', () => {
+        expect(summarize({ rule: 'monthly', strategy: 'strict', byMonthDay: [1, 16] }))
+            .toBe('Monthly · on 1, 16 · Ends: Never');
+    });
+
     it('reads a BYMONTHDAY of -1 as the last day of the month', () => {
         expect(summarize({ rule: 'monthly', strategy: 'strict', byMonthDay: [-1] }))
             .toBe('Monthly · Last day of the month · Ends: Never');

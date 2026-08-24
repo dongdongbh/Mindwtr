@@ -443,7 +443,7 @@ function TaskEditModalInner({
     const [customMode, setCustomMode] = useState<'date' | 'nth' | 'lastDay'>('date');
     const [customOrdinal, setCustomOrdinal] = useState<'1' | '2' | '3' | '4' | '-1'>('1');
     const [customWeekday, setCustomWeekday] = useState<RecurrenceWeekday>(monthlyWeekdayCode);
-    const [customMonthDay, setCustomMonthDay] = useState<number>(monthlyAnchorDate.getDate());
+    const [customMonthDays, setCustomMonthDays] = useState<number[]>([monthlyAnchorDate.getDate()]);
     const [waitingAssignmentModalVisible, setWaitingAssignmentModalVisible] = useState(false);
     const [waitingAssignmentInput, setWaitingAssignmentInput] = useState('');
     const [completedAtPickerVisible, setCompletedAtPickerVisible] = useState(false);
@@ -456,18 +456,26 @@ function TaskEditModalInner({
     );
     const [isTitleInputFocused, setIsTitleInputFocused] = useState(false);
 
+    const toggleCustomMonthDay = useCallback((day: number) => {
+        setCustomMonthDays((current) => {
+            if (!current.includes(day)) return [...current, day].sort((a, b) => a - b);
+            // The rule needs at least one day, so ignore the tap that would empty it.
+            return current.length > 1 ? current.filter((value) => value !== day) : current;
+        });
+    }, []);
+
     const openCustomRecurrence = useCallback(() => {
         const parsed = parseRRuleString(recurrenceRRuleValue);
         const interval = parsed.interval && parsed.interval > 0 ? parsed.interval : 1;
         let mode: 'date' | 'nth' | 'lastDay' = 'date';
         let ordinal: '1' | '2' | '3' | '4' | '-1' = '1';
         let weekday: RecurrenceWeekday = monthlyWeekdayCode;
-        const monthDay = parsed.byMonthDay?.[0];
-        if (monthDay === -1) {
+        const monthDays = (parsed.byMonthDay ?? []).filter((day) => day >= 1 && day <= 31);
+        if (parsed.byMonthDay?.includes(-1)) {
             mode = 'lastDay';
-        } else if (monthDay) {
+        } else if (monthDays.length > 0) {
             mode = 'date';
-            setCustomMonthDay(Math.min(Math.max(monthDay, 1), 31));
+            setCustomMonthDays(monthDays);
         }
         const token = parsed.byDay?.find((day) => /^(-1|1|2|3|4)/.test(String(day)));
         if (token) {
@@ -482,28 +490,30 @@ function TaskEditModalInner({
         setCustomMode(mode);
         setCustomOrdinal(ordinal);
         setCustomWeekday(weekday);
-        if (!monthDay || monthDay === -1) {
-            setCustomMonthDay(monthlyAnchorDate.getDate());
+        if (monthDays.length === 0) {
+            setCustomMonthDays([monthlyAnchorDate.getDate()]);
         }
         setCustomRecurrenceVisible(true);
     }, [monthlyAnchorDate, monthlyWeekdayCode, recurrenceRRuleValue]);
 
     const applyCustomRecurrence = useCallback(() => {
+        const parsed = parseRRuleString(recurrenceRRuleValue);
         const intervalValue = Number(customInterval);
         const safeInterval = Number.isFinite(intervalValue) && intervalValue > 0 ? intervalValue : 1;
-        const safeMonthDay = Math.min(Math.max(Math.round(customMonthDay || 1), 1), 31);
+        // buildRRuleString clamps, dedupes and sorts the list.
+        const safeMonthDays = customMonthDays.length > 0 ? customMonthDays : [1];
+        const ends = { count: parsed.count, until: parsed.until };
         const rrule = customMode === 'nth'
-            ? buildRRuleString('monthly', [`${customOrdinal}${customWeekday}` as RecurrenceByDay], safeInterval)
-            : [
-                'FREQ=MONTHLY',
-                safeInterval > 1 ? `INTERVAL=${safeInterval}` : null,
-                `BYMONTHDAY=${customMode === 'lastDay' ? -1 : safeMonthDay}`,
-            ].filter(Boolean).join(';');
+            ? buildRRuleString('monthly', [`${customOrdinal}${customWeekday}` as RecurrenceByDay], safeInterval, ends)
+            : buildRRuleString('monthly', undefined, safeInterval, {
+                ...ends,
+                byMonthDay: customMode === 'lastDay' ? [-1] : safeMonthDays,
+            });
         setDraftField('recurrence', 'monthly');
         setDraftField('recurrenceStrategy', recurrenceStrategyValue);
         setDraftField('recurrenceRRule', rrule);
         setCustomRecurrenceVisible(false);
-    }, [customInterval, customMode, customOrdinal, customWeekday, customMonthDay, recurrenceStrategyValue, setDraftField]);
+    }, [customInterval, customMode, customOrdinal, customWeekday, customMonthDays, recurrenceRRuleValue, recurrenceStrategyValue, setDraftField]);
 
     const [isMarkdownOverlayOpen, setIsMarkdownOverlayOpen] = useState(false);
     const {
@@ -1037,7 +1047,7 @@ function TaskEditModalInner({
                         confirmAddLink={confirmAddLink}
                         customInterval={customInterval}
                         customMode={customMode}
-                        customMonthDay={customMonthDay}
+                        customMonthDays={customMonthDays}
                         customOrdinal={customOrdinal}
                         customRecurrenceVisible={customRecurrenceVisible}
                         customWeekday={customWeekday}
@@ -1056,7 +1066,7 @@ function TaskEditModalInner({
                         sectionPickerSections={projectSections}
                         setCustomInterval={setCustomInterval}
                         setCustomMode={setCustomMode}
-                        setCustomMonthDay={setCustomMonthDay}
+                        toggleCustomMonthDay={toggleCustomMonthDay}
                         setCustomOrdinal={setCustomOrdinal}
                         setCustomRecurrenceVisible={setCustomRecurrenceVisible}
                         setCustomWeekday={setCustomWeekday}

@@ -34,7 +34,7 @@ export function TaskEditOverlayStack(props: TaskEditOverlayStackProps) {
         confirmAddLink,
         customInterval,
         customMode,
-        customMonthDay,
+        customMonthDays,
         customOrdinal,
         customRecurrenceVisible,
         customWeekday,
@@ -51,7 +51,7 @@ export function TaskEditOverlayStack(props: TaskEditOverlayStackProps) {
         sectionPickerProjectId,
         setCustomInterval,
         setCustomMode,
-        setCustomMonthDay,
+        toggleCustomMonthDay,
         setCustomOrdinal,
         setCustomRecurrenceVisible,
         setCustomWeekday,
@@ -146,8 +146,8 @@ export function TaskEditOverlayStack(props: TaskEditOverlayStackProps) {
                     setCustomOrdinal={setCustomOrdinal}
                     customWeekday={customWeekday}
                     setCustomWeekday={setCustomWeekday}
-                    customMonthDay={customMonthDay}
-                    setCustomMonthDay={setCustomMonthDay}
+                    customMonthDays={customMonthDays}
+                    toggleCustomMonthDay={toggleCustomMonthDay}
                     recurrenceWeekdayButtons={recurrenceWeekdayButtons}
                     recurrenceWeekdayLabels={recurrenceWeekdayLabels}
                     onClose={() => setCustomRecurrenceVisible(false)}

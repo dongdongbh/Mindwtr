@@ -202,12 +202,12 @@ describe('Accessibility', () => {
                 customMode="date"
                 customOrdinal="1"
                 customWeekday="MO"
-                customMonthDay={1}
+                customMonthDays={[1]}
                 onIntervalChange={vi.fn()}
                 onModeChange={vi.fn()}
                 onOrdinalChange={vi.fn()}
                 onWeekdayChange={vi.fn()}
-                onMonthDayChange={vi.fn()}
+                onMonthDayToggle={vi.fn()}
                 onClose={vi.fn()}
                 onApply={vi.fn()}
             />

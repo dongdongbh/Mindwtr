@@ -1158,6 +1158,43 @@ describe('TaskEditModal', () => {
       expect(fieldProps().recurrenceRRuleValue).toBe('FREQ=MONTHLY;BYMONTHDAY=-1');
     });
 
+    it('round-trips a multi-day month rule through the RRULE', async () => {
+      const { tree, fieldProps } = await openEditor({
+        rule: 'monthly',
+        strategy: 'strict',
+        byMonthDay: [1],
+        rrule: 'FREQ=MONTHLY;BYMONTHDAY=1',
+      });
+
+      act(() => {
+        tree.root.findByType(TaskEditCustomRecurrenceModal).props.toggleCustomMonthDay(16);
+      });
+      expect(tree.root.findByType(TaskEditCustomRecurrenceModal).props.customMonthDays).toEqual([1, 16]);
+
+      pressChip(tree, 'common.save');
+      expect(fieldProps().recurrenceRRuleValue).toBe('FREQ=MONTHLY;BYMONTHDAY=1,16');
+
+      act(() => {
+        fieldProps().openCustomRecurrence();
+      });
+      expect(tree.root.findByType(TaskEditCustomRecurrenceModal).props.customMode).toBe('date');
+      expect(tree.root.findByType(TaskEditCustomRecurrenceModal).props.customMonthDays).toEqual([1, 16]);
+    });
+
+    it('keeps the last selected month day when its chip is tapped again', async () => {
+      const { tree } = await openEditor({
+        rule: 'monthly',
+        strategy: 'strict',
+        byMonthDay: [16],
+        rrule: 'FREQ=MONTHLY;BYMONTHDAY=16',
+      });
+
+      act(() => {
+        tree.root.findByType(TaskEditCustomRecurrenceModal).props.toggleCustomMonthDay(16);
+      });
+      expect(tree.root.findByType(TaskEditCustomRecurrenceModal).props.customMonthDays).toEqual([16]);
+    });
+
     it('reopens a last-day rule with the choice still selected', async () => {
       const { tree, fieldProps } = await openEditor({
         rule: 'monthly',

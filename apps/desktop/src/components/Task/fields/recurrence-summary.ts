@@ -79,11 +79,16 @@ export function formatRecurrenceSummary(
             weekday: longWeekdays[day.weekday] ?? day.weekday,
         })).join(', '));
     } else if ((input.byMonthDay ?? []).length > 0) {
-        segments.push((input.byMonthDay ?? [])
-            .map((day) => (day === -1
-                ? t('recurrence.lastDayOfMonth')
-                : formatI18nTemplate(t('recurrence.onDayOfMonth'), { day })))
-            .join(', '));
+        const monthDays = input.byMonthDay ?? [];
+        // A list of plain days reads better collapsed ("on 1, 16") than repeated
+        // ("Day 1, Day 16"); -1 keeps its own phrasing.
+        segments.push(monthDays.length > 1 && !monthDays.includes(-1)
+            ? formatI18nTemplate(t('recurrence.summaryOnDays'), { days: monthDays.join(', ') })
+            : monthDays
+                .map((day) => (day === -1
+                    ? t('recurrence.lastDayOfMonth')
+                    : formatI18nTemplate(t('recurrence.onDayOfMonth'), { day })))
+                .join(', '));
     }
 
     const endsValue = input.count
