@@ -201,6 +201,53 @@ describe('groupTasksByProject', () => {
         expect(groups[0]?.tasks.map((task) => task.id)).toEqual(['t3']);
         expect(groups[1]?.tasks.map((task) => task.id)).toEqual(['t2']);
     });
+
+    // The header dot must agree with the project chips on the rows below it,
+    // which show the AREA color; the project's own color is only the fallback
+    // for a project without an area (Discord report: gray header dot over
+    // blue-chipped rows).
+    it('colors the group dot with the area color, falling back to the project color', () => {
+        const projectMap = new Map<string, Project>([
+            ['p1', {
+                id: 'p1',
+                title: 'In area',
+                status: 'active',
+                color: '#6B7280',
+                areaId: 'a1',
+                order: 0,
+                tagIds: [],
+                createdAt: '2026-03-01T00:00:00.000Z',
+                updatedAt: '2026-03-01T00:00:00.000Z',
+            }],
+            ['p2', {
+                id: 'p2',
+                title: 'No area',
+                status: 'active',
+                color: '#22C55E',
+                order: 1,
+                tagIds: [],
+                createdAt: '2026-03-01T00:00:00.000Z',
+                updatedAt: '2026-03-01T00:00:00.000Z',
+            }],
+        ]);
+        const areas: Area[] = [{
+            id: 'a1',
+            name: 'Studies',
+            color: '#3B82F6',
+            order: 0,
+            createdAt: '2026-03-01T00:00:00.000Z',
+            updatedAt: '2026-03-01T00:00:00.000Z',
+        }];
+        const tasks = [
+            baseTask({ id: 't1', title: 'A', projectId: 'p1' }),
+            baseTask({ id: 't2', title: 'B', projectId: 'p2' }),
+        ];
+
+        const groups = groupTasksByProject({ tasks, projectMap, areas, noProjectLabel: 'No project' });
+
+        expect(groups.find((group) => group.title === 'In area')?.dotColor).toBe('#3B82F6');
+        expect(groups.find((group) => group.title === 'No area')?.dotColor).toBe('#22C55E');
+    });
 });
 
 // #963: grouping is for finding a group, so the ungrouped pile goes last. This

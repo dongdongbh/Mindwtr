@@ -72,6 +72,7 @@ interface GroupByProjectParams {
     tasks: Task[];
     projectMap: Map<string, Project>;
     noProjectLabel: string;
+    areas?: Area[];
 }
 
 interface GroupByTagParams {
@@ -284,9 +285,11 @@ export function groupTasksByProject({
     tasks,
     projectMap,
     noProjectLabel,
+    areas,
 }: GroupByProjectParams): TaskGroup[] {
     const grouped = new Map<string, Task[]>();
     const noProjectTasks: Task[] = [];
+    const areaById = new Map((areas ?? []).map((area) => [area.id, area]));
 
     tasks.forEach((task) => {
         if (!task.projectId) {
@@ -315,7 +318,11 @@ export function groupTasksByProject({
             id: `project:${project.id}`,
             title: project.title,
             tasks: projectTasks,
-            dotColor: project.color,
+            // Same precedence the task rows' project chips and the Agenda's
+            // project dots use: the area color is the identity color, the
+            // project's own color is the fallback — a header dot must not
+            // disagree with the chips right under it.
+            dotColor: (project.areaId ? areaById.get(project.areaId)?.color : undefined) || project.color,
         });
     });
 
@@ -481,7 +488,7 @@ export function groupTasks(axis: TaskGroupAxis, { tasks, areas, projectMap, t, t
         case 'area':
             return groupTasksByArea({ areas, tasks, projectMap, noAreaLabel: tFallback(t, 'taskEdit.noAreaOption', 'No Area') });
         case 'project':
-            return groupTasksByProject({ tasks, projectMap, noProjectLabel: tFallback(t, 'taskEdit.noProjectOption', 'No project') });
+            return groupTasksByProject({ tasks, projectMap, areas, noProjectLabel: tFallback(t, 'taskEdit.noProjectOption', 'No project') });
         case 'priority':
             return groupTasksByPriority({ tasks, getPriorityLabel: (priority) => t(`priority.${priority}`), noPriorityLabel: tFallback(t, 'focus.group.noPriority', 'No priority') });
         case 'energy':
