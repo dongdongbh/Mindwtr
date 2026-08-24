@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <!-- An appex must be sandboxed even inside a non-sandboxed host app
-         (#1054 decision 8) -- this is not optional for a WidgetKit extension. -->
+         (#1054 decision 8); this is not optional for a WidgetKit extension. -->
     <key>com.apple.security.app-sandbox</key>
     <true/>
     <key>com.apple.security.application-groups</key>

@@ -92,6 +92,9 @@ jobs:
       - name: iOS App Intents availability check
         run: node scripts/ci/validate-ios-app-intents-availability.js
 
+      - name: Apple property list syntax check
+        run: python3 scripts/ci/validate-apple-plists.py
+
       - name: Run unit tests
         run: bun run --filter @mindwtr/core test -- --coverage --coverage.thresholds.lines=70 --coverage.thresholds.statements=70 --coverage.thresholds.functions=50 --coverage.thresholds.branches=50
 
