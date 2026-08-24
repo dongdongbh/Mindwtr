@@ -579,6 +579,8 @@ export const en: Record<string, string> = {
         'calendar.allDay': 'All day',
         'calendar.deadline': 'Deadline',
         'calendar.showCompleted': 'Completed',
+        'calendar.showScheduled': 'Starts',
+        'calendar.showScheduledHint': 'Show tasks on their start date; turn off to read only deadlines',
         'calendar.showCompletedHint': 'Show done and archived tasks on the day they were completed',
         'calendar.projectedRecurrence': 'Projected',
         'calendar.projectedRecurrenceDescription': 'Planning-only preview. Complete the current recurring task to create the real next task.',

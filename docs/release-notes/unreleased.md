@@ -6,6 +6,7 @@ Changes collected after `v1.2.1` and before the next version tag.
 
 ## Full Change List
 
+- Desktop: the Calendar toolbar gained a "Starts" toggle next to "Completed" — turn it off to hide start-date entries and read the calendar as deadlines only. On by default, remembered per device.
 - Desktop: grouping a list by project no longer shows a gray header dot over rows whose project chips are colored — the group header now uses the same color the chips do: the project's area color, with the project's own color as the fallback.
 - Desktop: status pills now wear their Board View colors everywhere — the status badge on task rows (lists and the review flows) and the selected status in the task editor show amber for Waiting, purple for Someday, and so on, instead of one uniform accent.
 - iOS: when a storage app (Google Drive, OneDrive, ownCloud…) grays out folder selection, canceling the folder screen now explains the alternative — selecting an exported Mindwtr backup file in that app — instead of silently opening a second identical-looking picker. The in-app File Sync instructions now describe this route too. (#1068)

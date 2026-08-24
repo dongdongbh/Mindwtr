@@ -562,6 +562,8 @@ export const zhHans: Record<string, string> = {
         'calendar.allDay': '全天',
         'calendar.deadline': '截止',
         'calendar.showCompleted': '已完成',
+        'calendar.showScheduled': '开始日期',
+        'calendar.showScheduledHint': '在开始日期显示任务；关闭后只查看截止日期',
         'calendar.showCompletedHint': '在任务完成的那天显示已完成和已归档的任务',
         'calendar.projectedRecurrence': '预览',
         'calendar.projectedRecurrenceDescription': '仅用于规划预览。完成当前重复任务后，才会创建真正的下一个任务。',

@@ -561,6 +561,8 @@ export const faOverrides: Record<string, string> = {
         'calendar.allDay': 'تمام روز',
         'calendar.deadline': 'مهلت',
         'calendar.showCompleted': 'تکمیل‌شده',
+        'calendar.showScheduled': 'تاریخ شروع',
+        'calendar.showScheduledHint': 'نمایش وظایف در تاریخ شروع؛ برای دیدن فقط مهلت‌ها خاموش کنید',
         'calendar.showCompletedHint': 'نمایش کارهای انجام‌شده و بایگانی‌شده در روز تکمیل آن‌ها',
         'calendar.projectedRecurrence': 'پیش‌بینی‌شده',
         'calendar.projectedRecurrenceDescription': 'پیش‌نمایش صرفاً برنامه‌ریزی. برای ایجاد کار بعدی واقعی، کار تکراری فعلی را تکمیل کنید.',

@@ -588,6 +588,8 @@ export const jaOverrides: Record<string, string> = {
         'calendar.allDay': '終日',
         'calendar.deadline': '期限',
         'calendar.showCompleted': '完了したもの',
+        'calendar.showScheduled': '開始日',
+        'calendar.showScheduledHint': '開始日にタスクを表示します。オフにすると締め切りだけを確認できます',
         'calendar.showCompletedHint': '完了・アーカイブ済みのタスクを、完了した日に表示します',
         'calendar.projectedRecurrence': '予測',
         'calendar.projectedRecurrenceDescription': '計画を立てるための予測表示です。実際の次のタスクは、今の繰り返しタスクを完了すると作成されます。',

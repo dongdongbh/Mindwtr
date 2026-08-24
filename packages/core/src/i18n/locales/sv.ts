@@ -561,6 +561,8 @@ export const svOverrides: Record<string, string> = {
         'calendar.allDay': 'Heldag',
         'calendar.deadline': 'Tidsfrist',
         'calendar.showCompleted': 'Slutförda',
+        'calendar.showScheduled': 'Startdatum',
+        'calendar.showScheduledHint': 'Visa uppgifter på deras startdatum; stäng av för att bara se deadlines',
         'calendar.showCompletedHint': 'Visa klara och arkiverade uppgifter på dagen de slutfördes',
         'calendar.projectedRecurrence': 'Prognostiserad',
         'calendar.projectedRecurrenceDescription': 'Endast en planeringsförhandsvisning. Slutför den aktuella återkommande uppgiften för att skapa den riktiga nästa uppgiften.',

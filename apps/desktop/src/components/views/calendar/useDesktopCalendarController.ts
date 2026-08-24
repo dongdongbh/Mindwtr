@@ -66,6 +66,9 @@ import { useCalendarScheduleFeedback, useCalendarSelectedDay } from './use-calen
 /** Per-device like the planning panel and the timeline day count: revealing the
  *  look-back is a property of this window, not of the user's data. */
 const CALENDAR_SHOW_COMPLETED_KEY = 'mindwtr.calendar.showCompleted';
+/** Same per-device family: hiding start-date entries to read only deadlines is
+ *  a lens on this window, not data. Defaults to showing them. */
+const CALENDAR_SHOW_SCHEDULED_KEY = 'mindwtr.calendar.showScheduled';
 
 const readShowCompletedPreference = (): boolean => {
     if (typeof window === 'undefined') return false;
@@ -73,6 +76,15 @@ const readShowCompletedPreference = (): boolean => {
         return window.localStorage.getItem(CALENDAR_SHOW_COMPLETED_KEY) === 'true';
     } catch {
         return false;
+    }
+};
+
+const readShowScheduledPreference = (): boolean => {
+    if (typeof window === 'undefined') return true;
+    try {
+        return window.localStorage.getItem(CALENDAR_SHOW_SCHEDULED_KEY) !== 'false';
+    } catch {
+        return true;
     }
 };
 
@@ -155,6 +167,18 @@ export function useDesktopCalendarController() {
             const next = !previous;
             try {
                 window.localStorage.setItem(CALENDAR_SHOW_COMPLETED_KEY, String(next));
+            } catch {
+                // A blocked storage quota must not stop the toggle from working.
+            }
+            return next;
+        });
+    }, []);
+    const [showScheduled, setShowScheduled] = useState(readShowScheduledPreference);
+    const toggleShowScheduled = useCallback(() => {
+        setShowScheduled((previous) => {
+            const next = !previous;
+            try {
+                window.localStorage.setItem(CALENDAR_SHOW_SCHEDULED_KEY, String(next));
             } catch {
                 // A blocked storage quota must not stop the toggle from working.
             }
@@ -275,7 +299,10 @@ export function useDesktopCalendarController() {
                     else deadlinesByDay.set(dueKey, [calendarTask]);
                 }
             }
-            if (calendarTask.startTime) {
+            // Hiding starts empties every scheduled surface (month cells, the
+            // timeline, the selected-day panel) at this single source; a task
+            // with a due date keeps its deadline entry above.
+            if (calendarTask.startTime && showScheduled) {
                 const startTime = safeParseDate(calendarTask.startTime);
                 if (startTime) {
                     const startKey = dayKey(startTime);
@@ -286,7 +313,7 @@ export function useDesktopCalendarController() {
             }
         }
         return { visibleTasks, deadlinesByDay, scheduledByDay, completedByDay };
-    }, [tasks, allTasks, isCalendarTaskVisible, isCalendarTaskInScope, showCompleted, visibleRange, viewMode, days, projectedAtIso]);
+    }, [tasks, allTasks, isCalendarTaskVisible, isCalendarTaskInScope, showCompleted, showScheduled, visibleRange, viewMode, days, projectedAtIso]);
 
     const schedulableTasks = useMemo(
         () => tasks
@@ -747,6 +774,8 @@ export function useDesktopCalendarController() {
         timelineDayCount: nav.timelineDayCount,
         timelineDays: nav.timelineDays,
         showCompleted,
+        showScheduled,
+        toggleShowScheduled,
         toggleShowCompleted,
         toggleExternalCalendar: external.toggleExternalCalendar,
         toggleMonthPicker: nav.toggleMonthPicker,

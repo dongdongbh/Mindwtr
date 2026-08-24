@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { isSameDay, isToday } from 'date-fns';
-import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Minus, Plus, Search } from 'lucide-react';
+import { CalendarClock, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Minus, Plus, Search } from 'lucide-react';
 import {
     formatI18nTemplate,
     getCalendarDayOfMonth,
@@ -111,6 +111,8 @@ export function CalendarView() {
         t,
         showCompleted,
         toggleShowCompleted,
+        showScheduled,
+        toggleShowScheduled,
         toggleExternalCalendar,
         toggleMonthPicker,
         updateViewFilterQuery,
@@ -442,6 +444,21 @@ export function CalendarView() {
                             className={cn(VIEW_FILTER_INPUT, 'pl-9')}
                         />
                     </div>
+                    <button
+                        type="button"
+                        onClick={toggleShowScheduled}
+                        aria-pressed={showScheduled}
+                        className={cn(
+                            'inline-flex shrink-0 items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-primary/40',
+                            showScheduled
+                                ? 'border-primary bg-primary/10 text-primary'
+                                : 'border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground'
+                        )}
+                        title={resolveText('calendar.showScheduledHint', 'Show tasks on their start date; turn off to read only deadlines')}
+                    >
+                        <CalendarClock className="h-4 w-4" aria-hidden="true" />
+                        {resolveText('calendar.showScheduled', 'Starts')}
+                    </button>
                     <button
                         type="button"
                         onClick={toggleShowCompleted}
