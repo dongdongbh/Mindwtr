@@ -170,7 +170,7 @@ fi
 # independently), but the *compiled binary* would still have baked in the
 # DEVTEAM placeholder from build.rs, and the widget would silently never see
 # real data. Checking the binary's own strings catches that class of drift.
-if ! strings "$APP_PATH/Contents/MacOS/${HOST_EXECUTABLE_NAME}" 2>/dev/null | grep -qF "$APP_GROUP"; then
+if ! strings "$APP_PATH/Contents/MacOS/${HOST_EXECUTABLE_NAME}" 2>/dev/null | grep -F "$APP_GROUP" >/dev/null; then
     echo "::error::Host binary does not appear to have ${APP_GROUP} baked in -- APPLE_TEAM_ID may be missing from the Build App step's env."
     exit 1
 fi
