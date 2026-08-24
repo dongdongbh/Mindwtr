@@ -2,6 +2,7 @@ import { AlertTriangle, Calendar as CalendarIcon, Tag, Trash2, ArrowRight, Repea
 import type { Area, Attachment, Project, RangeSelectionOptions, Task, TaskStatus, RecurrenceRule, RecurrenceStrategy, Language } from '@mindwtr/core';
 import { DEFAULT_AREA_COLOR, formatRecurrenceLabel, formatTimeEstimateLabel, formatTimeSpentLabel, getChecklistProgress, getContextColor, getInlineMarkdownPreview, getRecurringTaskPreviewDate, getTaskAgeLabel, getTaskDateCoherenceIssues, getTaskStaleness, getTaskUrgency, hasTimeComponent, isTaskActionable, isTaskFinished, safeFormatDate, resolveTaskTextDirection, tFallback } from '@mindwtr/core';
 import { cn } from '../../lib/utils';
+import { STATUS_PILL_CLASSES } from '../../lib/status-colors';
 import { useBareFileReferenceCheck } from '../../lib/attachment-reference';
 import { getAttachmentDisplayTitle } from '../../lib/attachment-utils';
 import { MetadataBadge } from '../ui/MetadataBadge';
@@ -1053,7 +1054,12 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                                     }
                                     onStatusChange(nextStatus);
                                 }}
-                                    className="text-[11px] font-medium px-2.5 py-0.5 rounded-full cursor-pointer appearance-none bg-primary/10 text-primary border-none hover:bg-primary/15 focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                    // Colored per status with the Board's --status-* tints, so a
+                                    // Waiting pill reads amber wherever it appears (Discord ask).
+                                    className={cn(
+                                        'text-[11px] font-medium px-2.5 py-0.5 rounded-full cursor-pointer appearance-none border-none hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-primary/40',
+                                        STATUS_PILL_CLASSES[task.status],
+                                    )}
                                 >
                                     <option value="inbox">{t('status.inbox')}</option>
                                     <option value="next">{t('status.next')}</option>

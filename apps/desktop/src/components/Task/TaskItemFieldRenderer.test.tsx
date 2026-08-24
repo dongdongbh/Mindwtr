@@ -918,7 +918,8 @@ describe('TaskItemFieldRenderer date clear buttons', () => {
         expect(getByRole('group', { name: 'Task status' })).toBeInTheDocument();
         const selectedStatus = getByRole('button', { name: 'Inbox' });
         expect(selectedStatus).toHaveAttribute('aria-pressed', 'true');
-        expect(selectedStatus).toHaveClass('bg-primary', 'text-primary-foreground');
+        // The active status pill wears its own status color, not the generic primary.
+        expect(selectedStatus).toHaveClass('border-[hsl(var(--status-inbox))]', 'text-[hsl(var(--status-inbox))]');
         expect(getByRole('button', { name: 'Archived' })).toBeInTheDocument();
 
         fireEvent.click(getByRole('button', { name: 'Waiting' }));

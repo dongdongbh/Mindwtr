@@ -6,6 +6,7 @@ Changes collected after `v1.2.1` and before the next version tag.
 
 ## Full Change List
 
+- Desktop: status pills now wear their Board View colors everywhere — the status badge on task rows (lists and the review flows) and the selected status in the task editor show amber for Waiting, purple for Someday, and so on, instead of one uniform accent.
 - iOS: when a storage app (Google Drive, OneDrive, ownCloud…) grays out folder selection, canceling the folder screen now explains the alternative — selecting an exported Mindwtr backup file in that app — instead of silently opening a second identical-looking picker. The in-app File Sync instructions now describe this route too. (#1068)
 - Desktop: a task's quick-action menu no longer closes itself — killing the click — when the tap nudges the menu's own contents into view; taps on menu entries like Duplicate could silently do nothing. Scrolling the list behind the menu still dismisses it.
 - Desktop: hand-editing `config.toml` or `secrets.toml` no longer stops the app from starting. The integrity check that guards against half-written config transactions treated any outside edit as corruption; an edited file that still reads cleanly is now accepted as the new state, and one that doesn't parse is reported with the file's name. (#1064)

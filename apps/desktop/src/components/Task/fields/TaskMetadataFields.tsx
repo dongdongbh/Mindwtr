@@ -13,6 +13,7 @@ import {
 } from '@mindwtr/core';
 
 import { cn } from '../../../lib/utils';
+import { STATUS_PILL_ACTIVE_CLASSES } from '../../../lib/status-colors';
 import {
     QUICK_ADD_FIELD_TOKENS,
     QuickAddTokenBadge,
@@ -23,6 +24,9 @@ type PillOption<TValue extends string> = {
     value: TValue;
     label: string;
     onContextMenu?: () => void;
+    /** Overrides the selected look for this option (status pills wear their
+     *  Board status color instead of the generic primary). */
+    activeClassName?: string;
 };
 
 const selectedPillClassName = 'border-primary bg-primary text-primary-foreground shadow-sm hover:bg-primary/90';
@@ -235,7 +239,7 @@ function PillOptionField<TValue extends string>({
                             className={cn(
                                 'inline-flex min-h-7 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-primary/40',
                                 isActive
-                                    ? activeClassName ?? selectedPillClassName
+                                    ? option.activeClassName ?? activeClassName ?? selectedPillClassName
                                     : 'border-border bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground'
                             )}
                         >
@@ -568,7 +572,7 @@ export function StatusField({
     onChange: (value: TaskStatus) => void;
     onRequestBackdatedComplete?: () => void;
 }) {
-    const options: Array<PillOption<TaskStatus>> = [
+    const baseOptions: Array<PillOption<TaskStatus>> = [
         { value: 'inbox', label: t('status.inbox') },
         { value: 'next', label: t('status.next') },
         { value: 'waiting', label: t('status.waiting') },
@@ -577,6 +581,10 @@ export function StatusField({
         { value: 'done', label: t('status.done'), onContextMenu: onRequestBackdatedComplete },
         { value: 'archived', label: t('status.archived') },
     ];
+    const options = baseOptions.map((option) => ({
+        ...option,
+        activeClassName: `${STATUS_PILL_ACTIVE_CLASSES[option.value]} shadow-sm hover:brightness-110`,
+    }));
 
     return (
         <PillOptionField
