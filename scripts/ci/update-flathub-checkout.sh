@@ -91,6 +91,54 @@ updated, count = re.subn(
 if count != 1:
     raise SystemExit(f"Expected to update exactly one commit line in {manifest_path}")
 
+workspace_protocol_pattern = re.compile(
+    r'^(?P<indent>[ \t]*)if requested_spec\.startswith\(\("file:", "workspace:", "git\+", "github:", "http:", "https:", "link:", "npm:"\)\):\n'
+    r'(?P=indent)    continue\n'
+    r'(?P=indent)locked = packages\.get\(f"node_modules/\{dependency_name\}"\)$',
+    flags=re.MULTILINE,
+)
+
+def replace_workspace_protocol(match: re.Match[str]) -> str:
+    indent = match.group('indent')
+    block = [
+        'locked = packages.get(f"node_modules/{dependency_name}")',
+        'if requested_spec.startswith("workspace:"):',
+        '    locked_resolved = locked.get("resolved") if isinstance(locked, dict) else None',
+        '    if (',
+        '        not isinstance(locked, dict)',
+        '        or locked.get("link") is not True',
+        '        or not isinstance(locked_resolved, str)',
+        '        or not locked_resolved',
+        '        or Path(locked_resolved).is_absolute()',
+        '    ):',
+        '        raise SystemExit(',
+        '            f"Expected a relative package-lock link for workspace dependency {dependency_name}"',
+        '        )',
+        '    checkout_root = Path.cwd().resolve()',
+        '    dependency_path = (package_path.parent / locked_resolved).resolve()',
+        '    if dependency_path != checkout_root and checkout_root not in dependency_path.parents:',
+        '        raise SystemExit(',
+        '            f"Workspace dependency {dependency_name} resolves outside the source checkout"',
+        '        )',
+        '    local_spec = f"file:{locked_resolved}"',
+        '    section[dependency_name] = local_spec',
+        '    synced_specs.append(',
+        '        f"{section_name}:{dependency_name}:{requested_spec}->{local_spec}"',
+        '    )',
+        '    continue',
+        'if requested_spec.startswith(("file:", "git+", "github:", "http:", "https:", "link:", "npm:")):',
+        '    continue',
+    ]
+    return '\n'.join(f'{indent}{line}' for line in block)
+
+updated, workspace_protocol_count = workspace_protocol_pattern.subn(
+    replace_workspace_protocol,
+    updated,
+    count=1,
+)
+if workspace_protocol_count == 0 and 'if requested_spec.startswith("workspace:"):' not in updated:
+    raise SystemExit(f"Could not find the desktop workspace dependency repair block in {manifest_path}")
+
 lines = updated.splitlines()
 
 # Flathub rejects this custom single-instance D-Bus name in finish-args, so the
@@ -277,6 +325,71 @@ python3 "${repo_root}/scripts/ci/repair-package-lock.py" \
 python3 "${repo_root}/scripts/ci/repair-package-lock.py" \
   --check \
   "${worktree_dir}/packages/core/package-lock.json"
+
+python3 - "${worktree_dir}/apps/desktop/package.json" "${worktree_dir}/apps/desktop/package-lock.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+package_path = Path(sys.argv[1])
+lock_path = Path(sys.argv[2])
+package = json.loads(package_path.read_text())
+lock = json.loads(lock_path.read_text())
+packages = lock.get("packages")
+if not isinstance(packages, dict):
+    raise SystemExit(f"Missing packages map in {lock_path}")
+
+checkout_root = package_path.parents[2].resolve()
+converted = []
+for section_name in ("dependencies", "devDependencies", "optionalDependencies"):
+    section = package.get(section_name)
+    if not isinstance(section, dict):
+        continue
+    for dependency_name, requested_spec in list(section.items()):
+        if not isinstance(requested_spec, str) or not requested_spec.startswith("workspace:"):
+            continue
+        locked = packages.get(f"node_modules/{dependency_name}")
+        locked_resolved = locked.get("resolved") if isinstance(locked, dict) else None
+        if (
+            not isinstance(locked, dict)
+            or locked.get("link") is not True
+            or not isinstance(locked_resolved, str)
+            or not locked_resolved
+            or Path(locked_resolved).is_absolute()
+        ):
+            raise SystemExit(
+                f"Expected a relative package-lock link for workspace dependency {dependency_name}"
+            )
+        dependency_path = (package_path.parent / locked_resolved).resolve()
+        if dependency_path != checkout_root and checkout_root not in dependency_path.parents:
+            raise SystemExit(
+                f"Workspace dependency {dependency_name} resolves outside the source checkout"
+            )
+        local_spec = f"file:{locked_resolved}"
+        section[dependency_name] = local_spec
+        converted.append(f"{section_name}:{dependency_name}:{requested_spec}->{local_spec}")
+
+if converted:
+    package_path.write_text(json.dumps(package, indent=2) + "\n")
+    print("Prepared workspace dependencies for isolated Flathub npm validation:")
+    for item in converted:
+        print(f"  - {item}")
+PY
+
+npm ci \
+  --prefix="${worktree_dir}/apps/desktop" \
+  --package-lock-only \
+  --ignore-scripts \
+  --legacy-peer-deps \
+  --workspaces=false \
+  --no-audit \
+  --no-fund
+
+if ! git -C "${worktree_dir}" diff --quiet -- apps/desktop/package-lock.json; then
+  echo "Isolated Flathub npm validation changed apps/desktop/package-lock.json" >&2
+  git -C "${worktree_dir}" diff -- apps/desktop/package-lock.json >&2
+  exit 1
+fi
 
 python3 "${tools_dir}/cargo/flatpak-cargo-generator.py" \
   "${worktree_dir}/apps/desktop/src-tauri/Cargo.lock" \
