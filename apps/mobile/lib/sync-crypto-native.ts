@@ -55,17 +55,58 @@ export type SyncCryptoNativeModule = {
 };
 
 let nativeModule: SyncCryptoNativeModule | null = null;
+let nativeModuleError: Error | null = null;
 
 /** Test seam, mirroring storage-adapter.ts's `setSqliteInitializerForTests` convention.
  *  Pass `null` to fall back to the real native module. */
 export const setSyncCryptoNativeModuleForTests = (module: SyncCryptoNativeModule | null): void => {
     nativeModule = module;
+    nativeModuleError = null;
+};
+
+const defaultIsExpoGo = (): boolean => {
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const constants = require('expo-constants') as {
+            default?: { appOwnership?: string | null };
+            appOwnership?: string | null;
+        };
+        return (constants.default ?? constants).appOwnership === 'expo';
+    } catch {
+        return false;
+    }
+};
+
+let isExpoGo: () => boolean = defaultIsExpoGo;
+
+/** Test seam. Pass `null` to restore the real expo-constants probe. */
+export const setExpoGoProbeForTests = (probe: (() => boolean) | null): void => {
+    isExpoGo = probe ?? defaultIsExpoGo;
 };
 
 const getNativeModule = (): SyncCryptoNativeModule => {
-    if (!nativeModule) {
+    if (nativeModule) return nativeModule;
+    // Latch failures: requiring quick-crypto in a binary that lacks it throws a loud
+    // TurboModule Invariant Violation that LogBox red-boxes on every attempt (one per
+    // attachment per sync cycle in Expo Go). Detect Expo Go before ever touching the
+    // require, and cache the failure either way so callers get one clean, stable error.
+    if (nativeModuleError) throw nativeModuleError;
+    if (isExpoGo()) {
+        nativeModuleError = new Error(
+            'Sync encryption and attachment hashing need a development build; ' +
+                'react-native-quick-crypto cannot load in Expo Go.',
+        );
+        throw nativeModuleError;
+    }
+    try {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         nativeModule = require('react-native-quick-crypto') as SyncCryptoNativeModule;
+    } catch (error) {
+        nativeModuleError = new Error(
+            'react-native-quick-crypto native module unavailable (rebuild the app): ' +
+                (error instanceof Error ? error.message : String(error)),
+        );
+        throw nativeModuleError;
     }
     return nativeModule;
 };

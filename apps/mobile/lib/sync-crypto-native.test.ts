@@ -14,6 +14,7 @@ import {
 import {
   mobileSha256Hex,
   mobileSyncCryptoPrimitives,
+  setExpoGoProbeForTests,
   setSyncCryptoNativeModuleForTests,
   type SyncCryptoNativeModule,
 } from './sync-crypto-native';
@@ -193,5 +194,34 @@ describe('mobileSha256Hex', () => {
     } finally {
       setSha256HexProvider(null);
     }
+  });
+});
+
+describe('native module unavailability latch', () => {
+  afterEach(() => {
+    setExpoGoProbeForTests(null);
+    setSyncCryptoNativeModuleForTests(nodeBackedQuickCrypto);
+  });
+
+  it('refuses with one clean cached error in Expo Go instead of requiring the native module', () => {
+    setExpoGoProbeForTests(() => true);
+    setSyncCryptoNativeModuleForTests(null);
+
+    let first: unknown;
+    try {
+      mobileSha256Hex(new Uint8Array([1]));
+    } catch (error) {
+      first = error;
+    }
+    expect(String(first)).toMatch(/Expo Go/);
+    expect(String(first)).not.toMatch(/Invariant/);
+
+    let second: unknown;
+    try {
+      mobileSha256Hex(new Uint8Array([1]));
+    } catch (error) {
+      second = error;
+    }
+    expect(second).toBe(first);
   });
 });
