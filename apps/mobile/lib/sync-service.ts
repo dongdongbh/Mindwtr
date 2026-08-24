@@ -340,7 +340,7 @@ const resolveBookmarkedFileSyncPath = async (
 const getSupportedBackend = (rawBackend: string | null): SyncBackend =>
   coerceSupportedBackend(resolveBackend(rawBackend), isCloudKitAvailable());
 
-export async function getMobileSyncConfigurationStatus(): Promise<{ backend: SyncBackend; configured: boolean }> {
+export async function getMobileSyncConfigurationStatus(): Promise<{ backend: SyncBackend; configured: boolean; cloudProvider?: CloudProvider }> {
   const rawBackend = (await readConfigValue(SYNC_BACKEND_KEY, false))?.trim() ?? null;
   const backend: SyncBackend = getSupportedBackend(rawBackend);
 
@@ -365,6 +365,7 @@ export async function getMobileSyncConfigurationStatus(): Promise<{ backend: Syn
     const dropboxConnected = await isDropboxConnected().catch(() => false);
     return {
       backend,
+      cloudProvider,
       configured: DROPBOX_SYNC_ENABLED && getDropboxAppKey().length > 0 && dropboxConnected,
     };
   }
@@ -373,6 +374,7 @@ export async function getMobileSyncConfigurationStatus(): Promise<{ backend: Syn
   const cloudToken = (await readConfigValue(CLOUD_TOKEN_KEY, false))?.trim();
   return {
     backend,
+    cloudProvider,
     configured: Boolean(cloudUrl && cloudToken),
   };
 }

@@ -2076,6 +2076,7 @@ export const en: Record<string, string> = {
         'settings.syncMobile.pleaseSetASelfHostedUrlFirst': 'Please set a self-hosted URL first',
         'settings.syncMobile.pleaseSetASyncFolderFirst': 'Please set a sync folder first',
         'settings.syncMobile.pleaseSetAWebdavUrlFirst': 'Please set a WebDAV URL first',
+        'settings.syncMobile.pleaseSetUpSyncFirst': 'Please set up sync first',
         'settings.syncMobile.publicHttpSyncUrlsAreBlockedUseHttpsOrEnable': 'Public HTTP sync URLs are blocked. Use HTTPS, or enable insecure HTTP only for a trusted private network.',
         'settings.syncMobile.readAndMergeDropboxData': 'Read and merge Dropbox data.',
         'settings.syncMobile.readAndMergeTheLatestCloudkitDataNow': 'Read and merge the latest CloudKit data now.',

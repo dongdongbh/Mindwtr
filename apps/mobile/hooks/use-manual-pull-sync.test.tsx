@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useManualPullSync } from './use-manual-pull-sync';
 
 const mocked = vi.hoisted(() => ({
+  getMobileSyncActivityState: vi.fn(() => 'idle'),
   getMobileSyncConfigurationStatus: vi.fn(),
   getSyncConflictCount: vi.fn(() => 0),
   isLikelyOfflineSyncError: vi.fn(() => false),
@@ -38,6 +39,7 @@ vi.mock('@/contexts/toast-context', () => ({
 }));
 
 vi.mock('@/lib/sync-service', () => ({
+  getMobileSyncActivityState: mocked.getMobileSyncActivityState,
   getMobileSyncConfigurationStatus: mocked.getMobileSyncConfigurationStatus,
   performMobileSync: mocked.performMobileSync,
 }));
@@ -76,6 +78,8 @@ describe('useManualPullSync', () => {
     mocked.isLikelyOfflineSyncError.mockReturnValue(false);
     mocked.performMobileSync.mockReset();
     mocked.performMobileSync.mockResolvedValue({ success: true });
+    mocked.getMobileSyncActivityState.mockReset();
+    mocked.getMobileSyncActivityState.mockReturnValue('idle');
     mocked.showToast.mockReset();
   });
 
@@ -120,6 +124,54 @@ describe('useManualPullSync', () => {
     expect(latest?.indicatorState).toBe('error');
     expect(mocked.showToast).toHaveBeenCalledWith(expect.objectContaining({
       message: 'Please set a WebDAV URL first',
+      tone: 'warning',
+    }));
+  });
+
+  it('joins an in-flight activation sync instead of toasting setup advice', async () => {
+    mocked.getMobileSyncConfigurationStatus.mockResolvedValue({ backend: 'off', configured: false });
+    mocked.getMobileSyncActivityState.mockReturnValue('syncing');
+    renderHarness();
+
+    await act(async () => {
+      await latest?.onRefresh();
+    });
+
+    expect(mocked.performMobileSync).toHaveBeenCalledTimes(1);
+    expect(latest?.indicatorState).toBe('success');
+    expect(mocked.showToast).not.toHaveBeenCalled();
+  });
+
+  it('asks the user to set up sync, not a sync folder, when sync is off', async () => {
+    mocked.getMobileSyncConfigurationStatus.mockResolvedValue({ backend: 'off', configured: false });
+    renderHarness();
+
+    await act(async () => {
+      await latest?.onRefresh();
+    });
+
+    expect(mocked.performMobileSync).not.toHaveBeenCalled();
+    expect(mocked.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Please set up sync first',
+      tone: 'warning',
+    }));
+  });
+
+  it('asks for a Dropbox connection when the cloud provider is Dropbox', async () => {
+    mocked.getMobileSyncConfigurationStatus.mockResolvedValue({
+      backend: 'cloud',
+      cloudProvider: 'dropbox',
+      configured: false,
+    });
+    renderHarness();
+
+    await act(async () => {
+      await latest?.onRefresh();
+    });
+
+    expect(mocked.performMobileSync).not.toHaveBeenCalled();
+    expect(mocked.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Please connect Dropbox first.',
       tone: 'warning',
     }));
   });

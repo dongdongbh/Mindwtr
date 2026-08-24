@@ -3,7 +3,7 @@ import { tFallback } from '@mindwtr/core';
 
 import { useLanguage } from '@/contexts/language-context';
 import { useToast } from '@/contexts/toast-context';
-import { getMobileSyncConfigurationStatus, performMobileSync } from '@/lib/sync-service';
+import { getMobileSyncActivityState, getMobileSyncConfigurationStatus, performMobileSync } from '@/lib/sync-service';
 import type { PullSyncIndicatorState } from '@/components/PullSyncIndicator';
 import {
   getSyncConflictCount,
@@ -20,7 +20,7 @@ const formatCountTemplate = (template: string, count: number) => (
     .replace(/\{\s*count\s*\}/g, String(count))
 );
 
-const getSetupMessage = (backend: SyncBackendName, t: (key: string) => string) => {
+const getSetupMessage = (backend: SyncBackendName, cloudProvider: string | undefined, t: (key: string) => string) => {
   if (backend === 'file') {
     return tFallback(t, 'settings.syncMobile.pleaseSetASyncFolderFirst', 'Please set a sync folder first');
   }
@@ -31,9 +31,12 @@ const getSetupMessage = (backend: SyncBackendName, t: (key: string) => string) =
     return tFallback(t, 'settings.syncMobile.icloudUnavailable', 'iCloud unavailable');
   }
   if (backend === 'cloud') {
+    if (cloudProvider === 'dropbox') {
+      return tFallback(t, 'settings.syncMobile.pleaseConnectDropboxFirst', 'Please connect Dropbox first.');
+    }
     return tFallback(t, 'settings.syncMobile.pleaseSetASelfHostedUrlFirst', 'Please set a self-hosted URL first');
   }
-  return tFallback(t, 'settings.syncMobile.pleaseSetASyncFolderFirst', 'Please set up sync first');
+  return tFallback(t, 'settings.syncMobile.pleaseSetUpSyncFirst', 'Please set up sync first');
 };
 
 const getErrorMessage = (error: unknown) => {
@@ -74,11 +77,14 @@ export function useManualPullSync() {
 
     try {
       const status = await getMobileSyncConfigurationStatus();
-      if (!status.configured || status.backend === 'off') {
+      // The persisted config lags while a sync-settings activation probe is
+      // proving new credentials (e.g. the Dropbox OAuth continuation, #1033).
+      // If a sync is already running, join it instead of toasting setup advice.
+      if ((!status.configured || status.backend === 'off') && getMobileSyncActivityState() !== 'syncing') {
         finishIndicator('error');
         showToast({
           title: tFallback(t, 'common.notice', 'Notice'),
-          message: getSetupMessage(status.backend, t),
+          message: getSetupMessage(status.backend, status.cloudProvider, t),
           tone: 'warning',
           durationMs: 3600,
         });
