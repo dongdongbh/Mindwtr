@@ -1694,6 +1694,7 @@ export const en: Record<string, string> = {
         'settings.syncNow': 'Sync now',
         'settings.syncing': 'Syncing…',
         'settings.syncQueued': 'Sync queued',
+        'settings.syncTurnedOff': 'Sync is turned off',
         'settings.pathHint': 'Choose a folder (e.g., ~/Sync/mindwtr). With Syncthing: use Send & Receive + Watch for Changes, then press Sync now before switching devices.',
         'settings.cloudProvider': 'Cloud provider',
         'settings.cloudProviderSelfHosted': 'Self-hosted',
