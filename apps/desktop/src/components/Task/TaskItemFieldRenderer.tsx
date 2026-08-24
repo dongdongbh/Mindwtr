@@ -1113,6 +1113,7 @@ export function TaskItemFieldRenderer({
                     editShowFutureRecurrence={editShowFutureRecurrence}
                     monthlyRecurrence={monthlyRecurrence}
                     parsedRecurrenceRRule={parsedRecurrenceRRule}
+                    completedOccurrences={getRecurrenceCompletedOccurrencesValue(task.recurrence)}
                     recurrenceEndMode={recurrenceEndMode}
                     recurrenceDefaultEndDate={recurrenceDefaultEndDate}
                     dateFormatSetting={dateFormatSetting}

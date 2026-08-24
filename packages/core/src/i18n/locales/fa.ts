@@ -383,6 +383,7 @@ export const faOverrides: Record<string, string> = {
         'recurrence.endsOnDate': 'در تاریخ',
         'recurrence.endsAfterCount': 'بعد از',
         'recurrence.occurrenceUnit': 'بار',
+        'recurrence.occurrenceProgressOf': 'از',
         'recurrence.dayUnit': 'روز',
         'recurrence.weekUnit': 'هفته',
         'recurrence.monthUnit': 'ماه',

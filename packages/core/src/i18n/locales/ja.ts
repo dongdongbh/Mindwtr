@@ -406,6 +406,7 @@ export const jaOverrides: Record<string, string> = {
         'recurrence.endsOnDate': '日付',
         'recurrence.endsAfterCount': '回数',
         'recurrence.occurrenceUnit': '回',
+        'recurrence.occurrenceProgressOf': '/',
         'recurrence.dayUnit': '日',
         'recurrence.weekUnit': '週',
         'recurrence.monthUnit': 'か月',

@@ -396,6 +396,8 @@ export const en: Record<string, string> = {
         'recurrence.endsOnDate': 'On date',
         'recurrence.endsAfterCount': 'After',
         'recurrence.occurrenceUnit': 'occurrence(s)',
+        // Separator for the "After 6 of 10 occurrence(s)" progress form.
+        'recurrence.occurrenceProgressOf': 'of',
         'recurrence.dayUnit': 'day(s)',
         'recurrence.weekUnit': 'week(s)',
         'recurrence.monthUnit': 'month(s)',

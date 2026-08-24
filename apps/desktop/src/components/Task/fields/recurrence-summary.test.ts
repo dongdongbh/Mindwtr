@@ -22,6 +22,7 @@ const labels: Record<string, string> = {
     'recurrence.endsNever': 'Never',
     'recurrence.endsAfterCount': 'After',
     'recurrence.occurrenceUnit': 'occurrence(s)',
+    'recurrence.occurrenceProgressOf': 'of',
     'recurrence.afterCompletionShort': 'after completion',
 };
 
@@ -67,6 +68,13 @@ describe('formatRecurrenceSummary', () => {
     it('shows the occurrence count of a COUNT rule', () => {
         expect(summarize({ rule: 'daily', strategy: 'strict', count: 5 }))
             .toBe('Daily · Ends: After 5 occurrence(s)');
+    });
+
+    it('shows progress against the count once occurrences are completed', () => {
+        expect(summarize({ rule: 'daily', strategy: 'strict', count: 10, completedOccurrences: 6 }))
+            .toBe('Daily · Ends: After 6 of 10 occurrence(s)');
+        expect(summarize({ rule: 'daily', strategy: 'strict', count: 10, completedOccurrences: 0 }))
+            .toBe('Daily · Ends: After 10 occurrence(s)');
     });
 
     it('flags the after-completion strategy', () => {

@@ -383,6 +383,7 @@ export const svOverrides: Record<string, string> = {
         'recurrence.endsOnDate': 'På datum',
         'recurrence.endsAfterCount': 'Efter',
         'recurrence.occurrenceUnit': 'tillfälle(n)',
+        'recurrence.occurrenceProgressOf': 'av',
         'recurrence.dayUnit': 'dag(ar)',
         'recurrence.weekUnit': 'vecka/veckor',
         'recurrence.monthUnit': 'månad(er)',

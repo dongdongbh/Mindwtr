@@ -1,5 +1,6 @@
 import {
     formatI18nTemplate,
+    formatRecurrenceCountLabel,
     getLocalizedWeekdayLabels,
     safeFormatDate,
     type RecurrenceByDay,
@@ -37,6 +38,7 @@ export type RecurrenceSummaryInput = {
     byDay?: RecurrenceByDay[];
     byMonthDay?: number[];
     count?: number;
+    completedOccurrences?: number;
     until?: string;
 };
 
@@ -85,7 +87,7 @@ export function formatRecurrenceSummary(
     }
 
     const endsValue = input.count
-        ? `${t('recurrence.endsAfterCount')} ${input.count} ${t('recurrence.occurrenceUnit')}`
+        ? formatRecurrenceCountLabel(input.count, input.completedOccurrences, t)
         : input.until
             ? safeFormatDate(input.until, 'PP', input.until)
             : t('recurrence.endsNever');

@@ -66,6 +66,7 @@ describe('recurrence', () => {
         'recurrence.endsAfterCount': 'After',
         'recurrence.endsOnDate': 'On date',
         'recurrence.occurrenceUnit': 'occurrence(s)',
+        'recurrence.occurrenceProgressOf': 'of',
         'recurrence.afterCompletionShort': 'after completion',
     }[key] ?? key);
 
@@ -97,6 +98,25 @@ describe('recurrence', () => {
         });
 
         expect(label).toBe('Weekly · after completion · Repeat every 2 week(s) · After 4 occurrence(s)');
+    });
+
+    // #1082: a counted series shows how far along it is once there is progress
+    // to show; a fresh one stays on the plain form.
+    it('shows count progress once occurrences have been completed', () => {
+        expect(formatRecurrenceLabel({
+            recurrence: { rule: 'daily', rrule: 'FREQ=DAILY;COUNT=10', completedOccurrences: 6 },
+            t,
+        })).toBe('Daily · After 6 of 10 occurrence(s)');
+
+        expect(formatRecurrenceLabel({
+            recurrence: { rule: 'daily', rrule: 'FREQ=DAILY;COUNT=10', completedOccurrences: 0 },
+            t,
+        })).toBe('Daily · After 10 occurrence(s)');
+
+        expect(formatRecurrenceLabel({
+            recurrence: { rule: 'daily', rrule: 'FREQ=DAILY;COUNT=10' },
+            t,
+        })).toBe('Daily · After 10 occurrence(s)');
     });
 
     it('builds and parses weekly BYDAY rules', () => {

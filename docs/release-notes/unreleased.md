@@ -6,6 +6,7 @@ Changes collected after `v1.2.1` and before the next version tag.
 
 ## Full Change List
 
+- Recurrence: a repeat that ends after a set number of occurrences now shows how far along it is — "After 6 of 10 occurrence(s)" instead of just "After 10 occurrence(s)" — on task rows and in the recurrence summary. A series with nothing completed yet still reads plainly. (#1082)
 - Recurrence: monthly repeats can now target the true last day of the month (RFC 5545's BYMONTHDAY=-1) — no more starting a repeat on a 31st to get end-of-month behavior. Works in the repeat engine, calendar preview, ICS import, and the local automation API; the editors gain a "Last day" choice.
 - Desktop: the Calendar toolbar gained a "Starts" toggle next to "Completed" — turn it off to hide start-date entries and read the calendar as deadlines only. On by default, remembered per device.
 - Desktop: grouping a list by project no longer shows a gray header dot over rows whose project chips are colored — the group header now uses the same color the chips do: the project's area color, with the project's own color as the fallback.

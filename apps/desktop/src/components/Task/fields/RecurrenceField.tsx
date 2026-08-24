@@ -17,6 +17,7 @@ type RecurrenceFieldProps = {
     editShowFutureRecurrence: boolean;
     monthlyRecurrence: MonthlyRecurrenceInfo;
     parsedRecurrenceRRule: ReturnType<typeof parseRRuleString>;
+    completedOccurrences?: number;
     recurrenceEndMode: 'never' | 'until' | 'count';
     recurrenceDefaultEndDate: string;
     dateFormatSetting?: string | null;
@@ -54,6 +55,7 @@ export function RecurrenceField({
     editShowFutureRecurrence,
     monthlyRecurrence,
     parsedRecurrenceRRule,
+    completedOccurrences,
     recurrenceEndMode,
     recurrenceDefaultEndDate,
     dateFormatSetting,
@@ -79,6 +81,7 @@ export function RecurrenceField({
             byDay: parsedRecurrenceRRule.byDay,
             byMonthDay: parsedRecurrenceRRule.byMonthDay,
             count: parsedRecurrenceRRule.count,
+            completedOccurrences,
             until: parsedRecurrenceRRule.until,
         }, t, language)
         : '';

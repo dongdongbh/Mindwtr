@@ -461,6 +461,22 @@ export function getRecurrenceCompletedOccurrencesValue(value: Task['recurrence']
     return Math.floor(recurrence.completedOccurrences);
 }
 
+/**
+ * "After 10 occurrence(s)", or "After 6 of 10 occurrence(s)" once the series has
+ * progress worth showing. Zero completions stay on the plain form so a freshly
+ * created series carries no "0 of 10" noise.
+ */
+export function formatRecurrenceCountLabel(
+    count: number,
+    completedOccurrences: number | undefined,
+    t: (key: string) => string
+): string {
+    const progress = completedOccurrences && completedOccurrences > 0
+        ? `${completedOccurrences} ${t('recurrence.occurrenceProgressOf')} `
+        : '';
+    return `${t('recurrence.endsAfterCount')} ${progress}${count} ${t('recurrence.occurrenceUnit')}`;
+}
+
 export function formatRecurrenceLabel({ recurrence, t, formatDate }: FormatRecurrenceLabelOptions): string {
     const rule = getRecurrenceRule(recurrence);
     if (!rule) return '';
@@ -469,6 +485,7 @@ export function formatRecurrenceLabel({ recurrence, t, formatDate }: FormatRecur
     const interval = getRecurrenceInterval(recurrence);
     const until = getRecurrenceUntilValue(recurrence);
     const count = getRecurrenceCountValue(recurrence);
+    const completed = getRecurrenceCompletedOccurrencesValue(recurrence);
     const unitKey = rule === 'daily'
         ? 'recurrence.dayUnit'
         : rule === 'weekly'
@@ -485,7 +502,7 @@ export function formatRecurrenceLabel({ recurrence, t, formatDate }: FormatRecur
             ? `${t('recurrence.repeatEvery')} ${interval} ${t(unitKey)}`
             : undefined,
         until ? `${t('recurrence.endsOnDate')} ${(formatDate ?? ((value: string) => safeFormatDate(value, 'P')))(until)}` : undefined,
-        count ? `${t('recurrence.endsAfterCount')} ${count} ${t('recurrence.occurrenceUnit')}` : undefined,
+        count ? formatRecurrenceCountLabel(count, completed, t) : undefined,
     ].filter(Boolean).join(' · ');
 }
 
