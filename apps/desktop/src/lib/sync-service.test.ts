@@ -505,6 +505,7 @@ describe('SyncService testability hooks', () => {
             step: null,
             lastResult: null,
             lastResultAt: null,
+            backend: null,
         });
         expect((SyncService as any).syncListeners.size).toBe(0);
         expect((SyncService as any).syncOrchestrator.getState()).toEqual({

@@ -173,6 +173,7 @@ import {
 } from './sync-service-config';
 import {
     commitProvenSyncConfiguration as commitProvenSyncConfigurationTransaction,
+    SyncConfigurationDisabledError,
     type SyncConfigurationCandidate as DesktopSyncConfigOverride,
     type PersistedSyncConfiguration as PersistedDesktopSyncConfiguration,
     type SyncConfigurationCommitResult,
@@ -626,6 +627,10 @@ const getSyncConfigDeps = () => ({
     invokeNative: invokeSyncNative,
 });
 
+// NOTE: also the config transaction's `writeBackend` dependency, which writes an
+// intermediate 'off' on every commit — user-visible backend-change notifications
+// live in the explicit entry points (setSyncBackend, disconnectDropbox,
+// commitProvenSyncConfiguration), never here.
 const writeSyncBackendDirect = (backend: SyncBackend): Promise<void> => (
     writeSyncBackend(backend, getSyncConfigDeps())
 );
@@ -717,6 +722,28 @@ const resolveDropboxAccessTokenForContext = async (
     return context.cachedDropboxAccessToken;
 };
 
+// Synchronous mirror of the last observed sync backend, so the footer's sync
+// affordances render correctly on the first frame instead of blinking while the
+// async config read resolves (#1001). The persisted config stays the authority;
+// this is display seed data only.
+const SYNC_BACKEND_HINT_KEY = 'mindwtr-last-known-sync-backend';
+const SYNC_BACKEND_VALUES: readonly SyncBackend[] = ['off', 'file', 'webdav', 'cloud', 'cloudkit'];
+const readSyncBackendHint = (): SyncBackend | null => {
+    try {
+        const value = window.localStorage.getItem(SYNC_BACKEND_HINT_KEY);
+        return (SYNC_BACKEND_VALUES as readonly string[]).includes(value ?? '') ? value as SyncBackend : null;
+    } catch {
+        return null;
+    }
+};
+const writeSyncBackendHint = (backend: SyncBackend): void => {
+    try {
+        window.localStorage.setItem(SYNC_BACKEND_HINT_KEY, backend);
+    } catch {
+        // Display seed only; losing it costs one blink, nothing else.
+    }
+};
+
 export class SyncService {
     private static didMigrate = false;
     private static legacyMigrationPromise: Promise<void> | null = null;
@@ -733,12 +760,16 @@ export class SyncService {
         step: string | null;
         lastResult: 'success' | 'error' | null;
         lastResultAt: string | null;
+        /** Persisted sync backend; `null` until first read. Lets the UI hide
+         *  sync affordances when sync is off (#1001). */
+        backend: SyncBackend | null;
     } = {
         inFlight: false,
         queued: false,
         step: null,
         lastResult: null,
         lastResultAt: null,
+        backend: readSyncBackendHint(),
     };
     private static readonly syncOrchestrator = createSyncOrchestrator<SyncRunOptions, SyncRunResult>({
         runCycle: async (options) => SyncService.runSyncCycle(options),
@@ -866,6 +897,38 @@ export class SyncService {
 
     static getSyncStatus() {
         return SyncService.syncStatus;
+    }
+
+    /** Seed `syncStatus.backend` from the persisted configuration. Later changes
+     *  flow through `writeSyncBackendDirect`, the single home for durable
+     *  backend writes. */
+    static async refreshSyncBackendStatus(): Promise<void> {
+        try {
+            const backend = await SyncService.getSyncBackend();
+            SyncService.updateSyncStatus({ backend });
+        } catch (error) {
+            logSyncWarning('Failed to read sync backend for status', error);
+        }
+    }
+
+    /** Call only for a user-visible backend change (turn off, disconnect,
+     *  committed configuration) — never for the config transaction's
+     *  intermediate 'off' write, which would blink the footer and wipe the
+     *  error text a failed save just produced. */
+    static async noteSyncBackendPersisted(backend: SyncBackend): Promise<void> {
+        SyncService.updateSyncStatus({ backend });
+        if (backend !== 'off') return;
+        // Sync reporting ends with sync: once no future sync can clear it, a
+        // stale conflict/error status would re-toast at every launch (#1001).
+        try {
+            await persistSyncSettings({
+                lastSyncStatus: 'idle',
+                lastSyncError: undefined,
+                lastSyncStats: undefined,
+            });
+        } catch (error) {
+            logSyncWarning('Failed to clear sync status after disabling sync', error);
+        }
     }
 
     static getPendingDropboxCredentialHandleForSession(): string | null {
@@ -997,6 +1060,7 @@ export class SyncService {
             step: null,
             lastResult: null,
             lastResultAt: null,
+            backend: null,
         };
         SyncService.syncListeners.clear();
         SyncService.fileWatcherStop = null;
@@ -1053,6 +1117,7 @@ export class SyncService {
 
     private static updateSyncStatus(partial: Partial<typeof SyncService.syncStatus>) {
         SyncService.syncStatus = { ...SyncService.syncStatus, ...partial };
+        if (partial.backend != null) writeSyncBackendHint(partial.backend);
         SyncService.syncListeners.forEach((listener) => listener(SyncService.syncStatus));
     }
 
@@ -1306,6 +1371,7 @@ export class SyncService {
         return runSyncRestoreExclusive(async () => {
             await SyncService.recoverDropboxCredentialsBeforeConfigurationMutation();
             await writeSyncBackendDirect(backend);
+            await SyncService.noteSyncBackendPersisted(backend);
         });
     }
 
@@ -1533,41 +1599,58 @@ export class SyncService {
         config: DesktopSyncConfigOverride,
     ): Promise<SyncConfigurationCommitResult> {
         const credentialHandle = config.dropboxCredentialHandle?.trim();
-        const result = await runSyncRestoreExclusive(async () => {
-            const committed = await commitProvenSyncConfigurationTransaction(config, {
-                recoverDropboxCredentialsBeforeConfiguration: () => (
-                    SyncService.recoverDropboxCredentialsBeforeConfigurationMutation()
-                ),
-                readConfiguration: (requirements) => SyncService.readPersistedSyncConfiguration(requirements),
-                writeBackend: writeSyncBackendDirect,
-                writeSyncPath: (path) => SyncService.setSyncPath(path),
-                clearSyncPath: () => clearSyncPath(getSyncConfigDeps()),
-                writeWebDav: (webdav) => SyncService.setWebDavConfig({
-                    ...webdav,
-                    replacePassword: true,
-                }),
-                writeCloud: (cloud) => SyncService.setCloudConfig(cloud),
-                writeCloudProvider: writeCloudProviderDirect,
-                promoteDropboxCredentials: (handle) => (
-                    SyncService.promoteDropboxCredentials(handle)
-                ),
-                discardDropboxCredentials: (handle) => (
-                    SyncService.discardDropboxCredentials(handle)
-                ),
-                rollbackDropboxCredentials: (handle) => (
-                    SyncService.rollbackDropboxCredentials(handle)
-                ),
-                finalizeDropboxCredentials: (handle) => (
-                    SyncService.finalizeDropboxCredentials(handle)
-                ),
+        let result: SyncConfigurationCommitResult;
+        try {
+            result = await runSyncRestoreExclusive(async () => {
+                const committed = await commitProvenSyncConfigurationTransaction(config, {
+                    recoverDropboxCredentialsBeforeConfiguration: () => (
+                        SyncService.recoverDropboxCredentialsBeforeConfigurationMutation()
+                    ),
+                    readConfiguration: (requirements) => SyncService.readPersistedSyncConfiguration(requirements),
+                    writeBackend: writeSyncBackendDirect,
+                    writeSyncPath: (path) => SyncService.setSyncPath(path),
+                    clearSyncPath: () => clearSyncPath(getSyncConfigDeps()),
+                    writeWebDav: (webdav) => SyncService.setWebDavConfig({
+                        ...webdav,
+                        replacePassword: true,
+                    }),
+                    writeCloud: (cloud) => SyncService.setCloudConfig(cloud),
+                    writeCloudProvider: writeCloudProviderDirect,
+                    promoteDropboxCredentials: (handle) => (
+                        SyncService.promoteDropboxCredentials(handle)
+                    ),
+                    discardDropboxCredentials: (handle) => (
+                        SyncService.discardDropboxCredentials(handle)
+                    ),
+                    rollbackDropboxCredentials: (handle) => (
+                        SyncService.rollbackDropboxCredentials(handle)
+                    ),
+                    finalizeDropboxCredentials: (handle) => (
+                        SyncService.finalizeDropboxCredentials(handle)
+                    ),
+                });
+                if (committed.cleanupPending && credentialHandle) {
+                    // Phase ownership changes before releasing the lifecycle queue;
+                    // a queued Off/disconnect barrier must see and settle this slot.
+                    SyncService.moveDropboxCredentialToFinalizeRetry(credentialHandle);
+                }
+                return committed;
             });
-            if (committed.cleanupPending && credentialHandle) {
-                // Phase ownership changes before releasing the lifecycle queue;
-                // a queued Off/disconnect barrier must see and settle this slot.
-                SyncService.moveDropboxCredentialToFinalizeRetry(credentialHandle);
+        } catch (error) {
+            // A SyncConfigurationDisabledError is the transaction's own assertion
+            // that it left sync durably off (rollback could not restore). Reflect
+            // that without any config IO — after a failed native recovery, no
+            // further configuration read may run (fail-closed).
+            if (error instanceof SyncConfigurationDisabledError) {
+                SyncService.updateSyncStatus({ backend: 'off' });
             }
-            return committed;
-        });
+            throw error;
+        }
+        // The transaction's internal intermediate 'off' write is deliberately not
+        // observed; only the committed configuration is (#1001). On any other
+        // throw/rollback the persisted backend is unchanged, so the status needs
+        // no correction.
+        await SyncService.refreshSyncBackendStatus();
         if (result.cleanupPending && credentialHandle) {
             // Schedule the post-commit notice/retry behind anything that was
             // already queued during commit. A newer Off/disconnect barrier may
@@ -1660,6 +1743,7 @@ export class SyncService {
                 if (disabled.backend !== 'off') {
                     throw new Error('Dropbox could not be disconnected because sync is not durably disabled');
                 }
+                await SyncService.noteSyncBackendPersisted('off');
 
                 SyncService.syncOrchestrator.reset();
                 SyncService.queuedSyncOptions = null;

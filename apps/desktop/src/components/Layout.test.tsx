@@ -109,6 +109,18 @@ const resetStores = () => {
 beforeEach(() => {
     window.localStorage.clear();
     resetStores();
+    // Pin a sync-enabled backend so footer/toast assertions don't race the async
+    // backend read (jsdom's persisted default is 'off', which hides the footer).
+    vi.spyOn(SyncService, 'refreshSyncBackendStatus').mockResolvedValue();
+    vi.spyOn(SyncService, 'subscribeSyncStatus').mockImplementation(() => () => undefined);
+    vi.spyOn(SyncService, 'getSyncStatus').mockReturnValue({
+        inFlight: false,
+        queued: false,
+        step: null,
+        lastResult: null,
+        lastResultAt: null,
+        backend: 'file',
+    });
     act(() => {
         useTaskStore.setState((state) => ({
             ...state,
@@ -144,7 +156,7 @@ afterEach(() => {
     cleanup();
     resetStores();
     vi.useRealTimers();
-    vi.clearAllMocks();
+    vi.restoreAllMocks();
 });
 
 describe('Layout content width', () => {
@@ -451,6 +463,75 @@ describe('Layout sync conflict surface', () => {
         });
 
         await waitFor(() => expect(showToast).toHaveBeenCalledTimes(2));
+    });
+
+    it('stays quiet about a stale persisted conflict when sync is turned off', () => {
+        const showToast = vi.fn();
+        vi.spyOn(SyncService, 'getSyncStatus').mockReturnValue({
+            inFlight: false,
+            queued: false,
+            step: null,
+            lastResult: null,
+            lastResultAt: null,
+            backend: 'off',
+        });
+        act(() => {
+            useUiStore.setState((state) => ({
+                ...state,
+                showToast,
+            }));
+            useTaskStore.setState((state) => ({
+                ...state,
+                settings: {
+                    ...state.settings,
+                    lastSyncAt: '2026-04-22T12:00:00.000Z',
+                    lastSyncStatus: 'conflict',
+                },
+            }));
+        });
+
+        renderLayout();
+
+        expect(showToast).not.toHaveBeenCalled();
+    });
+
+    it('hides the footer sync controls while sync is turned off', () => {
+        vi.spyOn(SyncService, 'getSyncStatus').mockReturnValue({
+            inFlight: false,
+            queued: false,
+            step: null,
+            lastResult: null,
+            lastResultAt: null,
+            backend: 'off',
+        });
+
+        const { queryByRole, container } = renderLayout();
+
+        expect(queryByRole('button', { name: /Sync now/i })).toBeNull();
+        expect(container.querySelector('[data-sidebar-sync-status]')).toBeNull();
+    });
+
+    it('reports "sync is turned off" instead of a fake completed sync', async () => {
+        const showToast = vi.fn();
+        const performSpy = vi
+            .spyOn(SyncService, 'performSync')
+            .mockResolvedValue({ success: true, skipped: 'disabled' });
+        act(() => {
+            useUiStore.setState((state) => ({
+                ...state,
+                showToast,
+            }));
+        });
+
+        const { getByRole } = renderLayout();
+
+        await act(async () => {
+            fireEvent.click(getByRole('button', { name: /Sync now/i }));
+        });
+
+        expect(performSpy).toHaveBeenCalledWith({ manual: true });
+        expect(showToast).toHaveBeenCalledWith('Sync is turned off', 'info');
+        expect(showToast).not.toHaveBeenCalledWith('Sync completed', 'success');
     });
 });
 

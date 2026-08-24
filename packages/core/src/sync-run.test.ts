@@ -199,7 +199,7 @@ describe('runSharedSyncCycle', () => {
 
         const result = await run();
 
-        expect(result).toEqual({ success: true });
+        expect(result).toEqual({ success: true, skipped: 'disabled' });
         expect(hooks.setupCycle).toHaveBeenCalledTimes(1);
         expect(io.readRemote).not.toHaveBeenCalled();
         expect(storage.persistLocal).not.toHaveBeenCalled();

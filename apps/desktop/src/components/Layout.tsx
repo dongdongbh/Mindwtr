@@ -193,11 +193,15 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
         return `${countParts.join('|')}:ids:${conflictIds.join(',')}:samples:${conflictSamples.join(',')}`;
     }, [lastSyncAt, lastSyncStats, lastSyncStatus]);
     useEffect(() => {
+        // Wait until the backend is known, and stay quiet when sync is off — a
+        // persisted conflict status can never be cleared by a sync that will
+        // never run again, so it would re-toast at every launch (#1001).
+        if (syncStatus.backend === null || syncStatus.backend === 'off') return;
         if (lastSyncStatus !== 'conflict' || !syncConflictToastKey) return;
         if (shownConflictToastKeyRef.current === syncConflictToastKey) return;
         shownConflictToastKeyRef.current = syncConflictToastKey;
         showToast(syncConflictNotice, 'info', 6000);
-    }, [lastSyncStatus, showToast, syncConflictNotice, syncConflictToastKey]);
+    }, [lastSyncStatus, showToast, syncConflictNotice, syncConflictToastKey, syncStatus.backend]);
 
     // A sync cycle that queues a follow-up drops inFlight between runs while queued stays
     // true. Reading inFlight alone made the footer flicker on every hand-off — the status dot
@@ -206,6 +210,10 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
     // the icon jumping about while you hover it. Queued work is still sync work, so treat it
     // as busy and the footer stays put for the whole cycle.
     const syncBusy = syncStatus.inFlight || syncStatus.queued;
+    // Sync affordances disappear entirely while sync is off (#1001). `null`
+    // means "not read yet"; keep the footer visible then so it doesn't blink
+    // in a heartbeat later for the common sync-enabled case.
+    const syncOff = syncStatus.backend === 'off';
     const syncFreshnessDotClass = syncBusy
         ? 'bg-info'
         : !isOnline
@@ -528,6 +536,10 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
         setIsManualSyncing(true);
         try {
             const result = await SyncService.performSync({ manual: true });
+            if (result.skipped === 'disabled') {
+                showToast(tFallback(t, 'settings.syncTurnedOff', 'Sync is turned off'), 'info');
+                return;
+            }
             if (result.skipped === 'requeued') {
                 showToast(tFallback(t, 'settings.syncRetryQueued', 'Local changes arrived during sync. Retry queued.'), 'info');
             } else if (result.success && result.remoteWriteDeferred) {
@@ -571,6 +583,7 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
     }, []);
 
     useEffect(() => {
+        void SyncService.refreshSyncBackendStatus();
         return SyncService.subscribeSyncStatus(setSyncStatus);
     }, []);
 
@@ -869,13 +882,13 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
                                 )}
                                 aria-current={currentView === 'settings' ? 'page' : undefined}
                                 title={t('nav.settings')}
-                                aria-label={isCollapsed ? `${t('nav.settings')}. ${syncTooltip}` : t('nav.settings')}
+                                aria-label={isCollapsed && !syncOff ? `${t('nav.settings')}. ${syncTooltip}` : t('nav.settings')}
                             >
                                 <span className="inline-flex min-w-0 items-center gap-2 text-sm font-medium">
                                     <Settings className="h-4 w-4 shrink-0" />
                                     {!isCollapsed && <span>{t('nav.settings')}</span>}
                                 </span>
-                                {isCollapsed && (
+                                {isCollapsed && !syncOff && (
                                     <span
                                         className={cn(
                                             "absolute right-1.5 top-1.5 h-2 w-2 rounded-full ring-2 ring-card",
@@ -887,7 +900,7 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
                                     />
                                 )}
                             </button>
-                            {!isCollapsed && (
+                            {!isCollapsed && !syncOff && (
                                 <button
                                     type="button"
                                     onClick={onOpenSyncSettings ?? (() => onViewChange('settings'))}
@@ -911,20 +924,22 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
                                     <span className="shrink-0 tabular-nums text-muted-foreground">{compactSyncTimeLabel}</span>
                                 </button>
                             )}
-                            <button
-                                type="button"
-                                onClick={handleManualSyncNow}
-                                disabled={manualSyncBusy}
-                                className={cn(
-                                    "inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60",
-                                    "hover:bg-accent/70 hover:text-accent-foreground",
-                                    isCollapsed ? "h-10 w-10" : "h-9 w-9"
-                                )}
-                                title={`${syncNowLabel}. ${syncTooltip}`}
-                                aria-label={`${syncNowLabel}. ${syncTooltip}`}
-                            >
-                                <RefreshCw className={cn("h-4 w-4", manualSyncBusy && "animate-spin")} aria-hidden="true" />
-                            </button>
+                            {!syncOff && (
+                                <button
+                                    type="button"
+                                    onClick={handleManualSyncNow}
+                                    disabled={manualSyncBusy}
+                                    className={cn(
+                                        "inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60",
+                                        "hover:bg-accent/70 hover:text-accent-foreground",
+                                        isCollapsed ? "h-10 w-10" : "h-9 w-9"
+                                    )}
+                                    title={`${syncNowLabel}. ${syncTooltip}`}
+                                    aria-label={`${syncNowLabel}. ${syncTooltip}`}
+                                >
+                                    <RefreshCw className={cn("h-4 w-4", manualSyncBusy && "animate-spin")} aria-hidden="true" />
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>

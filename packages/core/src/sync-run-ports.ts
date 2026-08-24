@@ -16,7 +16,7 @@ import type { buildMergeSummaryLog } from './sync-log-utils';
  * transports, platform storage, and UI notification behind these ports.
  */
 
-export type SyncRunSkipReason = 'offline' | 'requeued' | 'unchanged' | 'pendingRemoteWriteBackoff';
+export type SyncRunSkipReason = 'offline' | 'requeued' | 'unchanged' | 'pendingRemoteWriteBackoff' | 'disabled';
 
 export type SyncRunResult = {
     success: boolean;

@@ -89,7 +89,11 @@ const IOS_TEMP_INBOX_PATH_PATTERN = /\/tmp\/[^/]*-Inbox\//i;
 const INVALID_CONFIG_CHAR_PATTERN = /[\u0000-\u001F\u007F]/;
 type MobileSyncActivityState = 'idle' | 'syncing';
 type MobileSyncActivityListener = (state: MobileSyncActivityState) => void;
-type MobileSyncSkipReason = 'offline' | 'requeued' | 'unchanged' | 'pendingRemoteWriteBackoff';
+// 'disabled' surfaces from the shared core cycle for any no-op setup: sync off,
+// an unresolvable file-backend config, or an automatic run without the
+// encryption key. Mobile callers gate on configuration status before syncing,
+// so none branch on it today.
+type MobileSyncSkipReason = 'offline' | 'requeued' | 'unchanged' | 'pendingRemoteWriteBackoff' | 'disabled';
 // 'network': the OS reported the device offline. 'request': the device looked
 // online but the app's requests failed (per-app cellular block, VPN/firewall).
 type MobileSyncOfflineCause = 'network' | 'request';

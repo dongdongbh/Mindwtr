@@ -231,7 +231,10 @@ class SharedSyncRunMachine {
 
         const setup = await this.hooks.setupCycle({ setStep: (step) => this.setStep(step) });
         if (setup.kind === 'disabled') {
-            return { success: true };
+            // Callers must be able to tell "nothing to do, sync is off" from a
+            // completed sync — a manual "Sync now" with sync off must not toast
+            // "Sync completed" (#1001).
+            return { success: true, skipped: 'disabled' };
         }
         this.state.backend = setup.backend;
         this.state.cloudProvider = setup.cloudProvider ?? 'selfhosted';
