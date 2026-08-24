@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Project, Section, Task } from '@mindwtr/core';
 
 import { useUiStore } from '../../../store/ui-store';
+import { DndContext } from '@dnd-kit/core';
 import { LanguageProvider } from '../../../contexts/language-context';
 import { KeybindingProvider } from '../../../contexts/keybinding-context';
 import { selectToolbarOption } from '../../../test/toolbar-select';
@@ -237,10 +238,12 @@ const renderWorkspace = (overrides: Record<string, unknown> = {}) => {
     seedStore(store);
     return render(
         <LanguageProvider>
-            <ProjectWorkspace
-                {...defaultProps}
-                {...(props as Partial<ProjectWorkspaceProps>)}
-            />
+            <DndContext>
+                <ProjectWorkspace
+                    {...defaultProps}
+                    {...(props as Partial<ProjectWorkspaceProps>)}
+                />
+            </DndContext>
         </LanguageProvider>
     );
 };
@@ -251,10 +254,12 @@ const renderWorkspaceWithKeybindings = (overrides: Record<string, unknown> = {})
     return render(
         <LanguageProvider>
             <KeybindingProvider currentView="projects" onNavigate={vi.fn()}>
-                <ProjectWorkspace
-                    {...defaultProps}
-                    {...(props as Partial<ProjectWorkspaceProps>)}
-                />
+                <DndContext>
+                    <ProjectWorkspace
+                        {...defaultProps}
+                        {...(props as Partial<ProjectWorkspaceProps>)}
+                    />
+                </DndContext>
             </KeybindingProvider>
         </LanguageProvider>
     );

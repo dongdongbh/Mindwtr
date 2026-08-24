@@ -1,6 +1,7 @@
 import { fireEvent, render, waitFor } from '@testing-library/react';
 import type { ComponentProps, RefObject } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { DndContext } from '@dnd-kit/core';
 import type { DragEndEvent } from '@dnd-kit/core';
 import type { Project, Section, Task } from '@mindwtr/core';
 
@@ -157,6 +158,7 @@ const renderWorkspace = ({ store = {}, props = {}, layout }: RenderOptions = {})
     const taskDragEndRef: RefObject<((event: DragEndEvent) => void) | null> = { current: null };
     const utils = render(
         <LanguageProvider>
+            <DndContext>
             <ProjectWorkspace
                 highlightTaskId={null}
                 isAreaCreating={false}
@@ -173,6 +175,7 @@ const renderWorkspace = ({ store = {}, props = {}, layout }: RenderOptions = {})
                 taskDragEndRef={taskDragEndRef}
                 {...props}
             />
+            </DndContext>
         </LanguageProvider>
     );
     return { ...utils, taskDragEndRef, store: storeHolder.current as ReturnType<typeof makeStore> };
@@ -220,27 +223,24 @@ describe('ProjectWorkspace sections-as-columns (#1019)', () => {
         expect(getByRole('button', { name: 'Columns' })).toHaveAttribute('aria-pressed', 'true');
     });
 
-    it('renders unsectioned first, then sections in order, with each column holding its own tasks', () => {
+    it('renders sections in order with the unsectioned bucket last, each column holding its own tasks', () => {
         const { container } = renderWorkspace({ layout: 'columns' });
 
         expect(columnTitles(container).map((title) => title.replace(/\d+$/, '')))
-            .toEqual(['No Section', 'Planning', 'Shipping']);
-        expect(columnTaskIds(container, 0)).toEqual(['task-4']);
-        expect(columnTaskIds(container, 1)).toEqual(['task-1', 'task-2']);
-        expect(columnTaskIds(container, 2)).toEqual(['task-3']);
+            .toEqual(['Planning', 'Shipping', 'No Section']);
+        expect(columnTaskIds(container, 0)).toEqual(['task-1', 'task-2']);
+        expect(columnTaskIds(container, 1)).toEqual(['task-3']);
+        expect(columnTaskIds(container, 2)).toEqual(['task-4']);
     });
 
-    it('keeps the No Section column as a drop target when every task belongs to a section', () => {
+    it('hides the No Section column while every task belongs to a section', () => {
         const { container } = renderWorkspace({
             layout: 'columns',
             store: { allTasks: tasks.slice(0, 3) },
         });
 
         expect(columnTitles(container).map((title) => title.replace(/\d+$/, '')))
-            .toEqual(['No Section', 'Planning', 'Shipping']);
-        expect(columnTaskIds(container, 0)).toEqual([]);
-        expect(container.querySelectorAll('[data-project-section-columns] > div')[0].textContent)
-            .toContain('No tasks');
+            .toEqual(['Planning', 'Shipping']);
     });
 
     it('reorders within a column through the section-scoped store call', () => {
@@ -339,8 +339,9 @@ describe('ProjectWorkspace sections-as-columns (#1019)', () => {
             store: { allTasks: [tasks[0], tasks[1]] },
         });
 
-        // Empty Shipping section + the empty No Section column (still a drop target).
-        expect(getAllByText('No tasks')).toHaveLength(2);
+        // Empty Shipping section only — the empty No Section column stays hidden
+        // outside a drag.
+        expect(getAllByText('No tasks')).toHaveLength(1);
         expect(queryByText('No active tasks')).toBeNull();
     });
 
@@ -350,8 +351,9 @@ describe('ProjectWorkspace sections-as-columns (#1019)', () => {
             store: { allTasks: [tasks[0], tasks[1]] },
         });
 
-        // Empty Shipping section + the empty "No Section" bucket.
-        expect(getAllByText('No tasks')).toHaveLength(2);
+        // Empty Shipping section only — the empty "No Section" bucket stays
+        // hidden outside a drag.
+        expect(getAllByText('No tasks')).toHaveLength(1);
         expect(queryByText('No active tasks')).toBeNull();
     });
 
@@ -407,9 +409,9 @@ describe('ProjectWorkspace section notes preview', () => {
         });
 
         const columns = container.querySelectorAll('[data-project-section-columns] > div');
-        expect(columns[1].querySelector('[data-section-notes-preview]')?.textContent)
+        expect(columns[0].querySelector('[data-section-notes-preview]')?.textContent)
             .toBe('Natural planning: purpose first');
-        expect(columns[2].querySelector('[data-section-notes-preview]')).toBeNull();
+        expect(columns[1].querySelector('[data-section-notes-preview]')).toBeNull();
     });
 
     it('renders nothing for empty or whitespace-only notes', () => {

@@ -16,6 +16,7 @@ import { Attachment,
     stripMarkdown,
     sortTasksBy,
     splitCompletedTasks, tFallback, } from '@mindwtr/core';
+import { useDndMonitor } from '@dnd-kit/core';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CheckCircle2, ChevronDown, ChevronRight, Columns3, FileText, Folder, PanelLeftOpen, Pencil, Plus, Trash2, X } from 'lucide-react';
@@ -684,6 +685,17 @@ export function ProjectWorkspace({
         };
     }, [orderedProjectTasks, projectSections, selectedProjectId, sortProjectTasks]);
 
+    // "No Section" is a bucket, not a section: it renders after the named
+    // sections and only while it has tasks. During a live drag it must exist
+    // even when empty — it's the drop target that clears a task's section.
+    const [taskDragActive, setTaskDragActive] = useState(false);
+    useDndMonitor(useMemo(() => ({
+        onDragStart: () => setTaskDragActive(true),
+        onDragEnd: () => setTaskDragActive(false),
+        onDragCancel: () => setTaskDragActive(false),
+    }), []));
+    const showUnsectionedGroup = sectionTaskGroups.unsectioned.length > 0 || taskDragActive;
+
     const orderedProjectTaskList = useMemo(() => {
         if (projectSections.length === 0) return [...orderedProjectTasks, ...completedProjectTasks];
         const combined: Task[] = [];
@@ -713,20 +725,19 @@ export function ProjectWorkspace({
                 : [...orderedProjectTasks, ...completedProjectTasks];
         }
         const combined: Task[] = [];
-        // Keyboard order follows reading order, so the unsectioned tasks come
-        // first in columns mode (leftmost column) and last in list mode.
-        if (columnsLayout) combined.push(...sectionTaskGroups.unsectioned);
+        // Keyboard order follows reading order: named sections, then the
+        // unsectioned tasks, in both layouts — "No Section" renders last.
         sectionTaskGroups.sections.forEach((group) => {
             if (!group.section.isCollapsed) {
                 combined.push(...group.tasks);
             }
         });
-        if (!columnsLayout) combined.push(...sectionTaskGroups.unsectioned);
+        combined.push(...sectionTaskGroups.unsectioned);
         if (!completedTasksCollapsed) {
             combined.push(...completedProjectTasks);
         }
         return combined;
-    }, [columnsLayout, completedProjectTasks, completedTasksCollapsed, orderedProjectTasks, projectSections.length, sectionTaskGroups.sections, sectionTaskGroups.unsectioned]);
+    }, [completedProjectTasks, completedTasksCollapsed, orderedProjectTasks, projectSections.length, sectionTaskGroups.sections, sectionTaskGroups.unsectioned]);
     const visibleProjectTaskIds = useMemo(
         () => visibleProjectTaskList.map((task) => task.id),
         [visibleProjectTaskList],
@@ -1284,24 +1295,6 @@ export function ProjectWorkspace({
                 onPointerDown={handleColumnsPointerDown}
                 className="flex items-start gap-3 overflow-x-auto pb-2"
             >
-                <ProjectSectionColumn
-                    id={NO_SECTION_CONTAINER}
-                    dashed
-                    header={(
-                        <div className="flex items-center gap-2 text-sm font-semibold">
-                            <span className="truncate">{t('projects.noSection')}</span>
-                            <span className="text-xs text-muted-foreground">
-                                {sectionTaskGroups.unsectioned.length}
-                            </span>
-                        </div>
-                    )}
-                >
-                    {(scrollRef) => (sectionTaskGroups.unsectioned.length > 0 ? (
-                        renderTasks(sectionTaskGroups.unsectioned, scrollRef)
-                    ) : (
-                        sectionEmptyState
-                    ))}
-                </ProjectSectionColumn>
                 {sectionTaskGroups.sections.map((group, index) => (
                     <ProjectSectionColumn
                         key={group.section.id}
@@ -1317,6 +1310,26 @@ export function ProjectWorkspace({
                         ))}
                     </ProjectSectionColumn>
                 ))}
+                {showUnsectionedGroup && (
+                    <ProjectSectionColumn
+                        id={NO_SECTION_CONTAINER}
+                        dashed
+                        header={(
+                            <div className="flex items-center gap-2 text-sm font-semibold">
+                                <span className="truncate">{t('projects.noSection')}</span>
+                                <span className="text-xs text-muted-foreground">
+                                    {sectionTaskGroups.unsectioned.length}
+                                </span>
+                            </div>
+                        )}
+                    >
+                        {(scrollRef) => (sectionTaskGroups.unsectioned.length > 0 ? (
+                            renderTasks(sectionTaskGroups.unsectioned, scrollRef)
+                        ) : (
+                            sectionEmptyState
+                        ))}
+                    </ProjectSectionColumn>
+                )}
             </div>
             {renderCompletedTaskGroup()}
         </div>
@@ -1366,26 +1379,28 @@ export function ProjectWorkspace({
                         )}
                     </SectionDropZone>
                 ))}
-                <SectionDropZone
-                    id={NO_SECTION_CONTAINER}
-                    className="rounded-lg border border-dashed border-border/70"
-                >
-                    <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
-                        <div className="flex items-center gap-2 text-sm font-semibold">
-                            <span>{t('projects.noSection')}</span>
-                            <span className="text-xs text-muted-foreground">
-                                {sectionTaskGroups.unsectioned.length}
-                            </span>
+                {showUnsectionedGroup && (
+                    <SectionDropZone
+                        id={NO_SECTION_CONTAINER}
+                        className="rounded-lg border border-dashed border-border/70"
+                    >
+                        <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
+                            <div className="flex items-center gap-2 text-sm font-semibold">
+                                <span>{t('projects.noSection')}</span>
+                                <span className="text-xs text-muted-foreground">
+                                    {sectionTaskGroups.unsectioned.length}
+                                </span>
+                            </div>
                         </div>
-                    </div>
-                    <div className="p-3">
-                        {sectionTaskGroups.unsectioned.length > 0 ? (
-                            renderTasks(sectionTaskGroups.unsectioned)
-                        ) : (
-                            sectionEmptyState
-                        )}
-                    </div>
-                </SectionDropZone>
+                        <div className="p-3">
+                            {sectionTaskGroups.unsectioned.length > 0 ? (
+                                renderTasks(sectionTaskGroups.unsectioned)
+                            ) : (
+                                sectionEmptyState
+                            )}
+                        </div>
+                    </SectionDropZone>
+                )}
                 {sectionTaskGroups.sections.length === 0 && sectionTaskGroups.unsectioned.length === 0 && (
                     <div className="py-12 text-center text-muted-foreground">
                         {t('projects.noActiveTasks')}
