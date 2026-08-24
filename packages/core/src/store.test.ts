@@ -694,6 +694,25 @@ describe('TaskStore', () => {
         ]);
     });
 
+    it('shows the duplicated task in the visible list immediately', async () => {
+        const { addTask, duplicateTask } = useTaskStore.getState();
+        const addResult = await addTask('Context Bank', { status: 'reference' });
+        expect(addResult.success).toBe(true);
+
+        const visibleBefore = useTaskStore.getState().tasks.filter((task) => task.title === 'Context Bank');
+        expect(visibleBefore).toHaveLength(1);
+
+        const duplicateResult = await duplicateTask(addResult.id!, false);
+        expect(duplicateResult.success).toBe(true);
+
+        // The reporter's video (#feedback 9cb87074): the copy existed in the
+        // store but the list on screen kept showing one row until an unrelated
+        // action re-derived it.
+        const visibleAfter = useTaskStore.getState().tasks.filter((task) => task.title === 'Context Bank');
+        expect(visibleAfter).toHaveLength(2);
+        expect(useTaskStore.getState()._tasksById.get(duplicateResult.id!)?.title).toBe('Context Bank');
+    });
+
     it('sends a duplicated done task back to the Inbox to be re-clarified', async () => {
         const { addTask, duplicateTask } = useTaskStore.getState();
         const addResult = await addTask('Weekly review', {
