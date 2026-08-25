@@ -406,7 +406,11 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
 
     // Only show the filtering banner for user-driven filter changes.
     // Background task refreshes can still be deferred without shifting the list UI.
-    const filterFeedbackInputs = useMemo(() => ({
+    // Compared as a serialized string, NOT by object identity: a sync-triggered
+    // store replace rebuilds these inputs with identical values but fresh
+    // identities, and an identity-compared deferred value would flash the
+    // banner — shifting the whole list down a row — on every sync (#1079).
+    const filterFeedbackKey = useMemo(() => JSON.stringify({
         statusFilter,
         filterCriteria: activeListFilterCriteria,
         resolvedAreaFilter,
@@ -419,8 +423,8 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
         selectedWaitingPerson,
         normalizedSearchQuery,
     ]);
-    const deferredFilterFeedbackInputs = useDeferredValue(filterFeedbackInputs);
-    const isFiltering = deferredFilterFeedbackInputs !== filterFeedbackInputs;
+    const deferredFilterFeedbackKey = useDeferredValue(filterFeedbackKey);
+    const isFiltering = deferredFilterFeedbackKey !== filterFeedbackKey;
 
     const filterInputs = useMemo(() => ({
         baseTasks,
