@@ -22,6 +22,7 @@ import { hasFreshAttachmentCleanupWork } from './attachment-cleanup';
 import { flushPendingSave, useTaskStore } from './store';
 import {
     assertNoPendingAttachmentUploads,
+    computeSyncChangeFingerprint,
     findPendingAttachmentUploads,
     hasPendingSyncSideEffects,
 } from './sync-helpers';
@@ -347,9 +348,37 @@ class SharedSyncRunMachine {
             return this.state.localDataCache.data;
         }
         const inMemorySnapshot = this.store.getInMemorySnapshot();
-        const baseData = this.state.preSyncedLocalData
-            ? mergeAppData(this.state.preSyncedLocalData, inMemorySnapshot)
-            : mergeAppData(await this.storage.readPersistedLocal(), inMemorySnapshot);
+        // The persisted-vs-in-memory reconcile is a full-library merge — the
+        // single most expensive step of an idle cycle at whale scale — and after
+        // the flush at cycle start the two sides are almost always identical.
+        // When the change fingerprint (per-entity id|rev|revBy|updatedAt|
+        // deletedAt|purgedAt + sanitized settings) matches, use the persisted
+        // side directly, NOT the in-memory snapshot: persisted is the previous
+        // cycle's merge output, so its byte shape matches the recorded
+        // fast-sync localFingerprint — the raw store snapshot has no such
+        // guarantee on platforms without applyDataToStore, and handing it back
+        // would make the fast-check miss forever. Content diverging at
+        // identical revision metadata is deferred to the next changed cycle,
+        // the same trust reconcileEntityCollection already places in this
+        // tuple (#766). The attachment pre-sync branch must keep merging
+        // unconditionally: its patches can change fields the fingerprint does
+        // not cover (cloudKey, localStatus).
+        let baseData: AppData;
+        if (this.state.preSyncedLocalData) {
+            baseData = mergeAppData(this.state.preSyncedLocalData, inMemorySnapshot);
+        } else {
+            const persisted = await this.storage.readPersistedLocal();
+            const reconcileStart = Date.now();
+            const aligned = computeSyncChangeFingerprint(persisted) === computeSyncChangeFingerprint(inMemorySnapshot);
+            baseData = aligned ? persisted : mergeAppData(persisted, inMemorySnapshot);
+            // One line per cycle so a diagnostics log shows whether whale-scale
+            // cycles take the cheap aligned path and what a miss costs (#766).
+            this.notifier.logInfo('Sync local reconcile', {
+                reconcile: aligned ? 'aligned-skip' : 'merged',
+                durationMs: String(Date.now() - reconcileStart),
+                tasks: String(baseData.tasks.length),
+            });
+        }
         const data = this.options.activationProbe
             ? baseData
             : await this.storage.injectExternalCalendars(baseData);

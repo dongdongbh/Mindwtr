@@ -177,6 +177,59 @@ const createHarness = (config: HarnessConfig = {}) => {
 };
 
 describe('runSharedSyncCycle', () => {
+    describe('persisted-vs-in-memory reconcile short-circuit (#766)', () => {
+        it('uses the persisted side without merging when change fingerprints match', async () => {
+            // Same id/rev/updatedAt metadata, diverged content. The fingerprint
+            // short-circuit trusts the tuple and hands back the persisted side
+            // (the previous cycle's merge output, whose byte shape the fast-sync
+            // state recorded) — the accepted deferral this test documents.
+            // Sides chosen so the assertion DISCRIMINATES: a real merge's
+            // deterministic winner is signature-lexical and would pick the
+            // in-memory 'Zebra title'; only the short-circuit yields 'Apple'.
+            const inMemory = createData([createTask('t-1', 'Zebra title')]);
+            const persisted = createData([createTask('t-1', 'Apple title')]);
+            let capturedLocal: AppData | null = null;
+            const { run } = createHarness({
+                local: inMemory,
+                storage: { readPersistedLocal: vi.fn(async () => cloneAppData(persisted)) },
+                performSyncCycle: async (io) => {
+                    capturedLocal = await io.readLocal();
+                    return performSyncCycle(io);
+                },
+            });
+
+            const result = await run();
+
+            expect(result.success).toBe(true);
+            expect(capturedLocal!.tasks.map((task) => task.title)).toEqual(['Apple title']);
+        });
+
+        it('still merges when the change fingerprints differ', async () => {
+            // The extra task lives on the IN-MEMORY side so the assertion
+            // discriminates: only a real merge unions it in — a broken
+            // short-circuit handing back persisted would drop it.
+            const inMemory = createData([
+                createTask('t-1', 'Shared task'),
+                createTask('t-extra', 'Only in memory'),
+            ]);
+            const persisted = createData([createTask('t-1', 'Shared task')]);
+            let capturedLocal: AppData | null = null;
+            const { run } = createHarness({
+                local: inMemory,
+                storage: { readPersistedLocal: vi.fn(async () => cloneAppData(persisted)) },
+                performSyncCycle: async (io) => {
+                    capturedLocal = await io.readLocal();
+                    return performSyncCycle(io);
+                },
+            });
+
+            const result = await run();
+
+            expect(result.success).toBe(true);
+            expect(capturedLocal!.tasks.map((task) => task.id).sort()).toEqual(['t-1', 't-extra']);
+        });
+    });
+
     it('repairs an aligned file remote recovered from a fallback candidate', async () => {
         const aligned = createData();
         const { io, run } = createHarness({
