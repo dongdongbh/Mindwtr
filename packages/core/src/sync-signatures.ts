@@ -1,25 +1,6 @@
 import type { Area, Attachment, Person, Project, Section, Task } from './types';
 import { normalizeProjectSequentialScope, normalizeProjectTaskSortBy } from './project-utils';
 
-type StableSignatureCacheEntry = {
-    validation: string;
-    signature: string;
-};
-
-export type SyncSignatureMemo = {
-    comparable: WeakMap<object, string>;
-    deterministic: WeakMap<object, string>;
-    comparableByRevision: Map<string, StableSignatureCacheEntry>;
-    deterministicByRevision: Map<string, StableSignatureCacheEntry>;
-};
-
-export const createSyncSignatureMemo = (): SyncSignatureMemo => ({
-    comparable: new WeakMap<object, string>(),
-    deterministic: new WeakMap<object, string>(),
-    comparableByRevision: new Map<string, StableSignatureCacheEntry>(),
-    deterministicByRevision: new Map<string, StableSignatureCacheEntry>(),
-});
-
 const CONTENT_DIFF_IGNORED_KEYS = new Set([
     'rev',
     'revBy',
@@ -184,59 +165,6 @@ export const normalizePersonForContentComparison = (person: Person): Record<stri
     referenceLink: person.referenceLink?.trim() || undefined,
 });
 
-const STABLE_SIGNATURE_CACHE_LIMIT = 5000;
-
-const toStableRevisionCacheKey = (
-    value: unknown,
-    signatureKind: 'comparable' | 'deterministic'
-): string | undefined => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-    const record = value as Record<string, unknown>;
-    if (typeof record.id !== 'string' || record.id.length === 0) return undefined;
-    if (typeof record.rev !== 'number' || !Number.isFinite(record.rev)) return undefined;
-
-    const updatedAt = typeof record.updatedAt === 'string' ? record.updatedAt : '';
-    const deletedAt = typeof record.deletedAt === 'string' ? record.deletedAt : '';
-    const purgedAt = typeof record.purgedAt === 'string' ? record.purgedAt : '';
-    const revBy = typeof record.revBy === 'string' ? record.revBy : '';
-    return [
-        signatureKind,
-        record.id,
-        record.rev,
-        updatedAt,
-        deletedAt,
-        purgedAt,
-        revBy,
-    ].join('\0');
-};
-
-const readStableSignatureCache = (
-    cache: Map<string, StableSignatureCacheEntry> | undefined,
-    key: string | undefined,
-    validation: string
-): string | undefined => {
-    if (!cache || !key) return undefined;
-    const cached = cache.get(key);
-    if (cached === undefined || cached.validation !== validation) return undefined;
-    cache.delete(key);
-    cache.set(key, cached);
-    return cached.signature;
-};
-
-const writeStableSignatureCache = (
-    cache: Map<string, StableSignatureCacheEntry> | undefined,
-    key: string | undefined,
-    validation: string,
-    signature: string
-) => {
-    if (!cache || !key) return;
-    if (!cache.has(key) && cache.size >= STABLE_SIGNATURE_CACHE_LIMIT) {
-        const oldestKey = cache.keys().next().value;
-        if (oldestKey !== undefined) cache.delete(oldestKey);
-    }
-    cache.set(key, { validation, signature });
-};
-
 export const toComparableValue = (value: unknown, options?: { includeIgnoredKeys?: boolean }): unknown => {
     const includeIgnoredKeys = options?.includeIgnoredKeys === true;
     if (Array.isArray(value)) {
@@ -265,38 +193,86 @@ export const toComparableValue = (value: unknown, options?: { includeIgnoredKeys
     return value;
 };
 
-const toMemoizedSignature = (
+/**
+ * Module-level identity-keyed signature caches (#766 round 3). A merge at 7k
+ * tasks used to spend ~40% of its time recomputing and re-validating these
+ * signatures: the old per-merge memo started empty every call, and its
+ * revision-keyed fallback validated each hit by stringifying the whole raw
+ * entity — measured at a 3.4% hit rate costing more bytes than it saved.
+ *
+ * Correctness premise: synced entity objects are never mutated in place, so
+ * object identity implies content identity. This is the same invariant the
+ * SQLite adapter's identity-keyed row cache already ships on, enforced for the
+ * one historical violator (attachment backends) by the pure patch lifecycle,
+ * whose deep-freeze suites fail on any regression. An entity that changes is a
+ * new object and simply computes fresh — nothing here trusts revision metadata.
+ *
+ * Three caches because one entity object legitimately carries up to three
+ * signatures: the merge loop's type-normalized comparable, the deterministic
+ * winner's plain comparable, and its ignored-keys tie-breaker.
+ */
+const mergeComparableSignatureCache = new WeakMap<object, string>();
+const plainComparableSignatureCache = new WeakMap<object, string>();
+const deterministicSignatureCache = new WeakMap<object, string>();
+
+const computeSignature = (value: unknown, options?: { includeIgnoredKeys?: boolean }): string =>
+    JSON.stringify(toComparableValue(value, options));
+
+/**
+ * Teeth for the never-mutated-in-place premise above, which nothing at runtime
+ * would otherwise catch: under NODE_ENV=test every cache hit is recomputed and
+ * compared, so any code path a test exercises that mutates a cached entity in
+ * place fails loudly instead of silently corrupting merge convergence.
+ * Production never pays for this.
+ */
+let validateCacheHits = typeof process !== 'undefined' && process.env?.NODE_ENV === 'test';
+
+/** Test-only: lets the memo-has-teeth tests observe a true cache hit. */
+export const setSignatureCacheValidationForTests = (enabled: boolean): void => {
+    validateCacheHits = enabled;
+};
+
+const memoizedSignature = (
+    cache: WeakMap<object, string>,
     value: unknown,
-    cache: WeakMap<object, string> | undefined,
-    stableCache: Map<string, StableSignatureCacheEntry> | undefined,
-    signatureKind: 'comparable' | 'deterministic',
-    options?: { includeIgnoredKeys?: boolean }
+    compute: () => string,
 ): string => {
-    if (value && typeof value === 'object' && cache) {
-        const cached = cache.get(value);
-        if (cached !== undefined) return cached;
-        const stableCacheKey = toStableRevisionCacheKey(value, signatureKind);
-        const stableCacheValidation = stableCacheKey ? JSON.stringify(value) : '';
-        const stableCached = readStableSignatureCache(stableCache, stableCacheKey, stableCacheValidation);
-        if (stableCached !== undefined) {
-            cache.set(value, stableCached);
-            return stableCached;
+    if (!value || typeof value !== 'object') return compute();
+    const cached = cache.get(value);
+    if (cached !== undefined) {
+        if (validateCacheHits && compute() !== cached) {
+            throw new Error(
+                'Signature cache hit diverged from recomputation: a synced entity was mutated in place. '
+                + 'Synced entities must be replaced, never mutated (#766).',
+            );
         }
-        const signature = JSON.stringify(toComparableValue(value, options));
-        cache.set(value, signature);
-        writeStableSignatureCache(stableCache, stableCacheKey, stableCacheValidation, signature);
-        return signature;
+        return cached;
     }
-    return JSON.stringify(toComparableValue(value, options));
+    const signature = compute();
+    cache.set(value, signature);
+    return signature;
 };
 
-export const toComparableSignature = (value: unknown, memo?: SyncSignatureMemo): string => {
-    return toMemoizedSignature(value, memo?.comparable, memo?.comparableByRevision, 'comparable');
+export const toComparableSignature = (value: unknown): string =>
+    memoizedSignature(plainComparableSignatureCache, value, () => computeSignature(value));
+
+/** The merge loop's signature: the per-entity-type comparison normalizer is
+ *  applied inside, so the cache can key on the stable entity object instead of
+ *  the freshly-spread normalized copy the old code hashed. */
+export const getMergeComparableSignature = <T>(
+    item: T,
+    normalizeForComparison?: (item: T) => unknown,
+): string => {
+    if (!normalizeForComparison) return toComparableSignature(item);
+    return memoizedSignature(
+        mergeComparableSignatureCache,
+        item,
+        () => computeSignature(normalizeForComparison(item)),
+    );
 };
 
-const toDeterministicSignature = (value: unknown, memo?: SyncSignatureMemo): string => {
-    return toMemoizedSignature(value, memo?.deterministic, memo?.deterministicByRevision, 'deterministic', { includeIgnoredKeys: true });
-};
+const toDeterministicSignature = (value: unknown): string =>
+    memoizedSignature(deterministicSignatureCache, value, () => computeSignature(value, { includeIgnoredKeys: true }));
 
 export const hashComparableSignature = (signature: string): string => {
     let hash = 0x811c9dc5;
@@ -365,12 +341,12 @@ export const collectComparableDiffKeys = (
     return diffKeys;
 };
 
-export const chooseDeterministicWinner = <T>(localItem: T, incomingItem: T, memo?: SyncSignatureMemo): T => {
-    const localSignature = toComparableSignature(localItem, memo);
-    const incomingSignature = toComparableSignature(incomingItem, memo);
+export const chooseDeterministicWinner = <T>(localItem: T, incomingItem: T): T => {
+    const localSignature = toComparableSignature(localItem);
+    const incomingSignature = toComparableSignature(incomingItem);
     if (localSignature === incomingSignature) {
-        const localFullSignature = toDeterministicSignature(localItem, memo);
-        const incomingFullSignature = toDeterministicSignature(incomingItem, memo);
+        const localFullSignature = toDeterministicSignature(localItem);
+        const incomingFullSignature = toDeterministicSignature(incomingItem);
         if (localFullSignature === incomingFullSignature) return incomingItem;
         return incomingFullSignature > localFullSignature ? incomingItem : localItem;
     }

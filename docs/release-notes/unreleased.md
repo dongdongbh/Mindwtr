@@ -6,6 +6,7 @@ Changes collected after `v1.2.1` and before the next version tag.
 
 ## Full Change List
 
+- Sync: merging on very large libraries is about a third faster in the common case where most tasks haven't changed since the last cycle — an unchanged task is now recognized as the same object and skips re-serialization entirely, instead of being rebuilt and re-compared field by field on every cycle. Less time mid-sync means fewer moments where a tap lands during heavy background work. (#766)
 - Sync: each cycle no longer deep-copies the whole task library before checking attachments — on very large libraries that copy alone was real time per cycle, and it also forced the database to re-save every row instead of only the changed ones. (#766)
 - Desktop: a start-deferred task in Focus's Upcoming section no longer shows its start date twice — the "appears on" chip now yields to the row's own start-date chip when they name the same day. With list details hidden, the appears-on chip still carries the date. (#1061)
 - Desktop: Inbox rows now show their quick-complete check at rest like every other list, instead of a blank slot that only filled on hover — in mixed lists like Review the empty space read as a missing icon.

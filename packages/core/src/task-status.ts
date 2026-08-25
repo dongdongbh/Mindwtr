@@ -3,6 +3,7 @@ import { normalizeRecurrenceForLoad } from './recurrence';
 import { normalizeRepeatReminderMinutes } from './schedule-utils';
 import { normalizeTimeSpentMinutes } from './time-spent';
 import { normalizeRelativeStartOffset } from './task-relative-start';
+import { preserveShallowIdentity, sameShallowRecord } from './shallow-identity';
 import { safeParseDate } from './date';
 
 export const TASK_STATUS_VALUES: TaskStatus[] = ['inbox', 'next', 'waiting', 'someday', 'reference', 'done', 'archived'];
@@ -114,7 +115,7 @@ export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toI
             ? ((task as Task & { orderNum?: number }).orderNum as number)
             : undefined;
     const relativeStartOffset = task.dueDate
-        ? normalizeRelativeStartOffset(task.relativeStartOffset)
+        ? preserveShallowIdentity(task.relativeStartOffset, normalizeRelativeStartOffset(task.relativeStartOffset))
         : undefined;
     const next: Task = {
         ...rest,
@@ -125,7 +126,7 @@ export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toI
         areaId: resolvedAreaId,
         order: normalizedOrder,
         orderNum: normalizedOrder,
-        recurrence: normalizeRecurrenceForLoad(task.recurrence),
+        recurrence: preserveShallowIdentity(task.recurrence, normalizeRecurrenceForLoad(task.recurrence)),
         repeatReminderMinutes: normalizeRepeatReminderMinutes(task.repeatReminderMinutes),
         timeSpentMinutes: normalizeTimeSpentMinutes(task.timeSpentMinutes),
         relativeStartOffset,
@@ -157,5 +158,9 @@ export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toI
         next.completedAt = undefined;
     }
 
-    return next;
+    // Hand back the input when nothing actually changed, so an already-normalized
+    // task keeps its identity through the merge normalizers (#766 — see
+    // shallow-identity.ts). The time-dependent branches above naturally produce a
+    // differing object on the cycle they fire, so this stays a pure no-change check.
+    return sameShallowRecord(task, next) ? task : next;
 }

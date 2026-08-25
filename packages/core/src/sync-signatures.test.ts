@@ -1,11 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
     chooseDeterministicWinner,
-    createSyncSignatureMemo,
     normalizeAreaForContentComparison,
     normalizeProjectForContentComparison,
     normalizeSectionForContentComparison,
     normalizeTaskForContentComparison,
+    getMergeComparableSignature,
+    setSignatureCacheValidationForTests,
     toComparableSignature,
 } from './sync-signatures';
 import type { Area, Project, Section, Task } from './types';
@@ -119,47 +120,54 @@ describe('sync signatures', () => {
         expect(toComparableSignature(local)).toBe(toComparableSignature(incoming));
     });
 
-    it('reuses comparable signatures across cloned entity references with matching revision metadata', () => {
-        const memo = createSyncSignatureMemo();
-        const first = normalizeAreaForContentComparison(area({
-            rev: 3,
-            revBy: 'device-a',
-        }));
+    it('returns byte-identical signatures for an entity and its clone (identity memo parity)', () => {
+        const first = normalizeAreaForContentComparison(area({ rev: 3, revBy: 'device-a' }));
         const clone = { ...first };
 
-        expect(toComparableSignature(first, memo)).toBe(toComparableSignature(clone, memo));
-        expect(memo.comparableByRevision.size).toBe(1);
+        // First call caches by identity; the clone takes the uncached path.
+        expect(toComparableSignature(first)).toBe(toComparableSignature(clone));
+        // Repeat on the cached reference: same answer.
+        expect(toComparableSignature(first)).toBe(toComparableSignature(clone));
     });
 
-    it('does not reuse stable signatures when revision metadata advances', () => {
-        const memo = createSyncSignatureMemo();
-        const original = normalizeAreaForContentComparison(area({
-            rev: 3,
-            name: 'Work',
-        }));
-        const changed = normalizeAreaForContentComparison(area({
-            rev: 3,
-            updatedAt: '2026-01-01T00:01:00.000Z',
-            name: 'Personal',
-        }));
-
-        expect(toComparableSignature(original, memo)).not.toBe(toComparableSignature(changed, memo));
-        expect(memo.comparableByRevision.size).toBe(2);
+    it('computes the same object signature once (identity memo has teeth)', () => {
+        // Cache-hit validation recomputes on every hit under NODE_ENV=test; turn
+        // it off so the spy can observe the true memoized path.
+        setSignatureCacheValidationForTests(false);
+        try {
+            const item = normalizeAreaForContentComparison(area({ rev: 4, name: 'Memoized' }));
+            toComparableSignature(item);
+            const stringifySpy = vi.spyOn(JSON, 'stringify');
+            toComparableSignature(item);
+            expect(stringifySpy).not.toHaveBeenCalled();
+            stringifySpy.mockRestore();
+        } finally {
+            setSignatureCacheValidationForTests(true);
+        }
     });
 
-    it('validates stable cache entries before reusing matching revision metadata', () => {
-        const memo = createSyncSignatureMemo();
-        const original = normalizeAreaForContentComparison(area({
-            rev: 3,
-            name: 'Work',
-        }));
-        const changed = normalizeAreaForContentComparison(area({
-            rev: 3,
-            name: 'Personal',
-        }));
+    it('a cached entity mutated in place fails loudly under test validation', () => {
+        const item = normalizeAreaForContentComparison(area({ rev: 6, name: 'Guarded' }));
+        toComparableSignature(item);
+        (item as Record<string, unknown>).name = 'Mutated in place';
+        expect(() => toComparableSignature(item)).toThrow(/mutated in place/);
+    });
 
-        expect(toComparableSignature(original, memo)).not.toBe(toComparableSignature(changed, memo));
-        expect(memo.comparableByRevision.size).toBe(1);
+    it('applies the merge normalizer inside getMergeComparableSignature and matches the manual pipeline', () => {
+        setSignatureCacheValidationForTests(false);
+        try {
+            const raw = area({ rev: 5, name: 'Merge' });
+            const viaMemo = getMergeComparableSignature(raw, normalizeAreaForContentComparison);
+            const manual = toComparableSignature(normalizeAreaForContentComparison({ ...raw }));
+            expect(viaMemo).toBe(manual);
+            // Cached on the raw object: second call computes nothing.
+            const stringifySpy = vi.spyOn(JSON, 'stringify');
+            expect(getMergeComparableSignature(raw, normalizeAreaForContentComparison)).toBe(viaMemo);
+            expect(stringifySpy).not.toHaveBeenCalled();
+            stringifySpy.mockRestore();
+        } finally {
+            setSignatureCacheValidationForTests(true);
+        }
     });
 
     it('ignores project archive task sidecars in comparable and deterministic signatures', () => {

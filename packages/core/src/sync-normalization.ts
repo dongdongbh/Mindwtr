@@ -4,7 +4,8 @@ import { normalizePersonName, normalizePersonNote, normalizePersonReferenceLink 
 import { normalizeProjectSequentialScope, normalizeProjectTaskSortBy } from './project-utils';
 import { normalizeTaskForLoad } from './task-status';
 import { SYNC_REPAIR_REV_BY } from './sync-types';
-import { isValidRevision, nextRevision, normalizeRevision } from './sync-revision';
+import { MAX_SYNC_REVISION, isValidRevision, nextRevision, normalizeRevision } from './sync-revision';
+import { sameShallowRecord } from './shallow-identity';
 import { resolveTaskContainerHierarchy } from './task-container-rules';
 import { dedupeLiveAreasByName } from './area-utils';
 import {
@@ -38,8 +39,13 @@ export const isValidTimestamp = (value: unknown): value is string =>
 const normalizeOptionalString = (value: unknown): string | undefined =>
     typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 
-const normalizeStringArray = (value: unknown): string[] =>
-    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+const normalizeStringArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) return [];
+    const strings = value.filter((item): item is string => typeof item === 'string');
+    // Every element survived the filter, so the copy is value-identical: keep the
+    // input array so its owner can keep its own identity (#766).
+    return strings.length === value.length ? (value as string[]) : strings;
+};
 
 const ATTACHMENT_TRAVERSAL_SEGMENT_PATTERN = /(?:^|[\\/])\.\.(?:[\\/]|$)/;
 const ATTACHMENT_URI_DECODE_LIMIT = 4;
@@ -106,15 +112,21 @@ export const sanitizeAttachmentFileHashForSyncMerge = (value: unknown): string |
 
 export const normalizeAttachmentsForSyncMerge = (attachments: Attachment[] | undefined): Attachment[] | undefined => {
     if (!attachments) return attachments;
-    return attachments.map((attachment) => {
-        if (attachment.kind !== 'file') return attachment;
-        return {
+    let sanitized: Attachment[] | undefined;
+    for (let index = 0; index < attachments.length; index += 1) {
+        const attachment = attachments[index];
+        if (attachment.kind !== 'file') continue;
+        const candidate: Attachment = {
             ...attachment,
             uri: sanitizeAttachmentUriForSyncMerge(attachment.uri) ?? '',
             cloudKey: sanitizeAttachmentCloudKeyForSyncMerge(attachment.cloudKey),
             fileHash: sanitizeAttachmentFileHashForSyncMerge(attachment.fileHash),
         };
-    });
+        if (sameShallowRecord(attachment, candidate)) continue;
+        sanitized = sanitized ?? attachments.slice();
+        sanitized[index] = candidate;
+    }
+    return sanitized ?? attachments;
 };
 
 type RevisionMetadata = {
@@ -122,7 +134,25 @@ type RevisionMetadata = {
     revBy?: unknown;
 };
 
+const hasOwnKey = (item: object, key: string): boolean => Object.prototype.hasOwnProperty.call(item, key);
+
+/** True when normalizeRevisionMetadata would emit `item` unchanged. Deliberately
+ *  does not call normalizeRevision, whose clamp path logs — a clamp is a change,
+ *  so it falls through to the real normalizer and logs exactly once (#766). */
+const hasNormalizedRevisionMetadata = (item: RevisionMetadata): boolean => {
+    const rawRev = item.rev;
+    const revIsNormalized = isValidRevision(rawRev)
+        ? rawRev <= MAX_SYNC_REVISION && hasOwnKey(item, 'rev')
+        : !hasOwnKey(item, 'rev');
+    if (!revIsNormalized) return false;
+    const rawRevBy = item.revBy;
+    return typeof rawRevBy === 'string'
+        ? rawRevBy.trim() === rawRevBy && rawRevBy.length > 0
+        : !hasOwnKey(item, 'revBy');
+};
+
 export const normalizeRevisionMetadata = <T extends RevisionMetadata>(item: T): T => {
+    if (hasNormalizedRevisionMetadata(item)) return item;
     const normalized = { ...item };
     const rawRev = normalized.rev;
     if (!isValidRevision(rawRev)) {
@@ -179,7 +209,7 @@ export const normalizeTaskForSyncMerge = (
     }
     const normalized = normalizeTaskForLoad(task, nowIso);
     const hasRecurrence = normalized.recurrence !== undefined && normalized.recurrence !== null;
-    return {
+    const candidate: Task = {
         id: normalized.id,
         title: normalized.title,
         status: normalized.status,
@@ -226,7 +256,18 @@ export const normalizeTaskForSyncMerge = (
         focusOrder: normalized.focusOrder,
         // Fields not listed here are stripped from every task on every merge.
         // The satisfies clause turns a forgotten new Task field into a compile error.
+        // Keep this an exhaustive literal: the explicit-undefined keys it emits only
+        // ever match a previous merge output held in memory — a JSON round-trip drops
+        // them — so rewriting it as conditional spreads would change the emitted
+        // shape without ever buying remote-side identity (#766).
     } satisfies Record<keyof Task, unknown>;
+    // normalizeRevisionMetadata runs next in the merge pipeline and deletes an
+    // undefined revBy own key. Emit that same shape here, or a task without a
+    // revBy oscillates between key sets and never reaches an identity fixed
+    // point across the composed pipeline (#766). rev needs no such branch:
+    // normalizeTaskForLoad always backfills it to a valid number.
+    if (candidate.revBy === undefined) delete candidate.revBy;
+    return sameShallowRecord(task, candidate) ? task : candidate;
 };
 
 export const normalizeProjectForSyncMerge = (
@@ -241,7 +282,7 @@ export const normalizeProjectForSyncMerge = (
             ? { ...compacted, rev: nextRevision(project.rev), revBy: SYNC_REPAIR_REV_BY }
             : compacted;
     }
-    return {
+    const candidate: Project = {
         ...project,
         status: normalizeProjectStatusForMerge(project.status),
         color: normalizeOptionalString(project.color) ?? '#6B7280',
@@ -256,6 +297,7 @@ export const normalizeProjectForSyncMerge = (
         areaId: normalizeOptionalString(project.areaId),
         areaTitle: normalizeOptionalString(project.areaTitle),
     };
+    return sameShallowRecord(project, candidate) ? project : candidate;
 };
 
 export type SyncMergeArea = Omit<Area, 'order'> & {
@@ -267,7 +309,7 @@ export type SyncMergeArea = Omit<Area, 'order'> & {
 export const normalizeAreaForSyncMerge = (area: Area, nowIso: string): SyncMergeArea => {
     const createdAt = normalizeOptionalString(area.createdAt) ?? normalizeOptionalString(area.updatedAt) ?? nowIso;
     const updatedAt = normalizeOptionalString(area.updatedAt) ?? normalizeOptionalString(area.createdAt) ?? nowIso;
-    return {
+    const candidate: SyncMergeArea = {
         ...area,
         color: normalizeOptionalString(area.color),
         icon: normalizeOptionalString(area.icon),
@@ -275,12 +317,13 @@ export const normalizeAreaForSyncMerge = (area: Area, nowIso: string): SyncMerge
         createdAt,
         updatedAt,
     };
+    return sameShallowRecord(area, candidate) ? (area as SyncMergeArea) : candidate;
 };
 
 export const normalizePersonForSyncMerge = (person: Person, nowIso: string): Person => {
     const createdAt = normalizeOptionalString(person.createdAt) ?? normalizeOptionalString(person.updatedAt) ?? nowIso;
     const updatedAt = normalizeOptionalString(person.updatedAt) ?? normalizeOptionalString(person.createdAt) ?? nowIso;
-    return {
+    const candidate: Person = {
         ...person,
         name: normalizePersonName(person.name),
         note: normalizePersonNote(person.note),
@@ -288,6 +331,7 @@ export const normalizePersonForSyncMerge = (person: Person, nowIso: string): Per
         createdAt,
         updatedAt,
     };
+    return sameShallowRecord(person, candidate) ? person : candidate;
 };
 
 const hasDeletedAt = (value: { deletedAt?: string } | undefined): boolean => Boolean(value?.deletedAt);

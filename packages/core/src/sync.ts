@@ -29,15 +29,13 @@ import { mergeSettingsForSync } from './sync-merge-settings';
 import {
     chooseDeterministicWinner,
     collectComparableDiffKeys,
-    createSyncSignatureMemo,
-    type SyncSignatureMemo,
     hashComparableSignature,
     normalizeAreaForContentComparison,
     normalizePersonForContentComparison,
     normalizeProjectForContentComparison,
     normalizeSectionForContentComparison,
     normalizeTaskForContentComparison,
-    toComparableSignature,
+    getMergeComparableSignature,
     toComparableValue,
 } from './sync-signatures';
 import { purgeExpiredTombstones } from './sync-tombstones';
@@ -296,7 +294,6 @@ function mergeEntitiesWithStats<T extends MergeableEntity>(
     mergeConflict?: (localItem: T, incomingItem: T, winner: T) => T,
     normalizeForComparison?: ComparisonNormalizer<T>,
     entityType: string = 'entity',
-    signatureMemo: SyncSignatureMemo = createSyncSignatureMemo(),
     nowIso?: string,
 ): { merged: T[]; stats: EntityMergeStats } {
     const localMap = new Map<string, T>(local.map((item) => [item.id, item]));
@@ -415,10 +412,8 @@ function mergeEntitiesWithStats<T extends MergeableEntity>(
         const incomingDeleted = !!normalizedIncomingItem.deletedAt;
         const revDiff = localRev - incomingRev;
         const revByDiff = localRevBy !== incomingRevBy;
-        const comparableLocalItem = normalizeForComparison ? normalizeForComparison(normalizedLocalItem) : normalizedLocalItem;
-        const comparableIncomingItem = normalizeForComparison ? normalizeForComparison(normalizedIncomingItem) : normalizedIncomingItem;
-        const localComparableSignature = toComparableSignature(comparableLocalItem, signatureMemo);
-        const incomingComparableSignature = toComparableSignature(comparableIncomingItem, signatureMemo);
+        const localComparableSignature = getMergeComparableSignature(normalizedLocalItem, normalizeForComparison);
+        const incomingComparableSignature = getMergeComparableSignature(normalizedIncomingItem, normalizeForComparison);
         const comparableContentMatches = localComparableSignature === incomingComparableSignature;
         const shouldCheckContentDiff = hasRevision
             ? revDiff === 0 && localDeleted === incomingDeleted
@@ -475,12 +470,12 @@ function mergeEntitiesWithStats<T extends MergeableEntity>(
         const preferDeletedCandidate = (left: T, right: T): T => {
             if (left.deletedAt && !right.deletedAt) return left;
             if (right.deletedAt && !left.deletedAt) return right;
-            return chooseDeterministicWinner(left, right, signatureMemo);
+            return chooseDeterministicWinner(left, right);
         };
         const preferLiveCandidate = (left: T, right: T): T => {
             if (left.deletedAt && !right.deletedAt) return right;
             if (right.deletedAt && !left.deletedAt) return left;
-            return chooseDeterministicWinner(left, right, signatureMemo);
+            return chooseDeterministicWinner(left, right);
         };
         const isBackupRestoreLiveCandidate = (item: T): boolean => (
             !item.deletedAt && item.revBy === SYNC_BACKUP_RESTORE_REV_BY
@@ -575,7 +570,7 @@ function mergeEntitiesWithStats<T extends MergeableEntity>(
             } else if (revByDiff && localRevBy && incomingRevBy) {
                 winner = incomingRevBy > localRevBy ? normalizedIncomingItem : normalizedLocalItem;
             } else {
-                winner = chooseDeterministicWinner(normalizedLocalItem, normalizedIncomingItem, signatureMemo);
+                winner = chooseDeterministicWinner(normalizedLocalItem, normalizedIncomingItem);
             }
         } else {
             const hasInvalidTimestamp = localUpdatedTime.raw < 0 || incomingUpdatedTime.raw < 0;
@@ -584,11 +579,11 @@ function mergeEntitiesWithStats<T extends MergeableEntity>(
             if (requiresStrictTimestampOrdering) {
                 winner = comparableUpdatedTimeDiff > 0 ? normalizedIncomingItem : normalizedLocalItem;
             } else if (withinSkew) {
-                winner = chooseDeterministicWinner(normalizedLocalItem, normalizedIncomingItem, signatureMemo);
+                winner = chooseDeterministicWinner(normalizedLocalItem, normalizedIncomingItem);
             } else if (comparableUpdatedTimeDiff !== 0) {
                 winner = comparableUpdatedTimeDiff > 0 ? normalizedIncomingItem : normalizedLocalItem;
             } else {
-                winner = chooseDeterministicWinner(normalizedLocalItem, normalizedIncomingItem, signatureMemo);
+                winner = chooseDeterministicWinner(normalizedLocalItem, normalizedIncomingItem);
             }
         }
         if (winner === normalizedIncomingItem) stats.resolvedUsingIncoming += 1;
@@ -665,8 +660,14 @@ function mergeEntitiesWithStats<T extends MergeableEntity>(
         }
 
         if (differs && (stats.conflictSamples?.length || 0) < CONFLICT_SAMPLE_LIMIT) {
-            const comparableLocalValue = contentDiff ? toComparableValue(comparableLocalItem) : undefined;
-            const comparableIncomingValue = contentDiff ? toComparableValue(comparableIncomingItem) : undefined;
+            // Only conflict samples need the expanded comparable views; the loop's
+            // equality check runs on cached signatures now, so these are built lazily.
+            const comparableLocalValue = contentDiff
+                ? toComparableValue(normalizeForComparison ? normalizeForComparison(normalizedLocalItem) : normalizedLocalItem)
+                : undefined;
+            const comparableIncomingValue = contentDiff
+                ? toComparableValue(normalizeForComparison ? normalizeForComparison(normalizedIncomingItem) : normalizedIncomingItem)
+                : undefined;
             const diffKeys = contentDiff && comparableLocalValue !== undefined && comparableIncomingValue !== undefined
                 ? collectComparableDiffKeys(comparableLocalValue, comparableIncomingValue, CONFLICT_DIFF_KEY_LIMIT)
                 : [];
@@ -728,10 +729,9 @@ function mergeEntitiesWithStats<T extends MergeableEntity>(
 function mergeAreas(
     local: SyncMergeArea[],
     incoming: SyncMergeArea[],
-    signatureMemo: SyncSignatureMemo = createSyncSignatureMemo(),
     nowIso?: string,
 ): { merged: Area[]; stats: EntityMergeStats } {
-    const result = mergeEntitiesWithStats(local, incoming, undefined, normalizeAreaForContentComparison, 'area', signatureMemo, nowIso);
+    const result = mergeEntitiesWithStats(local, incoming, undefined, normalizeAreaForContentComparison, 'area', nowIso);
     let fallbackOrder = result.merged.reduce((maxOrder, area) => {
         const order = typeof area.order === 'number' && Number.isFinite(area.order) ? area.order : -1;
         return Math.max(maxOrder, order);
@@ -776,7 +776,6 @@ const getClockSkewWarning = (stats: MergeResult['stats']): ClockSkewWarning | un
 
 export function mergeAppDataWithStats(local: AppData, incoming: AppData, options: MergeAppDataOptions = {}): MergeResult {
     const nowIso = isValidTimestamp(options.nowIso) ? options.nowIso : new Date().toISOString();
-    const signatureMemo = createSyncSignatureMemo();
     // Compaction repairs must converge to zero after one cycle; a steady nonzero
     // count here is a rev-bump loop that rewrites every purged tombstone each
     // cycle (#766). Counted per cycle and surfaced via stats.tombstoneRepairs.
@@ -941,7 +940,7 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
                 uri,
                 localStatus,
             };
-        }, undefined, 'attachment', signatureMemo, nowIso).merged;
+        }, undefined, 'attachment', nowIso).merged;
 
         const normalized = merged.map((attachment) => {
             if (attachment.kind !== 'file') return attachment;
@@ -988,7 +987,6 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
         },
         normalizeTaskForContentComparison,
         'task',
-        signatureMemo,
         nowIso
     );
 
@@ -1006,7 +1004,6 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
         },
         normalizeProjectForContentComparison,
         'project',
-        signatureMemo,
         nowIso
     );
 
@@ -1016,18 +1013,16 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
         undefined,
         normalizeSectionForContentComparison,
         'section',
-        signatureMemo,
         nowIso
     );
 
-    const areasResult = mergeAreas(localNormalized.areas, incomingNormalized.areas, signatureMemo, nowIso);
+    const areasResult = mergeAreas(localNormalized.areas, incomingNormalized.areas, nowIso);
     const peopleResult = mergeEntitiesWithStats(
         localNormalized.people,
         incomingNormalized.people,
         undefined,
         normalizePersonForContentComparison,
         'person',
-        signatureMemo,
         nowIso
     );
 
