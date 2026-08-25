@@ -34,8 +34,6 @@ type Props = {
   hasExactProjectMatch: boolean;
   handleCreateProjectEarly: () => void;
   handleConvertToProject: () => void;
-  handleProjectConversionCancel: () => void;
-  handleProjectConversionStart: () => void;
   selectProjectEarly: (id: string | null) => void;
 };
 
@@ -64,8 +62,6 @@ export function InboxProjectSection({
   hasExactProjectMatch,
   handleCreateProjectEarly,
   handleConvertToProject,
-  handleProjectConversionCancel,
-  handleProjectConversionStart,
   selectProjectEarly,
 }: Props) {
   const filledButton = useFilledButtonColors();
@@ -308,54 +304,11 @@ export function InboxProjectSection({
       <View style={styles.stepQuestionRow}>
         <Folder size={20} color={tc.text} accessible={false} />
         <Text style={[styles.stepQuestion, styles.stepQuestionInline, { color: tc.text }]}>
-          {showProjectField ? t('process.moreThanOneStep') : t('inbox.assignProjectQuestion')}
+          {/* The "more than one step?" question is its own step now; this
+              section is the answer's field, whichever way it went. */}
+          {showProjectField && convertToProject ? t('projects.title') : t('inbox.assignProjectQuestion')}
         </Text>
       </View>
-      {showProjectField && (
-        <>
-          <Text style={[styles.stepHint, { color: tc.secondaryText }]}>
-            {t('process.moreThanOneStepDesc')}
-          </Text>
-          <View style={styles.projectDecisionRow}>
-            <TouchableOpacity
-              style={[
-                styles.projectDecisionButton,
-                convertToProject
-                  ? { backgroundColor: tc.tint, borderColor: tc.tint }
-                  : { backgroundColor: tc.cardBg, borderColor: tc.border },
-              ]}
-              onPress={handleProjectConversionStart}
-            >
-              <Text
-                style={[
-                  styles.projectDecisionText,
-                  { color: convertToProject ? tc.onTint : tc.text },
-                ]}
-              >
-                {t('process.moreThanOneStepYes')}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.projectDecisionButton,
-                !convertToProject
-                  ? { backgroundColor: tc.filterBg, borderColor: tc.tint }
-                  : { backgroundColor: tc.cardBg, borderColor: tc.border },
-              ]}
-              onPress={handleProjectConversionCancel}
-            >
-              <Text
-                style={[
-                  styles.projectDecisionText,
-                  { color: !convertToProject ? tc.text : tc.secondaryText },
-                ]}
-              >
-                {t('process.moreThanOneStepNo')}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </>
-      )}
       {showProjectField && convertToProject ? renderProjectConversion() : renderProjectPicker()}
     </View>
   );

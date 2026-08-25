@@ -134,6 +134,17 @@ vi.mock('expo-clipboard', () => ({
   setStringAsync: vi.fn().mockResolvedValue(true),
 }));
 
+// Importing the real module pulls in expo's winter runtime, which cannot load
+// under node. Files that assert on haptics still mock it themselves.
+vi.mock('expo-haptics', () => ({
+  __esModule: true,
+  ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy' },
+  NotificationFeedbackType: { Success: 'success', Warning: 'warning', Error: 'error' },
+  impactAsync: vi.fn().mockResolvedValue(undefined),
+  notificationAsync: vi.fn().mockResolvedValue(undefined),
+  selectionAsync: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('@expo/vector-icons', () => {
   const Icon = (props: any) => React.createElement('Icon', props, props.children);
   return {
@@ -171,6 +182,7 @@ vi.mock('lucide-react-native', () => {
     'BookOpen',
     'BookmarkPlus',
     'Calendar',
+    'CalendarClock',
     'CalendarDays',
     'Check',
     'CheckCircle',
@@ -192,6 +204,7 @@ vi.mock('lucide-react-native', () => {
     'Info',
     'Layers',
     'LayoutGrid',
+    'LayoutList',
     'Lightbulb',
     'ListChecks',
     'ListOrdered',

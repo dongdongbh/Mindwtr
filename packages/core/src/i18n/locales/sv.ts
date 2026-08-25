@@ -460,6 +460,9 @@ export const svOverrides: Record<string, string> = {
         'inbox.assignProjectQuestion': 'Tilldela ett projekt? (Valfritt)',
         'inbox.noProject': 'Inget projekt',
         'inbox.skip': 'Hoppa över',
+        'inbox.deferWhen': 'När ska den starta?',
+        'inbox.movedToTrash': '{{title}} flyttad till Papperskorgen',
+        'inbox.fileIt': 'Arkivera',
 
         'next.title': 'Nästa steg',
         'next.ready': 'uppgifter redo att köra',

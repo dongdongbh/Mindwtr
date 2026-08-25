@@ -82,7 +82,7 @@ export function useInboxProcessingController({
   visible,
   onClose,
 }: InboxProcessingControllerParams) {
-  const { tasks, projects, areas, people, settings, updateTask, deleteTask, addProject, addTask } = useTaskStore();
+  const { tasks, projects, areas, people, settings, updateTask, deleteTask, restoreTask, addProject, addTask } = useTaskStore();
   const { t, language } = useLanguage();
   const { showToast } = useToast();
   const router = useRouter();
@@ -134,6 +134,9 @@ export function useInboxProcessingController({
   const titleInputRef = useRef<any>(null);
   const processingScrollRef = useRef<any>(null);
   const hasInitialized = useRef(false);
+  // Last committed decision, kept so a presentation that auto-advances can
+  // offer an Undo without re-deriving what it just did.
+  const lastCommittedRef = useRef<{ taskId: string; discarded: boolean } | null>(null);
 
   const inboxProcessing = settings?.gtd?.inboxProcessing ?? {};
   const twoMinuteEnabled = inboxProcessing.twoMinuteEnabled !== false;
@@ -348,6 +351,14 @@ export function useInboxProcessingController({
     if (choice) scrollProcessingToRevealedStep();
   }, [scrollProcessingToRevealedStep]);
 
+  // Step back to an earlier question: clearing one answer clears everything the
+  // flow derived from it, so the next step can never be reached out of order.
+  const clearDecision = useCallback((level: 'actionability' | 'twoMinute' | 'execution') => {
+    if (level === 'actionability') setActionabilityChoice(null);
+    if (level !== 'execution') setTwoMinuteChoice(null);
+    setExecutionChoice(null);
+  }, []);
+
   // "More options" reveals below the fold exactly like answering a question
   // does, so expanding follows the reveal down too; collapsing stays put.
   const toggleAdvancedOptions = useCallback(() => {
@@ -542,6 +553,7 @@ export function useInboxProcessingController({
         showProcessingError(getActionFailureMessage(outcome.writeResult));
         return false;
       }
+      lastCommittedRef.current = { taskId: currentTask.id, discarded: event.type === 'discard' };
       if (options.advance !== false && !activateProcessingSession(outcome.session)) {
         handleClose();
       }
@@ -571,38 +583,56 @@ export function useInboxProcessingController({
     ...(showTagsField ? { tags: selectedTags } : {}),
   }), [selectedAreaId, selectedContexts, selectedProjectId, selectedTags, showContextsField, showTagsField]);
 
-  const handleNotActionable = useCallback(async (action: 'trash' | 'someday' | 'reference') => {
-    if (!currentTask) return;
-    if (action === 'trash') {
-      await applyWorkflowEvent({ type: 'discard' });
-    } else if (action === 'someday') {
-      await applyWorkflowEvent({ type: 'someday', fields: buildSelectionFields() });
-    } else {
-      await applyWorkflowEvent({ type: 'reference', fields: buildSelectionFields() });
+  // Undo the decision just committed: a discard is a soft delete that left the
+  // task in the Inbox, everything else moved its status out of it.
+  const undoLastDecision = useCallback(async () => {
+    const committed = lastCommittedRef.current;
+    if (!committed) return;
+    lastCommittedRef.current = null;
+    try {
+      const result = committed.discarded
+        ? await restoreTask(committed.taskId)
+        : await updateTask(committed.taskId, { status: 'inbox' });
+      if (isActionFailure(result)) showProcessingError(getActionFailureMessage(result));
+    } catch (error) {
+      showProcessingError(getUnknownErrorMessage(error));
     }
+  }, [restoreTask, showProcessingError, updateTask]);
+
+  const handleNotActionable = useCallback(async (action: 'trash' | 'someday' | 'reference') => {
+    if (!currentTask) return false;
+    if (action === 'trash') {
+      return applyWorkflowEvent({ type: 'discard' });
+    }
+    if (action === 'someday') {
+      return applyWorkflowEvent({ type: 'someday', fields: buildSelectionFields() });
+    }
+    return applyWorkflowEvent({ type: 'reference', fields: buildSelectionFields() });
   }, [applyWorkflowEvent, buildSelectionFields, currentTask]);
 
   const handleLaterMobile = useCallback(async () => {
-    if (!currentTask) return;
-    if (!pendingStartDate && !laterNoDateSelected) {
+    if (!currentTask) return false;
+    const startDate = pendingStartDate;
+    if (!startDate && !laterNoDateSelected) {
       showToast({
         title: t('common.notice'),
         message: tFallback(t, 'process.laterStartRequired', 'Choose a start date for Later.'),
         tone: 'warning',
       });
-      return;
+      return false;
     }
     const applied = await applyWorkflowEvent({
       type: 'later',
       fields: {
         ...(showProjectField ? { projectId: selectedProjectId ?? undefined } : {}),
         ...(showAreaField ? { areaId: selectedProjectId ? undefined : (selectedAreaId ?? undefined) } : {}),
-        startTime: pendingStartDate ? formatScheduledDateValue(pendingStartDate, pendingStartDateOnly) : undefined,
+        startTime: startDate ? formatScheduledDateValue(startDate, pendingStartDateOnly) : undefined,
       },
     });
-    if (!applied) return;
+    if (!applied) return false;
     setPendingStartDate(null);
     setLaterNoDateSelected(false);
+    return true;
   }, [
     applyWorkflowEvent,
     currentTask,
@@ -619,7 +649,8 @@ export function useInboxProcessingController({
   ]);
 
   const handleTwoMinYes = useCallback(async () => {
-    if (currentTask) await applyWorkflowEvent({ type: 'complete', fields: buildSelectionFields() });
+    if (!currentTask) return false;
+    return applyWorkflowEvent({ type: 'complete', fields: buildSelectionFields() });
   }, [applyWorkflowEvent, buildSelectionFields, currentTask]);
 
   const buildScheduleUpdates = useCallback(() => {
@@ -648,7 +679,7 @@ export function useInboxProcessingController({
   ]);
 
   const handleConfirmWaitingMobile = useCallback(async () => {
-    if (!currentTask) return;
+    if (!currentTask) return false;
     const who = delegateWho.trim() || selectedAssignedTo.trim();
     const fields: Partial<Task> = {
       assignedTo: who || undefined,
@@ -668,9 +699,10 @@ export function useInboxProcessingController({
         ? formatScheduledDateValue(delegateFollowUpDate, delegateFollowUpDateOnly)
         : undefined,
     });
-    if (!applied) return;
+    if (!applied) return false;
     setDelegateWho('');
     setDelegateFollowUpDate(null);
+    return true;
   }, [
     applyWorkflowEvent,
     buildScheduleUpdates,
@@ -732,9 +764,27 @@ export function useInboxProcessingController({
     );
   }, []);
 
-  const addCustomContextMobile = useCallback(() => {
+  // `kind` is how a surface that shows contexts and tags separately says which
+  // one an unprefixed entry belongs to; without it the prefix decides.
+  const addCustomContextMobile = useCallback((kind?: 'context' | 'tag') => {
     const trimmed = newContext.trim();
     if (!trimmed) return;
+    if (kind === 'tag' && showTagsField) {
+      const normalized = trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+      if (!selectedTags.includes(normalized)) {
+        setSelectedTags((prev) => [...prev, normalized]);
+      }
+      setNewContext('');
+      return;
+    }
+    if (kind === 'context' && showContextsField) {
+      const normalized = trimmed.startsWith('@') ? trimmed : `@${trimmed}`;
+      if (!selectedContexts.includes(normalized)) {
+        setSelectedContexts((prev) => [...prev, normalized]);
+      }
+      setNewContext('');
+      return;
+    }
     if (showTagsField && (trimmed.startsWith('#') || !showContextsField)) {
       const normalized = trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
       if (!selectedTags.includes(normalized)) {
@@ -818,10 +868,11 @@ export function useInboxProcessingController({
         ...buildScheduleUpdates(),
       },
     });
-    if (!applied) return;
+    if (!applied) return false;
     setPendingStartDate(null);
     setPendingDueDate(null);
     setPendingReviewDate(null);
+    return true;
   }, [
     applyWorkflowEvent,
     buildScheduleUpdates,
@@ -842,18 +893,18 @@ export function useInboxProcessingController({
     showTimeEstimateField,
   ]);
 
-  const handleConvertToProject = useCallback(async () => {
-    if (!currentTask) return;
+  const handleConvertToProject = useCallback(async (): Promise<boolean> => {
+    if (!currentTask) return false;
     const projectTitle = projectTitleDraft.trim() || processingTitle.trim() || currentTask.title;
     const nextAction = nextActionDraft.trim();
-    if (!projectTitle) return;
+    if (!projectTitle) return false;
     if (!nextAction) {
       showToast({
         title: t('common.notice'),
         message: tFallback(t, 'process.nextActionRequired', 'Add a next action before creating the project.'),
         tone: 'warning',
       });
-      return;
+      return false;
     }
 
     try {
@@ -863,7 +914,7 @@ export function useInboxProcessingController({
         DEFAULT_PROJECT_COLOR,
         showAreaField && selectedAreaId ? { areaId: selectedAreaId } : undefined,
       );
-      if (!project) return;
+      if (!project) return false;
 
       const applied = await applyWorkflowEvent({
         type: 'next',
@@ -879,7 +930,7 @@ export function useInboxProcessingController({
           ...buildScheduleUpdates(),
         },
       }, nextAction, currentTask.title, { advance: false });
-      if (!applied) return;
+      if (!applied) return false;
 
       // The converted capture becomes the project's clarified next action.
       // Extra actions typed at the split step are raw captures, so they
@@ -890,7 +941,7 @@ export function useInboxProcessingController({
         const result = await addTask(title, { status: 'inbox', projectId: project.id });
         if (isActionFailure(result)) {
           showProcessingError(getActionFailureMessage(result));
-          return;
+          return false;
         }
       }
       setExtraActionDrafts([]);
@@ -899,6 +950,7 @@ export function useInboxProcessingController({
       setPendingReviewDate(null);
       setConvertToProject(false);
       moveToNext();
+      return true;
     } catch (error) {
       void logWarn('Failed to create project from mobile inbox processing', {
         scope: 'inbox',
@@ -909,6 +961,7 @@ export function useInboxProcessingController({
         message: tFallback(t, 'projects.createFailed', 'Failed to create project.'),
         tone: 'error',
       });
+      return false;
     }
   }, [
     addProject,
@@ -941,31 +994,28 @@ export function useInboxProcessingController({
     t,
   ]);
 
-  const handleNextTask = useCallback(async () => {
-    if (!currentTask) return;
-    if (!actionabilityChoice) return;
+  // Returns whether the decision was actually committed, so the presentation
+  // can hold its completion feedback (haptic, Undo toast) until it lands.
+  const handleNextTask = useCallback(async (): Promise<boolean> => {
+    if (!currentTask) return false;
+    if (!actionabilityChoice) return false;
     if (actionabilityChoice === 'later') {
-      await handleLaterMobile();
-      return;
+      return handleLaterMobile();
     }
     if (actionabilityChoice === 'trash' || actionabilityChoice === 'someday' || actionabilityChoice === 'reference') {
-      await handleNotActionable(actionabilityChoice);
-      return;
+      return handleNotActionable(actionabilityChoice);
     }
     if (twoMinuteEnabled && twoMinuteChoice === 'yes') {
-      await handleTwoMinYes();
-      return;
+      return handleTwoMinYes();
     }
-    if (!executionChoice) return;
+    if (!executionChoice) return false;
     if (executionChoice === 'delegate') {
-      await handleConfirmWaitingMobile();
-      return;
+      return handleConfirmWaitingMobile();
     }
     if (convertToProject) {
-      await handleConvertToProject();
-      return;
+      return handleConvertToProject();
     }
-    await finalizeNextAction(selectedProjectId);
+    return finalizeNextAction(selectedProjectId);
   }, [
     actionabilityChoice,
     convertToProject,
@@ -1142,6 +1192,7 @@ export function useInboxProcessingController({
     applyTokenSuggestion,
     areaById,
     assignedToSuggestions,
+    clearDecision,
     closeAIModal,
     contextCopilotSuggestions,
     convertToProject,
@@ -1160,9 +1211,15 @@ export function useInboxProcessingController({
     formatProgressLabel,
     handleAIClarifyInbox,
     handleClose,
+    handleConfirmWaitingMobile,
     handleConvertToProject,
     handleCreateProjectEarly,
+    handleLaterMobile,
     handleNextTask,
+    handleNotActionable,
+    handleTwoMinYes,
+    finalizeNextAction,
+    undoLastDecision,
     handleProjectConversionCancel,
     handleProjectConversionStart,
     handleSendDelegateRequest,

@@ -475,6 +475,9 @@ export const en: Record<string, string> = {
         'inbox.assignProjectQuestion': 'Assign to a project? (Optional)',
         'inbox.noProject': 'No project',
         'inbox.skip': 'Skip',
+        'inbox.deferWhen': 'When should it start?',
+        'inbox.movedToTrash': '{{title}} moved to Trash',
+        'inbox.fileIt': 'File it',
 
         // Next Actions (Mobile)
         'next.title': 'Next Actions',

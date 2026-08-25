@@ -460,6 +460,9 @@ export const faOverrides: Record<string, string> = {
         'inbox.assignProjectQuestion': 'به یک پروژه اختصاص یابد؟ (اختیاری)',
         'inbox.noProject': 'بدون پروژه',
         'inbox.skip': 'رد کردن',
+        'inbox.deferWhen': 'چه زمانی شروع شود؟',
+        'inbox.movedToTrash': '{{title}} به زباله‌دان منتقل شد',
+        'inbox.fileIt': 'ثبت کن',
 
         'next.title': 'اقدامات بعدی',
         'next.ready': 'کار آماده انجام',

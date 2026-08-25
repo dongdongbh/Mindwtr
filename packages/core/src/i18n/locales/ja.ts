@@ -483,6 +483,9 @@ export const jaOverrides: Record<string, string> = {
         'inbox.assignProjectQuestion': 'プロジェクトに割り当てますか？（任意）',
         'inbox.noProject': 'プロジェクトなし',
         'inbox.skip': 'スキップ',
+        'inbox.deferWhen': 'いつ開始しますか？',
+        'inbox.movedToTrash': '{{title}} をゴミ箱に移動しました',
+        'inbox.fileIt': '整理する',
 
         // Next Actions (Mobile)
         'next.title': '次のアクション',

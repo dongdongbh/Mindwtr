@@ -17,7 +17,7 @@ type Props = {
   toggleTag: (tag: string) => void;
   newContext: string;
   setNewContext: (v: string) => void;
-  addCustomContextMobile: () => void;
+  addCustomContextMobile: (kind?: 'context' | 'tag') => void;
   tokenSuggestions: string[];
   applyTokenSuggestion: (token: string) => void;
   contextCopilotSuggestions: string[];
@@ -55,6 +55,13 @@ export function InboxContextSection({
     : showTagsField && !showContextsField
       ? '#deep-work'
       : t('inbox.addContextPlaceholder');
+  // When only one of the two is on screen, an unprefixed entry belongs to that
+  // one — otherwise the shared prefix rule would file a bare tag as a context.
+  const addToken = () => addCustomContextMobile(
+    showContextsField === showTagsField
+      ? undefined
+      : showTagsField ? 'tag' : 'context',
+  );
   const suggestedContextsLabel = `${t('copilot.suggested')} ${t('nav.contexts').toLowerCase()}`;
   const suggestedTagsLabel = `${t('copilot.suggested')} ${t('taskEdit.tagsLabel').toLowerCase()}`;
 
@@ -103,7 +110,7 @@ export function InboxContextSection({
           placeholderTextColor={tc.secondaryText}
           value={newContext}
           onChangeText={setNewContext}
-          onSubmitEditing={addCustomContextMobile}
+          onSubmitEditing={addToken}
         />
         <TouchableOpacity
           accessibilityRole="button"
@@ -112,7 +119,7 @@ export function InboxContextSection({
             styles.addContextButton,
             { backgroundColor: tc.tint, opacity: newContext.trim() ? 1 : 0.5 },
           ]}
-          onPress={addCustomContextMobile}
+          onPress={addToken}
           disabled={!newContext.trim()}
         >
           <Text style={[styles.addContextButtonText, { color: tc.onTint }]}>+</Text>

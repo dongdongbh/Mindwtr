@@ -1,5 +1,5 @@
 import React from 'react';
-import { Keyboard, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { Animated, Keyboard, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -7,8 +7,31 @@ import { InboxProcessingModal } from './inbox-processing-modal';
 
 const updateTask = vi.fn();
 const deleteTask = vi.fn();
+const restoreTask = vi.fn();
 const addProject = vi.fn();
 const addTask = vi.fn();
+const asyncStorageMock = vi.hoisted(() => ({
+  getItem: vi.fn(),
+  setItem: vi.fn(),
+}));
+
+vi.mock('@react-native-async-storage/async-storage', () => ({
+  default: asyncStorageMock,
+}));
+
+const hapticsMock = vi.hoisted(() => ({ notificationAsync: vi.fn().mockResolvedValue(undefined) }));
+
+vi.mock('expo-haptics', () => ({
+  __esModule: true,
+  NotificationFeedbackType: { Success: 'success', Warning: 'warning' },
+  notificationAsync: hapticsMock.notificationAsync,
+}));
+
+const reducedMotionMock = vi.hoisted(() => ({ value: false }));
+
+vi.mock('@/hooks/use-reduced-motion', () => ({
+  useReducedMotion: () => reducedMotionMock.value,
+}));
 const push = vi.fn();
 const clarifyTask = vi.fn();
 const showToast = vi.fn();
@@ -72,6 +95,7 @@ const storeState = {
   settings: mockSettings,
   updateTask,
   deleteTask,
+  restoreTask,
   addProject,
   addTask,
   updateSettings: vi.fn(async () => {}),
@@ -304,6 +328,14 @@ describe('InboxProcessingModal', () => {
     updateTask.mockResolvedValue({ success: true });
     deleteTask.mockReset();
     deleteTask.mockResolvedValue({ success: true });
+    restoreTask.mockReset();
+    restoreTask.mockResolvedValue({ success: true });
+    hapticsMock.notificationAsync.mockClear();
+    asyncStorageMock.getItem.mockReset();
+    asyncStorageMock.getItem.mockResolvedValue(null);
+    asyncStorageMock.setItem.mockReset();
+    asyncStorageMock.setItem.mockResolvedValue(undefined);
+    reducedMotionMock.value = false;
     addProject.mockClear();
     addTask.mockReset();
     addTask.mockResolvedValue({ success: true });
@@ -357,20 +389,48 @@ describe('InboxProcessingModal', () => {
     return node;
   };
 
-  const chooseActionableLonger = (root: ReturnType<typeof create>['root']) => {
+  const pressStep = (root: ReturnType<typeof create>['root'], text: string) => {
     act(() => {
-      findPressableWithText(root, 'inbox.yesActionable').props.onPress();
-    });
-    act(() => {
-      findPressableWithText(root, 'inbox.takesLonger').props.onPress();
+      findPressableWithText(root, text).props.onPress();
     });
   };
 
-  const revealDeferredOptions = (root: ReturnType<typeof create>['root']) => {
+  /** "Yes, actionable" then "takes longer than two minutes". */
+  const chooseActionableLonger = (root: ReturnType<typeof create>['root']) => {
+    pressStep(root, 'inbox.yes');
+    pressStep(root, 'inbox.takesLonger');
+  };
+
+  /** Walk to the terminal Next-Action step: actionable → longer → I'll do it → single action. */
+  const walkToFileStep = (root: ReturnType<typeof create>['root']) => {
     chooseActionableLonger(root);
-    act(() => {
-      findPressableWithText(root, 'inbox.illDoIt').props.onPress();
+    pressStep(root, 'inbox.illDoIt');
+    if (findNodesWithText(root, 'process.moreThanOneStepNo').length > 0) {
+      pressStep(root, 'process.moreThanOneStepNo');
+    }
+  };
+
+  /** Walk to the terminal step with "make it a project" chosen instead. */
+  const walkToProjectConversion = (root: ReturnType<typeof create>['root']) => {
+    chooseActionableLonger(root);
+    pressStep(root, 'inbox.illDoIt');
+    pressStep(root, 'process.moreThanOneStepYes');
+  };
+
+  /** The note field rides an explicit affordance on the capture card. */
+  const openAnchorEditor = (root: ReturnType<typeof create>['root']) => {
+    const notesButton = root.findByProps({
+      accessibilityLabel: 'taskEdit.descriptionLabel',
+      accessibilityRole: 'button',
     });
+    if (!notesButton.props.accessibilityState?.expanded) {
+      act(() => {
+        notesButton.props.onPress();
+      });
+    }
+  };
+
+  const expandMoreOptions = (root: ReturnType<typeof create>['root']) => {
     const moreOptions = findPressableWithText(root, 'More options');
     if (!moreOptions.props.accessibilityState?.expanded) {
       act(() => {
@@ -379,7 +439,12 @@ describe('InboxProcessingModal', () => {
     }
   };
 
-  it('reveals one Inbox decision at a time and requires an explicit path', () => {
+  const revealDeferredOptions = (root: ReturnType<typeof create>['root']) => {
+    walkToFileStep(root);
+    expandMoreOptions(root);
+  };
+
+  it('asks one question per screen and only commits at the terminal step', () => {
     storeState.tasks = [{ ...baseInboxTask, contexts: [], tags: [] }];
     const onClose = vi.fn();
     let tree: ReturnType<typeof create>;
@@ -389,32 +454,159 @@ describe('InboxProcessingModal', () => {
     });
 
     const root = tree!.root;
-    const nextTaskButton = findPressableWithText(root, 'Next task →');
 
-    expect(nextTaskButton.props.disabled).toBe(true);
+    // Step 1 is the only question on screen, and nothing can be filed yet.
+    expect(findNodesWithText(root, 'inbox.isActionable').length).toBeGreaterThan(0);
     expect(findNodesWithText(root, 'inbox.twoMinRule')).toHaveLength(0);
     expect(findNodesWithText(root, 'inbox.whoShouldDoIt')).toHaveLength(0);
+    expect(findNodesWithText(root, 'File it')).toHaveLength(0);
+
+    pressStep(root, 'inbox.yes');
+
+    expect(findNodesWithText(root, 'inbox.twoMinRule').length).toBeGreaterThan(0);
+    expect(findNodesWithText(root, 'inbox.isActionable')).toHaveLength(0);
+    expect(findNodesWithText(root, 'inbox.whoShouldDoIt')).toHaveLength(0);
+
+    pressStep(root, 'inbox.takesLonger');
+
+    expect(findNodesWithText(root, 'inbox.whoShouldDoIt').length).toBeGreaterThan(0);
+    expect(findNodesWithText(root, 'inbox.twoMinRule')).toHaveLength(0);
+    expect(findNodesWithText(root, 'File it')).toHaveLength(0);
+
+    pressStep(root, 'inbox.illDoIt');
+
+    expect(findNodesWithText(root, 'process.moreThanOneStep').length).toBeGreaterThan(0);
+    expect(findNodesWithText(root, 'File it')).toHaveLength(0);
+
+    pressStep(root, 'process.moreThanOneStepNo');
+
+    // Terminal step: Project and Context, with everything else behind More options.
+    expect(findNodesWithText(root, 'File it').length).toBeGreaterThan(0);
+    expect(findPressableWithText(root, 'More options').props.accessibilityState).toEqual({ expanded: false });
+    expect(updateTask).not.toHaveBeenCalled();
+  });
+
+  it('keeps the item anchored above every step', () => {
+    storeState.tasks = [{ ...baseInboxTask, title: 'Anchored capture', description: '# Heading\n**bold** note' }];
+    let tree: ReturnType<typeof create>;
 
     act(() => {
-      findPressableWithText(root, 'inbox.yesActionable').props.onPress();
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
     });
+
+    const root = tree!.root;
+    const title = () => root.findByProps({
+      placeholder: 'taskEdit.titleLabel',
+      accessibilityLabel: 'taskEdit.titleLabel',
+    }).props.value;
+
+    expect(title()).toBe('Anchored capture');
+    // The note preview is plain text, not the raw Markdown.
+    expect(findNodesWithText(root, 'Heading\nbold note').length).toBeGreaterThan(0);
+
+    chooseActionableLonger(root);
+
+    expect(title()).toBe('Anchored capture');
+  });
+
+  it('edits the capture title in place and opens the note on an explicit tap', () => {
+    storeState.tasks = [{ ...baseInboxTask }];
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+
+    const root = tree!.root;
+    const titleInput = root.findByProps({
+      placeholder: 'taskEdit.titleLabel',
+      accessibilityLabel: 'taskEdit.titleLabel',
+    });
+
+    act(() => {
+      titleInput.props.onChangeText('Clarified while deciding');
+    });
+
+    expect(root.findByProps({
+      placeholder: 'taskEdit.titleLabel',
+      accessibilityLabel: 'taskEdit.titleLabel',
+    }).props.value).toBe('Clarified while deciding');
+
+    const notesButton = root.findByProps({
+      accessibilityLabel: 'taskEdit.descriptionLabel',
+      accessibilityRole: 'button',
+    });
+    expect(notesButton.props.accessibilityState).toEqual({ expanded: false });
+    expect(root.findAllByProps({ placeholder: 'taskEdit.descriptionPlaceholder' })).toHaveLength(0);
+
+    act(() => {
+      notesButton.props.onPress();
+    });
+
+    expect(root.findAllByProps({ placeholder: 'taskEdit.descriptionPlaceholder' }).length).toBeGreaterThan(0);
+  });
+
+  it('keeps the title editable on every step of both modes', async () => {
+    storeState.tasks = [{ ...baseInboxTask }];
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+    await flushAsyncActions();
+
+    const root = tree!.root;
+    const titleInput = () => root.findByProps({
+      placeholder: 'taskEdit.titleLabel',
+      accessibilityLabel: 'taskEdit.titleLabel',
+    });
+
+    chooseActionableLonger(root);
+    pressStep(root, 'inbox.illDoIt');
+    pressStep(root, 'process.moreThanOneStepNo');
+
+    act(() => {
+      titleInput().props.onChangeText('Edited at the terminal step');
+    });
+    expect(titleInput().props.value).toBe('Edited at the terminal step');
+
+    // ...and in quick mode.
+    asyncStorageMock.getItem.mockResolvedValue('quick');
+    storeState.tasks = [{ ...baseInboxTask }];
+    let quickTree: ReturnType<typeof create>;
+    act(() => {
+      quickTree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+    await flushAsyncActions();
+
+    expect(quickTree!.root.findByProps({
+      placeholder: 'taskEdit.titleLabel',
+      accessibilityLabel: 'taskEdit.titleLabel',
+    }).props.value).toBe('Inbox task');
+  });
+
+  it('steps back to the previous question and clears the answer it derived', () => {
+    storeState.tasks = [{ ...baseInboxTask, contexts: [], tags: [] }];
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+
+    const root = tree!.root;
+    chooseActionableLonger(root);
+    expect(findNodesWithText(root, 'inbox.whoShouldDoIt').length).toBeGreaterThan(0);
+
+    pressStep(root, '‹ Back');
 
     expect(findNodesWithText(root, 'inbox.twoMinRule').length).toBeGreaterThan(0);
     expect(findNodesWithText(root, 'inbox.whoShouldDoIt')).toHaveLength(0);
 
-    act(() => {
-      findPressableWithText(root, 'inbox.takesLonger').props.onPress();
-    });
+    pressStep(root, '‹ Back');
 
-    expect(findNodesWithText(root, 'inbox.whoShouldDoIt').length).toBeGreaterThan(0);
-    expect(root.findByProps({ children: 'Next task →' }).parent?.props.disabled).toBe(true);
-
-    act(() => {
-      findPressableWithText(root, 'inbox.illDoIt').props.onPress();
-    });
-
-    expect(findPressableWithText(root, 'More options').props.accessibilityState).toEqual({ expanded: false });
-    expect(root.findByProps({ children: 'Next task →' }).parent?.props.disabled).toBe(false);
+    expect(findNodesWithText(root, 'inbox.isActionable').length).toBeGreaterThan(0);
+    // The first step is the start of the flow, so it offers no way further back.
+    expect(findNodesWithText(root, '‹ Back')).toHaveLength(0);
   });
 
   it('keeps optional scheduling available for delegated tasks without showing project metadata', () => {
@@ -511,7 +703,8 @@ describe('InboxProcessingModal', () => {
     });
 
     const root = tree!.root;
-    const titleInput = root.findByProps({ placeholder: 'taskEdit.titleLabel' });
+    openAnchorEditor(root);
+    const titleInput = root.findByProps({ placeholder: 'taskEdit.titleLabel', accessibilityLabel: 'taskEdit.titleLabel' });
     const descriptionInput = root.findByProps({ placeholder: 'taskEdit.descriptionPlaceholder' });
 
     act(() => {
@@ -676,7 +869,8 @@ describe('InboxProcessingModal', () => {
 
     const root = tree!.root;
 
-    expect(root.findByProps({ placeholder: 'taskEdit.titleLabel' }).props.value).toBe('Work inbox');
+    openAnchorEditor(root);
+    expect(root.findByProps({ placeholder: 'taskEdit.titleLabel', accessibilityLabel: 'taskEdit.titleLabel' }).props.value).toBe('Work inbox');
 
     const skipLabel = root.findByProps({ children: 'Skip' });
     const skipButton = skipLabel.parent;
@@ -763,11 +957,7 @@ describe('InboxProcessingModal', () => {
 
     const root = tree!.root;
 
-    revealDeferredOptions(root);
-
-    act(() => {
-      findPressableWithText(root, 'process.moreThanOneStepYes').props.onPress();
-    });
+    walkToProjectConversion(root);
 
     const projectTitleInput = root.findByProps({ accessibilityLabel: 'projects.title' });
     const nextActionInput = root.findByProps({ accessibilityLabel: 'process.nextAction' });
@@ -810,11 +1000,7 @@ describe('InboxProcessingModal', () => {
 
     const root = tree!.root;
 
-    revealDeferredOptions(root);
-
-    act(() => {
-      findPressableWithText(root, 'process.moreThanOneStepYes').props.onPress();
-    });
+    walkToProjectConversion(root);
 
     const findActionInputs = () => root.findAll((node) => (
       typeof node.type === 'string'
@@ -869,11 +1055,7 @@ describe('InboxProcessingModal', () => {
 
     const root = tree!.root;
 
-    revealDeferredOptions(root);
-
-    act(() => {
-      findPressableWithText(root, 'process.moreThanOneStepYes').props.onPress();
-    });
+    walkToProjectConversion(root);
     act(() => {
       root.findByProps({ accessibilityLabel: 'projects.title' }).props.onChangeText('Plan Launch');
     });
@@ -942,7 +1124,7 @@ describe('InboxProcessingModal', () => {
 
     const root = tree!.root;
     revealDeferredOptions(root);
-    const tokenInput = root.findByProps({ placeholder: 'inbox.addContextPlaceholder' });
+    const tokenInput = root.findByProps({ placeholder: '@home' });
 
     act(() => {
       tokenInput.props.onChangeText('off');
@@ -952,7 +1134,7 @@ describe('InboxProcessingModal', () => {
     expect(contextSuggestion).toBeTruthy();
     expect(typeof contextSuggestion.parent?.props.onPress).toBe('function');
 
-    const updatedTokenInput = root.findByProps({ placeholder: 'inbox.addContextPlaceholder' });
+    const updatedTokenInput = root.findByProps({ placeholder: '@home' });
     act(() => {
       updatedTokenInput.props.onChangeText('urg');
     });
@@ -1015,7 +1197,7 @@ describe('InboxProcessingModal', () => {
     expect(findNodeWithText(root, 'nav.reference')).toBeTruthy();
   });
 
-  it('starts mobile inbox processing at the refine form without duplicating the task preview', () => {
+  it('opens on the first question with the item anchored and the editor closed', () => {
     const onClose = vi.fn();
     let tree: ReturnType<typeof create>;
 
@@ -1025,9 +1207,12 @@ describe('InboxProcessingModal', () => {
 
     const root = tree!.root;
 
-    expect(root.findByProps({ children: 'inbox.refineTitle' })).toBeTruthy();
-    expect(findNodesWithText(root, 'Inbox task')).toHaveLength(0);
-    expect(findNodesWithText(root, 'Original description')).toHaveLength(0);
+    expect(findNodesWithText(root, 'inbox.isActionable').length).toBeGreaterThan(0);
+    // The title is editable in place from the first step; the note is one tap away.
+    expect(root.findByProps({ placeholder: 'taskEdit.titleLabel', accessibilityLabel: 'taskEdit.titleLabel' }).props.value)
+      .toBe('Inbox task');
+    expect(findNodesWithText(root, 'Original description').length).toBeGreaterThan(0);
+    expect(root.findAllByProps({ placeholder: 'taskEdit.descriptionPlaceholder' })).toHaveLength(0);
   });
 
   it('includes future-start inbox tasks in processing', () => {
@@ -1044,7 +1229,8 @@ describe('InboxProcessingModal', () => {
 
     const root = tree!.root;
 
-    expect(root.findByProps({ children: 'inbox.refineTitle' })).toBeTruthy();
+    expect(root.findByProps({ placeholder: 'taskEdit.titleLabel', accessibilityLabel: 'taskEdit.titleLabel' }).props.value)
+      .toBe('Inbox task');
     expect(onClose).not.toHaveBeenCalled();
   });
 
@@ -1084,7 +1270,7 @@ describe('InboxProcessingModal', () => {
       datePicker.props.onChange({ type: 'set' }, new Date(2026, 2, 23, 12, 0, 0));
     });
 
-    const nextTaskLabel = findNodeWithText(root, 'Next task →');
+    const nextTaskLabel = findNodeWithText(root, 'File it');
     const nextTaskButton = nextTaskLabel.parent;
 
     if (!nextTaskButton) {
@@ -1142,7 +1328,7 @@ describe('InboxProcessingModal', () => {
       datePicker.props.onChange({ type: 'set' }, new Date(2026, 2, 23, 12, 0, 0));
     });
 
-    const nextTaskButton = findNodeWithText(root, 'Next task →').parent;
+    const nextTaskButton = findNodeWithText(root, 'File it').parent;
 
     if (!nextTaskButton) {
       throw new Error('Next task button not found');
@@ -1208,7 +1394,7 @@ describe('InboxProcessingModal', () => {
       dateOnlyButton.props.onPress();
     });
 
-    const nextTaskButton = findNodeWithText(root, 'Next task →').parent;
+    const nextTaskButton = findNodeWithText(root, 'File it').parent;
 
     if (!nextTaskButton) {
       throw new Error('Next task button not found');
@@ -1266,7 +1452,7 @@ describe('InboxProcessingModal', () => {
 
     expect(selectedNoDateButton.props.accessibilityState?.selected).toBe(true);
 
-    const nextTaskButton = findNodeWithText(root, 'Next task →').parent;
+    const nextTaskButton = findNodeWithText(root, 'File it').parent;
 
     if (!nextTaskButton) {
       throw new Error('Next task button not found');
@@ -1327,7 +1513,7 @@ describe('InboxProcessingModal', () => {
       noDateButton.props.onPress();
     });
 
-    const nextTaskButton = findNodeWithText(root, 'Next task →').parent;
+    const nextTaskButton = findNodeWithText(root, 'File it').parent;
 
     if (!nextTaskButton) {
       throw new Error('Next task button not found');
@@ -1346,8 +1532,11 @@ describe('InboxProcessingModal', () => {
     expect(updateTask.mock.calls[0][1]).toHaveProperty('startTime', undefined);
     await flushAsyncActions();
     expect(onClose).not.toHaveBeenCalled();
-    expect(root.findByProps({ placeholder: 'taskEdit.titleLabel' }).props.value).toBe('Second inbox task');
-    expect(showToast).not.toHaveBeenCalled();
+    expect(root.findByProps({ placeholder: 'taskEdit.titleLabel', accessibilityLabel: 'taskEdit.titleLabel' }).props.value)
+      .toBe('Second inbox task');
+    // "No date" is a real answer, so nothing warns — the only toast is the
+    // Undo offered for the item that just moved.
+    expect(showToast.mock.calls.map(([options]) => options?.tone)).toEqual(['info']);
   });
 
   it('saves the selected priority when the priority field is shown', async () => {
@@ -1492,7 +1681,7 @@ describe('InboxProcessingModal', () => {
       whoInput.props.onChangeText('Alex');
     });
 
-    const nextTaskLabel = findNodeWithText(root, 'Next task →');
+    const nextTaskLabel = findNodeWithText(root, 'File it');
     const nextTaskButton = nextTaskLabel.parent;
 
     if (!nextTaskButton) {
@@ -1530,7 +1719,9 @@ describe('InboxProcessingModal', () => {
     });
 
     const root = tree!.root;
-    revealDeferredOptions(root);
+    chooseActionableLonger(root);
+    pressStep(root, 'inbox.delegate');
+    expandMoreOptions(root);
     const priorityLabel = root.findByProps({ children: 'priority.high' });
     const priorityButton = priorityLabel.parent;
 
@@ -1542,23 +1733,13 @@ describe('InboxProcessingModal', () => {
       priorityButton.props.onPress();
     });
 
-    const delegateButton = findPressableWithText(root, 'inbox.delegate');
-
-    if (!delegateButton) {
-      throw new Error('Delegate button not found');
-    }
-
-    act(() => {
-      delegateButton.props.onPress();
-    });
-
     const whoInput = root.findByProps({ placeholder: 'process.delegateWhoPlaceholder' });
 
     act(() => {
       whoInput.props.onChangeText('Alex');
     });
 
-    const nextTaskLabel = findNodeWithText(root, 'Next task →');
+    const nextTaskLabel = findNodeWithText(root, 'File it');
     const nextTaskButton = nextTaskLabel.parent;
 
     if (!nextTaskButton) {
@@ -1596,7 +1777,9 @@ describe('InboxProcessingModal', () => {
     });
 
     const root = tree!.root;
-    revealDeferredOptions(root);
+    chooseActionableLonger(root);
+    pressStep(root, 'inbox.delegate');
+    expandMoreOptions(root);
     const priorityLabel = root.findByProps({ children: 'priority.urgent' });
     const priorityButton = priorityLabel.parent;
 
@@ -1608,23 +1791,13 @@ describe('InboxProcessingModal', () => {
       priorityButton.props.onPress();
     });
 
-    const delegateButton = findPressableWithText(root, 'inbox.delegate');
-
-    if (!delegateButton) {
-      throw new Error('Delegate button not found');
-    }
-
-    act(() => {
-      delegateButton.props.onPress();
-    });
-
     const whoInput = root.findByProps({ placeholder: 'process.delegateWhoPlaceholder' });
 
     act(() => {
       whoInput.props.onChangeText('Alex');
     });
 
-    const nextTaskLabel = findNodeWithText(root, 'Next task →');
+    const nextTaskLabel = findNodeWithText(root, 'File it');
     const nextTaskButton = nextTaskLabel.parent;
 
     if (!nextTaskButton) {
@@ -1672,14 +1845,12 @@ describe('InboxProcessingModal', () => {
       delegateButton.props.onPress();
     });
 
-    const nextTaskLabel = findNodeWithText(root, 'Next task →');
+    const nextTaskLabel = findNodeWithText(root, 'File it');
     const nextTaskButton = nextTaskLabel.parent;
 
     if (!nextTaskButton) {
       throw new Error('Next task button not found');
     }
-
-    expect(nextTaskButton.props.disabled).toBe(false);
 
     act(() => {
       nextTaskButton.props.onPress();
@@ -1712,6 +1883,7 @@ describe('InboxProcessingModal', () => {
     });
 
     const root = tree!.root;
+    openAnchorEditor(root);
     const aiClarifyLabel = root.findByProps({ children: 'taskEdit.aiClarify' });
     const aiClarifyButton = aiClarifyLabel.parent;
 
@@ -1726,5 +1898,571 @@ describe('InboxProcessingModal', () => {
     });
 
     expect(root.findByProps({ children: 'Working...' })).toBeTruthy();
+  });
+
+  describe('terminal decisions', () => {
+    const openFlow = async () => {
+      let tree: ReturnType<typeof create>;
+      act(() => {
+        tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+      });
+      await flushAsyncActions();
+      return tree!.root;
+    };
+
+    const pressAsync = async (root: ReturnType<typeof create>['root'], text: string) => {
+      await act(async () => {
+        findPressableWithText(root, text).props.onPress();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    };
+
+    const undoToast = () => showToast.mock.calls
+      .map(([options]) => options)
+      .find((options) => options?.actionLabel === 'Undo');
+
+    it('files Someday straight from the first question', async () => {
+      const root = await openFlow();
+
+      await pressAsync(root, 'inbox.someday');
+
+      expect(updateTask).toHaveBeenCalledTimes(1);
+      expect(updateTask.mock.calls[0][1]).toMatchObject({ status: 'someday' });
+      expect(undoToast()?.message).toBe('Inbox task moved to someday');
+    });
+
+    it('files Reference straight from the first question', async () => {
+      const root = await openFlow();
+
+      await pressAsync(root, 'nav.reference');
+
+      expect(updateTask.mock.calls[0][1]).toMatchObject({ status: 'reference' });
+    });
+
+    it('trashes from the first question and offers to put it back', async () => {
+      const root = await openFlow();
+
+      await pressAsync(root, 'inbox.trash');
+
+      expect(deleteTask).toHaveBeenCalledWith('inbox-1');
+      const toast = undoToast();
+      expect(toast?.message).toBe('Inbox task moved to Trash');
+
+      await act(async () => {
+        toast!.onAction();
+        await Promise.resolve();
+      });
+
+      expect(restoreTask).toHaveBeenCalledWith('inbox-1');
+    });
+
+    it('completes a two-minute item from the second question', async () => {
+      const root = await openFlow();
+
+      pressStep(root, 'inbox.yes');
+      await pressAsync(root, 'inbox.doneIt');
+
+      expect(updateTask.mock.calls[0][1]).toMatchObject({ status: 'done' });
+    });
+
+    it('restores a filed item to the Inbox from its Undo toast', async () => {
+      const root = await openFlow();
+
+      await pressAsync(root, 'inbox.someday');
+      const toast = undoToast();
+
+      await act(async () => {
+        toast!.onAction();
+        await Promise.resolve();
+      });
+
+      expect(updateTask).toHaveBeenLastCalledWith('inbox-1', { status: 'inbox' });
+    });
+
+    it('marks completing an item with the app\'s success haptic', async () => {
+      const root = await openFlow();
+
+      expect(hapticsMock.notificationAsync).not.toHaveBeenCalled();
+
+      await pressAsync(root, 'inbox.someday');
+
+      expect(hapticsMock.notificationAsync).toHaveBeenCalledTimes(1);
+      expect(hapticsMock.notificationAsync).toHaveBeenCalledWith('success');
+    });
+
+    it('does not buzz or offer Undo when the write fails', async () => {
+      updateTask.mockResolvedValue({ success: false, error: 'nope' });
+      const root = await openFlow();
+
+      await pressAsync(root, 'inbox.someday');
+
+      expect(hapticsMock.notificationAsync).not.toHaveBeenCalled();
+      expect(undoToast()).toBeUndefined();
+      expect(showToast.mock.calls.some(([options]) => options?.tone === 'error')).toBe(true);
+    });
+
+    it('transitions each answered question forward within the motion budget', async () => {
+      const timing = vi.spyOn(Animated, 'timing');
+      try {
+        const root = await openFlow();
+        timing.mockClear();
+
+        pressStep(root, 'inbox.yes');
+
+        expect(timing).toHaveBeenCalled();
+        for (const [, config] of timing.mock.calls) {
+          expect((config as any).duration).toBeGreaterThanOrEqual(150);
+          expect((config as any).duration).toBeLessThanOrEqual(250);
+        }
+      } finally {
+        timing.mockRestore();
+      }
+    });
+
+    it('lands each step flat instead of animating when reduce motion is on', async () => {
+      reducedMotionMock.value = true;
+      const timing = vi.spyOn(Animated, 'timing');
+      try {
+        const root = await openFlow();
+        timing.mockClear();
+
+        pressStep(root, 'inbox.yes');
+
+        expect(findNodesWithText(root, 'inbox.twoMinRule').length).toBeGreaterThan(0);
+        expect(timing).not.toHaveBeenCalled();
+      } finally {
+        timing.mockRestore();
+      }
+    });
+  });
+  describe('guided and quick modes', () => {
+    const openFlow = async () => {
+      let tree: ReturnType<typeof create>;
+      act(() => {
+        tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+      });
+      await flushAsyncActions();
+      return tree!.root;
+    };
+
+    const pressAsync = async (root: ReturnType<typeof create>['root'], text: string) => {
+      await act(async () => {
+        findPressableWithText(root, text).props.onPress();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    };
+
+    // Carries a project and metadata so a comparison is sensitive to the fields
+    // each mode passes along, not just to the status.
+    const carriedTask = () => ({
+      ...baseInboxTask,
+      projectId: workProject.id,
+      priority: 'high',
+      energyLevel: 'low',
+      assignedTo: 'Sam',
+    });
+
+    it('remembers the mode on this device only', async () => {
+      const root = await openFlow();
+
+      expect(asyncStorageMock.getItem).toHaveBeenCalledWith('mindwtr:view:inboxProcessingMode:v1');
+      expect(findNodesWithText(root, 'inbox.isActionable').length).toBeGreaterThan(0);
+
+      act(() => {
+        root.findByProps({ accessibilityLabel: 'Quick', accessibilityRole: 'button' }).props.onPress();
+      });
+
+      expect(asyncStorageMock.setItem).toHaveBeenCalledWith('mindwtr:view:inboxProcessingMode:v1', 'quick');
+      expect(findNodesWithText(root, 'inbox.isActionable')).toHaveLength(0);
+      expect(findNodesWithText(root, 'inbox.illDoIt').length).toBeGreaterThan(0);
+      // The synced GTD settings document is never touched by a layout choice.
+      expect(storeState.updateSettings).not.toHaveBeenCalled();
+      expect(root.findByProps({ accessibilityLabel: 'Guided', accessibilityRole: 'button' })).toBeTruthy();
+    });
+
+    it('walks the guided tree by default', async () => {
+      const root = await openFlow();
+
+      expect(findNodesWithText(root, 'inbox.isActionable').length).toBeGreaterThan(0);
+      expect(findNodesWithText(root, 'inbox.delegate')).toHaveLength(0);
+    });
+
+    it('shows every destination on one screen in quick mode', async () => {
+      asyncStorageMock.getItem.mockResolvedValue('quick');
+      const root = await openFlow();
+
+      expect(findNodesWithText(root, 'inbox.isActionable')).toHaveLength(0);
+      for (const label of ['inbox.illDoIt', 'taskEdit.projectLabel', 'Later', 'inbox.delegate', 'inbox.someday', 'nav.reference', 'inbox.trash']) {
+        expect(findNodesWithText(root, label).length).toBeGreaterThan(0);
+      }
+    });
+
+    it('files a next action identically in both modes', async () => {
+      mockSettings.gtd.taskEditor = { hidden: [] };
+      storeState.projects = [workProject];
+      storeState.areas = [workArea];
+      storeState.tasks = [carriedTask()];
+
+      const guided = await openFlow();
+      chooseActionableLonger(guided);
+      await pressAsync(guided, 'inbox.illDoIt');
+      await pressAsync(guided, 'process.moreThanOneStepNo');
+      await pressAsync(guided, 'File it');
+
+      expect(updateTask).toHaveBeenCalledTimes(1);
+      const guidedCall = updateTask.mock.calls[0];
+      expect(guidedCall[1]).toMatchObject({ status: 'next', projectId: workProject.id, priority: 'high' });
+
+      updateTask.mockClear();
+      asyncStorageMock.getItem.mockResolvedValue('quick');
+      storeState.tasks = [carriedTask()];
+
+      const quick = await openFlow();
+      await pressAsync(quick, 'inbox.illDoIt');
+
+      expect(updateTask).toHaveBeenCalledTimes(1);
+      expect(updateTask.mock.calls[0]).toEqual(guidedCall);
+    });
+
+    it('trashes identically in both modes', async () => {
+      const guided = await openFlow();
+      await pressAsync(guided, 'inbox.trash');
+
+      expect(deleteTask).toHaveBeenCalledTimes(1);
+      const guidedCall = deleteTask.mock.calls[0];
+
+      deleteTask.mockClear();
+      asyncStorageMock.getItem.mockResolvedValue('quick');
+      storeState.tasks = [{ ...baseInboxTask }];
+
+      const quick = await openFlow();
+      await pressAsync(quick, 'inbox.trash');
+
+      expect(deleteTask.mock.calls[0]).toEqual(guidedCall);
+    });
+
+    it('lands quick decisions on only that decision\'s follow-up', async () => {
+      asyncStorageMock.getItem.mockResolvedValue('quick');
+      const root = await openFlow();
+
+      pressStep(root, 'inbox.delegate');
+
+      // Straight to the waiting details — no two-minute or one-action question.
+      expect(root.findByProps({ placeholder: 'process.delegateWhoPlaceholder' })).toBeTruthy();
+      expect(findNodesWithText(root, 'inbox.twoMinRule')).toHaveLength(0);
+      expect(findNodesWithText(root, 'process.moreThanOneStep')).toHaveLength(0);
+      expect(updateTask).not.toHaveBeenCalled();
+
+      pressStep(root, '‹ Back');
+
+      expect(findNodesWithText(root, 'inbox.illDoIt').length).toBeGreaterThan(0);
+    });
+
+    it('files Waiting identically in both modes', async () => {
+      const guided = await openFlow();
+      chooseActionableLonger(guided);
+      pressStep(guided, 'inbox.delegate');
+      act(() => {
+        guided.findByProps({ placeholder: 'process.delegateWhoPlaceholder' }).props.onChangeText('Alex');
+      });
+      await pressAsync(guided, 'File it');
+
+      expect(updateTask).toHaveBeenCalledTimes(1);
+      const guidedCall = updateTask.mock.calls[0];
+      expect(guidedCall[1]).toMatchObject({ status: 'waiting', assignedTo: 'Alex' });
+
+      updateTask.mockClear();
+      asyncStorageMock.getItem.mockResolvedValue('quick');
+      storeState.tasks = [{ ...baseInboxTask }];
+
+      const quick = await openFlow();
+      pressStep(quick, 'inbox.delegate');
+      act(() => {
+        quick.findByProps({ placeholder: 'process.delegateWhoPlaceholder' }).props.onChangeText('Alex');
+      });
+      await pressAsync(quick, 'File it');
+
+      expect(updateTask.mock.calls[0]).toEqual(guidedCall);
+    });
+
+    it('skips the two-minute question when that shortcut is off', async () => {
+      mockSettings.gtd.inboxProcessing = { twoMinuteEnabled: false };
+      const root = await openFlow();
+
+      pressStep(root, 'inbox.yes');
+
+      expect(findNodesWithText(root, 'inbox.twoMinRule')).toHaveLength(0);
+      expect(findNodesWithText(root, 'inbox.whoShouldDoIt').length).toBeGreaterThan(0);
+    });
+
+    it('drops the context step from the terminal step when it is off', async () => {
+      mockSettings.gtd.inboxProcessing = { contextStepEnabled: false };
+      const root = await openFlow();
+      walkToFileStep(root);
+
+      expect(root.findAllByProps({ placeholder: '@home' })).toHaveLength(0);
+      expect(findNodesWithText(root, 'inbox.assignProjectQuestion').length).toBeGreaterThan(0);
+    });
+
+    it('keeps date fields out of More options until scheduling is enabled', async () => {
+      const root = await openFlow();
+      walkToFileStep(root);
+      expandMoreOptions(root);
+
+      expect(findNodesWithText(root, 'taskEdit.scheduling')).toHaveLength(0);
+    });
+
+    it('orders the terminal step by the project-first preference', async () => {
+      mockSettings.gtd.inboxProcessing = { projectFirst: true };
+      storeState.projects = [workProject];
+      storeState.areas = [workArea];
+      const projectFirstRoot = await openFlow();
+      walkToFileStep(projectFirstRoot);
+
+      const orderOf = (root: ReturnType<typeof create>['root']) => {
+        const rendered = root.findAll((node) => (
+          ((node.type as unknown) === 'Text' && node.props?.children === 'inbox.assignProjectQuestion')
+          || ((node.type as unknown) === 'TextInput' && node.props?.placeholder === '@home')
+        ));
+        return rendered.map((node) => (node.props?.placeholder === '@home' ? 'context' : 'project'));
+      };
+
+      expect(orderOf(projectFirstRoot)).toEqual(['project', 'context']);
+
+      mockSettings.gtd.inboxProcessing = {};
+      storeState.tasks = [{ ...baseInboxTask }];
+      const contextFirstRoot = await openFlow();
+      walkToFileStep(contextFirstRoot);
+
+      expect(orderOf(contextFirstRoot)).toEqual(['context', 'project']);
+    });
+  });
+  // Capability parity: presentation changed, capability did not. Each of these
+  // existed in the one-scroll form and must stay reachable in BOTH modes.
+  describe('capability parity with the old flow', () => {
+    const openMode = async (mode: 'guided' | 'quick') => {
+      asyncStorageMock.getItem.mockResolvedValue(mode);
+      let tree: ReturnType<typeof create>;
+      act(() => {
+        tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+      });
+      await flushAsyncActions();
+      return tree!.root;
+    };
+
+    const pressAsync = async (root: ReturnType<typeof create>['root'], text: string) => {
+      await act(async () => {
+        findPressableWithText(root, text).props.onPress();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    };
+
+    it('can mark a two-minute item done in quick mode', async () => {
+      const root = await openMode('quick');
+
+      await pressAsync(root, 'inbox.doneIt');
+
+      expect(updateTask.mock.calls[0][1]).toMatchObject({ status: 'done' });
+    });
+
+    it('hides the two-minute shortcut in quick mode when it is disabled', async () => {
+      mockSettings.gtd.inboxProcessing = { twoMinuteEnabled: false };
+      const root = await openMode('quick');
+
+      expect(findNodesWithText(root, 'inbox.doneIt')).toHaveLength(0);
+      expect(findNodesWithText(root, 'inbox.illDoIt').length).toBeGreaterThan(0);
+    });
+
+    it('can still split a capture into a project from quick mode', async () => {
+      storeState.projects = [];
+      addProject.mockResolvedValue({ id: 'new-project', title: 'Plan Launch' });
+      const root = await openMode('quick');
+
+      pressStep(root, 'taskEdit.projectLabel');
+      // Quick reaches the one-action question, so conversion stays available.
+      pressStep(root, 'process.moreThanOneStepYes');
+
+      act(() => {
+        root.findByProps({ accessibilityLabel: 'projects.title' }).props.onChangeText('Plan Launch');
+        root.findByProps({ accessibilityLabel: 'process.nextAction' }).props.onChangeText('Draft brief');
+      });
+
+      await pressAsync(root, 'process.createProject');
+
+      expect(addProject).toHaveBeenCalled();
+      expect(updateTask.mock.calls[0][1]).toMatchObject({ status: 'next', projectId: 'new-project' });
+    });
+
+    it('offers the delegate hand-off message and person suggestions in both modes', async () => {
+      storeState.tasks = [
+        { ...baseInboxTask },
+        { ...baseInboxTask, id: 'other', status: 'next', assignedTo: 'Alexandra' },
+      ];
+
+      for (const mode of ['guided', 'quick'] as const) {
+        storeState.tasks[0] = { ...baseInboxTask };
+        const root = await openMode(mode);
+        if (mode === 'guided') chooseActionableLonger(root);
+        pressStep(root, 'inbox.delegate');
+
+        expect(findNodesWithText(root, 'process.delegateSendRequest').length).toBeGreaterThan(0);
+        expect(root.findByProps({ placeholder: 'process.delegateWhoPlaceholder' })).toBeTruthy();
+
+        act(() => {
+          root.findByProps({ placeholder: 'process.delegateWhoPlaceholder' }).props.onChangeText('Alex');
+        });
+
+        const suggestion = findNodeWithText(root, 'Alexandra');
+        expect(typeof suggestion.parent?.props.onPress).toBe('function');
+      }
+    });
+
+    it('keeps the note editor and AI clarify reachable in both modes', async () => {
+      mockSettings.ai = { enabled: true, provider: 'openai' };
+
+      for (const mode of ['guided', 'quick'] as const) {
+        const root = await openMode(mode);
+
+        expect(root.findByProps({
+          placeholder: 'taskEdit.titleLabel',
+          accessibilityLabel: 'taskEdit.titleLabel',
+        })).toBeTruthy();
+        expect(findNodesWithText(root, 'taskEdit.aiClarify').length).toBeGreaterThan(0);
+
+        act(() => {
+          root.findByProps({
+            accessibilityLabel: 'taskEdit.descriptionLabel',
+            accessibilityRole: 'button',
+          }).props.onPress();
+        });
+
+        expect(root.findAllByProps({ placeholder: 'taskEdit.descriptionPlaceholder' }).length).toBeGreaterThan(0);
+      }
+    });
+
+    it('keeps every organization and scheduling field behind More options in both modes', async () => {
+      mockSettings.gtd.inboxProcessing = { scheduleEnabled: true };
+      mockSettings.gtd.taskEditor = { hidden: [] };
+
+      for (const mode of ['guided', 'quick'] as const) {
+        storeState.tasks = [{ ...baseInboxTask }];
+        const root = await openMode(mode);
+        if (mode === 'guided') {
+          walkToFileStep(root);
+        } else {
+          pressStep(root, 'taskEdit.projectLabel');
+          pressStep(root, 'process.moreThanOneStepNo');
+        }
+        expandMoreOptions(root);
+
+        for (const label of [
+          'taskEdit.priorityLabel',
+          'taskEdit.energyLevel',
+          'taskEdit.timeEstimateLabel',
+          'taskEdit.assignedTo',
+          'taskEdit.startDateLabel',
+          'taskEdit.dueDateLabel',
+          'taskEdit.reviewDateLabel',
+          'taskEdit.tagsLabel',
+        ]) {
+          expect(findNodesWithText(root, label).length).toBeGreaterThan(0);
+        }
+      }
+    });
+
+    it('keeps the area picker and project search in both modes', async () => {
+      storeState.projects = [workProject];
+      storeState.areas = [workArea];
+
+      for (const mode of ['guided', 'quick'] as const) {
+        storeState.tasks = [{ ...baseInboxTask }];
+        const root = await openMode(mode);
+        if (mode === 'guided') {
+          walkToFileStep(root);
+        } else {
+          pressStep(root, 'taskEdit.projectLabel');
+          pressStep(root, 'process.moreThanOneStepNo');
+        }
+
+        expect(root.findByProps({ placeholder: 'projects.addPlaceholder' })).toBeTruthy();
+        expect(findNodesWithText(root, 'taskEdit.areaLabel').length).toBeGreaterThan(0);
+        expect(findNodesWithText(root, 'projects.noArea').length).toBeGreaterThan(0);
+        expect(findNodesWithText(root, 'Work Project').length).toBeGreaterThan(0);
+      }
+    });
+
+    it('keeps the Later no-date and date-only controls in both modes', async () => {
+      mockSettings.gtd.defaultScheduleTime = '09:00';
+
+      for (const mode of ['guided', 'quick'] as const) {
+        storeState.tasks = [{ ...baseInboxTask }];
+        const root = await openMode(mode);
+        pressStep(root, 'Later');
+
+        expect(findNodesWithText(root, 'No date').length).toBeGreaterThan(0);
+        expect(findNodesWithText(root, 'common.notSet').length).toBeGreaterThan(0);
+        expect(findNodesWithText(root, 'File it').length).toBeGreaterThan(0);
+      }
+    });
+  });
+  describe('progress and undo wording', () => {
+    it('names the refined title in the Undo toast, not the raw capture', async () => {
+      storeState.tasks = [{ ...baseInboxTask, title: 'Reply to Sam' }];
+      let tree: ReturnType<typeof create>;
+      act(() => {
+        tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+      });
+      await flushAsyncActions();
+      const root = tree!.root;
+
+      act(() => {
+        root.findByProps({
+          placeholder: 'taskEdit.titleLabel',
+          accessibilityLabel: 'taskEdit.titleLabel',
+        }).props.onChangeText('Reply to Sam about budget');
+      });
+
+      await act(async () => {
+        findPressableWithText(root, 'inbox.someday').props.onPress();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(updateTask.mock.calls[0][1]).toMatchObject({ title: 'Reply to Sam about budget' });
+      const toast = showToast.mock.calls.map(([o]) => o).find((o) => o?.actionLabel === 'Undo');
+      expect(toast?.message).toBe('Reply to Sam about budget moved to someday');
+    });
+
+    it('counts up against the session size instead of the shrinking queue', async () => {
+      storeState.tasks = [
+        { ...baseInboxTask, id: 'a', title: 'A' },
+        { ...baseInboxTask, id: 'b', title: 'B' },
+        { ...baseInboxTask, id: 'c', title: 'C' },
+      ];
+      let tree: ReturnType<typeof create>;
+      act(() => {
+        tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+      });
+      await flushAsyncActions();
+      const root = tree!.root;
+      const progressText = () => root.findAll((node) => (
+        typeof node.props?.children === 'string' && node.props.children.endsWith('common.tasks')
+      ))[0].props.children;
+
+      expect(progressText()).toBe('0/3 common.tasks');
+
+      // Filing one item removes it from the Inbox, so the queue and the raw
+      // total both shrink; the session counter must still move forward.
+      storeState.tasks = storeState.tasks.filter((task) => task.id !== 'a');
+      await act(async () => {
+        findPressableWithText(root, 'inbox.someday').props.onPress();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(progressText()).toBe('1/3 common.tasks');    });
   });
 });
