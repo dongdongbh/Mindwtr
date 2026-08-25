@@ -127,11 +127,30 @@ type HttpRemoteFileFingerprintOptions = {
     warnOnceKey?: string;
 };
 
+// Nextcloud/ownCloud users paste the browser address of the Files app
+// (…/apps/files/… or …?dir=/Folder) instead of the WebDAV endpoint; every
+// request then 404s with an unactionable "MKCOL failed (404)" (#1084).
+// Kept under 200 chars: the desktop probe toast slices reasons to 200.
+const WEBDAV_WEB_UI_URL_ERROR = 'This looks like the Nextcloud/ownCloud web page address, not a WebDAV address. Copy the WebDAV URL from Files → File settings (like https://server/remote.php/dav/files/USERNAME/).';
+
+const looksLikeWebUiUrl = (url: string): boolean => {
+    try {
+        const parsed = new URL(url);
+        if (parsed.pathname.includes('/remote.php/')) return false;
+        return parsed.pathname.includes('/apps/files') || parsed.searchParams.has('dir');
+    } catch {
+        return false;
+    }
+};
+
 const assertWebdavUrl = (url: string, options: WebDavOptions): void => {
     assertConnectionAllowed(url, WEBDAV_HTTPS_ERROR, {
         ...SYNC_LOCAL_INSECURE_URL_OPTIONS,
         allowInsecureHttp: options.allowInsecureHttp,
     });
+    if (looksLikeWebUiUrl(url)) {
+        throw new Error(WEBDAV_WEB_UI_URL_ERROR);
+    }
 };
 
 export const buildHttpRemoteFileFingerprint = (

@@ -43,6 +43,33 @@ describe('webdav http helpers', () => {
         expect(fetcher).toHaveBeenCalledOnce();
     });
 
+    it('rejects Nextcloud web-UI URLs with an actionable message', async () => {
+        const fetcher = vi.fn();
+        await expect(
+            webdavGetJson('https://cloud.example.com/apps/files/files/6538200/data.json?dir=%2FMindwtr', { fetcher }),
+        ).rejects.toThrow('not a WebDAV address');
+        await expect(
+            webdavGetJson('https://cloud.example.com/index.php/apps/files/data.json', { fetcher }),
+        ).rejects.toThrow('not a WebDAV address');
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+
+    it('accepts real Nextcloud WebDAV endpoints', async () => {
+        const fetcher = vi.fn(
+            async () =>
+                ({
+                    ok: false,
+                    status: 404,
+                    statusText: 'Not Found',
+                    text: async () => '',
+                }) as Response,
+        );
+        await expect(
+            webdavGetJson('https://cloud.example.com/remote.php/dav/files/user/Mindwtr/data.json', { fetcher }),
+        ).resolves.toBeNull();
+        expect(fetcher).toHaveBeenCalledOnce();
+    });
+
     it('rejects HTTP for public targets', async () => {
         const fetcher = vi.fn();
         await expect(webdavGetJson('http://8.8.8.8/dav/data.json', { fetcher })).rejects.toThrow(
