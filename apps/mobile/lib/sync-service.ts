@@ -1504,10 +1504,12 @@ class MobileSyncRun {
 }
 
 // A follow-up cycle (requeued after mid-cycle edits or a lifecycle abort) waits at
-// least as long as the finished cycle took (capped at a minute) so slow devices get
-// breathing room for user interactions instead of back-to-back sync cycles (#766).
+// least as long as the finished cycle took, so the app never spends more than half
+// its time syncing. The cap bounds staleness; the old one-minute cap defeated the
+// half-duty rule exactly on the whale libraries that need it most — an 80s cycle
+// got a 60s gap, keeping a 7k-task device near-continuously mid-sync (#766).
 const MIN_FOLLOW_UP_DELAY_MS = 1_000;
-const MAX_FOLLOW_UP_DELAY_MS = 60_000;
+const MAX_FOLLOW_UP_DELAY_MS = 5 * 60_000;
 
 const mobileSyncOrchestrator = createSyncOrchestrator<MobileSyncRequest | undefined, MobileSyncResult>({
   getFollowUpDelayMs: (lastCycleDurationMs) => {
