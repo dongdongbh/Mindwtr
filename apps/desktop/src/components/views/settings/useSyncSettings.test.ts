@@ -744,8 +744,20 @@ describe('useSyncSettings cloud token validation', () => {
         );
     });
 
+    it('skips the Dropbox connection probe while Dropbox is not the selected transport', async () => {
+        vi.mocked(SyncService.getDropboxAppKey).mockResolvedValue('dropbox-app-key');
+        const { result } = setup();
+        await waitFor(() => expect(result.current.syncPageProps.dropboxConfigured).toBe(true));
+
+        expect(SyncService.isDropboxConnected).not.toHaveBeenCalled();
+        expect(result.current.syncPageProps.dropboxConnected).toBe(false);
+    });
+
     it('does not publish a stale connect error after its durable connection refresh is overtaken', async () => {
         vi.mocked(SyncService.getDropboxAppKey).mockResolvedValue('dropbox-app-key');
+        // The visit probe only runs while Dropbox is the selected transport.
+        vi.spyOn(SyncService, 'getPersistedSyncConfigurationSnapshot')
+            .mockResolvedValue(dropboxConfigurationSnapshot('cloud'));
         vi.mocked(SyncService.connectDropbox).mockRejectedValue(new Error('stale OAuth failure'));
         let resolveConnectionRefresh!: (connected: boolean) => void;
         const connectionRefreshGate = new Promise<boolean>((resolve) => {

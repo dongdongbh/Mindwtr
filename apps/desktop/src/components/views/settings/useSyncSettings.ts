@@ -373,7 +373,13 @@ export const useSyncSettings = ({
                 return;
             }
             const appKey = dropboxAppKey.trim();
-            if (!appKey) {
+            // Only probe while the Dropbox panel is in play. The probe runs
+            // native credential recovery, and on keyring-less systems its
+            // failure toasts a Dropbox error to users who never chose
+            // Dropbox (#1084); the same relevance gate as auto-sync
+            // eligibility keeps real Dropbox breakage loud.
+            const dropboxSelected = syncBackend === 'cloud' && cloudProvider === 'dropbox';
+            if (!appKey || !dropboxSelected) {
                 if (!cancelled) {
                     setDropboxConnected(false);
                     setDropboxTestState('idle');
@@ -400,7 +406,7 @@ export const useSyncSettings = ({
         return () => {
             cancelled = true;
         };
-    }, [dropboxAppKey, dropboxCredentialHandle]);
+    }, [cloudProvider, dropboxAppKey, dropboxCredentialHandle, syncBackend]);
 
     useEffect(() => {
         const unsubscribe = SyncService.subscribePendingDropboxCredentialHandleForSession((credentialHandle) => {
