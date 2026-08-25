@@ -101,7 +101,7 @@ describe('AgendaView', () => {
         // A starred task inside a someday project used to vanish from Today's
         // Focus while still consuming a focus-limit slot — "I can only star 4
         // when the limit is 5", unfixable by any filter change.
-        const somedayProject: Project = {
+        const somedayProject = {
             id: 'proj-someday',
             title: 'Parked project',
             status: 'someday',
@@ -109,7 +109,7 @@ describe('AgendaView', () => {
             tagIds: [],
             createdAt: nowIso,
             updatedAt: nowIso,
-        } as Project;
+        } as unknown as Project;
         const parkedStarred: Task = {
             ...focusedTask,
             id: 'parked-starred',
