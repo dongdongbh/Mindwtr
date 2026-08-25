@@ -1194,9 +1194,23 @@ describe('mobile sync-service runtime', () => {
       if (attachmentSyncCalls === 1) {
         return false;
       }
-      data.tasks[0].attachments[0].cloudKey = 'attachments/att-1.txt';
-      data.tasks[0].attachments[0].localStatus = 'available';
-      return true;
+      // Pure-backend contract: return a folded document, never mutate the input.
+      return {
+        ...data,
+        tasks: [
+          {
+            ...data.tasks[0],
+            attachments: [
+              {
+                ...data.tasks[0].attachments[0],
+                cloudKey: 'attachments/att-1.txt',
+                localStatus: 'available',
+              },
+            ],
+          },
+          ...data.tasks.slice(1),
+        ],
+      };
     });
     attachmentSyncMocks.hasPendingAttachmentSyncWork.mockImplementation(async (data: AppData) => {
       const attachment = data.tasks[0]?.attachments?.[0];

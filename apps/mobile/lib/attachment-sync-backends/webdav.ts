@@ -1,5 +1,6 @@
 import type { AppData, Attachment, SyncKeyMaterial } from '@mindwtr/core';
 import {
+  applyAttachmentPatches,
   getErrorStatus,
   isWebdavRateLimitedError,
   validateAttachmentForUpload,
@@ -75,7 +76,7 @@ export const syncWebdavAttachments = async (
     /** #1056: seal bytes before upload / open them after download. Null = encryption off. */
     material?: SyncKeyMaterial | null;
   } = {}
-): Promise<boolean> => {
+): Promise<AppData | false> => {
   assertAttachmentSyncNotAborted(signal);
   const material = options.material ?? null;
   let lastRequestAt = 0;
@@ -124,7 +125,10 @@ export const syncWebdavAttachments = async (
     count: String(attachmentsById.size),
   });
 
-  let didMutate = await migrateAttachmentsLocallyBeforeSync(attachmentsById, signal);
+  // Every pass writes only to per-attachment copies and records them here; the patches are
+  // folded into a fresh document at the end. `attachmentsById` is updated alongside so a
+  // later pass reads the earlier pass's values.
+  const allPatches = await migrateAttachmentsLocallyBeforeSync(attachmentsById, signal);
 
   let abortedByRateLimit = false;
 
@@ -170,9 +174,10 @@ export const syncWebdavAttachments = async (
           exists: remoteExists ? 'true' : 'false',
         });
         if (!remoteExists) {
-          attachment.cloudKey = undefined;
+          const patched: Attachment = { ...attachment, cloudKey: undefined };
+          allPatches.set(patched.id, patched);
+          attachmentsById.set(patched.id, patched);
           clearWebdavDownloadBackoff(attachment.id);
-          didMutate = true;
         }
       } catch (error) {
         if (isAttachmentSyncAbortError(error, signal)) throw error;
@@ -221,7 +226,7 @@ export const syncWebdavAttachments = async (
     return true;
   };
 
-  const syncMutated = await runMobileAttachmentLifecycle({
+  const { patches } = await runMobileAttachmentLifecycle({
     attachmentsById,
     localFileExists: fileExists,
     forceUploadExistingLocal: options.activationProbe === true,
@@ -434,7 +439,9 @@ export const syncWebdavAttachments = async (
     },
   });
 
-  didMutate = didMutate || syncMutated;
+  for (const patch of patches.values()) allPatches.set(patch.id, patch);
+  const nextData = applyAttachmentPatches(appData, allPatches);
+  const didMutate = nextData !== appData;
 
   if (abortedByRateLimit) {
     logAttachmentWarn('WebDAV attachment sync aborted due to rate limiting');
@@ -442,5 +449,5 @@ export const syncWebdavAttachments = async (
   logAttachmentInfo('WebDAV attachment sync done', {
     mutated: didMutate ? 'true' : 'false',
   });
-  return didMutate;
+  return didMutate ? nextData : false;
 };

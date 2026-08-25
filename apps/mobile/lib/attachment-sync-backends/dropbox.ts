@@ -1,5 +1,5 @@
 import type { AppData, Attachment, SyncKeyMaterial } from '@mindwtr/core';
-import { isAbortError, validateAttachmentForUpload } from '@mindwtr/core';
+import { applyAttachmentPatches, isAbortError, validateAttachmentForUpload } from '@mindwtr/core';
 import {
   DropboxFileNotFoundError,
   downloadDropboxFile,
@@ -71,20 +71,33 @@ export const syncDropboxAttachments = async (
   dropboxClientId: string,
   fetcher: typeof fetch = fetch,
   options: DropboxAttachmentSyncOptions = {}
-): Promise<boolean> => {
+): Promise<AppData | false> => {
   if (!dropboxClientId) return false;
   const attachmentsDir = await getAttachmentsDir();
   const attachmentsById = collectAttachments(appData);
-  let didMutate = await migrateAttachmentsLocallyBeforeSync(attachmentsById, options.signal);
+  // This backend runs its own loops rather than the shared lifecycle, so it does the same
+  // bookkeeping by hand: write to a per-attachment working copy, record it here, and put it
+  // back into `attachmentsById`. The patches are folded into a fresh document at the end.
+  const allPatches = await migrateAttachmentsLocallyBeforeSync(attachmentsById, options.signal);
+  const recordPatch = (attachment: Attachment): void => {
+    allPatches.set(attachment.id, attachment);
+    attachmentsById.set(attachment.id, attachment);
+  };
+  const foldPatches = (): AppData | false => {
+    const nextData = applyAttachmentPatches(appData, allPatches);
+    return nextData !== appData ? nextData : false;
+  };
 
   const downloadQueue: Attachment[] = [];
   const pendingUploadMutations: PendingDropboxUploadMutation[] = [];
   let uploadCount = 0;
   let uploadLimitLogged = false;
 
-  for (const attachment of attachmentsById.values()) {
-    if (attachment.kind !== 'file') continue;
-    if (attachment.deletedAt) continue;
+  for (const original of attachmentsById.values()) {
+    if (original.kind !== 'file') continue;
+    if (original.deletedAt) continue;
+
+    const attachment: Attachment = { ...original };
 
     const uri = attachment.uri || '';
     const isHttp = isHttpAttachmentUri(uri);
@@ -94,12 +107,12 @@ export const syncDropboxAttachments = async (
     const nextStatus = getAttachmentLocalStatus(uri, existsLocally);
     if (attachment.localStatus !== nextStatus) {
       attachment.localStatus = nextStatus;
-      didMutate = true;
+      recordPatch(attachment);
     }
 
     if (options.activationProbe && existsLocally && attachment.cloudKey) {
       attachment.cloudKey = undefined;
-      didMutate = true;
+      recordPatch(attachment);
     }
 
     // SEC-07: same containment the shared lifecycle applies via `canUploadFrom`.
@@ -175,7 +188,7 @@ export const syncDropboxAttachments = async (
         }
         if (localReadFailed) {
           if (markAttachmentUnrecoverable(attachment)) {
-            didMutate = true;
+            recordPatch(attachment);
           }
           logAttachmentWarn(`Attachment local file is unreadable; marking unrecoverable (${attachment.id})`, error);
         }
@@ -202,11 +215,11 @@ export const syncDropboxAttachments = async (
       pending.attachment.size = Number(pending.fileSize);
     }
     pending.attachment.localStatus = 'available';
-    didMutate = true;
+    recordPatch(pending.attachment);
     reportProgress(pending.attachment.id, 'upload', pending.totalBytes, pending.totalBytes, 'completed');
   }
 
-  if (!attachmentsDir) return didMutate;
+  if (!attachmentsDir) return foldPatches();
 
   let downloadCount = 0;
   for (const attachment of downloadQueue) {
@@ -244,7 +257,7 @@ export const syncDropboxAttachments = async (
       if (attachment.uri !== targetUri || attachment.localStatus !== 'available') {
         attachment.uri = targetUri;
         attachment.localStatus = 'available';
-        didMutate = true;
+        recordPatch(attachment);
       }
       reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
     } catch (error) {
@@ -253,12 +266,12 @@ export const syncDropboxAttachments = async (
       }
       if (error instanceof DropboxFileNotFoundError && attachment.cloudKey) {
         if (markAttachmentUnrecoverable(attachment)) {
-          didMutate = true;
+          recordPatch(attachment);
         }
       }
       if (!(error instanceof DropboxFileNotFoundError) && attachment.localStatus !== 'missing') {
         attachment.localStatus = 'missing';
-        didMutate = true;
+        recordPatch(attachment);
       }
       reportProgress(
         attachment.id,
@@ -272,5 +285,5 @@ export const syncDropboxAttachments = async (
     }
   }
 
-  return didMutate;
+  return foldPatches();
 };

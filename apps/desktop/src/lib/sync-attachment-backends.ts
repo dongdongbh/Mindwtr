@@ -1,7 +1,10 @@
 import {
     type AppData,
     type Attachment,
+    type AttachmentSettings,
     type SyncRunAttachmentHelpers,
+    applyAttachmentPatches,
+    withAttachmentSettingsPatch,
     createWebdavDownloadBackoff,
     buildCloudKitAttachmentKey,
     cloudGetFile,
@@ -146,31 +149,37 @@ const pruneWebdavDownloadBackoff = (): void => {
     webdavDownloadBackoff.prune();
 };
 
-type CloudKitOwnedAttachment = {
+/** Which task/project an attachment id belongs to — CloudKit's upload metadata needs the
+ *  owner, which the shared lifecycle's per-attachment callbacks don't carry. Deliberately
+ *  holds no attachment reference: the attachment values come from the lifecycle's own
+ *  working copy, so metadata can never describe a stale pre-patch object. */
+type CloudKitAttachmentOwner = {
     ownerType: 'task' | 'project';
     ownerId: string;
-    attachment: Attachment;
 };
 
-const collectCloudKitOwnedAttachments = (appData: AppData): CloudKitOwnedAttachment[] => {
-    const owned: CloudKitOwnedAttachment[] = [];
+const collectCloudKitAttachmentOwners = (appData: AppData): Map<string, CloudKitAttachmentOwner> => {
+    const owners = new Map<string, CloudKitAttachmentOwner>();
     for (const task of appData.tasks) {
         if (task.deletedAt) continue;
         for (const attachment of task.attachments ?? []) {
-            owned.push({ ownerType: 'task', ownerId: task.id, attachment });
+            owners.set(attachment.id, { ownerType: 'task', ownerId: task.id });
         }
     }
     for (const project of appData.projects) {
         if (project.deletedAt) continue;
         for (const attachment of project.attachments ?? []) {
-            owned.push({ ownerType: 'project', ownerId: project.id, attachment });
+            owners.set(attachment.id, { ownerType: 'project', ownerId: project.id });
         }
     }
-    return owned;
+    return owners;
 };
 
-const buildCloudKitAttachmentMetadata = (owned: CloudKitOwnedAttachment, size?: number): CloudKitAttachmentMetadata => {
-    const { attachment } = owned;
+const buildCloudKitAttachmentMetadata = (
+    attachment: Attachment,
+    owned: CloudKitAttachmentOwner,
+    size?: number,
+): CloudKitAttachmentMetadata => {
     return {
         attachmentId: attachment.id,
         ownerType: owned.ownerType,
@@ -202,10 +211,14 @@ const applyCloudKitAttachmentMetadata = (
     return mutated;
 };
 
-const flushPendingCloudKitAttachmentDeletes = async (appData: AppData): Promise<boolean> => {
+/** The next `settings.attachments` value once the flushed keys are dropped, or `undefined`
+ *  when there was nothing to flush. Never writes to the input settings. */
+const flushPendingCloudKitAttachmentDeletes = async (
+    appData: AppData,
+): Promise<AttachmentSettings | undefined> => {
     const attachmentSettings = appData.settings.attachments;
     const pendingDeletes = attachmentSettings?.pendingRemoteDeletes ?? [];
-    if (!attachmentSettings || pendingDeletes.length === 0) return false;
+    if (!attachmentSettings || pendingDeletes.length === 0) return undefined;
 
     const remaining = [];
     const recordNames: string[] = [];
@@ -217,11 +230,10 @@ const flushPendingCloudKitAttachmentDeletes = async (appData: AppData): Promise<
             remaining.push(pending);
         }
     }
-    if (recordNames.length === 0) return false;
+    if (recordNames.length === 0) return undefined;
 
     await deleteCloudKitAttachmentAssets(recordNames);
-    attachmentSettings.pendingRemoteDeletes = remaining;
-    return true;
+    return { ...attachmentSettings, pendingRemoteDeletes: remaining };
 };
 
 export async function syncWebdavAttachments(
@@ -269,8 +281,16 @@ export async function syncWebdavAttachments(
 
     const baseDataDir = await dataDir();
     const managedAttachmentsDir = await getManagedPath(ATTACHMENTS_DIR_NAME);
-    const workingData = structuredClone(appData);
-    const attachmentsById = collectAttachmentsById(workingData);
+    const attachmentsById = collectAttachmentsById(appData);
+    // Every pass below writes only to per-attachment copies and records them here; the
+    // patches are folded into a fresh document at the end. `attachmentsById` is updated
+    // alongside so a later pass reads the earlier pass's values (#766: this replaces a
+    // full structuredClone of the whole library per cycle).
+    const allPatches = new Map<string, Attachment>();
+    const recordPatch = (attachment: Attachment): void => {
+        allPatches.set(attachment.id, attachment);
+        attachmentsById.set(attachment.id, attachment);
+    };
 
     pruneWebdavDownloadBackoff();
     deps.logSyncInfo('WebDAV attachment sync start', {
@@ -311,7 +331,6 @@ export async function syncWebdavAttachments(
     // if it was deleted directly on the server, clear cloudKey so the lifecycle below re-uploads
     // it. This has to run as its own pass before the lifecycle: it's an async, network-calling,
     // state-mutating check, which doesn't fit the lifecycle's synchronous `hasCloudCopy` predicate.
-    let preMutated = false;
     const maybeYieldPrePass = createCooperativeYield(4);
     for (const attachment of attachmentsById.values()) {
         await maybeYieldPrePass();
@@ -353,8 +372,7 @@ export async function syncWebdavAttachments(
                     exists: remoteExists ? 'true' : 'false',
                 });
                 if (!remoteExists) {
-                    attachment.cloudKey = undefined;
-                    preMutated = true;
+                    recordPatch({ ...attachment, cloudKey: undefined });
                 }
             } catch (error) {
                 if (handleRateLimit(error)) {
@@ -403,7 +421,7 @@ export async function syncWebdavAttachments(
         return true;
     };
 
-    const syncMutated = await syncBasicRemoteAttachments({
+    const { patches } = await syncBasicRemoteAttachments({
         attachmentsById,
         forceUploadExistingLocal: helpers?.activationProbe === true,
         ensureLocalSnapshotFresh: helpers?.ensureLocalSnapshotFresh,
@@ -567,7 +585,9 @@ export async function syncWebdavAttachments(
         },
     });
 
-    const didMutate = preMutated || syncMutated;
+    for (const patch of patches.values()) allPatches.set(patch.id, patch);
+    const nextData = applyAttachmentPatches(appData, allPatches);
+    const didMutate = nextData !== appData;
 
     if (abortedByRateLimit) {
         deps.logSyncWarning('WebDAV attachment sync aborted due to rate limiting');
@@ -575,7 +595,7 @@ export async function syncWebdavAttachments(
     deps.logSyncInfo('WebDAV attachment sync done', {
         mutated: didMutate ? 'true' : 'false',
     });
-    return didMutate ? workingData : null;
+    return didMutate ? nextData : null;
 }
 
 export async function syncCloudAttachments(
@@ -584,7 +604,7 @@ export async function syncCloudAttachments(
     baseSyncUrl: string,
     deps: AttachmentBackendDeps,
     helpers?: SyncRunAttachmentHelpers,
-): Promise<boolean> {
+): Promise<AppData | false> {
     if (!deps.isTauriRuntimeEnv() || !cloudConfig.url) return false;
 
     const fetcher = await deps.getTauriFetch();
@@ -612,7 +632,7 @@ export async function syncCloudAttachments(
     const computeLocalFileHash = async (path: string, attachment: Attachment): Promise<string | null> =>
         computeSha256Hex(await readLocalFile(path, attachment));
 
-    return await syncBasicRemoteAttachments({
+    const { patches } = await syncBasicRemoteAttachments({
         attachmentsById,
         forceUploadExistingLocal: helpers?.activationProbe === true,
         ensureLocalSnapshotFresh: helpers?.ensureLocalSnapshotFresh,
@@ -734,6 +754,9 @@ export async function syncCloudAttachments(
             deps.logSyncWarning(`Failed to download attachment ${attachment.title}`, error);
         },
     });
+
+    const nextData = applyAttachmentPatches(appData, patches);
+    return nextData !== appData ? nextData : false;
 }
 
 export async function syncDropboxAttachments(
@@ -741,7 +764,7 @@ export async function syncDropboxAttachments(
     resolveAccessToken: (forceRefresh?: boolean) => Promise<string>,
     deps: AttachmentBackendDeps,
     helpers?: SyncRunAttachmentHelpers,
-): Promise<boolean> {
+): Promise<AppData | false> {
     if (!deps.isTauriRuntimeEnv()) return false;
 
     const fetcher = await deps.getTauriFetch();
@@ -781,7 +804,7 @@ export async function syncDropboxAttachments(
     const computeLocalFileHash = async (path: string, attachment: Attachment): Promise<string | null> =>
         computeSha256Hex(await readLocalFile(path, attachment));
 
-    return await syncBasicRemoteAttachments({
+    const { patches } = await syncBasicRemoteAttachments({
         attachmentsById,
         forceUploadExistingLocal: helpers?.activationProbe === true,
         ensureLocalSnapshotFresh: helpers?.ensureLocalSnapshotFresh,
@@ -896,13 +919,16 @@ export async function syncDropboxAttachments(
             deps.logSyncWarning(`Failed to download attachment ${attachment.title}`, error);
         },
     });
+
+    const nextData = applyAttachmentPatches(appData, patches);
+    return nextData !== appData ? nextData : false;
 }
 
 export async function syncCloudKitAttachments(
     appData: AppData,
     deps: AttachmentBackendDeps,
     helpers?: SyncRunAttachmentHelpers,
-): Promise<boolean> {
+): Promise<AppData | false> {
     if (!deps.isTauriRuntimeEnv()) return false;
 
     const { BaseDirectory, exists, mkdir, readFile, stat } = await import('@tauri-apps/plugin-fs');
@@ -917,13 +943,8 @@ export async function syncCloudKitAttachments(
     const baseDataDir = await dataDir();
     const managedAttachmentsDir = await getManagedPath(ATTACHMENTS_DIR_NAME);
     const attachmentsById = collectAttachmentsById(appData);
-    // Same task/project walk as `attachmentsById`, kept as its own owner-tagged list because
-    // CloudKit's upload metadata needs the owning task/project id, which the shared lifecycle's
-    // per-attachment callbacks don't carry.
-    const ownedByAttachmentId = new Map(
-        collectCloudKitOwnedAttachments(appData).map((owned) => [owned.attachment.id, owned]),
-    );
-    const flushMutated = await flushPendingCloudKitAttachmentDeletes(appData);
+    const ownerByAttachmentId = collectCloudKitAttachmentOwners(appData);
+    const settingsPatch = await flushPendingCloudKitAttachmentDeletes(appData);
 
     const { readLocalFile, localFileExists, statLocalFile } = createLocalAttachmentFs(
         deps.logSyncWarning,
@@ -937,7 +958,7 @@ export async function syncCloudKitAttachments(
         count: String(attachmentsById.size),
     });
 
-    const syncMutated = await syncBasicRemoteAttachments({
+    const { patches } = await syncBasicRemoteAttachments({
         attachmentsById,
         forceUploadExistingLocal: helpers?.activationProbe === true,
         ensureLocalSnapshotFresh: helpers?.ensureLocalSnapshotFresh,
@@ -949,7 +970,7 @@ export async function syncCloudKitAttachments(
         // CloudKit record key, so CloudKit must still treat the attachment as needing upload.
         hasCloudCopy: (attachment) => Boolean(parseCloudKitAttachmentKey(attachment.cloudKey)),
         onUpload: async (attachment, localPath) => {
-            const owned = ownedByAttachmentId.get(attachment.id);
+            const owned = ownerByAttachmentId.get(attachment.id);
             if (!owned) return false;
             const fileData = await readLocalFile(localPath, attachment);
             const validation = await validateAttachmentForUpload(attachment, fileData.length);
@@ -969,7 +990,7 @@ export async function syncCloudKitAttachments(
 
             clearAttachmentValidationFailure(attachment.id);
             reportProgress(attachment.id, 'upload', 0, fileData.length, 'active');
-            const metadata = buildCloudKitAttachmentMetadata(owned, fileData.length);
+            const metadata = buildCloudKitAttachmentMetadata(attachment, owned, fileData.length);
             const savedMetadata = await saveCloudKitAttachmentAsset(attachment.id, localPath, metadata);
             attachment.cloudKey = buildCloudKitAttachmentKey(attachment.id);
             attachment.localStatus = 'available';
@@ -1017,12 +1038,13 @@ export async function syncCloudKitAttachments(
         },
     });
 
-    const didMutate = flushMutated || syncMutated;
+    const nextData = withAttachmentSettingsPatch(applyAttachmentPatches(appData, patches), settingsPatch);
+    const didMutate = nextData !== appData;
     deps.logSyncInfo('CloudKit attachment sync done', {
         mutated: didMutate ? 'true' : 'false',
     });
 
-    return didMutate;
+    return didMutate ? nextData : false;
 }
 
 export async function syncFileAttachments(
@@ -1030,7 +1052,7 @@ export async function syncFileAttachments(
     baseSyncDir: string,
     deps: AttachmentBackendDeps,
     helpers?: SyncRunAttachmentHelpers,
-): Promise<boolean> {
+): Promise<AppData | false> {
     if (!deps.isTauriRuntimeEnv() || !baseSyncDir) return false;
 
     // #1037: every fs call below can land on the sync folder, which may be a
@@ -1080,7 +1102,7 @@ export async function syncFileAttachments(
     // previous sync folder (or a file deleted from this one) must not stop
     // the copy into the current folder. Clearing it lets the lifecycle below
     // re-upload; only cleared when a local copy exists to upload from (#1001).
-    let preMutated = false;
+    const allPatches = new Map<string, Attachment>();
     for (const attachment of attachmentsById.values()) {
         if (attachment.kind !== 'file' || attachment.deletedAt || !attachment.cloudKey) continue;
         const rawUri = attachment.uri ? stripFileScheme(attachment.uri) : '';
@@ -1089,15 +1111,16 @@ export async function syncFileAttachments(
         try {
             const remotePath = await resolveFileBackendPath(join, baseSyncDir, attachment.cloudKey);
             if (!(await syncFsExists(remotePath))) {
-                attachment.cloudKey = undefined;
-                preMutated = true;
+                const patched: Attachment = { ...attachment, cloudKey: undefined };
+                allPatches.set(patched.id, patched);
+                attachmentsById.set(patched.id, patched);
             }
         } catch (error) {
             deps.logSyncWarning('Failed to check sync-folder attachment presence', error);
         }
     }
 
-    const syncMutated = await syncBasicRemoteAttachments({
+    const { patches } = await syncBasicRemoteAttachments({
         attachmentsById,
         forceUploadExistingLocal: helpers?.activationProbe === true,
         ensureLocalSnapshotFresh: helpers?.ensureLocalSnapshotFresh,
@@ -1162,5 +1185,8 @@ export async function syncFileAttachments(
             deps.logSyncWarning(`Failed to copy attachment ${attachment.title} from sync folder`, error);
         },
     });
-    return preMutated || syncMutated;
+
+    for (const patch of patches.values()) allPatches.set(patch.id, patch);
+    const nextData = applyAttachmentPatches(appData, allPatches);
+    return nextData !== appData ? nextData : false;
 }

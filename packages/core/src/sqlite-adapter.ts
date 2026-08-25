@@ -234,8 +234,9 @@ export { taskToSqliteRow };
 // Serialized row + fingerprint cache keyed by task object identity. Store and
 // sync updates are immutable — a changed task is a new object — and
 // taskToSqliteRow is pure, so an unchanged object always serializes to the
-// same row. The one in-place writer, the attachment transfer lifecycle
-// (attachment-transfer.ts), operates on cloned AppData for this reason.
+// same row. The attachment transfer lifecycle (attachment-transfer.ts) upholds
+// this by never mutating in place: it returns patches that applyAttachmentPatches
+// folds into fresh owner objects, so only genuinely changed rows re-serialize.
 // This turns the per-save serialization/fingerprint pass over every
 // task into a lookup for unchanged rows, which dominated saveData time on
 // large mobile libraries (#766).

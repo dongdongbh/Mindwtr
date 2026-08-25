@@ -1,5 +1,5 @@
-import type { AppData, SyncKeyMaterial } from '@mindwtr/core';
-import { validateAttachmentForUpload } from '@mindwtr/core';
+import type { AppData, Attachment, SyncKeyMaterial } from '@mindwtr/core';
+import { applyAttachmentPatches, validateAttachmentForUpload } from '@mindwtr/core';
 import * as FileSystem from '../file-system';
 import {
   buildCloudKey,
@@ -41,7 +41,7 @@ export const syncFileAttachments = async (
     /** #1056: seal bytes before they land in the sync folder. Null = encryption off. */
     material?: SyncKeyMaterial | null;
   } = {}
-): Promise<boolean> => {
+): Promise<AppData | false> => {
   assertAttachmentSyncNotAborted(signal);
   const syncDir = await resolveFileSyncDir(syncPath);
   if (!syncDir) return false;
@@ -72,12 +72,16 @@ export const syncFileAttachments = async (
   // remote presence checked here regardless of cloudKey state; if missing, clearing cloudKey
   // lets the lifecycle below re-upload it through its normal hasCloudCopy-false path.
   const migrateAttachmentLocally = createAttachmentLocalMigrationLimiter();
-  let didMutate = false;
-  for (const attachment of attachmentsById.values()) {
+  // Both steps write only to a per-attachment working copy, recorded here and put back into
+  // `attachmentsById` so the lifecycle below reads the pre-pass's values.
+  const allPatches = new Map<string, Attachment>();
+  for (const original of attachmentsById.values()) {
     assertAttachmentSyncNotAborted(signal);
-    if (attachment.kind !== 'file' || attachment.deletedAt) continue;
+    if (original.kind !== 'file' || original.deletedAt) continue;
+    const attachment: Attachment = { ...original };
+    let patched = false;
     const localMigration = await migrateAttachmentLocally(attachment);
-    if (localMigration.migrated) didMutate = true;
+    if (localMigration.migrated) patched = true;
     if (localMigration.skipped) {
       attachmentsById.delete(attachment.id);
       continue;
@@ -86,21 +90,26 @@ export const syncFileAttachments = async (
     const uri = attachment.uri || '';
     const isHttp = isHttpAttachmentUri(uri);
     const hasLocal = Boolean(uri) && !isHttp;
-    if (!hasLocal) continue;
-    if (!(await fileExists(uri))) continue;
+    if (hasLocal && (await fileExists(uri))) {
+      const cloudKey = attachment.cloudKey || buildCloudKey(attachment);
+      const filename = remoteFilenameFor(cloudKey, attachment);
+      const remoteExists =
+        syncDir.type === 'file'
+          ? await fileExists(`${syncDir.attachmentsDirUri}${filename}`)
+          : (await getSafEntriesByName()).has(filename);
+      if (!remoteExists && attachment.cloudKey !== undefined) {
+        attachment.cloudKey = undefined;
+        patched = true;
+      }
+    }
 
-    const cloudKey = attachment.cloudKey || buildCloudKey(attachment);
-    const filename = remoteFilenameFor(cloudKey, attachment);
-    const remoteExists =
-      syncDir.type === 'file'
-        ? await fileExists(`${syncDir.attachmentsDirUri}${filename}`)
-        : (await getSafEntriesByName()).has(filename);
-    if (!remoteExists) {
-      attachment.cloudKey = undefined;
+    if (patched) {
+      allPatches.set(attachment.id, attachment);
+      attachmentsById.set(attachment.id, attachment);
     }
   }
 
-  const syncMutated = await runMobileAttachmentLifecycle({
+  const { patches } = await runMobileAttachmentLifecycle({
     attachmentsById,
     localFileExists: fileExists,
     forceUploadExistingLocal: options.activationProbe === true,
@@ -186,5 +195,7 @@ export const syncFileAttachments = async (
     },
   });
 
-  return didMutate || syncMutated;
+  for (const patch of patches.values()) allPatches.set(patch.id, patch);
+  const nextData = applyAttachmentPatches(appData, allPatches);
+  return nextData !== appData ? nextData : false;
 };

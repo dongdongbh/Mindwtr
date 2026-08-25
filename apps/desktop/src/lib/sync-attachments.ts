@@ -1,6 +1,7 @@
 import {
     runAttachmentTransferLifecycle,
     type AttachmentTransferLifecycleOptions,
+    type AttachmentTransferResult,
 } from '@mindwtr/core';
 import {
     createCooperativeYield,
@@ -31,10 +32,15 @@ type BasicRemoteAttachmentSyncOptions = Omit<
     ensureLocalSnapshotFresh?: () => void;
 };
 
+/**
+ * Reports changes as attachment patches; it never writes to the objects it is given.
+ * Callers fold the patches into a fresh document with `applyAttachmentPatches` and
+ * return that.
+ */
 export async function syncBasicRemoteAttachments({
     ensureLocalSnapshotFresh,
     ...options
-}: BasicRemoteAttachmentSyncOptions): Promise<boolean> {
+}: BasicRemoteAttachmentSyncOptions): Promise<AttachmentTransferResult> {
     const maybeYield = createCooperativeYield(4);
     return await runAttachmentTransferLifecycle({
         ...options,

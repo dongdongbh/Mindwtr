@@ -7,6 +7,7 @@ import {
   SyncCryptoUnsupportedError,
   SyncEncryptionTerminalError,
   type AttachmentTransferLifecycleOptions,
+  type AttachmentTransferResult,
 } from '@mindwtr/core';
 import * as FileSystem from '../file-system';
 import {
@@ -123,10 +124,13 @@ export const isAttachmentSyncAbortError = (error: unknown, signal?: AbortSignal)
  * `file://`/`content://` scheme) — unlike Tauri's native absolute paths, there's nothing to
  * strip, so `resolveLocalPath` is the identity function rather than the core default (which
  * strips `file://`).
+ *
+ * Like core's lifecycle it never writes to the attachments it is given: changes come back as
+ * patches for `applyAttachmentPatches` to fold into a fresh document.
  */
 export async function runMobileAttachmentLifecycle(
   options: Omit<AttachmentTransferLifecycleOptions, 'resolveLocalPath' | 'canUploadFrom'>
-): Promise<boolean> {
+): Promise<AttachmentTransferResult> {
   return await runAttachmentTransferLifecycle({
     ...options,
     resolveLocalPath: (uri) => uri,
@@ -143,21 +147,29 @@ export async function runMobileAttachmentLifecycle(
  * (lifecycle or bespoke loop) touches it again this round. A migration attempt that fails
  * (rather than being capped) leaves the attachment in the map with its uri unchanged, so the
  * caller still tries to upload/copy straight from wherever the file currently lives.
+ *
+ * Pure with respect to the document: the migration writes to a per-attachment working copy,
+ * which is returned as a patch AND put back into `attachmentsById` so the lifecycle (or a
+ * bespoke loop) that runs next reads the migrated uri.
  */
 export const migrateAttachmentsLocallyBeforeSync = async (
   attachmentsById: Map<string, Attachment>,
   signal?: AbortSignal
-): Promise<boolean> => {
+): Promise<Map<string, Attachment>> => {
   const migrateAttachmentLocally = createAttachmentLocalMigrationLimiter();
-  let didMutate = false;
-  for (const attachment of attachmentsById.values()) {
+  const patches = new Map<string, Attachment>();
+  for (const original of attachmentsById.values()) {
     assertAttachmentSyncNotAborted(signal);
-    if (attachment.kind !== 'file' || attachment.deletedAt) continue;
+    if (original.kind !== 'file' || original.deletedAt) continue;
+    const attachment: Attachment = { ...original };
     const result = await migrateAttachmentLocally(attachment);
-    if (result.migrated) didMutate = true;
+    if (result.migrated) {
+      patches.set(attachment.id, attachment);
+      attachmentsById.set(attachment.id, attachment);
+    }
     if (result.skipped) attachmentsById.delete(attachment.id);
   }
-  return didMutate;
+  return patches;
 };
 
 export const waitForAttachmentSyncDelay = async (ms: number, signal?: AbortSignal): Promise<void> => {

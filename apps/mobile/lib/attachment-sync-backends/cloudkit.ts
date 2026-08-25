@@ -1,5 +1,11 @@
-import type { AppData, Attachment } from '@mindwtr/core';
-import { buildCloudKitAttachmentKey, parseCloudKitAttachmentKey, validateAttachmentForUpload } from '@mindwtr/core';
+import type { AppData, Attachment, AttachmentSettings } from '@mindwtr/core';
+import {
+    applyAttachmentPatches,
+    buildCloudKitAttachmentKey,
+    parseCloudKitAttachmentKey,
+    validateAttachmentForUpload,
+    withAttachmentSettingsPatch,
+} from '@mindwtr/core';
 import {
     deleteCloudKitAttachmentAssets,
     fetchCloudKitAttachmentAsset,
@@ -29,27 +35,30 @@ import {
     runMobileAttachmentLifecycle,
 } from './common';
 
-type OwnedAttachment = {
+/** Which task/project an attachment id belongs to — CloudKit's upload metadata needs the
+ *  owner, which the shared lifecycle's per-attachment callbacks don't carry. Deliberately
+ *  holds no attachment reference: the attachment values come from the lifecycle's own
+ *  working copy, so metadata can never describe a stale pre-patch object. */
+type AttachmentOwner = {
     ownerType: 'task' | 'project';
     ownerId: string;
-    attachment: Attachment;
 };
 
-const collectOwnedAttachments = (appData: AppData): OwnedAttachment[] => {
-    const owned: OwnedAttachment[] = [];
+const collectAttachmentOwners = (appData: AppData): Map<string, AttachmentOwner> => {
+    const owners = new Map<string, AttachmentOwner>();
     for (const task of appData.tasks) {
         if (task.deletedAt) continue;
         for (const attachment of task.attachments ?? []) {
-            owned.push({ ownerType: 'task', ownerId: task.id, attachment });
+            owners.set(attachment.id, { ownerType: 'task', ownerId: task.id });
         }
     }
     for (const project of appData.projects) {
         if (project.deletedAt) continue;
         for (const attachment of project.attachments ?? []) {
-            owned.push({ ownerType: 'project', ownerId: project.id, attachment });
+            owners.set(attachment.id, { ownerType: 'project', ownerId: project.id });
         }
     }
-    return owned;
+    return owners;
 };
 
 const buildTargetUri = (attachmentsDir: string, attachment: Attachment): string => {
@@ -86,16 +95,20 @@ const ensureCloudKitAssetFile = async (
     return { uri: targetUri, size: result.data.byteLength, mutated: true };
 };
 
-const buildMetadata = (owned: OwnedAttachment, fileSize: number | null): CloudKitAttachmentMetadata => ({
-    attachmentId: owned.attachment.id,
+const buildMetadata = (
+    attachment: Attachment,
+    owned: AttachmentOwner,
+    fileSize: number | null,
+): CloudKitAttachmentMetadata => ({
+    attachmentId: attachment.id,
     ownerType: owned.ownerType,
     ownerId: owned.ownerId,
-    title: owned.attachment.title,
-    ...(owned.attachment.mimeType ? { mimeType: owned.attachment.mimeType } : {}),
+    title: attachment.title,
+    ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
     ...(Number.isFinite(fileSize ?? NaN) ? { size: fileSize as number } : {}),
-    ...(owned.attachment.fileHash ? { fileHash: owned.attachment.fileHash } : {}),
-    updatedAt: owned.attachment.updatedAt,
-    ...(owned.attachment.deletedAt ? { deletedAt: owned.attachment.deletedAt } : {}),
+    ...(attachment.fileHash ? { fileHash: attachment.fileHash } : {}),
+    updatedAt: attachment.updatedAt,
+    ...(attachment.deletedAt ? { deletedAt: attachment.deletedAt } : {}),
 });
 
 const applyFetchedMetadata = (attachment: Attachment, metadata: CloudKitAttachmentMetadata): void => {
@@ -105,7 +118,12 @@ const applyFetchedMetadata = (attachment: Attachment, metadata: CloudKitAttachme
     if (metadata.fileHash) attachment.fileHash = metadata.fileHash;
 };
 
-const flushPendingCloudKitDeletes = async (appData: AppData, signal?: AbortSignal): Promise<boolean> => {
+/** The next `settings.attachments` value once the flushed keys are dropped, or `undefined`
+ *  when there was nothing to flush. Never writes to the input settings. */
+const flushPendingCloudKitDeletes = async (
+    appData: AppData,
+    signal?: AbortSignal,
+): Promise<AttachmentSettings | undefined> => {
     const pendingDeletes = appData.settings.attachments?.pendingRemoteDeletes ?? [];
     const recordNames: string[] = [];
     const remaining = [];
@@ -116,39 +134,38 @@ const flushPendingCloudKitDeletes = async (appData: AppData, signal?: AbortSigna
         else remaining.push(pending);
     }
 
-    if (recordNames.length === 0) return false;
+    if (recordNames.length === 0) return undefined;
     assertAttachmentSyncNotAborted(signal);
     await deleteCloudKitAttachmentAssets(recordNames, { signal });
 
-    appData.settings.attachments = {
+    return {
         ...(appData.settings.attachments ?? {}),
         pendingRemoteDeletes: remaining.length > 0 ? remaining : undefined,
     };
-    return true;
 };
 
 export const syncCloudKitAttachments = async (
     appData: AppData,
     signal?: AbortSignal,
     options: { activationProbe?: boolean; phase?: 'prepare' | 'post-merge' } = {},
-): Promise<boolean> => {
+): Promise<AppData | false> => {
     assertAttachmentSyncNotAborted(signal);
     const attachmentsDir = await getAttachmentsDir();
     if (!attachmentsDir) return false;
 
-    let didMutate = await flushPendingCloudKitDeletes(appData, signal);
+    const settingsPatch = await flushPendingCloudKitDeletes(appData, signal);
+    /** Fold both channels (attachment patches + settings) into one fresh document. */
+    const fold = (patches: Map<string, Attachment>): AppData | false => {
+        const next = withAttachmentSettingsPatch(applyAttachmentPatches(appData, patches), settingsPatch);
+        return next !== appData ? next : false;
+    };
+
     const attachmentsById = collectAttachments(appData);
-    if (attachmentsById.size === 0) return didMutate;
-    didMutate = (await migrateAttachmentsLocallyBeforeSync(attachmentsById, signal)) || didMutate;
+    if (attachmentsById.size === 0) return fold(new Map());
+    const allPatches = await migrateAttachmentsLocallyBeforeSync(attachmentsById, signal);
+    const ownerByAttachmentId = collectAttachmentOwners(appData);
 
-    // Same task/project walk as `attachmentsById`, kept as its own owner-tagged list because
-    // CloudKit's upload metadata needs the owning task/project id, which the shared lifecycle's
-    // per-attachment callbacks don't carry.
-    const ownedByAttachmentId = new Map(
-        collectOwnedAttachments(appData).map((owned) => [owned.attachment.id, owned]),
-    );
-
-    const syncMutated = await runMobileAttachmentLifecycle({
+    const { patches } = await runMobileAttachmentLifecycle({
         attachmentsById,
         localFileExists: fileExists,
         forceUploadExistingLocal: options.activationProbe === true,
@@ -160,10 +177,16 @@ export const syncCloudKitAttachments = async (
         // CloudKit record key, so CloudKit must still treat the attachment as needing upload.
         hasCloudCopy: (attachment) => Boolean(parseCloudKitAttachmentKey(attachment.cloudKey)),
         onUpload: async (attachment, localPath) => {
-            const owned = ownedByAttachmentId.get(attachment.id);
+            const owned = ownerByAttachmentId.get(attachment.id);
             if (!owned) return false;
+            // A local content:// → managed-file migration must survive an upload
+            // failure (the bytes ARE in the managed dir), so its mutated flag is
+            // reported from the catch too — mirroring the validation-failure
+            // branch below.
+            let migrated = false;
             try {
                 const assetFile = await ensureCloudKitAssetFile(attachment, localPath, attachmentsDir, signal);
+                migrated = assetFile.mutated;
                 const validation = await validateAttachmentForUpload(attachment, assetFile.size ?? attachment.size);
                 if (!validation.valid) {
                     reportProgress(attachment.id, 'upload', 0, attachment.size ?? 0, 'failed', validation.error);
@@ -176,7 +199,7 @@ export const syncCloudKitAttachments = async (
                 await saveCloudKitAttachmentAsset(
                     attachment.id,
                     assetFile.uri,
-                    buildMetadata(owned, assetFile.size),
+                    buildMetadata(attachment, owned, assetFile.size),
                     { signal },
                 );
                 attachment.cloudKey = buildCloudKitAttachmentKey(attachment.id);
@@ -196,7 +219,7 @@ export const syncCloudKitAttachments = async (
                     error instanceof Error ? error.message : String(error),
                 );
                 logAttachmentWarn(`Failed to upload CloudKit attachment ${attachment.id}`, error);
-                return false;
+                return migrated;
             }
         },
         onUploadError: () => {
@@ -234,5 +257,6 @@ export const syncCloudKitAttachments = async (
         onDownloadError: () => {},
     });
 
-    return didMutate || syncMutated;
+    for (const patch of patches.values()) allPatches.set(patch.id, patch);
+    return fold(allPatches);
 };

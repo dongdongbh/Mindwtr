@@ -729,16 +729,19 @@ class SharedSyncRunMachine {
             if (isRemoteSyncBackend(this.backend)) {
                 await this.ensureNetwork();
             }
-            const candidateData = cloneAppData(currentData);
-            const result = await io.syncAttachments(candidateData, this.attachmentHelpers('post-merge'));
+            // No defensive clone: the attachment backends are pure (they return a folded
+            // document instead of writing to this one), so cloning a whole library here was
+            // dead weight that also invalidated the storage layer's identity-keyed row cache
+            // for every unchanged row (#766).
+            const result = await io.syncAttachments(currentData, this.attachmentHelpers('post-merge'));
             const nextData = result && typeof result === 'object'
                 ? result
                 : result
-                    ? candidateData
+                    ? currentData
                     : null;
             this.notifier.onDiagnostic?.({
                 event: 'attachment-sync-applied',
-                data: nextData ?? candidateData,
+                data: nextData ?? currentData,
                 extra: { mutated: String(Boolean(nextData)) },
             });
             if (nextData) {

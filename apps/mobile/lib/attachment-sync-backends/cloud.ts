@@ -1,5 +1,12 @@
 import type { AppData } from '@mindwtr/core';
-import { cloudDeleteFile, cloudPutFile, isAbortError, validateAttachmentForUpload, type Attachment } from '@mindwtr/core';
+import {
+  applyAttachmentPatches,
+  cloudDeleteFile,
+  cloudPutFile,
+  isAbortError,
+  validateAttachmentForUpload,
+  type Attachment,
+} from '@mindwtr/core';
 import { logAttachmentWarn } from '../attachment-sync-utils';
 import {
   buildCloudKey,
@@ -53,11 +60,18 @@ export const syncCloudAttachments = async (
   cloudConfig: CloudConfig,
   baseSyncUrl: string,
   options: CloudAttachmentSyncOptions = {}
-): Promise<boolean> => {
+): Promise<AppData | false> => {
   await getAttachmentsDir();
 
   const attachmentsById = collectAttachments(appData);
-  let didMutate = await migrateAttachmentsLocallyBeforeSync(attachmentsById, options.signal);
+  // This backend runs its own loop rather than the shared lifecycle, so it does the same
+  // bookkeeping by hand: write to a per-attachment working copy, record it here, and put it
+  // back into `attachmentsById`. The patches are folded into a fresh document at the end.
+  const allPatches = await migrateAttachmentsLocallyBeforeSync(attachmentsById, options.signal);
+  const recordPatch = (attachment: Attachment): void => {
+    allPatches.set(attachment.id, attachment);
+    attachmentsById.set(attachment.id, attachment);
+  };
 
   const pendingUploadMutations: PendingCloudUploadMutation[] = [];
 
@@ -76,9 +90,11 @@ export const syncCloudAttachments = async (
     pendingUploadMutations.length = 0;
   };
 
-  for (const attachment of attachmentsById.values()) {
-    if (attachment.kind !== 'file') continue;
-    if (attachment.deletedAt) continue;
+  for (const original of attachmentsById.values()) {
+    if (original.kind !== 'file') continue;
+    if (original.deletedAt) continue;
+
+    const attachment: Attachment = { ...original };
 
     const uri = attachment.uri || '';
     const isHttp = isHttpAttachmentUri(uri);
@@ -87,12 +103,12 @@ export const syncCloudAttachments = async (
     const nextStatus = getAttachmentLocalStatus(uri, existsLocally);
     if (attachment.localStatus !== nextStatus) {
       attachment.localStatus = nextStatus;
-      didMutate = true;
+      recordPatch(attachment);
     }
 
     if (options.activationProbe && existsLocally && attachment.cloudKey) {
       attachment.cloudKey = undefined;
-      didMutate = true;
+      recordPatch(attachment);
     }
 
     // SEC-07: same containment the shared lifecycle applies via `canUploadFrom`.
@@ -187,7 +203,7 @@ export const syncCloudAttachments = async (
         }
         if (localReadFailed) {
           if (markAttachmentUnrecoverable(attachment)) {
-            didMutate = true;
+            recordPatch(attachment);
           }
           logAttachmentWarn(`Attachment local file is unreadable; marking unrecoverable (${attachment.id})`, error);
         }
@@ -210,9 +226,10 @@ export const syncCloudAttachments = async (
       pending.attachment.size = Number(pending.fileSize);
     }
     pending.attachment.localStatus = 'available';
-    didMutate = true;
+    recordPatch(pending.attachment);
     reportProgress(pending.attachment.id, 'upload', pending.totalBytes, pending.totalBytes, 'completed');
   }
 
-  return didMutate;
+  const nextData = applyAttachmentPatches(appData, allPatches);
+  return nextData !== appData ? nextData : false;
 };

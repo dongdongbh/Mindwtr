@@ -5,6 +5,7 @@ import {
     clearAttachmentSyncState,
     syncCloudAttachments,
     syncCloudKitAttachments,
+    syncDropboxAttachments,
     syncFileAttachments,
     syncWebdavAttachments,
     type AttachmentBackendDeps,
@@ -51,6 +52,11 @@ const cloudKitMocks = vi.hoisted(() => ({
     saveCloudKitAttachmentAsset: vi.fn(),
 }));
 
+const dropboxMocks = vi.hoisted(() => ({
+    downloadDropboxFile: vi.fn(),
+    uploadDropboxFile: vi.fn(),
+}));
+
 vi.mock('@mindwtr/core', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@mindwtr/core')>();
     return {
@@ -64,6 +70,26 @@ vi.mock('@tauri-apps/plugin-fs', () => fsMocks);
 vi.mock('./sync-fs', () => syncFsMocks);
 vi.mock('@tauri-apps/api/path', () => pathMocks);
 vi.mock('./cloudkit-sync', () => cloudKitMocks);
+vi.mock('./dropbox-sync', () => ({
+    downloadDropboxFile: dropboxMocks.downloadDropboxFile,
+    uploadDropboxFile: dropboxMocks.uploadDropboxFile,
+    DropboxFileNotFoundError: class DropboxFileNotFoundError extends Error {},
+    DropboxUnauthorizedError: class DropboxUnauthorizedError extends Error {},
+}));
+
+/** Backends now return the folded document instead of mutating the one they were given. */
+const expectFoldedData = (result: AppData | boolean | null | undefined): AppData => {
+    expect(typeof result === 'object' && result !== null).toBe(true);
+    return result as AppData;
+};
+
+const deepFreeze = <T>(value: T): T => {
+    if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+        Object.freeze(value);
+        for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
+    }
+    return value;
+};
 
 const errorResponse = (status: number, statusText: string): Response =>
     ({
@@ -167,16 +193,16 @@ describe('desktop sync attachment backends', () => {
             resolveWebdavPassword: vi.fn(),
         };
 
-        await expect(
-            syncCloudAttachments(
-                appData,
-                { url: 'https://cloud.example/v1/data', token: 'token' },
-                'https://cloud.example/v1',
-                deps,
-            ),
-        ).resolves.toBe(true);
+        const result = await syncCloudAttachments(
+            appData,
+            { url: 'https://cloud.example/v1/data', token: 'token' },
+            'https://cloud.example/v1',
+            deps,
+        );
 
-        const attachment = appData.tasks[0].attachments?.[0];
+        const attachment = expectFoldedData(result).tasks[0].attachments?.[0];
+        // The document handed in is never written to.
+        expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.jpg');
         expect(fetcher).toHaveBeenCalledTimes(1);
         expect(attachment?.cloudKey).toBeUndefined();
         expect(attachment?.fileHash).toBeUndefined();
@@ -240,16 +266,15 @@ describe('desktop sync attachment backends', () => {
             return bytes;
         });
 
-        await expect(
-            syncCloudAttachments(
-                appData,
-                { url: 'http://cloud.local/v1/data', token: 'token', allowInsecureHttp: true },
-                'http://cloud.local/v1',
-                deps,
-            ),
-        ).resolves.toBe(true);
+        const result = await syncCloudAttachments(
+            appData,
+            { url: 'http://cloud.local/v1/data', token: 'token', allowInsecureHttp: true },
+            'http://cloud.local/v1',
+            deps,
+        );
 
-        const attachment = appData.tasks[0].attachments?.[0];
+        const attachment = expectFoldedData(result).tasks[0].attachments?.[0];
+        expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
         // Inside the profile root, so the read is scoped to the data dir; the drive-letter
         // form still has to be recognised as such for that to happen at all.
         expect(fsMocks.exists).toHaveBeenCalledWith(relativePath, { baseDir: fsMocks.BaseDirectory.Data });
@@ -280,7 +305,7 @@ describe('desktop sync attachment backends', () => {
         fsMocks.exists.mockResolvedValue(true);
         fsMocks.readFile.mockResolvedValue(bytes);
 
-        await syncCloudAttachments(
+        const result = await syncCloudAttachments(
             appData,
             { url: 'https://candidate.example/v1/data', token: 'candidate-token' },
             'https://candidate.example/v1',
@@ -292,7 +317,7 @@ describe('desktop sync attachment backends', () => {
             'https://candidate.example/v1/attachments/attachment-1.txt',
             expect.objectContaining({ method: 'PUT' }),
         );
-        expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
+        expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
     });
 
     it('clears stale candidate proof when an activation-probe attachment upload fails', async () => {
@@ -308,7 +333,7 @@ describe('desktop sync attachment backends', () => {
         fsMocks.exists.mockResolvedValue(true);
         fsMocks.readFile.mockResolvedValue(new Uint8Array([1, 2, 3]));
 
-        await syncCloudAttachments(
+        const result = await syncCloudAttachments(
             appData,
             { url: 'https://candidate.example/v1/data', token: 'candidate-token' },
             'https://candidate.example/v1',
@@ -320,7 +345,8 @@ describe('desktop sync attachment backends', () => {
             'https://candidate.example/v1/attachments/attachment-1.txt',
             expect.objectContaining({ method: 'PUT' }),
         );
-        expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
+        expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
+        expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
     });
 
     it('re-copies a locally available attachment with an old cloud key during a file activation probe', async () => {
@@ -336,7 +362,7 @@ describe('desktop sync attachment backends', () => {
         syncFsMocks.exists.mockResolvedValue(true);
         fsMocks.readFile.mockResolvedValue(bytes);
 
-        await syncFileAttachments(
+        const result = await syncFileAttachments(
             appData,
             '/candidate-sync',
             deps,
@@ -354,7 +380,7 @@ describe('desktop sync attachment backends', () => {
             expect.stringMatching(/^\/candidate-sync\/attachments\/attachment-1\.txt\.tmp-/),
             '/candidate-sync/attachments/attachment-1.txt',
         );
-        expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
+        expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
     });
 
     it('re-copies a locally available attachment into a sync folder that is missing it on a regular sync', async () => {
@@ -379,8 +405,7 @@ describe('desktop sync attachment backends', () => {
             expect.stringMatching(/^\/candidate-sync\/attachments\/attachment-1\.txt\.tmp-/),
             '/candidate-sync/attachments/attachment-1.txt',
         );
-        expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
-        expect(mutated).toBe(true);
+        expect(expectFoldedData(mutated).tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
         // The sync folder is only ever touched off the main thread (#1037). The fs
         // plugin is still how the app reads its OWN data dir, so the assertion names
         // the sync folder rather than banning the plugin outright.
@@ -403,9 +428,10 @@ describe('desktop sync attachment backends', () => {
         syncFsMocks.exists.mockResolvedValue(false);
         fsMocks.exists.mockResolvedValue(false);
 
-        await syncFileAttachments(appData, '/candidate-sync', deps);
+        const result = await syncFileAttachments(appData, '/candidate-sync', deps);
 
-        expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
+        // localStatus reconciles to 'missing', but the cloud key survives on the folded copy.
+        expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
         expect(fsMocks.writeFile).not.toHaveBeenCalled();
         // The sync folder is only ever stat'd off the main thread (#1037); reads of the
         // app's own data dir legitimately go through the fs plugin.
@@ -794,9 +820,9 @@ describe('desktop sync attachment backends', () => {
             updatedAt: '2026-06-07T00:00:00.000Z',
         });
 
-        await expect(syncCloudKitAttachments(appData, deps)).resolves.toBe(true);
+        const result = expectFoldedData(await syncCloudKitAttachments(appData, deps));
 
-        const attachment = appData.tasks[0].attachments?.[0];
+        const attachment = result.tasks[0].attachments?.[0];
         expect(cloudKitMocks.deleteCloudKitAttachmentAssets).toHaveBeenCalledWith(['old-attachment']);
         expect(cloudKitMocks.saveCloudKitAttachmentAsset).toHaveBeenCalledWith(
             'attachment-1',
@@ -812,9 +838,113 @@ describe('desktop sync attachment backends', () => {
         expect(attachment?.cloudKey).toBe('cloudkit:attachment-1');
         expect(attachment?.localStatus).toBe('available');
         expect(attachment?.size).toBe(3);
-        expect(appData.settings.attachments?.pendingRemoteDeletes).toEqual([
+        expect(result.settings.attachments?.pendingRemoteDeletes).toEqual([
             { cloudKey: 'attachments/legacy-file.jpg' },
         ]);
+        // The input document keeps both pending deletes and its un-uploaded attachment.
+        expect(appData.settings.attachments?.pendingRemoteDeletes).toHaveLength(2);
+        expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
         expect(logSyncWarning).not.toHaveBeenCalled();
+    });
+
+    // The teeth of the purity contract: a deep-frozen document makes any in-place write
+    // throw (strict mode), so a backend that still mutates its input fails loudly here.
+    describe('backend purity (frozen input document)', () => {
+        const bytes = new Uint8Array([1, 2, 3]);
+
+        const frozenDeps = (): AttachmentBackendDeps => ({
+            getTauriFetch: async () => (vi.fn(async () => new Response(null, { status: 200 })) as unknown as typeof fetch),
+            isTauriRuntimeEnv: () => true,
+            logSyncInfo: vi.fn(),
+            logSyncWarning: vi.fn(),
+            resolveWebdavPassword: vi.fn(async () => 'secret'),
+        });
+
+        /** A locally-available attachment with no cloud key: every backend has real work to do. */
+        const frozenData = (): AppData => {
+            const data = createCandidateAttachmentData();
+            data.tasks[0].attachments![0].cloudKey = undefined;
+            data.settings = { attachments: { pendingRemoteDeletes: [{ cloudKey: 'cloudkit:old-attachment' }] } };
+            return deepFreeze(data);
+        };
+
+        beforeEach(() => {
+            fsMocks.exists.mockResolvedValue(true);
+            fsMocks.readFile.mockResolvedValue(bytes);
+            fsMocks.stat.mockResolvedValue({ mtime: new Date(1000), size: 3 });
+            syncFsMocks.exists.mockResolvedValue(false);
+            coreMocks.webdavFileExists.mockResolvedValue(false);
+            cloudKitMocks.deleteCloudKitAttachmentAssets.mockResolvedValue(undefined);
+            cloudKitMocks.saveCloudKitAttachmentAsset.mockResolvedValue({
+                recordName: 'attachment-1',
+                attachmentId: 'attachment-1',
+                ownerType: 'task',
+                ownerId: 'task-1',
+                title: 'candidate-proof.txt',
+                size: 3,
+                updatedAt: '2026-08-03T00:00:00.000Z',
+            });
+            dropboxMocks.uploadDropboxFile.mockResolvedValue(undefined);
+        });
+
+        const prepareHelpers = () => ({
+            activationProbe: false,
+            ensureLocalSnapshotFresh: vi.fn(),
+            phase: 'prepare' as const,
+        });
+
+        it('webdav', async () => {
+            const appData = frozenData();
+            const result = await syncWebdavAttachments(
+                appData,
+                { url: 'https://dav.example/mindwtr', username: 'alice' },
+                'https://dav.example/mindwtr',
+                frozenDeps(),
+                prepareHelpers(),
+            );
+            expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
+            expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
+        });
+
+        it('cloud', async () => {
+            const appData = frozenData();
+            const result = await syncCloudAttachments(
+                appData,
+                { url: 'https://cloud.example/v1/data', token: 'token' },
+                'https://cloud.example/v1',
+                frozenDeps(),
+                prepareHelpers(),
+            );
+            expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
+            expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
+        });
+
+        it('dropbox', async () => {
+            const appData = frozenData();
+            const result = await syncDropboxAttachments(
+                appData,
+                async () => 'dropbox-token',
+                frozenDeps(),
+                prepareHelpers(),
+            );
+            expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
+            expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
+        });
+
+        it('file', async () => {
+            const appData = frozenData();
+            const result = await syncFileAttachments(appData, '/candidate-sync', frozenDeps(), prepareHelpers());
+            expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
+            expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
+        });
+
+        it('cloudkit, including the pending-remote-delete flush', async () => {
+            const appData = frozenData();
+            const result = expectFoldedData(await syncCloudKitAttachments(appData, frozenDeps(), prepareHelpers()));
+            expect(result.tasks[0].attachments?.[0]?.cloudKey).toBe('cloudkit:attachment-1');
+            expect(result.settings.attachments?.pendingRemoteDeletes).toEqual([]);
+            expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
+            expect(appData.settings.attachments?.pendingRemoteDeletes).toHaveLength(1);
+        });
     });
 });

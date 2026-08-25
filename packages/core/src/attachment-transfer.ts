@@ -91,9 +91,10 @@ export const reportProgress = (
 
 /**
  * Collect the live attachment objects of non-deleted tasks and projects, keyed
- * by id. The map holds the same object references that sit inside `appData` —
- * callers that mutate them (see {@link runAttachmentTransferLifecycle}) must
- * build the map from a cloned AppData.
+ * by id. The map holds the same object references that sit inside `appData`.
+ * {@link runAttachmentTransferLifecycle} never mutates them — it works on
+ * per-attachment copies and reports changes as patches for
+ * {@link applyAttachmentPatches} to fold into a fresh document.
  */
 export const collectAttachmentsById = (appData: AppData): Map<string, Attachment> => {
     const attachmentsById = new Map<string, Attachment>();
@@ -164,10 +165,10 @@ export type AttachmentTransferLifecycleOptions = {
      * Predicate for errors that must abort the whole lifecycle run rather than being treated as
      * an isolated per-attachment failure — e.g. an AbortSignal firing mid-transfer. When it
      * matches an upload/download error, the lifecycle rethrows immediately instead of calling
-     * onUploadError/onDownloadError: the promise this function returns rejects, and whichever
-     * attachments were mutated by earlier, already-completed iterations this run keep their
-     * mutations (the same as if the caller's own loop had thrown) — only the interrupted
-     * attachment's own onUpload/onDownload side effects are the caller's to reason about.
+     * onUploadError/onDownloadError: the promise this function returns rejects and the whole
+     * run's patches go with it, so the caller's document is byte-identical to what it passed
+     * in. Only the side effects the callbacks performed outside the document (bytes already
+     * uploaded, files already written) are the caller's to reason about.
      */
     isFatalError?: (error: unknown) => boolean;
     /**
@@ -205,6 +206,68 @@ export type AttachmentTransferLifecycleOptions = {
     onLocalEditRace?: (attachment: Attachment) => void;
 };
 
+export type AttachmentTransferResult = {
+    /** True when at least one attachment changed (same meaning the old boolean had). */
+    changed: boolean;
+    /** Fresh attachment objects to swap in, keyed by attachment id. The input
+     *  objects are never touched. */
+    patches: Map<string, Attachment>;
+};
+
+/**
+ * Fold lifecycle patches into a new document with copy-on-write structural
+ * sharing: only owners holding a patched attachment are re-allocated (plus
+ * their attachments array); every untouched task/project keeps its identity,
+ * so the SQLite adapter's identity-keyed row cache stays valid for them and
+ * only genuinely changed rows re-serialize. Returns the input unchanged when
+ * there is nothing to apply.
+ *
+ * This replaces the old contract where the whole document had to be cloned up
+ * front so the lifecycle could mutate it (#766 — a full clone of a 7k-task
+ * library per cycle, busting the row cache for every row).
+ */
+export const applyAttachmentPatches = (
+    appData: AppData,
+    patches: Map<string, Attachment>,
+): AppData => {
+    if (patches.size === 0) return appData;
+    let changed = false;
+    const patchOwners = <T extends { deletedAt?: string; attachments?: Attachment[] }>(items: T[]): T[] => {
+        let itemsChanged = false;
+        const next = items.map((owner) => {
+            if (owner.deletedAt || !owner.attachments?.some((attachment) => patches.has(attachment.id))) {
+                return owner;
+            }
+            itemsChanged = true;
+            return {
+                ...owner,
+                attachments: owner.attachments.map(
+                    (attachment) => patches.get(attachment.id) ?? attachment,
+                ),
+            };
+        });
+        if (itemsChanged) changed = true;
+        return itemsChanged ? next : items;
+    };
+    const tasks = patchOwners(appData.tasks);
+    const projects = patchOwners(appData.projects);
+    return changed ? { ...appData, tasks, projects } : appData;
+};
+
+/**
+ * Companion to {@link applyAttachmentPatches} for the settings-level channel
+ * backends use (`settings.attachments`, e.g. the pendingRemoteDeletes queue).
+ * `undefined` means unchanged and returns the input as-is.
+ */
+export const withAttachmentSettingsPatch = (
+    appData: AppData,
+    attachmentSettings: AttachmentSettings | undefined,
+): AppData => (
+    attachmentSettings === undefined
+        ? appData
+        : { ...appData, settings: { ...appData.settings, attachments: attachmentSettings } }
+);
+
 const defaultResolveLocalPath = (uri: string): string => {
     if (!/^file:\/\//i.test(uri)) return uri;
     try {
@@ -223,17 +286,19 @@ const defaultResolveLocalPath = (uri: string): string => {
  * Reconcile each file attachment's local presence with its cloud state:
  * refresh `localStatus`, upload local-only files, download cloud-only ones.
  *
- * Mutates the attachment objects in place (`localStatus`, and whatever the
- * upload/download callbacks set, e.g. `cloudKey`). Because the SQLite adapter
- * caches serialized task rows by task object identity, callers MUST pass
- * attachments collected from a cloned AppData (`cloneAppData`/`structuredClone`)
- * and persist that clone — mutating tasks already held by the store would make
- * the row cache serve stale rows and silently skip persisting these changes.
+ * Never mutates the input objects. Each attachment is processed on a shallow
+ * working copy (the copy is what the upload/download callbacks receive and may
+ * write to — `cloudKey`, `uri`, `localStatus`…), and every copy that changed is
+ * returned as a patch. Callers fold the patches into a fresh document with
+ * {@link applyAttachmentPatches} and persist THAT — the store's own objects and
+ * the sync cycle's cached snapshots stay byte-stable, which is what the
+ * serialization/signature layers and the SQLite identity-keyed row cache
+ * rely on (#766).
  */
 export async function runAttachmentTransferLifecycle(
     options: AttachmentTransferLifecycleOptions,
-): Promise<boolean> {
-    let didMutate = false;
+): Promise<AttachmentTransferResult> {
+    const patches = new Map<string, Attachment>();
     const hasCloudCopy = options.hasCloudCopy ?? ((attachment: Attachment) => Boolean(attachment.cloudKey));
     const resolveLocalPath = options.resolveLocalPath ?? defaultResolveLocalPath;
 
@@ -247,11 +312,16 @@ export async function runAttachmentTransferLifecycle(
         if (stat) applyAttachmentContentStat(attachment, stat);
     };
 
-    for (const attachment of options.attachmentsById.values()) {
+    for (const original of options.attachmentsById.values()) {
         await options.beforeEachAttachment?.();
-        if (attachment.kind !== 'file') continue;
-        if (attachment.deletedAt) continue;
-        if (options.policy?.shouldSkip?.(attachment)) continue;
+        if (original.kind !== 'file') continue;
+        if (original.deletedAt) continue;
+        if (options.policy?.shouldSkip?.(original)) continue;
+
+        // The working copy is the only object this iteration writes to. It is
+        // recorded as a patch when anything changed; `original` stays pristine.
+        const attachment: Attachment = { ...original };
+        let itemMutated = false;
 
         const rawUri = attachment.uri ? resolveLocalPath(attachment.uri) : '';
         const isHttp = /^https?:\/\//i.test(rawUri);
@@ -264,7 +334,7 @@ export async function runAttachmentTransferLifecycle(
         const nextStatus: Attachment['localStatus'] = existsLocally ? 'available' : 'missing';
         if (attachment.localStatus !== nextStatus) {
             attachment.localStatus = nextStatus;
-            didMutate = true;
+            itemMutated = true;
         }
 
         // Refused paths still reconcile localStatus above; what they never do is get read.
@@ -272,14 +342,14 @@ export async function runAttachmentTransferLifecycle(
 
         if (options.forceUploadExistingLocal && mayReadForSync && attachment.cloudKey !== undefined) {
             attachment.cloudKey = undefined;
-            didMutate = true;
+            itemMutated = true;
         }
 
         if (!hasCloudCopy(attachment) && mayReadForSync) {
             if (!options.policy?.shouldUpload || options.policy.shouldUpload(attachment)) {
                 try {
                     if (await options.onUpload(attachment, localPath)) {
-                        didMutate = true;
+                        itemMutated = true;
                         if (!attachment.fileHash && options.computeLocalFileHash) {
                             const hash = await options.computeLocalFileHash(localPath, attachment).catch(() => null);
                             if (hash) attachment.fileHash = hash;
@@ -297,7 +367,7 @@ export async function runAttachmentTransferLifecycle(
             if (!options.policy?.shouldDownload || options.policy.shouldDownload(attachment)) {
                 try {
                     if (await options.onDownload(attachment)) {
-                        didMutate = true;
+                        itemMutated = true;
                         // Loop safety (#1057): stat the file we just wrote and record it
                         // immediately, using the (possibly just-updated) uri — otherwise
                         // every subsequent cycle re-detects this download as a "change".
@@ -330,7 +400,7 @@ export async function runAttachmentTransferLifecycle(
                 if (!check.changed) {
                     if (check.stat.mtimeMs !== attachment.contentMtimeMs || check.stat.size !== attachment.contentSize) {
                         applyAttachmentContentStat(attachment, check.stat, check.hash);
-                        didMutate = true;
+                        itemMutated = true;
                     }
                 } else if (!check.hash) {
                     // The stat mismatched but no hash could be computed to confirm it (review
@@ -349,7 +419,7 @@ export async function runAttachmentTransferLifecycle(
                     // state as this device's edit and re-uploads it, which is where the
                     // missing hash gets published.
                     applyAttachmentContentStat(attachment, check.stat, check.hash);
-                    didMutate = true;
+                    itemMutated = true;
                 } else if (options.contentChangePhase === 'prepare') {
                     // This device's own edit, detected before this cycle's remote pull.
                     // Review B2: attempt the re-upload FIRST — only a *confirmed success*
@@ -362,7 +432,7 @@ export async function runAttachmentTransferLifecycle(
                             if (await options.onUpload(attachment, localPath)) {
                                 applyAttachmentContentStat(attachment, check.stat, check.hash);
                                 attachment.contentRev = bumpAttachmentContentRevision(attachment);
-                                didMutate = true;
+                                itemMutated = true;
                             }
                         } catch (error) {
                             if (options.isFatalError?.(error)) throw error;
@@ -391,7 +461,7 @@ export async function runAttachmentTransferLifecycle(
                     } else if (!options.policy?.shouldDownload || options.policy.shouldDownload(attachment)) {
                         try {
                             if (await options.onDownload(attachment)) {
-                                didMutate = true;
+                                itemMutated = true;
                                 const freshPath = attachment.uri ? resolveLocalPath(attachment.uri) : localPath;
                                 if (freshPath) await refreshContentStat(attachment, freshPath);
                             }
@@ -403,7 +473,11 @@ export async function runAttachmentTransferLifecycle(
                 }
             }
         }
+
+        if (itemMutated) {
+            patches.set(attachment.id, attachment);
+        }
     }
 
-    return didMutate;
+    return { changed: patches.size > 0, patches };
 }
