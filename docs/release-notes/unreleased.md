@@ -6,6 +6,7 @@ Changes collected after `v1.2.1` and before the next version tag.
 
 ## Full Change List
 
+- Today's Focus now shows every starred task the focus limit counts, on desktop and mobile. A starred task inside a project moved to Someday or Waiting, in a hidden area, or with a start time later today used to disappear from the section while still occupying a focus slot — the visible result was "I can star only 4 tasks when the limit is 5", and no filter change could reveal the task holding the slot. Deferred starred tasks no longer show in Upcoming, since they now render in Today's Focus directly.
 - Desktop: switching between lists or syncing no longer flashes a "Filtering..." line that shifted the whole list down a row for a moment — the banner now appears only when the filters actually changed, not when a sync refreshed the same values. Seen on every sync in Inbox, Someday/Maybe, and Waiting For. (#1079)
 - Sync: merging on very large libraries is about a third faster in the common case where most tasks haven't changed since the last cycle — an unchanged task is now recognized as the same object and skips re-serialization entirely, instead of being rebuilt and re-compared field by field on every cycle. Less time mid-sync means fewer moments where a tap lands during heavy background work. (#766)
 - Sync: each cycle no longer deep-copies the whole task library before checking attachments — on very large libraries that copy alone was real time per cycle, and it also forced the database to re-save every row instead of only the changed ones. (#766)

@@ -775,8 +775,10 @@ export const computeTaskDerivedState = (
         if (dateCoherenceIssues.length > 0) {
             dateCoherenceIssuesByTaskId.set(task.id, dateCoherenceIssues);
         }
-        // Done/reference tasks keep their historical focus flag but should not consume today's focus limit.
-        if (task.isFocusedToday && task.status !== 'done' && task.status !== 'reference') {
+        // Done/reference/archived tasks keep their historical focus flag but should
+        // not consume today's focus limit — the Focus views never show them, so a
+        // counted-but-invisible star would eat a slot the user cannot free.
+        if (task.isFocusedToday && task.status !== 'done' && task.status !== 'reference' && task.status !== 'archived') {
             focusedCount += 1;
             focusedTasks.push(task);
         }

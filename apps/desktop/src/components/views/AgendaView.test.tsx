@@ -97,6 +97,57 @@ describe('AgendaView', () => {
         vi.useRealTimers();
     });
 
+    it('shows a starred task even when its project is not active (counted slot must be visible)', () => {
+        // A starred task inside a someday project used to vanish from Today's
+        // Focus while still consuming a focus-limit slot — "I can only star 4
+        // when the limit is 5", unfixable by any filter change.
+        const somedayProject: Project = {
+            id: 'proj-someday',
+            title: 'Parked project',
+            status: 'someday',
+            order: 0,
+            tagIds: [],
+            createdAt: nowIso,
+            updatedAt: nowIso,
+        } as Project;
+        const parkedStarred: Task = {
+            ...focusedTask,
+            id: 'parked-starred',
+            title: 'Starred inside parked project',
+            checklist: undefined,
+            projectId: 'proj-someday',
+        };
+        useTaskStore.setState({
+            tasks: [focusedTask, parkedStarred],
+            _allTasks: [focusedTask, parkedStarred],
+            projects: [somedayProject],
+            _allProjects: [somedayProject],
+        });
+
+        const { getByText } = renderAgenda();
+
+        expect(getByText('Starred inside parked project')).toBeInTheDocument();
+    });
+
+    it('shows a starred task whose start time is later today', () => {
+        vi.useFakeTimers({ now: new Date(nowIso), toFake: ['Date'] });
+        const laterToday: Task = {
+            ...focusedTask,
+            id: 'later-today-starred',
+            title: 'Starred starting tonight',
+            checklist: undefined,
+            startTime: '2026-02-28T22:00:00.000Z',
+        };
+        useTaskStore.setState({
+            tasks: [focusedTask, laterToday],
+            _allTasks: [focusedTask, laterToday],
+        });
+
+        const { getByText } = renderAgenda();
+
+        expect(getByText('Starred starting tonight')).toBeInTheDocument();
+    });
+
     it('ends the page with the shared end gap on its scrolled content (#977)', () => {
         const { container } = renderAgenda();
         expectScrolledEndGap(container);

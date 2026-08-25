@@ -366,13 +366,31 @@ export default function FocusScreen() {
     selections.criteria,
     projects,
   ]);
+  // Today's Focus shows every starred task the focus cap counts. It must not
+  // inherit the pool's area-visibility or start-time hiding: the star buttons
+  // enforce the store-wide count, so a starred task hidden by those rules
+  // silently eats a slot no filter change can reveal ("I can only star 4 when
+  // the limit is 5"). User filter criteria still apply — that cause is visible.
+  const focusedPool = useMemo(() => (
+    applyFilter(
+      tasks.filter((task) => isTaskActionable(task) && task.isFocusedToday === true),
+      selections.criteria,
+      { projects, tokenMatchMode: 'all' },
+    )
+  ), [tasks, selections.criteria, projects]);
   // The Upcoming preview draws from baseActiveTasks: the deferral filter that
   // produced activeTasks is exactly what hides these rows today (#1061).
+  // Starred tasks are excluded — they render in Today's Focus regardless of
+  // deferral, and one task must not appear in both sections.
   const upcomingEntries = useMemo(() => {
     void localDayKey;
     const now = new Date();
     return getUpcomingDeferredTasks(
-      applyFilter(baseActiveTasks, selections.criteria, { projects, tokenMatchMode: 'all' }),
+      applyFilter(
+        baseActiveTasks.filter((task) => !task.isFocusedToday),
+        selections.criteria,
+        { projects, tokenMatchMode: 'all' },
+      ),
       { now },
     );
   }, [baseActiveTasks, localDayKey, projects, selections.criteria]);
@@ -758,7 +776,8 @@ export default function FocusScreen() {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
     const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-    const { focusedTasks: allFocusedTasks, otherTasks: nonFocusedTasks } = splitFocusedTasks(filteredActiveTasks);
+    const { otherTasks: nonFocusedTasks } = splitFocusedTasks(filteredActiveTasks);
+    const allFocusedTasks = focusedPool;
     const sequentialFirstTaskIds = getFocusSequentialFirstTaskIds(baseActiveTasks, sequentialProjectIds, {
       now,
       sectionScopedProjectIds: sequentialWithinSectionProjectIds,
@@ -830,6 +849,7 @@ export default function FocusScreen() {
     baseActiveTasks,
     effectiveFocusSortBy,
     filteredActiveTasks,
+    focusedPool,
     localDayKey,
     prioritiesEnabled,
     projects,

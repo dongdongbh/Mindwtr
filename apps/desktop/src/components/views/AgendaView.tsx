@@ -530,8 +530,10 @@ export function AgendaView() {
         const reviewDue = applyFilter(reviewDueBase, effectiveFilterCriteria, { projects, now, tokenMatchMode: 'all' });
         // The Upcoming preview draws from baseActiveTasks: the deferral filter that
         // produced activeTasks is exactly what hides these rows today (#1061).
+        // Starred tasks are excluded — they render in Today's Focus regardless of
+        // deferral, and one task must not appear in both sections.
         const upcomingBase = applyFilter(
-            baseActiveTasks.filter((task) => matchesSearchQuery(task.title)),
+            baseActiveTasks.filter((task) => !task.isFocusedToday && matchesSearchQuery(task.title)),
             effectiveFilterCriteria,
             { projects, now, tokenMatchMode: 'all' },
         );
@@ -668,9 +670,19 @@ export function AgendaView() {
     // clears. Clearing the filter is the correction path.
     const focusDragEnabled = effectiveFocusSortBy === DEFAULT_FOCUS_SORT_BY && !hasTaskFilters;
     const focusedTasks = useMemo(() => {
-        const focused = filteredActiveTasks.filter(t => t.isFocusedToday);
+        // Today's Focus shows every starred task the focus cap counts. It must
+        // not inherit the pool's area-visibility or start-time hiding: the star
+        // buttons enforce the store-wide count, so a starred task hidden by
+        // those rules silently eats a slot no filter change can reveal — the
+        // "I can only star 4 when the limit is 5" report. Saved filters and
+        // search still apply; the user can see those causes and undo them.
+        const focused = applyFilter(
+            derivedActiveTasks.filter((t) => t.isFocusedToday),
+            effectiveFilterCriteria,
+            { projects, now: new Date(), tokenMatchMode: 'all' },
+        ).filter((task) => matchesSearchQuery(task.title));
         return focusDragEnabled ? sortTasksByFocusOrder(focused) : sortBySavedPerspective(focused);
-    }, [filteredActiveTasks, focusDragEnabled, sortBySavedPerspective]);
+    }, [derivedActiveTasks, effectiveFilterCriteria, projects, matchesSearchQuery, focusDragEnabled, sortBySavedPerspective]);
 
     // Categorize tasks
     const sections = useMemo(() => {
