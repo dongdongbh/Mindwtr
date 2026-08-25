@@ -55,6 +55,9 @@ config.resolver.blockList = [
     /(^|\/)\.worktrees\/.*/,
     /\.git\/.*/,
     /node_modules\/.*\/\.git\/.*/,
+    // vitest coverage output is rewritten while suites run; Metro's file
+    // watcher crashes on the vanishing sub-dirs (ENOENT in FallbackWatcher).
+    /(^|\/)coverage\/.*/,
 ];
 
 // 2. Let Metro know where to resolve packages and in what order

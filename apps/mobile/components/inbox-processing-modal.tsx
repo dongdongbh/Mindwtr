@@ -100,7 +100,16 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
       <Modal
         visible={visible}
         animationType="slide"
-        presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
+        presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : undefined}
+        // Android renders this as a transparent full-cover window that paints
+        // its own opaque background, matching the app's other sheets. A
+        // non-transparent full-screen Modal window mishandles adjustResize on
+        // some OEM Android 15 builds (OnePlus 13): the dialog surface is
+        // letterboxed instead of resized, leaving a black band between the
+        // lifted content and the keyboard while typing a note.
+        transparent={Platform.OS === 'android'}
+        statusBarTranslucent
+        navigationBarTranslucent
         allowSwipeDismissal
         onRequestClose={handleClose}
       >
@@ -126,7 +135,12 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
       <Modal
         visible={visible}
         animationType="slide"
-        presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
+        presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : undefined}
+        // See the loading-state Modal above: transparent-with-own-background on
+        // Android avoids the OEM letterboxed-resize black band (OnePlus 13).
+        transparent={Platform.OS === 'android'}
+        statusBarTranslucent
+        navigationBarTranslucent
         allowSwipeDismissal
         onRequestClose={handleClose}
       >

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Animated, Keyboard, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { Animated, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -651,6 +651,25 @@ describe('InboxProcessingModal', () => {
     expect(processingScroll.props.automaticallyAdjustKeyboardInsets).toBe(true);
     expect(processingScroll.props.keyboardDismissMode).toBe('interactive');
     expect(processingScroll.props.keyboardShouldPersistTaps).toBe('handled');
+  });
+
+  it('renders as a transparent self-backed window on Android (OnePlus letterbox fix)', () => {
+    setPlatform('android');
+    const onClose = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={onClose} />);
+    });
+
+    const modal = tree.root.findByType(Modal);
+    // A non-transparent full-screen Modal window is letterboxed instead of
+    // resized by some OEM Android 15 builds when the keyboard opens, leaving a
+    // black band under the note input. Transparent + own opaque background
+    // matches the app's other sheets and dodges that path entirely.
+    expect(modal.props.transparent).toBe(true);
+    expect(modal.props.statusBarTranslucent).toBe(true);
+    expect(modal.props.navigationBarTranslucent).toBe(true);
+    expect(modal.props.presentationStyle).toBeUndefined();
   });
 
   it('lifts the Android processing form by the measured keyboard inset instead of resizing', () => {
