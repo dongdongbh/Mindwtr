@@ -439,10 +439,20 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
             />
         );
     };
+    // Inside the full metadata row the start chip already names this exact day,
+    // so a start-derived "appears on" chip would render the same date twice
+    // (Upcoming section, Discord report). Recurring projections have no
+    // startTime on the visible instance and keep the chip; the details-off
+    // fallback row below has no start chip and always keeps it.
+    const appearsAtDuplicatesStart = Boolean(
+        appearsAtLabel
+        && task.startTime
+        && safeFormatDate(task.startTime, 'P') === appearsAtLabel,
+    );
     const renderMetadataRow = (className?: string) => (
         <div className={cn("flex flex-wrap items-center text-xs", className)}>
             {showProjectBadgeInMetadata && renderProjectBadge()}
-            {renderAppearsAtMetadataBadge()}
+            {!appearsAtDuplicatesStart && renderAppearsAtMetadataBadge()}
             {renderProjectDeadlineMetadataBadge()}
             {!project && area && (
                 <MetadataBadge
@@ -585,10 +595,6 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     const inlineLeftControls = !actionsOverlay && (showQuickDoneButton || dragHandle);
     const showActionTags = !actionsOverlay && !isViewOpen && task.tags.length > 0;
 
-    // Inbox items are unprocessed captures, not a done/not-done checklist, so the
-    // quick-complete check stays hidden at rest and only reveals on row hover (for the
-    // 2-minute rule). Actionable lists (next, projects, focus) show it at rest.
-    const isInboxItem = task.status === 'inbox';
     // Waiting/Someday tasks promote to Next instead of completing — the natural
     // transition when an item unblocks, matching the mobile swipe action.
     const quickActionIsPromote = task.status === 'waiting' || task.status === 'someday';
@@ -611,11 +617,14 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                     ? tFallback(t, 'task.completeBackdateHint', 'Right-click to complete with a different time')
                     : undefined}
             aria-label={quickActionIsPromote ? t('status.next') : t('status.done')}
+            // Inbox rows used to hide this check until hover ("not a checklist"),
+            // but in mixed-status lists like Review the reserved blank slot read
+            // as a missing icon — and touch devices always showed it anyway.
+            // One consistent at-rest affordance everywhere now.
             className={cn(
                 quickActionIsPromote
                     ? "text-info hover:text-info/80 p-1 rounded hover:bg-info/20"
                     : "text-success hover:text-success/80 p-1 rounded hover:bg-success/20",
-                isInboxItem && "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity motion-reduce:transition-none",
             )}
         >
             {quickActionIsPromote ? <ArrowRight className="w-4 h-4" /> : <Check className="w-4 h-4" />}
