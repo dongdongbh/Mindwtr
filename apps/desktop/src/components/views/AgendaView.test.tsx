@@ -337,6 +337,46 @@ describe('AgendaView', () => {
         expect(upcomingSection).toContainElement(getByText(safeFormatDate(inThreeDays, 'P')));
     });
 
+    it('shows a start-deferred upcoming date once, not as a duplicate appears-on chip', () => {
+        const now = new Date();
+        // Date-only start, like the report: chip and appears-on label format identically.
+        const inThreeDays = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 3);
+        const dateOnlyStart = `${inThreeDays.getFullYear()}-${String(inThreeDays.getMonth() + 1).padStart(2, '0')}-${String(inThreeDays.getDate()).padStart(2, '0')}`;
+        const deferredTask: Task = {
+            id: 'deferred-task',
+            title: 'Deferred prep task',
+            status: 'next',
+            startTime: dateOnlyStart,
+            tags: [],
+            contexts: [],
+            createdAt: nowIso,
+            updatedAt: nowIso,
+        };
+
+        useTaskStore.setState({
+            tasks: [deferredTask],
+            _allTasks: [deferredTask],
+            projects: [],
+            _allProjects: [],
+            areas: [],
+            _allAreas: [],
+            settings: {},
+            highlightTaskId: null,
+        });
+        // Details on: the row renders its own start chip for the same day.
+        useUiStore.setState((state) => ({
+            listOptions: { ...state.listOptions, showDetails: true },
+        }));
+
+        const { getAllByText } = renderAgenda();
+
+        const upcomingSection = document.getElementById('agenda-section-upcoming');
+        expect(upcomingSection).not.toBeNull();
+        // The date renders exactly once — the start chip. The appears-on badge
+        // yields to it instead of duplicating the same day (Discord report).
+        expect(getAllByText(safeFormatDate(inThreeDays, 'P'))).toHaveLength(1);
+    });
+
     it('shows an empty state when active tasks do not produce agenda sections', () => {
         const inboxTask: Task = {
             id: 'inbox-task',
