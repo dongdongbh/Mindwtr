@@ -1,8 +1,14 @@
 import React from 'react';
 import { act, create } from 'react-test-renderer';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ReviewModal } from './review-modal';
+
+const { mockStorageGetItem, mockStorageRemoveItem, mockStorageSetItem } = vi.hoisted(() => ({
+    mockStorageGetItem: vi.fn(),
+    mockStorageRemoveItem: vi.fn(),
+    mockStorageSetItem: vi.fn(),
+}));
 
 const defaultTasks = [
     {
@@ -90,6 +96,7 @@ vi.mock('react-native', async () => {
 
 vi.mock('@mindwtr/core', async (importOriginal) => ({
     resolveReviewStepSession: (await importOriginal<typeof import('@mindwtr/core')>()).resolveReviewStepSession,
+    parseStoredReviewStepSession: (await importOriginal<typeof import('@mindwtr/core')>()).parseStoredReviewStepSession,
     buildQuickAddParseOptions: (await importOriginal<typeof import('@mindwtr/core')>()).buildQuickAddParseOptions,
     useTaskStore: Object.assign(() => storeState, { getState: () => storeState }),
     shallow: vi.fn((a, b) => a === b),
@@ -268,7 +275,9 @@ vi.mock('../lib/store-review-prompt', () => ({
 
 vi.mock('@react-native-async-storage/async-storage', () => ({
     default: {
-        setItem: vi.fn().mockResolvedValue(undefined),
+        getItem: mockStorageGetItem,
+        removeItem: mockStorageRemoveItem,
+        setItem: mockStorageSetItem,
     },
 }));
 
@@ -327,10 +336,18 @@ const flattenText = (value: unknown): string => {
 
 describe('ReviewModal', () => {
     beforeEach(() => {
+        vi.useRealTimers();
         vi.clearAllMocks();
         storeState.tasks = defaultTasks.map((task) => ({ ...task }));
         storeState.projects = defaultProjects.map((project) => ({ ...project }));
         storeState.settings = { ...defaultSettings };
+        mockStorageGetItem.mockReset().mockResolvedValue(null);
+        mockStorageRemoveItem.mockReset().mockResolvedValue(undefined);
+        mockStorageSetItem.mockReset().mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
     });
 
     it('advances and goes back through weekly review steps', async () => {
@@ -347,6 +364,9 @@ describe('ReviewModal', () => {
         expect(
             tree.root.findAll((node) => node.props?.accessibilityLabel === 'inbox.processButton').length,
         ).toBeGreaterThan(0);
+
+        const initialBackLabel = tree.root.find((node) => flattenText(node.props?.children) === '← Back');
+        expect(initialBackLabel.parent?.props.disabled).toBe(true);
 
         const nextLabel = tree.root.find((node) => flattenText(node.props?.children) === 'Next →');
         const nextButton = nextLabel.parent;
@@ -371,6 +391,50 @@ describe('ReviewModal', () => {
         });
 
         expect(hasText('Inbox')).toBe(true);
+    });
+
+    it('resumes within the local review week, preserves Close, and clears on Finish', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 2, 4, 10, 0, 0));
+        storeState.settings = {
+            ...defaultSettings,
+            weekStart: 'monday',
+        } as typeof storeState.settings;
+        mockStorageGetItem.mockResolvedValue(JSON.stringify({
+            step: 'waiting',
+            startedAt: new Date(2026, 2, 3, 9, 0, 0).toISOString(),
+        }));
+        const onClose = vi.fn();
+
+        let tree!: ReturnType<typeof create>;
+        await act(async () => {
+            tree = create(<ReviewModal visible onClose={onClose} />);
+            await Promise.resolve();
+        });
+
+        expect(tree.root.findAll((node) => flattenText(node.props?.children).includes('Waiting For')).length).toBeGreaterThan(0);
+        const closeButton = tree.root.findByProps({ accessibilityLabel: 'Close' });
+        await act(async () => {
+            closeButton.props.onPress();
+        });
+        expect(onClose).toHaveBeenCalledTimes(1);
+        expect(mockStorageRemoveItem).not.toHaveBeenCalled();
+
+        const nextLabel = tree.root.find((node) => flattenText(node.props?.children) === 'Next →');
+        await act(async () => {
+            nextLabel.parent?.props.onPress();
+        });
+        for (let index = 0; index < 8 && tree.root.findAll((node) => flattenText(node.props?.children) === 'Finish').length === 0; index += 1) {
+            const next = tree.root.find((node) => flattenText(node.props?.children) === 'Next →');
+            await act(async () => {
+                next.parent?.props.onPress();
+            });
+        }
+        const finishLabel = tree.root.find((node) => flattenText(node.props?.children) === 'Finish');
+        await act(async () => {
+            await finishLabel.parent?.props.onPress();
+        });
+        expect(mockStorageRemoveItem).toHaveBeenCalledWith('mindwtr:weeklyReview:currentStep');
     });
 
     it('keeps the full Process Inbox step inside one vertical scroll surface', async () => {

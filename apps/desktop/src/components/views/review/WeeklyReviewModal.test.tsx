@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetForTests, useTaskStore, type Task } from '@mindwtr/core';
 
@@ -55,6 +55,7 @@ vi.mock('../../PromptModal', () => ({
 }));
 
 const now = '2026-02-01T00:00:00.000Z';
+const storageKey = 'mindwtr:weeklyReview:currentStep';
 const initialTaskState = useTaskStore.getState();
 
 const makeTask = (overrides: Partial<Task>): Task => ({
@@ -70,6 +71,7 @@ describe('WeeklyReviewGuideModal', () => {
     beforeEach(() => {
         vi.useRealTimers();
         resetForTests();
+        window.localStorage.clear();
         useTaskStore.setState(initialTaskState, true);
         useTaskStore.setState({
             _allTasks: [],
@@ -105,5 +107,58 @@ describe('WeeklyReviewGuideModal', () => {
 
         expect(screen.getByRole('heading', { level: 1, name: 'Inbox' })).toBeInTheDocument();
         expect(screen.getByTestId('task-inbox-1')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'review.back' })).toBeDisabled();
+    });
+
+    it('resumes within the configured local review week, preserves Close, and clears on Finish', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 2, 4, 10, 0, 0));
+        useTaskStore.setState({
+            _allTasks: [
+                makeTask({ id: 'inbox-1', title: 'Inbox task', status: 'inbox', updatedAt: new Date(2026, 2, 4).toISOString() }),
+                makeTask({ id: 'waiting-1', title: 'Waiting task', status: 'waiting', updatedAt: new Date(2026, 2, 4).toISOString() }),
+            ],
+            settings: { weekStart: 'monday', gtd: { weeklyReview: { includeContextStep: true } } },
+        });
+        const onClose = vi.fn();
+        const first = render(<WeeklyReviewGuideModal onClose={onClose} />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'review.nextStepBtn' }));
+        expect(screen.getByRole('heading', { level: 1, name: 'Waiting For' })).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+        expect(onClose).toHaveBeenCalledTimes(1);
+        expect(JSON.parse(window.localStorage.getItem(storageKey) ?? '{}')).toEqual({
+            step: 'waiting',
+            startedAt: new Date(2026, 2, 4, 10, 0, 0).toISOString(),
+        });
+
+        first.unmount();
+        render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
+        expect(screen.getByRole('heading', { level: 1, name: 'Waiting For' })).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: 'review.nextStepBtn' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
+        expect(window.localStorage.getItem(storageKey)).toBeNull();
+    });
+
+    it('ignores a checkpoint from the previous configured review week', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 2, 2, 9, 0, 0));
+        window.localStorage.setItem(storageKey, JSON.stringify({
+            step: 'completed',
+            startedAt: new Date(2026, 2, 1, 16, 0, 0).toISOString(),
+        }));
+        useTaskStore.setState({
+            _allTasks: [makeTask({ id: 'inbox-1', title: 'Inbox task', status: 'inbox' })],
+            settings: { weekStart: 'monday', gtd: { weeklyReview: { includeContextStep: true } } },
+        });
+
+        render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
+
+        expect(screen.getByRole('heading', { level: 1, name: 'Inbox' })).toBeInTheDocument();
+        expect(JSON.parse(window.localStorage.getItem(storageKey) ?? '{}')).toEqual({
+            step: 'inbox',
+            startedAt: new Date(2026, 2, 2, 9, 0, 0).toISOString(),
+        });
     });
 });

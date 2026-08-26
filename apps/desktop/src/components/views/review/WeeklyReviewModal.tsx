@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     buildQuickAddParseOptions,
     buildReviewSteps,
@@ -11,6 +11,7 @@ import {
     getWeeklyReviewBuckets,
     isTaskInActiveProject,
     parseProjectNextActionInput,
+    parseStoredReviewStepSession,
     resolveReviewStepSession,
     safeFormatDate,
     safeParseDate,
@@ -19,6 +20,7 @@ import {
     type ExternalCalendarDaySummary,
     type ExternalCalendarEvent,
     type ReviewSuggestion,
+    type StoredReviewStepSession,
     useTaskStore,
     type Project,
     type Task,
@@ -49,6 +51,10 @@ type ReviewStepDefinition = {
 type WeeklyReviewGuideModalProps = {
     onClose: () => void;
 };
+const WEEKLY_REVIEW_STEP_STORAGE_KEY = 'mindwtr:weeklyReview:currentStep';
+const WEEKLY_REVIEW_STEPS = new Set<ReviewStep>([
+    'inbox', 'stale', 'calendar', 'waiting', 'contexts', 'projects', 'someday', 'completed',
+]);
 
 function SummaryRow({ good, text }: { good: boolean; text: string }) {
     return (
@@ -62,7 +68,6 @@ function SummaryRow({ good, text }: { good: boolean; text: string }) {
 }
 
 export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps) {
-    const [currentStep, setCurrentStep] = useState<ReviewStep>('inbox');
     const [isProcessing, setIsProcessing] = useState(false);
     const [expandedExternalDays, setExpandedExternalDays] = useState<Set<string>>(new Set());
     const [expandedContextGroups, setExpandedContextGroups] = useState<Set<string>>(new Set());
@@ -83,6 +88,18 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
         }),
         shallow
     );
+    const [reviewSession, setReviewSession] = useState<StoredReviewStepSession<ReviewStep>>(() => {
+        const now = new Date();
+        return parseStoredReviewStepSession(
+            window.localStorage.getItem(WEEKLY_REVIEW_STEP_STORAGE_KEY),
+            WEEKLY_REVIEW_STEPS,
+            { cadence: 'weekly', now, weekStart: settings?.weekStart },
+        ) ?? { step: 'inbox', startedAt: now.toISOString() };
+    });
+    const currentStep = reviewSession.step;
+    const setCurrentStep = useCallback((step: ReviewStep) => {
+        setReviewSession((session) => ({ ...session, step }));
+    }, []);
     const addTask = useTaskStore((state) => state.addTask);
     const showToast = useUiStore((state) => state.showToast);
     const setEditingTaskId = useUiStore((state) => state.setEditingTaskId);
@@ -192,7 +209,11 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
         if (currentStep !== displayedStep) {
             setCurrentStep(displayedStep);
         }
-    }, [currentStep, displayedStep]);
+    }, [currentStep, displayedStep, setCurrentStep]);
+
+    useEffect(() => {
+        window.localStorage.setItem(WEEKLY_REVIEW_STEP_STORAGE_KEY, JSON.stringify(reviewSession));
+    }, [reviewSession]);
 
     useEffect(() => {
         if (displayedStep !== 'inbox' && isProcessing) {
@@ -246,6 +267,11 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
 
     const prevStep = () => {
         if (previousStepId) setCurrentStep(previousStepId);
+    };
+
+    const finishReview = () => {
+        window.localStorage.removeItem(WEEKLY_REVIEW_STEP_STORAGE_KEY);
+        onClose();
     };
 
     const renderStepRail = () => (
@@ -956,7 +982,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                             {renderMindSweepNudge()}
                         </div>
                         <button
-                            onClick={onClose}
+                            onClick={finishReview}
                             className="bg-primary text-primary-foreground px-8 py-3 rounded-lg text-lg font-medium hover:bg-primary/90 transition-colors"
                         >
                             {t('review.finish')}
@@ -1017,7 +1043,8 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                     <div className="flex justify-between items-center pt-3.5 border-t border-border mt-5">
                         <button
                             onClick={prevStep}
-                            className="flex items-center gap-1.5 px-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                            disabled={!previousStepId}
+                            className="flex items-center gap-1.5 px-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-muted-foreground"
                         >
                             <ChevronLeft className="w-3.5 h-3.5" /> {t('review.back')}
                         </button>

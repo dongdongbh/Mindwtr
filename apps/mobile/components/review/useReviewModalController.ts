@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
     buildQuickAddParseOptions,
@@ -8,10 +8,12 @@ import {
     getExternalCalendarDaySummaries,
     getWeeklyReviewBuckets,
     parseProjectNextActionInput,
+    parseStoredReviewStepSession,
     resolveReviewStepSession,
     type AIProviderId,
     type ExternalCalendarEvent,
     type ReviewSuggestion,
+    type StoredReviewStepSession,
     type Task,
     type TaskStatus,
     type WeeklyReviewProjectEntry,
@@ -70,6 +72,11 @@ export type ReviewProjectEntry = WeeklyReviewProjectEntry & {
     areaColor: string;
 };
 
+const WEEKLY_REVIEW_STEP_STORAGE_KEY = 'mindwtr:weeklyReview:currentStep';
+const WEEKLY_REVIEW_STEPS = new Set<ReviewStep>([
+    'inbox', 'stale', 'calendar', 'waiting', 'contexts', 'projects', 'someday', 'completed',
+]);
+
 type UseReviewModalControllerParams = {
     onClose: () => void;
     visible: boolean;
@@ -84,7 +91,16 @@ export function useReviewModalController({
     const { isDark } = useTheme();
     const { t } = useLanguage();
     const { openQuickCapture } = useQuickCapture();
-    const [currentStep, setCurrentStep] = useState<ReviewStep>('inbox');
+    const [reviewSession, setReviewSession] = useState<StoredReviewStepSession<ReviewStep>>(() => ({
+        step: 'inbox',
+        startedAt: new Date().toISOString(),
+    }));
+    const [sessionHydrated, setSessionHydrated] = useState(false);
+    const sessionWriteRef = useRef<Promise<void>>(Promise.resolve());
+    const currentStep = reviewSession.step;
+    const setCurrentStep = useCallback((step: ReviewStep) => {
+        setReviewSession((session) => ({ ...session, step }));
+    }, []);
     const [editingTask, setEditingTask] = useState<Task | null>(null);
     const [showEditModal, setShowEditModal] = useState(false);
     const [expandedProject, setExpandedProject] = useState<string | null>(null);
@@ -108,8 +124,43 @@ export function useReviewModalController({
     const includeContextStep = settings?.gtd?.weeklyReview?.includeContextStep !== false;
     const aiProvider = (settings?.ai?.provider ?? 'openai') as AIProviderId;
 
+    useEffect(() => {
+        if (!visible) {
+            setSessionHydrated(false);
+            return;
+        }
+        let cancelled = false;
+        const now = new Date();
+        void AsyncStorage.getItem(WEEKLY_REVIEW_STEP_STORAGE_KEY)
+            .then((stored) => {
+                if (cancelled) return;
+                const restored = parseStoredReviewStepSession(stored, WEEKLY_REVIEW_STEPS, {
+                    cadence: 'weekly',
+                    now,
+                    weekStart: settings?.weekStart,
+                });
+                setReviewSession(restored ?? { step: 'inbox', startedAt: now.toISOString() });
+            })
+            .catch(() => {
+                if (!cancelled) setReviewSession({ step: 'inbox', startedAt: now.toISOString() });
+            })
+            .finally(() => {
+                if (!cancelled) setSessionHydrated(true);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [settings?.weekStart, visible]);
+
+    useEffect(() => {
+        if (!visible || !sessionHydrated) return;
+        const serialized = JSON.stringify(reviewSession);
+        sessionWriteRef.current = sessionWriteRef.current
+            .then(() => AsyncStorage.setItem(WEEKLY_REVIEW_STEP_STORAGE_KEY, serialized))
+            .catch(() => undefined);
+    }, [reviewSession, sessionHydrated, visible]);
+
     const handleClose = useCallback(() => {
-        setCurrentStep('inbox');
         setExpandedExternalDays(new Set());
         setExpandedContextGroups(new Set());
         onClose();
@@ -243,6 +294,12 @@ export function useReviewModalController({
             await AsyncStorage.setItem('lastWeeklyReview', new Date().toISOString());
         } catch (error) {
             void logError(error, { scope: 'review', extra: { message: 'Failed to save review time' } });
+        }
+        try {
+            await sessionWriteRef.current;
+            await AsyncStorage.removeItem(WEEKLY_REVIEW_STEP_STORAGE_KEY);
+        } catch (error) {
+            void logError(error, { scope: 'review', extra: { message: 'Failed to clear review session' } });
         }
         handleClose();
         setTimeout(() => {
@@ -432,15 +489,15 @@ export function useReviewModalController({
         if (currentStep !== displayedStep) {
             setCurrentStep(displayedStep);
         }
-    }, [currentStep, displayedStep]);
+    }, [currentStep, displayedStep, setCurrentStep]);
 
     const nextStep = useCallback(() => {
         if (nextStepId) setCurrentStep(nextStepId);
-    }, [nextStepId]);
+    }, [nextStepId, setCurrentStep]);
 
     const prevStep = useCallback(() => {
         if (previousStepId) setCurrentStep(previousStepId);
-    }, [previousStepId]);
+    }, [previousStepId, setCurrentStep]);
 
     const handleNavigateToProject = useCallback((projectId: string) => {
         onClose();
@@ -465,6 +522,7 @@ export function useReviewModalController({
         aiSuggestions,
         applyAiSuggestions,
         calendarReviewItems,
+        canGoBack: previousStepId !== null,
         closeEditModal,
         closeProjectTaskPrompt,
         contextReviewGroups,
