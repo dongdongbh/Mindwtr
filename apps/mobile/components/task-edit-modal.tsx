@@ -470,8 +470,8 @@ function TaskEditModalInner({
         let mode: 'date' | 'nth' | 'lastDay' = 'date';
         let ordinal: '1' | '2' | '3' | '4' | '-1' = '1';
         let weekday: RecurrenceWeekday = monthlyWeekdayCode;
-        const monthDays = (parsed.byMonthDay ?? []).filter((day) => day >= 1 && day <= 31);
-        if (parsed.byMonthDay?.includes(-1)) {
+        const monthDays = (parsed.byMonthDay ?? []).filter((day) => day === -1 || (day >= 1 && day <= 31));
+        if (monthDays.length === 1 && monthDays[0] === -1) {
             mode = 'lastDay';
         } else if (monthDays.length > 0) {
             mode = 'date';
@@ -490,7 +490,7 @@ function TaskEditModalInner({
         setCustomMode(mode);
         setCustomOrdinal(ordinal);
         setCustomWeekday(weekday);
-        if (monthDays.length === 0) {
+        if (monthDays.length === 0 || (monthDays.length === 1 && monthDays[0] === -1)) {
             setCustomMonthDays([monthlyAnchorDate.getDate()]);
         }
         setCustomRecurrenceVisible(true);

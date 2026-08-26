@@ -1181,6 +1181,23 @@ describe('TaskEditModal', () => {
       expect(tree.root.findByType(TaskEditCustomRecurrenceModal).props.customMonthDays).toEqual([1, 16]);
     });
 
+    it('round-trips a mixed last-day and numbered-day rule', async () => {
+      const { tree, fieldProps } = await openEditor({
+        rule: 'monthly',
+        strategy: 'strict',
+        byMonthDay: [-1, 15],
+        rrule: 'FREQ=MONTHLY;BYMONTHDAY=-1,15',
+      });
+
+      const modal = tree.root.findByType(TaskEditCustomRecurrenceModal);
+      expect(modal.props.customMode).toBe('date');
+      expect(modal.props.customMonthDays).toEqual([-1, 15]);
+
+      pressChip(tree, 'common.save');
+
+      expect(fieldProps().recurrenceRRuleValue).toBe('FREQ=MONTHLY;BYMONTHDAY=-1,15');
+    });
+
     it('keeps the last selected month day when its chip is tapped again', async () => {
       const { tree } = await openEditor({
         rule: 'monthly',
