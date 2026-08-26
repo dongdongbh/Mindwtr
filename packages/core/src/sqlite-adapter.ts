@@ -353,8 +353,18 @@ export type SqliteSaveDataStats = {
     sqlCount: number;
 };
 
+export type SqliteAdapterOptions = {
+    /**
+     * Reject a write when another connection changed the snapshot since getData().
+     * Long-lived app processes normally merge concurrent state above this layer;
+     * short-lived automation clients use this guard so retry can reload first.
+     */
+    rejectConcurrentWrites?: boolean;
+};
+
 export class SqliteAdapter {
     private client: SqliteClient;
+    private rejectConcurrentWrites: boolean;
     private schemaReadyPromise: Promise<void> | null = null;
     // Fingerprints of rows submitted by this adapter's last committed save.
     // Revision-guarded upserts make it safe for another process to advance a row;
@@ -366,10 +376,12 @@ export class SqliteAdapter {
     // database version still matches. This keeps a stale full snapshot from
     // deleting rows added or advanced by another process between read and save.
     private lastKnownRowVersions: Map<SqliteEntityTable, Map<string, SqliteKnownRowVersion>> | null = null;
+    private lastObservedSettingsJson: string | null | undefined;
     private lastSaveDataStats: SqliteSaveDataStats | null = null;
 
-    constructor(client: SqliteClient) {
+    constructor(client: SqliteClient, options: SqliteAdapterOptions = {}) {
         this.client = client;
+        this.rejectConcurrentWrites = options.rejectConcurrentWrites === true;
     }
 
     private async loadAllRows(table: 'tasks' | 'projects' | 'sections' | 'areas' | 'people'): Promise<Record<string, unknown>[]> {
@@ -423,6 +435,54 @@ export class SqliteAdapter {
             });
         }
         return versions;
+    }
+
+    private concurrentWriteError(detail: string): Error {
+        return new Error(`SQLITE_BUSY: database changed after the automation snapshot was loaded (${detail})`);
+    }
+
+    private knownRowVersionsEqual(
+        observed: Map<string, SqliteKnownRowVersion>,
+        current: Map<string, SqliteKnownRowVersion>,
+    ): boolean {
+        if (observed.size !== current.size) return false;
+        for (const [id, expected] of observed) {
+            const actual = current.get(id);
+            if (
+                !actual
+                || actual.rowId !== expected.rowId
+                || actual.rev !== expected.rev
+                || actual.updatedAt !== expected.updatedAt
+            ) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private async assertObservedSnapshotUnchanged(): Promise<void> {
+        if (!this.rejectConcurrentWrites) return;
+        if (!this.lastKnownRowVersions || this.lastObservedSettingsJson === undefined) {
+            throw this.concurrentWriteError('no read baseline');
+        }
+
+        for (const table of ['tasks', 'projects', 'sections', 'areas', 'people', 'saved_filters'] as const) {
+            const revisionColumn = table === 'saved_filters' ? 'NULL AS rev' : 'rev';
+            const rows = await this.client.all<Record<string, unknown>>(
+                `SELECT rowid as _rowid, id, ${revisionColumn}, updatedAt FROM ${table}`,
+            );
+            const current = this.knownRowVersionsFromRows(rows);
+            const observed = this.lastKnownRowVersions.get(table) ?? new Map();
+            if (!this.knownRowVersionsEqual(observed, current)) {
+                throw this.concurrentWriteError(table);
+            }
+        }
+
+        const settingsRow = await this.client.get<Record<string, unknown>>('SELECT data FROM settings WHERE id = 1');
+        const currentSettingsJson = typeof settingsRow?.data === 'string' ? settingsRow.data : null;
+        if (currentSettingsJson !== this.lastObservedSettingsJson) {
+            throw this.concurrentWriteError('settings');
+        }
     }
 
     private async acquireFtsLock(): Promise<string | null> {
@@ -971,6 +1031,7 @@ export class SqliteAdapter {
             ['people', this.knownRowVersionsFromRows(peopleRows)],
             ['saved_filters', this.knownRowVersionsFromRows(savedFilterRows)],
         ]);
+        this.lastObservedSettingsJson = typeof settingsRow?.data === 'string' ? settingsRow.data : null;
 
         return { tasks, projects, sections, areas, people, settings };
     }
@@ -1052,6 +1113,7 @@ export class SqliteAdapter {
         await this.ensureSchema();
         await this.client.run('BEGIN IMMEDIATE');
         try {
+            await this.assertObservedSnapshotUnchanged();
             const columnList = TASK_UPSERT_COLUMNS.join(', ');
             const placeholders = TASK_UPSERT_COLUMNS.map(() => '?').join(', ');
             const entry = getTaskRowEntry(task);
@@ -1137,6 +1199,8 @@ export class SqliteAdapter {
         stats.beginMs = Date.now() - beginStartedAt;
         let saveStep = 'begin';
         try {
+            saveStep = 'concurrent-write-check';
+            await this.assertObservedSnapshotUnchanged();
             const nowIso = new Date().toISOString();
             const chunkArray = <T>(items: T[], size: number): T[][] => {
                 const chunks: T[][] = [];
@@ -1449,6 +1513,7 @@ export class SqliteAdapter {
             stats.commitMs = Date.now() - commitStartedAt;
             this.lastSavedFingerprints = nextSave;
             this.lastKnownRowVersions = nextKnownRows;
+            this.lastObservedSettingsJson = settingsJson;
             this.lastSaveDataStats = stats;
         } catch (error) {
             await this.client.run('ROLLBACK').catch((rollbackError) => {

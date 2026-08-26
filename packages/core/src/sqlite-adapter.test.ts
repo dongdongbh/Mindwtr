@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { SqliteAdapter, type SqliteClient } from './sqlite-adapter';
 import { consoleLogger, setLogger, type LogPayload } from './logger';
 import { SQLITE_BASE_SCHEMA, SQLITE_FTS_SCHEMA } from './sqlite-schema';
-import type { AppData } from './types';
+import type { AppData, Task } from './types';
 import { prepareRestoredBackupDataForSync } from './backup-transfer';
 
 const require = createRequire(import.meta.url);
@@ -614,6 +614,112 @@ describeSqlite('SqliteAdapter', () => {
             { id: 'task-concurrent' },
             { id: 'task-original' },
         ]);
+    });
+
+    it('rejects a guarded snapshot write after another connection changes settings', async () => {
+        const now = '2026-07-21T08:00:00.000Z';
+        await adapter.saveData({
+            tasks: [],
+            projects: [],
+            sections: [],
+            areas: [],
+            people: [],
+            settings: { theme: 'light' },
+        });
+        const automationAdapter = new SqliteAdapter(createClient(db), { rejectConcurrentWrites: true });
+        const staleSnapshot = await automationAdapter.getData();
+        const desktopAdapter = new SqliteAdapter(createClient(db));
+        const desktopSnapshot = await desktopAdapter.getData();
+        await desktopAdapter.saveData({
+            ...desktopSnapshot,
+            settings: { ...desktopSnapshot.settings, theme: 'dark' },
+        });
+
+        await expect(automationAdapter.saveData({
+            ...staleSnapshot,
+            projects: [{
+                id: 'project-mcp',
+                title: 'Automation project',
+                status: 'active',
+                color: '#2563EB',
+                order: 0,
+                tagIds: [],
+                createdAt: now,
+                updatedAt: now,
+                rev: 1,
+                revBy: 'mcp',
+            }],
+        })).rejects.toThrow('SQLITE_BUSY: database changed after the automation snapshot was loaded (settings)');
+
+        const afterConflict = await desktopAdapter.getData();
+        expect(afterConflict.settings.theme).toBe('dark');
+        expect(afterConflict.projects).toEqual([]);
+
+        const refreshed = await automationAdapter.getData();
+        await automationAdapter.saveData({
+            ...refreshed,
+            projects: [{
+                id: 'project-mcp',
+                title: 'Automation project',
+                status: 'active',
+                color: '#2563EB',
+                order: 0,
+                tagIds: [],
+                createdAt: now,
+                updatedAt: now,
+                rev: 1,
+                revBy: 'mcp',
+            }],
+        });
+        const afterRetry = await automationAdapter.getData();
+        expect(afterRetry.settings.theme).toBe('dark');
+        expect(afterRetry.projects.map((project) => project.id)).toEqual(['project-mcp']);
+    });
+
+    it('rejects a guarded equal-revision task write after another connection advances it', async () => {
+        const task: Task = {
+            id: 'task-race',
+            title: 'Original',
+            status: 'next',
+            tags: [],
+            contexts: [],
+            createdAt: '2026-07-21T08:00:00.000Z',
+            updatedAt: '2026-07-21T08:00:00.000Z',
+            rev: 1,
+            revBy: 'seed',
+        };
+        await adapter.saveData({
+            tasks: [task],
+            projects: [],
+            sections: [],
+            areas: [],
+            people: [],
+            settings: {},
+        });
+        const automationAdapter = new SqliteAdapter(createClient(db), { rejectConcurrentWrites: true });
+        const staleSnapshot = await automationAdapter.getData();
+        const desktopAdapter = new SqliteAdapter(createClient(db));
+        await desktopAdapter.saveTask({
+            ...task,
+            title: 'Desktop edit',
+            updatedAt: '2026-07-21T08:01:00.000Z',
+            rev: 2,
+            revBy: 'desktop',
+        });
+
+        await expect(automationAdapter.saveTask({
+            ...staleSnapshot.tasks[0],
+            title: 'MCP edit',
+            updatedAt: '2026-07-21T08:02:00.000Z',
+            rev: 2,
+            revBy: 'mcp',
+        })).rejects.toThrow('SQLITE_BUSY: database changed after the automation snapshot was loaded (tasks)');
+
+        expect((await desktopAdapter.getData()).tasks[0]).toMatchObject({
+            title: 'Desktop edit',
+            rev: 2,
+            revBy: 'desktop',
+        });
     });
 
     it('uses the observed row version when pruning after another adapter advances it', async () => {
