@@ -4,6 +4,7 @@ import {
     type CloudProvider,
     type DesktopSyncConfigOverride,
 } from '../../../lib/sync-service';
+import { classifySyncEncryptionFailure } from '../../../lib/sync-encryption-service';
 import { useUiStore } from '../../../store/ui-store';
 import { logError } from '../../../lib/app-log';
 import { markSettingsOpenTrace, measureSettingsOpenStep } from '../../../lib/settings-open-diagnostics';
@@ -1040,6 +1041,34 @@ export const useSyncSettings = ({
                         'settings.syncQueuedBody',
                         'Local changes arrived during sync. A retry was queued automatically.',
                     ), 'info');
+                    return;
+                }
+                if (
+                    !probeResult.success
+                    && classifySyncEncryptionFailure(probeResult.error) === 'remote-encrypted-no-key'
+                    && (await SyncService.getSyncEncryptionStatus()).state === 'remote-encrypted-no-key'
+                ) {
+                    // An encrypted remote is transport PROOF, not a failed probe: the
+                    // read reached the sync location and found a valid Mindwtr document
+                    // this device has no key for (the discovery just persisted the
+                    // no-key state). Refusing to activate here would deadlock joining
+                    // an already-encrypted location — unlock requires a durable
+                    // backend, and the backend could only become durable through a
+                    // sync that needs the key (#1001).
+                    if (syncConfigurationGeneration.current !== activationGeneration) {
+                        await resolveCapturedCredential();
+                        return;
+                    }
+                    const committedEncryptedConfiguration = await commitProvenSyncConfiguration(
+                        configOverride,
+                        activationGeneration,
+                    );
+                    if (committedEncryptedConfiguration) {
+                        showToast(resolveText(
+                            'settings.syncEncryptionRemoteEncrypted',
+                            'This sync location is encrypted. Enter its sync passphrase to continue syncing.',
+                        ), 'info', 6000);
+                    }
                     return;
                 }
                 if (

@@ -43,6 +43,7 @@ import {
 import { syncMobileBackgroundSyncRegistration } from '@/lib/background-sync-task';
 import { getMobileCloudRequestOptions, getMobileWebDavRequestOptions } from '@/lib/webdav-request-options';
 import {
+    classifySyncFailure,
     getSyncConflictCount,
     getSyncMaxClockSkewMs,
     getSyncTimestampAdjustments,
@@ -50,6 +51,7 @@ import {
     isLikelyOfflineSyncError,
     coerceSupportedBackend,
 } from '@/lib/sync-service-utils';
+import { isSyncEncryptionBlocked } from '@/lib/sync-encryption-state';
 import { testDropboxAccess } from '@/lib/dropbox-sync';
 import { formatClockSkew, formatError, isDropboxUnauthorizedError, logSettingsError } from '@/lib/settings-utils';
 import {
@@ -792,6 +794,26 @@ export function useSyncSettingsTransportActions({
                     || probeResult.remoteWriteDeferred
                     || probeResult.skipped === 'pendingRemoteWriteBackoff'
                 ) {
+                    // An encrypted remote is transport PROOF, not a failed probe: the
+                    // read reached the sync location and found a valid Mindwtr document
+                    // this device has no key for (the discovery just persisted the
+                    // no-key state). Refusing to activate here would deadlock joining an
+                    // already-encrypted location — unlock requires a durable backend,
+                    // and the backend could only become durable through a sync that
+                    // needs the key (#1001).
+                    if (
+                        !probeResult.success
+                        && classifySyncFailure(probeResult.error) === 'encryption'
+                        && (await isSyncEncryptionBlocked())
+                    ) {
+                        await commitProvenSyncConfiguration(configOverride);
+                        showSettingsWarning(
+                            tr('common.notice'),
+                            tr('settings.syncEncryptionRemoteEncrypted'),
+                            6000,
+                        );
+                        return;
+                    }
                     throw new Error(probeResult.error || 'Sync setup could not be verified');
                 }
                 await commitProvenSyncConfiguration(configOverride);

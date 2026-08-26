@@ -123,6 +123,7 @@ import {
     runDisableOverRemote,
     runEnableLocalOnly,
     runEnableOverRemote,
+    SYNC_ENCRYPTION_REMOTE_ENCRYPTED,
     runProvidePassphraseOverRemote,
 } from './sync-encryption-service';
 import {
@@ -2118,8 +2119,11 @@ export class SyncService {
                 );
                 if (result.state === 'encrypted-no-key') {
                     await markRemoteSyncEncryptionDiscovered({ salt: result.salt, params: result.params });
+                    // Carries the Rust-mirrored sentinel so string-form classification
+                    // (classifySyncEncryptionFailure on a probe result's error text)
+                    // recognizes this as no-key, same as the native path.
                     throw new SyncEncryptionTerminalError(
-                        new SyncCryptoUnsupportedError('the WebDAV remote is encrypted and this device has no key'),
+                        new SyncCryptoUnsupportedError(`${SYNC_ENCRYPTION_REMOTE_ENCRYPTED}: the WebDAV remote is encrypted and this device has no key`),
                     );
                 }
                 if (result.state === 'remote-plaintext') {
@@ -2298,8 +2302,10 @@ export class SyncService {
         const settle = async (result: DropboxDownloadResult): Promise<DropboxDownloadResult> => {
             if (result.encryptedNoKey) {
                 await markRemoteSyncEncryptionDiscovered(result.encryptedNoKey);
+                // Sentinel-prefixed for the same string-form classification as the
+                // WebDAV path above.
                 throw new SyncEncryptionTerminalError(
-                    new SyncCryptoUnsupportedError('the Dropbox remote is encrypted and this device has no key'),
+                    new SyncCryptoUnsupportedError(`${SYNC_ENCRYPTION_REMOTE_ENCRYPTED}: the Dropbox remote is encrypted and this device has no key`),
                 );
             }
             // The mirror case: this device has a key and the remote is back in plaintext, so a

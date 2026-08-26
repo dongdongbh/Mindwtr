@@ -57,6 +57,7 @@ const mocked = vi.hoisted(() => ({
             ? trimmed
             : `${trimmed}/data.json`;
     }),
+    isSyncEncryptionBlocked: vi.fn(async () => false),
     resetSyncStatusForBackendSwitch: vi.fn(),
     performMobileSync: vi.fn(),
     revokeDropboxTokens: vi.fn(),
@@ -149,6 +150,12 @@ vi.mock('@/lib/background-sync-task', () => ({
 }));
 
 vi.mock('@/lib/sync-service-utils', () => ({
+    // Mirrors the real classifier's encryption arm closely enough for the
+    // encrypted-remote activation tests: the production messages all mention
+    // the passphrase or encryption.
+    classifySyncFailure: (error: unknown) => (
+        /passphrase|encrypt/i.test(String(error ?? '')) ? 'encryption' : 'unknown'
+    ),
     coerceSupportedBackend: (backend: string, supportsNativeICloudSync: boolean) => (
         backend === 'cloudkit' && !supportsNativeICloudSync ? 'off' : backend
     ),
@@ -157,6 +164,10 @@ vi.mock('@/lib/sync-service-utils', () => ({
     getSyncTimestampAdjustments: vi.fn(() => 0),
     hasSameUserFacingSyncConflictSummary: vi.fn(() => false),
     isLikelyOfflineSyncError: vi.fn(() => false),
+}));
+
+vi.mock('@/lib/sync-encryption-state', () => ({
+    isSyncEncryptionBlocked: mocked.isSyncEncryptionBlocked,
 }));
 
 vi.mock('@/lib/dropbox-sync', () => ({
@@ -288,6 +299,8 @@ beforeEach(() => {
     mocked.isDropboxConnected.mockResolvedValue(false);
     mocked.performMobileSync.mockReset();
     mocked.performMobileSync.mockResolvedValue({ success: true });
+    mocked.isSyncEncryptionBlocked.mockReset();
+    mocked.isSyncEncryptionBlocked.mockResolvedValue(false);
     mocked.revokeDropboxTokens.mockReset();
     mocked.revokeDropboxTokens.mockResolvedValue(undefined);
     mocked.saveDropboxTokens.mockReset();
@@ -535,6 +548,63 @@ describe('useSyncSettingsTransportActions', () => {
             mocked.asyncStorage.setItem.mock.invocationCallOrder[1],
         );
         expect(mocked.syncMobileBackgroundSyncRegistration).toHaveBeenCalledTimes(1);
+    });
+
+    it('activates the configuration when the probe finds an encrypted remote it has no key for (#1001)', async () => {
+        // The probe DID reach the sync location — refusing to activate would
+        // deadlock joining an encrypted remote: unlock requires a durable
+        // backend, and the backend could only become durable through a sync
+        // that needs the key.
+        await renderHarness();
+        mocked.performMobileSync.mockClear();
+        mocked.performMobileSync.mockResolvedValueOnce({
+            success: false,
+            error: 'This sync folder is encrypted. Enter the sync passphrase to continue.',
+        });
+        mocked.isSyncEncryptionBlocked.mockResolvedValue(true);
+
+        await act(async () => {
+            await latestHookResult?.handleSync({
+                backend: 'webdav',
+                webdav: {
+                    allowInsecureHttp: false,
+                    password: 'secret',
+                    url: 'https://dav.example.com/mindwtr/',
+                    username: 'alice',
+                },
+            });
+        });
+
+        // Committed: backend activated despite the failed probe.
+        expect(mocked.asyncStorage.setItem).toHaveBeenLastCalledWith(SYNC_BACKEND_KEY, 'webdav');
+        // No follow-up sync — it would only fail with the same no-key error.
+        expect(mocked.performMobileSync).toHaveBeenCalledTimes(1);
+        expect(mocked.showSettingsWarning).toHaveBeenCalled();
+    });
+
+    it('does not activate on an encryption failure without persisted no-key evidence', async () => {
+        await renderHarness();
+        mocked.performMobileSync.mockClear();
+        mocked.performMobileSync.mockResolvedValueOnce({
+            success: false,
+            error: 'This sync folder is encrypted. Enter the sync passphrase to continue.',
+        });
+        mocked.isSyncEncryptionBlocked.mockResolvedValue(false);
+
+        await act(async () => {
+            await latestHookResult?.handleSync({
+                backend: 'webdav',
+                webdav: {
+                    allowInsecureHttp: false,
+                    password: 'secret',
+                    url: 'https://dav.example.com/mindwtr/',
+                    username: 'alice',
+                },
+            });
+        });
+
+        expect(mocked.asyncStorage.setItem).not.toHaveBeenLastCalledWith(SYNC_BACKEND_KEY, 'webdav');
+        expect(mocked.performMobileSync).toHaveBeenCalledTimes(1);
     });
 
     it('runs one normal sync for an already proven unchanged backend', async () => {

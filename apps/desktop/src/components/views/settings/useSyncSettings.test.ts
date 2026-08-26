@@ -481,6 +481,58 @@ describe('useSyncSettings cloud token validation', () => {
         expect(showSaved).not.toHaveBeenCalled();
     });
 
+    it('activates the configuration when the probe finds an encrypted remote it has no key for (#1001)', async () => {
+        // The probe DID reach the sync location — refusing to activate would
+        // deadlock joining an encrypted remote: unlock requires a durable
+        // backend, and the backend could only become durable through a sync
+        // that needs the key.
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: false,
+            error: 'SYNC_ENCRYPTION_REMOTE_ENCRYPTED: the WebDAV remote is encrypted and this device has no key',
+        });
+        vi.spyOn(SyncService, 'getSyncEncryptionStatus').mockResolvedValue({ state: 'remote-encrypted-no-key' });
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+
+        act(() => {
+            void result.current.syncPageProps.onSetSyncBackend('cloud');
+            result.current.syncPageProps.onCloudUrlChange('https://example.com');
+            result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
+        });
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.commitProvenSyncConfiguration).toHaveBeenCalledWith(
+            expect.objectContaining({ backend: 'cloud' }),
+        );
+        // No follow-up sync — it would only fail with the same no-key error.
+        expect(SyncService.performSync).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not activate on an encrypted-remote error when the persisted state disagrees', async () => {
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: false,
+            error: 'SYNC_ENCRYPTION_REMOTE_ENCRYPTED: the WebDAV remote is encrypted and this device has no key',
+        });
+        vi.spyOn(SyncService, 'getSyncEncryptionStatus').mockResolvedValue({ state: 'off' });
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+
+        act(() => {
+            void result.current.syncPageProps.onSetSyncBackend('cloud');
+            result.current.syncPageProps.onCloudUrlChange('https://example.com');
+            result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
+        });
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
+    });
+
     it('treats an empty token as "unchanged, use keyring" in the transient sync config', async () => {
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
