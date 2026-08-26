@@ -258,7 +258,7 @@ Mindwtr 的发展离不开用户与贡献者的支持，感谢大家一起把它
 2. **留下应用商店评价：** 在 [App Store](https://apps.apple.com/app/mindwtr/id6758597144)、[Google Play](https://play.google.com/store/apps/details?id=tech.dongdongbh.mindwtr) 或 [Microsoft Store](https://apps.microsoft.com/detail/9n0v5b0b6frx?ocid=webpdpshare) 的好评对项目帮助很大。
 3. **Star 并分享：** 给仓库点个 Star，并在 [X](https://twitter.com/intent/tweet?text=I%20like%20Mindwtr%20https%3A%2F%2Fgithub.com%2Fdongdongbh%2FMindwtr)、[Reddit](https://www.reddit.com/submit?url=https%3A%2F%2Fgithub.com%2Fdongdongbh%2FMindwtr&title=I%20like%20Mindwtr)、[LinkedIn](https://www.linkedin.com/shareArticle?mini=true&url=https%3A%2F%2Fgithub.com%2Fdongdongbh%2FMindwtr&title=I%20like%20Mindwtr) 发布使用体验。
 4. **报告问题与提出需求：** 在 [GitHub Issues](https://github.com/dongdongbh/Mindwtr/issues) 提交 Bug 和功能建议。
-5. **加入社区讨论：** 欢迎加入 [Discord](https://discord.gg/gc4h5t58PR)。
+5. **加入社区讨论：** 欢迎加入 [Discord](https://discord.gg/gc4h5t58PR)，也可以逛逛社区自发运营的 [r/Mindwtr](https://www.reddit.com/r/Mindwtr/) 版块。
 6. **参与翻译：** 在 [`packages/core/src/i18n/locales/`](packages/core/src/i18n/locales/) 提交语言翻译改进。
 7. **贡献代码或文档：** 提交 PR，并遵循[贡献指南](docs/CONTRIBUTING.md)和提交规范。
 8. **认领并实现：** 欢迎社区成员从任何开放 issue 中认领条目并提交 PR。
