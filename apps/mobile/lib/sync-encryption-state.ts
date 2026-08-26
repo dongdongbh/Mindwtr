@@ -118,6 +118,7 @@ export const loadSyncEncryptionLocalState = async (): Promise<SyncEncryptionLoca
 // pair. Without it a transition could return (and its caller report success) while the state
 // that survives a restart was still in flight, or had failed silently.
 let pendingLocalStateWrites: Promise<unknown> = Promise.resolve();
+let localStateWriteQueue: Promise<unknown> = Promise.resolve();
 
 export const flushSyncEncryptionLocalState = async (): Promise<void> => {
     await pendingLocalStateWrites;
@@ -128,16 +129,25 @@ export const syncEncryptionLocalState: SyncEncryptionLocalStatePort = {
     write: (state) => {
         cachedLocalState = state;
         hydrated = true;
-        const persist = state === null
-            ? AsyncStorage.removeItem(SYNC_ENCRYPTION_STATE_KEY)
-            : AsyncStorage.setItem(SYNC_ENCRYPTION_STATE_KEY, JSON.stringify(state));
-        const settled = persist.catch((error: unknown) => {
-            void logWarn('Failed to persist sync encryption state', {
-                scope: 'sync',
-                extra: { error: error instanceof Error ? error.message : String(error) },
-            });
+        const queuedWrite = localStateWriteQueue.then(async () => {
+            try {
+                if (state === null) {
+                    await AsyncStorage.removeItem(SYNC_ENCRYPTION_STATE_KEY);
+                } else {
+                    await AsyncStorage.setItem(SYNC_ENCRYPTION_STATE_KEY, JSON.stringify(state));
+                }
+            } catch (error) {
+                void logWarn('Failed to persist sync encryption state', {
+                    scope: 'sync',
+                    extra: { error: error instanceof Error ? error.message : String(error) },
+                });
+                throw error;
+            }
         });
-        pendingLocalStateWrites = pendingLocalStateWrites.then(() => settled);
+        pendingLocalStateWrites = queuedWrite;
+        // Keep the serializer usable after a failed write while leaving the
+        // current write observable to flush/callers as a rejection.
+        localStateWriteQueue = queuedWrite.catch(() => undefined);
     },
 };
 
@@ -211,4 +221,5 @@ export const __resetSyncEncryptionStateForTests = (): void => {
     cachedLocalState = null;
     hydrated = false;
     pendingLocalStateWrites = Promise.resolve();
+    localStateWriteQueue = Promise.resolve();
 };

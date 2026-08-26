@@ -635,6 +635,19 @@ describe('local-state persistence and the remote-plaintext state', () => {
     expect(JSON.parse(asyncStorage.get(SYNC_ENCRYPTION_STATE_KEY)!)).toMatchObject({ state: 'enabled' });
   });
 
+  it('reports a failed local-state write and lets the next queued write recover', async () => {
+    vi.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error('storage unavailable'));
+    syncEncryptionLocalState.write({ state: 'enabled', discoveredSalt: 'aabb', discoveredParams: FAST_PARAMS });
+
+    await expect(flushSyncEncryptionLocalState()).rejects.toThrow('storage unavailable');
+
+    syncEncryptionLocalState.write({ state: 'remote-encrypted-no-key' });
+    await expect(flushSyncEncryptionLocalState()).resolves.toBeUndefined();
+    expect(JSON.parse(asyncStorage.get(SYNC_ENCRYPTION_STATE_KEY)!)).toMatchObject({
+      state: 'remote-encrypted-no-key',
+    });
+  });
+
   it('File Sync: a keyed device treats a peer-disabled folder as terminal, not as an empty folder', async () => {
     // The inverse of `discoverEncryptedSyncFolder`: a peer ran the disable transition, so the
     // `.enc` artifact is gone and the plaintext original is back.
