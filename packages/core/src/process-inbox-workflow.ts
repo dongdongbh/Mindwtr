@@ -1,5 +1,6 @@
 import {
     advanceProcessInboxSession,
+    skipCurrentProcessInboxTask,
     type ProcessInboxCandidate,
     type ProcessInboxSession,
     type ProcessInboxTaskTransitionOptions,
@@ -40,12 +41,13 @@ export function resolveProcessInboxContainerFields(
 /**
  * Domain decisions emitted by an Inbox-processing UI.
  *
- * Platforms remain responsible for collecting and validating UI input. This
- * event boundary owns the status/effect mapping so every client commits the
- * same GTD decision once input is ready.
+ * Platforms collect and normalize UI input; process-inbox-plan validates and
+ * prepares these events. This boundary owns status/effect mapping so every
+ * client commits the same GTD decision once input is ready.
  */
 export type ProcessInboxWorkflowEvent =
     | { type: 'discard' }
+    | { type: 'skip'; fields: ProcessInboxWorkflowFields }
     | { type: 'someday'; fields?: ProcessInboxWorkflowFields }
     | { type: 'reference'; fields?: ProcessInboxWorkflowFields }
     | { type: 'complete'; fields?: ProcessInboxWorkflowFields }
@@ -97,6 +99,8 @@ export function resolveProcessInboxWorkflowEvent(
     switch (event.type) {
         case 'discard':
             return { type: 'delete' };
+        case 'skip':
+            return { type: 'update', updates: normalizeFields(event.fields) };
         case 'someday':
             return updateEffect('someday', event.fields);
         case 'reference':
@@ -146,7 +150,9 @@ export async function commitProcessInboxWorkflowEvent<
     }
 
     return {
-        session: advanceProcessInboxSession(session, candidates, options),
+        session: event.type === 'skip'
+            ? skipCurrentProcessInboxTask(session, candidates, options)
+            : advanceProcessInboxSession(session, candidates, options),
         writeResult,
     };
 }

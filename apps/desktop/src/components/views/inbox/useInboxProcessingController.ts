@@ -8,15 +8,14 @@ import {
     getPersonOptionNames,
     goBackProcessInboxStep,
     parseQuickAddDateCommands,
-    resolveProcessInboxContainerFields,
-    skipCurrentProcessInboxTask,
+    prepareProcessInboxDecision,
     startProcessInboxSession,
     tFallback,
     useTaskStore,
     type AppData,
     type Area,
     type Project,
-    type ProcessInboxWorkflowEvent,
+    type ProcessInboxDecision,
     type ProcessInboxWorkflowFields,
     type StoreActionResult,
     type Task,
@@ -85,6 +84,7 @@ export function useInboxProcessingController({
     const addPerson = useTaskStore((state) => state.addPerson);
     const personOptions = useMemo(() => getPersonOptionNames(people, tasks), [people, tasks]);
     const {
+        processInboxPlan,
         processingMode,
         setProcessingMode,
         processingSession,
@@ -122,7 +122,6 @@ export function useInboxProcessingController({
         twoMinuteFirst,
         projectFirst,
         scheduleEnabled,
-        prioritiesEnabled,
         visibility,
         showProjectStep,
         visibleScheduleFieldKeys,
@@ -220,15 +219,6 @@ export function useInboxProcessingController({
         ));
     }, [applySessionTransition, eligibleInboxTasks, processingSession]);
 
-    const handleSkip = useCallback(() => {
-        if (!processingTask) return;
-        applySessionTransition(skipCurrentProcessInboxTask(
-            processingSession,
-            eligibleInboxTasks,
-            { entryStep: 'refine' },
-        ));
-    }, [applySessionTransition, eligibleInboxTasks, processingSession, processingTask]);
-
     const buildScheduleUpdates = useCallback(
         () => (scheduleEnabled
             ? {
@@ -250,6 +240,31 @@ export function useInboxProcessingController({
             scheduleTimeDraft,
         ],
     );
+
+    const buildDecisionFields = useCallback((
+        overrides: ProcessInboxWorkflowFields = {},
+    ): ProcessInboxWorkflowFields => ({
+        projectId: draft.projectId || undefined,
+        areaId: draft.areaId || undefined,
+        contexts: selectedContexts,
+        tags: selectedTags,
+        priority: draft.priority || undefined,
+        energyLevel: draft.energyLevel || undefined,
+        assignedTo: draft.assignedTo.trim() || undefined,
+        timeEstimate: draft.timeEstimate || undefined,
+        ...buildScheduleUpdates(),
+        ...overrides,
+    }), [
+        buildScheduleUpdates,
+        draft.areaId,
+        draft.assignedTo,
+        draft.energyLevel,
+        draft.priority,
+        draft.projectId,
+        draft.timeEstimate,
+        selectedContexts,
+        selectedTags,
+    ]);
 
     const prepareProcessingEdits = useCallback((
         titleInput: string = draft.title,
@@ -275,26 +290,44 @@ export function useInboxProcessingController({
         };
     }, [draft.description, draft.title, processingTask, settings?.quickAddAutoClean, showToast, t]);
 
-    const applyWorkflowEvent = useCallback(async (
-        event: ProcessInboxWorkflowEvent,
-        titleInput?: string,
-        fallbackTitle?: string,
-        options: { advance?: boolean } = {},
+    const applyWorkflowDecision = useCallback(async (
+        decision: ProcessInboxDecision,
+        options: {
+            fields?: ProcessInboxWorkflowFields;
+            titleInput?: string;
+            fallbackTitle?: string;
+            advance?: boolean;
+        } = {},
     ): Promise<boolean> => {
         if (!processingTask) return false;
-        const taskUpdates = event.type === 'discard'
+        const taskUpdates = decision.type === 'discard'
             ? undefined
-            : prepareProcessingEdits(titleInput, fallbackTitle);
-        if (event.type !== 'discard' && !taskUpdates) return false;
+            : prepareProcessingEdits(options.titleInput, options.fallbackTitle);
+        if (decision.type !== 'discard' && !taskUpdates) return false;
+        const prepared = prepareProcessInboxDecision({
+            task: processingTask,
+            draft: {
+                fields: buildDecisionFields(options.fields),
+                taskUpdates: taskUpdates ?? undefined,
+            },
+            decision,
+            plan: processInboxPlan,
+        });
+        if (!prepared.ok) {
+            if (prepared.reason === 'later-start-required') {
+                showToast(tFallback(t, 'process.laterStartRequired', 'Choose a start date for Later.'), 'error');
+            }
+            return false;
+        }
         try {
             const outcome = await commitProcessInboxWorkflowEvent(
                 processingSession,
                 eligibleInboxTasks,
-                event,
+                prepared.event,
                 { deleteTask, updateTask },
                 {
                     entryStep: 'refine',
-                    taskUpdates: taskUpdates ?? undefined,
+                    taskUpdates: prepared.taskUpdates,
                     advance: options.advance,
                 },
             );
@@ -311,8 +344,10 @@ export function useInboxProcessingController({
         }
     }, [
         applySessionTransition,
+        buildDecisionFields,
         deleteTask,
         eligibleInboxTasks,
+        processInboxPlan,
         prepareProcessingEdits,
         processingSession,
         processingTask,
@@ -320,6 +355,10 @@ export function useInboxProcessingController({
         t,
         updateTask,
     ]);
+
+    const handleSkip = useCallback(() => {
+        void applyWorkflowDecision({ type: 'skip' });
+    }, [applyWorkflowDecision]);
 
     const goToStep = useCallback((nextStep: ProcessingStep) => {
         setProcessingSession((current) => enterProcessInboxStep(current, nextStep));
@@ -329,19 +368,10 @@ export function useInboxProcessingController({
         setProcessingSession((current) => goBackProcessInboxStep(current));
     }, [setProcessingSession]);
 
-    // Terminal destinations that skip the project step still carry whatever the
-    // user already picked; the state is hydrated from the task, so an untouched
-    // selection writes back unchanged (#958).
-    const buildSelectionFields = useCallback((): ProcessInboxWorkflowFields => ({
-        ...resolveProcessInboxContainerFields(draft.projectId, draft.areaId),
-        ...(showContextsField ? { contexts: selectedContexts } : {}),
-        ...(showTagsField ? { tags: selectedTags } : {}),
-    }), [draft.areaId, draft.projectId, selectedContexts, selectedTags, showContextsField, showTagsField]);
-
     const handleNotActionable = useCallback(async (action: 'trash' | 'someday' | 'reference') => {
         if (!processingTask) return;
         if (action === 'trash') {
-            await applyWorkflowEvent({ type: 'discard' });
+            await applyWorkflowDecision({ type: 'discard' });
             return;
         }
         if (action === 'reference') {
@@ -349,13 +379,12 @@ export function useInboxProcessingController({
                 goToStep('reference');
                 return;
             }
-            await applyWorkflowEvent({ type: 'reference', fields: buildSelectionFields() });
+            await applyWorkflowDecision({ type: 'reference' });
             return;
         }
-        await applyWorkflowEvent({ type: 'someday', fields: buildSelectionFields() });
+        await applyWorkflowDecision({ type: 'someday' });
     }, [
-        applyWorkflowEvent,
-        buildSelectionFields,
+        applyWorkflowDecision,
         goToStep,
         processingMode,
         processingTask,
@@ -365,37 +394,26 @@ export function useInboxProcessingController({
 
     const handleConfirmReference = useCallback(async () => {
         if (!processingTask) return;
-        await applyWorkflowEvent({ type: 'reference', fields: buildSelectionFields() });
-    }, [applyWorkflowEvent, buildSelectionFields, processingTask]);
+        await applyWorkflowDecision({ type: 'reference' });
+    }, [applyWorkflowDecision, processingTask]);
 
     const handleLater = useCallback(async () => {
         if (!processingTask) return;
         handleScheduleTimeCommit();
         const startTime = buildDateTimeUpdate(scheduleDate, scheduleTimeDraft, scheduleTime);
-        if (!startTime) {
-            showToast(tFallback(t, 'process.laterStartRequired', 'Choose a start date for Later.'), 'error');
-            return;
-        }
-        await applyWorkflowEvent({
-            type: 'later',
-            fields: { ...resolveProcessInboxContainerFields(draft.projectId, draft.areaId), startTime },
-        });
+        await applyWorkflowDecision({ type: 'later' }, { fields: { startTime } });
     }, [
-        applyWorkflowEvent,
-        draft.areaId,
-        draft.projectId,
+        applyWorkflowDecision,
         handleScheduleTimeCommit,
         processingTask,
         scheduleDate,
         scheduleTime,
         scheduleTimeDraft,
-        showToast,
-        t,
     ]);
 
     const getInitialGuidedStep = useCallback<() => ProcessingStep>(() => (
-        twoMinuteEnabled && twoMinuteFirst ? 'twomin' : 'actionable'
-    ), [twoMinuteEnabled, twoMinuteFirst]);
+        processInboxPlan.initialGuidedStep === 'two-minute' ? 'twomin' : 'actionable'
+    ), [processInboxPlan.initialGuidedStep]);
 
     const continueFromProjectCheck = useCallback(() => {
         if (!twoMinuteEnabled) {
@@ -427,8 +445,8 @@ export function useInboxProcessingController({
 
     const handleTwoMinDone = useCallback(async () => {
         if (!processingTask) return;
-        await applyWorkflowEvent({ type: 'complete', fields: buildSelectionFields() });
-    }, [applyWorkflowEvent, buildSelectionFields, processingTask]);
+        await applyWorkflowDecision({ type: 'complete' });
+    }, [applyWorkflowDecision, processingTask]);
 
     const handleTwoMinNo = useCallback(() => {
         goToStep(twoMinuteFirst ? 'actionable' : 'decide');
@@ -444,35 +462,26 @@ export function useInboxProcessingController({
         if (!processingTask) return;
         const who = delegateWho.trim();
         const scheduleUpdates = buildScheduleUpdates();
-        const applied = await applyWorkflowEvent({
+        const applied = await applyWorkflowDecision({
             type: 'waiting',
-            fields: {
-                ...buildSelectionFields(),
-                energyLevel: draft.energyLevel || undefined,
-                assignedTo: who || undefined,
-                timeEstimate: draft.timeEstimate || undefined,
-                ...(prioritiesEnabled ? { priority: draft.priority || undefined } : {}),
-                ...scheduleUpdates,
-                reviewAt: scheduleUpdates.reviewAt,
-            },
             followUpAt: delegateFollowUp
                 ? new Date(`${delegateFollowUp}T09:00:00`).toISOString()
                 : undefined,
+        }, {
+            fields: {
+                ...scheduleUpdates,
+                assignedTo: who || undefined,
+            },
         });
         if (applied) {
             setDelegateWho('');
             setDelegateFollowUp('');
         }
     }, [
-        applyWorkflowEvent,
-        buildSelectionFields,
+        applyWorkflowDecision,
         buildScheduleUpdates,
         delegateFollowUp,
         delegateWho,
-        draft.energyLevel,
-        draft.priority,
-        draft.timeEstimate,
-        prioritiesEnabled,
         processingTask,
     ]);
 
@@ -566,35 +575,12 @@ export function useInboxProcessingController({
 
     const handleSetProject = useCallback(async (projectId: string | null) => {
         if (!processingTask) return;
-        await applyWorkflowEvent({
-            type: 'next',
-            fields: {
-                contexts: showContextsField ? selectedContexts : (processingTask.contexts ?? []),
-                tags: showTagsField ? selectedTags : (processingTask.tags ?? []),
-                energyLevel: draft.energyLevel || undefined,
-                assignedTo: draft.assignedTo.trim() || undefined,
-                timeEstimate: draft.timeEstimate || undefined,
-                ...(prioritiesEnabled ? { priority: draft.priority || undefined } : {}),
-                projectId: projectId || undefined,
-                areaId: projectId ? undefined : (showAreaField ? (draft.areaId || undefined) : (processingTask.areaId || undefined)),
-                ...buildScheduleUpdates(),
-            },
+        await applyWorkflowDecision({ type: 'next' }, {
+            fields: { projectId: projectId || undefined },
         });
     }, [
-        applyWorkflowEvent,
-        buildScheduleUpdates,
-        draft.areaId,
-        draft.assignedTo,
-        draft.energyLevel,
-        draft.priority,
-        draft.timeEstimate,
-        prioritiesEnabled,
+        applyWorkflowDecision,
         processingTask,
-        selectedContexts,
-        selectedTags,
-        showAreaField,
-        showContextsField,
-        showTagsField,
     ]);
 
     const handleConfirmContexts = useCallback(() => {
@@ -657,19 +643,12 @@ export function useInboxProcessingController({
                 showAreaField && draft.areaId ? { areaId: draft.areaId } : undefined,
             );
             if (!project) return;
-            const applied = await applyWorkflowEvent({
-                type: 'next',
-                fields: {
-                    contexts: showContextsField ? selectedContexts : (processingTask.contexts ?? []),
-                    tags: showTagsField ? selectedTags : (processingTask.tags ?? []),
-                    energyLevel: draft.energyLevel || undefined,
-                    assignedTo: draft.assignedTo.trim() || undefined,
-                    timeEstimate: draft.timeEstimate || undefined,
-                    ...(prioritiesEnabled ? { priority: draft.priority || undefined } : {}),
-                    projectId: project.id,
-                    ...buildScheduleUpdates(),
-                },
-            }, nextAction, processingTask.title, { advance: false });
+            const applied = await applyWorkflowDecision({ type: 'next' }, {
+                fields: { projectId: project.id },
+                titleInput: nextAction,
+                fallbackTitle: processingTask.title,
+                advance: false,
+            });
             if (applied) {
                 // The converted capture becomes the project's clarified next
                 // action. Extra actions typed at the split step are raw
@@ -696,16 +675,10 @@ export function useInboxProcessingController({
         addTask,
         extraActionDrafts,
         setExtraActionDrafts,
-        applyWorkflowEvent,
-        buildScheduleUpdates,
+        applyWorkflowDecision,
         draft.areaId,
-        draft.assignedTo,
-        draft.energyLevel,
-        draft.priority,
-        draft.timeEstimate,
         draft.title,
         nextActionDraft,
-        prioritiesEnabled,
         processingTask,
         processNext,
         projectTitleDraft,

@@ -21,36 +21,30 @@ import {
   getProcessInboxRemainingCandidates,
   hasTimeComponent,
   normalizeClockTimeInput,
-  resolveFeatureFlags,
+  prepareProcessInboxDecision,
+  resolveProcessInboxPlan,
   safeFormatDate,
   safeParseDate,
   isTaskVisibleInArea,
   selectProcessInboxCandidates,
-  skipCurrentProcessInboxTask,
   startProcessInboxSession,
   tFallback,
   undoTaskCompletion,
   resolveAutoTextDirection,
   useTaskStore,
   type AIProviderId,
+  type ProcessInboxDecision,
   type ProcessInboxSession,
   type Task,
-  type TaskEditorFieldId,
   type TaskPriority,
   type TimeEstimate,
 } from '@mindwtr/core';
 import {
   commitProcessInboxWorkflowEvent,
-  resolveProcessInboxContainerFields,
-  type ProcessInboxWorkflowEvent,
   type ProcessInboxWorkflowFields,
 } from '@mindwtr/core/process-inbox-workflow';
 
 import type { AIResponseAction } from '../ai-response-modal';
-import {
-  DEFAULT_TASK_EDITOR_ORDER,
-  DEFAULT_TASK_EDITOR_VISIBLE,
-} from '../task-edit/task-edit-modal.utils';
 import { MOBILE_TIME_ESTIMATE_OPTIONS } from '../time-estimate-filter-utils';
 import { useLanguage } from '../../contexts/language-context';
 import { useTheme } from '../../contexts/theme-context';
@@ -176,45 +170,32 @@ export function useInboxProcessingController({
     restoreUpdates: Partial<Task>;
   } | null>(null);
 
-  const inboxProcessing = settings?.gtd?.inboxProcessing ?? {};
-  const twoMinuteEnabled = inboxProcessing.twoMinuteEnabled !== false;
-  const projectFirst = inboxProcessing.projectFirst === true;
-  const contextStepEnabled = inboxProcessing.contextStepEnabled !== false;
-  const scheduleEnabled = inboxProcessing.scheduleEnabled === true;
+  const processInboxPlan = useMemo(() => resolveProcessInboxPlan(settings), [settings]);
+  const {
+    twoMinuteEnabled,
+    projectFirst,
+    referenceEnabled,
+  } = processInboxPlan;
+  const {
+    project: showProjectField,
+    area: showAreaField,
+    contexts: showContextsField,
+    tags: showTagsField,
+    priority: showPriorityField,
+    energyLevel: showEnergyLevelField,
+    assignedTo: showAssignedToField,
+    timeEstimate: showTimeEstimateField,
+    startTime: showStartDateField,
+    dueDate: showDueDateField,
+    reviewAt: showReviewDateField,
+  } = processInboxPlan.visibleFields;
   const defaultScheduleTime = normalizeClockTimeInput(settings?.gtd?.defaultScheduleTime) || '';
-  const referenceEnabled = true;
-  const { priorities: prioritiesEnabled, timeEstimates: timeEstimatesEnabled } = resolveFeatureFlags(settings);
   const aiEnabled = settings?.ai?.enabled === true;
   const aiProvider = (settings?.ai?.provider ?? 'openai') as AIProviderId;
-  const defaultHiddenTaskEditorFields = useMemo(() => {
-    const featureHiddenFields = new Set<TaskEditorFieldId>();
-    if (!prioritiesEnabled) featureHiddenFields.add('priority');
-    if (!timeEstimatesEnabled) featureHiddenFields.add('timeEstimate');
-    return DEFAULT_TASK_EDITOR_ORDER.filter(
-      (fieldId) => !DEFAULT_TASK_EDITOR_VISIBLE.includes(fieldId) || featureHiddenFields.has(fieldId)
-    );
-  }, [prioritiesEnabled, timeEstimatesEnabled]);
-  const hiddenTaskEditorFields = useMemo(() => {
-    const next = new Set<TaskEditorFieldId>(settings?.gtd?.taskEditor?.hidden ?? defaultHiddenTaskEditorFields);
-    if (!prioritiesEnabled) next.add('priority');
-    if (!timeEstimatesEnabled) next.add('timeEstimate');
-    return next;
-  }, [defaultHiddenTaskEditorFields, prioritiesEnabled, settings?.gtd?.taskEditor?.hidden, timeEstimatesEnabled]);
-  const showProjectField = !hiddenTaskEditorFields.has('project');
-  const showAreaField = !hiddenTaskEditorFields.has('area');
-  const showContextsField = contextStepEnabled && !hiddenTaskEditorFields.has('contexts');
-  const showTagsField = contextStepEnabled && !hiddenTaskEditorFields.has('tags');
-  const showPriorityField = prioritiesEnabled && !hiddenTaskEditorFields.has('priority');
-  const showEnergyLevelField = !hiddenTaskEditorFields.has('energyLevel');
-  const showAssignedToField = !hiddenTaskEditorFields.has('assignedTo');
-  const showTimeEstimateField = timeEstimatesEnabled && !hiddenTaskEditorFields.has('timeEstimate');
-  const showStartDateField = scheduleEnabled && !hiddenTaskEditorFields.has('startTime');
-  const showDueDateField = scheduleEnabled && !hiddenTaskEditorFields.has('dueDate');
-  const showReviewDateField = scheduleEnabled && !hiddenTaskEditorFields.has('reviewAt');
-  const showProjectSection = showProjectField || showAreaField;
+  const showProjectSection = processInboxPlan.showProjectStep;
   const showContextSection = showContextsField || showTagsField;
   const showOrganizationSection = showPriorityField || showEnergyLevelField || showAssignedToField || showTimeEstimateField;
-  const showSchedulingSection = showStartDateField || showDueDateField || showReviewDateField;
+  const showSchedulingSection = processInboxPlan.showScheduleFields;
   const timeEstimateOptions = useMemo<TimeEstimate[]>(() => {
     const savedPresets = settings?.gtd?.timeEstimatePresets ?? [];
     const normalizedPresets = MOBILE_TIME_ESTIMATE_OPTIONS.filter((value) => savedPresets.includes(value));
@@ -557,6 +538,31 @@ export function useInboxProcessingController({
     });
   }, [showToast, t]);
 
+  const buildScheduleUpdates = useCallback(() => {
+    const updates: Partial<Task> = {};
+    if (showStartDateField) {
+      updates.startTime = pendingStartDate ? formatScheduledDateValue(pendingStartDate, pendingStartDateOnly) : undefined;
+    }
+    if (showDueDateField) {
+      updates.dueDate = pendingDueDate ? formatScheduledDateValue(pendingDueDate, pendingDueDateOnly) : undefined;
+    }
+    if (showReviewDateField) {
+      updates.reviewAt = pendingReviewDate ? formatScheduledDateValue(pendingReviewDate, pendingReviewDateOnly) : undefined;
+    }
+    return updates;
+  }, [
+    formatScheduledDateValue,
+    pendingDueDate,
+    pendingDueDateOnly,
+    pendingReviewDate,
+    pendingReviewDateOnly,
+    pendingStartDate,
+    pendingStartDateOnly,
+    showDueDateField,
+    showReviewDateField,
+    showStartDateField,
+  ]);
+
   const prepareProcessingEdits = useCallback((titleOverride?: string, fallbackTitle?: string): Partial<Task> | null => {
     if (!currentTask) return null;
     const titleSource = titleOverride ?? processingTitle;
@@ -568,37 +574,86 @@ export function useInboxProcessingController({
     };
   }, [currentTask, processingDescription, processingTitle]);
 
-  const applyWorkflowEvent = useCallback(async (
-    event: ProcessInboxWorkflowEvent,
-    titleOverride?: string,
-    fallbackTitle?: string,
-    options: { advance?: boolean } = {},
+  const buildDecisionFields = useCallback((
+    overrides: ProcessInboxWorkflowFields = {},
+  ): ProcessInboxWorkflowFields => ({
+    projectId: selectedProjectId ?? undefined,
+    areaId: selectedAreaId ?? undefined,
+    contexts: selectedContexts,
+    tags: selectedTags,
+    priority: selectedPriority,
+    energyLevel: selectedEnergyLevel,
+    assignedTo: selectedAssignedTo.trim() || undefined,
+    timeEstimate: selectedTimeEstimate,
+    ...buildScheduleUpdates(),
+    ...overrides,
+  }), [
+    buildScheduleUpdates,
+    selectedAreaId,
+    selectedAssignedTo,
+    selectedContexts,
+    selectedEnergyLevel,
+    selectedPriority,
+    selectedProjectId,
+    selectedTags,
+    selectedTimeEstimate,
+  ]);
+
+  const applyWorkflowDecision = useCallback(async (
+    decision: ProcessInboxDecision,
+    options: {
+      fields?: ProcessInboxWorkflowFields;
+      titleOverride?: string;
+      fallbackTitle?: string;
+      advance?: boolean;
+    } = {},
   ): Promise<boolean> => {
     if (!currentTask) return false;
-    const taskUpdates = event.type === 'discard'
+    const taskUpdates = decision.type === 'discard'
       ? undefined
-      : prepareProcessingEdits(titleOverride, fallbackTitle);
-    if (event.type !== 'discard' && !taskUpdates) return false;
+      : prepareProcessingEdits(options.titleOverride, options.fallbackTitle);
+    if (decision.type !== 'discard' && !taskUpdates) return false;
+    const prepared = prepareProcessInboxDecision({
+      task: currentTask,
+      draft: {
+        fields: buildDecisionFields(options.fields),
+        taskUpdates: taskUpdates ?? undefined,
+      },
+      decision,
+      plan: processInboxPlan,
+    });
+    if (!prepared.ok) {
+      if (prepared.reason === 'later-start-required') {
+        showToast({
+          title: t('common.notice'),
+          message: tFallback(t, 'process.laterStartRequired', 'Choose a start date for Later.'),
+          tone: 'warning',
+        });
+      }
+      return false;
+    }
     try {
       const outcome = await commitProcessInboxWorkflowEvent(
         processingSession,
         inboxTasks,
-        event,
+        prepared.event,
         { deleteTask, updateTask },
-        { taskUpdates: taskUpdates ?? undefined, advance: options.advance },
+        { taskUpdates: prepared.taskUpdates, advance: options.advance },
       );
       if (isActionFailure(outcome.writeResult)) {
         showProcessingError(getActionFailureMessage(outcome.writeResult));
         return false;
       }
-      lastCommittedRef.current = {
-        taskId: currentTask.id,
-        discarded: event.type === 'discard',
-        completed: event.type === 'complete',
-        previousStatus: currentTask.status,
-        wasFocusedToday: currentTask.isFocusedToday === true,
-        restoreUpdates: buildInboxDecisionRestoreUpdates(currentTask),
-      };
+      if (prepared.event.type !== 'skip') {
+        lastCommittedRef.current = {
+          taskId: currentTask.id,
+          discarded: prepared.event.type === 'discard',
+          completed: prepared.event.type === 'complete',
+          previousStatus: currentTask.status,
+          wasFocusedToday: currentTask.isFocusedToday === true,
+          restoreUpdates: buildInboxDecisionRestoreUpdates(currentTask),
+        };
+      }
       if (options.advance !== false && !activateProcessingSession(outcome.session)) {
         handleClose();
       }
@@ -609,24 +664,19 @@ export function useInboxProcessingController({
     }
   }, [
     activateProcessingSession,
+    buildDecisionFields,
     currentTask,
     deleteTask,
     handleClose,
     inboxTasks,
+    processInboxPlan,
     prepareProcessingEdits,
     processingSession,
     showProcessingError,
+    showToast,
+    t,
     updateTask,
   ]);
-
-  // Terminal destinations that skip the project section still carry whatever
-  // the user already picked; the state is hydrated from the task, so an
-  // untouched selection writes back unchanged (#958).
-  const buildSelectionFields = useCallback((): ProcessInboxWorkflowFields => ({
-    ...resolveProcessInboxContainerFields(selectedProjectId, selectedAreaId),
-    ...(showContextsField ? { contexts: selectedContexts } : {}),
-    ...(showTagsField ? { tags: selectedTags } : {}),
-  }), [selectedAreaId, selectedContexts, selectedProjectId, selectedTags, showContextsField, showTagsField]);
 
   // Undo the decision just committed: a discard is a soft delete that left the
   // task in the Inbox, everything else moved its status out of it.
@@ -660,30 +710,22 @@ export function useInboxProcessingController({
   const handleNotActionable = useCallback(async (action: 'trash' | 'someday' | 'reference') => {
     if (!currentTask) return false;
     if (action === 'trash') {
-      return applyWorkflowEvent({ type: 'discard' });
+      return applyWorkflowDecision({ type: 'discard' });
     }
     if (action === 'someday') {
-      return applyWorkflowEvent({ type: 'someday', fields: buildSelectionFields() });
+      return applyWorkflowDecision({ type: 'someday' });
     }
-    return applyWorkflowEvent({ type: 'reference', fields: buildSelectionFields() });
-  }, [applyWorkflowEvent, buildSelectionFields, currentTask]);
+    return applyWorkflowDecision({ type: 'reference' });
+  }, [applyWorkflowDecision, currentTask]);
 
   const handleLaterMobile = useCallback(async () => {
     if (!currentTask) return false;
     const startDate = pendingStartDate;
-    if (!startDate && !laterNoDateSelected) {
-      showToast({
-        title: t('common.notice'),
-        message: tFallback(t, 'process.laterStartRequired', 'Choose a start date for Later.'),
-        tone: 'warning',
-      });
-      return false;
-    }
-    const applied = await applyWorkflowEvent({
+    const applied = await applyWorkflowDecision({
       type: 'later',
+      allowUndated: laterNoDateSelected,
+    }, {
       fields: {
-        ...(showProjectField ? { projectId: selectedProjectId ?? undefined } : {}),
-        ...(showAreaField ? { areaId: selectedProjectId ? undefined : (selectedAreaId ?? undefined) } : {}),
         startTime: startDate ? formatScheduledDateValue(startDate, pendingStartDateOnly) : undefined,
       },
     });
@@ -692,98 +734,42 @@ export function useInboxProcessingController({
     setLaterNoDateSelected(false);
     return true;
   }, [
-    applyWorkflowEvent,
+    applyWorkflowDecision,
     currentTask,
     formatScheduledDateValue,
     laterNoDateSelected,
     pendingStartDate,
     pendingStartDateOnly,
-    selectedAreaId,
-    selectedProjectId,
-    showAreaField,
-    showProjectField,
-    showToast,
-    t,
   ]);
 
   const handleTwoMinYes = useCallback(async () => {
     if (!currentTask) return false;
-    return applyWorkflowEvent({ type: 'complete', fields: buildSelectionFields() });
-  }, [applyWorkflowEvent, buildSelectionFields, currentTask]);
-
-  const buildScheduleUpdates = useCallback(() => {
-    const updates: Partial<Task> = {};
-    if (showStartDateField) {
-      updates.startTime = pendingStartDate ? formatScheduledDateValue(pendingStartDate, pendingStartDateOnly) : undefined;
-    }
-    if (showDueDateField) {
-      updates.dueDate = pendingDueDate ? formatScheduledDateValue(pendingDueDate, pendingDueDateOnly) : undefined;
-    }
-    if (showReviewDateField) {
-      updates.reviewAt = pendingReviewDate ? formatScheduledDateValue(pendingReviewDate, pendingReviewDateOnly) : undefined;
-    }
-    return updates;
-  }, [
-    formatScheduledDateValue,
-    pendingDueDate,
-    pendingDueDateOnly,
-    pendingReviewDate,
-    pendingReviewDateOnly,
-    pendingStartDate,
-    pendingStartDateOnly,
-    showDueDateField,
-    showReviewDateField,
-    showStartDateField,
-  ]);
+    return applyWorkflowDecision({ type: 'complete' });
+  }, [applyWorkflowDecision, currentTask]);
 
   const handleConfirmWaitingMobile = useCallback(async () => {
     if (!currentTask) return false;
     const who = delegateWho.trim() || selectedAssignedTo.trim();
-    const fields: Partial<Task> = {
-      assignedTo: who || undefined,
-      ...(showPriorityField ? { priority: selectedPriority ?? undefined } : {}),
-      ...(showEnergyLevelField ? { energyLevel: selectedEnergyLevel ?? undefined } : {}),
-      ...(showTimeEstimateField ? { timeEstimate: selectedTimeEstimate ?? undefined } : {}),
-      ...(showProjectField ? { projectId: selectedProjectId ?? undefined } : {}),
-      ...(showAreaField ? { areaId: selectedProjectId ? undefined : (selectedAreaId ?? undefined) } : {}),
-      ...(showContextsField ? { contexts: selectedContexts } : {}),
-      ...(showTagsField ? { tags: selectedTags } : {}),
-      ...buildScheduleUpdates(),
-    };
-    const applied = await applyWorkflowEvent({
+    const applied = await applyWorkflowDecision({
       type: 'waiting',
-      fields,
       followUpAt: delegateFollowUpDate
         ? formatScheduledDateValue(delegateFollowUpDate, delegateFollowUpDateOnly)
         : undefined,
+    }, {
+      fields: { assignedTo: who || undefined },
     });
     if (!applied) return false;
     setDelegateWho('');
     setDelegateFollowUpDate(null);
     return true;
   }, [
-    applyWorkflowEvent,
-    buildScheduleUpdates,
+    applyWorkflowDecision,
     currentTask,
     delegateFollowUpDate,
     delegateFollowUpDateOnly,
     delegateWho,
     formatScheduledDateValue,
-    selectedAreaId,
     selectedAssignedTo,
-    selectedContexts,
-    selectedEnergyLevel,
-    selectedPriority,
-    selectedProjectId,
-    selectedTags,
-    selectedTimeEstimate,
-    showAreaField,
-    showContextsField,
-    showEnergyLevelField,
-    showPriorityField,
-    showProjectField,
-    showTagsField,
-    showTimeEstimateField,
   ]);
 
   const handleSendDelegateRequest = useCallback(async () => {
@@ -912,19 +898,8 @@ export function useInboxProcessingController({
   }, []);
 
   const finalizeNextAction = useCallback(async (projectId: string | null) => {
-    const applied = await applyWorkflowEvent({
-      type: 'next',
-      fields: {
-        ...(showProjectField ? { projectId: projectId ?? undefined } : {}),
-        ...(showAreaField ? { areaId: projectId ? undefined : (selectedAreaId ?? undefined) } : {}),
-        ...(showContextsField ? { contexts: selectedContexts } : {}),
-        ...(showTagsField ? { tags: selectedTags } : {}),
-        ...(showPriorityField ? { priority: selectedPriority ?? undefined } : {}),
-        ...(showEnergyLevelField ? { energyLevel: selectedEnergyLevel ?? undefined } : {}),
-        ...(showAssignedToField ? { assignedTo: selectedAssignedTo.trim() || undefined } : {}),
-        ...(showTimeEstimateField ? { timeEstimate: selectedTimeEstimate ?? undefined } : {}),
-        ...buildScheduleUpdates(),
-      },
+    const applied = await applyWorkflowDecision({ type: 'next' }, {
+      fields: { projectId: projectId ?? undefined },
     });
     if (!applied) return false;
     setPendingStartDate(null);
@@ -932,23 +907,7 @@ export function useInboxProcessingController({
     setPendingReviewDate(null);
     return true;
   }, [
-    applyWorkflowEvent,
-    buildScheduleUpdates,
-    selectedAreaId,
-    selectedAssignedTo,
-    selectedContexts,
-    selectedEnergyLevel,
-    selectedPriority,
-    selectedTimeEstimate,
-    selectedTags,
-    showAreaField,
-    showAssignedToField,
-    showContextsField,
-    showEnergyLevelField,
-    showPriorityField,
-    showProjectField,
-    showTagsField,
-    showTimeEstimateField,
+    applyWorkflowDecision,
   ]);
 
   const handleConvertToProject = useCallback(async (): Promise<boolean> => {
@@ -974,20 +933,12 @@ export function useInboxProcessingController({
       );
       if (!project) return false;
 
-      const applied = await applyWorkflowEvent({
-        type: 'next',
-        fields: {
-          projectId: project.id,
-          ...(showAreaField ? { areaId: undefined } : {}),
-          ...(showContextsField ? { contexts: selectedContexts } : {}),
-          ...(showTagsField ? { tags: selectedTags } : {}),
-          ...(showPriorityField ? { priority: selectedPriority ?? undefined } : {}),
-          ...(showEnergyLevelField ? { energyLevel: selectedEnergyLevel ?? undefined } : {}),
-          ...(showAssignedToField ? { assignedTo: selectedAssignedTo.trim() || undefined } : {}),
-          ...(showTimeEstimateField ? { timeEstimate: selectedTimeEstimate ?? undefined } : {}),
-          ...buildScheduleUpdates(),
-        },
-      }, nextAction, currentTask.title, { advance: false });
+      const applied = await applyWorkflowDecision({ type: 'next' }, {
+        fields: { projectId: project.id, areaId: undefined },
+        titleOverride: nextAction,
+        fallbackTitle: currentTask.title,
+        advance: false,
+      });
       if (!applied) return false;
 
       // The converted capture becomes the project's clarified next action.
@@ -1024,8 +975,7 @@ export function useInboxProcessingController({
   }, [
     addProject,
     addTask,
-    applyWorkflowEvent,
-    buildScheduleUpdates,
+    applyWorkflowDecision,
     currentTask,
     extraActionDrafts,
     moveToNext,
@@ -1034,20 +984,8 @@ export function useInboxProcessingController({
     projectTitleDraft,
     projects,
     selectedAreaId,
-    selectedAssignedTo,
-    selectedContexts,
-    selectedEnergyLevel,
-    selectedPriority,
-    selectedTags,
-    selectedTimeEstimate,
     showAreaField,
-    showAssignedToField,
-    showContextsField,
-    showEnergyLevelField,
-    showPriorityField,
     showProcessingError,
-    showTagsField,
-    showTimeEstimateField,
     showToast,
     t,
   ]);
@@ -1091,59 +1029,8 @@ export function useInboxProcessingController({
   ]);
 
   const handleSkipTask = useCallback(async () => {
-    if (!currentTask) return;
-    const taskUpdates = prepareProcessingEdits();
-    if (!taskUpdates) return;
-    try {
-      const result = await updateTask(currentTask.id, {
-        ...taskUpdates,
-        ...(showProjectField ? { projectId: selectedProjectId ?? undefined } : {}),
-        ...(showAreaField ? { areaId: selectedProjectId ? undefined : (selectedAreaId ?? undefined) } : {}),
-        ...(showContextsField ? { contexts: selectedContexts } : {}),
-        ...(showTagsField ? { tags: selectedTags } : {}),
-        ...(showPriorityField ? { priority: selectedPriority ?? undefined } : {}),
-        ...(showEnergyLevelField ? { energyLevel: selectedEnergyLevel ?? undefined } : {}),
-        ...(showAssignedToField ? { assignedTo: selectedAssignedTo.trim() || undefined } : {}),
-        ...(showTimeEstimateField ? { timeEstimate: selectedTimeEstimate ?? undefined } : {}),
-        ...buildScheduleUpdates(),
-      });
-      if (isActionFailure(result)) {
-        showProcessingError(getActionFailureMessage(result));
-        return;
-      }
-    } catch (error) {
-      showProcessingError(getUnknownErrorMessage(error));
-      return;
-    }
-    const nextSession = skipCurrentProcessInboxTask(processingSession, inboxTasks);
-    if (!activateProcessingSession(nextSession)) handleClose();
-  }, [
-    activateProcessingSession,
-    buildScheduleUpdates,
-    currentTask,
-    handleClose,
-    inboxTasks,
-    prepareProcessingEdits,
-    processingSession,
-    selectedAreaId,
-    selectedAssignedTo,
-    selectedContexts,
-    selectedEnergyLevel,
-    selectedPriority,
-    selectedProjectId,
-    selectedTimeEstimate,
-    selectedTags,
-    showAreaField,
-    showAssignedToField,
-    showContextsField,
-    showEnergyLevelField,
-    showPriorityField,
-    showProjectField,
-    showTagsField,
-    showTimeEstimateField,
-    showProcessingError,
-    updateTask,
-  ]);
+    await applyWorkflowDecision({ type: 'skip' });
+  }, [applyWorkflowDecision]);
 
   const handleAIClarifyInbox = useCallback(async () => {
     if (!currentTask) return;

@@ -8,7 +8,7 @@ import {
     getProjectChoiceState,
     normalizeClockTimeInput,
     openProcessInboxTask,
-    resolveFeatureFlags,
+    resolveProcessInboxPlan,
     selectProcessInboxCandidates,
     setTaskDraftField,
     type AppData,
@@ -18,7 +18,6 @@ import {
     type Task,
     type TaskDraft,
     type TaskDraftSetter,
-    type TaskEditorFieldId,
     type TimeEstimate,
 } from '@mindwtr/core';
 
@@ -29,7 +28,6 @@ import type {
 } from '../../InboxProcessingQuickPanel';
 import type { InboxProcessingScheduleFieldKey, InboxProcessingScheduleFieldsControls } from '../../InboxProcessingScheduleFields';
 import type { ProcessingStep } from '../../InboxProcessingWizard';
-import { DEFAULT_TASK_EDITOR_HIDDEN } from '../../Task/task-item-helpers';
 import { isTaskVisibleInArea, resolveAreaFilterSelection } from '@mindwtr/core';
 import {
     getDateFieldDraft,
@@ -96,53 +94,39 @@ export function useInboxProcessingState({
     const [reviewTime, setReviewTime] = useState('');
     const [reviewTimeDraft, setReviewTimeDraft] = useState('');
 
-    const inboxProcessing = settings?.gtd?.inboxProcessing ?? {};
     const defaultScheduleTime = normalizeClockTimeInput(settings?.gtd?.defaultScheduleTime) || '';
-    const defaultProcessingMode = inboxProcessing.defaultMode === 'quick' ? 'quick' : 'guided';
-    const twoMinuteEnabled = inboxProcessing.twoMinuteEnabled !== false;
-    const twoMinuteFirst = inboxProcessing.twoMinuteFirst === true;
-    const projectFirst = inboxProcessing.projectFirst === true;
-    const contextStepEnabled = inboxProcessing.contextStepEnabled !== false;
-    const scheduleEnabled = inboxProcessing.scheduleEnabled === true;
-    const referenceEnabled = true;
-    const { priorities: prioritiesEnabled, timeEstimates: timeEstimatesEnabled } = resolveFeatureFlags(settings);
-    const defaultHiddenTaskEditorFields = useMemo(() => {
-        const featureHiddenFields = new Set<TaskEditorFieldId>();
-        if (!prioritiesEnabled) featureHiddenFields.add('priority');
-        if (!timeEstimatesEnabled) featureHiddenFields.add('timeEstimate');
-        return DEFAULT_TASK_EDITOR_HIDDEN.filter((fieldId) => !featureHiddenFields.has(fieldId));
-    }, [prioritiesEnabled, timeEstimatesEnabled]);
-    const hiddenTaskEditorFields = useMemo(() => {
-        const next = new Set(settings?.gtd?.taskEditor?.hidden ?? defaultHiddenTaskEditorFields);
-        if (!prioritiesEnabled) next.add('priority');
-        if (!timeEstimatesEnabled) next.add('timeEstimate');
-        return next;
-    }, [defaultHiddenTaskEditorFields, prioritiesEnabled, settings?.gtd?.taskEditor?.hidden, timeEstimatesEnabled]);
-    const showProjectField = !hiddenTaskEditorFields.has('project');
-    const showAreaField = !hiddenTaskEditorFields.has('area');
-    const showContextsField = !hiddenTaskEditorFields.has('contexts');
-    const showTagsField = !hiddenTaskEditorFields.has('tags');
-    const showPriorityField = prioritiesEnabled && !hiddenTaskEditorFields.has('priority');
-    const showEnergyLevelField = !hiddenTaskEditorFields.has('energyLevel');
-    const showAssignedToField = !hiddenTaskEditorFields.has('assignedTo');
-    const showTimeEstimateField = timeEstimatesEnabled && !hiddenTaskEditorFields.has('timeEstimate');
-    const showProjectStep = showProjectField || showAreaField;
-    const visibleScheduleFieldKeys = useMemo<InboxProcessingScheduleFieldKey[]>(() => {
-        if (!scheduleEnabled) return [];
-        const next: InboxProcessingScheduleFieldKey[] = [];
-        if (!hiddenTaskEditorFields.has('startTime')) next.push('start');
-        if (!hiddenTaskEditorFields.has('dueDate')) next.push('due');
-        if (!hiddenTaskEditorFields.has('reviewAt')) next.push('review');
-        return next;
-    }, [hiddenTaskEditorFields, scheduleEnabled]);
-    const showScheduleFields = visibleScheduleFieldKeys.length > 0;
-    const showOrganizationStep = (
-        (contextStepEnabled && (showContextsField || showTagsField))
-        || showPriorityField
-        || showEnergyLevelField
-        || showAssignedToField
-        || showTimeEstimateField
-    );
+    const processInboxPlan = useMemo(() => resolveProcessInboxPlan(settings), [settings]);
+    const {
+        defaultMode: defaultProcessingMode,
+        twoMinuteEnabled,
+        twoMinuteFirst,
+        projectFirst,
+        contextStepEnabled,
+        scheduleEnabled,
+        prioritiesEnabled,
+        timeEstimatesEnabled,
+        referenceEnabled,
+        showProjectStep,
+        showOrganizationStep,
+        showScheduleFields,
+    } = processInboxPlan;
+    const {
+        project: showProjectField,
+        area: showAreaField,
+        contexts: showContextsField,
+        tags: showTagsField,
+        priority: showPriorityField,
+        energyLevel: showEnergyLevelField,
+        assignedTo: showAssignedToField,
+        timeEstimate: showTimeEstimateField,
+    } = processInboxPlan.visibleFields;
+    const visibleScheduleFieldKeys = useMemo<InboxProcessingScheduleFieldKey[]>(() => (
+        processInboxPlan.visibleScheduleFields.map((field) => {
+            if (field === 'startTime') return 'start';
+            if (field === 'dueDate') return 'due';
+            return 'review';
+        })
+    ), [processInboxPlan.visibleScheduleFields]);
     const visibility = useMemo<InboxProcessingVisibility>(() => ({
         showProjectField,
         showAreaField,
@@ -460,6 +444,7 @@ export function useInboxProcessingState({
     }, [draft.timeEstimate, settings?.gtd?.timeEstimatePresets]);
 
     return {
+        processInboxPlan,
         processingMode,
         setProcessingMode,
         processingSession,

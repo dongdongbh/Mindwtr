@@ -27,6 +27,7 @@ export * from './announcements';
 export * from './user-prompts';
 export * from './process-inbox-workflow';
 export * from './process-inbox-session';
+export * from './process-inbox-plan';
 export * from './speech-to-task';
 export * from './data-transfer-transaction';
 export * from './feedback';
