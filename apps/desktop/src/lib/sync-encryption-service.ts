@@ -513,7 +513,10 @@ export async function sealAttachmentBytes(bytes: Uint8Array): Promise<Uint8Array
  *  upload plaintext. Ciphertext with no key is terminal — never "corrupt, re-upload". */
 export async function openAttachmentBytes(bytes: Uint8Array): Promise<Uint8Array> {
     const inspected = inspectSyncArtifact(bytes);
-    if (inspected.kind !== 'encrypted') return bytes;
+    if (inspected.kind === 'unsupported') {
+        throw new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError(inspected.reason));
+    }
+    if (inspected.kind === 'plaintext') return bytes;
     const material = await getSyncEncryptionMaterial();
     if (!material) {
         await markRemoteSyncEncryptionDiscovered({ salt: inspected.salt, params: inspected.params });

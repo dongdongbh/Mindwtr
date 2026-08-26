@@ -346,6 +346,15 @@ describe('attachment bytes', () => {
         await expect(openAttachmentBytes(sealed)).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
         expect(native.state.state).toBe('remote-encrypted-no-key');
     });
+
+    it('fails closed for an unsupported MWENC1 attachment container', async () => {
+        const truncated = new Uint8Array(20);
+        truncated.set(new TextEncoder().encode('MWENC1'));
+
+        await expect(openAttachmentBytes(truncated)).rejects.toBeInstanceOf(
+            SyncEncryptionTerminalError,
+        );
+    });
 });
 
 describe('unsupported base document', () => {
