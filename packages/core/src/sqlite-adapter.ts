@@ -288,6 +288,7 @@ type SqliteKnownRowVersion = {
     rowId: number | null;
     rev: number | null;
     updatedAt: string | null;
+    fingerprint: string;
 };
 
 const createTempIdTableName = (table: SqliteEntityTable): string => {
@@ -428,11 +429,29 @@ export class SqliteAdapter {
         for (const row of rows) {
             const rawRev = row.rev;
             const parsedRev = rawRev === null || rawRev === undefined ? null : Number(rawRev);
+            const fingerprint = JSON.stringify(
+                Object.keys(row)
+                    .filter((key) => key !== '_rowid')
+                    .sort()
+                    .map((key) => [key, row[key]]),
+            );
             versions.set(String(row.id), {
                 rowId: typeof row._rowid === 'number' ? row._rowid : null,
                 rev: parsedRev !== null && Number.isFinite(parsedRev) ? parsedRev : null,
                 updatedAt: typeof row.updatedAt === 'string' ? row.updatedAt : null,
+                fingerprint,
             });
+        }
+        return versions;
+    }
+
+    private async readCurrentKnownRowVersions(): Promise<Map<SqliteEntityTable, Map<string, SqliteKnownRowVersion>>> {
+        const versions = new Map<SqliteEntityTable, Map<string, SqliteKnownRowVersion>>();
+        for (const table of ['tasks', 'projects', 'sections', 'areas', 'people', 'saved_filters'] as const) {
+            const rows = await this.client.all<Record<string, unknown>>(
+                `SELECT rowid as _rowid, * FROM ${table}`,
+            );
+            versions.set(table, this.knownRowVersionsFromRows(rows));
         }
         return versions;
     }
@@ -453,6 +472,7 @@ export class SqliteAdapter {
                 || actual.rowId !== expected.rowId
                 || actual.rev !== expected.rev
                 || actual.updatedAt !== expected.updatedAt
+                || actual.fingerprint !== expected.fingerprint
             ) {
                 return false;
             }
@@ -466,12 +486,9 @@ export class SqliteAdapter {
             throw this.concurrentWriteError('no read baseline');
         }
 
+        const currentVersions = await this.readCurrentKnownRowVersions();
         for (const table of ['tasks', 'projects', 'sections', 'areas', 'people', 'saved_filters'] as const) {
-            const revisionColumn = table === 'saved_filters' ? 'NULL AS rev' : 'rev';
-            const rows = await this.client.all<Record<string, unknown>>(
-                `SELECT rowid as _rowid, id, ${revisionColumn}, updatedAt FROM ${table}`,
-            );
-            const current = this.knownRowVersionsFromRows(rows);
+            const current = currentVersions.get(table) ?? new Map();
             const observed = this.lastKnownRowVersions.get(table) ?? new Map();
             if (!this.knownRowVersionsEqual(observed, current)) {
                 throw this.concurrentWriteError(table);
@@ -1121,19 +1138,18 @@ export class SqliteAdapter {
                 `INSERT INTO tasks (${columnList}) VALUES (${placeholders}) ON CONFLICT(id) DO UPDATE SET ${TASK_UPSERT_UPDATE_CLAUSE}`,
                 entry.row
             );
+            const savedRow = await this.client.get<Record<string, unknown>>(
+                'SELECT rowid as _rowid, * FROM tasks WHERE id = ?',
+                [task.id],
+            );
             await this.client.run('COMMIT');
             this.lastSavedFingerprints?.tables.get('tasks')?.set(String(entry.row[0]), entry.fingerprint);
             const knownTables = new Map(this.lastKnownRowVersions ?? []);
             const knownTasks = new Map(knownTables.get('tasks') ?? []);
-            const previousVersion = knownTasks.get(task.id);
-            const rawRev = entry.row[TASK_UPSERT_COLUMNS.indexOf('rev')];
-            const parsedRev = rawRev === null || rawRev === undefined ? null : Number(rawRev);
-            const rawUpdatedAt = entry.row[TASK_UPSERT_COLUMNS.indexOf('updatedAt')];
-            knownTasks.set(task.id, {
-                rowId: previousVersion?.rowId ?? null,
-                rev: parsedRev !== null && Number.isFinite(parsedRev) ? parsedRev : null,
-                updatedAt: typeof rawUpdatedAt === 'string' ? rawUpdatedAt : null,
-            });
+            if (savedRow) {
+                const savedVersion = this.knownRowVersionsFromRows([savedRow]).get(task.id);
+                if (savedVersion) knownTasks.set(task.id, savedVersion);
+            }
             knownTables.set('tasks', knownTasks);
             this.lastKnownRowVersions = knownTables;
         } catch (error) {
@@ -1173,6 +1189,7 @@ export class SqliteAdapter {
             settingsJson: null,
         };
         const nextKnownRows = new Map<SqliteEntityTable, Map<string, SqliteKnownRowVersion>>();
+        let committedKnownRows = nextKnownRows;
         const stats: SqliteSaveDataStats = {
             incremental: previousSave !== null,
             writtenRows: 0,
@@ -1238,6 +1255,7 @@ export class SqliteAdapter {
                             rowId: previousVersions?.get(id)?.rowId ?? null,
                             rev: parsedRev !== null && Number.isFinite(parsedRev) ? parsedRev : null,
                             updatedAt: typeof rawUpdatedAt === 'string' ? rawUpdatedAt : null,
+                            fingerprint: previousVersions?.get(id)?.fingerprint ?? '',
                         });
                     }
                     const previousFingerprint = previousRows?.get(id);
@@ -1507,12 +1525,16 @@ export class SqliteAdapter {
                 );
             }
 
+            if (this.rejectConcurrentWrites) {
+                committedKnownRows = await this.readCurrentKnownRowVersions();
+            }
+
             saveStep = 'commit';
             const commitStartedAt = Date.now();
             await runTimed('COMMIT');
             stats.commitMs = Date.now() - commitStartedAt;
             this.lastSavedFingerprints = nextSave;
-            this.lastKnownRowVersions = nextKnownRows;
+            this.lastKnownRowVersions = committedKnownRows;
             this.lastObservedSettingsJson = settingsJson;
             this.lastSaveDataStats = stats;
         } catch (error) {

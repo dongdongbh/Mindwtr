@@ -722,6 +722,71 @@ describeSqlite('SqliteAdapter', () => {
         });
     });
 
+    it('rejects a guarded full save after same-metadata content changes following saveTask', async () => {
+        const timestamp = '2026-07-21T08:00:00.000Z';
+        const original: Task = {
+            id: 'task-same-metadata-race',
+            title: 'Original',
+            status: 'next',
+            tags: [],
+            contexts: [],
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            rev: 1,
+            revBy: 'shared-device',
+        };
+        await adapter.saveData({
+            tasks: [original],
+            projects: [],
+            sections: [],
+            areas: [],
+            people: [],
+            settings: {},
+        });
+
+        const automationAdapter = new SqliteAdapter(createClient(db), { rejectConcurrentWrites: true });
+        const automationSnapshot = await automationAdapter.getData();
+        const automationTask: Task = {
+            ...automationSnapshot.tasks[0],
+            title: 'Automation edit',
+            updatedAt: timestamp,
+            rev: 2,
+            revBy: 'shared-device',
+        };
+        await automationAdapter.saveTask(automationTask);
+
+        const desktopAdapter = new SqliteAdapter(createClient(db));
+        await desktopAdapter.saveTask({
+            ...automationTask,
+            title: 'Desktop edit',
+        });
+
+        await expect(automationAdapter.saveData({
+            ...automationSnapshot,
+            tasks: [automationTask],
+            projects: [{
+                id: 'project-blocked-by-race',
+                title: 'Must not be written',
+                status: 'active',
+                color: '#2563EB',
+                order: 0,
+                tagIds: [],
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                rev: 1,
+                revBy: 'shared-device',
+            }],
+        })).rejects.toThrow('SQLITE_BUSY: database changed after the automation snapshot was loaded (tasks)');
+
+        const afterConflict = await desktopAdapter.getData();
+        expect(afterConflict.tasks[0]).toMatchObject({
+            title: 'Desktop edit',
+            rev: 2,
+            revBy: 'shared-device',
+        });
+        expect(afterConflict.projects).toEqual([]);
+    });
+
     it('uses the observed row version when pruning after another adapter advances it', async () => {
         const now = '2026-07-21T08:00:00.000Z';
         const data: AppData = {
