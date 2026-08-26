@@ -374,11 +374,12 @@ describe('getWeeklyReviewBuckets', () => {
         expect(buckets.projectEntries.map((entry) => ({
             id: entry.project.id,
             taskIds: entry.tasks.map((task) => task.id),
-            hasNextAction: entry.hasNextAction,
+            nextActionState: entry.nextActionState,
         }))).toEqual([
-            { id: 'p-due', taskIds: ['due-waiting'], hasNextAction: false },
-            { id: 'p-due-2', taskIds: [], hasNextAction: false },
-            { id: 'p-active', taskIds: ['active-inbox', 'active-next'], hasNextAction: true },
+            // A waiting-only project is delegated, not stuck (#1086).
+            { id: 'p-due', taskIds: ['due-waiting'], nextActionState: 'waiting' },
+            { id: 'p-due-2', taskIds: [], nextActionState: 'none' },
+            { id: 'p-active', taskIds: ['active-inbox', 'active-next'], nextActionState: 'next' },
         ]);
         expect(buckets.staleItems.map((item) => item.id)).toEqual([
             'waiting-1',
@@ -391,7 +392,9 @@ describe('getWeeklyReviewBuckets', () => {
         expect(buckets.summary).toEqual({
             inboxCount: 2,
             activeProjectCount: 3,
-            projectsWithoutNextAction: 2,
+            // p-due is waiting-only and no longer counts as "without next action"
+            // (#1086); only the taskless p-due-2 does.
+            projectsWithoutNextAction: 1,
             staleWaitingCount: 2,
         });
         expect(buckets.staleItems).toEqual(getStaleItems(reviewTasks, reviewProjects, 14, weeklyNow));
@@ -465,16 +468,17 @@ describe('getReviewOverviewGroups', () => {
         expect(groups[1]).toMatchObject({
             taskCount: 4,
             projectCount: 2,
-            needsActionCount: 1,
+            // alpha is waiting-only — delegated, not "needs action" (#1086).
+            needsActionCount: 0,
         });
         expect(groups[1].projectGroups.map((group) => ({
             projectId: group.project?.id,
             taskIds: group.tasks.map((task) => task.id),
-            hasNextAction: group.hasNextAction,
+            nextActionState: group.nextActionState,
         }))).toEqual([
-            { projectId: 'project-alpha', taskIds: ['alpha-waiting'], hasNextAction: false },
-            { projectId: 'project-zeta', taskIds: ['zeta-inbox', 'zeta-next'], hasNextAction: true },
-            { projectId: undefined, taskIds: ['work-single'], hasNextAction: false },
+            { projectId: 'project-alpha', taskIds: ['alpha-waiting'], nextActionState: 'waiting' },
+            { projectId: 'project-zeta', taskIds: ['zeta-inbox', 'zeta-next'], nextActionState: 'next' },
+            { projectId: undefined, taskIds: ['work-single'], nextActionState: 'none' },
         ]);
         expect(groups[2].projectGroups.map((group) => ({
             projectId: group.project?.id,

@@ -66,6 +66,7 @@ type ReviewLabelKey =
     | 'next'
     | 'back'
     | 'hasNext'
+    | 'waitingStatus'
     | 'needsAction'
     | 'activeTasks'
     | 'moreItems';
@@ -142,6 +143,7 @@ const defaultReviewLabels: ReviewLabels = {
     next: 'Next',
     back: 'Back',
     hasNext: '✓ Has Next',
+    waitingStatus: 'Waiting',
     needsAction: '! Needs Action',
     activeTasks: 'active tasks',
     moreItems: 'more items',
@@ -215,6 +217,7 @@ const reviewLabelTranslationKeys: Record<ReviewLabelKey, string> = {
     next: 'review.next',
     back: 'review.back',
     hasNext: 'review.hasNextAction',
+    waitingStatus: 'status.waiting',
     needsAction: 'review.needsAction',
     activeTasks: 'review.activeTasks',
     moreItems: 'review.moreItems',

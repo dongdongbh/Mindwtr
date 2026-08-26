@@ -462,9 +462,11 @@ export default function ReviewScreen() {
                 <View style={styles.reviewAreaBody}>
                   {areaGroup.projectGroups.map((projectGroup) => {
                     const projectExpanded = expandedReviewProjectIds.has(projectGroup.id);
-                    const projectStateLabel = projectGroup.hasNextAction
+                    const projectStateLabel = projectGroup.nextActionState === 'next'
                       ? t('review.hasNextAction')
-                      : t('review.needsAction');
+                      : projectGroup.nextActionState === 'waiting'
+                        ? t('status.waiting')
+                        : t('review.needsAction');
                     const projectSummary = projectGroup.isSingleActions
                       ? `${projectGroup.tasks.length} ${t('common.tasks')}`
                       : `${projectGroup.tasks.length} ${activeTasksLabel} · ${projectStateLabel}`;
@@ -496,7 +498,14 @@ export default function ReviewScreen() {
                               <View
                                 style={[
                                   styles.reviewStatusDot,
-                                  { backgroundColor: projectGroup.hasNextAction ? tc.success : tc.warning },
+                                  {
+                                    backgroundColor: projectGroup.nextActionState === 'next'
+                                      ? tc.success
+                                      // Delegated (waiting) stays amber; truly stuck turns red (#1086).
+                                      : projectGroup.nextActionState === 'waiting'
+                                        ? tc.warning
+                                        : tc.danger,
+                                  },
                                 ]}
                               />
                             ) : null}
@@ -504,7 +513,7 @@ export default function ReviewScreen() {
                               style={[
                                 styles.reviewProjectSummaryText,
                                 {
-                                  color: projectGroup.projectId && !projectGroup.hasNextAction
+                                  color: projectGroup.projectId && projectGroup.nextActionState === 'none'
                                     ? tc.warning
                                     : tc.secondaryText,
                                 },

@@ -715,9 +715,24 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                                                             {labels.addTask}
                                                         </Text>
                                                     </TouchableOpacity>
-                                                    <View style={[styles.statusBadge, { backgroundColor: entry.hasNextAction ? '#10B98120' : '#EF444420' }]}>
-                                                        <Text style={[styles.statusText, { color: entry.hasNextAction ? '#10B981' : '#EF4444' }]}>
-                                                            {entry.hasNextAction ? labels.hasNext : labels.needsAction}
+                                                    <View
+                                                        style={[styles.statusBadge, {
+                                                            backgroundColor: entry.nextActionState === 'next'
+                                                                ? '#10B98120'
+                                                                // Delegated (waiting) is amber, not the red alarm (#1086).
+                                                                : entry.nextActionState === 'waiting' ? '#F59E0B20' : '#EF444420',
+                                                        }]}
+                                                    >
+                                                        <Text
+                                                            style={[styles.statusText, {
+                                                                color: entry.nextActionState === 'next'
+                                                                    ? '#10B981'
+                                                                    : entry.nextActionState === 'waiting' ? '#F59E0B' : '#EF4444',
+                                                            }]}
+                                                        >
+                                                            {entry.nextActionState === 'next'
+                                                                ? labels.hasNext
+                                                                : entry.nextActionState === 'waiting' ? labels.waitingStatus : labels.needsAction}
                                                         </Text>
                                                     </View>
                                                 </View>

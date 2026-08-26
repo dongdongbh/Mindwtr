@@ -827,7 +827,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                     <div className="space-y-6">
                         <p className="text-muted-foreground">{t('review.projectsHint')}</p>
                         <div className="space-y-4">
-                            {projectEntries.map(({ project, tasks: projectTasks, hasNextAction }) => {
+                            {projectEntries.map(({ project, tasks: projectTasks, nextActionState }) => {
                                 return (
                                     <div key={project.id} className="border border-border rounded-lg p-4">
                                         <div className="flex items-center justify-between gap-3 mb-3">
@@ -844,9 +844,19 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                                                     {t('projects.addTask')}
                                                 </button>
                                                 <div
-                                                    className={cn("text-xs px-2 py-1 rounded-full", hasNextAction ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive")}
+                                                    className={cn(
+                                                        "text-xs px-2 py-1 rounded-full",
+                                                        nextActionState === 'next' && "bg-success/10 text-success",
+                                                        // Delegated, not stuck: amber, not the red alarm (#1086).
+                                                        nextActionState === 'waiting' && "bg-warning/10 text-warning",
+                                                        nextActionState === 'none' && "bg-destructive/10 text-destructive",
+                                                    )}
                                                 >
-                                                    {hasNextAction ? t('review.hasNextAction') : t('review.needsAction')}
+                                                    {nextActionState === 'next'
+                                                        ? t('review.hasNextAction')
+                                                        : nextActionState === 'waiting'
+                                                            ? t('status.waiting')
+                                                            : t('review.needsAction')}
                                                 </div>
                                             </div>
                                         </div>

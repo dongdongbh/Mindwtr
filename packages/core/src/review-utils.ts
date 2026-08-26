@@ -81,10 +81,24 @@ export type WeeklyReviewSummary = {
     staleWaitingCount: number;
 };
 
+/** The review badge's answer to "can this project move?": a live `next` task
+ * means yes; otherwise a live `waiting` task means it is delegated — blocked on
+ * someone, not stuck (#1086, mirroring the sequential-chain rule where waiting
+ * holds a slot); only a project with neither truly needs a next action. */
+export type ProjectNextActionState = 'next' | 'waiting' | 'none';
+
+export function getProjectNextActionState(
+    tasks: ReadonlyArray<Pick<Task, 'status'>>,
+): ProjectNextActionState {
+    if (tasks.some((task) => task.status === 'next')) return 'next';
+    if (tasks.some((task) => task.status === 'waiting')) return 'waiting';
+    return 'none';
+}
+
 export type WeeklyReviewProjectEntry = {
     project: Project;
     tasks: Task[];
-    hasNextAction: boolean;
+    nextActionState: ProjectNextActionState;
 };
 
 type WeeklyReviewDerivation = {
@@ -165,13 +179,15 @@ function deriveWeeklyReview(
         return {
             project,
             tasks: projectTasks,
-            hasNextAction: projectTasks.some((task) => task.status === 'next'),
+            nextActionState: getProjectNextActionState(projectTasks),
         };
     });
     const summary: WeeklyReviewSummary = {
         inboxCount: inbox.length,
         activeProjectCount: projectEntries.length,
-        projectsWithoutNextAction: projectEntries.filter((entry) => !entry.hasNextAction).length,
+        // A waiting-only project is delegated, not stuck — it does not count as
+        // "without next action" (#1086).
+        projectsWithoutNextAction: projectEntries.filter((entry) => entry.nextActionState === 'none').length,
         staleWaitingCount: staleItems.filter((item) => item.status === 'waiting').length,
     };
 
@@ -438,7 +454,7 @@ export function getWeeklyReviewBuckets(
 export type ReviewOverviewProjectGroup = {
     project?: Project;
     tasks: Task[];
-    hasNextAction: boolean;
+    nextActionState: ProjectNextActionState;
 };
 
 export type ReviewOverviewAreaGroup = {
@@ -506,10 +522,10 @@ export function getReviewOverviewGroups({
         const projectGroup = areaGroup.projectGroups.get(projectKey) ?? {
             project,
             tasks: [],
-            hasNextAction: false,
+            nextActionState: 'none' as ProjectNextActionState,
         };
         projectGroup.tasks.push(task);
-        projectGroup.hasNextAction ||= task.status === 'next';
+        projectGroup.nextActionState = getProjectNextActionState(projectGroup.tasks);
         areaGroup.projectGroups.set(projectKey, projectGroup);
         areaGroup.taskCount += 1;
         areaGroups.set(areaKey, areaGroup);
@@ -533,7 +549,7 @@ export function getReviewOverviewGroups({
                 });
             const projectCount = projectGroups.filter((group) => Boolean(group.project)).length;
             const needsActionCount = projectGroups.filter(
-                (group) => Boolean(group.project) && !group.hasNextAction,
+                (group) => Boolean(group.project) && group.nextActionState === 'none',
             ).length;
             return {
                 areaId: areaGroup.areaId,

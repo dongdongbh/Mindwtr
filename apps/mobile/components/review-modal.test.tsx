@@ -143,7 +143,9 @@ vi.mock('@mindwtr/core', async (importOriginal) => ({
             return {
                 project,
                 tasks: projectTasks,
-                hasNextAction: projectTasks.some((task: any) => task.status === 'next'),
+                nextActionState: projectTasks.some((task: any) => task.status === 'next')
+                    ? 'next'
+                    : projectTasks.some((task: any) => task.status === 'waiting') ? 'waiting' : 'none',
             };
         });
         return {
