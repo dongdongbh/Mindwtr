@@ -40,6 +40,11 @@ const KEYRING_SYNC_ENCRYPTION_KEY: &str = "sync_encryption_key_v1";
 /// in the desktop TS) branch on this prefix to stop the run and ask for the passphrase again.
 pub(crate) const SYNC_ENCRYPTION_TERMINAL: &str = "SYNC_ENCRYPTION_TERMINAL";
 
+/// The device-local state could not be read or validated. This is terminal for
+/// sync, but a passphrase cannot repair it, so UI callers need a distinct
+/// recovery path from ciphertext authentication failures.
+pub(crate) const SYNC_ENCRYPTION_STATE_UNAVAILABLE: &str = "SYNC_ENCRYPTION_STATE_UNAVAILABLE";
+
 /// Returned when a device with no key finds MWENC1 bytes where it expected the sync document.
 /// The command layer persists `remote-encrypted-no-key` before surfacing this to TS.
 pub(crate) const SYNC_ENCRYPTION_REMOTE_ENCRYPTED: &str = "SYNC_ENCRYPTION_REMOTE_ENCRYPTED";
@@ -55,8 +60,13 @@ pub(crate) fn terminal_error(reason: impl std::fmt::Display) -> String {
     format!("{SYNC_ENCRYPTION_TERMINAL}: {reason}")
 }
 
+fn state_unavailable_error(reason: impl std::fmt::Display) -> String {
+    format!("{SYNC_ENCRYPTION_STATE_UNAVAILABLE}: {reason}")
+}
+
 pub(crate) fn is_terminal_error(error: &str) -> bool {
     error.starts_with(SYNC_ENCRYPTION_TERMINAL)
+        || error.starts_with(SYNC_ENCRYPTION_STATE_UNAVAILABLE)
         || error.starts_with(SYNC_ENCRYPTION_REMOTE_ENCRYPTED)
         || error.starts_with(SYNC_ENCRYPTION_REMOTE_PLAINTEXT)
 }
@@ -187,16 +197,16 @@ fn read_state_file(path: &Path) -> Result<Option<SyncEncryptionLocalState>, Stri
     let raw = match std::fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(terminal_error(format!(
+        Err(error) => return Err(state_unavailable_error(format!(
             "failed to read local sync encryption state: {error}"
         ))),
     };
     let parsed: SyncEncryptionLocalState = serde_json::from_str(&raw)
-        .map_err(|_| terminal_error("local sync encryption state is invalid"))?;
+        .map_err(|_| state_unavailable_error("local sync encryption state is invalid"))?;
     if state_holds_key(&parsed.state) || parsed.state == STATE_REMOTE_ENCRYPTED_NO_KEY {
         Ok(Some(parsed))
     } else {
-        Err(terminal_error("local sync encryption state is invalid"))
+        Err(state_unavailable_error("local sync encryption state is invalid"))
     }
 }
 
@@ -607,11 +617,11 @@ mod tests {
         std::fs::write(&path, b"not json").expect("write");
         assert!(read_state_file(&path)
             .expect_err("corrupt state must fail")
-            .contains(SYNC_ENCRYPTION_TERMINAL));
+            .contains(SYNC_ENCRYPTION_STATE_UNAVAILABLE));
         std::fs::write(&path, br#"{"state":"off"}"#).expect("write");
         assert!(read_state_file(&path)
             .expect_err("explicit off must fail")
-            .contains(SYNC_ENCRYPTION_TERMINAL));
+            .contains(SYNC_ENCRYPTION_STATE_UNAVAILABLE));
     }
 
     #[test]
@@ -622,7 +632,7 @@ mod tests {
 
         assert!(read_state_file(&path)
             .expect_err("unreadable state must fail")
-            .contains(SYNC_ENCRYPTION_TERMINAL));
+            .contains(SYNC_ENCRYPTION_STATE_UNAVAILABLE));
     }
 
     #[test]

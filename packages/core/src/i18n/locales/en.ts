@@ -1096,6 +1096,8 @@ export const en: Record<string, string> = {
         'settings.syncEncryptionRemotePlaintext': 'Sync stopped: this sync location is no longer encrypted. Turn sync encryption off on this device, or turn it back on at the sync location.',
         'settings.syncEncryptionRemotePlaintextDesc': 'Another device turned encryption off at this sync location. Nothing here has been changed or downgraded. Turn sync encryption off on this device to keep syncing in plain form, or turn encryption back on at the sync location.',
         'settings.syncEncryptionPassphraseNeeded': 'Sync stopped: the sync passphrase for this location did not work. Enter it again to continue.',
+        'settings.syncEncryptionStateUnavailable': 'Sync is paused because this device could not read its local encryption state. Restart Mindwtr and try again. If the problem continues, keep sync paused and contact support before changing this sync setup.',
+        'settings.syncEncryptionRetry': 'Try again',
         'settings.syncPreferences': 'Settings sync options',
         'settings.syncPreferencesDesc': 'Choose which preferences stay in sync across devices.',
         'settings.syncPreferenceAppearance': 'Appearance (theme, task age, quick access)',

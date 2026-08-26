@@ -441,6 +441,8 @@ describe('failure classification', () => {
     it('maps decrypt failures to a passphrase signal and leaves everything else alone', () => {
         expect(classifySyncEncryptionFailure('SYNC_ENCRYPTION_TERMINAL: wrong passphrase or corrupted data'))
             .toBe('needs-passphrase');
+        expect(classifySyncEncryptionFailure('SYNC_ENCRYPTION_STATE_UNAVAILABLE: invalid local state'))
+            .toBe('local-state-unavailable');
         expect(classifySyncEncryptionFailure('SYNC_ENCRYPTION_REMOTE_ENCRYPTED'))
             .toBe('remote-encrypted-no-key');
         expect(classifySyncEncryptionFailure('SYNC_ENCRYPTION_REMOTE_PLAINTEXT'))

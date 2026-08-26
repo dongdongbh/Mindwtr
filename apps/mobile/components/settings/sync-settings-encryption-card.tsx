@@ -48,6 +48,7 @@ const classifyFailure = (error: unknown, terminal: ErrorKind): ErrorKind => {
 
 export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) {
     const [state, setState] = useState<SyncEncryptionState | null>(null);
+    const [stateUnavailable, setStateUnavailable] = useState(false);
     const [flow, setFlow] = useState<Flow>('none');
     const [busy, setBusy] = useState(false);
     const [progress, setProgress] = useState<SyncEncryptionTransitionProgress | null>(null);
@@ -60,13 +61,17 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
 
     // A status read that failed says nothing about the folder; reporting 'off'
     // would offer "Enable encryption" for a folder that may already be encrypted.
-    // null renders the card empty until a later read succeeds.
-    const readState = useCallback(async (): Promise<SyncEncryptionState | null> => {
+    // null is paired with stateUnavailable so the card can offer a safe retry
+    // without guessing that encryption is off.
+    const readState = useCallback(async (): Promise<{
+        state: SyncEncryptionState | null;
+        unavailable: boolean;
+    }> => {
         try {
-            return (await getSyncEncryptionStatus()).state;
+            return { state: (await getSyncEncryptionStatus()).state, unavailable: false };
         } catch (failure) {
             logSettingsError(failure);
-            return null;
+            return { state: null, unavailable: true };
         }
     }, []);
 
@@ -77,7 +82,10 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
     useEffect(() => {
         let cancelled = false;
         void readState().then((next) => {
-            if (!cancelled) setState(next);
+            if (!cancelled) {
+                setState(next.state);
+                setStateUnavailable(next.unavailable);
+            }
         });
         void isSyncEncryptionBackendPending()
             .then((pending) => {
@@ -126,7 +134,9 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
             setError(classifyFailure(failure, terminal));
         }
         // Transitions are resumable, so a half-finished run still moved the state.
-        setState(await readState());
+        const nextState = await readState();
+        setState(nextState.state);
+        setStateUnavailable(nextState.unavailable);
         setPendingFirstSync(await isSyncEncryptionBackendPending().catch(() => false));
         setProgress(null);
         setBusy(false);
@@ -171,7 +181,9 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
                 logSettingsError(failure);
                 setError(classifyFailure(failure, 'wrong-passphrase'));
             }
-            setState(await readState());
+            const nextState = await readState();
+            setState(nextState.state);
+            setStateUnavailable(nextState.unavailable);
             setBusy(false);
             if (accepted) closeFlow();
         })();
@@ -181,10 +193,54 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
         closeFlow();
         void declineSyncEncryptionPassphrase()
             .catch(logSettingsError)
-            .then(async () => setState(await readState()));
+            .then(async () => {
+                const nextState = await readState();
+                setState(nextState.state);
+                setStateUnavailable(nextState.unavailable);
+            });
     };
 
-    if (state === null) return null;
+    const retryState = () => {
+        void (async () => {
+            setBusy(true);
+            const nextState = await readState();
+            setState(nextState.state);
+            setStateUnavailable(nextState.unavailable);
+            setBusy(false);
+        })();
+    };
+
+    if (state === null) {
+        if (!stateUnavailable) return null;
+        return (
+            <>
+                <Text style={[styles.sectionTitle, { color: tc.text, marginTop: 16 }]}>
+                    {t('settings.syncEncryption')}
+                </Text>
+                <View style={[styles.settingCard, { backgroundColor: tc.cardBg }]}>
+                    <View style={styles.settingRowColumn}>
+                        <Text accessibilityRole="alert" style={[styles.settingDescription, { color: tc.danger }]}>
+                            {t('settings.syncEncryptionStateUnavailable')}
+                        </Text>
+                    </View>
+                    <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityState={{ busy, disabled: busy }}
+                        disabled={busy}
+                        onPress={retryState}
+                        style={[styles.settingRow, { borderTopWidth: 1, borderTopColor: tc.border }]}
+                    >
+                        <View style={styles.settingInfo}>
+                            <Text style={[styles.settingLabel, { color: busy ? tc.secondaryText : tc.tint }]}>
+                                {t('settings.syncEncryptionRetry')}
+                            </Text>
+                        </View>
+                        {busy && <ActivityIndicator size="small" color={tc.tint} />}
+                    </TouchableOpacity>
+                </View>
+            </>
+        );
+    }
 
     const errorMessage = error === 'mismatch'
         ? t('settings.syncEncryptionErrorMismatch')

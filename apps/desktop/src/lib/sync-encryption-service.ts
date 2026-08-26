@@ -533,10 +533,15 @@ export async function openAttachmentBytes(bytes: Uint8Array): Promise<Uint8Array
 
 /** Rust's sentinels, mirrored from apps/desktop/src-tauri/src/sync_encryption.rs. */
 export const SYNC_ENCRYPTION_TERMINAL = 'SYNC_ENCRYPTION_TERMINAL';
+export const SYNC_ENCRYPTION_STATE_UNAVAILABLE = 'SYNC_ENCRYPTION_STATE_UNAVAILABLE';
 export const SYNC_ENCRYPTION_REMOTE_ENCRYPTED = 'SYNC_ENCRYPTION_REMOTE_ENCRYPTED';
 export const SYNC_ENCRYPTION_REMOTE_PLAINTEXT = 'SYNC_ENCRYPTION_REMOTE_PLAINTEXT';
 
-export type SyncEncryptionFailure = 'needs-passphrase' | 'remote-encrypted-no-key' | 'remote-plaintext';
+export type SyncEncryptionFailure =
+    | 'local-state-unavailable'
+    | 'needs-passphrase'
+    | 'remote-encrypted-no-key'
+    | 'remote-plaintext';
 
 /** A decrypt failure is never a permission problem and never "corrupt data we repaired" — it
  *  is always "this device needs the passphrase again". Returning a discriminant (rather than a
@@ -550,6 +555,7 @@ export function classifySyncEncryptionFailure(error: unknown): SyncEncryptionFai
     // wrapping before it gets here, the same reason `SYNC_FILE_WRITE_CONFLICT` is matched that
     // way. The two sentinels do not share a prefix, so order only decides which wins on the
     // (impossible) both-present case.
+    if (message.includes(SYNC_ENCRYPTION_STATE_UNAVAILABLE)) return 'local-state-unavailable';
     if (message.includes(SYNC_ENCRYPTION_REMOTE_ENCRYPTED)) return 'remote-encrypted-no-key';
     if (message.includes(SYNC_ENCRYPTION_REMOTE_PLAINTEXT)) return 'remote-plaintext';
     if (message.includes(SYNC_ENCRYPTION_TERMINAL)) return 'needs-passphrase';

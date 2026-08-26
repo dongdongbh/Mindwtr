@@ -15,7 +15,16 @@ import {
 } from '@mindwtr/core';
 
 export type SyncBackend = CoreSyncBackend | 'cloudkit';
-export type SyncFailureKind = 'offline' | 'auth' | 'permission' | 'rateLimited' | 'misconfigured' | 'conflict' | 'encryption' | 'unknown';
+export type SyncFailureKind =
+  | 'offline'
+  | 'auth'
+  | 'permission'
+  | 'rateLimited'
+  | 'misconfigured'
+  | 'conflict'
+  | 'encryptionState'
+  | 'encryption'
+  | 'unknown';
 
 const FILE_EXTENSION_PATTERN = /\.[A-Za-z0-9]{1,16}$/;
 const READONLY_ERROR_PATTERN = /isn't writable|not writable|read-only|read only|permission denied|EACCES/i;
@@ -25,12 +34,13 @@ const AUTH_ERROR_PATTERN = /\b401\b|unauthori[sz]ed|forbidden|\b403\b|reauth|re-
 const RATE_LIMIT_ERROR_PATTERN = /\b429\b|rate limit|too many requests|retry after/i;
 const MISCONFIGURED_SYNC_PATTERN = /not configured|missing .*config|save .*settings first|finish setup/i;
 const CONFLICT_ERROR_PATTERN = /\bconflict\b|stale remote state|precondition failed/i;
+const ENCRYPTION_STATE_ERROR_PATTERN = /SyncEncryptionStateUnavailableError/i;
 // #1056. Checked BEFORE the auth pattern: "wrong passphrase" contains "passphrase", and
 // several of these messages would otherwise be swallowed by AUTH_ERROR_PATTERN's
 // `credentials?` alternative or by the read-only/permission pattern, producing a
 // "check your sync credentials" toast for something only a passphrase prompt can fix.
 const ENCRYPTION_ERROR_PATTERN =
-  /SyncEncryptionNoKeyError|SyncEncryptionTerminalError|SyncEncryptionKeyMissingError|SyncEncryptionStateUnavailableError|SyncEncryptionRemotePlaintextError|sync passphrase|wrong passphrase or corrupted data|MWENC1|no longer encrypted/i;
+  /SyncEncryptionNoKeyError|SyncEncryptionTerminalError|SyncEncryptionKeyMissingError|SyncEncryptionRemotePlaintextError|sync passphrase|wrong passphrase or corrupted data|MWENC1|no longer encrypted/i;
 
 export const formatSyncErrorMessage = (error: unknown, backend: SyncBackend): string => {
   const raw = sanitizeSyncErrorMessage(String(error));
@@ -49,6 +59,7 @@ export const isLikelyOfflineSyncError = (errorOrMessage: unknown): boolean => {
 export const classifySyncFailure = (errorOrMessage: unknown): SyncFailureKind => {
   const message = sanitizeSyncErrorMessage(String(errorOrMessage || ''));
   if (!message.trim()) return 'unknown';
+  if (ENCRYPTION_STATE_ERROR_PATTERN.test(message)) return 'encryptionState';
   if (ENCRYPTION_ERROR_PATTERN.test(message)) return 'encryption';
   if (isLikelyOfflineSyncError(message)) return 'offline';
   if (RATE_LIMIT_ERROR_PATTERN.test(message)) return 'rateLimited';

@@ -1071,6 +1071,8 @@ export const svOverrides: Record<string, string> = {
         'settings.syncEncryptionRemotePlaintext': 'Synkningen stoppades: den här synkplatsen är inte längre krypterad. Stäng av synkkryptering på den här enheten, eller slå på den igen på synkplatsen.',
         'settings.syncEncryptionRemotePlaintextDesc': 'En annan enhet stängde av krypteringen på den här synkplatsen. Ingenting här har ändrats eller nedgraderats. Stäng av synkkryptering på den här enheten för att fortsätta synka i klartext, eller slå på krypteringen igen på synkplatsen.',
         'settings.syncEncryptionPassphraseNeeded': 'Synkroniseringen stoppades: synklösenfrasen för den här platsen fungerade inte. Ange den igen för att fortsätta.',
+        'settings.syncEncryptionStateUnavailable': 'Synkroniseringen är pausad eftersom enheten inte kunde läsa sin lokala krypteringsstatus. Starta om Mindwtr och försök igen. Om problemet kvarstår ska du låta synkroniseringen vara pausad och kontakta supporten innan du ändrar synkinställningarna.',
+        'settings.syncEncryptionRetry': 'Försök igen',
         'settings.syncPreferences': 'Synkalternativ för inställningar',
         'settings.syncPreferencesDesc': 'Välj vilka inställningar som synkas mellan enheter.',
         'settings.syncPreferenceAppearance': 'Utseende (tema, uppgiftsålder, snabbåtkomst)',

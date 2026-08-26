@@ -72,7 +72,34 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
 
     // Rendered after the hooks so the component's hook order never depends on the
     // backend: `supported` flips whenever the user changes the sync backend.
-    if (!supported || state === null) return null;
+    if (!supported) return null;
+    if (state === null) {
+        if (!encryption.stateUnavailable) return null;
+        return (
+            <section className="space-y-3">
+                <h2 data-settings-key="syncEncryption" className="text-lg font-semibold flex items-center gap-2">
+                    <Lock className="w-5 h-5" />
+                    {t.syncEncryption}
+                </h2>
+                <div className="bg-card border border-border rounded-lg p-6 space-y-4">
+                    <p role="alert" className="text-sm text-destructive">
+                        {t.syncEncryptionStateUnavailable}
+                    </p>
+                    <div className="flex justify-end">
+                        <button
+                            type="button"
+                            onClick={() => void encryption.retryState()}
+                            disabled={busy}
+                            aria-busy={busy}
+                            className={PRIMARY_BUTTON_CLS}
+                        >
+                            {t.syncEncryptionRetry}
+                        </button>
+                    </div>
+                </div>
+            </section>
+        );
+    }
 
     const errorMessage = mismatch
         ? t.syncEncryptionErrorMismatch

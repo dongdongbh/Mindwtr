@@ -1102,6 +1102,8 @@ export const jaOverrides: Record<string, string> = {
         'settings.syncEncryptionRemotePlaintext': '同期を停止しました: この同期先はもう暗号化されていません。このデバイスで同期の暗号化をオフにするか、同期先で暗号化をもう一度オンにしてください。',
         'settings.syncEncryptionRemotePlaintextDesc': '別のデバイスがこの同期先の暗号化をオフにしました。この端末側では何も変更も解除もされていません。平文のまま同期を続けるにはこのデバイスで同期の暗号化をオフにし、そうでなければ同期先で暗号化をもう一度オンにしてください。',
         'settings.syncEncryptionPassphraseNeeded': '同期を停止しました。この同期先のパスフレーズが使えませんでした。もう一度入力して続けてください。',
+        'settings.syncEncryptionStateUnavailable': 'このデバイスでローカルの暗号化状態を読み取れなかったため、同期を一時停止しています。Mindwtr を再起動して、もう一度お試しください。問題が続く場合は、同期を停止したまま、この同期設定を変更する前にサポートへお問い合わせください。',
+        'settings.syncEncryptionRetry': 'もう一度試す',
         'settings.syncPreferences': '設定の同期範囲',
         'settings.syncPreferencesDesc': 'どの設定を端末間でそろえるかを選べます。',
         'settings.syncPreferenceAppearance': '外観（テーマ、タスクの経過日数、クイックアクセス）',

@@ -1039,6 +1039,8 @@ export const zhHans: Record<string, string> = {
         'settings.syncEncryptionRemotePlaintext': '同步已停止：此同步位置不再加密。请在此设备上关闭同步加密，或在该同步位置重新启用加密。',
         'settings.syncEncryptionRemotePlaintextDesc': '另一台设备在此同步位置关闭了加密。此设备上的内容没有被更改或降级。若要以明文继续同步，请在此设备上关闭同步加密；否则请在该同步位置重新启用加密。',
         'settings.syncEncryptionPassphraseNeeded': '同步已停止：此位置的同步密码短语无效。请重新输入以继续。',
+        'settings.syncEncryptionStateUnavailable': '此设备无法读取本地加密状态，因此同步已暂停。请重启 Mindwtr 后重试。如果问题持续存在，请保持同步暂停，并在更改此同步设置前联系支持人员。',
+        'settings.syncEncryptionRetry': '重试',
         'settings.syncPreferences': '设置同步选项',
         'settings.syncPreferencesDesc': '选择要在设备间同步的偏好设置。',
         'settings.syncPreferenceAppearance': '外观（主题、任务年龄、快速访问）',

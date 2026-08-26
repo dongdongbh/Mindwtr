@@ -50,7 +50,7 @@ import {
 import { __syncEncryptionServiceTestUtils } from './sync-encryption-service';
 import { __resetSecureSecretStoreForTests } from './secure-secret-store';
 import { classifySyncFailure } from './sync-service-utils';
-import { SyncEncryptionNoKeyError } from './sync-encryption-state';
+import { SyncEncryptionNoKeyError, SyncEncryptionStateUnavailableError } from './sync-encryption-state';
 
 const nodeQuickCrypto: SyncCryptoNativeModule = {
   argon2: (_algorithm, params, callback) => {
@@ -250,6 +250,7 @@ describe('classifySyncFailure', () => {
     expect(classifySyncFailure('SyncEncryptionTerminalError: wrong passphrase or corrupted data'))
       .toBe('encryption');
     expect(classifySyncFailure('unsupported MWENC1 format_version 9')).toBe('encryption');
+    expect(classifySyncFailure(new SyncEncryptionStateUnavailableError())).toBe('encryptionState');
   });
 
   it('leaves the existing classifications alone', () => {

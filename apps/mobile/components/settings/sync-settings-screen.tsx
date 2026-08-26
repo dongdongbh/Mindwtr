@@ -241,6 +241,8 @@ function SyncSettingsView({
                 return t('settings.syncFailureMisconfigured');
             case 'conflict':
                 return t('settings.syncFailureConflict');
+            case 'encryptionState':
+                return t('settings.syncEncryptionStateUnavailable');
             case 'encryption':
                 return t('settings.syncFailureEncryption');
             default:

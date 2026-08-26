@@ -318,6 +318,11 @@ const resolveSyncText = (key: string, fallback: string): string => resolveI18nTe
  *  carry the wording until its locale keys land. */
 const resolveSyncFailureMessage = (rawError: string | undefined): string => {
     switch (classifySyncEncryptionFailure(rawError)) {
+        case 'local-state-unavailable':
+            return resolveSyncText(
+                'settings.syncEncryptionStateUnavailable',
+                'Sync is paused because this device could not read its local encryption state. Restart Mindwtr and try again. If the problem continues, keep sync paused and contact support before changing this sync setup.',
+            );
         case 'remote-plaintext':
             return resolveSyncText(
                 'settings.syncEncryptionRemotePlaintext',

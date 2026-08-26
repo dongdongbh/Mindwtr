@@ -181,6 +181,8 @@ export type SettingsSyncLabels = {
     syncEncryptionErrorGeneric: string;
     syncEncryptionErrorRotationFirst: string;
     syncEncryptionErrorBackendRequired: string;
+    syncEncryptionStateUnavailable: string;
+    syncEncryptionRetry: string;
     syncEncryptionEnableBeforeFirstSyncHint: string;
     syncEncryptionProgressAttachments: string;
     syncEncryptionProgressDocuments: string;
@@ -212,8 +214,9 @@ export type SyncEncryptionErrorKind = 'wrong-passphrase' | 'rotation-first' | 'b
  * close its form without re-reading state.
  */
 export type SyncEncryptionController = {
-    /** `null` while the first status read is in flight, or when the backend cannot encrypt. */
+    /** `null` while the first status read is in flight, unavailable, or the backend cannot encrypt. */
     state: SyncEncryptionState | null;
+    stateUnavailable: boolean;
     /** File, WebDAV and Dropbox only — see `isEncryptionCapableBackend`. */
     supported: boolean;
     /** True while no encryption-capable backend is durably active (e.g. a WebDAV config
@@ -224,6 +227,7 @@ export type SyncEncryptionController = {
     progress: SyncEncryptionTransitionProgress | null;
     error: SyncEncryptionErrorKind | null;
     clearError: () => void;
+    retryState: () => Promise<void>;
     generatePassphrase: () => string;
     enable: (passphrase: string) => Promise<boolean>;
     disable: () => Promise<boolean>;

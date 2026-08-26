@@ -401,6 +401,8 @@ export const SETTINGS_LABEL_KEYS = [
     'syncEncryptionErrorGeneric',
     'syncEncryptionErrorRotationFirst',
     'syncEncryptionErrorBackendRequired',
+    'syncEncryptionStateUnavailable',
+    'syncEncryptionRetry',
     'syncEncryptionEnableBeforeFirstSyncHint',
     'syncEncryptionProgressAttachments',
     'syncEncryptionProgressDocuments',

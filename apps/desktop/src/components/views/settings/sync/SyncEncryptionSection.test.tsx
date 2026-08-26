@@ -11,12 +11,14 @@ const t = getEnglishSettingsLabels();
 
 const controller = (overrides: Partial<SyncEncryptionController> = {}): SyncEncryptionController => ({
     state: 'off',
+    stateUnavailable: false,
     supported: true,
     pendingFirstSync: false,
     busy: false,
     progress: null,
     error: null,
     clearError: vi.fn(),
+    retryState: vi.fn(async () => undefined),
     generatePassphrase: vi.fn(() => 'gerbil unpaved trombone cameo hazily wrongdoer'),
     enable: vi.fn(async () => true),
     disable: vi.fn(async () => true),
@@ -63,6 +65,15 @@ describe('SyncEncryptionSection', () => {
             <SyncEncryptionSection t={t} encryption={controller({ state: null })} />,
         );
         expect(container).toBeEmptyDOMElement();
+    });
+
+    it('shows a retryable recovery state when local encryption status is unavailable', () => {
+        const encryption = controller({ state: null, stateUnavailable: true });
+        render(<SyncEncryptionSection t={t} encryption={encryption} />);
+
+        expect(screen.getByRole('alert')).toHaveTextContent(t.syncEncryptionStateUnavailable);
+        fireEvent.click(screen.getByRole('button', { name: t.syncEncryptionRetry }));
+        expect(encryption.retryState).toHaveBeenCalledOnce();
     });
 
     it('shows both warnings before anything can be enabled', () => {
