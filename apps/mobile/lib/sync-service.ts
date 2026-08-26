@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { AppData, MergeStats, createSyncOrchestrator, runSerializedSyncDocumentOperation, runSharedSyncCycle, useTaskStore, webdavGetJson, webdavGetSyncDocument, webdavHeadFile, webdavPutJson, webdavPutSyncDocument, markRemoteEncryptionDiscovered, markRemotePlaintextDiscovered, SyncEncryptionRemotePlaintextError, SyncEncryptionTerminalError, type SyncKeyMaterial, cloudGetJson, cloudHeadJson, cloudPutJson, flushPendingSave, performSyncCycle, withRetry, isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeWebdavUrl, normalizeCloudUrl, createSyncBackendIO, buildFastSyncScope, hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, getInMemoryAppDataSnapshot, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, isDropboxUnauthorizedError, parseFastSyncState, serializeFastSyncState, summarizeTaskLifecycleCounts, decodeUriSafe, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES, SYNC_FILE_NAME, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type Attachment, type CloudProvider, type FastSyncState, type SyncBackendContext, type SyncBackendIO, type SyncRunDiagnosticEvent, type SyncRunNotifier, type SyncRunPlatformHooks, type SyncRunStorage, type SyncTransport } from '@mindwtr/core';
+import { AppData, MergeStats, createSyncOrchestrator, runSerializedSyncDocumentOperation, runSharedSyncCycle, useTaskStore, webdavGetSyncDocument, webdavHeadFile, webdavPutSyncDocument, syncEncryptedArtifactName, markRemoteEncryptionDiscovered, markRemotePlaintextDiscovered, SyncEncryptionRemotePlaintextError, SyncEncryptionTerminalError, type SyncKeyMaterial, cloudGetJson, cloudHeadJson, cloudPutJson, flushPendingSave, performSyncCycle, withRetry, isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeWebdavUrl, normalizeCloudUrl, createSyncBackendIO, buildFastSyncScope, hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, getInMemoryAppDataSnapshot, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, isDropboxUnauthorizedError, parseFastSyncState, serializeFastSyncState, summarizeTaskLifecycleCounts, decodeUriSafe, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES, SYNC_FILE_NAME, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type Attachment, type CloudProvider, type FastSyncState, type SyncBackendContext, type SyncBackendIO, type SyncRunDiagnosticEvent, type SyncRunNotifier, type SyncRunPlatformHooks, type SyncRunStorage, type SyncTransport } from '@mindwtr/core';
 import { mobileStorage } from './storage-adapter';
 import { logInfo, logSyncError, logWarn, sanitizeLogMessage } from './app-log';
 import { readSyncFile, resolveSyncFileUri, writeSyncFile } from './storage-file';
@@ -1252,60 +1252,35 @@ class MobileSyncRun {
         };
         this.ensureWebdavSyncNotRateLimited();
         try {
-          if (this.encryptionMaterial) {
-            const result = await withRetry(
-              () =>
-                webdavGetSyncDocument<AppData>(webdavConfig.url, {
-                  ...requestOptions,
-                  material: this.encryptionMaterial ?? undefined,
-                  cryptoPrims: mobileSyncCryptoPrimitives,
-                }),
-              WEBDAV_READ_RETRY_OPTIONS
-            );
-            if (result.state === 'remote-plaintext') {
-              // A peer disabled encryption at the sync location. Persist first (the state must
-              // survive a restart), then fail the cycle. Nothing on the remote is touched, and
-              // this device never follows the remote down to plaintext on its own.
-              markRemotePlaintextDiscovered(syncEncryptionLocalState);
-              await flushSyncEncryptionLocalState();
-              throw new SyncEncryptionRemotePlaintextError();
-            }
-            if (result.state === 'encrypted-no-key') {
-              // The remote is sealed under a different salt than this device's key — a
-              // passphrase set before the first sync, or a peer's rotation. Persist the
-              // downgrade so the unlock prompt (which re-derives from the remote's salt)
-              // surfaces; treating this as "no data" would fork the remote's generation.
-              markRemoteEncryptionDiscovered(syncEncryptionLocalState, result);
-              await flushSyncEncryptionLocalState();
-              this.markCandidateEncryptedRemoteProven();
-              throw new SyncEncryptionNoKeyError();
-            }
-            return result.state === 'data' ? result.data : null;
-          }
-
-          // Encryption off: the read is the pre-feature call, unchanged — same core
-          // function, same URL, same request shape (backward-compat invariant #1).
-          const data = await withRetry(
-            () => webdavGetJson<AppData>(webdavConfig.url, requestOptions),
+          const result = await withRetry(
+            () => webdavGetSyncDocument<AppData>(webdavConfig.url, {
+              ...requestOptions,
+              material: this.encryptionMaterial ?? undefined,
+              cryptoPrims: mobileSyncCryptoPrimitives,
+            }),
             WEBDAV_READ_RETRY_OPTIONS
           );
-          if (data !== null) return data;
-
-          // Only "the remote has nothing" — the shape a first sync and a peer that
-          // enabled encryption both produce — costs one extra probe (decision #2). A
-          // steadily-syncing plaintext install never reaches it, and a probe that
-          // itself fails must never break an otherwise working sync.
-          const probe = await webdavGetSyncDocument<AppData>(webdavConfig.url, requestOptions)
-            .catch(() => null);
-          if (probe?.state === 'encrypted-no-key') {
+          if (result.state === 'remote-plaintext') {
+            // A peer disabled encryption at the sync location. Persist first (the state must
+            // survive a restart), then fail the cycle. Nothing on the remote is touched, and
+            // this device never follows the remote down to plaintext on its own.
+            markRemotePlaintextDiscovered(syncEncryptionLocalState);
+            await flushSyncEncryptionLocalState();
+            throw new SyncEncryptionRemotePlaintextError();
+          }
+          if (result.state === 'encrypted-no-key') {
             // Persist first (decision #5: the state must survive a restart), then fail
             // the cycle. Nothing on the remote is touched on this path.
-            markRemoteEncryptionDiscovered(syncEncryptionLocalState, probe);
+            markRemoteEncryptionDiscovered(syncEncryptionLocalState, result);
             await flushSyncEncryptionLocalState();
             this.markCandidateEncryptedRemoteProven();
             throw new SyncEncryptionNoKeyError();
           }
-          return null;
+          return {
+            data: result.data,
+            exists: result.exists,
+            strongEtag: result.strongEtag,
+          };
         } catch (error) {
           // The core machine maps invalid-JSON reads to the repair-write path;
           // only genuine transport failures count toward the rate limiter.
@@ -1315,7 +1290,7 @@ class MobileSyncRun {
           throw error;
         }
       },
-      webdavPut: async (sanitized) => {
+      webdavPut: async (sanitized, expectedEtag) => {
         const webdavConfig = this.webdavConfig;
         if (!webdavConfig?.url) throw new Error('WebDAV URL not configured');
         const requestOptions = {
@@ -1328,17 +1303,14 @@ class MobileSyncRun {
         };
         this.ensureWebdavSyncNotRateLimited();
         try {
-          // Encryption off keeps the pre-feature call verbatim (invariant #1).
           const material = this.encryptionMaterial;
           return await withRetry(
-            () =>
-              material
-                ? webdavPutSyncDocument(webdavConfig.url, sanitized, {
-                    ...requestOptions,
-                    material,
-                    cryptoPrims: mobileSyncCryptoPrimitives,
-                  })
-                : webdavPutJson(webdavConfig.url, sanitized, requestOptions),
+            () => webdavPutSyncDocument(webdavConfig.url, sanitized, {
+              ...requestOptions,
+              material: material ?? undefined,
+              cryptoPrims: mobileSyncCryptoPrimitives,
+              expectedEtag,
+            }),
             WEBDAV_RETRY_OPTIONS
           );
         } catch (error) {
@@ -1350,9 +1322,11 @@ class MobileSyncRun {
         const webdavConfig = this.webdavConfig!;
         this.ensureWebdavSyncNotRateLimited();
         try {
+          const material = this.encryptionMaterial;
+          const headUrl = material ? syncEncryptedArtifactName(webdavConfig.url) : webdavConfig.url;
           const metadata = await withRetry(
             () =>
-              webdavHeadFile(webdavConfig.url, {
+              webdavHeadFile(headUrl, {
                 ...getMobileWebDavRequestOptions(webdavConfig.allowInsecureHttp),
                 username: webdavConfig.username,
                 password: webdavConfig.password,

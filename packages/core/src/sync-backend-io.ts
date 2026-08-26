@@ -5,6 +5,11 @@ import { SyncRemoteWriteConflict, type SyncBackendIO, type SyncRunAttachmentHelp
 import type { CloudProvider } from './sync-client-helpers';
 import type { SyncBackend } from './sync-service-utils';
 import type { AppData } from './types';
+import {
+    getWebdavDocumentVersionFromError,
+    isWebdavRemoteWriteConflictError,
+    type WebDavDocumentVersion,
+} from './webdav';
 
 /**
  * ADR 0014 completion — the one implementation of the `SyncBackendIO` port.
@@ -42,6 +47,8 @@ type DropboxRevResult = { rev: string | null };
 type DropboxDownloadResult = { data: AppData | null; rev: string | null };
 type AttachmentSyncResult = Promise<AppData | boolean | null | undefined>;
 
+export type WebdavSyncReadResult = WebDavDocumentVersion & { data: AppData | null };
+
 export type FileSyncReadResult = {
     data: AppData;
     fingerprint: string;
@@ -61,8 +68,9 @@ export type FileSyncReadResult = {
  * that platform runs today. This ladder does not add or remove retries.
  */
 export type SyncTransport = {
-    webdavGet(): Promise<AppData | null | undefined>;
-    webdavPut(sanitized: AppData): Promise<RemoteWriteResult>;
+    webdavGet(): Promise<WebdavSyncReadResult>;
+    /** null means create-only (If-None-Match:*); a value is the strong GET ETag (If-Match). */
+    webdavPut(sanitized: AppData, expectedEtag: string | null): Promise<RemoteWriteResult>;
     webdavHead(): Promise<RemoteHeadResult>;
     cloudGet(): Promise<AppData | null | undefined>;
     cloudPut(sanitized: AppData): Promise<RemoteWriteResult>;
@@ -99,6 +107,7 @@ const isFileSyncReadResult = (value: AppData | FileSyncReadResult): value is Fil
 export function createSyncBackendIO(ctx: SyncBackendContext, transport: SyncTransport): SyncBackendIO {
     let fileRemoteFingerprint: string | null = null;
     let fileRemoteNeedsRepair = false;
+    let webdavDocumentVersion: WebDavDocumentVersion | null = null;
     /** Dropbox token-retry policy: try with the current token; on an
      *  unauthorized response, force-refresh once and retry once; any other
      *  error, or a second unauthorized response, propagates. Outer transient
@@ -135,7 +144,16 @@ export function createSyncBackendIO(ctx: SyncBackendContext, transport: SyncTran
                     throw new Error('WebDAV URL not configured');
                 }
                 ctx.syncUrl = normalizeWebdavUrl(ctx.webdav.url);
-                return transport.webdavGet();
+                try {
+                    const remote = await transport.webdavGet();
+                    webdavDocumentVersion = { exists: remote.exists, strongEtag: remote.strongEtag };
+                    return remote.data;
+                } catch (error) {
+                    // Invalid JSON still enters the shared repair path. Preserve the GET
+                    // validator carried by that error so the repair is conditional too.
+                    webdavDocumentVersion = getWebdavDocumentVersionFromError(error);
+                    throw error;
+                }
             }
             if (ctx.backend === 'cloud') {
                 if (ctx.cloudProvider === 'selfhosted') {
@@ -172,8 +190,24 @@ export function createSyncBackendIO(ctx: SyncBackendContext, transport: SyncTran
                 if (ctx.webdav?.url) {
                     ctx.syncUrl = normalizeWebdavUrl(ctx.webdav.url);
                 }
-                const result = await transport.webdavPut(sanitized);
-                return normalizeRemoteWriteResult('webdav', result);
+                if (!webdavDocumentVersion) {
+                    throw new Error('WebDAV document version is unavailable; refusing an unconditional write');
+                }
+                if (webdavDocumentVersion.exists && !webdavDocumentVersion.strongEtag) {
+                    throw new Error('WebDAV server did not provide a safe strong ETag for the existing sync document; refusing to overwrite it');
+                }
+                try {
+                    const result = await transport.webdavPut(
+                        sanitized,
+                        webdavDocumentVersion.exists ? webdavDocumentVersion.strongEtag : null,
+                    );
+                    return normalizeRemoteWriteResult('webdav', result);
+                } catch (error) {
+                    if (isWebdavRemoteWriteConflictError(error)) {
+                        throw new SyncRemoteWriteConflict();
+                    }
+                    throw error;
+                }
             }
             if (ctx.backend === 'cloud') {
                 if (ctx.cloudProvider === 'selfhosted') {

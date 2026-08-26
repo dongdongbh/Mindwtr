@@ -3,13 +3,18 @@ import { createSyncBackendIO, type SyncBackendContext, type SyncTransport } from
 import { DropboxConflictError, DropboxUnauthorizedError } from './dropbox';
 import { SyncRemoteWriteConflict } from './sync-run-ports';
 import type { AppData } from './types';
+import { WebDavRemoteWriteConflictError } from './webdav';
 
 const APP_DATA: AppData = {
     tasks: [], projects: [], sections: [], areas: [], people: [], settings: {},
 };
 
 const makeTransport = (overrides: Partial<SyncTransport> = {}): SyncTransport => ({
-    webdavGet: vi.fn().mockResolvedValue(APP_DATA),
+    webdavGet: vi.fn().mockResolvedValue({
+        data: APP_DATA,
+        exists: true,
+        strongEtag: '"webdav-read-v1"',
+    }),
     webdavPut: vi.fn().mockResolvedValue({ fingerprint: 'webdav-fp' }),
     webdavHead: vi.fn().mockResolvedValue({ exists: true, fingerprint: 'webdav-head-fp' }),
     cloudGet: vi.fn().mockResolvedValue(APP_DATA),
@@ -75,7 +80,7 @@ describe('createSyncBackendIO', () => {
             expect(transport.webdavGet).toHaveBeenCalledTimes(1);
 
             const outcome = await io.writeRemote(APP_DATA);
-            expect(transport.webdavPut).toHaveBeenCalledWith(APP_DATA);
+            expect(transport.webdavPut).toHaveBeenCalledWith(APP_DATA, '"webdav-read-v1"');
             expect(outcome).toEqual({ fingerprint: 'webdav-fp', serverMergedRemoteData: false });
 
             await expect(io.readRemoteFingerprint!()).resolves.toBe('webdav-head-fp');
@@ -90,6 +95,66 @@ describe('createSyncBackendIO', () => {
             const io = createSyncBackendIO(ctx, transport);
             await expect(io.syncAttachments!(APP_DATA, helpers)).resolves.toBeNull();
             expect(transport.syncWebdavAttachments).not.toHaveBeenCalled();
+        });
+
+        it('uses create-only semantics after a confirmed missing read', async () => {
+            const ctx: SyncBackendContext = {
+                backend: 'webdav', cloudProvider: 'selfhosted',
+                webdav: { url: 'https://dav.example.com/data.json' }, dropboxRev: null,
+            };
+            const transport = makeTransport({
+                webdavGet: vi.fn().mockResolvedValue({ data: null, exists: false, strongEtag: null }),
+            });
+            const io = createSyncBackendIO(ctx, transport);
+
+            await io.readRemote();
+            await io.writeRemote(APP_DATA);
+
+            expect(transport.webdavPut).toHaveBeenCalledWith(APP_DATA, null);
+        });
+
+        it('refuses to replace an existing document without a strong ETag', async () => {
+            const ctx: SyncBackendContext = {
+                backend: 'webdav', cloudProvider: 'selfhosted',
+                webdav: { url: 'https://dav.example.com/data.json' }, dropboxRev: null,
+            };
+            const transport = makeTransport({
+                webdavGet: vi.fn().mockResolvedValue({ data: APP_DATA, exists: true, strongEtag: null }),
+            });
+            const io = createSyncBackendIO(ctx, transport);
+
+            await io.readRemote();
+            await expect(io.writeRemote(APP_DATA)).rejects.toThrow('safe strong ETag');
+            expect(transport.webdavPut).not.toHaveBeenCalled();
+        });
+
+        it('maps a conditional WebDAV conflict into SyncRemoteWriteConflict', async () => {
+            const ctx: SyncBackendContext = {
+                backend: 'webdav', cloudProvider: 'selfhosted',
+                webdav: { url: 'https://dav.example.com/data.json' }, dropboxRev: null,
+            };
+            const transport = makeTransport({
+                webdavPut: vi.fn().mockRejectedValue(new WebDavRemoteWriteConflictError(412)),
+            });
+            const io = createSyncBackendIO(ctx, transport);
+
+            await io.readRemote();
+            await expect(io.writeRemote(APP_DATA)).rejects.toBeInstanceOf(SyncRemoteWriteConflict);
+        });
+
+        it('preserves a native invalid-JSON read validator for a conditional repair', async () => {
+            const ctx: SyncBackendContext = {
+                backend: 'webdav', cloudProvider: 'selfhosted',
+                webdav: { url: 'https://dav.example.com/data.json' }, dropboxRev: null,
+            };
+            const invalid = new Error('Invalid WebDAV response: error decoding response body [mindwtr-webdav-version:existing:"broken-v1"]');
+            const transport = makeTransport({ webdavGet: vi.fn().mockRejectedValue(invalid) });
+            const io = createSyncBackendIO(ctx, transport);
+
+            await expect(io.readRemote()).rejects.toBe(invalid);
+            await io.writeRemote(APP_DATA);
+
+            expect(transport.webdavPut).toHaveBeenCalledWith(APP_DATA, '"broken-v1"');
         });
     });
 

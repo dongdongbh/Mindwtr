@@ -64,7 +64,17 @@ pub(crate) struct RemoteJsonWriteResult {
     server_merged_remote_data: Option<bool>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebdavSyncReadResult {
+    data: Value,
+    exists: bool,
+    strong_etag: Option<String>,
+}
+
 const NATIVE_HTTP_TIMEOUT_SECS: u64 = 30;
+const WEBDAV_REMOTE_WRITE_CONFLICT: &str = "WEBDAV_REMOTE_WRITE_CONFLICT";
+const WEBDAV_VERSION_MARKER: &str = "mindwtr-webdav-version";
 const DROPBOX_STAGED_CREDENTIAL_TTL_MS: i64 = 30 * 60 * 1000;
 const DROPBOX_MAX_STAGED_CREDENTIALS: usize = 4;
 const DROPBOX_MAX_RESOLVED_CREDENTIAL_HANDLES: usize = 16;
@@ -1322,6 +1332,56 @@ fn header_value_to_string(headers: &reqwest::header::HeaderMap, name: &str) -> O
         .get(name)
         .and_then(|value| value.to_str().ok())
         .map(|value| value.to_string())
+}
+
+fn normalize_strong_webdav_etag(raw: Option<&str>) -> Option<String> {
+    let value = raw?.trim();
+    if value.len() < 2
+        || value
+            .get(..2)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("W/"))
+        || !value.starts_with('"')
+        || !value.ends_with('"')
+    {
+        return None;
+    }
+    let opaque = &value[1..value.len() - 1];
+    if opaque
+        .chars()
+        .any(|ch| ch == '"' || ch.is_control() || ch == ' ')
+    {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+fn strong_webdav_etag_from_headers(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    normalize_strong_webdav_etag(header_value_to_string(headers, "etag").as_deref())
+}
+
+fn invalid_webdav_document_error(message: String, strong_etag: Option<&str>) -> String {
+    format!(
+        "{message} [{WEBDAV_VERSION_MARKER}:existing:{}]",
+        strong_etag.unwrap_or("none")
+    )
+}
+
+fn webdav_write_condition(
+    expected_etag: Option<&str>,
+) -> Result<(reqwest::header::HeaderName, reqwest::header::HeaderValue), String> {
+    match expected_etag {
+        None => Ok((
+            reqwest::header::IF_NONE_MATCH,
+            reqwest::header::HeaderValue::from_static("*"),
+        )),
+        Some(expected) => {
+            let strong = normalize_strong_webdav_etag(Some(expected))
+                .ok_or_else(|| "WebDAV replacement requires a valid strong ETag".to_string())?;
+            let value = reqwest::header::HeaderValue::from_str(&strong)
+                .map_err(|_| "WebDAV replacement ETag is not a valid HTTP header".to_string())?;
+            Ok((reqwest::header::IF_MATCH, value))
+        }
+    }
 }
 
 fn remote_json_write_result_from_headers(
@@ -3184,7 +3244,7 @@ fn foreign_salt_discovery(bytes: &[u8], material: &SyncKeyMaterial) -> Option<St
 fn webdav_get_json_blocking(
     app: &tauri::AppHandle,
     material: Option<&SyncKeyMaterial>,
-) -> Result<Value, String> {
+) -> Result<WebdavSyncReadResult, String> {
     let (config, password) = read_bound_credential(app, CredentialService::Webdav)?;
     let allow_insecure_http = webdav_allows_insecure_http(&config);
     let plain_url = resolve_webdav_request_url(&config)?;
@@ -3222,7 +3282,11 @@ fn webdav_get_json_blocking(
         if let Some(discovery) = webdav_absent_document_discovery(&fetch, &plain_url, material)? {
             return Err(discovery);
         }
-        return Ok(Value::Null);
+        return Ok(WebdavSyncReadResult {
+            data: Value::Null,
+            exists: false,
+            strong_etag: None,
+        });
     }
 
     if !response.status().is_success() {
@@ -3235,6 +3299,7 @@ fn webdav_get_json_blocking(
         ));
     }
 
+    let strong_etag = strong_webdav_etag_from_headers(response.headers());
     let body_bytes = response
         .bytes()
         .map_err(|e| format!("Invalid WebDAV response: error reading response body: {e}"))?;
@@ -3245,8 +3310,17 @@ fn webdav_get_json_blocking(
         }
         let plaintext = decrypt_sync_artifact(&body_bytes, &material.key)
             .map_err(|error| terminal_error(error))?;
-        return serde_json::from_slice::<Value>(&plaintext)
-            .map_err(|e| format!("Invalid WebDAV response: error decoding response body: {e}"));
+        let data = serde_json::from_slice::<Value>(&plaintext).map_err(|e| {
+            invalid_webdav_document_error(
+                format!("Invalid WebDAV response: error decoding response body: {e}"),
+                strong_etag.as_deref(),
+            )
+        })?;
+        return Ok(WebdavSyncReadResult {
+            data,
+            exists: true,
+            strong_etag,
+        });
     }
 
     let body = String::from_utf8_lossy(&body_bytes);
@@ -3255,12 +3329,25 @@ fn webdav_get_json_blocking(
         if let Some(discovery) = webdav_absent_document_discovery(&fetch, &plain_url, None)? {
             return Err(discovery);
         }
-        return Ok(Value::Null);
+        return Ok(WebdavSyncReadResult {
+            data: Value::Null,
+            exists: true,
+            strong_etag,
+        });
     }
-    serde_json::from_str::<Value>(normalized_body).map_err(|e| {
+    let data = serde_json::from_str::<Value>(normalized_body).map_err(|e| {
         // Inspect the ORIGINAL bytes, not the lossy UTF-8 text, before conceding "invalid JSON".
-        webdav_encrypted_discovery(&body_bytes)
-            .unwrap_or_else(|| format!("Invalid WebDAV response: error decoding response body: {e}"))
+        webdav_encrypted_discovery(&body_bytes).unwrap_or_else(|| {
+            invalid_webdav_document_error(
+                format!("Invalid WebDAV response: error decoding response body: {e}"),
+                strong_etag.as_deref(),
+            )
+        })
+    })?;
+    Ok(WebdavSyncReadResult {
+        data,
+        exists: true,
+        strong_etag,
     })
 }
 
@@ -3289,7 +3376,7 @@ where
 }
 
 #[tauri::command]
-pub(crate) async fn webdav_get_json(app: tauri::AppHandle) -> Result<Value, String> {
+pub(crate) async fn webdav_get_json(app: tauri::AppHandle) -> Result<WebdavSyncReadResult, String> {
     let material = resolve_sync_encryption_material(&app)?;
     let result = tauri::async_runtime::spawn_blocking({
         let app = app.clone();
@@ -3304,6 +3391,7 @@ fn webdav_put_json_blocking(
     app: &tauri::AppHandle,
     data: &Value,
     material: Option<&SyncKeyMaterial>,
+    expected_etag: Option<&str>,
 ) -> Result<RemoteJsonWriteResult, String> {
     let (config, password) = read_bound_credential(app, CredentialService::Webdav)?;
     let allow_insecure_http = webdav_allows_insecure_http(&config);
@@ -3327,11 +3415,13 @@ fn webdav_put_json_blocking(
         ),
     };
     let client = webdav_blocking_http_client(config.proxy_url.as_deref(), allow_insecure_http)?;
+    let (condition_name, condition_value) = webdav_write_condition(expected_etag)?;
     let send_put = || {
         client
             .put(url.clone())
             .basic_auth(&username, Some(&password))
             .header("Content-Type", content_type)
+            .header(condition_name.clone(), condition_value.clone())
             .body(payload.clone())
             .send()
             .map_err(|e| format_reqwest_send_error("WebDAV request failed", &e))
@@ -3353,6 +3443,13 @@ fn webdav_put_json_blocking(
 
     if !response.status().is_success() {
         let status = response.status();
+        if status == reqwest::StatusCode::CONFLICT
+            || status == reqwest::StatusCode::PRECONDITION_FAILED
+        {
+            return Err(format!(
+                "{WEBDAV_REMOTE_WRITE_CONFLICT}: WebDAV document changed before replacement ({status})"
+            ));
+        }
         let body = response.text().unwrap_or_default();
         return Err(format!(
             "WebDAV PUT failed ({status}) at {}{}",
@@ -3367,10 +3464,11 @@ fn webdav_put_json_blocking(
 pub(crate) async fn webdav_put_json(
     app: tauri::AppHandle,
     data: Value,
+    expected_etag: Option<String>,
 ) -> Result<RemoteJsonWriteResult, String> {
     let material = resolve_sync_encryption_material(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        webdav_put_json_blocking(&app, &data, material.as_ref())
+        webdav_put_json_blocking(&app, &data, material.as_ref(), expected_etag.as_deref())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -4951,6 +5049,45 @@ mod tests {
             encrypted_webdav_url("https://host/dav/data.json#frag"),
             "https://host/dav/data.json.enc#frag"
         );
+    }
+
+    #[test]
+    fn webdav_cas_accepts_only_strong_etags_and_builds_create_or_replace_headers() {
+        assert_eq!(
+            normalize_strong_webdav_etag(Some("  \"v1\"  ")),
+            Some("\"v1\"".to_string())
+        );
+        assert_eq!(normalize_strong_webdav_etag(Some("W/\"v1\"")), None);
+        assert_eq!(normalize_strong_webdav_etag(Some("v1")), None);
+
+        let (create_name, create_value) = webdav_write_condition(None).expect("create condition");
+        assert_eq!(create_name, reqwest::header::IF_NONE_MATCH);
+        assert_eq!(create_value, reqwest::header::HeaderValue::from_static("*"));
+
+        let (replace_name, replace_value) =
+            webdav_write_condition(Some("\"v1\"")).expect("replace condition");
+        assert_eq!(replace_name, reqwest::header::IF_MATCH);
+        assert_eq!(
+            replace_value,
+            reqwest::header::HeaderValue::from_static("\"v1\"")
+        );
+        assert!(webdav_write_condition(Some("W/\"v1\"")).is_err());
+        assert!(webdav_write_condition(Some("unquoted")).is_err());
+    }
+
+    #[test]
+    fn invalid_webdav_document_error_carries_the_strong_get_validator() {
+        let versioned = invalid_webdav_document_error(
+            "Invalid WebDAV response: error decoding response body".to_string(),
+            Some("\"broken-v2\""),
+        );
+        assert!(versioned.contains("[mindwtr-webdav-version:existing:\"broken-v2\"]"));
+
+        let unsafe_version = invalid_webdav_document_error(
+            "Invalid WebDAV response: error decoding response body".to_string(),
+            None,
+        );
+        assert!(unsafe_version.contains("[mindwtr-webdav-version:existing:none]"));
     }
 
     #[test]

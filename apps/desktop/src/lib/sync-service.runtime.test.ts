@@ -1266,7 +1266,13 @@ describe('desktop sync-service runtime', () => {
                 };
             }
             if (command === 'get_data') return structuredClone(syncedData);
-            if (command === 'webdav_get_json') return structuredClone(remoteChangedData);
+            if (command === 'webdav_get_json') {
+                return {
+                    data: structuredClone(remoteChangedData),
+                    exists: true,
+                    strongEtag: '"remote-v2"',
+                };
+            }
             if (command === 'save_data') return undefined;
             throw new Error(`Unexpected command: ${command} ${JSON.stringify(args)}`);
         });

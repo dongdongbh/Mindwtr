@@ -72,6 +72,7 @@ import {
     type SyncRunCycleSetup,
     type SyncRunResult,
     type SyncTransport,
+    type WebdavSyncReadResult,
 } from '@mindwtr/core';
 import { isTauriRuntime } from './runtime';
 import { getTauriHttpFetch } from './tauri-http';
@@ -2094,16 +2095,15 @@ export class SyncService {
                 // A "missing" remote on a folder that other devices populate
                 // means the app is reading the wrong URL or the server hid
                 // the file; make it visible in shared logs (#898).
-                const logMissingRemote = (data: AppData | null | undefined): AppData | null => {
-                    if (data == null) {
+                const logMissingRemote = (remote: WebdavSyncReadResult): WebdavSyncReadResult => {
+                    if (remote.data == null) {
                         logSyncInfo('WebDAV remote read returned no data', { url: normalizedUrl });
-                        return null;
                     }
-                    return data;
+                    return remote;
                 };
                 if (isTauriRuntimeEnv() && !context.usesConfigOverride) {
                     return logMissingRemote(await withRetry(
-                        () => invokeSyncNative<AppData>('webdav_get_json'),
+                        () => invokeSyncNative<WebdavSyncReadResult>('webdav_get_json'),
                         WEBDAV_READ_RETRY_OPTIONS,
                     ));
                 }
@@ -2135,11 +2135,18 @@ export class SyncService {
                     await markRemoteSyncEncryptionPlaintext();
                     throw new SyncEncryptionRemotePlaintextError('the WebDAV remote is no longer encrypted');
                 }
-                return logMissingRemote(result.data);
+                return logMissingRemote({
+                    data: result.data,
+                    exists: result.exists,
+                    strongEtag: result.strongEtag,
+                });
             },
-            webdavPut: async (sanitized) => {
+            webdavPut: async (sanitized, expectedEtag) => {
                 if (isTauriRuntimeEnv() && !context.usesConfigOverride) {
-                    return invokeSyncNative<RemoteJsonWriteResult | boolean>('webdav_put_json', { data: sanitized });
+                    return invokeSyncNative<RemoteJsonWriteResult | boolean>('webdav_put_json', {
+                        data: sanitized,
+                        expectedEtag,
+                    });
                 }
                 const config = context.webdavConfig ?? await SyncService.getWebDavConfig();
                 const normalizedUrl = normalizeWebdavUrl(config.url);
@@ -2154,6 +2161,7 @@ export class SyncService {
                     fetcher,
                     material,
                     cryptoPrims: desktopSyncCryptoPrimitives,
+                    expectedEtag,
                 });
             },
             webdavHead: async () => {

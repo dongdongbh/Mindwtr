@@ -109,8 +109,10 @@ const storeStateRef = vi.hoisted(() => ({
 
 const coreMocks = vi.hoisted(() => ({
   webdavGetJson: vi.fn(),
+  webdavGetSyncDocument: vi.fn(),
   webdavHeadFile: vi.fn(),
   webdavPutJson: vi.fn(),
+  webdavPutSyncDocument: vi.fn(),
   cloudGetJson: vi.fn(),
   cloudHeadJson: vi.fn(),
   cloudPutJson: vi.fn(),
@@ -220,8 +222,10 @@ vi.mock('@mindwtr/core', async () => {
   return {
     ...actual,
     webdavGetJson: coreMocks.webdavGetJson,
+    webdavGetSyncDocument: coreMocks.webdavGetSyncDocument,
     webdavHeadFile: coreMocks.webdavHeadFile,
     webdavPutJson: coreMocks.webdavPutJson,
+    webdavPutSyncDocument: coreMocks.webdavPutSyncDocument,
     cloudGetJson: coreMocks.cloudGetJson,
     cloudHeadJson: coreMocks.cloudHeadJson,
     cloudPutJson: coreMocks.cloudPutJson,
@@ -311,8 +315,22 @@ describe('mobile sync-service runtime', () => {
     coreMocks.flushPendingSave.mockResolvedValue(undefined);
     coreMocks.withRetry.mockImplementation(async (operation: () => Promise<unknown>) => await operation());
     coreMocks.webdavGetJson.mockResolvedValue(emptyData);
+    coreMocks.webdavGetSyncDocument.mockReset();
+    coreMocks.webdavGetSyncDocument.mockImplementation(async (url: string, options: unknown) => {
+      const data = await coreMocks.webdavGetJson(url, options);
+      return {
+        state: 'data',
+        data,
+        exists: data !== null,
+        strongEtag: data !== null ? '"initial"' : null,
+      };
+    });
     coreMocks.webdavPutJson.mockReset();
     coreMocks.webdavPutJson.mockResolvedValue(undefined);
+    coreMocks.webdavPutSyncDocument.mockReset();
+    coreMocks.webdavPutSyncDocument.mockImplementation(
+      async (url: string, data: AppData, options: unknown) => coreMocks.webdavPutJson(url, data, options),
+    );
     coreMocks.webdavHeadFile.mockResolvedValue({ exists: true, fingerprint: 'webdav:v1:etag="initial"' });
     coreMocks.cloudHeadJson.mockResolvedValue({ exists: true, fingerprint: 'cloud:v1:etag="initial"' });
     coreMocks.getInMemoryAppDataSnapshot.mockReturnValue(emptyData);
