@@ -111,8 +111,7 @@ workspace_protocol_pattern = re.compile(
     flags=re.MULTILINE,
 )
 
-def replace_workspace_protocol(match: re.Match[str]) -> str:
-    indent = match.group('indent')
+def workspace_protocol_block(indent: str) -> str:
     block = [
         'locked = packages.get(f"node_modules/{dependency_name}")',
         'if requested_spec.startswith("workspace:"):',
@@ -144,12 +143,24 @@ def replace_workspace_protocol(match: re.Match[str]) -> str:
     ]
     return '\n'.join(f'{indent}{line}' for line in block)
 
-updated, workspace_protocol_count = workspace_protocol_pattern.subn(
+def replace_workspace_protocol(match: re.Match[str]) -> str:
+    return workspace_protocol_block(match.group('indent'))
+
+updated, _workspace_protocol_count = workspace_protocol_pattern.subn(
     replace_workspace_protocol,
     updated,
     count=1,
 )
-if workspace_protocol_count == 0 and 'if requested_spec.startswith("workspace:"):' not in updated:
+workspace_markers = list(re.finditer(
+    r'^(?P<indent>[ \t]*)if requested_spec\.startswith\("workspace:"\):$',
+    updated,
+    flags=re.MULTILINE,
+))
+workspace_block_is_canonical = (
+    len(workspace_markers) == 1
+    and workspace_protocol_block(workspace_markers[0].group('indent')) in updated
+)
+if not workspace_block_is_canonical:
     raise SystemExit(f"Could not find the desktop workspace dependency repair block in {manifest_path}")
 
 lines = updated.splitlines()

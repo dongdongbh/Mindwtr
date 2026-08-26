@@ -76,3 +76,9 @@ test("fails closed when the generator repair block drifts", () => {
   expect(result.status).not.toBe(0);
   expect(result.stderr).toContain("Could not find the desktop workspace dependency repair block");
 });
+
+test("fails closed when a generated workspace repair block is only partially intact", () => {
+  const { result } = runFixture("partially-drifted.yml");
+  expect(result.status).not.toBe(0);
+  expect(result.stderr).toContain("Could not find the desktop workspace dependency repair block");
+});
