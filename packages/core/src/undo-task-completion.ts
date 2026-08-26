@@ -1,7 +1,7 @@
 import { normalizeFocusTaskLimit } from './focus-utils';
 import { translateWithFallback } from './i18n';
 import { useTaskStore } from './store';
-import type { TaskStatus } from './types';
+import type { Task, TaskStatus } from './types';
 
 type TranslateFn = (key: string) => string;
 
@@ -26,10 +26,51 @@ export async function undoTaskCompletion(
     taskId: string,
     previousStatus: TaskStatus,
     wasFocusedToday: boolean,
+    options: { restoreUpdates?: Partial<Task> } = {},
 ): Promise<void> {
     const state = useTaskStore.getState();
-    const moveResult = await Promise.resolve(state.moveTask(taskId, previousStatus));
+    const completedTask = state._allTasks.find((task) => task.id === taskId);
+    const recurrence = completedTask?.recurrence;
+    const seriesId = recurrence && typeof recurrence === 'object'
+        ? recurrence.seriesId?.trim() || taskId
+        : typeof recurrence === 'string'
+            ? taskId
+            : undefined;
+    const generatedOccurrence = seriesId && completedTask?.completedAt
+        ? state._allTasks.find((task) => (
+            task.id !== taskId
+            && !task.deletedAt
+            && task.createdAt === completedTask.completedAt
+            && task.recurrence
+            && typeof task.recurrence === 'object'
+            && task.recurrence.seriesId === seriesId
+        ))
+        : undefined;
+
+    if (generatedOccurrence) {
+        const deleteResult = await Promise.resolve(state.deleteTask(generatedOccurrence.id));
+        if (!deleteResult.success) {
+            throw new Error(deleteResult.error || 'Failed to remove recurring follow-up');
+        }
+    }
+
+    const {
+        isFocusedToday: _restoreFocusedToday,
+        focusOrder: previousFocusOrder,
+        ...restoreUpdates
+    } = options.restoreUpdates ?? {};
+    const moveResult = options.restoreUpdates
+        ? await Promise.resolve(state.updateTask(taskId, {
+            ...restoreUpdates,
+            status: previousStatus,
+            isFocusedToday: false,
+            focusOrder: undefined,
+        }))
+        : await Promise.resolve(state.moveTask(taskId, previousStatus));
     if (!moveResult.success) {
+        if (generatedOccurrence) {
+            await Promise.resolve(useTaskStore.getState().restoreTask(generatedOccurrence.id));
+        }
         throw new Error(moveResult.error || 'Failed to restore task status');
     }
     if (!wasFocusedToday) return;
@@ -37,7 +78,10 @@ export async function undoTaskCompletion(
     const current = useTaskStore.getState();
     const focusTaskLimit = normalizeFocusTaskLimit(current.settings.gtd?.focusTaskLimit);
     if (current.getDerivedState().focusedCount >= focusTaskLimit) return;
-    const focusResult = await Promise.resolve(current.updateTask(taskId, { isFocusedToday: true }));
+    const focusResult = await Promise.resolve(current.updateTask(taskId, {
+        isFocusedToday: true,
+        ...(previousFocusOrder !== undefined ? { focusOrder: previousFocusOrder } : {}),
+    }));
     if (!focusResult.success) {
         throw new Error(focusResult.error || 'Failed to restore task focus');
     }

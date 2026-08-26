@@ -8,6 +8,7 @@ import { InboxProcessingModal } from './inbox-processing-modal';
 const updateTask = vi.fn();
 const deleteTask = vi.fn();
 const restoreTask = vi.fn();
+const undoTaskCompletion = vi.hoisted(() => vi.fn());
 const addProject = vi.fn();
 const addTask = vi.fn();
 const asyncStorageMock = vi.hoisted(() => ({
@@ -244,6 +245,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
     useTaskStore: (selector?: (state: typeof storeState) => unknown) => (
       selector ? selector(storeState) : storeState
     ),
+    undoTaskCompletion,
     loadAIKey: vi.fn(),
   };
 });
@@ -330,6 +332,8 @@ describe('InboxProcessingModal', () => {
     deleteTask.mockResolvedValue({ success: true });
     restoreTask.mockReset();
     restoreTask.mockResolvedValue({ success: true });
+    undoTaskCompletion.mockReset();
+    undoTaskCompletion.mockResolvedValue(undefined);
     hapticsMock.notificationAsync.mockClear();
     asyncStorageMock.getItem.mockReset();
     asyncStorageMock.getItem.mockResolvedValue(null);
@@ -1959,6 +1963,37 @@ describe('InboxProcessingModal', () => {
       expect(updateTask.mock.calls[0][1]).toMatchObject({ status: 'reference' });
     });
 
+    it('restores metadata cleared by Reference when the decision is undone', async () => {
+      const recurrence = { rule: 'monthly', strategy: 'strict', byMonthDay: [15] };
+      storeState.tasks = [{
+        ...baseInboxTask,
+        startTime: '2026-09-14',
+        dueDate: '2026-09-15',
+        reviewAt: '2026-09-16',
+        recurrence,
+        priority: 'high',
+        timeEstimate: '30min',
+      }];
+      const root = await openFlow();
+
+      await pressAsync(root, 'nav.reference');
+      const toast = undoToast();
+      await act(async () => {
+        toast!.onAction();
+        await Promise.resolve();
+      });
+
+      expect(updateTask).toHaveBeenLastCalledWith('inbox-1', expect.objectContaining({
+        status: 'inbox',
+        startTime: '2026-09-14',
+        dueDate: '2026-09-15',
+        reviewAt: '2026-09-16',
+        recurrence,
+        priority: 'high',
+        timeEstimate: '30min',
+      }));
+    });
+
     it('trashes from the first question and offers to put it back', async () => {
       const root = await openFlow();
 
@@ -1996,7 +2031,37 @@ describe('InboxProcessingModal', () => {
         await Promise.resolve();
       });
 
-      expect(updateTask).toHaveBeenLastCalledWith('inbox-1', { status: 'inbox' });
+      expect(updateTask).toHaveBeenLastCalledWith('inbox-1', expect.objectContaining({ status: 'inbox' }));
+    });
+
+    it('uses recurrence-aware completion undo for a recurring two-minute item', async () => {
+      const recurringTask = {
+        ...baseInboxTask,
+        isFocusedToday: true,
+        recurrence: { rule: 'daily', strategy: 'strict' },
+      };
+      storeState.tasks = [recurringTask];
+      const root = await openFlow();
+
+      pressStep(root, 'inbox.yes');
+      await pressAsync(root, 'inbox.doneIt');
+      const toast = undoToast();
+      await act(async () => {
+        toast!.onAction();
+        await Promise.resolve();
+      });
+
+      expect(undoTaskCompletion).toHaveBeenCalledWith(
+        'inbox-1',
+        'inbox',
+        true,
+        expect.objectContaining({
+          restoreUpdates: expect.objectContaining({
+            status: 'inbox',
+            recurrence: recurringTask.recurrence,
+          }),
+        }),
+      );
     });
 
     it('marks completing an item with the app\'s success haptic', async () => {

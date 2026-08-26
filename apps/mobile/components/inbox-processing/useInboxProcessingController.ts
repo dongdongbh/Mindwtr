@@ -29,6 +29,7 @@ import {
   skipCurrentProcessInboxTask,
   startProcessInboxSession,
   tFallback,
+  undoTaskCompletion,
   resolveAutoTextDirection,
   useTaskStore,
   type AIProviderId,
@@ -72,6 +73,36 @@ const ENERGY_LEVEL_OPTIONS: Array<NonNullable<Task['energyLevel']>> = ['low', 'm
 type ActionabilityChoice = 'actionable' | 'later' | 'trash' | 'someday' | 'reference' | null;
 type TwoMinuteChoice = 'yes' | 'no' | null;
 type ExecutionChoice = 'defer' | 'delegate' | null;
+
+const buildInboxDecisionRestoreUpdates = (task: Task): Partial<Task> => ({
+  title: task.title,
+  description: task.description,
+  status: task.status,
+  projectId: task.projectId,
+  sectionId: task.sectionId,
+  areaId: task.areaId,
+  contexts: [...task.contexts],
+  tags: [...task.tags],
+  priority: task.priority,
+  energyLevel: task.energyLevel,
+  assignedTo: task.assignedTo,
+  timeEstimate: task.timeEstimate,
+  startTime: task.startTime,
+  dueDate: task.dueDate,
+  reviewAt: task.reviewAt,
+  recurrence: task.recurrence && typeof task.recurrence === 'object'
+    ? { ...task.recurrence }
+    : task.recurrence,
+  relativeStartOffset: task.relativeStartOffset ? { ...task.relativeStartOffset } : undefined,
+  suppressMindwtrReminders: task.suppressMindwtrReminders,
+  repeatReminderMinutes: task.repeatReminderMinutes,
+  showFutureRecurrence: task.showFutureRecurrence,
+  isFocusedToday: task.isFocusedToday,
+  focusOrder: task.focusOrder,
+  boardOrder: task.boardOrder,
+  pushCount: task.pushCount,
+  completedAt: task.completedAt,
+});
 
 type InboxProcessingControllerParams = {
   visible: boolean;
@@ -136,7 +167,14 @@ export function useInboxProcessingController({
   const hasInitialized = useRef(false);
   // Last committed decision, kept so a presentation that auto-advances can
   // offer an Undo without re-deriving what it just did.
-  const lastCommittedRef = useRef<{ taskId: string; discarded: boolean } | null>(null);
+  const lastCommittedRef = useRef<{
+    taskId: string;
+    discarded: boolean;
+    completed: boolean;
+    previousStatus: Task['status'];
+    wasFocusedToday: boolean;
+    restoreUpdates: Partial<Task>;
+  } | null>(null);
 
   const inboxProcessing = settings?.gtd?.inboxProcessing ?? {};
   const twoMinuteEnabled = inboxProcessing.twoMinuteEnabled !== false;
@@ -553,7 +591,14 @@ export function useInboxProcessingController({
         showProcessingError(getActionFailureMessage(outcome.writeResult));
         return false;
       }
-      lastCommittedRef.current = { taskId: currentTask.id, discarded: event.type === 'discard' };
+      lastCommittedRef.current = {
+        taskId: currentTask.id,
+        discarded: event.type === 'discard',
+        completed: event.type === 'complete',
+        previousStatus: currentTask.status,
+        wasFocusedToday: currentTask.isFocusedToday === true,
+        restoreUpdates: buildInboxDecisionRestoreUpdates(currentTask),
+      };
       if (options.advance !== false && !activateProcessingSession(outcome.session)) {
         handleClose();
       }
@@ -588,12 +633,25 @@ export function useInboxProcessingController({
   const undoLastDecision = useCallback(async () => {
     const committed = lastCommittedRef.current;
     if (!committed) return;
-    lastCommittedRef.current = null;
     try {
+      if (committed.completed) {
+        await undoTaskCompletion(
+          committed.taskId,
+          committed.previousStatus,
+          committed.wasFocusedToday,
+          { restoreUpdates: committed.restoreUpdates },
+        );
+        lastCommittedRef.current = null;
+        return;
+      }
       const result = committed.discarded
         ? await restoreTask(committed.taskId)
-        : await updateTask(committed.taskId, { status: 'inbox' });
-      if (isActionFailure(result)) showProcessingError(getActionFailureMessage(result));
+        : await updateTask(committed.taskId, committed.restoreUpdates);
+      if (isActionFailure(result)) {
+        showProcessingError(getActionFailureMessage(result));
+        return;
+      }
+      lastCommittedRef.current = null;
     } catch (error) {
       showProcessingError(getUnknownErrorMessage(error));
     }
