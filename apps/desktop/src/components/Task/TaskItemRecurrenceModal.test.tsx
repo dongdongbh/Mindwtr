@@ -14,6 +14,7 @@ const baseProps = {
         'recurrence.onDayOfMonth': 'Day {day}',
         'recurrence.onNthWeekday': 'The {ordinal} {weekday}',
         'recurrence.lastDay': 'Last day',
+        'recurrence.lastDayOfMonth': 'Last day of the month',
         'recurrence.ordinal.first': 'First',
         'recurrence.ordinal.second': 'Second',
         'recurrence.ordinal.third': 'Third',
@@ -101,7 +102,7 @@ describe('TaskItemRecurrenceModal', () => {
         );
 
         expect(screen.getByRole('button', { name: 'Day 15 + Last day' })).toBeTruthy();
-        const lastDayToggle = screen.getByRole('button', { name: 'Include last day', pressed: true });
+        const lastDayToggle = screen.getByRole('button', { name: 'Last day of the month', pressed: true });
         fireEvent.click(lastDayToggle);
         expect(onMonthDayToggle).toHaveBeenCalledWith(-1);
     });

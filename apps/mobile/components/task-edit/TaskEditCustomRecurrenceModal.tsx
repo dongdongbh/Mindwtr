@@ -64,6 +64,7 @@ export function TaskEditCustomRecurrenceModal({
         { color: active ? tc.onTint : tc.secondaryText },
     ]);
     const lastDayLabel = t('recurrence.lastDay');
+    const lastDayOfMonthLabel = t('recurrence.lastDayOfMonth');
     const numberedMonthDays = customMonthDays.filter((day) => day !== -1);
     const numberedDaysLabel = t('recurrence.onDayOfMonth').replace('{day}', numberedMonthDays.join(', '));
     const monthDaysLabel = customMonthDays.includes(-1)
@@ -209,7 +210,7 @@ export function TaskEditCustomRecurrenceModal({
                                     onPress={() => toggleCustomMonthDay(-1)}
                                     accessibilityRole="button"
                                     accessibilityState={{ selected: customMonthDays.includes(-1) }}
-                                    accessibilityLabel={`${t('common.add')} ${lastDayLabel}`}
+                                    accessibilityLabel={lastDayOfMonthLabel}
                                 >
                                     <View
                                         style={[
