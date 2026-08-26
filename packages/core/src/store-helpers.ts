@@ -127,7 +127,9 @@ export function applyTaskUpdates(oldTask: Task, updates: Partial<Task>, now: str
         finalUpdates = {
             ...finalUpdates,
             dueDate: rescheduled.dueDate,
-            pushCount: rescheduled.pushCount,
+            pushCount: hasOwnField(finalUpdates, 'pushCount')
+                ? finalUpdates.pushCount
+                : rescheduled.pushCount,
         };
     }
 

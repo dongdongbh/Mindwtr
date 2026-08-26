@@ -152,6 +152,31 @@ describe('reference task invariants', () => {
             expect(updatedTask[field]).toBeUndefined();
         }
     });
+
+    it('restores an explicit push count when undo restores the due date', () => {
+        const original = createTask('reference-undo', undefined, undefined, {
+            status: 'inbox',
+            dueDate: '2026-09-15',
+            pushCount: 3,
+        });
+        const reference = applyTaskUpdates(
+            original,
+            { status: 'reference' },
+            '2026-08-26T12:00:00.000Z',
+        ).updatedTask;
+
+        const restored = applyTaskUpdates(reference, {
+            status: 'inbox',
+            dueDate: original.dueDate,
+            pushCount: original.pushCount,
+        }, '2026-08-26T12:01:00.000Z').updatedTask;
+
+        expect(restored).toMatchObject({
+            status: 'inbox',
+            dueDate: '2026-09-15',
+            pushCount: 3,
+        });
+    });
 });
 
 describe('relative start updates', () => {
