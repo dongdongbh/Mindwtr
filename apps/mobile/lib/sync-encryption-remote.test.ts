@@ -161,6 +161,43 @@ describe('transition entry derivation', () => {
   });
 });
 
+describe('WebDAV remote port error boundaries', () => {
+  const createPort = async () => {
+    asyncStorage.set('@mindwtr_webdav_url', 'https://dav.example.com/mindwtr');
+    return __syncEncryptionServiceTestUtils.createWebdavRemotePort(null);
+  };
+
+  it('propagates a GET 401 instead of treating the artifact as absent', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 401 })));
+    const port = await createPort();
+
+    await expect(port.read('data.json')).rejects.toThrow('WebDAV File GET failed (401)');
+  });
+
+  it('propagates a GET timeout instead of treating the artifact as absent', async () => {
+    const timeout = new Error('WebDAV request timed out');
+    vi.stubGlobal('fetch', vi.fn(async () => { throw timeout; }));
+    const port = await createPort();
+
+    await expect(port.read('data.json')).rejects.toBe(timeout);
+  });
+
+  it('treats only an explicit GET/DELETE 404 as an idempotent absence', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 404 })));
+    const port = await createPort();
+
+    await expect(port.read('data.json')).resolves.toBeNull();
+    await expect(port.remove('data.json')).resolves.toBeUndefined();
+  });
+
+  it('propagates a DELETE 500 so the transition cannot commit', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 500 })));
+    const port = await createPort();
+
+    await expect(port.remove('data.json')).rejects.toThrow('WebDAV DELETE failed (500)');
+  });
+});
+
 describe('Dropbox remote port + core transition round trip', () => {
   const remote = new Map<string, Uint8Array>();
 
@@ -174,7 +211,7 @@ describe('Dropbox remote port + core transition round trip', () => {
       const path = String(arg.path ?? '');
       if (url.includes('/files/download')) {
         const bytes = remote.get(path);
-        if (!bytes) return new Response(null, { status: 409 });
+        if (!bytes) return jsonResponse({ error_summary: 'path/not_found/..' }, 409);
         return new Response(new Uint8Array(bytes), { status: 200 });
       }
       if (url.includes('/files/upload')) {
@@ -242,6 +279,83 @@ describe('Dropbox remote port + core transition round trip', () => {
     expect(Buffer.from(remote.get('/data.json.enc')!).toString('base64')).toBe(sealedDoc);
     expect(Buffer.from(remote.get('/attachments/a0.png')!).toString('base64')).toBe(sealedAttachment);
   }, 30_000);
+
+  it('aborts before committing key/state on a Dropbox delete failure and resumes cleanly', async () => {
+    const data = appData([]);
+    remote.set('/data.json', new TextEncoder().encode(JSON.stringify(data)));
+    let failDelete = true;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const arg = JSON.parse(String((init?.headers as Record<string, string>)?.['Dropbox-API-Arg'] ?? '{}'));
+      const path = String(arg.path ?? '');
+      if (url.includes('/files/download')) {
+        const bytes = remote.get(path);
+        if (!bytes) return jsonResponse({ error_summary: 'path/not_found/..' }, 409);
+        return new Response(new Uint8Array(bytes), { status: 200 });
+      }
+      if (url.includes('/files/upload')) {
+        remote.set(path, new Uint8Array(await new Response(init?.body as BodyInit).arrayBuffer()));
+        return jsonResponse({ rev: 'rev1' });
+      }
+      if (url.includes('/files/delete_v2')) {
+        if (failDelete) return jsonResponse({ error_summary: 'internal_error/..' }, 500);
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        remote.delete(String(body.path ?? ''));
+        return jsonResponse({});
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+
+    const port = await __syncEncryptionServiceTestUtils.createDropboxRemotePort(data);
+    await expect(runEnableSyncEncryptionOverRemote(
+      PASSPHRASE, port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    )).rejects.toThrow('Dropbox file delete failed: HTTP 500');
+    expect(syncEncryptionLocalState.read()).toBeNull();
+    await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
+    expect(remote.has('/data.json')).toBe(true);
+    expect(remote.has('/data.json.enc')).toBe(true);
+
+    failDelete = false;
+    await runEnableSyncEncryptionOverRemote(
+      PASSPHRASE, port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    );
+    expect(remote.has('/data.json')).toBe(false);
+    expect(syncEncryptionLocalState.read()?.state).toBe('enabled');
+    await expect(syncEncryptionKeyCache.getKey()).resolves.not.toBeNull();
+  });
+
+  it('treats explicit Dropbox not-found reads and deletes as idempotent absences', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/files/download')) {
+        return jsonResponse({
+          error: { '.tag': 'path', path: { '.tag': 'not_found' } },
+        }, 409);
+      }
+      if (url.includes('/files/delete_v2')) {
+        return jsonResponse({
+          error: { '.tag': 'path_lookup', path_lookup: { '.tag': 'not_found' } },
+        }, 409);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    const port = await __syncEncryptionServiceTestUtils.createDropboxRemotePort(null);
+
+    await expect(port.read('data.json')).resolves.toBeNull();
+    await expect(port.remove('data.json')).resolves.toBeUndefined();
+  });
+
+  it('propagates a non-not-found Dropbox delete conflict', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/files/delete_v2')) {
+        return jsonResponse({ error: { '.tag': 'too_many_write_operations' } }, 409);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    const port = await __syncEncryptionServiceTestUtils.createDropboxRemotePort(null);
+
+    await expect(port.remove('data.json')).rejects.toThrow('Dropbox file delete failed: HTTP 409');
+  });
 });
 
 describe('classifySyncFailure', () => {

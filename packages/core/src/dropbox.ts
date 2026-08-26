@@ -1,6 +1,7 @@
 import type { AppData } from './types';
 import {
     isDropboxPathConflictTag,
+    isDropboxPathNotFoundTag,
     parseDropboxApiErrorTag,
     parseDropboxMetadataRev,
     resolveDropboxPath,
@@ -279,7 +280,10 @@ export async function downloadDropboxFile(
         throw new DropboxUnauthorizedError('Dropbox file download failed: HTTP 401');
     }
     if (response.status === 409) {
-        throw new DropboxFileNotFoundError('Dropbox file not found');
+        if (isDropboxPathNotFoundTag(await parseDropboxApiErrorTag(response))) {
+            throw new DropboxFileNotFoundError('Dropbox file not found');
+        }
+        throw new Error('Dropbox file download failed: HTTP 409');
     }
     if (!response.ok) {
         throw new Error(`Dropbox file download failed: HTTP ${response.status}`);
@@ -339,7 +343,8 @@ export async function deleteDropboxFile(
         throw new DropboxUnauthorizedError('Dropbox file delete failed: HTTP 401');
     }
     if (response.status === 409) {
-        return;
+        if (isDropboxPathNotFoundTag(await parseDropboxApiErrorTag(response))) return;
+        throw new Error('Dropbox file delete failed: HTTP 409');
     }
     if (!response.ok) {
         throw new Error(`Dropbox file delete failed: HTTP ${response.status}`);

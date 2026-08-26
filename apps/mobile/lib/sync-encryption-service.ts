@@ -59,6 +59,13 @@ import {
 const BACKUP_FILE_NAME = `${SYNC_FILE_NAME}.bak`;
 const DROPBOX_PROVIDER = 'dropbox';
 
+const isWebdavNotFoundError = (error: unknown): boolean => (
+    typeof error === 'object'
+    && error !== null
+    && 'status' in error
+    && error.status === 404
+);
+
 export type SyncEncryptionProgressCallback = (progress: SyncEncryptionTransitionProgress) => void;
 
 /**
@@ -114,17 +121,20 @@ const createWebdavRemotePort = async (appData: AppData | null): Promise<SyncEncr
             try {
                 const data = await webdavGetFile(urlFor(name), requestOptions);
                 return data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as ArrayBuffer);
-            } catch {
+            } catch (error) {
                 // A 404 for an artifact this folder simply does not have is the normal
                 // case for half of the derived entry list.
-                return null;
+                if (isWebdavNotFoundError(error)) return null;
+                throw error;
             }
         },
         write: async (name, bytes) => {
             await webdavPutFile(urlFor(name), bytes, 'application/octet-stream', requestOptions);
         },
         remove: async (name) => {
-            await webdavDeleteFile(urlFor(name), requestOptions).catch(() => undefined);
+            // webdavDeleteFile is idempotent for HTTP 404. Auth, network and server
+            // failures must abort the transition before core commits the key/state.
+            await webdavDeleteFile(urlFor(name), requestOptions);
         },
     };
 };
@@ -149,7 +159,9 @@ const createDropboxRemotePort = async (appData: AppData | null): Promise<SyncEnc
             await authorized((token) => uploadDropboxFile(token, `/${name}`, bytes));
         },
         remove: async (name) => {
-            await authorized((token) => deleteDropboxFile(token, `/${name}`)).catch(() => undefined);
+            // deleteDropboxFile is idempotent only for Dropbox's explicit path-not-found
+            // response. Any other error must leave the transition resumable and uncommitted.
+            await authorized((token) => deleteDropboxFile(token, `/${name}`));
         },
     };
 };
