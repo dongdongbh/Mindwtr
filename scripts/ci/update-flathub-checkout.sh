@@ -15,6 +15,7 @@ default_analytics_heartbeat_url="https://analytics.mindwtr.app/"
 analytics_heartbeat_url="${ANALYTICS_HEARTBEAT_URL:-${default_analytics_heartbeat_url}}"
 analytics_release_version="${VITE_ANALYTICS_RELEASE_VERSION:-${ref}}"
 dropbox_app_key="${VITE_DROPBOX_APP_KEY:-}"
+manifest_only="${MINDWTR_FLATHUB_MANIFEST_ONLY:-0}"
 
 manifest_path="${flathub_dir}/tech.dongdongbh.mindwtr.yml"
 node_sources_path="${flathub_dir}/tech.dongdongbh.mindwtr.node-sources.json"
@@ -33,6 +34,7 @@ required_paths=(
   "apps/desktop/src-tauri/linux/tech.dongdongbh.mindwtr.desktop"
 )
 
+if [ "${manifest_only}" != "1" ]; then
 for relative_path in "${required_paths[@]}"; do
   if ! git -C "${repo_root}" cat-file -e "${ref}:${relative_path}" 2>/dev/null; then
     echo "Missing required file at ${ref}:${relative_path}" >&2
@@ -69,6 +71,17 @@ if ! command -v "${node_generator}" >/dev/null 2>&1; then
 fi
 
 upstream_commit="$(git -C "${repo_root}" rev-parse "${ref}^{commit}")"
+else
+  if ! [[ "${ref}" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "Manifest-only mode requires a full 40-character commit ref" >&2
+    exit 1
+  fi
+  if [ ! -f "${manifest_path}" ]; then
+    echo "Missing Flathub manifest: ${manifest_path}" >&2
+    exit 1
+  fi
+  upstream_commit="${ref}"
+fi
 
 python3 - "${manifest_path}" "${upstream_commit}" "${analytics_heartbeat_url}" "${analytics_release_version}" "${dropbox_app_key}" <<'PY'
 from pathlib import Path
@@ -296,6 +309,11 @@ lines[env_line_index + 1:block_end_index] = [
 
 manifest_path.write_text("\n".join(lines) + "\n")
 PY
+
+if [ "${manifest_only}" = "1" ]; then
+  echo "Updated Flathub manifest fixture in ${flathub_dir} for ${upstream_commit}"
+  exit 0
+fi
 
 rm -f "${flathub_dir}/appstream-homepage.patch"
 

@@ -1,0 +1,15 @@
+app-id: tech.dongdongbh.mindwtr
+finish-args:
+  - --socket=wayland
+build-options:
+  env:
+    - VITE_ANALYTICS_HEARTBEAT_URL=https://old.example/
+modules:
+  - name: mindwtr
+    buildsystem: simple
+    build-commands:
+      - echo "generator layout changed"
+    sources:
+      - type: git
+        url: https://github.com/dongdongbh/Mindwtr.git
+        commit: 0123456789abcdef0123456789abcdef01234567
