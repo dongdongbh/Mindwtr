@@ -11,7 +11,9 @@ import {
     getBaseSyncUrl,
     reaffirmRemoteEncryptionNoKey,
     runChangeSyncEncryptionPassphraseOverRemote,
+    runDisableSyncEncryptionLocalOnly,
     runDisableSyncEncryptionOverRemote,
+    runEnableSyncEncryptionLocalOnly,
     runEnableSyncEncryptionOverRemote,
     runProvideSyncEncryptionPassphraseOverRemote,
     runSerializedSyncDocumentOperation,
@@ -154,10 +156,16 @@ const createDropboxRemotePort = async (appData: AppData | null): Promise<SyncEnc
 
 type BackendTarget =
     | { kind: 'remote'; port: SyncEncryptionRemotePort }
+    | { kind: 'local-only' }
     | { kind: 'unsupported' };
 
 const resolveTransitionTarget = async (appData: AppData | null): Promise<BackendTarget> => {
     const backend = (await AsyncStorage.getItem(SYNC_BACKEND_KEY))?.trim();
+    // No durable backend yet (a typed-but-unproven config persists nothing until its
+    // activation probe passes). Enable/disable stay available as local-only key
+    // management so the passphrase can be set BEFORE the first sync uploads a byte
+    // (#1001); anything that must read remote artifacts rejects instead.
+    if (!backend || backend === 'off') return { kind: 'local-only' };
     if (backend === 'file') {
         const syncPath = await AsyncStorage.getItem(SYNC_PATH_KEY);
         if (!syncPath) throw new Error('No sync folder configured');
@@ -179,6 +187,9 @@ const resolveTransitionTarget = async (appData: AppData | null): Promise<Backend
 
 const requireTransitionPort = async (appData: AppData | null): Promise<SyncEncryptionRemotePort> => {
     const target = await resolveTransitionTarget(appData);
+    if (target.kind === 'local-only') {
+        throw new Error('SYNC_ENCRYPTION_BACKEND_REQUIRED');
+    }
     if (target.kind !== 'remote') {
         throw new Error('Sync encryption is only available for File Sync, WebDAV and Dropbox.');
     }
@@ -195,6 +206,12 @@ export type SyncEncryptionTransitionOptions = {
 
 export const getSyncEncryptionStatus = async (): Promise<SyncEncryptionStatus> =>
     getMobileSyncEncryptionStatus();
+
+/** True while no durable sync backend exists — enable/disable then run local-only. */
+export const isSyncEncryptionBackendPending = async (): Promise<boolean> => {
+    const backend = (await AsyncStorage.getItem(SYNC_BACKEND_KEY))?.trim();
+    return !backend || backend === 'off';
+};
 
 // Every mutating transition below runs through the SAME serialized queue a sync cycle's
 // `MobileSyncRun.run()` uses (`apps/mobile/lib/sync-service.ts:1503`). That queue is a
@@ -216,6 +233,17 @@ export const enableSyncEncryption = async (
     options: SyncEncryptionTransitionOptions = {},
 ): Promise<void> => runSerializedSyncDocumentOperation(async () => {
     await loadSyncEncryptionLocalState();
+    const target = await resolveTransitionTarget(options.appData ?? null);
+    if (target.kind === 'local-only') {
+        await runEnableSyncEncryptionLocalOnly(
+            passphrase,
+            syncEncryptionKeyCache,
+            syncEncryptionLocalState,
+            mobileSyncCryptoPrimitives,
+        );
+        await flushSyncEncryptionLocalState();
+        return;
+    }
     const port = await requireTransitionPort(options.appData ?? null);
     await runEnableSyncEncryptionOverRemote(
         passphrase,
@@ -234,6 +262,12 @@ export const disableSyncEncryption = async (
     options: SyncEncryptionTransitionOptions = {},
 ): Promise<void> => runSerializedSyncDocumentOperation(async () => {
     await loadSyncEncryptionLocalState();
+    const target = await resolveTransitionTarget(options.appData ?? null);
+    if (target.kind === 'local-only') {
+        await runDisableSyncEncryptionLocalOnly(syncEncryptionKeyCache, syncEncryptionLocalState);
+        await flushSyncEncryptionLocalState();
+        return;
+    }
     const port = await requireTransitionPort(options.appData ?? null);
     await runDisableSyncEncryptionOverRemote(
         port,

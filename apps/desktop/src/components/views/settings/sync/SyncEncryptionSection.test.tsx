@@ -12,6 +12,7 @@ const t = getEnglishSettingsLabels();
 const controller = (overrides: Partial<SyncEncryptionController> = {}): SyncEncryptionController => ({
     state: 'off',
     supported: true,
+    pendingFirstSync: false,
     busy: false,
     progress: null,
     error: null,
@@ -153,6 +154,26 @@ describe('SyncEncryptionSection', () => {
         await waitFor(() => expect(encryption.disable).toHaveBeenCalled());
     });
 
+    it('explains that enabling before the first sync keeps the first upload encrypted', () => {
+        render(<SyncEncryptionSection t={t} encryption={controller({ pendingFirstSync: true })} />);
+
+        fireEvent.click(screen.getByRole('button', { name: t.syncEncryptionEnable }));
+        expect(screen.getByText(t.syncEncryptionEnableBeforeFirstSyncHint)).toBeTruthy();
+    });
+
+    it('does not promise a remote decrypt when disabling with no configured backend', () => {
+        render(<SyncEncryptionSection t={t} encryption={controller({ state: 'enabled', pendingFirstSync: true })} />);
+
+        fireEvent.click(screen.getByRole('button', { name: t.syncEncryptionDisable }));
+        expect(screen.getByText(t.syncEncryptionDisableWarningNoBackend)).toBeTruthy();
+        expect(screen.queryByText(t.syncEncryptionDisableWarning)).toBeNull();
+    });
+
+    it('names the missing sync connection when a remote-only operation is refused', () => {
+        render(<SyncEncryptionSection t={t} encryption={controller({ state: 'enabled', error: 'backend-required' })} />);
+        expect(screen.getByText(t.syncEncryptionErrorBackendRequired)).toBeTruthy();
+    });
+
     it('points a wedged disable at the passphrase change that has to finish first', () => {
         render(<SyncEncryptionSection t={t} encryption={controller({ state: 'enabled', error: 'rotation-first' })} />);
         expect(screen.getByText(t.syncEncryptionErrorRotationFirst)).toBeTruthy();
@@ -230,6 +251,7 @@ describe('classifyFailure', () => {
     // rotation fails, the current passphrase has already been proven (#1056).
     it('blames the passphrase only on the verify sentinel, not on rotation failures', () => {
         expect(classifyFailure(new Error('SYNC_ENCRYPTION_WRONG_PASSPHRASE'), 'generic')).toBe('wrong-passphrase');
+        expect(classifyFailure(new Error('SYNC_ENCRYPTION_BACKEND_REQUIRED'), 'generic')).toBe('backend-required');
         expect(
             classifyFailure(new SyncEncryptionTerminalError(new SyncCryptoAuthError()), 'generic'),
         ).toBe('generic');

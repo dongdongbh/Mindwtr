@@ -19,6 +19,7 @@ const encryptionMocks = vi.hoisted(() => ({
     async (_passphrase: string, _options?: TransitionOptions): Promise<void> => undefined,
   ),
   getSyncEncryptionStatus: vi.fn(async (): Promise<{ state: EncryptionState }> => ({ state: 'off' })),
+  isSyncEncryptionBackendPending: vi.fn(async (): Promise<boolean> => false),
   provideSyncEncryptionPassphrase: vi.fn(
     async (_passphrase: string): Promise<'ok' | 'wrong-passphrase'> => 'ok',
   ),
@@ -107,6 +108,7 @@ describe('SyncEncryptionCard', () => {
     vi.clearAllMocks();
     encryptionMocks.getSyncEncryptionStatus.mockResolvedValue({ state: 'off' });
     encryptionMocks.provideSyncEncryptionPassphrase.mockResolvedValue('ok');
+    encryptionMocks.isSyncEncryptionBackendPending.mockResolvedValue(false);
   });
 
   it('shows both warnings before anything can be enabled', async () => {
@@ -117,6 +119,26 @@ describe('SyncEncryptionCard', () => {
 
     expect(texts(tree)).toContain('settings.syncEncryptionWarningLost');
     expect(texts(tree)).toContain('settings.syncEncryptionWarningDevices');
+  });
+
+  it('swaps to the pre-first-sync copy while no durable backend exists', async () => {
+    encryptionMocks.isSyncEncryptionBackendPending.mockResolvedValue(true);
+    encryptionMocks.getSyncEncryptionStatus.mockResolvedValue({ state: 'enabled' });
+    const tree = await renderCard();
+
+    await press(tree, 'settings.syncEncryptionDisable');
+
+    expect(texts(tree)).toContain('settings.syncEncryptionDisableWarningNoBackend');
+    expect(texts(tree)).not.toContain('settings.syncEncryptionDisableWarning');
+  });
+
+  it('shows the first-sync-encrypted hint when enabling before sync is set up', async () => {
+    encryptionMocks.isSyncEncryptionBackendPending.mockResolvedValue(true);
+    const tree = await renderCard();
+
+    await press(tree, 'settings.syncEncryptionEnable');
+
+    expect(texts(tree)).toContain('settings.syncEncryptionEnableBeforeFirstSyncHint');
   });
 
   it('enables with the typed passphrase and the local document', async () => {

@@ -21,7 +21,9 @@ import {
     encryptSyncArtifact,
     inspectSyncArtifact,
     runChangeSyncEncryptionPassphraseOverRemote,
+    runDisableSyncEncryptionLocalOnly,
     runDisableSyncEncryptionOverRemote,
+    runEnableSyncEncryptionLocalOnly,
     runEnableSyncEncryptionOverRemote,
     runProvideSyncEncryptionPassphraseOverRemote,
     SYNC_ENCRYPTION_KEYED_STATES,
@@ -398,6 +400,26 @@ export async function runEnableOverRemote(
         onProgress,
         desktopSyncCryptoPrimitives,
     );
+    await ports.flush();
+}
+
+/** No configured backend (#1001): derive+persist only, so the first sync a later backend
+ *  runs writes ciphertext from its first byte. Core guards the entry state. */
+export async function runEnableLocalOnly(passphrase: string): Promise<void> {
+    const ports = await openTransitionPorts();
+    await runEnableSyncEncryptionLocalOnly(
+        passphrase,
+        ports.keyCache,
+        ports.localState,
+        desktopSyncCryptoPrimitives,
+    );
+    await ports.flush();
+}
+
+/** No configured backend: clears this device's key and state; no remote is touched. */
+export async function runDisableLocalOnly(): Promise<void> {
+    const ports = await openTransitionPorts();
+    await runDisableSyncEncryptionLocalOnly(ports.keyCache, ports.localState);
     await ports.flush();
 }
 

@@ -23,14 +23,21 @@ export const isEncryptionCapableBackend = (backend: SyncBackend, cloudProvider: 
 export const classifyFailure = (error: unknown, terminal: SyncEncryptionErrorKind): SyncEncryptionErrorKind => {
     const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
     if (message.includes('SYNC_ENCRYPTION_WRONG_PASSPHRASE')) return 'wrong-passphrase';
+    if (message.includes('SYNC_ENCRYPTION_BACKEND_REQUIRED')) return 'backend-required';
     return isSyncEncryptionFailure(error) ? terminal : 'generic';
 };
 
 export function useSyncEncryptionSettings(
     syncBackend: SyncBackend,
     cloudProvider: CloudProvider,
+    persistedSyncBackend: SyncBackend,
+    persistedCloudProvider: CloudProvider,
 ): SyncEncryptionController {
     const supported = isEncryptionCapableBackend(syncBackend, cloudProvider);
+    // The service resolves the DURABLE backend, and a typed-but-unproven config is still
+    // 'off' there — the mismatch that used to fail a pre-first-sync enable with a
+    // misleading generic error (#1001).
+    const pendingFirstSync = !isEncryptionCapableBackend(persistedSyncBackend, persistedCloudProvider);
     const [state, setState] = useState<SyncEncryptionController['state']>(null);
     const [busy, setBusy] = useState(false);
     const [progress, setProgress] = useState<SyncEncryptionTransitionProgress | null>(null);
@@ -128,6 +135,7 @@ export function useSyncEncryptionSettings(
     return {
         state,
         supported,
+        pendingFirstSync,
         busy,
         progress,
         error,

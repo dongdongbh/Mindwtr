@@ -80,9 +80,11 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
             ? t.syncEncryptionErrorWrongPassphrase
             : error === 'rotation-first'
                 ? t.syncEncryptionErrorRotationFirst
-                : error === 'generic'
-                    ? t.syncEncryptionErrorGeneric
-                    : null;
+                : error === 'backend-required'
+                    ? t.syncEncryptionErrorBackendRequired
+                    : error === 'generic'
+                        ? t.syncEncryptionErrorGeneric
+                        : null;
 
     const progressLabel = progress
         ? `${progress.phase === 'attachments' ? t.syncEncryptionProgressAttachments : t.syncEncryptionProgressDocuments} ${progress.completed} / ${progress.total}`
@@ -159,6 +161,9 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
                             <div className="space-y-4 border-t border-border pt-4">
                                 <p className="text-sm text-warning">{t.syncEncryptionWarningLost}</p>
                                 <p className="text-sm text-warning">{t.syncEncryptionWarningDevices}</p>
+                                {encryption.pendingFirstSync && (
+                                    <p className="text-sm text-muted-foreground">{t.syncEncryptionEnableBeforeFirstSyncHint}</p>
+                                )}
                                 {passphraseInput(t.syncEncryptionPassphrase, nextPassphrase, setNextPassphrase, true)}
                                 {passphraseInput(t.syncEncryptionPassphraseConfirm, confirmPassphrase, setConfirmPassphrase)}
                                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -216,7 +221,11 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
                         )}
                         {flow === 'disable' && (
                             <div className="space-y-4 border-t border-border pt-4">
-                                <p className="text-sm text-warning">{t.syncEncryptionDisableWarning}</p>
+                                <p className="text-sm text-warning">
+                                    {encryption.pendingFirstSync
+                                        ? t.syncEncryptionDisableWarningNoBackend
+                                        : t.syncEncryptionDisableWarning}
+                                </p>
                                 {formActions(t.syncEncryptionDisable, false)}
                             </div>
                         )}

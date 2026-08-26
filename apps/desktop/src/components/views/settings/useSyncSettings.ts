@@ -1716,7 +1716,7 @@ export const useSyncSettings = ({
             allowInsecureHttp: cloudAllowInsecureHttp,
         })
         : !cloudUrl.trim();
-    const encryption = useSyncEncryptionSettings(syncBackend, cloudProvider);
+    const encryption = useSyncEncryptionSettings(syncBackend, cloudProvider, persistedSyncBackend, persistedCloudProvider);
     const isSyncTargetValid =
         syncBackend === 'file'
             ? !!syncPath.trim()

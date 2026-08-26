@@ -161,8 +161,10 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { runSerializedSyncDocumentOperation } from '@mindwtr/core';
 import {
+  changeSyncEncryptionPassphrase,
   disableSyncEncryption,
   enableSyncEncryption,
+  isSyncEncryptionBackendPending,
   provideSyncEncryptionPassphrase,
 } from './sync-encryption-service';
 import { __resetSecureSecretStoreForTests } from './secure-secret-store';
@@ -415,6 +417,31 @@ describe('non-truncating provider padding (decision #8)', () => {
       tasks: [{ title: 'tiny' }],
     });
   });
+});
+
+describe('local-only transitions with no configured backend (#1001)', () => {
+  it('enable before the first sync persists key material without touching any folder', async () => {
+    expect(await isSyncEncryptionBackendPending()).toBe(true);
+
+    await enableSyncEncryption(PASSPHRASE);
+
+    await expect(getMobileSyncEncryptionStatus()).resolves.toMatchObject({ state: 'enabled' });
+    await expect(getSyncEncryptionMaterial()).resolves.not.toBeNull();
+    expect(fs.files.size).toBe(0);
+  }, 30_000);
+
+  it('disable clears the local key and state; change/unlock refuse with the backend sentinel', async () => {
+    await enableSyncEncryption(PASSPHRASE);
+
+    await expect(changeSyncEncryptionPassphrase(PASSPHRASE, 'another phrase entirely'))
+      .rejects.toThrow('SYNC_ENCRYPTION_BACKEND_REQUIRED');
+    await expect(provideSyncEncryptionPassphrase(PASSPHRASE))
+      .rejects.toThrow('SYNC_ENCRYPTION_BACKEND_REQUIRED');
+
+    await disableSyncEncryption();
+    await expect(getMobileSyncEncryptionStatus()).resolves.toEqual({ state: 'off' });
+    await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
+  }, 30_000);
 });
 
 describe('File Sync transitions through core orchestration', () => {

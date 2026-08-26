@@ -7,7 +7,9 @@ import {
     markRemotePlaintextDiscovered,
     reaffirmRemoteEncryptionNoKey,
     runChangeSyncEncryptionPassphraseOverRemote,
+    runDisableSyncEncryptionLocalOnly,
     runDisableSyncEncryptionOverRemote,
+    runEnableSyncEncryptionLocalOnly,
     runEnableSyncEncryptionOverRemote,
     runProvideSyncEncryptionPassphraseOverRemote,
     syncEncryptedArtifactName,
@@ -110,6 +112,48 @@ describe('sync encryption artifact naming', () => {
 
     it('leaves a name with no marker untouched', () => {
         expect(syncPlaintextArtifactName('data.json')).toBe('data.json');
+    });
+});
+
+describe('local-only transitions (no configured backend, #1001)', () => {
+    it('enable derives fresh material, caches the key, and persists enabled', async () => {
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+
+        const result = await runEnableSyncEncryptionLocalOnly('correct horse', keyCache, localState, undefined, FAST_KDF);
+
+        expect(keyCache.current).not.toBeNull();
+        expect(localState.value?.state).toBe('enabled');
+        expect(localState.value?.discoveredSalt).toHaveLength(32);
+        expect(localState.value?.discoveredParams).toEqual(FAST_KDF);
+        // The persisted salt is the derived material's salt — the first sync's writes
+        // must come out under exactly this header.
+        const rederived = await deriveSyncKeyMaterial('correct horse', result.salt, FAST_KDF);
+        expect([...rederived.key]).toEqual([...keyCache.current!]);
+    });
+
+    it('enable refuses every state that describes a known remote', async () => {
+        for (const state of ['enabled', 'remote-encrypted-no-key', 'remote-plaintext'] as const) {
+            const keyCache = createFakeKeyCache();
+            const localState = createFakeLocalState();
+            localState.write({ state });
+            await expect(
+                runEnableSyncEncryptionLocalOnly('pw', keyCache, localState, undefined, FAST_KDF),
+            ).rejects.toThrow('requires the off state');
+            expect(keyCache.current).toBeNull();
+            expect(localState.value?.state).toBe(state);
+        }
+    });
+
+    it('disable clears the key and state without any remote', async () => {
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionLocalOnly('pw', keyCache, localState, undefined, FAST_KDF);
+
+        await runDisableSyncEncryptionLocalOnly(keyCache, localState);
+
+        expect(keyCache.current).toBeNull();
+        expect(localState.value).toBeNull();
     });
 });
 

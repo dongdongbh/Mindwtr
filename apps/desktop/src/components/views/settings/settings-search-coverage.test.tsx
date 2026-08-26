@@ -194,6 +194,7 @@ const syncProps: Parameters<typeof SettingsSyncPage>[0] = {
     encryption: {
         state: 'off',
         supported: true,
+        pendingFirstSync: false,
         busy: false,
         progress: null,
         error: null,

@@ -17,6 +17,7 @@ import {
     disableSyncEncryption,
     enableSyncEncryption,
     getSyncEncryptionStatus,
+    isSyncEncryptionBackendPending,
     provideSyncEncryptionPassphrase,
 } from '@/lib/sync-encryption-service';
 
@@ -27,7 +28,7 @@ type Translate = (key: string) => string;
 /** Which message the card shows after a failed transition. `rotation-first` is the
  *  one terminal case with a remedy: an interrupted passphrase change left the sync
  *  location on two salts, and only re-running the change can heal it. */
-type ErrorKind = 'mismatch' | 'wrong-passphrase' | 'rotation-first' | 'generic';
+type ErrorKind = 'mismatch' | 'wrong-passphrase' | 'rotation-first' | 'backend-required' | 'generic';
 
 type Flow = 'none' | 'enable' | 'change' | 'disable' | 'unlock';
 
@@ -40,6 +41,7 @@ export type SyncEncryptionCardProps = {
 
 const classifyFailure = (error: unknown, terminal: ErrorKind): ErrorKind => {
     const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+    if (message.includes('SYNC_ENCRYPTION_BACKEND_REQUIRED')) return 'backend-required';
     if (/MWENC1|SYNC_ENCRYPTION|passphrase/i.test(message)) return terminal;
     return 'generic';
 };
@@ -68,11 +70,20 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
         }
     }, []);
 
+    // Durable backend, not the screen's editor selection: a typed-but-unproven config
+    // still runs transitions local-only, and the copy must say so (#1001).
+    const [pendingFirstSync, setPendingFirstSync] = useState(false);
+
     useEffect(() => {
         let cancelled = false;
         void readState().then((next) => {
             if (!cancelled) setState(next);
         });
+        void isSyncEncryptionBackendPending()
+            .then((pending) => {
+                if (!cancelled) setPendingFirstSync(pending);
+            })
+            .catch(logSettingsError);
         return () => {
             cancelled = true;
         };
@@ -116,6 +127,7 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
         }
         // Transitions are resumable, so a half-finished run still moved the state.
         setState(await readState());
+        setPendingFirstSync(await isSyncEncryptionBackendPending().catch(() => false));
         setProgress(null);
         setBusy(false);
         if (succeeded) closeFlow();
@@ -180,9 +192,11 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
             ? t('settings.syncEncryptionErrorWrongPassphrase')
             : error === 'rotation-first'
                 ? t('settings.syncEncryptionErrorRotationFirst')
-                : error === 'generic'
-                    ? t('settings.syncEncryptionErrorGeneric')
-                    : null;
+                : error === 'backend-required'
+                    ? t('settings.syncEncryptionErrorBackendRequired')
+                    : error === 'generic'
+                        ? t('settings.syncEncryptionErrorGeneric')
+                        : null;
 
     const progressLabel = progress
         ? `${progress.phase === 'attachments'
@@ -264,6 +278,11 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
                                         <Text style={[styles.settingDescription, { color: tc.warning, marginTop: 8 }]}>
                                             {t('settings.syncEncryptionWarningDevices')}
                                         </Text>
+                                        {pendingFirstSync && (
+                                            <Text style={[styles.settingDescription, { color: tc.secondaryText, marginTop: 8 }]}>
+                                                {t('settings.syncEncryptionEnableBeforeFirstSyncHint')}
+                                            </Text>
+                                        )}
                                     </View>
                                     {renderPassphraseInput(t('settings.syncEncryptionPassphrase'), nextPassphrase, setNextPassphrase)}
                                     {renderPassphraseInput(t('settings.syncEncryptionPassphraseConfirm'), confirmPassphrase, setConfirmPassphrase)}
@@ -333,7 +352,9 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
                             <>
                                 <View style={[styles.settingRowColumn, { borderTopWidth: 1, borderTopColor: tc.border }]}>
                                     <Text style={[styles.settingDescription, { color: tc.warning }]}>
-                                        {t('settings.syncEncryptionDisableWarning')}
+                                        {t(pendingFirstSync
+                                            ? 'settings.syncEncryptionDisableWarningNoBackend'
+                                            : 'settings.syncEncryptionDisableWarning')}
                                     </Text>
                                 </View>
                                 {renderAction(t('settings.syncEncryptionDisable'), submitDisable)}

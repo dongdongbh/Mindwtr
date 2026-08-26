@@ -299,6 +299,54 @@ export function reaffirmRemoteEncryptionNoKey(localState: SyncEncryptionLocalSta
 export type EnableRemoteEncryptionResult = { salt: Uint8Array; params: SyncCryptoKdfParams };
 
 /**
+ * Enable encryption while no sync backend is configured (#1001): there is no remote to
+ * convert, so the transition is pure local key material — derive under a fresh salt,
+ * cache the key, persist `enabled`. The first sync a later-activated backend runs then
+ * writes ciphertext from its first byte, which is the point: a passphrase set before the
+ * first sync means plaintext never reaches the server at all.
+ *
+ * Refuses every state except off: `remote-encrypted-no-key` / `remote-plaintext` describe
+ * a KNOWN remote, and enabling blind there would cache a key no artifact ever validated —
+ * the unlock flow is the only honest entry from those states. `enabled` cannot re-enable
+ * either, so a second passphrase can never silently replace the one an existing remote
+ * may already be sealed under.
+ */
+export async function runEnableSyncEncryptionLocalOnly(
+    passphrase: string,
+    keyCache: SyncEncryptionKeyCachePort,
+    localState: SyncEncryptionLocalStatePort,
+    prims: SyncCryptoPrimitives = defaultSyncCryptoPrimitives,
+    kdfParams: SyncCryptoKdfParams = SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
+): Promise<EnableRemoteEncryptionResult> {
+    const current = localState.read();
+    if (current && current.state !== 'off') {
+        throw new Error(`sync encryption local-only enable requires the off state, found ${current.state}`);
+    }
+    const material = await deriveSyncKeyMaterial(passphrase, prims.randomBytes(16), kdfParams, prims);
+    await keyCache.setKey(material.key);
+    localState.write({
+        state: 'enabled',
+        discoveredSalt: bytesToHex(material.salt),
+        discoveredParams: material.params,
+    });
+    return { salt: material.salt, params: material.params };
+}
+
+/**
+ * Disable while no sync backend is configured: nothing remote is touched — this only
+ * removes the key and state from this device. If a previously used sync location still
+ * holds ciphertext, it stays ciphertext and reconnecting rediscovers it (fail closed);
+ * the UI copy for this path says exactly that instead of promising a decrypt pass.
+ */
+export async function runDisableSyncEncryptionLocalOnly(
+    keyCache: SyncEncryptionKeyCachePort,
+    localState: SyncEncryptionLocalStatePort,
+): Promise<void> {
+    await keyCache.clearKey();
+    localState.write(null);
+}
+
+/**
  * Enable encryption over a generic remote (WebDAV or Dropbox). Order: every attachment
  * first, then non-base documents (`.bak`/snapshots), then the base document (`data.json`)
  * last — a reader that finds `data.json.enc` should never find it referencing an

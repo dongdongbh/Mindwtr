@@ -119,7 +119,9 @@ import {
     markRemoteSyncEncryptionDiscovered,
     markRemoteSyncEncryptionPlaintext,
     runChangePassphraseOverRemote,
+    runDisableLocalOnly,
     runDisableOverRemote,
+    runEnableLocalOnly,
     runEnableOverRemote,
     runProvidePassphraseOverRemote,
 } from './sync-encryption-service';
@@ -1393,10 +1395,17 @@ export class SyncService {
     // -----------------------------------------------------------------
 
     private static async resolveEncryptionTarget(): Promise<
-        { kind: 'native' } | { kind: 'remote'; remote: SyncEncryptionRemotePort }
+        { kind: 'native' } | { kind: 'remote'; remote: SyncEncryptionRemotePort } | { kind: 'local' }
     > {
         const backend = await SyncService.getSyncBackend();
         if (backend === 'file') return { kind: 'native' };
+
+        // No durable backend yet (a typed-but-unproven WebDAV config is still 'off' until
+        // its activation probe passes). Enable/disable stay available as local-only key
+        // management so the passphrase can be set BEFORE the first sync ever uploads a
+        // byte (#1001); operations that must read or convert remote artifacts reject with
+        // SYNC_ENCRYPTION_BACKEND_REQUIRED instead of a misleading generic failure.
+        if (backend === 'off') return { kind: 'local' };
 
         // `cloud` covers two very different providers; only Dropbox is a blob store this
         // feature applies to. Never branch on a bare `backend === 'cloud'` here.
@@ -1450,6 +1459,10 @@ export class SyncService {
                 await invokeSyncNative('enable_sync_encryption', { passphrase });
                 return;
             }
+            if (target.kind === 'local') {
+                await runEnableLocalOnly(passphrase);
+                return;
+            }
             await runEnableOverRemote(passphrase, target.remote, onProgress);
         });
     }
@@ -1461,6 +1474,10 @@ export class SyncService {
             const target = await SyncService.resolveEncryptionTarget();
             if (target.kind === 'native') {
                 await invokeSyncNative('disable_sync_encryption');
+                return;
+            }
+            if (target.kind === 'local') {
+                await runDisableLocalOnly();
                 return;
             }
             await runDisableOverRemote(target.remote, onProgress);
@@ -1484,6 +1501,13 @@ export class SyncService {
                 await invokeSyncNative('change_sync_encryption_passphrase', { nextPassphrase });
                 return;
             }
+            if (target.kind === 'local') {
+                // Rotation rewraps remote artifacts; with no backend there is nothing to
+                // rewrap AND no way to verify the current passphrase against the folder —
+                // and a local-only "rotation" while an old sync location still holds
+                // ciphertext would silently strand it under the previous key.
+                throw new Error('SYNC_ENCRYPTION_BACKEND_REQUIRED');
+            }
             await runChangePassphraseOverRemote(currentPassphrase, nextPassphrase, target.remote, onProgress);
         });
     }
@@ -1496,6 +1520,11 @@ export class SyncService {
             return invokeSyncNative<'ok' | 'wrong-passphrase'>('provide_sync_encryption_passphrase', {
                 passphrase,
             });
+        }
+        if (target.kind === 'local') {
+            // A passphrase can only be VALIDATED against remote artifacts; with no
+            // backend there are none to check against.
+            throw new Error('SYNC_ENCRYPTION_BACKEND_REQUIRED');
         }
         return runProvidePassphraseOverRemote(passphrase, target.remote);
     }
