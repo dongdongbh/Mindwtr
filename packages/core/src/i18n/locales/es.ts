@@ -764,7 +764,7 @@ export const esOverrides: Record<string, string> = {
         'settings.syncPreferencesDesc': 'Elige qué preferencias se sincronizan entre dispositivos.',
         'settings.syncPreferenceAppearance': 'Apariencia (tema)',
         'settings.syncPreferenceLanguage': 'Idioma y formato de fecha',
-        'settings.syncPreferenceGtd': 'Valores predeterminados de agenda',
+        'settings.syncPreferenceGtd': 'Valores predeterminados de GTD (agenda, enfoque, diseño del editor)',
         'settings.syncPreferenceExternalCalendars': 'URLs de calendarios externos',
         'settings.syncPreferenceAi': 'Ajustes de IA (modelos, proveedores)',
         'settings.syncPreferenceAiHint': 'Las claves API y rutas locales de modelos nunca se sincronizan.',

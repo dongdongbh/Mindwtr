@@ -450,6 +450,40 @@ export const sanitizeMergedSettingsForSync = (
             }
         }
 
+        if (next.gtd.taskEditor !== undefined) {
+            // Structural guard only: unknown field ids and extra keys pass
+            // through so an older device never strips (and then re-uploads
+            // without) layout values a newer client wrote — that asymmetry
+            // would churn forever. Wrong-typed sub-values are dropped because
+            // the load-time defaults migration calls .filter on order/hidden.
+            const rawTaskEditor = next.gtd.taskEditor;
+            if (!isObjectRecord(rawTaskEditor)) {
+                next.gtd = { ...next.gtd, taskEditor: localSettings.gtd?.taskEditor };
+                if (next.gtd.taskEditor === undefined) {
+                    delete next.gtd.taskEditor;
+                }
+            } else {
+                const sanitizedTaskEditor: Record<string, unknown> = { ...rawTaskEditor };
+                for (const key of ['order', 'hidden'] as const) {
+                    if (key in sanitizedTaskEditor && !Array.isArray(sanitizedTaskEditor[key])) {
+                        delete sanitizedTaskEditor[key];
+                    }
+                }
+                for (const key of ['sections', 'sectionOpen'] as const) {
+                    if (key in sanitizedTaskEditor && !isObjectRecord(sanitizedTaskEditor[key])) {
+                        delete sanitizedTaskEditor[key];
+                    }
+                }
+                if ('presentation' in sanitizedTaskEditor && typeof sanitizedTaskEditor.presentation !== 'string') {
+                    delete sanitizedTaskEditor.presentation;
+                }
+                if ('defaultsVersion' in sanitizedTaskEditor && typeof sanitizedTaskEditor.defaultsVersion !== 'number') {
+                    delete sanitizedTaskEditor.defaultsVersion;
+                }
+                next.gtd = { ...next.gtd, taskEditor: sanitizedTaskEditor as GtdSettings['taskEditor'] };
+            }
+        }
+
         if (
             next.gtd.defaultProjectFlowMode !== undefined
             && !setContainsValue(SETTINGS_DEFAULT_PROJECT_FLOW_MODE_VALUE_SET, next.gtd.defaultProjectFlowMode)

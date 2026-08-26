@@ -131,6 +131,79 @@ const GROUP_CASES: Array<{
     },
 ];
 
+describe('mergeSettingsForSync > gtd.taskEditor', () => {
+    const layoutA: NonNullable<Settings['gtd']>['taskEditor'] = {
+        order: ['status', 'priority'],
+        hidden: ['energyLevel'],
+        sectionOpen: { scheduling: true },
+        defaultsVersion: 4,
+    };
+    const layoutB: NonNullable<Settings['gtd']>['taskEditor'] = {
+        hidden: ['location', 'assignedTo'],
+        defaultsVersion: 4,
+    };
+
+    it('a configured layout survives merge against a peer without one, regardless of timestamps', () => {
+        const local: Settings = {
+            gtd: { taskEditor: layoutA },
+            syncPreferencesUpdatedAt: { gtd: '2026-08-01T00:00:00.000Z' },
+        };
+        const incoming: Settings = {
+            gtd: { defaultScheduleTime: '09:00' },
+            syncPreferencesUpdatedAt: { gtd: '2026-08-20T00:00:00.000Z' },
+        };
+
+        const merged = mergeSettingsForSync(local, incoming);
+
+        expect(merged.gtd?.taskEditor).toEqual(layoutA);
+        expect(merged.gtd?.defaultScheduleTime).toBe('09:00');
+    });
+
+    it('both sides configured: the newer peer by gtd timestamp wins whole', () => {
+        const local: Settings = {
+            gtd: { taskEditor: layoutA },
+            syncPreferencesUpdatedAt: { gtd: '2026-08-01T00:00:00.000Z' },
+        };
+        const incoming: Settings = {
+            gtd: { taskEditor: layoutB },
+            syncPreferencesUpdatedAt: { gtd: '2026-08-20T00:00:00.000Z' },
+        };
+
+        const merged = mergeSettingsForSync(local, incoming);
+
+        expect(merged.gtd?.taskEditor).toEqual(layoutB);
+    });
+});
+
+describe('sanitizeMergedSettingsForSync > gtd.taskEditor shape guard', () => {
+    it('falls back to the local layout when the incoming value is not an object', () => {
+        const local: Settings = { gtd: { taskEditor: { hidden: ['location'] } } };
+        const merged: Settings = { gtd: { taskEditor: 'corrupt' as never } };
+
+        const sanitized = sanitizeMergedSettingsForSync(merged, local);
+
+        expect(sanitized.gtd?.taskEditor).toEqual({ hidden: ['location'] });
+    });
+
+    it('drops wrong-typed sub-values but keeps unknown keys for newer clients', () => {
+        const merged: Settings = {
+            gtd: {
+                taskEditor: {
+                    order: 'not-an-array',
+                    hidden: ['location'],
+                    sectionOpen: 7,
+                    defaultsVersion: 'four',
+                    futureKey: 'kept',
+                } as never,
+            },
+        };
+
+        const sanitized = sanitizeMergedSettingsForSync(merged, {});
+
+        expect(sanitized.gtd?.taskEditor).toEqual({ hidden: ['location'], futureKey: 'kept' });
+    });
+});
+
 describe('mergeSettingsForSync > group arbitration', () => {
     it.each(GROUP_CASES)('$group: the incoming side wins when its group timestamp is newer', (testCase) => {
         const merged = mergeSettingsForSync(

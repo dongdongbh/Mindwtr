@@ -26,6 +26,12 @@ const GTD_SYNCED_FIELD_SAMPLE_VALUES: Record<GtdSyncedFieldKey, GtdSettings[GtdS
     focusGroupBy: 'project',
     defaultProjectFlowMode: 'sequential',
     naturalLanguageDates: false,
+    taskEditor: {
+        order: ['status', 'priority'],
+        hidden: ['energyLevel'],
+        sectionOpen: { scheduling: true },
+        defaultsVersion: 4,
+    },
 };
 
 const now = '2026-02-19T00:00:00.000Z';

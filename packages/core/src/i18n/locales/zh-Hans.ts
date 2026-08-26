@@ -1039,7 +1039,7 @@ export const zhHans: Record<string, string> = {
         'settings.syncPreferencesDesc': '选择要在设备间同步的偏好设置。',
         'settings.syncPreferenceAppearance': '外观（主题、任务年龄、快速访问）',
         'settings.syncPreferenceLanguage': '语言与日期格式',
-        'settings.syncPreferenceGtd': '日程默认值',
+        'settings.syncPreferenceGtd': 'GTD 默认值（日程、聚焦、编辑器布局）',
         'settings.syncPreferenceExternalCalendars': '外部日历 URL',
         'settings.syncPreferenceAi': 'AI 设置（模型、提供商）',
         'settings.syncPreferenceAiHint': 'API 密钥和本地模型路径不会同步。',

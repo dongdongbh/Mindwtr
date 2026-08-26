@@ -536,12 +536,15 @@ export const createSettingsActions = ({
             const naturalLanguageDatesUpdate = updates.gtd
                 ? Object.prototype.hasOwnProperty.call(updates.gtd, 'naturalLanguageDates')
                 : false;
+            const taskEditorUpdate = updates.gtd
+                ? Object.prototype.hasOwnProperty.call(updates.gtd, 'taskEditor')
+                : false;
 
             if ('language' in updates || 'weekStart' in updates || 'dateFormat' in updates || 'timeFormat' in updates) {
                 markSyncUpdated('language');
             }
 
-            if (defaultScheduleTimeUpdate || defaultAreaIdUpdate || defaultAreaModeUpdate || focusTaskLimitUpdate || focusGroupByUpdate || defaultProjectFlowModeUpdate || naturalLanguageDatesUpdate) {
+            if (defaultScheduleTimeUpdate || defaultAreaIdUpdate || defaultAreaModeUpdate || focusTaskLimitUpdate || focusGroupByUpdate || defaultProjectFlowModeUpdate || naturalLanguageDatesUpdate || taskEditorUpdate) {
                 markSyncUpdated('gtd');
             }
 

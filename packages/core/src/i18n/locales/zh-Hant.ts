@@ -1039,7 +1039,7 @@ export const zhHant: Record<string, string> = {
         'settings.syncPreferencesDesc': '選擇要在設備間同步的偏好設置。',
         'settings.syncPreferenceAppearance': '外觀（主題、任務年齡、快速訪問）',
         'settings.syncPreferenceLanguage': '語言與日期格式',
-        'settings.syncPreferenceGtd': '排程預設值',
+        'settings.syncPreferenceGtd': 'GTD 預設值（排程、聚焦、編輯器版面）',
         'settings.syncPreferenceExternalCalendars': '外部日曆 URL',
         'settings.syncPreferenceAi': 'AI 設置（模型、提供商）',
         'settings.syncPreferenceAiHint': 'API 密鑰和本地模型路徑不會同步。',
