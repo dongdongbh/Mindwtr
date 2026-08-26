@@ -6,7 +6,7 @@ import {
   runDataTransferTransaction,
   type AppData,
 } from '@mindwtr/core';
-import { __resetSyncEncryptionStateForTests } from './sync-encryption-state';
+import { __resetSyncEncryptionStateForTests, SyncEncryptionNoKeyError } from './sync-encryption-state';
 import { SYNC_ENCRYPTION_STATE_KEY } from './sync-constants';
 
 const emptyData = {
@@ -349,6 +349,58 @@ describe('mobile sync-service runtime', () => {
     expect(result).toMatchObject({ success: false });
     expect(coreMocks.webdavGetJson).not.toHaveBeenCalled();
     expect(coreMocks.webdavPutJson).not.toHaveBeenCalled();
+  });
+
+  it('probes a candidate transport despite stale global no-key state', async () => {
+    asyncStorageMocks.getItem.mockImplementation(async (key: string) => (
+      key === SYNC_ENCRYPTION_STATE_KEY
+        ? JSON.stringify({ state: 'remote-encrypted-no-key' })
+        : null
+    ));
+    coreMocks.webdavGetJson.mockRejectedValue(new Error('candidate auth failed'));
+
+    const result = await syncServiceModule.performMobileSync(undefined, {
+      activationProbe: true,
+      manual: true,
+      configOverride: {
+        backend: 'webdav',
+        webdav: {
+          url: 'https://candidate.example.com/mindwtr',
+          username: 'candidate-user',
+          password: 'wrong-password',
+          allowInsecureHttp: false,
+        },
+      },
+    });
+
+    expect(result).toMatchObject({ success: false, error: expect.stringContaining('candidate auth failed') });
+    expect(result.activationProof).toBeUndefined();
+    expect(coreMocks.webdavGetJson).toHaveBeenCalled();
+  });
+
+  it('returns candidate-scoped proof only when the candidate read finds ciphertext', async () => {
+    asyncStorageMocks.getItem.mockImplementation(async (key: string) => (
+      key === SYNC_ENCRYPTION_STATE_KEY
+        ? JSON.stringify({ state: 'remote-encrypted-no-key' })
+        : null
+    ));
+    storageFileMocks.readSyncFile.mockRejectedValue(new SyncEncryptionNoKeyError());
+
+    const result = await syncServiceModule.performMobileSync('file:///candidate/data.json', {
+      activationProbe: true,
+      manual: true,
+      configOverride: {
+        backend: 'file',
+        syncPath: 'file:///candidate/data.json',
+      },
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      activationProof: 'remote-encrypted-no-key',
+    });
+    expect(storageFileMocks.readSyncFile).toHaveBeenCalled();
+    expect(storageFileMocks.writeSyncFile).not.toHaveBeenCalled();
   });
 
   it('runs a first WebDAV round trip from session config without reading or activating persisted transport settings', async () => {

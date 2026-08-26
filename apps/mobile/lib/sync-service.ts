@@ -99,7 +99,7 @@ type MobileSyncSkipReason = 'offline' | 'requeued' | 'unchanged' | 'pendingRemot
 // 'network': the OS reported the device offline. 'request': the device looked
 // online but the app's requests failed (per-app cellular block, VPN/firewall).
 type MobileSyncOfflineCause = 'network' | 'request';
-type MobileSyncResult = { success: boolean; stats?: MergeStats; error?: string; skipped?: MobileSyncSkipReason; offlineCause?: MobileSyncOfflineCause; remoteWriteDeferred?: boolean };
+type MobileSyncResult = { success: boolean; stats?: MergeStats; error?: string; skipped?: MobileSyncSkipReason; offlineCause?: MobileSyncOfflineCause; remoteWriteDeferred?: boolean; activationProof?: 'remote-encrypted-no-key' };
 export type MobileWebDavSyncConfig = { url: string; username: string; password: string; allowInsecureHttp?: boolean; allowWeakFingerprint?: boolean };
 export type MobileCloudSyncConfig = { url: string; token: string; allowInsecureHttp?: boolean };
 export type MobileDropboxSyncCredentials = { tokens: DropboxAuthTokens };
@@ -551,6 +551,7 @@ class MobileSyncRun {
   private dropboxLastRev: string | null = null;
   private fileSyncPath: string | null = null;
   private fileSyncBookmark: string | null = null;
+  private activationProof: MobileSyncResult['activationProof'];
   /** #1056: resolved once per cycle in setupCycle. `null` is the encryption-off path and
    *  every seam below then behaves byte-for-byte as it did before the feature. */
   private encryptionMaterial: SyncKeyMaterial | null = null;
@@ -573,7 +574,7 @@ class MobileSyncRun {
     logSyncInfo('Sync diagnostic start', { backend });
     try {
       this.subscribeNetworkListener();
-      return await runSharedSyncCycle({
+      const result = await runSharedSyncCycle({
         options: {
           manual: this.manual,
           activationProbe: this.activationProbe,
@@ -597,6 +598,7 @@ class MobileSyncRun {
         },
         performSyncCycle: (io) => performSyncCycle(io),
       });
+      return this.activationProof ? { ...result, activationProof: this.activationProof } : result;
     } finally {
       this.releaseResources();
     }
@@ -994,6 +996,12 @@ class MobileSyncRun {
     return this.backend === 'cloud' && this.cloudProvider === CLOUD_PROVIDER_DROPBOX;
   }
 
+  private markCandidateEncryptedRemoteProven(): void {
+    if (this.activationProbe && this.configOverride) {
+      this.activationProof = 'remote-encrypted-no-key';
+    }
+  }
+
   private createHooks(): SyncRunPlatformHooks {
     return {
       setupCycle: async ({ setStep }) => {
@@ -1012,7 +1020,8 @@ class MobileSyncRun {
         // plaintext document beside the ciphertext is exactly the outcome decision #5
         // exists to prevent. Automatic and background runs go quiet; a manual run says why.
         if (this.supportsSyncEncryption()) {
-          if (await isSyncEncryptionBlocked()) {
+          const probingCandidate = this.activationProbe && Boolean(this.configOverride);
+          if (!probingCandidate && await isSyncEncryptionBlocked()) {
             if (!this.manual) return { kind: 'disabled' };
             throw new SyncEncryptionNoKeyError();
           }
@@ -1268,6 +1277,7 @@ class MobileSyncRun {
               // surfaces; treating this as "no data" would fork the remote's generation.
               markRemoteEncryptionDiscovered(syncEncryptionLocalState, result);
               await flushSyncEncryptionLocalState();
+              this.markCandidateEncryptedRemoteProven();
               throw new SyncEncryptionNoKeyError();
             }
             return result.state === 'data' ? result.data : null;
@@ -1292,6 +1302,7 @@ class MobileSyncRun {
             // the cycle. Nothing on the remote is touched on this path.
             markRemoteEncryptionDiscovered(syncEncryptionLocalState, probe);
             await flushSyncEncryptionLocalState();
+            this.markCandidateEncryptedRemoteProven();
             throw new SyncEncryptionNoKeyError();
           }
           return null;
@@ -1390,10 +1401,15 @@ class MobileSyncRun {
         if (!fileSyncPath) throw new Error('No sync folder configured');
         // The `material` key is added only when encryption is on, so the off-state call
         // is argument-for-argument what it was before this feature (invariant #1).
-        return readSyncFile(fileSyncPath, {
-          bookmark: this.fileSyncBookmark,
-          ...(this.encryptionMaterial ? { material: this.encryptionMaterial } : {}),
-        });
+        try {
+          return await readSyncFile(fileSyncPath, {
+            bookmark: this.fileSyncBookmark,
+            ...(this.encryptionMaterial ? { material: this.encryptionMaterial } : {}),
+          });
+        } catch (error) {
+          if (error instanceof SyncEncryptionNoKeyError) this.markCandidateEncryptedRemoteProven();
+          throw error;
+        }
       },
       fileWrite: async (sanitized) => {
         const fileSyncPath = this.fileSyncPath;
@@ -1421,6 +1437,7 @@ class MobileSyncRun {
         if (result.encryptedNoKey) {
           markRemoteEncryptionDiscovered(syncEncryptionLocalState, result.encryptedNoKey);
           await flushSyncEncryptionLocalState();
+          this.markCandidateEncryptedRemoteProven();
           throw new SyncEncryptionNoKeyError();
         }
         if (result.remotePlaintext) {

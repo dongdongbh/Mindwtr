@@ -560,6 +560,7 @@ describe('useSyncSettingsTransportActions', () => {
         mocked.performMobileSync.mockResolvedValueOnce({
             success: false,
             error: 'This sync folder is encrypted. Enter the sync passphrase to continue.',
+            activationProof: 'remote-encrypted-no-key',
         });
         mocked.isSyncEncryptionBlocked.mockResolvedValue(true);
 
@@ -580,6 +581,31 @@ describe('useSyncSettingsTransportActions', () => {
         // No follow-up sync — it would only fail with the same no-key error.
         expect(mocked.performMobileSync).toHaveBeenCalledTimes(1);
         expect(mocked.showSettingsWarning).toHaveBeenCalled();
+    });
+
+    it('does not activate from stale blocked state when the candidate produced no encryption proof', async () => {
+        await renderHarness();
+        mocked.performMobileSync.mockClear();
+        mocked.performMobileSync.mockResolvedValueOnce({
+            success: false,
+            error: 'This sync folder is encrypted. Enter the sync passphrase to continue.',
+        });
+        mocked.isSyncEncryptionBlocked.mockResolvedValue(true);
+
+        await act(async () => {
+            await latestHookResult?.handleSync({
+                backend: 'webdav',
+                webdav: {
+                    allowInsecureHttp: false,
+                    password: 'wrong-secret',
+                    url: 'https://candidate.example.com/mindwtr/',
+                    username: 'alice',
+                },
+            });
+        });
+
+        expect(mocked.asyncStorage.setItem).not.toHaveBeenLastCalledWith(SYNC_BACKEND_KEY, 'webdav');
+        expect(mocked.performMobileSync).toHaveBeenCalledTimes(1);
     });
 
     it('does not activate on an encryption failure without persisted no-key evidence', async () => {

@@ -43,7 +43,6 @@ import {
 import { syncMobileBackgroundSyncRegistration } from '@/lib/background-sync-task';
 import { getMobileCloudRequestOptions, getMobileWebDavRequestOptions } from '@/lib/webdav-request-options';
 import {
-    classifySyncFailure,
     getSyncConflictCount,
     getSyncMaxClockSkewMs,
     getSyncTimestampAdjustments,
@@ -51,7 +50,6 @@ import {
     isLikelyOfflineSyncError,
     coerceSupportedBackend,
 } from '@/lib/sync-service-utils';
-import { isSyncEncryptionBlocked } from '@/lib/sync-encryption-state';
 import { testDropboxAccess } from '@/lib/dropbox-sync';
 import { formatClockSkew, formatError, isDropboxUnauthorizedError, logSettingsError } from '@/lib/settings-utils';
 import {
@@ -803,8 +801,7 @@ export function useSyncSettingsTransportActions({
                     // needs the key (#1001).
                     if (
                         !probeResult.success
-                        && classifySyncFailure(probeResult.error) === 'encryption'
-                        && (await isSyncEncryptionBlocked())
+                        && probeResult.activationProof === 'remote-encrypted-no-key'
                     ) {
                         await commitProvenSyncConfiguration(configOverride);
                         showSettingsWarning(
