@@ -676,6 +676,7 @@ export const koOverrides: Record<string, string> = {
         'projects.colorPurple': '보라',
         'projects.colorPink': '분홍',
         'projects.colorNone': '색상 없음',
+        'projects.colorCustom': '사용자 지정 색상',
         'projects.create': '만들기',
         'areas.create': '만들기',
         'areas.deleteConfirm': '이 영역을 삭제하시겠습니까? 이 영역의 프로젝트와 할 일은 유지되고 미지정으로 이동됩니다.',

@@ -9,7 +9,12 @@ type AreaColorPickerProps = {
     align?: 'left' | 'right';
     /** Label for the "no color" option. Defaults to "None". */
     noneLabel?: string;
+    /** Label for the free-form color option. Defaults to "Custom color". */
+    customLabel?: string;
 };
+
+const CUSTOM_SWATCH_GRADIENT =
+    'conic-gradient(#ef4444, #f59e0b, #10b981, #06b6d4, #3b82f6, #8b5cf6, #ec4899, #ef4444)';
 
 export function AreaColorPicker({
     value,
@@ -17,10 +22,13 @@ export function AreaColorPicker({
     title,
     align = 'left',
     noneLabel = 'None',
+    customLabel = 'Custom color',
 }: AreaColorPickerProps) {
     const [open, setOpen] = useState(false);
     const rootRef = useRef<HTMLDivElement | null>(null);
     const resolvedValue = value || DEFAULT_AREA_COLOR;
+    const customSelected =
+        Boolean(value) && !(AREA_PRESET_COLORS as readonly string[]).includes(resolvedValue);
 
     useEffect(() => {
         if (!open) return;
@@ -110,6 +118,36 @@ export function AreaColorPicker({
                             </button>
                         );
                     })}
+                    <label
+                        className={`relative flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border focus-within:ring-2 focus-within:ring-ring ${
+                            customSelected ? 'border-foreground' : 'border-border'
+                        }`}
+                        style={{ background: customSelected ? resolvedValue : CUSTOM_SWATCH_GRADIENT }}
+                        title={customLabel}
+                        data-testid="area-color-picker-custom"
+                    >
+                        <input
+                            type="color"
+                            // Uncontrolled on purpose: the menu remounts on every
+                            // open, so the default is always the current color, and
+                            // a controlled value would fight the chooser's live
+                            // preview on each `input` event.
+                            defaultValue={resolvedValue}
+                            aria-label={customLabel}
+                            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                            ref={(node) => {
+                                if (!node) return;
+                                // `change` only: `input` fires continuously while the
+                                // chooser is dragged, and React's onChange maps to it,
+                                // which would spam store writes and rev bumps.
+                                const commit = () => {
+                                    if (node.value !== resolvedValue) onChange(node.value);
+                                };
+                                node.addEventListener('change', commit);
+                                return () => node.removeEventListener('change', commit);
+                            }}
+                        />
+                    </label>
                 </div>
             ) : null}
         </div>

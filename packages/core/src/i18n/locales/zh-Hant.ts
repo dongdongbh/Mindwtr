@@ -625,6 +625,7 @@ export const zhHant: Record<string, string> = {
         'projects.colorRose': '玫瑰色',
         'projects.colorSlate': '石板灰',
         'projects.colorNone': '無顏色',
+        'projects.colorCustom': '自訂顏色',
         'projects.create': '創建',
         'areas.create': '創建',
         'areas.deleteConfirm': '刪除此區域？此區域中的專案和任務會保留並移至未指派。',

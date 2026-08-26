@@ -129,6 +129,7 @@ export function AreaManagerModal({
                         onChange={onChangeNewAreaColor}
                         title={t('projects.color')}
                         noneLabel={t('projects.colorNone')}
+                        customLabel={t('projects.colorCustom')}
                     />
                     <input
                         type="text"

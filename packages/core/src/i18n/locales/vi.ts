@@ -666,6 +666,7 @@ export const viOverrides: Record<string, string> = {
         'projects.colorPurple': 'Tím',
         'projects.colorPink': 'Hồng',
         'projects.colorNone': 'Không có màu',
+        'projects.colorCustom': 'Màu tùy chỉnh',
         'projects.create': 'Tạo',
         'areas.create': 'Tạo',
         'areas.deleteConfirm': 'Xóa khu vực này? Các dự án và nhiệm vụ trong khu vực này sẽ được giữ lại và chuyển sang chưa phân công.',

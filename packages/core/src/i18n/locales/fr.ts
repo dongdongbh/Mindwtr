@@ -575,6 +575,7 @@ export const frOverrides: Record<string, string> = {
         'projects.colorPurple': 'Violet',
         'projects.colorPink': 'Rose',
         'projects.colorNone': 'Aucune couleur',
+        'projects.colorCustom': 'Couleur personnalisée',
         'projects.create': 'Créer',
         'areas.create': 'Créer',
 	'areas.deleteConfirm': 'Supprimer ce domaine? Les projets et tâches dans ce domaine seront gardés et marqués comme non assigné.',

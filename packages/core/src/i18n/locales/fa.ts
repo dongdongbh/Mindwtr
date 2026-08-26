@@ -625,6 +625,7 @@ export const faOverrides: Record<string, string> = {
         'projects.colorRose': 'گل‌سرخی',
         'projects.colorSlate': 'خاکستری سنگی',
         'projects.colorNone': 'هیچ‌کدام',
+        'projects.colorCustom': 'رنگ سفارشی',
         'projects.create': 'ایجاد',
         'areas.create': 'ایجاد',
         'areas.deleteConfirm': 'این حوزه حذف شود؟ پروژه‌ها و کارهای این حوزه نگه داشته شده و به تخصیص‌نیافته منتقل می‌شوند.',

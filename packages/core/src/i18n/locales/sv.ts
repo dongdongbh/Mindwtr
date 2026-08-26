@@ -625,6 +625,7 @@ export const svOverrides: Record<string, string> = {
         'projects.colorRose': 'Rosenröd',
         'projects.colorSlate': 'Skiffergrå',
         'projects.colorNone': 'Ingen',
+        'projects.colorCustom': 'Egen färg',
         'projects.create': 'Skapa',
         'areas.create': 'Skapa',
         'areas.deleteConfirm': 'Ta bort det här området? Projekt och uppgifter i området behålls och flyttas till otilldelat.',

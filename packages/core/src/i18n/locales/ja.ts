@@ -653,6 +653,7 @@ export const jaOverrides: Record<string, string> = {
         'projects.colorRose': 'ローズ',
         'projects.colorSlate': 'スレート',
         'projects.colorNone': 'なし',
+        'projects.colorCustom': 'カスタムカラー',
         'projects.create': '作成',
         'areas.create': '作成',
         'areas.deleteConfirm': 'このエリアを削除しますか？中のプロジェクトとタスクは削除されず、エリア未設定になります。',

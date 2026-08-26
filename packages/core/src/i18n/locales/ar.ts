@@ -522,6 +522,7 @@ export const arOverrides: Record<string, string> = {
         'projects.colorPurple': 'أرجواني',
         'projects.colorPink': 'وردي',
         'projects.colorNone': 'بدون لون',
+        'projects.colorCustom': 'لون مخصص',
         'projects.create': 'يخلق',
         'areas.create': 'يخلق',
         'areas.deleteConfirm': 'هل تريد حذف هذه المنطقة؟ ستبقى المشاريع والمهام في هذه المنطقة وسيتم نقلها إلى غير معيّن.',

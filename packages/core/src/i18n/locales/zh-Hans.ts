@@ -625,6 +625,7 @@ export const zhHans: Record<string, string> = {
         'projects.colorRose': '玫瑰色',
         'projects.colorSlate': '石板灰',
         'projects.colorNone': '无颜色',
+        'projects.colorCustom': '自定义颜色',
         'projects.create': '创建',
         'areas.create': '创建',
         'areas.deleteConfirm': '删除此区域？此区域中的项目和任务会保留并移至未分配。',

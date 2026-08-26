@@ -83,6 +83,7 @@ function SortableAreaRow({
                 onChange={commitColor}
                 title={translate('projects.color')}
                 noneLabel={translate('projects.colorNone')}
+                customLabel={translate('projects.colorCustom')}
             />
             <input
                 key={`${area.id}-${area.updatedAt}`}
@@ -502,6 +503,7 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
                             onChange={setNewAreaColor}
                             title={translate('projects.color')}
                             noneLabel={translate('projects.colorNone')}
+                            customLabel={translate('projects.colorCustom')}
                         />
                         <input
                             type="text"
