@@ -6,7 +6,7 @@ import {
     resolveDropboxPath,
 } from './dropbox-sync-utils';
 import { MAX_DOWNLOAD_BYTES, MAX_SYNC_DOCUMENT_BYTES, readResponseBody } from './http-utils';
-import { decryptRemoteArtifactOrThrow, isPlaintextSyncArtifact, syncEncryptedArtifactName } from './sync-encryption';
+import { decryptRemoteArtifactOrThrow, detectForeignSaltArtifact, isPlaintextSyncArtifact, syncEncryptedArtifactName } from './sync-encryption';
 import { encryptSyncArtifact, inspectSyncArtifact, type SyncCryptoKdfParams, type SyncCryptoPrimitives, type SyncKeyMaterial } from './sync-crypto';
 
 const DROPBOX_SYNC_PATH = '/data.json';
@@ -165,6 +165,11 @@ export async function downloadDropboxAppData(
 
     if (crypto.material) {
         const bodyBytes = new Uint8Array(await readResponseBody(response, undefined, MAX_SYNC_DOCUMENT_BYTES));
+        // Sealed under another salt = this device's key is for a different encryption
+        // generation; report it as a no-key discovery (which can prompt for the passphrase)
+        // instead of decrypting into a dead-end Auth failure.
+        const foreign = detectForeignSaltArtifact(bodyBytes, crypto.material);
+        if (foreign) return { data: null, rev: metadata.rev, encryptedNoKey: foreign };
         const plaintext = await decryptRemoteArtifactOrThrow(bodyBytes, crypto.material.key, crypto.cryptoPrims);
         return { data: JSON.parse(new TextDecoder().decode(plaintext)) as AppData, rev: metadata.rev };
     }

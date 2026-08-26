@@ -309,16 +309,21 @@ pub(crate) fn persist_enabled_material(
     )
 }
 
-/// Mirrors core's `markRemoteEncryptionDiscovered`: never downgrades an already-'enabled'
-/// device, and persists immediately so the state survives a restart without needing the user
-/// to acknowledge anything first.
+/// Mirrors core's `markRemoteEncryptionDiscovered`: never downgrades a keyed device whose
+/// salt matches the discovery, and persists immediately so the state survives a restart
+/// without needing the user to acknowledge anything first. A keyed device under a DIFFERENT
+/// salt is provably holding a foreign key (a passphrase set before the first sync while a
+/// peer encrypted the remote, or a peer's rotation) and does downgrade -- the no-key state is
+/// the only one that surfaces the unlock prompt able to re-derive from the remote's own salt.
 pub(crate) fn mark_remote_encrypted_no_key(
     app: &tauri::AppHandle,
     salt: &[u8],
     params: SyncCryptoKdfParams,
 ) -> Result<(), String> {
     if let Some(current) = read_local_state(app) {
-        if state_holds_key(&current.state) {
+        if state_holds_key(&current.state)
+            && current.salt.as_deref() == Some(bytes_to_hex(salt).as_str())
+        {
             return Ok(());
         }
     }

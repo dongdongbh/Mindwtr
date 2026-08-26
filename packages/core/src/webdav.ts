@@ -12,7 +12,7 @@ import {
     toUint8Array,
 } from './http-utils';
 import { logWarn } from './logger';
-import { decryptRemoteArtifactOrThrow, isPlaintextSyncArtifact, syncEncryptedArtifactName } from './sync-encryption';
+import { decryptRemoteArtifactOrThrow, detectForeignSaltArtifact, isPlaintextSyncArtifact, syncEncryptedArtifactName } from './sync-encryption';
 import { encryptSyncArtifact, inspectSyncArtifact, type SyncCryptoPrimitives, type SyncKeyMaterial } from './sync-crypto';
 
 export interface WebDavOptions {
@@ -533,6 +533,11 @@ export async function webdavGetSyncDocument<T>(
             const plain = await webdavGetFileOrNull(url, webdavOptions).catch(() => null);
             return isPlaintextSyncArtifact(plain) ? { state: 'remote-plaintext' } : { state: 'data', data: null };
         }
+        // Sealed under another salt = this device's key is for a different encryption
+        // generation; report it as a no-key discovery (which can prompt for the passphrase)
+        // instead of decrypting into a dead-end Auth failure.
+        const foreign = detectForeignSaltArtifact(bytes, material);
+        if (foreign) return { state: 'encrypted-no-key', salt: foreign.salt, params: foreign.params };
         const plaintext = await decryptRemoteArtifactOrThrow(bytes, material.key, cryptoPrims);
         return { state: 'data', data: JSON.parse(new TextDecoder().decode(plaintext)) as T };
     }

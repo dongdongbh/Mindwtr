@@ -328,11 +328,36 @@ describe('File Sync encryption — no-key discovery (decisions #2 and #5)', () =
     await expect(getSyncEncryptionMaterial()).resolves.toBeNull();
   });
 
-  it('never overwrites an already-enabled local state with the no-key state', async () => {
-    syncEncryptionLocalState.write({ state: 'enabled', discoveredSalt: '00', discoveredParams: FAST_PARAMS });
+  it('never overwrites an enabled local state whose salt matches the discovery', async () => {
+    syncEncryptionLocalState.write({ state: 'enabled', discoveredSalt: '07'.repeat(16), discoveredParams: FAST_PARAMS });
     await seedEncrypted(appData('secret'));
     await expect(readSyncFile(SYNC_URI)).rejects.toBeInstanceOf(SyncEncryptionNoKeyError);
     expect(syncEncryptionLocalState.read()?.state).toBe('enabled');
+  });
+
+  it('downgrades an enabled state to no-key when the folder is sealed under a foreign salt', async () => {
+    // A passphrase set before the first sync while a peer encrypted the folder (or a peer's
+    // rotation): this device's key is provably for another generation, and only the no-key
+    // state surfaces the unlock prompt that re-derives from the folder's own salt.
+    syncEncryptionLocalState.write({ state: 'enabled', discoveredSalt: '00'.repeat(16), discoveredParams: FAST_PARAMS });
+    await seedEncrypted(appData('secret'));
+    await expect(readSyncFile(SYNC_URI)).rejects.toBeInstanceOf(SyncEncryptionNoKeyError);
+    expect(syncEncryptionLocalState.read()?.state).toBe('remote-encrypted-no-key');
+    expect(syncEncryptionLocalState.read()?.discoveredSalt).toBe('07'.repeat(16));
+  });
+
+  it('a keyed read of a foreign-salt folder downgrades to no-key instead of a dead-end auth failure', async () => {
+    // The keyed shape of the case above: material resolves (state enabled + cached key), the
+    // .enc artifact exists, but its header salt is not ours. Decrypting could only fail as
+    // Auth, indistinguishable from a wrong passphrase — the read must persist the downgrade.
+    await seedEncrypted(appData('secret'));
+    const foreign = await deriveSyncKeyMaterial(
+      PASSPHRASE, new Uint8Array(16).fill(9), FAST_PARAMS, mobileSyncCryptoPrimitives,
+    );
+    syncEncryptionLocalState.write({ state: 'enabled', discoveredSalt: '09'.repeat(16), discoveredParams: FAST_PARAMS });
+    await expect(readSyncFile(SYNC_URI, { material: foreign })).rejects.toBeInstanceOf(SyncEncryptionNoKeyError);
+    expect(syncEncryptionLocalState.read()?.state).toBe('remote-encrypted-no-key');
+    expect(syncEncryptionLocalState.read()?.discoveredSalt).toBe('07'.repeat(16));
   });
 
   it('does not probe for .enc when the plaintext read succeeds', async () => {

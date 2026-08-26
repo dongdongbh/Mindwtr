@@ -6,6 +6,7 @@ import {
     AppData,
     decodeUriSafe,
     decryptRemoteArtifactOrThrow,
+    detectForeignSaltArtifact,
     encryptSyncArtifact,
     inspectSyncArtifact,
     isPlaintextSyncArtifact,
@@ -647,6 +648,16 @@ const readEncryptedSyncFile = async (
             throw new SyncEncryptionRemotePlaintextError();
         }
         return null;
+    }
+    // Sealed under another salt = this device's key is for a different encryption
+    // generation (a passphrase set before the first sync here, or a peer's rotation).
+    // Persist the no-key downgrade so the unlock prompt (which re-derives from the
+    // remote's own salt) surfaces, instead of decrypting into a dead-end Auth failure.
+    const foreign = detectForeignSaltArtifact(bytes, material);
+    if (foreign) {
+        markRemoteEncryptionDiscovered(syncEncryptionLocalState, foreign);
+        await flushSyncEncryptionLocalState();
+        throw new SyncEncryptionNoKeyError();
     }
     const plaintext = await decryptRemoteArtifactOrThrow(bytes, material.key, mobileSyncCryptoPrimitives);
     return parseAppData(new TextDecoder().decode(plaintext));

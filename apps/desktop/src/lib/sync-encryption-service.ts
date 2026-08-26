@@ -135,8 +135,10 @@ export async function getSyncEncryptionStatus(): Promise<SyncEncryptionStatus> {
 }
 
 /** Persists `remote-encrypted-no-key` the moment a TS seam finds ciphertext it cannot open.
- *  Mirrors core's `markRemoteEncryptionDiscovered`; Rust refuses to downgrade an already-
- *  'enabled' device, so this is safe to call unconditionally from a read path. */
+ *  Mirrors core's `markRemoteEncryptionDiscovered`; Rust refuses to downgrade a keyed device
+ *  whose salt matches the discovery (and deliberately DOES downgrade one holding a
+ *  foreign-salt key — that key is provably for another generation, and only the no-key state
+ *  surfaces the unlock prompt), so this is safe to call unconditionally from a read path. */
 export async function markRemoteSyncEncryptionDiscovered(discovered: {
     salt: Uint8Array;
     params: SyncCryptoKdfParams;

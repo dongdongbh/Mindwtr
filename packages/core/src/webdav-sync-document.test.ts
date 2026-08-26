@@ -83,6 +83,24 @@ describe('webdav sync-document encryption', () => {
         await expect(webdavGetSyncDocument(URL_, { fetcher, material: wrongMaterial })).rejects.toThrow();
     });
 
+    // A passphrase set before the first sync while a peer encrypted the remote, or a peer's
+    // rotation: the key is for a DIFFERENT salt than the remote's artifacts. That is a
+    // provable generation mismatch, reported as encrypted-no-key (which the caller persists
+    // and the unlock prompt heals by re-deriving from the remote's salt) — never a dead-end
+    // Auth failure, and never "no data" (which would fork the remote's generation).
+    it('a key under a foreign salt reports encrypted-no-key with the remote header salt', async () => {
+        const { fetcher } = createFakeWebdavServer();
+        const remoteMaterial = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(6), FAST_KDF);
+        await webdavPutSyncDocument(URL_, { tasks: [] }, { fetcher, material: remoteMaterial });
+
+        const foreignMaterial = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(7), FAST_KDF);
+        const result = await webdavGetSyncDocument(URL_, { fetcher, material: foreignMaterial });
+        expect(result.state).toBe('encrypted-no-key');
+        if (result.state === 'encrypted-no-key') {
+            expect(Array.from(result.salt)).toEqual(Array.from(remoteMaterial.salt));
+        }
+    });
+
     it('a genuinely missing remote (no .enc, no plain) reports state data/null, not encrypted-no-key', async () => {
         const { fetcher } = createFakeWebdavServer();
         const result = await webdavGetSyncDocument(URL_, { fetcher });

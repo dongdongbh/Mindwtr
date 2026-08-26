@@ -31,8 +31,8 @@ use crate::storage::{
 };
 use crate::sync_crypto::{
     decrypt_sync_artifact, derive_sync_key_material, encrypt_sync_artifact, inspect_sync_artifact,
-    random_salt, SyncArtifactInspection, SyncCryptoError, SyncCryptoKdfParams, SyncKeyMaterial,
-    KEY_LEN, SALT_LEN, SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
+    random_salt, ParsedHeaderFields, SyncArtifactInspection, SyncCryptoError, SyncCryptoKdfParams,
+    SyncKeyMaterial, KEY_LEN, SALT_LEN, SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
 };
 use crate::sync_encryption::{
     bytes_to_hex, clear_encryption_state, encrypted_artifact_name, hex_to_bytes,
@@ -3146,15 +3146,38 @@ fn is_plaintext_sync_artifact(bytes: &[u8]) -> bool {
 
 fn webdav_encrypted_discovery(bytes: &[u8]) -> Option<String> {
     match inspect_sync_artifact(bytes) {
-        SyncArtifactInspection::Encrypted(header) => Some(format!(
-            "{SYNC_ENCRYPTION_REMOTE_ENCRYPTED}:{}:{}:{}:{}",
-            bytes_to_hex(&header.salt),
-            header.params.m_kib,
-            header.params.t,
-            header.params.p
-        )),
+        SyncArtifactInspection::Encrypted(header) => Some(encrypted_discovery_marker(&header)),
         SyncArtifactInspection::Unsupported(reason) => Some(terminal_error(reason)),
         SyncArtifactInspection::Plaintext => None,
+    }
+}
+
+/// The in-band discovery marker `persist_discovery_and_reduce` parses back via
+/// `parse_encrypted_discovery` -- the one encoder for every seam that reports ciphertext
+/// this device has no (usable) key for.
+fn encrypted_discovery_marker(header: &ParsedHeaderFields) -> String {
+    format!(
+        "{SYNC_ENCRYPTION_REMOTE_ENCRYPTED}:{}:{}:{}:{}",
+        bytes_to_hex(&header.salt),
+        header.params.m_kib,
+        header.params.t,
+        header.params.p
+    )
+}
+
+/// A valid MWENC1 artifact sealed under a DIFFERENT salt than `material` is proof this
+/// device's key belongs to another encryption generation (a passphrase set before the first
+/// sync while a peer encrypted the remote, or a peer's rotation). Decrypting would only fail
+/// as Auth, indistinguishable from a wrong passphrase -- report the discovery marker instead
+/// so the command layer downgrades to `remote-encrypted-no-key` and the unlock prompt (which
+/// re-derives from the remote's own salt) can heal it. Matching-salt and non-encrypted bytes
+/// return None: those cases keep their existing decrypt/terminal behavior.
+fn foreign_salt_discovery(bytes: &[u8], material: &SyncKeyMaterial) -> Option<String> {
+    match inspect_sync_artifact(bytes) {
+        SyncArtifactInspection::Encrypted(header) if header.salt != material.salt => {
+            Some(encrypted_discovery_marker(&header))
+        }
+        _ => None,
     }
 }
 
@@ -3217,6 +3240,9 @@ fn webdav_get_json_blocking(
         .map_err(|e| format!("Invalid WebDAV response: error reading response body: {e}"))?;
 
     if let Some(material) = material {
+        if let Some(discovery) = foreign_salt_discovery(&body_bytes, material) {
+            return Err(discovery);
+        }
         let plaintext = decrypt_sync_artifact(&body_bytes, &material.key)
             .map_err(|error| terminal_error(error))?;
         return serde_json::from_slice::<Value>(&plaintext)
@@ -4521,7 +4547,9 @@ mod tests {
         fs::write(dir.path().join("data.json.enc"), &primary).expect("write primary");
         fs::write(dir.path().join("data.json.enc.bak"), &backup).expect("write backup");
 
-        let wrong = test_material(2);
+        // Same salt, different key: a genuine wrong passphrase within the same encryption
+        // generation (the different-salt shape is a discovery instead — see the next test).
+        let wrong = SyncKeyMaterial { key: [2; KEY_LEN], salt: real.salt, params: real.params };
         let error = read_sync_file_versioned_from_dir_with(
             dir.path(),
             SyncFileCrypto::Enabled(&wrong),
@@ -4533,6 +4561,32 @@ mod tests {
         assert_eq!(fs::read(dir.path().join("data.json.enc")).expect("primary"), primary);
         assert_eq!(fs::read(dir.path().join("data.json.enc.bak")).expect("backup"), backup);
         assert!(!dir.path().join("data.json.enc.previous").exists());
+    }
+
+    #[test]
+    fn a_foreign_salt_read_reports_a_no_key_discovery_instead_of_a_dead_end() {
+        // A passphrase set before the first sync (or a peer's rotation) leaves this device
+        // holding a key derived from a different salt than the artifacts on disk. That is
+        // provably a generation mismatch, not corruption: the read must surface the discovery
+        // marker so the command layer downgrades to remote-encrypted-no-key and the unlock
+        // prompt can re-derive the key from the artifact's own salt.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let remote = test_material(1);
+        let primary = seal(br#"{"tasks":[{"id":"remote"}]}"#, &remote);
+        fs::write(dir.path().join("data.json.enc"), &primary).expect("write primary");
+
+        let foreign = test_material(2);
+        let error = read_sync_file_versioned_from_dir_with(
+            dir.path(),
+            SyncFileCrypto::Enabled(&foreign),
+        )
+        .expect_err("a foreign-salt read must fail the read");
+
+        let (salt, params) = parse_encrypted_discovery(&error).expect("a discovery marker");
+        assert_eq!(salt, remote.salt);
+        assert_eq!(params, remote.params);
+        // Nothing moved, nothing was rewritten.
+        assert_eq!(fs::read(dir.path().join("data.json.enc")).expect("primary"), primary);
     }
 
     #[test]
@@ -9292,15 +9346,18 @@ fn read_sync_candidate(path: &Path, attempts: usize) -> Result<Value, String> {
 fn read_encrypted_sync_candidate(
     path: &Path,
     attempts: usize,
-    key: &[u8; KEY_LEN],
+    material: &SyncKeyMaterial,
 ) -> Result<Value, String> {
     read_json_with_retries_decoded(
         path,
         attempts,
         |path| {
             let bytes = fs::read(path).map_err(|error| error.to_string())?;
-            let plaintext =
-                decrypt_sync_artifact(&bytes, key).map_err(|error| terminal_error(error))?;
+            if let Some(discovery) = foreign_salt_discovery(&bytes, material) {
+                return Err(discovery);
+            }
+            let plaintext = decrypt_sync_artifact(&bytes, &material.key)
+                .map_err(|error| terminal_error(error))?;
             String::from_utf8(plaintext)
                 .map_err(|error| terminal_error(format!("decrypted sync payload is not UTF-8: {error}")))
         },
@@ -9315,7 +9372,7 @@ fn read_sync_candidate_with(
 ) -> Result<Value, String> {
     match crypto.material() {
         None => read_sync_candidate(path, attempts),
-        Some(material) => read_encrypted_sync_candidate(path, attempts, &material.key),
+        Some(material) => read_encrypted_sync_candidate(path, attempts, material),
     }
 }
 
@@ -9574,13 +9631,7 @@ fn read_sync_file_with_source_from_dir_with(
 fn classify_encrypted_bytes(path: &Path) -> Option<String> {
     let bytes = fs::read(path).ok()?;
     match inspect_sync_artifact(&bytes) {
-        SyncArtifactInspection::Encrypted(header) => Some(format!(
-            "{SYNC_ENCRYPTION_REMOTE_ENCRYPTED}:{}:{}:{}:{}",
-            bytes_to_hex(&header.salt),
-            header.params.m_kib,
-            header.params.t,
-            header.params.p
-        )),
+        SyncArtifactInspection::Encrypted(header) => Some(encrypted_discovery_marker(&header)),
         // A header that is present but unreadable is still never "repair me".
         SyncArtifactInspection::Unsupported(reason) => Some(terminal_error(reason)),
         SyncArtifactInspection::Plaintext => None,

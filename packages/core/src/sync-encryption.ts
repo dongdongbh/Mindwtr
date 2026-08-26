@@ -144,6 +144,27 @@ export async function decryptRemoteArtifactOrThrow(
     }
 }
 
+/** The MWENC1 header info when `bytes` are a valid encrypted artifact sealed under a
+ * DIFFERENT salt than `material` — proof the caller's key belongs to another encryption
+ * generation (a passphrase set before the first sync on a device joining an already-
+ * encrypted remote, or a peer's passphrase rotation while this device was offline).
+ * Decrypting would only fail as Auth, indistinguishable from a wrong passphrase; the salt
+ * comparison is what lets callers route to "enter the passphrase for THIS remote" instead
+ * of a dead-end terminal error. Returns `null` for plaintext/unsupported bytes and for the
+ * matching-salt case (where an Auth failure really is wrong-passphrase-or-corruption). */
+export function detectForeignSaltArtifact(
+    bytes: Uint8Array,
+    material: SyncKeyMaterial,
+): { salt: Uint8Array; params: SyncCryptoKdfParams } | null {
+    const inspected = inspectSyncArtifact(bytes);
+    if (inspected.kind !== 'encrypted') return null;
+    if (inspected.salt.length === material.salt.length
+        && inspected.salt.every((byte, index) => byte === material.salt[index])) {
+        return null;
+    }
+    return { salt: inspected.salt, params: inspected.params };
+}
+
 /** An artifact whose MWENC1 header is present but unreadable (truncated, a future format
  * version, a cost above the accepted ceiling) is neither plaintext to seal nor ciphertext we
  * can open. Every transition raises this instead of guessing: sealing it would double-wrap a
@@ -259,14 +280,19 @@ export function getSyncEncryptionStatusFromLocalState(localState: SyncEncryption
 /** Called from a read seam (webdav.ts / dropbox.ts) the moment it discovers ciphertext
  * it has no key for. Persists immediately (per the pinned "state persisted, survives
  * restart" requirement) — this is what makes discovery durable without requiring the
- * user to acknowledge a prompt first. Never overwrites an already-'enabled' local state
- * (a device that already has a key does not need to be told the remote is encrypted). */
+ * user to acknowledge a prompt first. Never overwrites a keyed local state whose salt
+ * matches the discovery (a device that already has THIS remote's key does not need to be
+ * told it is encrypted) — but a keyed state under a DIFFERENT salt is provably a foreign
+ * key (see detectForeignSaltArtifact) and downgrades to `remote-encrypted-no-key`, which
+ * is the only state that surfaces the unlock prompt able to re-derive the key from the
+ * remote's own salt. */
 export function markRemoteEncryptionDiscovered(
     localState: SyncEncryptionLocalStatePort,
     discovered: { salt: Uint8Array; params: SyncCryptoKdfParams },
 ): void {
     const current = localState.read();
-    if (current && SYNC_ENCRYPTION_KEYED_STATES.includes(current.state)) return;
+    if (current && SYNC_ENCRYPTION_KEYED_STATES.includes(current.state)
+        && current.discoveredSalt === bytesToHex(discovered.salt)) return;
     localState.write({
         state: 'remote-encrypted-no-key',
         discoveredSalt: bytesToHex(discovered.salt),

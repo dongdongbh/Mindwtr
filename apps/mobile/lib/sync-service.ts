@@ -1259,6 +1259,15 @@ class MobileSyncRun {
               await flushSyncEncryptionLocalState();
               throw new SyncEncryptionRemotePlaintextError();
             }
+            if (result.state === 'encrypted-no-key') {
+              // The remote is sealed under a different salt than this device's key — a
+              // passphrase set before the first sync, or a peer's rotation. Persist the
+              // downgrade so the unlock prompt (which re-derives from the remote's salt)
+              // surfaces; treating this as "no data" would fork the remote's generation.
+              markRemoteEncryptionDiscovered(syncEncryptionLocalState, result);
+              await flushSyncEncryptionLocalState();
+              throw new SyncEncryptionNoKeyError();
+            }
             return result.state === 'data' ? result.data : null;
           }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     SyncEncryptionTerminalError,
     decryptRemoteArtifactOrThrow,
+    detectForeignSaltArtifact,
     getSyncEncryptionStatusFromLocalState,
     markRemoteEncryptionDiscovered,
     markRemotePlaintextDiscovered,
@@ -346,11 +347,36 @@ describe('remote-encrypted-no-key discovery and passphrase provisioning', () => 
         expect(localState.read()?.state).toBe('remote-encrypted-no-key');
     });
 
-    it('does not clobber an already-enabled device', () => {
+    it('does not clobber an enabled device whose salt matches the discovery', () => {
         const localState = createFakeLocalState();
-        localState.write({ state: 'enabled', discoveredParams: SYNC_CRYPTO_DEFAULT_KDF_PARAMS });
+        localState.write({ state: 'enabled', discoveredSalt: '02'.repeat(16), discoveredParams: SYNC_CRYPTO_DEFAULT_KDF_PARAMS });
         markRemoteEncryptionDiscovered(localState, { salt: new Uint8Array(16).fill(2), params: SYNC_CRYPTO_DEFAULT_KDF_PARAMS });
         expect(localState.value?.state).toBe('enabled');
+    });
+
+    it('downgrades an enabled device to no-key when the discovered salt differs (foreign key)', () => {
+        // A passphrase set before the first sync while a peer encrypted the remote, or a
+        // peer's rotation: the cached key provably belongs to another generation, and only
+        // the no-key state surfaces the unlock prompt that re-derives from the remote salt.
+        const localState = createFakeLocalState();
+        localState.write({ state: 'enabled', discoveredSalt: '01'.repeat(16), discoveredParams: SYNC_CRYPTO_DEFAULT_KDF_PARAMS });
+        markRemoteEncryptionDiscovered(localState, { salt: new Uint8Array(16).fill(2), params: SYNC_CRYPTO_DEFAULT_KDF_PARAMS });
+        expect(localState.value?.state).toBe('remote-encrypted-no-key');
+        expect(localState.value?.discoveredSalt).toBe('02'.repeat(16));
+    });
+
+    it('detectForeignSaltArtifact flags only a valid container under another salt', async () => {
+        const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(1), FAST_KDF);
+        const sealed = await encryptSyncArtifact(utf8('{"tasks":[]}'), material);
+        expect(detectForeignSaltArtifact(sealed, material)).toBeNull();
+        expect(detectForeignSaltArtifact(utf8('{"tasks":[]}'), material)).toBeNull();
+
+        const foreignMaterial = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(9), FAST_KDF);
+        const foreignSealed = await encryptSyncArtifact(utf8('{"tasks":[]}'), foreignMaterial);
+        const detected = detectForeignSaltArtifact(foreignSealed, material);
+        expect(detected).not.toBeNull();
+        expect(Array.from(detected!.salt)).toEqual(Array.from(foreignMaterial.salt));
+        expect(detected!.params).toEqual(foreignMaterial.params);
     });
 
     it('decline re-affirms the no-key state without clearing it', () => {
@@ -440,14 +466,28 @@ describe('remote-plaintext discovery (a peer disabled encryption at the sync loc
         expect(localState.value?.state).toBe('remote-encrypted-no-key');
     });
 
-    it('does not let a later ciphertext discovery downgrade it to no-key', () => {
+    it('a later same-salt ciphertext discovery does not downgrade it to no-key', () => {
         const localState = createFakeLocalState();
-        localState.write({ state: 'enabled', discoveredSalt: 'aabb', discoveredParams: FAST_KDF });
+        localState.write({ state: 'enabled', discoveredSalt: '02'.repeat(16), discoveredParams: FAST_KDF });
         markRemotePlaintextDiscovered(localState);
 
         markRemoteEncryptionDiscovered(localState, { salt: new Uint8Array(16).fill(2), params: SYNC_CRYPTO_DEFAULT_KDF_PARAMS });
 
         expect(localState.value?.state).toBe('remote-plaintext');
+    });
+
+    it('a later foreign-salt ciphertext discovery moves it to no-key (remote re-encrypted anew)', () => {
+        // A peer disabled encryption and then re-enabled it under a new passphrase: this
+        // device's key is provably for a dead generation. The no-key state keeps auto-sync
+        // blocked exactly like remote-plaintext did, and its unlock prompt is the one path
+        // that can heal the device by re-deriving from the remote's new salt.
+        const localState = createFakeLocalState();
+        localState.write({ state: 'enabled', discoveredSalt: '01'.repeat(16), discoveredParams: FAST_KDF });
+        markRemotePlaintextDiscovered(localState);
+
+        markRemoteEncryptionDiscovered(localState, { salt: new Uint8Array(16).fill(2), params: SYNC_CRYPTO_DEFAULT_KDF_PARAMS });
+
+        expect(localState.value?.state).toBe('remote-encrypted-no-key');
     });
 });
 
