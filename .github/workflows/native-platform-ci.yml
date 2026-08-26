@@ -8,6 +8,7 @@ on:
       - "apps/desktop/src-tauri/**"
       - "apps/desktop/widgets-macos/**"
       - "scripts/build-macos-widget.sh"
+      - "scripts/ci/test-build-macos-widget.sh"
       - "apps/mobile/modules/**/android/**"
       - "apps/mobile/ios-app-intents/**"
       - "apps/mobile/widgets-ios/**"
@@ -29,6 +30,7 @@ on:
       - "apps/desktop/src-tauri/**"
       - "apps/desktop/widgets-macos/**"
       - "scripts/build-macos-widget.sh"
+      - "scripts/ci/test-build-macos-widget.sh"
       - "apps/mobile/modules/**/android/**"
       - "apps/mobile/ios-app-intents/**"
       - "apps/mobile/widgets-ios/**"
@@ -97,7 +99,7 @@ jobs:
           windows=false
           while IFS= read -r path; do
             case "$path" in
-              apps/desktop/src-tauri/*|apps/desktop/widgets-macos/*|scripts/build-macos-widget.sh|packages/core/src/*|scripts/check-synced-field-parity.ts|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
+              apps/desktop/src-tauri/*|apps/desktop/widgets-macos/*|scripts/build-macos-widget.sh|scripts/ci/test-build-macos-widget.sh|packages/core/src/*|scripts/check-synced-field-parity.ts|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
                 macos=true
                 ;;
             esac
@@ -164,6 +166,9 @@ jobs:
             -parse-as-library \
             -application-extension \
             apps/desktop/widgets-macos/*.swift
+
+      - name: Exercise macOS widget packaging and signing order
+        run: bash scripts/ci/test-build-macos-widget.sh
 
   windows-rust:
     if: needs.changes.outputs.windows == 'true'

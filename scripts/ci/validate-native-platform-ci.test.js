@@ -67,4 +67,7 @@ test("macOS native CI links the release Rust and Swift bridges", () => {
     "run: cargo build --release --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib",
   );
   expect(macosJob).toContain('MACOSX_DEPLOYMENT_TARGET: "10.15"');
+  expect(workflow.match(/- "scripts\/ci\/test-build-macos-widget\.sh"/g)).toHaveLength(2);
+  expect(macosJob).toContain("name: Exercise macOS widget packaging and signing order");
+  expect(macosJob).toContain("run: bash scripts/ci/test-build-macos-widget.sh");
 });
