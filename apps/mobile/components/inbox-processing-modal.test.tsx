@@ -2098,7 +2098,9 @@ describe('InboxProcessingModal', () => {
       expect(findNodesWithText(root, 'inbox.illDoIt').length).toBeGreaterThan(0);
       // The synced GTD settings document is never touched by a layout choice.
       expect(storeState.updateSettings).not.toHaveBeenCalled();
-      expect(root.findByProps({ accessibilityLabel: 'Guided', accessibilityRole: 'button' })).toBeTruthy();
+      const guidedAction = root.findByProps({ accessibilityLabel: 'Guided', accessibilityRole: 'button' });
+      expect(guidedAction).toBeTruthy();
+      expect(guidedAction.props.accessibilityState).toBeUndefined();
     });
 
     it('walks the guided tree by default', async () => {

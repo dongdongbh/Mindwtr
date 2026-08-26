@@ -152,7 +152,6 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
               onPress={() => setProcessingMode(quick ? 'guided' : 'quick')}
               accessibilityRole="button"
               accessibilityLabel={modeToggleLabel}
-              accessibilityState={{ selected: quick }}
               hitSlop={8}
             >
               <ModeToggleIcon size={20} color={tc.tint} strokeWidth={2} />
