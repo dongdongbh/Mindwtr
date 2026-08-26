@@ -55,6 +55,8 @@ export function SortableAreaRow({
                 title={t('projects.color')}
                 noneLabel={t('projects.colorNone')}
                 customLabel={t('projects.colorCustom')}
+                applyLabel={t('common.ok')}
+                cancelLabel={t('common.cancel')}
             />
             <input
                 key={`${area.id}-${area.updatedAt}`}

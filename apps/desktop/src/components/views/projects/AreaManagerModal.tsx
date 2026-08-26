@@ -130,6 +130,8 @@ export function AreaManagerModal({
                         title={t('projects.color')}
                         noneLabel={t('projects.colorNone')}
                         customLabel={t('projects.colorCustom')}
+                        applyLabel={t('common.ok')}
+                        cancelLabel={t('common.cancel')}
                     />
                     <input
                         type="text"

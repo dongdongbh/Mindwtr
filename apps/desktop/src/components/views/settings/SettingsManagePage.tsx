@@ -84,6 +84,8 @@ function SortableAreaRow({
                 title={translate('projects.color')}
                 noneLabel={translate('projects.colorNone')}
                 customLabel={translate('projects.colorCustom')}
+                applyLabel={translate('common.ok')}
+                cancelLabel={translate('common.cancel')}
             />
             <input
                 key={`${area.id}-${area.updatedAt}`}
@@ -504,6 +506,8 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
                             title={translate('projects.color')}
                             noneLabel={translate('projects.colorNone')}
                             customLabel={translate('projects.colorCustom')}
+                            applyLabel={translate('common.ok')}
+                            cancelLabel={translate('common.cancel')}
                         />
                         <input
                             type="text"
