@@ -148,6 +148,34 @@ describe('AgendaView', () => {
         expect(getByText('Starred starting tonight')).toBeInTheDocument();
     });
 
+    it('keeps the focus cap disabled when search hides every starred task', () => {
+        const hiddenFocused = Array.from({ length: 5 }, (_, index): Task => ({
+            ...focusedTask,
+            id: `hidden-focused-${index}`,
+            title: `Hidden focus ${index}`,
+            checklist: undefined,
+        }));
+        const visibleCandidate: Task = {
+            ...focusedTask,
+            id: 'visible-candidate',
+            title: 'Visible candidate',
+            checklist: undefined,
+            isFocusedToday: false,
+        };
+        const tasks = [...hiddenFocused, visibleCandidate];
+        useTaskStore.setState({
+            tasks,
+            _allTasks: tasks,
+            settings: { gtd: { focusTaskLimit: 5 } },
+        });
+
+        const { getByPlaceholderText, getByRole } = renderAgenda();
+        fireEvent.click(getByRole('button', { name: /^Filters$/i }));
+        fireEvent.change(getByPlaceholderText('Search...'), { target: { value: 'Visible candidate' } });
+
+        expect(getByRole('button', { name: 'Max 5 focus items' })).toBeDisabled();
+    });
+
     it('ends the page with the shared end gap on its scrolled content (#977)', () => {
         const { container } = renderAgenda();
         expectScrolledEndGap(container);
