@@ -917,6 +917,63 @@ describe('attachment sync', () => {
     expect(data.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
   });
 
+  it('downloads a remote-only attachment when proving a candidate cloud backend', async () => {
+    // A joining device: the attachment was uploaded by another device, so it has a
+    // cloudKey but no local file here. The probe must prove it by downloading from
+    // the candidate — without this leg "Candidate attachment proof failed" made
+    // activation impossible on any device that did not hold every file locally.
+    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+    const core = await import('@mindwtr/core');
+    vi.mocked(core.cloudGetFile).mockResolvedValue(new Uint8Array([1, 2, 3]).buffer);
+    const appData: AppData = {
+      tasks: [{
+        id: 'task-1',
+        title: 'Task',
+        status: 'inbox',
+        tags: [],
+        contexts: [],
+        attachments: [{
+          id: 'remote-only',
+          kind: 'file' as const,
+          title: 'report.pdf',
+          uri: '',
+          cloudKey: 'attachments/report.pdf',
+          localStatus: 'missing' as const,
+          createdAt: '2026-08-03T10:00:00.000Z',
+          updatedAt: '2026-08-03T10:00:00.000Z',
+        }],
+        createdAt: '2026-08-03T10:00:00.000Z',
+        updatedAt: '2026-08-03T10:00:00.000Z',
+      }],
+      projects: [],
+      sections: [],
+      areas: [],
+      settings: {},
+    };
+
+    const { syncCloudAttachments } = attachmentSync;
+    const { didMutate, data } = syncResult(
+      await syncCloudAttachments(
+        appData,
+        { url: 'https://candidate.example/v1/data', token: 'candidate-token' },
+        'https://candidate.example/v1',
+        { activationProbe: true },
+      ),
+      appData,
+    );
+
+    expect(didMutate).toBe(true);
+    expect(core.cloudGetFile).toHaveBeenCalledWith(
+      'https://candidate.example/v1/attachments/report.pdf',
+      { token: 'candidate-token' },
+    );
+    expect(data.tasks[0]?.attachments?.[0]).toMatchObject({
+      cloudKey: 'attachments/report.pdf',
+      localStatus: 'available',
+    });
+    expect(data.tasks[0]?.attachments?.[0]?.uri).toContain('report.pdf');
+  });
+
   it('re-uploads an existing local attachment when proving a candidate cloud backend', async () => {
     const localUri = 'file://document/attachments/notes.txt';
     fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (

@@ -2,6 +2,7 @@ import type { AppData } from '@mindwtr/core';
 import {
   applyAttachmentPatches,
   cloudDeleteFile,
+  cloudGetFile,
   cloudPutFile,
   isAbortError,
   validateAttachmentForUpload,
@@ -13,6 +14,7 @@ import {
   canUploadAttachmentFrom,
   collectAttachments,
   DEFAULT_CONTENT_TYPE,
+  extractExtension,
   fileExists,
   getAttachmentByteSize,
   getAttachmentLocalStatus,
@@ -22,6 +24,8 @@ import {
   readAttachmentBytesForUpload,
   reportProgress,
   toArrayBuffer,
+  validateAttachmentHash,
+  writeBytesSafely,
   type CloudConfig,
 } from '../attachment-sync-utils';
 import { migrateAttachmentsLocallyBeforeSync, uploadCloudFileWithFileSystem } from './common';
@@ -61,7 +65,7 @@ export const syncCloudAttachments = async (
   baseSyncUrl: string,
   options: CloudAttachmentSyncOptions = {}
 ): Promise<AppData | false> => {
-  await getAttachmentsDir();
+  const attachmentsDir = await getAttachmentsDir();
 
   const attachmentsById = collectAttachments(appData);
   // This backend runs its own loop rather than the shared lifecycle, so it does the same
@@ -109,6 +113,50 @@ export const syncCloudAttachments = async (
     if (options.activationProbe && existsLocally && attachment.cloudKey) {
       attachment.cloudKey = undefined;
       recordPatch(attachment);
+    }
+
+    // Activation proof for a JOINING device: an attachment uploaded by another
+    // device has a cloudKey but no local file here — this backend normally
+    // fetches attachments on demand, so without a download leg the probe's
+    // "every attachment proven available" assert could never pass and the
+    // configuration could never activate (the desktop cloud backend and the
+    // mobile WebDAV/Dropbox backends download through the shared lifecycle;
+    // this hand-rolled loop had upload only). Steady-state cycles keep the
+    // on-demand behavior — this runs during the activation probe alone.
+    if (options.activationProbe && attachment.cloudKey && !existsLocally && attachmentsDir) {
+      try {
+        assertNotAborted(options.signal);
+        const cloudKey = attachment.cloudKey;
+        reportProgress(attachment.id, 'download', 0, attachment.size ?? 0, 'active');
+        const fileData = await cloudGetFile(`${baseSyncUrl}/${cloudKey}`, {
+          token: cloudConfig.token,
+          ...(options.signal ? { signal: options.signal } : {}),
+        });
+        const bytes = new Uint8Array(fileData);
+        await validateAttachmentHash(attachment, bytes);
+        const filename = cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.title)}`;
+        const targetUri = `${attachmentsDir}${filename}`;
+        await writeBytesSafely(targetUri, bytes);
+        attachment.uri = targetUri;
+        attachment.localStatus = 'available';
+        recordPatch(attachment);
+        reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
+        continue;
+      } catch (error) {
+        if (isAbortLikeError(error, options.signal)) {
+          await cleanupPendingUploadMutations();
+          throw error;
+        }
+        reportProgress(
+          attachment.id,
+          'download',
+          0,
+          attachment.size ?? 0,
+          'failed',
+          error instanceof Error ? error.message : String(error)
+        );
+        logAttachmentWarn(`Failed to download attachment ${attachment.id} during activation`, error);
+      }
     }
 
     // SEC-07: same containment the shared lifecycle applies via `canUploadFrom`.
