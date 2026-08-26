@@ -153,6 +153,7 @@ import {
   getMobileSyncEncryptionStatus,
   getSyncEncryptionMaterial,
   isSyncEncryptionBlocked,
+  SyncEncryptionStateUnavailableError,
   SyncEncryptionKeyMissingError,
   SyncEncryptionNoKeyError,
   syncEncryptionKeyCache,
@@ -646,6 +647,19 @@ describe('local-state persistence and the remote-plaintext state', () => {
     expect(JSON.parse(asyncStorage.get(SYNC_ENCRYPTION_STATE_KEY)!)).toMatchObject({
       state: 'remote-encrypted-no-key',
     });
+  });
+
+  it('fails closed when the encryption state is unreadable or invalid', async () => {
+    vi.mocked(AsyncStorage.getItem).mockRejectedValueOnce(new Error('storage unavailable'));
+    await expect(getSyncEncryptionMaterial()).rejects.toBeInstanceOf(
+      SyncEncryptionStateUnavailableError,
+    );
+
+    __resetSyncEncryptionStateForTests();
+    asyncStorage.set(SYNC_ENCRYPTION_STATE_KEY, '{not-json');
+    await expect(getSyncEncryptionMaterial()).rejects.toBeInstanceOf(
+      SyncEncryptionStateUnavailableError,
+    );
   });
 
   it('File Sync: a keyed device treats a peer-disabled folder as terminal, not as an empty folder', async () => {

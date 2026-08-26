@@ -6,6 +6,8 @@ import {
   runDataTransferTransaction,
   type AppData,
 } from '@mindwtr/core';
+import { __resetSyncEncryptionStateForTests } from './sync-encryption-state';
+import { SYNC_ENCRYPTION_STATE_KEY } from './sync-constants';
 
 const emptyData = {
   tasks: [],
@@ -327,6 +329,26 @@ describe('mobile sync-service runtime', () => {
     });
 
     syncServiceModule.__mobileSyncTestUtils.reset();
+    __resetSyncEncryptionStateForTests();
+  });
+
+  it('performs no remote read or plaintext write when encryption state is unreadable', async () => {
+    asyncStorageMocks.getItem.mockImplementation(async (key: string) => {
+      if (key === SYNC_ENCRYPTION_STATE_KEY) throw new Error('state store unavailable');
+      const values: Record<string, string | null> = {
+        '@mindwtr_sync_backend': 'webdav',
+        '@mindwtr_webdav_url': 'https://sync.example.com/data.json',
+        '@mindwtr_webdav_username': 'user',
+        '@mindwtr_webdav_password': 'pass',
+      };
+      return values[key] ?? null;
+    });
+
+    const result = await syncServiceModule.performMobileSync(undefined, { manual: true });
+
+    expect(result).toMatchObject({ success: false });
+    expect(coreMocks.webdavGetJson).not.toHaveBeenCalled();
+    expect(coreMocks.webdavPutJson).not.toHaveBeenCalled();
   });
 
   it('runs a first WebDAV round trip from session config without reading or activating persisted transport settings', async () => {

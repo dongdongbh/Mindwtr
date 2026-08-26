@@ -68,6 +68,16 @@ export class SyncEncryptionKeyMissingError extends Error {
     }
 }
 
+/** The device-local encryption sidecar exists behind every backend. Until it can be
+ * read and validated, "encryption off" has not been established and plaintext writes
+ * are unsafe. */
+export class SyncEncryptionStateUnavailableError extends Error {
+    constructor(message = 'The local sync encryption state could not be read. Try again before syncing.') {
+        super(message);
+        this.name = 'SyncEncryptionStateUnavailableError';
+    }
+}
+
 let cachedLocalState: SyncEncryptionLocalState | null = null;
 let hydrated = false;
 
@@ -77,22 +87,23 @@ const isKdfParams = (value: unknown): value is SyncCryptoKdfParams => {
     return typeof mKib === 'number' && typeof t === 'number' && typeof p === 'number';
 };
 
-/** Anything unrecognized degrades to `null` (= implicit 'off'), never to a half-built
- *  state: a corrupt blob must not leave the device believing it holds a key. */
 const parseLocalState = (raw: string | null): SyncEncryptionLocalState | null => {
-    if (!raw) return null;
+    if (raw === null) return null;
     try {
         const parsed = JSON.parse(raw) as Partial<SyncEncryptionLocalState>;
         if (parsed?.state !== 'enabled'
             && parsed?.state !== 'remote-encrypted-no-key'
-            && parsed?.state !== 'remote-plaintext') return null;
+            && parsed?.state !== 'remote-plaintext') {
+            throw new SyncEncryptionStateUnavailableError();
+        }
         return {
             state: parsed.state,
             discoveredSalt: typeof parsed.discoveredSalt === 'string' ? parsed.discoveredSalt : undefined,
             discoveredParams: isKdfParams(parsed.discoveredParams) ? parsed.discoveredParams : undefined,
         };
-    } catch {
-        return null;
+    } catch (error) {
+        if (error instanceof SyncEncryptionStateUnavailableError) throw error;
+        throw new SyncEncryptionStateUnavailableError();
     }
 };
 
@@ -101,13 +112,15 @@ export const loadSyncEncryptionLocalState = async (): Promise<SyncEncryptionLoca
     try {
         cachedLocalState = parseLocalState(await AsyncStorage.getItem(SYNC_ENCRYPTION_STATE_KEY));
     } catch (error) {
-        // Treat an unreadable store as 'off' rather than throwing into the sync cycle;
-        // an encrypted remote will simply be re-discovered on the next read.
-        void logWarn('Failed to read sync encryption state; treating as off', {
+        void logWarn('Failed to read sync encryption state; stopping sync', {
             scope: 'sync',
             extra: { error: error instanceof Error ? error.message : String(error) },
         });
         cachedLocalState = null;
+        hydrated = false;
+        throw error instanceof SyncEncryptionStateUnavailableError
+            ? error
+            : new SyncEncryptionStateUnavailableError();
     }
     hydrated = true;
     return cachedLocalState;

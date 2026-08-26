@@ -50,6 +50,7 @@ import {
   getSyncEncryptionMaterial,
   isSyncEncryptionBlocked,
   SyncEncryptionNoKeyError,
+  SyncEncryptionStateUnavailableError,
   syncEncryptionLocalState,
 } from './sync-encryption-state';
 
@@ -70,6 +71,7 @@ export {
  *  mapping — see classifySyncFailure in sync-service-utils.ts. */
 const isSyncEncryptionError = (error: unknown): boolean =>
   error instanceof SyncEncryptionNoKeyError
+  || error instanceof SyncEncryptionStateUnavailableError
   || error instanceof SyncEncryptionRemotePlaintextError
   || error instanceof SyncEncryptionTerminalError;
 import { getMobileCloudRequestOptions, getMobileWebDavRequestOptions } from './webdav-request-options';
