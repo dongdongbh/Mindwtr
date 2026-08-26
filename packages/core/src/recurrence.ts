@@ -1,4 +1,4 @@
-import { addDays, addMonths, addWeeks, format } from 'date-fns';
+import { addDays, addMonths, addWeeks, differenceInCalendarDays, format } from 'date-fns';
 
 import { safeFormatDate, safeParseDate } from './date';
 import { generateUUID as uuidv4 } from './uuid';
@@ -526,6 +526,13 @@ const getDateDay = (value: string | undefined): number | undefined => {
 };
 
 type RecurrenceScheduleDates = Pick<Task, 'startTime' | 'dueDate' | 'reviewAt'>;
+type RecurrenceScheduleField = keyof RecurrenceScheduleDates;
+
+const getRecurrenceScheduleAnchorField = (
+    dates: RecurrenceScheduleDates,
+): RecurrenceScheduleField | null => (
+    (['dueDate', 'startTime', 'reviewAt'] as const).find((field) => Boolean(dates[field])) ?? null
+);
 
 /**
  * Per-field anchor days with the legacy single `anchorDay` credited ONLY to
@@ -856,6 +863,56 @@ const preserveDateOnlyFormat = (
     return parsed ? format(parsed, 'yyyy-MM-dd') : nextIso;
 };
 
+/**
+ * Rebuild one sibling schedule field around the selected occurrence anchor.
+ * RRULE selectors choose an occurrence once; they do not independently snap a
+ * task's start, due, and review fields onto the selector grid. Calendar-day
+ * offsets preserve the task's shape across DST while the source field supplies
+ * its own precision and wall-clock time.
+ */
+function shiftScheduleFieldFromAnchor(
+    sourceIso: string,
+    sourceAnchorIso: string,
+    nextAnchorIso: string,
+): string {
+    const source = safeParseDate(sourceIso);
+    const sourceAnchor = safeParseDate(sourceAnchorIso);
+    const nextAnchor = safeParseDate(nextAnchorIso);
+    if (!source || !sourceAnchor || !nextAnchor) return sourceIso;
+
+    const shifted = addDays(nextAnchor, differenceInCalendarDays(source, sourceAnchor));
+    shifted.setHours(
+        source.getHours(),
+        source.getMinutes(),
+        source.getSeconds(),
+        source.getMilliseconds(),
+    );
+    if (/^\d{4}-\d{2}-\d{2}$/.test(sourceIso)) return format(shifted, 'yyyy-MM-dd');
+    if (/Z$|[+-]\d{2}:?\d{2}$/.test(sourceIso)) return shifted.toISOString();
+    return format(shifted, "yyyy-MM-dd'T'HH:mm");
+}
+
+function rebuildScheduleFieldsFromAnchor(
+    sourceDates: RecurrenceScheduleDates,
+    anchorField: RecurrenceScheduleField,
+    nextAnchorIso: string,
+): RecurrenceScheduleDates {
+    const sourceAnchorIso = sourceDates[anchorField];
+    if (!sourceAnchorIso) return {};
+    const rebuild = (field: RecurrenceScheduleField): string | undefined => {
+        const sourceIso = sourceDates[field];
+        if (!sourceIso) return undefined;
+        return field === anchorField
+            ? preserveDateOnlyFormat(nextAnchorIso, sourceIso)
+            : shiftScheduleFieldFromAnchor(sourceIso, sourceAnchorIso, nextAnchorIso);
+    };
+    return {
+        startTime: rebuild('startTime'),
+        dueDate: rebuild('dueDate'),
+        reviewAt: rebuild('reviewAt'),
+    };
+}
+
 function resetChecklist(checklist: ChecklistItem[] | undefined): ChecklistItem[] | undefined {
     if (!checklist || checklist.length === 0) return undefined;
     return checklist.map((item) => ({
@@ -1056,108 +1113,6 @@ function projectFluidIsoFrom(
     return { iso: nextIso, steps };
 }
 
-function advanceStrictIsoBySteps(
-    baseIso: string,
-    steps: number,
-    rule: RecurrenceRule,
-    fallbackBase: Date,
-    byDay?: RecurrenceByDay[],
-    interval: number = 1,
-    byMonthDay?: number[],
-    weekStart?: RecurrenceWeekday,
-    anchorDay?: number,
-): string | undefined {
-    if (steps <= 0) return baseIso;
-    const safeInterval = interval > 0 ? interval : 1;
-    const hasComplexCalendarRule = Boolean(byDay?.length) || Boolean(byMonthDay?.length);
-    if (!hasComplexCalendarRule) {
-        return nextIsoFrom(
-            baseIso,
-            rule,
-            fallbackBase,
-            undefined,
-            safeInterval * steps,
-            undefined,
-            weekStart,
-            undefined,
-            anchorDay,
-        );
-    }
-
-    let nextIso = baseIso;
-    for (let step = 0; step < steps; step += 1) {
-        const stepBase = safeParseDate(nextIso) ?? fallbackBase;
-        const followingIso = nextIsoFrom(
-            nextIso,
-            rule,
-            stepBase,
-            byDay,
-            safeInterval,
-            byMonthDay,
-            weekStart,
-            undefined,
-            anchorDay,
-        );
-        if (!followingIso || followingIso === nextIso) return undefined;
-        nextIso = followingIso;
-    }
-    return nextIso;
-}
-
-function advanceFluidIsoBySteps(
-    baseIso: string,
-    steps: number,
-    rule: RecurrenceRule,
-    projectedAtIso: string,
-    projectionBase: Date,
-    byDay?: RecurrenceByDay[],
-    interval: number = 1,
-    byMonthDay?: number[],
-    weekStart?: RecurrenceWeekday,
-): string | undefined {
-    if (steps <= 0) return baseIso;
-    const fieldBaseDate = safeParseDate(baseIso);
-    const fieldIsFuture = Boolean(fieldBaseDate && fieldBaseDate.getTime() > projectionBase.getTime());
-    const fluidBaseIso = fieldIsFuture ? baseIso : projectedAtIso;
-    const fluidFallbackBase = fieldIsFuture && fieldBaseDate ? fieldBaseDate : projectionBase;
-    let nextIso = preserveDateOnlyFormat(
-        nextFluidIsoFrom(fluidBaseIso, rule, fluidFallbackBase, byDay, interval, byMonthDay, weekStart),
-        baseIso,
-    );
-    if (!nextIso || steps === 1) return nextIso;
-
-    const safeInterval = interval > 0 ? interval : 1;
-    const remainingSteps = steps - 1;
-    const canFastForwardByCalendarDays = (rule === 'daily' || rule === 'weekly')
-        && !byDay?.length
-        && !byMonthDay?.length;
-    if (canFastForwardByCalendarDays) {
-        return preserveDateOnlyFormat(
-            nextIsoFrom(
-                nextIso,
-                rule,
-                safeParseDate(nextIso) ?? projectionBase,
-                undefined,
-                safeInterval * remainingSteps,
-                undefined,
-                weekStart,
-            ),
-            baseIso,
-        );
-    }
-
-    for (let step = 0; step < remainingSteps; step += 1) {
-        const stepBase = safeParseDate(nextIso) ?? projectionBase;
-        const followingIso = preserveDateOnlyFormat(
-            nextFluidIsoFrom(nextIso, rule, stepBase, byDay, safeInterval, byMonthDay, weekStart),
-            baseIso,
-        );
-        if (!followingIso || followingIso === nextIso) return undefined;
-        nextIso = followingIso;
-    }
-    return nextIso;
-}
-
 function projectUnscheduledMonthlyStart(
     rule: RecurrenceRule,
     projectionBase: Date,
@@ -1225,8 +1180,7 @@ function projectNextRecurringOccurrenceFields(
     const interval = getRecurrenceInterval(task.recurrence);
     const weekStart = getRecurrenceWeekStart(task.recurrence);
 
-    type ScheduleField = 'startTime' | 'dueDate' | 'reviewAt';
-    const projectField = (field: ScheduleField): ProjectedIsoResult => {
+    const projectField = (field: RecurrenceScheduleField): ProjectedIsoResult => {
         const baseIso = baseTask[field];
         if (!baseIso) return { iso: undefined, steps: 0 };
         if (strategy === 'fluid') {
@@ -1245,34 +1199,6 @@ function projectNextRecurringOccurrenceFields(
         return projectStrictIsoFrom(baseIso, rule, projectionBase, byDay, interval, byMonthDay, weekStart, anchors[field]);
     };
 
-    const advanceFieldBySteps = (field: ScheduleField, steps: number): string | undefined => {
-        const baseIso = baseTask[field];
-        if (!baseIso) return undefined;
-        return strategy === 'fluid'
-            ? advanceFluidIsoBySteps(
-                baseIso,
-                steps,
-                rule,
-                projectedAtIso,
-                projectionBase,
-                byDay,
-                interval,
-                byMonthDay,
-                weekStart,
-            )
-            : advanceStrictIsoBySteps(
-                baseIso,
-                steps,
-                rule,
-                projectionBase,
-                byDay,
-                interval,
-                byMonthDay,
-                weekStart,
-                anchors[field],
-            );
-    };
-
     const hasScheduleFields = Boolean(baseTask.startTime || baseTask.dueDate || baseTask.reviewAt);
     if (!hasScheduleFields) {
         const nextStart = projectUnscheduledMonthlyStart(
@@ -1288,18 +1214,15 @@ function projectNextRecurringOccurrenceFields(
             : null;
     }
 
-    const anchorField = (['dueDate', 'startTime', 'reviewAt'] as const)
-        .find((field) => Boolean(baseTask[field]));
+    const anchorField = getRecurrenceScheduleAnchorField(baseTask);
     if (!anchorField) return null;
     const anchorProjection = projectField(anchorField);
     if (!anchorProjection.iso || anchorProjection.steps <= 0) return null;
     const steps = anchorProjection.steps;
-    const projectedField = (field: ScheduleField): string | undefined => (
-        field === anchorField ? anchorProjection.iso : advanceFieldBySteps(field, steps)
-    );
-    let nextStartIso = projectedField('startTime');
-    const nextDueIso = projectedField('dueDate');
-    const nextReviewIso = projectedField('reviewAt');
+    const rebuiltFields = rebuildScheduleFieldsFromAnchor(baseTask, anchorField, anchorProjection.iso);
+    let nextStartIso = rebuiltFields.startTime;
+    const nextDueIso = rebuiltFields.dueDate;
+    const nextReviewIso = rebuiltFields.reviewAt;
     if (task.relativeStartOffset && nextDueIso) {
         nextStartIso = computeRelativeStartTime(nextDueIso, task.relativeStartOffset) ?? nextStartIso;
     }
@@ -1696,99 +1619,64 @@ export function createNextRecurringTask(
     const count = getRecurrenceCountValue(task.recurrence);
     const until = getRecurrenceUntilValue(task.recurrence);
     const completedOccurrences = getRecurrenceCompletedOccurrencesValue(task.recurrence) ?? 0;
-    const {
-        startTime: startAnchorDay,
-        dueDate: dueAnchorDay,
-        reviewAt: reviewAnchorDay,
-    } = resolveRecurrenceFieldAnchorDays(task.recurrence, task);
+    const recurrenceAnchorDays = resolveRecurrenceFieldAnchorDays(task.recurrence, task);
     const parsedCompletedAt = safeParseDate(completedAtIso);
     const fallbackCompletedAt = (() => {
         const candidate = new Date(completedAtIso);
         return Number.isNaN(candidate.getTime()) ? new Date() : candidate;
     })();
     const completedAtDate = parsedCompletedAt ?? fallbackCompletedAt;
-    let nextDueDate = task.dueDate
+    const anchorField = getRecurrenceScheduleAnchorField(task);
+    const sourceAnchorIso = anchorField ? task[anchorField] : undefined;
+    let nextAnchorIso = sourceAnchorIso
         ? preserveDateOnlyFormat(
             strategy === 'fluid'
                 ? nextFluidIsoFrom(completedAtIso, rule, completedAtDate, byDay, interval, byMonthDay, weekStart)
-                : nextIsoFrom(task.dueDate, rule, completedAtDate, byDay, interval, byMonthDay, weekStart, undefined, dueAnchorDay),
-            task.dueDate
+                : nextIsoFrom(
+                    sourceAnchorIso,
+                    rule,
+                    completedAtDate,
+                    byDay,
+                    interval,
+                    byMonthDay,
+                    weekStart,
+                    undefined,
+                    recurrenceAnchorDays[anchorField!],
+                ),
+            sourceAnchorIso,
         )
         : undefined;
-    let nextStartTime = task.startTime
-        ? preserveDateOnlyFormat(
-            strategy === 'fluid'
-                ? nextFluidIsoFrom(completedAtIso, rule, completedAtDate, byDay, interval, byMonthDay, weekStart)
-                : nextIsoFrom(task.startTime, rule, completedAtDate, byDay, interval, byMonthDay, weekStart, undefined, startAnchorDay),
-            task.startTime
-        )
-        : undefined;
-    let nextReviewAt = task.reviewAt
-        ? preserveDateOnlyFormat(
-            strategy === 'fluid'
-                ? nextFluidIsoFrom(completedAtIso, rule, completedAtDate, byDay, interval, byMonthDay, weekStart)
-                : nextIsoFrom(task.reviewAt, rule, completedAtDate, byDay, interval, byMonthDay, weekStart, undefined, reviewAnchorDay),
-            task.reviewAt
-        )
-        : undefined;
-    // A single advance can land the next instance on or before the completion
-    // instant, materializing an occurrence that is already in the past. Push it
-    // onto the first occurrence after completion -- but measure the push ONCE,
-    // on the dueDate anchor, and move every schedule field by that same number
-    // of extra steps. Re-deriving startTime alone made it leapfrog a dueDate
-    // that had only advanced one step (a daily start=due task completed a day
-    // late came back as start=12/due=11). Anchoring on dueDate mirrors
-    // projectNextRecurringOccurrenceFields, so the completion path and the
-    // calendar projection agree on which occurrence comes next: the occurrence
-    // is identified by its due date, and a start that is already in the past
-    // when its due date is still ahead is a live task, not a stale one.
-    // relativeStartOffset tasks are excluded: their start is re-derived from the
-    // next due below, so they are coherent by construction.
-    if (strategy === 'strict' && task.startTime && task.dueDate && nextStartTime && nextDueDate
-        && !task.relativeStartOffset) {
-        const parsedNextStart = safeParseDate(nextStartTime);
+    let rebuiltFields = anchorField && nextAnchorIso
+        ? rebuildScheduleFieldsFromAnchor(task, anchorField, nextAnchorIso)
+        : {};
+    if (
+        strategy === 'strict'
+        && anchorField === 'dueDate'
+        && task.startTime
+        && rebuiltFields.startTime
+        && !task.relativeStartOffset
+    ) {
+        const parsedNextStart = safeParseDate(rebuiltFields.startTime);
         if (parsedNextStart && parsedNextStart <= completedAtDate) {
-            // `projectStrictIsoFrom` is the existing "first occurrence after this
-            // instant, and how many steps that took" helper, so multi-period
-            // lateness catches up here exactly as it does on the projection path.
-            const pushedDue = projectStrictIsoFrom(
-                task.dueDate,
+            const caughtUpAnchor = projectStrictIsoFrom(
+                sourceAnchorIso!,
                 rule,
                 completedAtDate,
                 byDay,
                 interval,
                 byMonthDay,
                 weekStart,
-                dueAnchorDay,
-            );
-            const extraSteps = pushedDue.iso ? pushedDue.steps - 1 : 0;
-            if (extraSteps > 0) {
-                const advancePastCompletion = (
-                    nextIso: string | undefined,
-                    sourceIso: string | undefined,
-                    anchorDay: number | undefined,
-                ): string | undefined => (nextIso
-                    ? preserveDateOnlyFormat(
-                        advanceStrictIsoBySteps(
-                            nextIso,
-                            extraSteps,
-                            rule,
-                            completedAtDate,
-                            byDay,
-                            interval,
-                            byMonthDay,
-                            weekStart,
-                            anchorDay,
-                        ),
-                        sourceIso,
-                    ) ?? nextIso
-                    : nextIso);
-                nextDueDate = preserveDateOnlyFormat(pushedDue.iso, task.dueDate);
-                nextStartTime = advancePastCompletion(nextStartTime, task.startTime, startAnchorDay);
-                nextReviewAt = advancePastCompletion(nextReviewAt, task.reviewAt, reviewAnchorDay);
+                recurrenceAnchorDays.dueDate,
+            ).iso;
+            if (caughtUpAnchor) {
+                nextAnchorIso = preserveDateOnlyFormat(caughtUpAnchor, sourceAnchorIso);
+                rebuiltFields = rebuildScheduleFieldsFromAnchor(task, anchorField, nextAnchorIso!);
             }
         }
     }
+    let nextStartTime = rebuiltFields.startTime;
+    let nextDueDate = rebuiltFields.dueDate;
+    let nextReviewAt = rebuiltFields.reviewAt;
     let nextRelativeStartOffset = task.relativeStartOffset ? { ...task.relativeStartOffset } : undefined;
     if (nextRelativeStartOffset) {
         if (nextDueDate) {
