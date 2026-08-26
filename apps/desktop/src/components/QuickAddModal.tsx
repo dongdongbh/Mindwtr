@@ -473,37 +473,72 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         };
     }, [t]);
 
+    const attachPastedImageFiles = useCallback((imageFiles: File[]) => {
+        setPastedImageError(null);
+        imageFiles.forEach((file) => {
+            setPastingImageCount((count) => count + 1);
+            void createPastedImageAttachment(file)
+                .then((pastedAttachment) => {
+                    if (!isOpenRef.current) {
+                        cleanupPastedImageAttachments([pastedAttachment]);
+                        return;
+                    }
+                    setPastedImageAttachments((current) => {
+                        const next = [...current, pastedAttachment];
+                        pastedImageAttachmentsRef.current = next;
+                        return next;
+                    });
+                })
+                .catch((error) => {
+                    reportError('Failed to attach pasted image', error);
+                    setPastedImageError(tFallback(t, 'quickAdd.pastedImageError', 'Could not attach pasted image.'));
+                })
+                .finally(() => {
+                    setPastingImageCount((count) => Math.max(0, count - 1));
+                });
+        });
+    }, [cleanupPastedImageAttachments, createPastedImageAttachment, t]);
+
+    // WebKitGTK (Linux) delivers an entirely empty DOM paste event for a
+    // clipboard image — no items, no files, no text — so an empty paste falls
+    // back to the async clipboard API, which the Rust side unlocks by allowing
+    // WebKit's clipboard permission request (#690). Anywhere the paste event
+    // already carried the image or any text, this never runs.
+    const attachImagesFromAsyncClipboard = useCallback(async () => {
+        if (typeof navigator === 'undefined' || !navigator.clipboard?.read) return;
+        let clipboardFiles: File[];
+        try {
+            const items = await navigator.clipboard.read();
+            const blobs = await Promise.all(items.map(async (item) => {
+                const imageType = item.types.find((type) => type.toLowerCase().startsWith('image/'));
+                return imageType ? { blob: await item.getType(imageType), type: imageType } : null;
+            }));
+            clipboardFiles = blobs
+                .filter((entry): entry is { blob: Blob; type: string } => entry !== null)
+                .map(({ blob, type }, index) => new File([blob], `clipboard-${index}`, { type }));
+        } catch {
+            // Permission denied or unsupported — identical outcome to the old
+            // behavior, where an image paste simply did nothing here.
+            return;
+        }
+        if (clipboardFiles.length > 0 && isOpenRef.current) {
+            attachPastedImageFiles(clipboardFiles);
+        }
+    }, [attachPastedImageFiles]);
+
     const handleQuickAddPaste = useCallback((event: ClipboardEvent<HTMLInputElement>) => {
         const imageFiles = getClipboardImageFiles(event.clipboardData);
         if (imageFiles.length > 0) {
             event.preventDefault();
-            setPastedImageError(null);
-            imageFiles.forEach((file) => {
-                setPastingImageCount((count) => count + 1);
-                void createPastedImageAttachment(file)
-                    .then((pastedAttachment) => {
-                        if (!isOpenRef.current) {
-                            cleanupPastedImageAttachments([pastedAttachment]);
-                            return;
-                        }
-                        setPastedImageAttachments((current) => {
-                            const next = [...current, pastedAttachment];
-                            pastedImageAttachmentsRef.current = next;
-                            return next;
-                        });
-                    })
-                    .catch((error) => {
-                        reportError('Failed to attach pasted image', error);
-                        setPastedImageError(tFallback(t, 'quickAdd.pastedImageError', 'Could not attach pasted image.'));
-                    })
-                    .finally(() => {
-                        setPastingImageCount((count) => Math.max(0, count - 1));
-                    });
-            });
+            attachPastedImageFiles(imageFiles);
             return;
         }
 
         const pastedText = event.clipboardData?.getData('text/plain') ?? '';
+        if (!pastedText && (event.clipboardData?.types?.length ?? 0) === 0) {
+            void attachImagesFromAsyncClipboard();
+            return;
+        }
         const lines = splitQuickAddBulkLines(pastedText);
         if (lines.length <= 1) {
             if (lines.length === 1 && /[\r\n]/.test(pastedText)) {
@@ -518,7 +553,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         event.preventDefault();
         setBulkQuickAddLines(lines);
         setBulkQuickAddError(null);
-    }, [cleanupPastedImageAttachments, createPastedImageAttachment, t]);
+    }, [attachImagesFromAsyncClipboard, attachPastedImageFiles]);
 
     const handleTextFileImport = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];

@@ -1114,6 +1114,37 @@ fn enable_desktop_spellcheck(window: &tauri::WebviewWindow) {
 #[cfg(not(target_os = "linux"))]
 fn enable_desktop_spellcheck(_window: &tauri::WebviewWindow) {}
 
+/// WebKitGTK never populates the DOM paste event with clipboard images (verified
+/// empty on 2.52 under Wayland), so Quick Add's image paste falls back to
+/// `navigator.clipboard.read()` — which WebKit gates behind a
+/// ClipboardPermissionRequest the embedder must answer, and the default answer
+/// is deny (#690). The webview only ever runs Mindwtr's own bundled UI, so
+/// granting it clipboard read is the same trust boundary as the app itself.
+/// Every other permission kind keeps the default deny.
+#[cfg(target_os = "linux")]
+pub(crate) fn allow_webview_clipboard_read(window: &tauri::WebviewWindow) {
+    if let Err(error) = window.with_webview(|webview| {
+        use webkit2gtk::glib::prelude::ObjectExt;
+        use webkit2gtk::{PermissionRequestExt, WebViewExt};
+
+        webview.inner().connect_permission_request(|_view, request| {
+            // The webkit2gtk crate predates WebKitGTK 2.42's
+            // ClipboardPermissionRequest binding, so match the runtime GType
+            // name instead of downcasting; older WebKitGTK never emits it.
+            if request.type_().name() == "WebKitClipboardPermissionRequest" {
+                request.allow();
+                return true;
+            }
+            false
+        });
+    }) {
+        log::warn!("Failed to install WebKit clipboard permission handler: {error}");
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn allow_webview_clipboard_read(_window: &tauri::WebviewWindow) {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -1410,6 +1441,7 @@ pub fn run() {
             let is_flatpak_install = cfg!(target_os = "linux") && is_flatpak();
             if let Some(window) = app.get_webview_window("main") {
                 enable_desktop_spellcheck(&window);
+                allow_webview_clipboard_read(&window);
                 // 128x128, not icon.png: GTK3 on X11 silently drops window
                 // icons whose _NET_WM_ICON property would be too large, so
                 // the 512px master never reached the taskbar and AppImages —

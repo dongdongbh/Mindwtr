@@ -682,7 +682,10 @@ pub(crate) fn create_quick_add_window(app: &tauri::AppHandle) -> Result<(), Stri
         .focused(false)
         .visible(false)
         .build()
-        .map(|window| convert_quick_add_window_to_panel(&window))
+        .map(|window| {
+            crate::allow_webview_clipboard_read(&window);
+            convert_quick_add_window_to_panel(&window)
+        })
         .map_err(|error| format!("Failed to create quick add window: {error}"))
 }
 

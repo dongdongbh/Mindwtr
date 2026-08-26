@@ -587,6 +587,74 @@ describe('QuickAddModal', () => {
         }));
     });
 
+    it('falls back to the async clipboard API when the paste event is empty (WebKitGTK)', async () => {
+        // WebKitGTK delivers no items, no files, and no text for an image paste;
+        // the image is only reachable through navigator.clipboard.read() (#690).
+        const addTask = vi.fn(async () => ({ success: true, id: 'task-id' }));
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                addTask,
+            }));
+        });
+        const read = vi.fn(async () => [{
+            types: ['image/png'],
+            getType: async () => new Blob([new Uint8Array([9, 9, 9, 9])], { type: 'image/png' }),
+        }]);
+        const originalClipboard = navigator.clipboard;
+        Object.defineProperty(navigator, 'clipboard', { value: { read }, configurable: true });
+
+        try {
+            renderQuickAddModal();
+            await act(async () => {
+                window.dispatchEvent(new CustomEvent('mindwtr:quick-add', {
+                    detail: { initialValue: 'Capture screenshot' },
+                }));
+                await Promise.resolve();
+            });
+
+            fireEvent.paste(screen.getByPlaceholderText('Add Task'), {
+                clipboardData: { getData: () => '', types: [], files: [], items: [] },
+            });
+
+            await waitFor(() => {
+                expect(read).toHaveBeenCalled();
+                expect(screen.getByText('1 image attached')).toBeInTheDocument();
+            });
+            expect(fsMocks.writeFile).toHaveBeenCalledWith(
+                expect.stringMatching(/^\/data\/mindwtr\/quick-add-images\/mindwtr-paste-/),
+                expect.any(Uint8Array),
+            );
+        } finally {
+            Object.defineProperty(navigator, 'clipboard', { value: originalClipboard, configurable: true });
+        }
+    });
+
+    it('does not touch the async clipboard API for an ordinary text paste', async () => {
+        const read = vi.fn(async () => []);
+        const originalClipboard = navigator.clipboard;
+        Object.defineProperty(navigator, 'clipboard', { value: { read }, configurable: true });
+
+        try {
+            renderQuickAddModal();
+            await act(async () => {
+                window.dispatchEvent(new CustomEvent('mindwtr:quick-add', { detail: {} }));
+                await Promise.resolve();
+            });
+
+            fireEvent.paste(screen.getByPlaceholderText('Add Task'), {
+                clipboardData: { getData: () => 'plain text', types: ['text/plain'], files: [], items: [] },
+            });
+
+            await act(async () => {
+                await Promise.resolve();
+            });
+            expect(read).not.toHaveBeenCalled();
+        } finally {
+            Object.defineProperty(navigator, 'clipboard', { value: originalClipboard, configurable: true });
+        }
+    });
+
     it('creates a screenshot-titled task for an image-only quick add paste', async () => {
         const addTask = vi.fn(async () => ({ success: true, id: 'task-id' }));
         act(() => {
