@@ -19,10 +19,12 @@
 import { Directory as ExpoDirectory, File as ExpoFile } from 'expo-file-system';
 import {
     ATTACHMENTS_DIR_NAME,
+    computeSha256Hex,
     inspectSyncArtifact,
     LEGACY_SYNC_FILE_NAME,
     SYNC_FILE_NAME,
     sleep,
+    SyncEncryptionRemoteConflictError,
     type SyncEncryptionRemoteEntry,
     type SyncEncryptionRemotePort,
 } from '@mindwtr/core';
@@ -146,7 +148,24 @@ const writeArtifactPayload = async (uri: string, payload: Uint8Array): Promise<v
     }
 };
 
-export const writeSyncArtifactBytes = async (uri: string, bytes: Uint8Array): Promise<void> => {
+export const writeSyncArtifactBytes = async (
+    uri: string,
+    bytes: Uint8Array,
+    options: { createOnly?: boolean } = {},
+): Promise<void> => {
+    if (options.createOnly) {
+        if (isSaf(uri)) throw new Error('SAF create-only writes must create through the directory handle');
+        const file = new ExpoFile(uri);
+        try {
+            file.create({ intermediates: true, overwrite: false });
+        } catch (error) {
+            const info = await FileSystem.getInfoAsync(uri).catch(() => ({ exists: false }));
+            if (info.exists) throw new SyncEncryptionRemoteConflictError(`${uri} was created by another writer`);
+            throw error;
+        }
+        file.write(bytes);
+        return;
+    }
     const isSealed = inspectSyncArtifact(bytes).kind === 'encrypted';
     if (isSealed) {
         // Ciphertext: pad up to the previous length instead of shrinking. Safe forever —
@@ -215,7 +234,16 @@ const openSafDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
     return {
         entries,
         resolve: async (name, options) => {
-            const existing = entries.get(name);
+            let existing = entries.get(name);
+            if (!existing && StorageAccessFramework?.readDirectoryAsync) {
+                for (const entry of await StorageAccessFramework.readDirectoryAsync(dirUri)) {
+                    if (getLeafName(entry) === name) {
+                        existing = entry;
+                        entries.set(name, entry);
+                        break;
+                    }
+                }
+            }
             if (existing) return existing;
             if (!options.createIfMissing || !StorageAccessFramework?.createFileAsync) return null;
             const created = await StorageAccessFramework.createFileAsync(
@@ -256,7 +284,15 @@ const openPathDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
     return {
         entries,
         resolve: async (name, options) => {
-            const existing = entries.get(name);
+            let existing = entries.get(name);
+            if (!existing) {
+                const candidate = `${normalized}${name}`;
+                const info = await FileSystem.getInfoAsync(candidate).catch(() => ({ exists: false }));
+                if (info.exists) {
+                    existing = candidate;
+                    entries.set(name, candidate);
+                }
+            }
             if (existing) return existing;
             if (!options.createIfMissing) return null;
             const uri = `${normalized}${name}`;
@@ -381,6 +417,20 @@ export const createFileSyncEncryptionRemotePort = async (
         });
     };
 
+    const versionFor = async (bytes: Uint8Array): Promise<string> => {
+        const digest = await computeSha256Hex(bytes);
+        if (!digest) throw new Error('sync encryption file transition requires SHA-256 support');
+        return `sha256:${digest}:length=${bytes.length}`;
+    };
+
+    const read = async (name: string) => {
+        const uri = await locate(name, false);
+        if (!uri) return { bytes: null, version: null };
+        const bytes = await readSyncArtifactBytes(uri);
+        if (!bytes) throw new Error(`sync encryption: failed to read existing artifact ${name}`);
+        return { bytes, version: await versionFor(bytes) };
+    };
+
     return {
         list: async (): Promise<SyncEncryptionRemoteEntry[]> => {
             const entries: SyncEncryptionRemoteEntry[] = [];
@@ -394,19 +444,23 @@ export const createFileSyncEncryptionRemotePort = async (
             }
             return entries;
         },
-        read: async (name) => {
-            const uri = await locate(name, false);
-            if (!uri) return null;
-            return readSyncArtifactBytes(uri);
-        },
-        write: async (name, bytes) => {
+        read,
+        write: async (name, bytes, expectedVersion) => {
+            const current = await read(name);
+            if (current.version !== expectedVersion) {
+                throw new SyncEncryptionRemoteConflictError(`${name} changed during sync encryption transition`);
+            }
             const uri = await locate(name, true);
             if (!uri) throw new Error(`sync encryption: cannot create ${name} in the sync folder`);
-            await writeSyncArtifactBytes(uri, bytes);
+            await writeSyncArtifactBytes(uri, bytes, { createOnly: expectedVersion === null && !isSaf(uri) });
         },
-        remove: async (name) => {
+        remove: async (name, expectedVersion) => {
+            const current = await read(name);
+            if (current.version !== expectedVersion) {
+                throw new SyncEncryptionRemoteConflictError(`${name} changed during sync encryption transition`);
+            }
             const uri = await locate(name, false);
-            if (!uri) return;
+            if (!uri) throw new SyncEncryptionRemoteConflictError(`${name} disappeared during sync encryption transition`);
             await deleteSyncArtifact(uri);
             if (name.startsWith(ATTACHMENT_PREFIX)) attachments?.entries.delete(name.slice(ATTACHMENT_PREFIX.length));
             else documents.entries.delete(name);

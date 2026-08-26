@@ -4852,13 +4852,17 @@ mod tests {
         let material = enable_sync_encryption_in_dir(dir.path(), "correct horse battery").expect("enable");
 
         // Rewind to exactly that window: documents back to plaintext, attachment still sealed.
-        for (enc, plain) in [
-            ("data.json.enc", DATA_FILE_NAME),
-            ("data.json.enc.bak", "data.json.bak"),
-            ("mindwtr-backup-2026-01-01.json.enc", "mindwtr-backup-2026-01-01.json"),
+        for (enc, plain, contents) in [
+            ("data.json.enc", DATA_FILE_NAME, br#"{"tasks":[{"id":"current"}]}"#.as_slice()),
+            ("data.json.enc.bak", "data.json.bak", br#"{"tasks":[{"id":"backup"}]}"#.as_slice()),
+            (
+                "mindwtr-backup-2026-01-01.json.enc",
+                "mindwtr-backup-2026-01-01.json",
+                br#"{"tasks":[{"id":"seed"}]}"#.as_slice(),
+            ),
         ] {
             fs::remove_file(dir.path().join(enc)).expect("remove enc");
-            fs::write(dir.path().join(plain), br#"{"tasks":[{"id":"current"}]}"#).expect("restore plaintext");
+            fs::write(dir.path().join(plain), contents).expect("restore plaintext");
         }
         assert!(matches!(
             inspect_sync_artifact(&fs::read(dir.path().join("attachments").join("a1.png")).expect("att")),
@@ -4898,6 +4902,27 @@ mod tests {
             fs::read(dir.path().join("attachments").join("a1.png")).expect("attachment"),
             b"\x89PNG attachment bytes"
         );
+    }
+
+    #[test]
+    fn transition_version_guard_preserves_peer_bytes_and_create_new_refuses_a_peer_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let target = dir.path().join("artifact.bin");
+        fs::write(&target, b"initial").expect("initial");
+        let expected = transition_artifact_fingerprint(b"initial");
+        fs::write(&target, b"peer").expect("peer update");
+
+        let error = write_and_verify(&target, b"ours", Some(&expected), |_| Ok(()))
+            .expect_err("stale replacement must conflict");
+        assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
+        assert_eq!(fs::read(&target).expect("peer bytes"), b"peer");
+
+        let create_target = dir.path().join("new.bin");
+        fs::write(&create_target, b"peer-created").expect("peer create");
+        let error = write_and_verify(&create_target, b"ours", None, |_| Ok(()))
+            .expect_err("create-new must not replace");
+        assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
+        assert_eq!(fs::read(&create_target).expect("peer-created bytes"), b"peer-created");
     }
 
     #[test]
@@ -10266,6 +10291,31 @@ fn transition_tmp_path(target: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
+fn transition_artifact_fingerprint(bytes: &[u8]) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(bytes))
+}
+
+fn require_transition_artifact_version(path: &Path, expected: &str) -> Result<Vec<u8>, String> {
+    let bytes = fs::read(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            SYNC_FILE_WRITE_CONFLICT.to_string()
+        } else {
+            format!("Failed to read {}: {error}", path.display())
+        }
+    })?;
+    if transition_artifact_fingerprint(&bytes) != expected {
+        return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
+    }
+    Ok(bytes)
+}
+
+fn remove_transition_artifact_if_version(path: &Path, expected: &str) -> Result<(), String> {
+    require_transition_artifact_version(path, expected)?;
+    fs::remove_file(path).map_err(|error| format!("Failed to remove {}: {error}", path.display()))?;
+    sync_parent_directory_for_durability(path)
+        .map_err(|error| format!("Failed to flush sync directory metadata: {error}"))
+}
+
 /// An artifact whose MWENC1 header is present but unreadable (truncated, a future format
 /// version, a cost above the accepted ceiling) is neither plaintext to seal nor ciphertext we
 /// can open. Every transition raises this instead of guessing: sealing it would double-wrap a
@@ -10277,46 +10327,75 @@ fn unsupported_artifact(path: &Path, reason: String) -> String {
 
 /// Writes `bytes` at `target` through a scratch file, then reads it back and runs `verify`
 /// before returning. Nothing downstream may delete a predecessor until this has succeeded.
-fn write_and_verify<Verify>(target: &Path, bytes: &[u8], verify: Verify) -> Result<(), String>
+fn write_and_verify<Verify>(
+    target: &Path,
+    bytes: &[u8],
+    expected_version: Option<&str>,
+    verify: Verify,
+) -> Result<(), String>
 where
     Verify: Fn(&[u8]) -> Result<(), String>,
 {
     let tmp = transition_tmp_path(target);
     write_new_file(&tmp, bytes)?;
-    install_replacing(&tmp, target)?;
+    match expected_version {
+        Some(expected) => {
+            require_transition_artifact_version(target, expected)?;
+            install_replacing(&tmp, target)?;
+        }
+        None => {
+            if target.exists() {
+                return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
+            }
+            // hard_link is an atomic create-new operation: it cannot replace a peer file
+            // that appears after the existence check, while the already-flushed scratch
+            // keeps the final bytes off the visible name until this point.
+            fs::hard_link(&tmp, target).map_err(|error| {
+                if target.exists() {
+                    SYNC_FILE_WRITE_CONFLICT.to_string()
+                } else {
+                    format!("Failed to install {} with create-new semantics: {error}", target.display())
+                }
+            })?;
+            fs::remove_file(&tmp).map_err(|error| error.to_string())?;
+            sync_parent_directory_for_durability(target)
+                .map_err(|error| format!("Failed to flush sync directory metadata: {error}"))?;
+        }
+    }
     let written = fs::read(target)
         .map_err(|error| format!("Failed to read back {}: {error}", target.display()))?;
     verify(&written)
 }
 
-fn verify_decrypts(material: &SyncKeyMaterial) -> impl Fn(&[u8]) -> Result<(), String> + '_ {
-    move |bytes: &[u8]| {
-        decrypt_sync_artifact(bytes, &material.key)
-            .map(|_| ())
-            .map_err(|error| terminal_error(error))
-    }
-}
-
 fn seal_artifact_in_place(path: &Path, material: &SyncKeyMaterial) -> Result<(), String> {
     let bytes = fs::read(path).map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+    let version = transition_artifact_fingerprint(&bytes);
     match inspect_sync_artifact(&bytes) {
         SyncArtifactInspection::Encrypted(_) => return Ok(()), // already migrated (resume)
         SyncArtifactInspection::Unsupported(reason) => return Err(unsupported_artifact(path, reason)),
         SyncArtifactInspection::Plaintext => {}
     }
     let sealed = encrypt_sync_artifact(&bytes, material).map_err(|error| terminal_error(error))?;
-    write_and_verify(path, &sealed, verify_decrypts(material))
+    write_and_verify(path, &sealed, Some(&version), |written| {
+        let plain = decrypt_sync_artifact(written, &material.key).map_err(|error| terminal_error(error))?;
+        if plain == bytes {
+            Ok(())
+        } else {
+            Err(SYNC_FILE_WRITE_CONFLICT.to_string())
+        }
+    })
 }
 
 fn open_artifact_in_place(path: &Path, key: &[u8; KEY_LEN]) -> Result<(), String> {
     let bytes = fs::read(path).map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+    let version = transition_artifact_fingerprint(&bytes);
     match inspect_sync_artifact(&bytes) {
         SyncArtifactInspection::Plaintext => return Ok(()), // already plaintext (resume)
         SyncArtifactInspection::Unsupported(reason) => return Err(unsupported_artifact(path, reason)),
         SyncArtifactInspection::Encrypted(_) => {}
     }
     let plain = decrypt_sync_artifact(&bytes, key).map_err(|error| terminal_error(error))?;
-    write_and_verify(path, &plain, |written| {
+    write_and_verify(path, &plain, Some(&version), |written| {
         if written == plain {
             Ok(())
         } else {
@@ -10341,6 +10420,7 @@ fn rewrap_artifact_in_place(
     recovered_by_salt: &mut HashMap<[u8; SALT_LEN], SyncKeyMaterial>,
 ) -> Result<(), String> {
     let bytes = fs::read(path).map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+    let version = transition_artifact_fingerprint(&bytes);
     if decrypt_sync_artifact(&bytes, &next.key).is_ok() {
         return Ok(()); // already migrated under the new key (resume)
     }
@@ -10362,7 +10442,14 @@ fn rewrap_artifact_in_place(
         decrypt_sync_artifact(&bytes, &recovered.key).map_err(|error| terminal_error(error))?
     };
     let sealed = encrypt_sync_artifact(&plain, next).map_err(|error| terminal_error(error))?;
-    write_and_verify(path, &sealed, verify_decrypts(next))
+    write_and_verify(path, &sealed, Some(&version), |written| {
+        let verified = decrypt_sync_artifact(written, &next.key).map_err(|error| terminal_error(error))?;
+        if verified == plain {
+            Ok(())
+        } else {
+            Err(SYNC_FILE_WRITE_CONFLICT.to_string())
+        }
+    })
 }
 
 /// The salt/params already committed to this folder, if any — resuming an interrupted enable
@@ -10396,12 +10483,12 @@ fn enable_sync_encryption_in_dir(
     sync_dir: &Path,
     passphrase: &str,
 ) -> Result<SyncKeyMaterial, String> {
+    let lock = acquire_sync_lock(sync_dir)?;
     let (salt, params) =
         existing_folder_header(sync_dir).unwrap_or((random_salt(), SYNC_CRYPTO_DEFAULT_KDF_PARAMS));
     let material =
         derive_sync_key_material(passphrase, salt, params).map_err(|error| terminal_error(error))?;
 
-    let lock = acquire_sync_lock(sync_dir)?;
     let result = (|| -> Result<(), String> {
         let artifacts = collect_sync_folder_artifacts(sync_dir, true);
         for path in &artifacts.attachments {
@@ -10423,10 +10510,28 @@ fn enable_sync_encryption_in_dir(
             let target = sync_dir.join(encrypted_artifact_name(name));
             let sealed =
                 encrypt_sync_artifact(&bytes, &material).map_err(|error| terminal_error(error))?;
-            write_and_verify(&target, &sealed, verify_decrypts(&material))?;
+            if target.is_file() {
+                let existing = fs::read(&target)
+                    .map_err(|error| format!("Failed to read {}: {error}", target.display()))?;
+                let plain = decrypt_sync_artifact(&existing, &material.key)
+                    .map_err(|error| terminal_error(error))?;
+                if plain != bytes {
+                    return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
+                }
+            } else {
+                write_and_verify(&target, &sealed, None, |written| {
+                    let plain = decrypt_sync_artifact(written, &material.key)
+                        .map_err(|error| terminal_error(error))?;
+                    if plain == bytes {
+                        Ok(())
+                    } else {
+                        Err(SYNC_FILE_WRITE_CONFLICT.to_string())
+                    }
+                })?;
+            }
             // Only now, with the ciphertext on disk and proven readable, does the plaintext go.
-            fs::remove_file(path)
-                .map_err(|error| format!("Failed to remove {}: {error}", path.display()))?;
+            let source_version = transition_artifact_fingerprint(&bytes);
+            remove_transition_artifact_if_version(path, &source_version)?;
         }
         Ok(())
     })();
@@ -10456,15 +10561,23 @@ fn disable_sync_encryption_in_dir(sync_dir: &Path, key: &[u8; KEY_LEN]) -> Resul
                 continue;
             };
             let target = sync_dir.join(plaintext_artifact_name(name));
-            write_and_verify(&target, &plain, |written| {
-                if written == plain {
-                    Ok(())
-                } else {
-                    Err(format!("Failed to verify {} after write", target.display()))
+            if target.is_file() {
+                let existing = fs::read(&target)
+                    .map_err(|error| format!("Failed to read {}: {error}", target.display()))?;
+                if existing != plain {
+                    return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
                 }
-            })?;
-            fs::remove_file(path)
-                .map_err(|error| format!("Failed to remove {}: {error}", path.display()))?;
+            } else {
+                write_and_verify(&target, &plain, None, |written| {
+                    if written == plain {
+                        Ok(())
+                    } else {
+                        Err(format!("Failed to verify {} after write", target.display()))
+                    }
+                })?;
+            }
+            let source_version = transition_artifact_fingerprint(&bytes);
+            remove_transition_artifact_if_version(path, &source_version)?;
         }
         Ok(())
     })();

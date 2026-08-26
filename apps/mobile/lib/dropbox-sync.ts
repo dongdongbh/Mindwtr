@@ -1,7 +1,9 @@
 export {
   deleteDropboxFile,
+  deleteDropboxFileVersioned,
   downloadDropboxAppData,
   downloadDropboxFile,
+  downloadDropboxFileVersioned,
   DropboxConflictError,
   DropboxFileNotFoundError,
   DropboxUnauthorizedError,
@@ -10,6 +12,7 @@ export {
   testDropboxAccess,
   uploadDropboxAppData,
   uploadDropboxFile,
+  uploadDropboxFileVersioned,
   type DropboxDownloadResult,
   type DropboxSyncCrypto,
 } from '@mindwtr/core';

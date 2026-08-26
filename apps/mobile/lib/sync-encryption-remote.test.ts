@@ -182,45 +182,64 @@ describe('WebDAV remote port error boundaries', () => {
     await expect(port.read('data.json')).rejects.toBe(timeout);
   });
 
-  it('treats only an explicit GET/DELETE 404 as an idempotent absence', async () => {
+  it('treats an explicit GET 404 as absence but a conditional DELETE 404 as conflict', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 404 })));
     const port = await createPort();
 
-    await expect(port.read('data.json')).resolves.toBeNull();
-    await expect(port.remove('data.json')).resolves.toBeUndefined();
+    await expect(port.read('data.json')).resolves.toEqual({ bytes: null, version: null });
+    await expect(port.remove('data.json', '"v1"')).rejects.toThrow('WEBDAV_REMOTE_WRITE_CONFLICT');
   });
 
   it('propagates a DELETE 500 so the transition cannot commit', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 500 })));
     const port = await createPort();
 
-    await expect(port.remove('data.json')).rejects.toThrow('WebDAV DELETE failed (500)');
+    await expect(port.remove('data.json', '"v1"')).rejects.toThrow('WebDAV DELETE failed (500)');
   });
 });
 
 describe('Dropbox remote port + core transition round trip', () => {
   const remote = new Map<string, Uint8Array>();
+  const revisions = new Map<string, number>();
 
   const jsonResponse = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
   beforeEach(() => {
     remote.clear();
+    revisions.clear();
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       const arg = JSON.parse(String((init?.headers as Record<string, string>)?.['Dropbox-API-Arg'] ?? '{}'));
       const path = String(arg.path ?? '');
       if (url.includes('/files/download')) {
         const bytes = remote.get(path);
         if (!bytes) return jsonResponse({ error_summary: 'path/not_found/..' }, 409);
-        return new Response(new Uint8Array(bytes), { status: 200 });
+        return new Response(new Uint8Array(bytes), {
+          status: 200,
+          headers: { 'Dropbox-API-Result': JSON.stringify({ rev: `rev${revisions.get(path) ?? 1}` }) },
+        });
       }
       if (url.includes('/files/upload')) {
+        const currentRev = remote.has(path) ? `rev${revisions.get(path) ?? 1}` : null;
+        const mode = arg.mode as { '.tag'?: string; update?: string } | undefined;
+        if ((mode?.['.tag'] === 'add' && currentRev)
+          || (mode?.['.tag'] === 'update' && mode.update !== currentRev)) {
+          return jsonResponse({ error_summary: 'path/conflict/file/..' }, 409);
+        }
         remote.set(path, new Uint8Array(await new Response(init?.body as BodyInit).arrayBuffer()));
-        return jsonResponse({ rev: 'rev1' });
+        const next = (revisions.get(path) ?? 0) + 1;
+        revisions.set(path, next);
+        return jsonResponse({ rev: `rev${next}` });
       }
       if (url.includes('/files/delete_v2')) {
         const body = JSON.parse(String(init?.body ?? '{}'));
-        remote.delete(String(body.path ?? ''));
+        const deletePath = String(body.path ?? '');
+        const currentRev = remote.has(deletePath) ? `rev${revisions.get(deletePath) ?? 1}` : null;
+        if (!currentRev || body.parent_rev !== currentRev) {
+          return jsonResponse({ error_summary: 'path_lookup/conflict/..' }, 409);
+        }
+        remote.delete(deletePath);
+        revisions.delete(deletePath);
         return jsonResponse({});
       }
       throw new Error(`unexpected fetch ${url}`);
@@ -290,16 +309,33 @@ describe('Dropbox remote port + core transition round trip', () => {
       if (url.includes('/files/download')) {
         const bytes = remote.get(path);
         if (!bytes) return jsonResponse({ error_summary: 'path/not_found/..' }, 409);
-        return new Response(new Uint8Array(bytes), { status: 200 });
+        return new Response(new Uint8Array(bytes), {
+          status: 200,
+          headers: { 'Dropbox-API-Result': JSON.stringify({ rev: `rev${revisions.get(path) ?? 1}` }) },
+        });
       }
       if (url.includes('/files/upload')) {
+        const currentRev = remote.has(path) ? `rev${revisions.get(path) ?? 1}` : null;
+        const mode = arg.mode as { '.tag'?: string; update?: string } | undefined;
+        if ((mode?.['.tag'] === 'add' && currentRev)
+          || (mode?.['.tag'] === 'update' && mode.update !== currentRev)) {
+          return jsonResponse({ error_summary: 'path/conflict/file/..' }, 409);
+        }
         remote.set(path, new Uint8Array(await new Response(init?.body as BodyInit).arrayBuffer()));
-        return jsonResponse({ rev: 'rev1' });
+        const next = (revisions.get(path) ?? 0) + 1;
+        revisions.set(path, next);
+        return jsonResponse({ rev: `rev${next}` });
       }
       if (url.includes('/files/delete_v2')) {
         if (failDelete) return jsonResponse({ error_summary: 'internal_error/..' }, 500);
         const body = JSON.parse(String(init?.body ?? '{}'));
-        remote.delete(String(body.path ?? ''));
+        const deletePath = String(body.path ?? '');
+        const currentRev = remote.has(deletePath) ? `rev${revisions.get(deletePath) ?? 1}` : null;
+        if (!currentRev || body.parent_rev !== currentRev) {
+          return jsonResponse({ error_summary: 'path_lookup/conflict/..' }, 409);
+        }
+        remote.delete(deletePath);
+        revisions.delete(deletePath);
         return jsonResponse({});
       }
       throw new Error(`unexpected fetch ${url}`);
@@ -325,7 +361,7 @@ describe('Dropbox remote port + core transition round trip', () => {
     await expect(syncEncryptionKeyCache.getKey()).resolves.not.toBeNull();
   });
 
-  it('treats explicit Dropbox not-found reads and deletes as idempotent absences', async () => {
+  it('treats explicit Dropbox not-found reads as absence and conditional deletes as conflicts', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/files/download')) {
         return jsonResponse({
@@ -341,8 +377,8 @@ describe('Dropbox remote port + core transition round trip', () => {
     }));
     const port = await __syncEncryptionServiceTestUtils.createDropboxRemotePort(null);
 
-    await expect(port.read('data.json')).resolves.toBeNull();
-    await expect(port.remove('data.json')).resolves.toBeUndefined();
+    await expect(port.read('data.json')).resolves.toEqual({ bytes: null, version: null });
+    await expect(port.remove('data.json', 'rev1')).rejects.toThrow('Dropbox artifact changed');
   });
 
   it('propagates a non-not-found Dropbox delete conflict', async () => {
@@ -354,7 +390,7 @@ describe('Dropbox remote port + core transition round trip', () => {
     }));
     const port = await __syncEncryptionServiceTestUtils.createDropboxRemotePort(null);
 
-    await expect(port.remove('data.json')).rejects.toThrow('Dropbox file delete failed: HTTP 409');
+    await expect(port.remove('data.json', 'rev1')).rejects.toThrow('Dropbox artifact changed');
   });
 });
 

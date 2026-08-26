@@ -15,9 +15,9 @@
 import {
     decryptRemoteArtifactOrThrow,
     defaultSyncCryptoPrimitives,
-    deleteDropboxFile,
+    deleteDropboxFileVersioned,
     deriveSyncKeyMaterial,
-    downloadDropboxFile,
+    downloadDropboxFileVersioned,
     encryptSyncArtifact,
     inspectSyncArtifact,
     runChangeSyncEncryptionPassphraseOverRemote,
@@ -30,10 +30,10 @@ import {
     SyncCryptoUnsupportedError,
     SyncEncryptionRemotePlaintextError,
     SyncEncryptionTerminalError,
-    uploadDropboxFile,
-    webdavDeleteFile,
-    webdavGetFile,
-    webdavPutFile,
+    uploadDropboxFileVersioned,
+    webdavDeleteFileVersioned,
+    webdavGetFileVersioned,
+    webdavPutFileVersioned,
     type AppData,
     type Attachment,
     type SyncCryptoKdfParams,
@@ -43,6 +43,7 @@ import {
     type SyncEncryptionLocalStatePort,
     type SyncEncryptionRemoteEntry,
     type SyncEncryptionRemotePort,
+    type SyncEncryptionRemoteRead,
     type SyncEncryptionStatus,
     type SyncEncryptionTransitionProgress,
     type SyncKeyMaterial,
@@ -316,13 +317,13 @@ const decodeDocument = async (
 /** The key is resolved here rather than taken as a parameter: a caller that passed `null` by
  *  mistake would enumerate zero attachments and a transition would silently skip all of them. */
 const listRemoteEntries = async (
-    read: (name: string) => Promise<Uint8Array | null>,
+    read: (name: string) => Promise<SyncEncryptionRemoteRead>,
     recoveryPassphrase?: string,
 ): Promise<SyncEncryptionRemoteEntry[]> => {
     const key = (await getSyncEncryptionMaterial())?.key ?? null;
     const data =
-        (await decodeDocument(await read('data.json.enc'), key, recoveryPassphrase)) ??
-        (await decodeDocument(await read('data.json'), key, recoveryPassphrase));
+        (await decodeDocument((await read('data.json.enc')).bytes, key, recoveryPassphrase)) ??
+        (await decodeDocument((await read('data.json')).bytes, key, recoveryPassphrase));
     return [
         ...REMOTE_DOCUMENT_NAMES.map((name) => ({ name, kind: 'document' as const })),
         ...collectRemoteAttachmentKeys(data).map((name) => ({ name, kind: 'attachment' as const })),
@@ -336,22 +337,18 @@ export type WebdavRemotePortConfig = {
 
 export function createWebdavRemotePort(config: WebdavRemotePortConfig): SyncEncryptionRemotePort {
     const urlFor = (name: string) => `${config.baseUrl}/${name}`;
-    const read = async (name: string): Promise<Uint8Array | null> => {
-        try {
-            return new Uint8Array(await webdavGetFile(urlFor(name), config.options));
-        } catch (error) {
-            if ((error as { status?: number } | null)?.status === 404) return null;
-            throw error;
-        }
-    };
+    const read = (name: string): Promise<SyncEncryptionRemoteRead> =>
+        webdavGetFileVersioned(urlFor(name), config.options);
     return {
         list: () => listRemoteEntries(read),
         read,
-        write: async (name, bytes) => {
-            await webdavPutFile(urlFor(name), bytes, 'application/octet-stream', config.options);
+        write: async (name, bytes, expectedVersion) => {
+            await webdavPutFileVersioned(
+                urlFor(name), bytes, 'application/octet-stream', expectedVersion, config.options,
+            );
         },
-        remove: async (name) => {
-            await webdavDeleteFile(urlFor(name), config.options);
+        remove: async (name, expectedVersion) => {
+            await webdavDeleteFileVersioned(urlFor(name), expectedVersion, config.options);
         },
     };
 }
@@ -360,26 +357,18 @@ export function createDropboxRemotePort(
     withToken: <T>(operation: (token: string) => Promise<T>) => Promise<T>,
     fetcher: typeof fetch,
 ): SyncEncryptionRemotePort {
-    const read = async (name: string): Promise<Uint8Array | null> => {
-        try {
-            return new Uint8Array(await withToken((token) => downloadDropboxFile(token, name, fetcher)));
-        } catch (error) {
-            // Dropbox answers "no such path" with 409, which downloadDropboxFile raises as
-            // DropboxFileNotFoundError. That is "nothing there", not a failure.
-            if ((error as Error | null)?.name === 'DropboxFileNotFoundError') return null;
-            throw error;
-        }
-    };
+    const read = (name: string): Promise<SyncEncryptionRemoteRead> =>
+        withToken((token) => downloadDropboxFileVersioned(token, name, fetcher));
     return {
         list: () => listRemoteEntries(read),
         read,
-        write: async (name, bytes) => {
+        write: async (name, bytes, expectedVersion) => {
             await withToken((token) =>
-                uploadDropboxFile(token, name, bytes, 'application/octet-stream', fetcher),
+                uploadDropboxFileVersioned(token, name, bytes, expectedVersion, fetcher),
             );
         },
-        remove: async (name) => {
-            await withToken((token) => deleteDropboxFile(token, name, fetcher));
+        remove: async (name, expectedVersion) => {
+            await withToken((token) => deleteDropboxFileVersioned(token, name, expectedVersion, fetcher));
         },
     };
 }

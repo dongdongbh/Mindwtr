@@ -118,7 +118,8 @@ const {
 /** A blob store both fakes serve from, keyed exactly the way the remote names it. */
 const createBlobStore = (seed: Record<string, Uint8Array>) => {
     const files = new Map<string, Uint8Array>(Object.entries(seed));
-    return { files };
+    const versions = new Map<string, number>(Object.keys(seed).map((name) => [name, 1]));
+    return { files, versions };
 };
 
 const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
@@ -150,10 +151,23 @@ const createDropboxFetch = (store: ReturnType<typeof createBlobStore>) =>
         const key = (arg.path ?? '').replace(/^\//, '');
         if (url.endsWith('/files/download')) {
             const bytes = store.files.get(key);
-            if (!bytes) return new Response(null, { status: 409 });
-            return new Response(bytes.slice() as unknown as BodyInit, { status: 200 });
+            if (!bytes) {
+                return new Response(JSON.stringify({
+                    error: { '.tag': 'path', path: { '.tag': 'not_found' } },
+                }), { status: 409, headers: { 'content-type': 'application/json' } });
+            }
+            return new Response(bytes.slice() as unknown as BodyInit, {
+                status: 200,
+                headers: { 'Dropbox-API-Result': JSON.stringify({ rev: `rev${store.versions.get(key) ?? 1}` }) },
+            });
         }
         if (url.endsWith('/files/upload')) {
+            const currentRev = store.files.has(key) ? `rev${store.versions.get(key) ?? 1}` : null;
+            const mode = arg.mode as { '.tag'?: string; update?: string } | undefined;
+            if ((mode?.['.tag'] === 'add' && currentRev)
+                || (mode?.['.tag'] === 'update' && mode.update !== currentRev)) {
+                return new Response('{}', { status: 409 });
+            }
             const body = init?.body as ArrayBuffer | Uint8Array | string;
             const bytes =
                 typeof body === 'string'
@@ -162,11 +176,17 @@ const createDropboxFetch = (store: ReturnType<typeof createBlobStore>) =>
                         ? new Uint8Array(body)
                         : new Uint8Array(body);
             store.files.set(key, bytes);
-            return new Response(JSON.stringify({ rev: 'rev1' }), { status: 200 });
+            const next = (store.versions.get(key) ?? 0) + 1;
+            store.versions.set(key, next);
+            return new Response(JSON.stringify({ rev: `rev${next}` }), { status: 200 });
         }
         if (url.endsWith('/files/delete_v2')) {
-            const path = JSON.parse(String(init?.body ?? '{}')).path.replace(/^\//, '');
+            const body = JSON.parse(String(init?.body ?? '{}'));
+            const path = body.path.replace(/^\//, '');
+            const currentRev = store.files.has(path) ? `rev${store.versions.get(path) ?? 1}` : null;
+            if (!currentRev || body.parent_rev !== currentRev) return new Response('{}', { status: 409 });
             store.files.delete(path);
+            store.versions.delete(path);
             return new Response('{}', { status: 200 });
         }
         throw new Error(`unexpected Dropbox endpoint ${url}`);
@@ -180,18 +200,33 @@ const createWebdavFetch = (store: ReturnType<typeof createBlobStore>, baseUrl: s
         if (method === 'GET') {
             const bytes = store.files.get(key);
             if (!bytes) return new Response(null, { status: 404 });
-            return new Response(bytes.slice() as unknown as BodyInit, { status: 200 });
+            return new Response(bytes.slice() as unknown as BodyInit, {
+                status: 200,
+                headers: { etag: `"v${store.versions.get(key) ?? 1}"` },
+            });
         }
         if (method === 'PUT') {
+            const headers = new Headers(init?.headers);
+            const currentEtag = store.files.has(key) ? `"v${store.versions.get(key) ?? 1}"` : null;
+            if ((headers.get('if-none-match') === '*' && currentEtag)
+                || (headers.has('if-match') && headers.get('if-match') !== currentEtag)) {
+                return new Response(null, { status: 412 });
+            }
             const body = init?.body as Uint8Array | string;
             store.files.set(
                 key,
                 typeof body === 'string' ? new TextEncoder().encode(body) : new Uint8Array(body),
             );
+            store.versions.set(key, (store.versions.get(key) ?? 0) + 1);
             return new Response(null, { status: 201 });
         }
         if (method === 'DELETE') {
+            const currentEtag = store.files.has(key) ? `"v${store.versions.get(key) ?? 1}"` : null;
+            if (!currentEtag || new Headers(init?.headers).get('if-match') !== currentEtag) {
+                return new Response(null, { status: 412 });
+            }
             store.files.delete(key);
+            store.versions.delete(key);
             return new Response(null, { status: 204 });
         }
         throw new Error(`unexpected WebDAV ${method} ${url}`);

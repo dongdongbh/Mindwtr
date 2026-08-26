@@ -790,6 +790,56 @@ export async function webdavPutFile(
     }
 }
 
+/** Versioned byte read for encryption transitions. The strong ETag comes from the same
+ * GET response as the bytes; an existing response without one is returned explicitly so
+ * the transition can refuse an unsafe mutation. */
+export async function webdavGetFileVersioned(
+    url: string,
+    options: WebDavOptions = {},
+): Promise<{ bytes: Uint8Array | null; version: string | null }> {
+    assertWebdavUrl(url, options);
+    const fetcher = options.fetcher ?? fetch;
+    const res = await fetchWithTimeout(
+        url,
+        buildReadRequestInit(options, 'GET'),
+        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        fetcher,
+        WEBDAV_TIMEOUT_ERROR,
+    );
+    if (res.status === 404) return { bytes: null, version: null };
+    if (!res.ok) {
+        const error = new Error(`WebDAV File GET failed (${res.status})`);
+        (error as { status?: number }).status = res.status;
+        throw error;
+    }
+    return {
+        bytes: new Uint8Array(await readResponseBody(res, options.onProgress, options.maxBytes ?? MAX_DOWNLOAD_BYTES)),
+        version: normalizeStrongWebdavEtag(res.headers.get('etag')),
+    };
+}
+
+/** CAS byte write used only by encryption transitions. `null` is create-only. */
+export async function webdavPutFileVersioned(
+    url: string,
+    data: ArrayBuffer | Uint8Array | Blob,
+    contentType: string,
+    expectedEtag: string | null,
+    options: WebDavOptions = {},
+): Promise<void> {
+    try {
+        await webdavPutFile(
+            url,
+            data,
+            contentType,
+            withWebdavDocumentWriteCondition(options, expectedEtag),
+        );
+    } catch (error) {
+        const status = (error as { status?: number } | null)?.status;
+        if (status === 409 || status === 412) throw new WebDavRemoteWriteConflictError(status);
+        throw error;
+    }
+}
+
 export async function webdavFileExists(
     url: string,
     options: WebDavOptions = {}
@@ -889,4 +939,30 @@ export async function webdavDeleteFile(
     if (!res.ok && res.status !== 404) {
         throw new Error(`WebDAV DELETE failed (${res.status})`);
     }
+}
+
+/** Conditional delete for an artifact whose strong ETag was captured by the transition
+ * read. Missing or changed targets are conflicts, never idempotent success. */
+export async function webdavDeleteFileVersioned(
+    url: string,
+    expectedEtag: string,
+    options: WebDavOptions = {},
+): Promise<void> {
+    assertWebdavUrl(url, options);
+    const strongEtag = normalizeStrongWebdavEtag(expectedEtag);
+    if (!strongEtag) throw new Error('WebDAV conditional delete requires a valid strong ETag');
+    const fetcher = options.fetcher ?? fetch;
+    const headers = buildHeaders(options);
+    headers['If-Match'] = strongEtag;
+    const res = await fetchWithTimeout(
+        url,
+        { method: 'DELETE', headers },
+        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        fetcher,
+        WEBDAV_TIMEOUT_ERROR,
+    );
+    if (res.status === 404 || res.status === 409 || res.status === 412) {
+        throw new WebDavRemoteWriteConflictError(res.status);
+    }
+    if (!res.ok) throw new Error(`WebDAV DELETE failed (${res.status})`);
 }

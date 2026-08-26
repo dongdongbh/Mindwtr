@@ -1,5 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
-import { __webdavTestUtils, webdavGetFile, webdavGetJson, webdavHeadFile, webdavPutFile, webdavPutJson } from './webdav';
+import {
+    __webdavTestUtils,
+    webdavDeleteFileVersioned,
+    webdavGetFile,
+    webdavGetFileVersioned,
+    webdavGetJson,
+    webdavHeadFile,
+    webdavPutFile,
+    webdavPutFileVersioned,
+    webdavPutJson,
+} from './webdav';
 import { MAX_DOWNLOAD_BYTES, MAX_ERROR_BODY_BYTES, ResponseTooLargeError } from './http-utils';
 import { consoleLogger, setLogger, type LogPayload } from './logger';
 
@@ -482,6 +492,54 @@ describe('webdavGetFile download cap', () => {
         });
         expect(Array.from(new Uint8Array(buffer))).toEqual([4, 5, 6]);
         expect(onProgress.mock.calls).toEqual([[2, 3], [3, 3]]);
+    });
+});
+
+describe('versioned WebDAV transition byte operations', () => {
+    it('returns bytes and the strong ETag from one GET, and distinguishes missing', async () => {
+        const found = await webdavGetFileVersioned('https://example.com/dav/a.bin', {
+            fetcher: async () => new Response(new Uint8Array([1, 2]), {
+                status: 200,
+                headers: { etag: '"v1"' },
+            }),
+        });
+        expect(found).toEqual({ bytes: new Uint8Array([1, 2]), version: '"v1"' });
+
+        await expect(webdavGetFileVersioned('https://example.com/dav/a.bin', {
+            fetcher: async () => new Response(null, { status: 404 }),
+        })).resolves.toEqual({ bytes: null, version: null });
+    });
+
+    it('preserves create-only headers across MKCOL retry', async () => {
+        const putHeaders: Headers[] = [];
+        let putCount = 0;
+        const fetcher = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+            const method = init?.method ?? 'GET';
+            if (method === 'PUT') {
+                putHeaders.push(new Headers(init?.headers));
+                putCount += 1;
+                return new Response(null, { status: putCount === 1 ? 409 : 201 });
+            }
+            if (method === 'MKCOL') return new Response(null, { status: 201 });
+            throw new Error(`unexpected ${method}`);
+        }) as unknown as typeof fetch;
+
+        await webdavPutFileVersioned(
+            'https://example.com/dav/a.bin', new Uint8Array([1]), 'application/octet-stream', null, { fetcher },
+        );
+        expect(putHeaders).toHaveLength(2);
+        expect(putHeaders.every((headers) => headers.get('if-none-match') === '*')).toBe(true);
+    });
+
+    it('uses If-Match for delete and maps a stale generation to conflict', async () => {
+        const fetcher = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+            expect(new Headers(init?.headers).get('if-match')).toBe('"v1"');
+            return new Response(null, { status: 412 });
+        }) as unknown as typeof fetch;
+
+        await expect(webdavDeleteFileVersioned(
+            'https://example.com/dav/a.bin', '"v1"', { fetcher },
+        )).rejects.toThrow('WEBDAV_REMOTE_WRITE_CONFLICT');
     });
 });
 

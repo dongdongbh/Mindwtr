@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     SyncEncryptionTerminalError,
+    SyncEncryptionRemoteConflictError,
     decryptRemoteArtifactOrThrow,
     detectForeignSaltArtifact,
     getSyncEncryptionStatusFromLocalState,
@@ -27,29 +28,44 @@ import { SYNC_CRYPTO_DEFAULT_KDF_PARAMS, encryptSyncArtifact, deriveSyncKeyMater
 // pattern already used by sync-crypto.test.ts fixtures).
 const FAST_KDF = { mKib: 8, t: 1, p: 1 };
 
-function createFakeRemote(seed: Record<string, { bytes: Uint8Array; kind: 'document' | 'attachment' }> = {}): SyncEncryptionRemotePort & { store: Map<string, Uint8Array>; kinds: Map<string, 'document' | 'attachment'> } {
+function createFakeRemote(seed: Record<string, { bytes: Uint8Array; kind: 'document' | 'attachment' }> = {}): SyncEncryptionRemotePort & {
+    store: Map<string, Uint8Array>;
+    kinds: Map<string, 'document' | 'attachment'>;
+    peerWrite(name: string, bytes: Uint8Array): void;
+} {
     const store = new Map<string, Uint8Array>();
     const kinds = new Map<string, 'document' | 'attachment'>();
+    const versions = new Map<string, number>();
     for (const [name, entry] of Object.entries(seed)) {
         store.set(name, entry.bytes);
         kinds.set(name, entry.kind);
+        versions.set(name, 1);
     }
+    const versionFor = (name: string): string | null => store.has(name) ? `v${versions.get(name) ?? 1}` : null;
+    const peerWrite = (name: string, bytes: Uint8Array): void => {
+        store.set(name, bytes);
+        versions.set(name, (versions.get(name) ?? 0) + 1);
+        if (!kinds.has(name)) kinds.set(name, name.startsWith('attachments/') ? 'attachment' : 'document');
+    };
     return {
         store,
         kinds,
+        peerWrite,
         async list(): Promise<SyncEncryptionRemoteEntry[]> {
             return [...store.keys()].map((name) => ({ name, kind: kinds.get(name) ?? 'document' }));
         },
         async read(name) {
-            return store.has(name) ? store.get(name)! : null;
+            return { bytes: store.has(name) ? store.get(name)! : null, version: versionFor(name) };
         },
-        async write(name, bytes) {
-            store.set(name, bytes);
-            if (!kinds.has(name)) kinds.set(name, name.startsWith('attachments/') ? 'attachment' : 'document');
+        async write(name, bytes, expectedVersion) {
+            if (versionFor(name) !== expectedVersion) throw new SyncEncryptionRemoteConflictError();
+            peerWrite(name, bytes);
         },
-        async remove(name) {
+        async remove(name, expectedVersion) {
+            if (versionFor(name) !== expectedVersion) throw new SyncEncryptionRemoteConflictError();
             store.delete(name);
             kinds.delete(name);
+            versions.delete(name);
         },
     };
 }
@@ -89,6 +105,10 @@ function createFakeLocalState(): SyncEncryptionLocalStatePort & { value: SyncEnc
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
 const text = (b: Uint8Array) => new TextDecoder().decode(b);
+const hexToBytesForTest = (hex: string): Uint8Array => Uint8Array.from(
+    { length: hex.length / 2 },
+    (_, index) => Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16),
+);
 
 // Shared with apps/desktop/src-tauri/src/sync_encryption.rs's test module — both languages'
 // name mapping must agree on every case, including compound suffix chains (S1: `.bak.previous`
@@ -253,10 +273,10 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         const remote = createFakeRemote({ 'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' } });
         const originalWrite = remote.write.bind(remote);
         let calls = 0;
-        remote.write = async (name, bytes) => {
+        remote.write = async (name, bytes, expectedVersion) => {
             calls += 1;
             if (name === 'data.json.enc') throw new Error('simulated transport failure');
-            return originalWrite(name, bytes);
+            return originalWrite(name, bytes, expectedVersion);
         };
         const keyCache = createFakeKeyCache();
         const localState = createFakeLocalState();
@@ -266,6 +286,37 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         expect(remote.store.has('data.json')).toBe(true); // plaintext untouched
         expect(remote.store.has('data.json.enc')).toBe(false);
         expect(localState.value).toBeNull();
+    });
+
+    it('aborts on a peer attachment update, preserves peer bytes, and converges on retry', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a1.png': { bytes: utf8('ORIGINAL'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        const originalWrite = remote.write.bind(remote);
+        let injected = false;
+        remote.write = async (name, bytes, expectedVersion) => {
+            if (!injected && name === 'attachments/a1.png') {
+                injected = true;
+                remote.peerWrite(name, utf8('PEER'));
+            }
+            return originalWrite(name, bytes, expectedVersion);
+        };
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+        expect(text(remote.store.get('attachments/a1.png')!)).toBe('PEER');
+        expect(localState.value).toBeNull();
+        expect(await keyCache.getKey()).toBeNull();
+
+        remote.write = originalWrite;
+        await runEnableSyncEncryptionOverRemote('pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        expect(text(await decryptRemoteArtifactOrThrow(
+            remote.store.get('attachments/a1.png')!, (await keyCache.getKey())!,
+        ))).toBe('PEER');
     });
 });
 
@@ -294,6 +345,33 @@ describe('runDisableSyncEncryptionOverRemote', () => {
         const localState = createFakeLocalState();
         await expect(runDisableSyncEncryptionOverRemote(remote, keyCache, localState)).rejects.toThrow();
         expect(remote.store.has('data.json.enc')).toBe(true);
+    });
+
+    it('aborts before clearing local key/state when a peer updates an artifact', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a1.png': { bytes: utf8('ORIGINAL'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const originalWrite = remote.write.bind(remote);
+        const peerMaterial = await deriveSyncKeyMaterial('pw', hexToBytesForTest(localState.value!.discoveredSalt!), FAST_KDF);
+        const peerBytes = await encryptSyncArtifact(utf8('PEER'), peerMaterial);
+        let injected = false;
+        remote.write = async (name, bytes, expectedVersion) => {
+            if (!injected && name === 'attachments/a1.png') {
+                injected = true;
+                remote.peerWrite(name, peerBytes);
+            }
+            return originalWrite(name, bytes, expectedVersion);
+        };
+
+        await expect(runDisableSyncEncryptionOverRemote(remote, keyCache, localState))
+            .rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+        expect(remote.store.get('attachments/a1.png')).toEqual(peerBytes);
+        expect(localState.value?.state).toBe('enabled');
+        expect(await keyCache.getKey()).not.toBeNull();
     });
 });
 
@@ -335,6 +413,39 @@ describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
         const key = (await keyCache.getKey())!;
         expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a1.png')!, key))).toBe('PNGBYTES');
         expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key))).toBe('{"tasks":[]}');
+    });
+
+    it('keeps the old local key/state and peer bytes when rotation loses its generation', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a1.png': { bytes: utf8('ORIGINAL'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('old-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const oldKey = new Uint8Array((await keyCache.getKey())!);
+        const oldState = structuredClone(localState.value);
+        const peerBytes = await encryptSyncArtifact(utf8('PEER'), {
+            key: oldKey,
+            salt: hexToBytesForTest(localState.value!.discoveredSalt!),
+            params: FAST_KDF,
+        });
+        const originalWrite = remote.write.bind(remote);
+        let injected = false;
+        remote.write = async (name, bytes, expectedVersion) => {
+            if (!injected && name === 'attachments/a1.png') {
+                injected = true;
+                remote.peerWrite(name, peerBytes);
+            }
+            return originalWrite(name, bytes, expectedVersion);
+        };
+
+        await expect(runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'new-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+        expect(remote.store.get('attachments/a1.png')).toEqual(peerBytes);
+        expect(localState.value).toEqual(oldState);
+        expect(await keyCache.getKey()).toEqual(oldKey);
     });
 });
 

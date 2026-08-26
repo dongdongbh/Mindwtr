@@ -291,6 +291,35 @@ export async function downloadDropboxFile(
     return await readResponseBody(response, undefined, MAX_DOWNLOAD_BYTES);
 }
 
+/** Versioned byte read for encryption transitions. Dropbox returns the file rev in the
+ * same download response's Dropbox-API-Result header, so bytes and generation cannot drift. */
+export async function downloadDropboxFileVersioned(
+    accessToken: string,
+    path: string,
+    fetcher: typeof fetch = fetch,
+): Promise<{ bytes: Uint8Array | null; version: string | null }> {
+    const response = await fetcher(DOWNLOAD_ENDPOINT, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Dropbox-API-Arg': JSON.stringify({ path: resolveDropboxPath(path) }),
+        },
+    });
+    if (response.status === 401) throw new DropboxUnauthorizedError('Dropbox file download failed: HTTP 401');
+    if (response.status === 409) {
+        if (isDropboxPathNotFoundTag(await parseDropboxApiErrorTag(response))) {
+            return { bytes: null, version: null };
+        }
+        throw new Error('Dropbox file download failed: HTTP 409');
+    }
+    if (!response.ok) throw new Error(`Dropbox file download failed: HTTP ${response.status}`);
+    const metadata = parseDropboxMetadataRev(response.headers.get('dropbox-api-result'));
+    return {
+        bytes: new Uint8Array(await readResponseBody(response, undefined, MAX_DOWNLOAD_BYTES)),
+        version: metadata.rev,
+    };
+}
+
 export async function uploadDropboxFile(
     accessToken: string,
     path: string,
@@ -326,6 +355,42 @@ export async function uploadDropboxFile(
     return { rev: typeof payload?.rev === 'string' ? payload.rev : null };
 }
 
+/** CAS byte write for encryption transitions. A missing read maps to Dropbox's add mode;
+ * an existing read maps to update(rev). No overwrite mode is used. */
+export async function uploadDropboxFileVersioned(
+    accessToken: string,
+    path: string,
+    content: ArrayBuffer | Uint8Array,
+    expectedRev: string | null,
+    fetcher: typeof fetch = fetch,
+): Promise<{ rev: string | null }> {
+    const sourceBytes = content instanceof Uint8Array ? content : new Uint8Array(content);
+    const requestBody = new Uint8Array(sourceBytes).buffer;
+    const mode = expectedRev
+        ? { '.tag': 'update', update: expectedRev }
+        : { '.tag': 'add' };
+    const response = await fetcher(UPLOAD_ENDPOINT, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Dropbox-API-Arg': JSON.stringify({
+                path: resolveDropboxPath(path),
+                mode,
+                autorename: false,
+                mute: true,
+                strict_conflict: true,
+            }),
+            'Content-Type': 'application/octet-stream',
+        },
+        body: requestBody,
+    });
+    if (response.status === 401) throw new DropboxUnauthorizedError('Dropbox file upload failed: HTTP 401');
+    if (response.status === 409) throw new DropboxConflictError('Dropbox artifact changed during encryption transition');
+    if (!response.ok) throw new Error(`Dropbox file upload failed: HTTP ${response.status}`);
+    const payload = await response.json().catch(() => null) as { rev?: unknown } | null;
+    return { rev: typeof payload?.rev === 'string' ? payload.rev : null };
+}
+
 export async function deleteDropboxFile(
     accessToken: string,
     path: string,
@@ -349,6 +414,28 @@ export async function deleteDropboxFile(
     if (!response.ok) {
         throw new Error(`Dropbox file delete failed: HTTP ${response.status}`);
     }
+}
+
+/** Revision-conditional Dropbox delete. `parent_rev` is supported for files by delete_v2;
+ * every 409 is a generation conflict, including a peer that removed the path first. */
+export async function deleteDropboxFileVersioned(
+    accessToken: string,
+    path: string,
+    expectedRev: string,
+    fetcher: typeof fetch = fetch,
+): Promise<void> {
+    if (!expectedRev.trim()) throw new Error('Dropbox conditional delete requires a revision');
+    const response = await fetcher(FILE_DELETE_ENDPOINT, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ path: resolveDropboxPath(path), parent_rev: expectedRev }),
+    });
+    if (response.status === 401) throw new DropboxUnauthorizedError('Dropbox file delete failed: HTTP 401');
+    if (response.status === 409) throw new DropboxConflictError('Dropbox artifact changed during encryption transition');
+    if (!response.ok) throw new Error(`Dropbox file delete failed: HTTP ${response.status}`);
 }
 
 export async function testDropboxAccess(

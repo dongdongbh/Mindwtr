@@ -132,12 +132,14 @@ import {
   inspectSyncArtifact,
   SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
   SyncEncryptionRemotePlaintextError,
+  SyncEncryptionRemoteConflictError,
   SyncEncryptionTerminalError,
   encryptSyncArtifact,
   type SyncKeyMaterial,
 } from '@mindwtr/core';
 import { readSyncFile, writeSyncFile } from './storage-file';
 import {
+  createFileSyncEncryptionRemotePort,
   padBytesForNonTruncatingOverwrite,
   readSyncArtifactBytes,
   writeSyncArtifactBytes,
@@ -503,6 +505,28 @@ describe('File Sync transitions through core orchestration', () => {
       tasks: [{ title: 'before' }],
     });
   }, 30_000);
+
+  it('uses byte fingerprints for replacement and create-new semantics for missing artifacts', async () => {
+    seedPlaintextFolder();
+    const port = await createFileSyncEncryptionRemotePort(SYNC_URI);
+    expect(port).not.toBeNull();
+
+    const attachmentName = 'attachments/a1.png';
+    const attachment = await port!.read(attachmentName);
+    const peerAttachment = new Uint8Array([1, 1, 1]);
+    fs.files.set(`${SYNC_DIR}/${attachmentName}`, peerAttachment);
+    await expect(port!.write(attachmentName, new Uint8Array([2, 2]), attachment.version))
+      .rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+    expect(fs.files.get(`${SYNC_DIR}/${attachmentName}`)).toEqual(peerAttachment);
+
+    const missing = await port!.read('data.json.enc');
+    expect(missing).toEqual({ bytes: null, version: null });
+    const peerCreated = new Uint8Array([7, 7]);
+    fs.files.set(ENC_URI, peerCreated);
+    await expect(port!.write('data.json.enc', new Uint8Array([8, 8]), missing.version))
+      .rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+    expect(fs.files.get(ENC_URI)).toEqual(peerCreated);
+  });
 
   it('resumes an interrupted enable without re-deriving a second salt', async () => {
     seedPlaintextFolder();

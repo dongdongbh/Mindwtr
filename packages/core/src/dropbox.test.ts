@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { downloadDropboxAppData, uploadDropboxAppData } from './dropbox';
+import {
+    deleteDropboxFileVersioned,
+    downloadDropboxAppData,
+    downloadDropboxFileVersioned,
+    DropboxConflictError,
+    uploadDropboxAppData,
+    uploadDropboxFileVersioned,
+} from './dropbox';
 import { deriveSyncKeyMaterial } from './sync-crypto';
 import type { AppData } from './types';
 
@@ -105,5 +112,42 @@ describe('dropbox sync-document encryption', () => {
         await uploadDropboxAppData('token', { tasks: [] } as unknown as AppData, null, fetcher, { material });
         const wrongMaterial = await deriveSyncKeyMaterial('other-pw', material.salt, FAST_KDF);
         await expect(downloadDropboxAppData('token', fetcher, { material: wrongMaterial })).rejects.toThrow();
+    });
+});
+
+describe('versioned Dropbox transition byte operations', () => {
+    it('returns bytes and revision from the same download response', async () => {
+        const result = await downloadDropboxFileVersioned('token', '/attachments/a.bin', async () => (
+            new Response(new Uint8Array([1, 2]), {
+                status: 200,
+                headers: { 'Dropbox-API-Result': JSON.stringify({ rev: 'abc123456' }) },
+            })
+        ));
+        expect(result).toEqual({ bytes: new Uint8Array([1, 2]), version: 'abc123456' });
+    });
+
+    it('uses add for create and update(rev) for replacement', async () => {
+        const args: unknown[] = [];
+        const fetcher = async (_url: string | URL, init?: RequestInit): Promise<Response> => {
+            args.push(JSON.parse(new Headers(init?.headers).get('dropbox-api-arg') ?? '{}'));
+            return Response.json({ rev: 'next-rev' });
+        };
+        await uploadDropboxFileVersioned('token', '/a.bin', new Uint8Array([1]), null, fetcher);
+        await uploadDropboxFileVersioned('token', '/a.bin', new Uint8Array([2]), 'old-rev', fetcher);
+        expect(args).toEqual([
+            expect.objectContaining({ mode: { '.tag': 'add' }, autorename: false, strict_conflict: true }),
+            expect.objectContaining({ mode: { '.tag': 'update', update: 'old-rev' }, autorename: false, strict_conflict: true }),
+        ]);
+    });
+
+    it('sends parent_rev on delete and maps stale revisions to conflict', async () => {
+        let body: unknown;
+        const fetcher = async (_url: string | URL, init?: RequestInit): Promise<Response> => {
+            body = JSON.parse(String(init?.body));
+            return new Response(null, { status: 409 });
+        };
+        await expect(deleteDropboxFileVersioned('token', '/a.bin', 'old-rev', fetcher))
+            .rejects.toBeInstanceOf(DropboxConflictError);
+        expect(body).toEqual({ path: '/a.bin', parent_rev: 'old-rev' });
     });
 });
