@@ -20,6 +20,7 @@ type NativeState = {
 const native = vi.hoisted(() => ({
     state: { state: 'off' } as NativeState,
     calls: [] as string[],
+    failingCommand: null as string | null,
 }));
 
 const bytesToBase64 = (bytes: Uint8Array): string => {
@@ -40,6 +41,7 @@ vi.mock('./tauri-invoke', () => {
     };
     const invoke = async (command: string, args?: Record<string, unknown>) => {
         native.calls.push(command);
+        if (native.failingCommand === command) throw new Error('local encryption state unavailable');
         switch (command) {
             case 'get_sync_encryption_status':
                 return native.state.state === 'off'
@@ -103,6 +105,7 @@ const {
     createWebdavRemotePort,
     desktopSyncCryptoPrimitives,
     getSyncEncryptionStatus,
+    getSyncEncryptionMaterial,
     markRemoteSyncEncryptionPlaintext,
     runChangePassphraseOverRemote,
     openAttachmentBytes,
@@ -200,6 +203,7 @@ const isEncrypted = (bytes: Uint8Array | undefined) =>
 beforeEach(() => {
     native.state = { state: 'off' };
     native.calls = [];
+    native.failingCommand = null;
     clearSyncEncryptionMaterialCache();
 });
 
@@ -294,6 +298,12 @@ describe('WebDAV sync encryption transitions (config-override / web path)', () =
 });
 
 describe('attachment bytes', () => {
+    it('propagates native encryption-state read failures instead of treating them as off', async () => {
+        native.failingCommand = 'get_sync_encryption_status';
+
+        await expect(getSyncEncryptionMaterial()).rejects.toThrow('local encryption state unavailable');
+    });
+
     it('are a no-op while encryption is off', async () => {
         const bytes = new Uint8Array([9, 8, 7]);
         expect(await sealAttachmentBytes(bytes)).toBe(bytes);

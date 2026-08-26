@@ -9715,10 +9715,10 @@ fn read_sync_file_versioned_from_dir_with(
 /// fails closed rather than silently reading/writing the plaintext names, which would fork the
 /// folder into two generations.
 fn resolve_sync_encryption_material(app: &tauri::AppHandle) -> Result<Option<SyncKeyMaterial>, String> {
-    if !is_encryption_enabled(app) {
+    if !is_encryption_enabled(app)? {
         return Ok(None);
     }
-    resolve_key_material(app)
+    resolve_key_material(app)?
         .map(Some)
         .ok_or_else(|| terminal_error("sync encryption is enabled but no key is available on this device"))
 }
@@ -10366,7 +10366,7 @@ fn require_file_backend_dir(
 }
 
 fn cached_key_or_err(app: &tauri::AppHandle) -> Result<[u8; KEY_LEN], String> {
-    resolve_key_material(app)
+    resolve_key_material(app)?
         .map(|material| material.key)
         .ok_or_else(|| terminal_error("sync encryption is not unlocked on this device"))
 }

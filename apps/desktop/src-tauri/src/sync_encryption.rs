@@ -183,13 +183,20 @@ fn sync_encryption_state_path(app: &tauri::AppHandle) -> PathBuf {
     dir.join(SYNC_ENCRYPTION_STATE_FILE_NAME)
 }
 
-fn read_state_file(path: &Path) -> Option<SyncEncryptionLocalState> {
-    let raw = std::fs::read_to_string(path).ok()?;
-    let parsed: SyncEncryptionLocalState = serde_json::from_str(&raw).ok()?;
+fn read_state_file(path: &Path) -> Result<Option<SyncEncryptionLocalState>, String> {
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(terminal_error(format!(
+            "failed to read local sync encryption state: {error}"
+        ))),
+    };
+    let parsed: SyncEncryptionLocalState = serde_json::from_str(&raw)
+        .map_err(|_| terminal_error("local sync encryption state is invalid"))?;
     if state_holds_key(&parsed.state) || parsed.state == STATE_REMOTE_ENCRYPTED_NO_KEY {
-        Some(parsed)
+        Ok(Some(parsed))
     } else {
-        None
+        Err(terminal_error("local sync encryption state is invalid"))
     }
 }
 
@@ -224,7 +231,7 @@ fn write_state_file(path: &Path, state: Option<&SyncEncryptionLocalState>) -> Re
 /// Reads the persisted state. `None` means the implicit, never-written 'off' default -- the
 /// state every existing install is in, which is why 'off' is represented by the ABSENCE of the
 /// file rather than a file saying "off" (an update must change nothing on disk by itself).
-pub(crate) fn read_local_state(app: &tauri::AppHandle) -> Option<SyncEncryptionLocalState> {
+pub(crate) fn read_local_state(app: &tauri::AppHandle) -> Result<Option<SyncEncryptionLocalState>, String> {
     let _guard = lock_sync_encryption_state();
     read_state_file(&sync_encryption_state_path(app))
 }
@@ -271,26 +278,37 @@ fn decode_key(encoded: &str) -> Option<[u8; KEY_LEN]> {
     <[u8; KEY_LEN]>::try_from(raw.as_slice()).ok()
 }
 
-/// The full material every write seam needs (the key alone cannot build a header). `None`
-/// whenever this device is not in the 'enabled' state or the key is not cached -- callers
-/// treat that as "encryption off for this read/write", which is the pre-feature behavior.
-pub(crate) fn resolve_key_material(app: &tauri::AppHandle) -> Option<SyncKeyMaterial> {
-    let state = read_local_state(app)?;
+/// The full material every write seam needs (the key alone cannot build a header). An absent
+/// sidecar is the only implicit-off state; unreadable or invalid sidecars are terminal.
+pub(crate) fn resolve_key_material(app: &tauri::AppHandle) -> Result<Option<SyncKeyMaterial>, String> {
+    let Some(state) = read_local_state(app)? else {
+        return Ok(None);
+    };
     if !state_holds_key(&state.state) {
-        return None;
+        return Ok(None);
     }
-    let salt_bytes = hex_to_bytes(state.salt.as_deref()?)?;
-    let salt = <[u8; SALT_LEN]>::try_from(salt_bytes.as_slice()).ok()?;
-    let params: SyncCryptoKdfParams = state.kdf_params?.into();
-    let encoded = keyring_key_available(app).or_else(|| state.fallback_key.clone())?;
-    let key = decode_key(&encoded)?;
-    Some(SyncKeyMaterial { key, salt, params })
+    let Some(salt_bytes) = state.salt.as_deref().and_then(hex_to_bytes) else {
+        return Ok(None);
+    };
+    let Ok(salt) = <[u8; SALT_LEN]>::try_from(salt_bytes.as_slice()) else {
+        return Ok(None);
+    };
+    let Some(params) = state.kdf_params.map(SyncCryptoKdfParams::from) else {
+        return Ok(None);
+    };
+    let Some(encoded) = keyring_key_available(app).or_else(|| state.fallback_key.clone()) else {
+        return Ok(None);
+    };
+    let Some(key) = decode_key(&encoded) else {
+        return Ok(None);
+    };
+    Ok(Some(SyncKeyMaterial { key, salt, params }))
 }
 
 /// True when this device believes the remote is encrypted, whether or not it has the key.
 /// Used by the seams to decide between the `.enc` names and the plaintext ones.
-pub(crate) fn is_encryption_enabled(app: &tauri::AppHandle) -> bool {
-    read_local_state(app).is_some_and(|state| state_holds_key(&state.state))
+pub(crate) fn is_encryption_enabled(app: &tauri::AppHandle) -> Result<bool, String> {
+    Ok(read_local_state(app)?.is_some_and(|state| state_holds_key(&state.state)))
 }
 
 pub(crate) fn persist_enabled_material(
@@ -320,7 +338,7 @@ pub(crate) fn mark_remote_encrypted_no_key(
     salt: &[u8],
     params: SyncCryptoKdfParams,
 ) -> Result<(), String> {
-    if let Some(current) = read_local_state(app) {
+    if let Some(current) = read_local_state(app)? {
         if state_holds_key(&current.state)
             && current.salt.as_deref() == Some(bytes_to_hex(salt).as_str())
         {
@@ -343,7 +361,7 @@ pub(crate) fn mark_remote_encrypted_no_key(
 /// resolvable -- running the disable transition is the only sanctioned way out and it needs
 /// one.
 pub(crate) fn mark_remote_plaintext(app: &tauri::AppHandle) -> Result<(), String> {
-    let Some(current) = read_local_state(app) else {
+    let Some(current) = read_local_state(app)? else {
         return Ok(());
     };
     if current.state != STATE_ENABLED {
@@ -414,7 +432,7 @@ pub(crate) fn parse_key_material_payload(
 pub(crate) fn get_sync_encryption_status(
     app: tauri::AppHandle,
 ) -> Result<SyncEncryptionStatus, String> {
-    let Some(state) = read_local_state(&app) else {
+    let Some(state) = read_local_state(&app)? else {
         return Ok(SyncEncryptionStatus {
             state: STATE_OFF.to_string(),
             kdf_params: None,
@@ -436,7 +454,7 @@ pub(crate) fn get_sync_encryption_status(
 pub(crate) fn get_sync_encryption_key_material(
     app: tauri::AppHandle,
 ) -> Result<Option<SyncEncryptionKeyMaterialPayload>, String> {
-    Ok(resolve_key_material(&app).as_ref().map(SyncEncryptionKeyMaterialPayload::from))
+    Ok(resolve_key_material(&app)?.as_ref().map(SyncEncryptionKeyMaterialPayload::from))
 }
 
 /// The key cache's `setKey`, called by the TS transition orchestration once a WebDAV/Dropbox
@@ -559,7 +577,9 @@ mod tests {
     #[test]
     fn absent_state_file_is_the_off_default() {
         let dir = tempfile::tempdir().expect("temp dir");
-        assert!(read_state_file(&dir.path().join(SYNC_ENCRYPTION_STATE_FILE_NAME)).is_none());
+        assert!(read_state_file(&dir.path().join(SYNC_ENCRYPTION_STATE_FILE_NAME))
+            .expect("absent state")
+            .is_none());
     }
 
     #[test]
@@ -573,21 +593,36 @@ mod tests {
             fallback_key: None,
         };
         write_state_file(&path, Some(&state)).expect("write state");
-        assert_eq!(read_state_file(&path), Some(state));
+        assert_eq!(read_state_file(&path).expect("read state"), Some(state));
         write_state_file(&path, None).expect("clear state");
-        assert!(read_state_file(&path).is_none());
+        assert!(read_state_file(&path).expect("read cleared state").is_none());
         // Clearing an already-absent file is not an error (idempotent disable).
         write_state_file(&path, None).expect("clear again");
     }
 
     #[test]
-    fn a_corrupt_or_off_state_file_reads_as_off_rather_than_erroring() {
+    fn a_corrupt_or_explicit_off_state_file_fails_closed() {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join(SYNC_ENCRYPTION_STATE_FILE_NAME);
         std::fs::write(&path, b"not json").expect("write");
-        assert!(read_state_file(&path).is_none());
+        assert!(read_state_file(&path)
+            .expect_err("corrupt state must fail")
+            .contains(SYNC_ENCRYPTION_TERMINAL));
         std::fs::write(&path, br#"{"state":"off"}"#).expect("write");
-        assert!(read_state_file(&path).is_none());
+        assert!(read_state_file(&path)
+            .expect_err("explicit off must fail")
+            .contains(SYNC_ENCRYPTION_TERMINAL));
+    }
+
+    #[test]
+    fn an_unreadable_state_path_fails_closed() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(SYNC_ENCRYPTION_STATE_FILE_NAME);
+        std::fs::create_dir(&path).expect("state path directory");
+
+        assert!(read_state_file(&path)
+            .expect_err("unreadable state must fail")
+            .contains(SYNC_ENCRYPTION_TERMINAL));
     }
 
     #[test]
