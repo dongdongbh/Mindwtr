@@ -223,6 +223,7 @@ export const jaOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': '買い物リストにしますか？',
         'taskEdit.openChecklistMode': 'チェックリストモードで開く',
         'taskEdit.addItem': '項目を追加',
+        'taskEdit.noChecklistItems': 'チェックリストに項目がありません',
         'taskEdit.resetChecklist': 'チェックリストをリセット',
         'task.convertToReference': '資料に変換',
         'task.createProjectFromTask': 'このタスクからプロジェクトを作成',

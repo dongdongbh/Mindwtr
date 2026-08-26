@@ -241,6 +241,7 @@ export const zhHans: Record<string, string> = {
         'taskEdit.shoppingListPrompt': '购物清单？',
         'taskEdit.openChecklistMode': '打开清单模式',
         'taskEdit.addItem': '添加项目',
+        'taskEdit.noChecklistItems': '检查清单中没有项目',
         'taskEdit.resetChecklist': '重置清单',
         'task.convertToReference': '转换为参考资料',
         'task.createProjectFromTask': '从任务创建项目',

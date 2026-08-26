@@ -213,6 +213,7 @@ export const en: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'Shopping list?',
         'taskEdit.openChecklistMode': 'Open Checklist Mode',
         'taskEdit.addItem': 'Add Item',
+        'taskEdit.noChecklistItems': 'No checklist items',
         'taskEdit.resetChecklist': 'Reset checklist',
         'task.convertToReference': 'Convert to Reference',
         'task.createProjectFromTask': 'Create project from task',

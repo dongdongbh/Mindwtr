@@ -267,6 +267,7 @@ export const csOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'Nákupní seznam?',
         'taskEdit.openChecklistMode': 'Otevřít režim checklistu',
         'taskEdit.addItem': 'Přidat položku',
+        'taskEdit.noChecklistItems': 'Žádné položky v kontrolním seznamu',
         'taskEdit.resetChecklist': 'Resetovat checklist',
         'task.convertToReference': 'Převést na referenční materiál',
         'task.createProjectFromTask': 'Vytvořit projekt z úkolu',

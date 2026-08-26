@@ -175,6 +175,7 @@ export const ptOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'Lista de compras?',
         'taskEdit.openChecklistMode': 'Abrir modo de lista de verificação',
         'taskEdit.addItem': 'Adicionar item',
+        'taskEdit.noChecklistItems': 'Nenhum item na lista de verificação',
         'taskEdit.resetChecklist': 'Redefinir lista de verificação',
         'task.convertToReference': 'Converter em referência',
         'task.createProjectFromTask': 'Criar projeto a partir da tarefa',

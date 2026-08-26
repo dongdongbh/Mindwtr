@@ -201,6 +201,7 @@ export const deOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'Einkaufsliste?',
         'taskEdit.openChecklistMode': 'Checklisten-Modus öffnen?',
         'taskEdit.addItem': 'Element hinzufügen',
+        'taskEdit.noChecklistItems': 'Keine Einträge in der Checkliste',
         'taskEdit.resetChecklist': 'Checkliste zurücksetzen',
         'task.convertToReference': 'In eine Referenz umwandeln',
         'task.createProjectFromTask': 'Projekt aus Aufgabe erstellen',

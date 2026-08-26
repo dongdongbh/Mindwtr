@@ -241,6 +241,7 @@ export const zhHant: Record<string, string> = {
         'taskEdit.shoppingListPrompt': '購物清單？',
         'taskEdit.openChecklistMode': '打開清單模式',
         'taskEdit.addItem': '添加項目',
+        'taskEdit.noChecklistItems': '檢查清單中沒有項目',
         'taskEdit.resetChecklist': '重置清單',
         'task.convertToReference': '轉換爲參考資料',
         'task.createProjectFromTask': '從任務建立專案',

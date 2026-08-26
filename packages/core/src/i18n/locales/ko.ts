@@ -270,6 +270,7 @@ export const koOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': '쇼핑 목록인가요?',
         'taskEdit.openChecklistMode': '체크리스트 모드 열기',
         'taskEdit.addItem': '항목 추가',
+        'taskEdit.noChecklistItems': '체크리스트 항목이 없습니다',
         'taskEdit.resetChecklist': '체크리스트 재설정',
         'task.convertToReference': '참조로 변환',
         'task.createProjectFromTask': '할 일에서 프로젝트 만들기',

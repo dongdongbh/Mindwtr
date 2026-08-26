@@ -167,6 +167,7 @@ export const arOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'قائمة التسوق؟',
         'taskEdit.openChecklistMode': 'افتح وضع قائمة التحقق',
         'taskEdit.addItem': 'إضافة عنصر',
+        'taskEdit.noChecklistItems': 'لا توجد عناصر في قائمة التحقق',
         'taskEdit.resetChecklist': 'إعادة تعيين قائمة التحقق',
         'task.convertToReference': 'تحويل إلى مرجع',
         'task.createProjectFromTask': 'إنشاء مشروع من المهمة',

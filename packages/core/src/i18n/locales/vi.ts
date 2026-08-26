@@ -266,6 +266,7 @@ export const viOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'Danh sách mua sắm?',
         'taskEdit.openChecklistMode': 'Mở chế độ danh sách kiểm tra',
         'taskEdit.addItem': 'Thêm mục',
+        'taskEdit.noChecklistItems': 'Không có mục nào trong danh sách kiểm tra',
         'taskEdit.resetChecklist': 'Đặt lại danh sách kiểm tra',
         'task.convertToReference': 'Chuyển thành tham khảo',
         'task.createProjectFromTask': 'Tạo dự án từ tác vụ',

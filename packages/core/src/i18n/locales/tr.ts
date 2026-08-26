@@ -181,6 +181,7 @@ export const trOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'Alışveriş listesi?',
         'taskEdit.openChecklistMode': 'Kontrol Listesi Modunu Aç',
         'taskEdit.addItem': 'Öğe Ekle',
+        'taskEdit.noChecklistItems': 'Kontrol listesinde öğe yok',
         'taskEdit.resetChecklist': 'Kontrol listesini sıfırla',
         'task.convertToReference': 'Referansa Dönüştür',
         'task.createProjectFromTask': 'Görevden proje oluştur',

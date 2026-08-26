@@ -179,6 +179,7 @@ export const plOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'Lista zakupów?',
         'taskEdit.openChecklistMode': 'Otwórz tryb listy kontrolnej',
         'taskEdit.addItem': 'Dodaj element',
+        'taskEdit.noChecklistItems': 'Brak elementów listy kontrolnej',
         'taskEdit.resetChecklist': 'Zresetuj listę kontrolną',
         'task.convertToReference': 'Przenieś do Referencji',
         'task.createProjectFromTask': 'Utwórz projekt z zadania',

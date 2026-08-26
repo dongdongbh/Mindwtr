@@ -215,6 +215,7 @@ export const itOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'Lista della spesa?',
         'taskEdit.openChecklistMode': 'Apri modalità checklist',
         'taskEdit.addItem': 'Aggiungi elemento',
+        'taskEdit.noChecklistItems': 'Nessun elemento nella lista',
         'taskEdit.resetChecklist': 'Reimposta checklist',
         'task.convertToReference': 'Salva come riferimento',
         'task.createProjectFromTask': 'Crea progetto da attività',

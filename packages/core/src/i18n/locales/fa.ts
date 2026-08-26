@@ -202,6 +202,7 @@ export const faOverrides: Record<string, string> = {
         'taskEdit.shoppingListPrompt': 'فهرست خرید؟',
         'taskEdit.openChecklistMode': 'باز کردن حالت چک‌لیست',
         'taskEdit.addItem': 'افزودن مورد',
+        'taskEdit.noChecklistItems': 'هیچ موردی در چک‌لیست نیست',
         'taskEdit.resetChecklist': 'بازنشانی چک‌لیست',
         'task.convertToReference': 'تبدیل به مرجع',
         'task.createProjectFromTask': 'ایجاد پروژه از کار',

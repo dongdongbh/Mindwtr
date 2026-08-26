@@ -1,6 +1,7 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const nlOverrides: Record<string, string> = {
         'taskEdit.quickAddTokenHint': 'Snel toevoegen: {{token}}',
+        'taskEdit.noChecklistItems': 'Geen items in de checklist',
         'app.name': 'Mindwtr',
         'donationPrompt.title': "Houd Mindwtr gratis en onafhankelijk",
         'donationPrompt.body': "Mindwtr heeft geen advertenties, tracking of betaalmuren. Het wordt gebouwd door één persoon en gesteund door mensen die het nuttig vinden. Als het je helpt helder te blijven, helpt een kleine donatie om het te blijven verbeteren.",
