@@ -10,6 +10,7 @@ import {
     expandCalendarRecurringTaskSetInRange,
     createProjectedRecurringTask,
     formatRecurrenceLabel,
+    getRecurrenceRRuleValue,
     getProjectedRecurringTaskCalendarDate,
     getProjectedRecurringTaskId,
     getRecurringTaskPreviewDate,
@@ -159,6 +160,35 @@ describe('recurrence', () => {
         const parsed = parseRRuleString(rrule);
         expect(parsed.rule).toBe('yearly');
         expect(parsed.interval).toBe(2);
+    });
+
+    describe('getRecurrenceRRuleValue', () => {
+        it('returns no rule for absent and legacy string recurrence values', () => {
+            expect(getRecurrenceRRuleValue(undefined)).toBe('');
+            expect(getRecurrenceRRuleValue('daily')).toBe('');
+        });
+
+        it('preserves an existing RRULE verbatim', () => {
+            expect(getRecurrenceRRuleValue({
+                rule: 'weekly',
+                byDay: ['MO'],
+                rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=WE;X-CUSTOM=value',
+            })).toBe('FREQ=WEEKLY;INTERVAL=2;BYDAY=WE;X-CUSTOM=value');
+        });
+
+        it('serializes recurrence metadata through the canonical RRULE builder', () => {
+            expect(getRecurrenceRRuleValue({ rule: 'daily' })).toBe('FREQ=DAILY');
+            expect(getRecurrenceRRuleValue({
+                rule: 'weekly',
+                byDay: ['WE', 'MO'],
+                count: 5,
+                until: '2026-09-30',
+            })).toBe('FREQ=WEEKLY;BYDAY=MO,WE;COUNT=5;UNTIL=20260930');
+            expect(getRecurrenceRRuleValue({
+                rule: 'monthly',
+                byMonthDay: [15, -1],
+            })).toBe('FREQ=MONTHLY;BYMONTHDAY=-1,15');
+        });
     });
 
     it('normalizes legacy recurrence values to object form', () => {

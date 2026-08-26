@@ -5,16 +5,14 @@ import {
     RecurrenceRule,
     type RecurrenceStrategy,
     type RecurrenceWeekday,
-    buildRRuleString,
-    getRecurrenceCountValue,
-    getRecurrenceUntilValue,
+    getRecurrenceRRuleValue,
     parseRRuleString,
     WEEKDAY_ORDER,
 } from '@mindwtr/core';
 
 export const MAX_SUGGESTED_TAGS = 8;
 export const MAX_VISIBLE_SUGGESTIONS = 4;
-export { WEEKDAY_ORDER };
+export { getRecurrenceRRuleValue, WEEKDAY_ORDER };
 
 export const getRecurrenceRuleValue = (recurrence: Task['recurrence']): RecurrenceRule | '' => {
     if (!recurrence) return '';
@@ -74,18 +72,4 @@ export const getRecurrenceByDayValue = (recurrence: Task['recurrence']): Recurre
         return (parsed.byDay || []).filter((day) => WEEKDAY_ORDER.includes(day as RecurrenceWeekday)) as RecurrenceWeekday[];
     }
     return [];
-};
-
-export const getRecurrenceRRuleValue = (recurrence: Task['recurrence']): string => {
-    if (!recurrence || typeof recurrence === 'string') return '';
-    const count = getRecurrenceCountValue(recurrence);
-    const until = getRecurrenceUntilValue(recurrence);
-    if (recurrence.rrule) return recurrence.rrule;
-    if (recurrence.byDay?.length) {
-        return buildRRuleString(recurrence.rule, recurrence.byDay, undefined, { count, until });
-    }
-    if (recurrence.byMonthDay?.length) {
-        return buildRRuleString(recurrence.rule, undefined, undefined, { byMonthDay: recurrence.byMonthDay, count, until });
-    }
-    return buildRRuleString(recurrence.rule, undefined, undefined, { count, until });
 };

@@ -5,10 +5,8 @@ import {
     safeParseDate,
 } from './date';
 import {
-    buildRRuleString,
     getRecurrenceCompletedOccurrencesValue,
-    getRecurrenceCountValue,
-    getRecurrenceUntilValue,
+    getRecurrenceRRuleValue,
     parseRRuleString,
 } from './recurrence';
 import type {
@@ -101,20 +99,7 @@ export function getTaskDraftRecurrenceStrategyValue(recurrence: Task['recurrence
     return 'strict';
 }
 
-export function getTaskDraftRecurrenceRRuleValue(recurrence: Task['recurrence']): string {
-    if (!recurrence || typeof recurrence === 'string') return '';
-    const rec = recurrence as Recurrence;
-    if (rec.rrule) return rec.rrule;
-    const count = getRecurrenceCountValue(recurrence);
-    const until = getRecurrenceUntilValue(recurrence);
-    if (rec.byDay && rec.byDay.length > 0) {
-        return buildRRuleString(rec.rule, rec.byDay, undefined, { count, until });
-    }
-    if (rec.byMonthDay && rec.byMonthDay.length > 0) {
-        return buildRRuleString(rec.rule, undefined, undefined, { byMonthDay: rec.byMonthDay, count, until });
-    }
-    return rec.rule ? buildRRuleString(rec.rule, undefined, undefined, { count, until }) : '';
-}
+export const getTaskDraftRecurrenceRRuleValue = getRecurrenceRRuleValue;
 
 const TASK_DRAFT_FIELDS: { [K in TaskDraftField]: FieldSpec<K> } = {
     title: { fromTask: (task) => task.title },

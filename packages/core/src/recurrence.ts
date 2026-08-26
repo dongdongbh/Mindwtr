@@ -355,6 +355,30 @@ export function buildRRuleString(
     return parts.join(';');
 }
 
+/**
+ * Returns the RRULE used by task editors for an existing recurrence value.
+ * Stored RRULE text stays authoritative so extensions and interval metadata
+ * that are not represented as top-level fields survive an edit unchanged.
+ */
+export function getRecurrenceRRuleValue(value: Task['recurrence']): string {
+    if (!value || typeof value === 'string' || !value.rule) return '';
+    if (value.rrule) return value.rrule;
+
+    const count = getRecurrenceCountValue(value);
+    const until = getRecurrenceUntilValue(value);
+    if (value.byDay?.length) {
+        return buildRRuleString(value.rule, value.byDay, undefined, { count, until });
+    }
+    if (value.byMonthDay?.length) {
+        return buildRRuleString(value.rule, undefined, undefined, {
+            byMonthDay: value.byMonthDay,
+            count,
+            until,
+        });
+    }
+    return buildRRuleString(value.rule, undefined, undefined, { count, until });
+}
+
 export function hasRecurrenceRule(value: Task['recurrence']): boolean {
     return getRecurrenceRule(value) !== null;
 }

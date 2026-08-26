@@ -400,6 +400,7 @@
     "getRecentTaskTokens",
     "getRecurrenceCompletedOccurrencesValue",
     "getRecurrenceCountValue",
+    "getRecurrenceRRuleValue",
     "getRecurrenceUntilValue",
     "getRecurringTaskPreviewDate",
     "getReferenceTaskFieldClears",
