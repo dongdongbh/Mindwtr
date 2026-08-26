@@ -22,6 +22,7 @@ import { Paths } from 'expo-file-system';
 
 import { ensureAttachmentAvailable, persistAttachmentLocally } from '../../lib/attachment-sync';
 import { loadAIKey } from '../../lib/ai-config';
+import { tryOpenWithAndroidViewer } from '../../lib/open-file-externally';
 import { ensureWhisperModelPathForConfigAsync, processAudioCapture, resolveSpeechToTextRuntimeSettings } from '../../lib/speech-to-text';
 import { normalizeAudioUri } from '../../lib/speech-to-text.helpers';
 import {
@@ -546,6 +547,9 @@ export function useTaskEditAttachments({
             setImagePreviewAttachment(resolved);
             return;
         }
+        // Android: a real ACTION_VIEW open first — the share sheet below only
+        // reaches send/save targets, so a PDF "open" only offered saving it.
+        if (await tryOpenWithAndroidViewer(resolved.uri, resolved.mimeType)) return;
         const available = await Sharing.isAvailableAsync().catch((error) => {
             logTaskWarn('[Sharing] availability check failed', error);
             return false;

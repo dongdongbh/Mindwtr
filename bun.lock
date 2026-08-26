@@ -76,14 +76,14 @@
     },
     "apps/cloud": {
       "name": "mindwtr-cloud",
-      "version": "1.2.1",
+      "version": "1.2.5",
       "dependencies": {
         "@mindwtr/core": "workspace:*",
       },
     },
     "apps/desktop": {
       "name": "mindwtr",
-      "version": "1.2.1",
+      "version": "1.2.5",
       "dependencies": {
         "@dnd-kit/core": "^6.1.0",
         "@dnd-kit/sortable": "^8.0.0",
@@ -149,7 +149,7 @@
     },
     "apps/mobile": {
       "name": "mobile",
-      "version": "1.2.1",
+      "version": "1.2.5",
       "dependencies": {
         "@babel/runtime": "^7.28.4",
         "@expo/metro-runtime": "^6.1.2",
@@ -181,6 +181,7 @@
         "expo-haptics": "~15.0.8",
         "expo-image": "~3.0.11",
         "expo-image-picker": "~17.0.11",
+        "expo-intent-launcher": "~13.0.8",
         "expo-linking": "~8.0.12",
         "expo-local-authentication": "~17.0.9",
         "expo-network": "~8.0.8",
@@ -237,7 +238,7 @@
     },
     "packages/core": {
       "name": "@mindwtr/core",
-      "version": "1.2.1",
+      "version": "1.2.5",
       "dependencies": {
         "@babel/runtime": "^7.28.4",
         "@noble/hashes": "^2.3.0",
@@ -1534,6 +1535,8 @@
     "expo-image-loader": ["expo-image-loader@6.0.0", "", { "peerDependencies": { "expo": "*" } }, "sha512-nKs/xnOGw6ACb4g26xceBD57FKLFkSwEUTDXEDF3Gtcu3MqF3ZIYd3YM+sSb1/z9AKV1dYT7rMSGVNgsveXLIQ=="],
 
     "expo-image-picker": ["expo-image-picker@17.0.11", "", { "dependencies": { "expo-image-loader": "~6.0.0" }, "peerDependencies": { "expo": "*" } }, "sha512-/apkoyukDvsCHHb9fzP+F34A1uQqSzUtYH/2P/xJACNEwq+mwEXjXvVU8bzlJq6ih0Qo1+tpVivIa7B9kYSwOQ=="],
+
+    "expo-intent-launcher": ["expo-intent-launcher@13.0.8", "", { "peerDependencies": { "expo": "*" } }, "sha512-sgGFotttKKN6dIatjOEJT8M6Arfakus7vIxgshg5VkxarVhZBGJzOJam7rbUlB1O/gQ8em9G8vhEU9AfjEIe7A=="],
 
     "expo-json-utils": ["expo-json-utils@0.15.0", "", {}, "sha512-duRT6oGl80IDzH2LD2yEFWNwGIC2WkozsB6HF3cDYNoNNdUvFk6uN3YiwsTsqVM/D0z6LEAQ01/SlYvN+Fw0JQ=="],
 

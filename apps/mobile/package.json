@@ -46,6 +46,7 @@
     "expo-haptics": "~15.0.8",
     "expo-image": "~3.0.11",
     "expo-image-picker": "~17.0.11",
+    "expo-intent-launcher": "~13.0.8",
     "expo-linking": "~8.0.12",
     "expo-local-authentication": "~17.0.9",
     "expo-network": "~8.0.8",

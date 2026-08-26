@@ -122,6 +122,12 @@ export const cacheDirectory = resolveDirectoryUri(
   LegacyFileSystem.cacheDirectory ?? null
 );
 
+/** Android-only: converts a file:// URI to a granted content:// URI so other
+ *  apps (attachment viewers) can read it. Legacy API — the modern File class
+ *  has no equivalent yet. */
+export const getContentUriAsync = async (uri: string): Promise<string> =>
+  LegacyFileSystem.getContentUriAsync(uri);
+
 export const getInfoAsync = async (uri: string, options: InfoOptions = {}): Promise<FileInfoLike> =>
   withLegacyFallback(
     canUseModernApi() ? () => toLegacyInfo(uri, options) : null,

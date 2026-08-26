@@ -14,6 +14,7 @@ import * as Sharing from 'expo-sharing';
 import { resolveAttachmentValidationMessage } from './projects-screen.utils';
 import { ensureAttachmentAvailable, persistAttachmentLocally } from '../../lib/attachment-sync';
 import { logWarn } from '../../lib/app-log';
+import { tryOpenWithAndroidViewer } from '../../lib/open-file-externally';
 
 type UseProjectAttachmentsParams = {
   selectedProject: Project | null;
@@ -97,6 +98,9 @@ export function useProjectAttachments({
       return;
     }
 
+    // Android: a real ACTION_VIEW open first — the share sheet below only
+    // reaches send/save targets, so a PDF "open" only offered saving it.
+    if (await tryOpenWithAndroidViewer(resolved.uri, resolved.mimeType)) return;
     const available = await Sharing.isAvailableAsync().catch((error) => {
       void logWarn('[Sharing] availability check failed', {
         scope: 'project',
