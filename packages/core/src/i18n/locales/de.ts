@@ -1564,5 +1564,7 @@ export const deOverrides: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "{{count}} Datumswerte konnten nicht zugeordnet werden und wurden ausgelassen.",
         'settings.importDiagnostics.unmappedStatus': "{{count}} Statuswerte konnten nicht zugeordnet werden; ein sicherer Standard wurde verwendet.",
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} nicht unterstützte Wiederholungsregeln wurden als Notizen beibehalten.",
+        'settings.syncRemoteBusy': 'Ein anderes kompatibles Mindwtr-Gerät aktualisiert gerade diesen Synchronisierungsort. Warten Sie, bis es fertig ist, und synchronisieren Sie dann erneut.',
+        'settings.syncRemoteCleanupDeferred': 'Der Synchronisierungsvorgang wurde abgeschlossen. Mindwtr konnte die temporäre Synchronisierungssperre nicht entfernen, sie läuft jedoch automatisch ab. Es ist kein erneuter Versuch erforderlich.',
         'settings.syncEncryptionCleanupDeferred': 'Die Verschlüsselung wurde aktualisiert. Mindwtr konnte die temporäre Synchronisierungssperre nicht entfernen, sie läuft jedoch automatisch ab. Es ist kein erneuter Versuch erforderlich.',
 };

@@ -542,8 +542,18 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
             }
             if (result.skipped === 'requeued') {
                 showToast(tFallback(t, 'settings.syncRetryQueued', 'Local changes arrived during sync. Retry queued.'), 'info');
-            } else if (result.remoteFenceDeferred) {
-                showToast(tFallback(t, 'settings.syncRetryQueued', 'Local changes arrived during sync. Retry queued.'), 'info');
+            } else if (result.success && result.remoteFenceDeferred === 'busy') {
+                showToast(tFallback(
+                    t,
+                    'settings.syncRemoteBusy',
+                    'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
+                ), 'info', 6000);
+            } else if (result.success && result.remoteFenceDeferred === 'cleanup') {
+                showToast(tFallback(
+                    t,
+                    'settings.syncRemoteCleanupDeferred',
+                    'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
+                ), 'info', 6000);
             } else if (result.success && result.remoteWriteDeferred) {
                 showToast(result.error || settings?.lastSyncError || tFallback(t, 'settings.lastSyncError', 'Sync failed'), 'error');
             } else if (result.success) {

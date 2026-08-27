@@ -1473,5 +1473,7 @@ export const ruOverrides: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "Не удалось сопоставить значений даты: {{count}}. Они опущены.",
         'settings.importDiagnostics.unmappedStatus': "Не удалось сопоставить значений статуса: {{count}}. Использовано безопасное значение.",
         'settings.importDiagnostics.unsupportedRecurrence': "Неподдерживаемых правил повтора сохранено в заметках: {{count}}.",
+        'settings.syncRemoteBusy': 'Другое совместимое устройство Mindwtr обновляет это расположение синхронизации. Дождитесь завершения и запустите синхронизацию снова.',
+        'settings.syncRemoteCleanupDeferred': 'Операция синхронизации завершена. Mindwtr не удалось снять временную блокировку синхронизации, но она истечёт автоматически. Повторять действие не нужно.',
         'settings.syncEncryptionCleanupDeferred': 'Шифрование обновлено. Mindwtr не удалось снять временную блокировку синхронизации, но она истечёт автоматически. Повторять действие не нужно.',
 };

@@ -946,11 +946,24 @@ export const useSyncSettings = ({
     const handleSync = useCallback(async () => {
         const activationGeneration = syncConfigurationGeneration.current;
         const activationCredentialHandle = dropboxCredentialHandleRef.current;
+        let activationCleanupDeferred = false;
         const resolveCapturedCredential = async () => {
             if (!activationCredentialHandle) return;
             await discardDropboxCredential(activationCredentialHandle, {
                 refreshDurableConnection: true,
             });
+        };
+        const showRemoteFenceFeedback = (deferred: 'busy' | 'cleanup') => {
+            const message = deferred === 'busy'
+                ? resolveText(
+                    'settings.syncRemoteBusy',
+                    'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
+                )
+                : resolveText(
+                    'settings.syncRemoteCleanupDeferred',
+                    'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
+                );
+            showToast(message, 'info', 6000);
         };
         addBreadcrumb('sync:manual');
         try {
@@ -1052,6 +1065,16 @@ export const useSyncSettings = ({
                     ), 'info');
                     return;
                 }
+                if (probeResult.success && probeResult.remoteFenceDeferred === 'busy') {
+                    if (configOverride.dropboxCredentialHandle) {
+                        await resolveCapturedCredential();
+                    }
+                    showRemoteFenceFeedback('busy');
+                    return;
+                }
+                const probeCleanupDeferred = probeResult.success
+                    && probeResult.remoteFenceDeferred === 'cleanup';
+                activationCleanupDeferred = probeCleanupDeferred;
                 if (
                     !probeResult.success
                     && classifySyncEncryptionFailure(probeResult.error) === 'remote-encrypted-no-key'
@@ -1083,7 +1106,7 @@ export const useSyncSettings = ({
                 if (
                     !probeResult.success
                     || probeResult.remoteWriteDeferred
-                    || probeResult.remoteFenceDeferred
+                    || (probeResult.remoteFenceDeferred && !probeCleanupDeferred)
                     || probeResult.skipped === 'offline'
                     || probeResult.skipped === 'pendingRemoteWriteBackoff'
                 ) {
@@ -1126,13 +1149,18 @@ export const useSyncSettings = ({
                     'settings.syncQueuedBody',
                     'Local changes arrived during sync. A retry was queued automatically.',
                 ), 'info');
+            } else if (result.success && result.remoteFenceDeferred) {
+                showRemoteFenceFeedback(activationCleanupDeferred ? 'cleanup' : result.remoteFenceDeferred);
             } else if (
                 result.success
                 && !result.remoteWriteDeferred
-                && !result.remoteFenceDeferred
                 && result.skipped !== 'offline'
                 && result.skipped !== 'pendingRemoteWriteBackoff'
             ) {
+                if (activationCleanupDeferred) {
+                    showRemoteFenceFeedback('cleanup');
+                    return;
+                }
                 const mergeSummary = summarizeMergeStats(result.stats);
                 const maxClockSkewMs = mergeSummary.maxClockSkewMs;
                 const timestampAdjustments = mergeSummary.timestampAdjustments;

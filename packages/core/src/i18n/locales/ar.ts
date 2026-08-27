@@ -1501,5 +1501,7 @@ export const arOverrides: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "تعذر تعيين {{count}} من قيم التاريخ وتم حذفها.",
         'settings.importDiagnostics.unmappedStatus': "تعذر تعيين {{count}} من قيم الحالة، فاستُخدمت قيمة افتراضية آمنة.",
         'settings.importDiagnostics.unsupportedRecurrence': "تم الاحتفاظ بـ {{count}} من قواعد التكرار غير المدعومة كملاحظات.",
+        'settings.syncRemoteBusy': 'يقوم جهاز Mindwtr متوافق آخر بتحديث موقع المزامنة هذا. انتظر حتى ينتهي، ثم قم بالمزامنة مرة أخرى.',
+        'settings.syncRemoteCleanupDeferred': 'اكتملت عملية المزامنة. تعذّر على Mindwtr إزالة قفل المزامنة المؤقت، لكنه سينتهي تلقائيًا. لا حاجة إلى إعادة المحاولة.',
         'settings.syncEncryptionCleanupDeferred': 'تم تحديث التشفير. تعذّر على Mindwtr إزالة قفل المزامنة المؤقت، لكنه سينتهي تلقائيًا. لا حاجة إلى إعادة المحاولة.',
 };

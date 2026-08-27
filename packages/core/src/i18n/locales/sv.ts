@@ -2447,5 +2447,7 @@ export const svOverrides: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "{{count}} datumvärden kunde inte mappas och utelämnades.",
         'settings.importDiagnostics.unmappedStatus': "{{count}} statusvärden kunde inte mappas; ett säkert standardvärde användes.",
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} upprepningsregler som inte stöds sparades som anteckningar.",
+        'settings.syncRemoteBusy': 'En annan kompatibel Mindwtr-enhet uppdaterar den här synkroniseringsplatsen. Vänta tills den är klar och synkronisera sedan igen.',
+        'settings.syncRemoteCleanupDeferred': 'Synkroniseringen slutfördes. Mindwtr kunde inte ta bort det tillfälliga synkroniseringslåset, men det upphör automatiskt. Du behöver inte försöka igen.',
         'settings.syncEncryptionCleanupDeferred': 'Krypteringen uppdaterades. Mindwtr kunde inte ta bort det tillfälliga synkroniseringslåset, men det upphör automatiskt. Du behöver inte försöka igen.',
 };

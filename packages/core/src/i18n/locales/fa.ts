@@ -2448,5 +2448,7 @@ export const faOverrides: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "{{count}} مقدار تاریخ قابل تبدیل نبود و حذف شد.",
         'settings.importDiagnostics.unmappedStatus': "{{count}} مقدار وضعیت قابل تبدیل نبود و مقدار پیش‌فرض امن استفاده شد.",
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} قانون تکرار پشتیبانی‌نشده به‌صورت یادداشت نگه داشته شد.",
+        'settings.syncRemoteBusy': 'یک دستگاه سازگار دیگرِ Mindwtr در حال به‌روزرسانی این مکان همگام‌سازی است. صبر کنید تا کارش تمام شود، سپس دوباره همگام‌سازی کنید.',
+        'settings.syncRemoteCleanupDeferred': 'عملیات همگام‌سازی کامل شد. Mindwtr نتوانست قفل موقت همگام‌سازی را حذف کند، اما این قفل خودکار منقضی می‌شود. نیازی به تلاش دوباره نیست.',
         'settings.syncEncryptionCleanupDeferred': 'رمزگذاری به‌روزرسانی شد. Mindwtr نتوانست قفل موقت همگام‌سازی را حذف کند، اما این قفل خودکار منقضی می‌شود. نیازی به تلاش دوباره نیست.',
 };

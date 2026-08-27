@@ -652,6 +652,16 @@ export function useSyncSettingsTransportActions({
     const handleSync = useCallback(async (options?: SyncActionOptions) => {
         addBreadcrumb('sync:manual');
         setIsSyncing(true);
+        let activationCleanupDeferred = false;
+        const showRemoteFenceFeedback = (deferred: 'busy' | 'cleanup') => {
+            showSettingsWarning(
+                tr('common.notice'),
+                tr(deferred === 'busy'
+                    ? 'settings.syncRemoteBusy'
+                    : 'settings.syncRemoteCleanupDeferred'),
+                6000,
+            );
+        };
         try {
             const previousLastSyncStatus = lastSyncStatus;
             const previousLastSyncStats = lastSyncStats ?? null;
@@ -800,10 +810,17 @@ export function useSyncSettingsTransportActions({
                     );
                     return;
                 }
+                if (probeResult.success && probeResult.remoteFenceDeferred === 'busy') {
+                    showRemoteFenceFeedback('busy');
+                    return;
+                }
+                const probeCleanupDeferred = probeResult.success
+                    && probeResult.remoteFenceDeferred === 'cleanup';
+                activationCleanupDeferred = probeCleanupDeferred;
                 if (
                     !probeResult.success
                     || probeResult.remoteWriteDeferred
-                    || probeResult.remoteFenceDeferred
+                    || (probeResult.remoteFenceDeferred && !probeCleanupDeferred)
                     || probeResult.skipped === 'pendingRemoteWriteBackoff'
                 ) {
                     // An encrypted remote is transport PROOF, not a failed probe: the
@@ -854,12 +871,19 @@ export function useSyncSettingsTransportActions({
                 });
                 return;
             }
+            if (result.success && result.remoteFenceDeferred) {
+                showRemoteFenceFeedback(activationCleanupDeferred ? 'cleanup' : result.remoteFenceDeferred);
+                return;
+            }
             if (
                 result.success
                 && !result.remoteWriteDeferred
-                && !result.remoteFenceDeferred
                 && result.skipped !== 'pendingRemoteWriteBackoff'
             ) {
+                if (activationCleanupDeferred) {
+                    showRemoteFenceFeedback('cleanup');
+                    return;
+                }
                 const conflictCount = getSyncConflictCount(result.stats);
                 const maxResultClockSkewMs = getSyncMaxClockSkewMs(result.stats);
                 const resultTimestampAdjustments = getSyncTimestampAdjustments(result.stats);

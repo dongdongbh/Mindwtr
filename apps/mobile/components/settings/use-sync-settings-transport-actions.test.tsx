@@ -546,6 +546,76 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.syncMobileBackgroundSyncRegistration).not.toHaveBeenCalled();
     });
 
+    it('waits without activating when a compatible peer owns the candidate sync location', async () => {
+        mocked.performMobileSync.mockResolvedValueOnce({
+            success: true,
+            skipped: 'remoteFenceBusy',
+            remoteFenceDeferred: 'busy',
+            retryAfterMs: 30_000,
+        });
+        await renderHarness();
+        mocked.asyncStorage.multiSet.mockClear();
+        mocked.asyncStorage.setItem.mockClear();
+
+        await act(async () => {
+            await latestHookResult?.handleSync({
+                backend: 'webdav',
+                webdav: {
+                    allowInsecureHttp: false,
+                    password: 'new-secret',
+                    url: 'https://dav.example.com/mindwtr/',
+                    username: 'alice',
+                },
+            });
+        });
+
+        expect(mocked.asyncStorage.setItem).not.toHaveBeenCalledWith(SYNC_BACKEND_KEY, 'webdav');
+        expect(mocked.asyncStorage.multiSet).not.toHaveBeenCalled();
+        expect(mocked.showSettingsWarning).toHaveBeenCalledWith(
+            'common.notice',
+            'settings.syncRemoteBusy',
+            6000,
+        );
+        expect(mocked.showSettingsErrorToast).not.toHaveBeenCalled();
+    });
+
+    it('commits a cleanup-deferred activation and reports completed cleanup instead of failure', async () => {
+        mocked.performMobileSync
+            .mockResolvedValueOnce({
+                success: true,
+                remoteFenceDeferred: 'cleanup',
+                retryAfterMs: 30_000,
+            })
+            .mockResolvedValueOnce({
+                success: true,
+                skipped: 'remoteFenceBusy',
+                remoteFenceDeferred: 'busy',
+                retryAfterMs: 30_000,
+            });
+        await renderHarness();
+
+        await act(async () => {
+            await latestHookResult?.handleSync({
+                backend: 'webdav',
+                webdav: {
+                    allowInsecureHttp: false,
+                    password: 'new-secret',
+                    url: 'https://dav.example.com/mindwtr/',
+                    username: 'alice',
+                },
+            });
+        });
+
+        expect(mocked.asyncStorage.setItem).toHaveBeenLastCalledWith(SYNC_BACKEND_KEY, 'webdav');
+        expect(mocked.performMobileSync).toHaveBeenCalledTimes(2);
+        expect(mocked.showSettingsWarning).toHaveBeenCalledWith(
+            'common.notice',
+            'settings.syncRemoteCleanupDeferred',
+            6000,
+        );
+        expect(mocked.showSettingsErrorToast).not.toHaveBeenCalled();
+    });
+
     it('passes WebDAV credentials transiently, then commits and refreshes background sync after success', async () => {
         await renderHarness();
         mocked.asyncStorage.multiSet.mockClear();

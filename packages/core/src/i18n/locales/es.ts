@@ -1417,5 +1417,7 @@ export const esOverrides: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "No se pudieron asignar {{count}} valores de fecha y se omitieron.",
         'settings.importDiagnostics.unmappedStatus': "No se pudieron asignar {{count}} valores de estado; se usó un valor seguro.",
         'settings.importDiagnostics.unsupportedRecurrence': "Se conservaron como notas {{count}} reglas de repetición no compatibles.",
+        'settings.syncRemoteBusy': 'Otro dispositivo compatible con Mindwtr está actualizando esta ubicación de sincronización. Espera a que termine y vuelve a sincronizar.',
+        'settings.syncRemoteCleanupDeferred': 'La operación de sincronización se completó. Mindwtr no pudo eliminar el bloqueo temporal de sincronización, pero caducará automáticamente. No es necesario volver a intentarlo.',
         'settings.syncEncryptionCleanupDeferred': 'El cifrado se actualizó. Mindwtr no pudo eliminar el bloqueo temporal de sincronización, pero caducará automáticamente. No es necesario volver a intentarlo.',
 };

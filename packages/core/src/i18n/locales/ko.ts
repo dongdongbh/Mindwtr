@@ -2351,5 +2351,7 @@ export const koOverrides: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "날짜 값 {{count}}개를 변환할 수 없어 생략했습니다.",
         'settings.importDiagnostics.unmappedStatus': "상태 값 {{count}}개를 변환할 수 없어 안전한 기본값을 사용했습니다.",
         'settings.importDiagnostics.unsupportedRecurrence': "지원하지 않는 반복 규칙 {{count}}개를 메모로 보존했습니다.",
+        'settings.syncRemoteBusy': '호환되는 다른 Mindwtr 기기가 이 동기화 위치를 업데이트하고 있습니다. 완료될 때까지 기다린 후 다시 동기화하세요.',
+        'settings.syncRemoteCleanupDeferred': '동기화 작업이 완료되었습니다. Mindwtr가 임시 동기화 잠금을 제거하지 못했지만 잠금은 자동으로 만료됩니다. 다시 시도할 필요가 없습니다.',
         'settings.syncEncryptionCleanupDeferred': '암호화가 업데이트되었습니다. Mindwtr가 임시 동기화 잠금을 제거하지 못했지만 잠금은 자동으로 만료됩니다. 다시 시도할 필요가 없습니다.',
 };

@@ -1562,5 +1562,7 @@ export const ptOverrides: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "Não foi possível mapear {{count}} valores de data; eles foram omitidos.",
         'settings.importDiagnostics.unmappedStatus': "Não foi possível mapear {{count}} valores de estado; foi usado um padrão seguro.",
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} regras de repetição não compatíveis foram mantidas como notas.",
+        'settings.syncRemoteBusy': 'Outro dispositivo compatível com o Mindwtr está atualizando este local de sincronização. Aguarde até terminar e sincronize novamente.',
+        'settings.syncRemoteCleanupDeferred': 'A operação de sincronização foi concluída. O Mindwtr não conseguiu remover o bloqueio temporário de sincronização, mas ele expirará automaticamente. Não é necessário tentar novamente.',
         'settings.syncEncryptionCleanupDeferred': 'A criptografia foi atualizada. O Mindwtr não conseguiu remover o bloqueio temporário de sincronização, mas ele expirará automaticamente. Não é necessário tentar novamente.',
 };

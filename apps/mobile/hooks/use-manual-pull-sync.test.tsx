@@ -24,6 +24,8 @@ vi.mock('@/contexts/language-context', () => ({
         'settings.syncMobile.pleaseSetAWebdavUrlFirst': 'Please set a WebDAV URL first',
         'settings.syncQueued': 'Sync queued',
         'settings.syncQueuedBody': 'Local changes arrived during sync. A retry was queued automatically.',
+        'settings.syncRemoteBusy': 'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
+        'settings.syncRemoteCleanupDeferred': 'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
         'settings.syncSkippedOffline': 'No internet connection. Sync skipped.',
         'settings.syncServerUnreachable': "Couldn't reach the sync server. Check that Mindwtr is allowed to use the network (cellular data, VPN, or firewall).",
       }[key] ?? key),
@@ -101,6 +103,7 @@ describe('useManualPullSync', () => {
     });
 
     expect(mocked.performMobileSync).toHaveBeenCalledTimes(1);
+    expect(mocked.performMobileSync).toHaveBeenCalledWith(undefined, { manual: true });
     expect(latest?.indicatorState).toBe('success');
     expect(latest?.refreshing).toBe(false);
     expect(mocked.showToast).not.toHaveBeenCalled();
@@ -225,6 +228,37 @@ describe('useManualPullSync', () => {
       title: 'Sync failed',
       message: 'Remote write failed. Retrying in the background.',
       tone: 'error',
+    }));
+  });
+
+  it.each([
+    {
+      deferred: 'busy' as const,
+      message: 'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
+    },
+    {
+      deferred: 'cleanup' as const,
+      message: 'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
+    },
+  ])('explains a $deferred remote fence without blaming local edits', async ({ deferred, message }) => {
+    mocked.performMobileSync.mockResolvedValue({
+      success: true,
+      remoteFenceDeferred: deferred,
+    });
+    renderHarness();
+
+    await act(async () => {
+      await latest?.onRefresh();
+    });
+
+    expect(latest?.indicatorState).toBe('success');
+    expect(mocked.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Notice',
+      message,
+      tone: 'info',
+    }));
+    expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Local changes arrived during sync. A retry was queued automatically.',
     }));
   });
 

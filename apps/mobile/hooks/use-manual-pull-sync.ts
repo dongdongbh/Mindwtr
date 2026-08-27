@@ -109,7 +109,7 @@ export function useManualPullSync() {
         return;
       }
 
-      if (result.skipped === 'requeued' || result.remoteFenceDeferred) {
+      if (result.skipped === 'requeued') {
         finishIndicator('success');
         showToast({
           title: tFallback(t, 'settings.syncQueued', 'Sync queued'),
@@ -120,6 +120,28 @@ export function useManualPullSync() {
           ),
           tone: 'info',
           durationMs: 4200,
+        });
+        return;
+      }
+
+      if (result.success && result.remoteFenceDeferred) {
+        finishIndicator('success');
+        const cleanupDeferred = result.remoteFenceDeferred === 'cleanup';
+        showToast({
+          title: tFallback(t, 'common.notice', 'Notice'),
+          message: cleanupDeferred
+            ? tFallback(
+              t,
+              'settings.syncRemoteCleanupDeferred',
+              'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.'
+            )
+            : tFallback(
+              t,
+              'settings.syncRemoteBusy',
+              'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.'
+            ),
+          tone: 'info',
+          durationMs: 6000,
         });
         return;
       }

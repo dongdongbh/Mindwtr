@@ -359,7 +359,37 @@ describe('Layout sync conflict surface', () => {
         fireEvent.click(getByRole('button', { name: /Sync now/i }));
 
         await waitFor(() => expect(performSyncSpy).toHaveBeenCalledTimes(1));
+        expect(performSyncSpy).toHaveBeenCalledWith({ manual: true });
         expect(showToast).toHaveBeenCalledWith('Sync completed', 'success');
+
+        performSyncSpy.mockRestore();
+    });
+
+    it.each([
+        {
+            deferred: 'busy' as const,
+            message: 'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
+        },
+        {
+            deferred: 'cleanup' as const,
+            message: 'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
+        },
+    ])('explains a $deferred remote fence without reporting false success or failure', async ({ deferred, message }) => {
+        const showToast = vi.fn();
+        const performSyncSpy = vi.spyOn(SyncService, 'performSync').mockResolvedValue({
+            success: true,
+            remoteFenceDeferred: deferred,
+        } as Awaited<ReturnType<typeof SyncService.performSync>>);
+        act(() => {
+            useUiStore.setState((state) => ({ ...state, showToast }));
+        });
+
+        const { getByRole } = renderLayout();
+        fireEvent.click(getByRole('button', { name: /Sync now/i }));
+
+        await waitFor(() => expect(performSyncSpy).toHaveBeenCalledWith({ manual: true }));
+        expect(showToast).toHaveBeenCalledWith(message, 'info', 6000);
+        expect(showToast).not.toHaveBeenCalledWith('Sync completed', 'success');
 
         performSyncSpy.mockRestore();
     });

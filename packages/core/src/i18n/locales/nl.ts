@@ -618,5 +618,7 @@ export const nlOverrides: Record<string, string> = {
         'digest.overdue': 'Te laat',
         'digest.reviewDue': 'Evaluatie nodig',
         'digest.noItems': 'Vandaag geen urgente items.',
+        'settings.syncRemoteBusy': 'Een ander compatibel Mindwtr-apparaat werkt deze synchronisatielocatie bij. Wacht tot het klaar is en synchroniseer daarna opnieuw.',
+        'settings.syncRemoteCleanupDeferred': 'De synchronisatie is voltooid. Mindwtr kon de tijdelijke synchronisatievergrendeling niet verwijderen, maar deze verloopt automatisch. Opnieuw proberen is niet nodig.',
         'settings.syncEncryptionCleanupDeferred': 'De versleuteling is bijgewerkt. Mindwtr kon de tijdelijke synchronisatievergrendeling niet verwijderen, maar deze verloopt automatisch. Opnieuw proberen is niet nodig.',
 };

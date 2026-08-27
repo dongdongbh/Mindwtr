@@ -482,6 +482,74 @@ describe('useSyncSettings cloud token validation', () => {
         expect(showSaved).not.toHaveBeenCalled();
     });
 
+    it('waits without activating when a compatible peer owns the candidate sync location', async () => {
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: true,
+            skipped: 'remoteFenceBusy',
+            remoteFenceDeferred: 'busy',
+            retryAfterMs: 30_000,
+        });
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        act(() => {
+            void result.current.syncPageProps.onSetSyncBackend('cloud');
+            result.current.syncPageProps.onCloudUrlChange('https://example.com');
+            result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
+        });
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
+        expect(showToast).toHaveBeenCalledWith(
+            'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
+            'info',
+            6000,
+        );
+    });
+
+    it('commits a cleanup-deferred activation and reports completed cleanup instead of failure', async () => {
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.mocked(SyncService.performSync)
+            .mockResolvedValueOnce({
+                success: true,
+                remoteFenceDeferred: 'cleanup',
+                retryAfterMs: 30_000,
+            })
+            .mockResolvedValueOnce({
+                success: true,
+                skipped: 'remoteFenceBusy',
+                remoteFenceDeferred: 'busy',
+                retryAfterMs: 30_000,
+            });
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        act(() => {
+            void result.current.syncPageProps.onSetSyncBackend('cloud');
+            result.current.syncPageProps.onCloudUrlChange('https://example.com');
+            result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
+        });
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.commitProvenSyncConfiguration).toHaveBeenCalledWith(
+            expect.objectContaining({ backend: 'cloud', cloudProvider: 'selfhosted' }),
+        );
+        expect(SyncService.performSync).toHaveBeenCalledTimes(2);
+        expect(showToast).toHaveBeenCalledWith(
+            'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
+            'info',
+            6000,
+        );
+        expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining('did not complete'), 'error');
+    });
+
     it('requires WebDAV conditional-write capability before candidate activation', async () => {
         const showToast = vi.fn();
         useUiStore.setState({ showToast } as never);
