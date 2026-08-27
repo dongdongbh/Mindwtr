@@ -164,6 +164,17 @@ const createDropboxFetch = (store: ReturnType<typeof createBlobStore>) =>
             ? JSON.parse((init.headers as Record<string, string>)['Dropbox-API-Arg'] ?? '{}')
             : {};
         const key = (arg.path ?? '').replace(/^\//, '');
+        if (url.endsWith('/files/list_folder')) {
+            const entries = Array.from(store.files.keys())
+                .filter((name) => name.startsWith('attachments/'))
+                .map((name) => ({
+                    '.tag': 'file',
+                    name: name.slice('attachments/'.length),
+                    path_display: `/${name}`,
+                    rev: `rev${store.versions.get(name) ?? 1}`,
+                }));
+            return new Response(JSON.stringify({ entries, cursor: 'done', has_more: false }), { status: 200 });
+        }
         if (url.endsWith('/files/download')) {
             const bytes = store.files.get(key);
             if (!bytes) {
@@ -216,6 +227,20 @@ const createWebdavFetch = (
         const url = String(input);
         const key = url.startsWith(`${baseUrl}/`) ? url.slice(baseUrl.length + 1) : url;
         const method = (init?.method ?? 'GET').toUpperCase();
+        if (method === 'PROPFIND') {
+            const hrefs = [
+                `${baseUrl}/attachments/`,
+                ...Array.from(store.files.keys())
+                    .filter((name) => name.startsWith('attachments/'))
+                    .map((name) => `${baseUrl}/${name}`),
+            ];
+            return new Response(
+                `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">${hrefs
+                    .map((href) => `<d:response><d:href>${href}</d:href></d:response>`)
+                    .join('')}</d:multistatus>`,
+                { status: 207, headers: { 'content-type': 'application/xml' } },
+            );
+        }
         if (method === 'GET') {
             const bytes = store.files.get(key);
             if (!bytes) return new Response(null, { status: 404 });
@@ -264,6 +289,30 @@ beforeEach(() => {
 });
 
 describe('Dropbox sync encryption transitions', () => {
+    it('paginates the provider attachment inventory and filters unmanaged entries', async () => {
+        const fetcher = vi.fn()
+            .mockResolvedValueOnce(new Response(JSON.stringify({
+                entries: [
+                    { '.tag': 'file', name: 'first.bin', path_display: '/attachments/first.bin' },
+                    { '.tag': 'folder', name: 'nested', path_display: '/attachments/nested' },
+                    { '.tag': 'file', name: '../victim', path_display: '/attachments/../victim' },
+                ],
+                cursor: 'page-2',
+                has_more: true,
+            }), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({
+                entries: [
+                    { '.tag': 'file', name: 'second.bin', path_display: '/attachments/second.bin' },
+                ],
+                cursor: 'done',
+                has_more: false,
+            }), { status: 200 }));
+
+        await expect(__syncEncryptionServiceTestUtils.listDropboxAttachmentKeys('token', fetcher))
+            .resolves.toEqual(['attachments/first.bin', 'attachments/second.bin']);
+        expect(JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body))).toEqual({ cursor: 'page-2' });
+    });
+
     it('encrypts every artifact, removes the plaintext documents, and leaves attachment names alone', async () => {
         const store = seedRemote();
         const fetcher = createDropboxFetch(store);
@@ -386,6 +435,29 @@ describe('Dropbox sync encryption transitions', () => {
         expect(store.files.get('attachments/a1.png')).toEqual(attachment);
     });
 
+    it('migrates an unreferenced attachment discovered by the provider inventory', async () => {
+        const orphan = new Uint8Array([9, 7, 5, 3]);
+        const store = createBlobStore({
+            'data.json': jsonBytes({ tasks: [], projects: [] }),
+            'attachments/orphan.bin': orphan,
+        });
+        const fetcher = createDropboxFetch(store);
+
+        await runEnableOverRemote(
+            'old passphrase',
+            createDropboxRemotePort((operation) => operation('token'), fetcher),
+        );
+        expect(isEncrypted(store.files.get('attachments/orphan.bin'))).toBe(true);
+
+        await runChangePassphraseOverRemote(
+            'old passphrase',
+            'new passphrase',
+            createDropboxRemotePort((operation) => operation('token'), fetcher),
+        );
+        await runDisableOverRemote(createDropboxRemotePort((operation) => operation('token'), fetcher));
+        expect(store.files.get('attachments/orphan.bin')).toEqual(orphan);
+    });
+
     it('a re-run after an interrupted enable converges instead of starting a second generation', async () => {
         const store = seedRemote();
         const fetcher = createDropboxFetch(store);
@@ -474,6 +546,27 @@ describe('WebDAV sync encryption transitions (config-override / web path)', () =
         expect(JSON.parse(new TextDecoder().decode(store.files.get('data.json.bak')!)))
             .toEqual(APP_DATA_WITH_ATTACHMENT);
         expect(store.files.get('attachments/a1.png')).toEqual(attachment);
+    });
+
+    it('migrates an unreferenced attachment from the WebDAV collection inventory', async () => {
+        const baseUrl = 'https://dav.example/sync';
+        const orphan = new Uint8Array([1, 3, 5, 7]);
+        const store = createBlobStore({
+            'data.json': jsonBytes({ tasks: [], projects: [] }),
+            'attachments/orphan.bin': orphan,
+        });
+        const options = { fetcher: createWebdavFetch(store, baseUrl), username: 'u', password: 'p' };
+
+        await runEnableOverRemote('old passphrase', createWebdavRemotePort({ baseUrl, options }));
+        expect(isEncrypted(store.files.get('attachments/orphan.bin'))).toBe(true);
+
+        await runChangePassphraseOverRemote(
+            'old passphrase',
+            'new passphrase',
+            createWebdavRemotePort({ baseUrl, options }),
+        );
+        await runDisableOverRemote(createWebdavRemotePort({ baseUrl, options }));
+        expect(store.files.get('attachments/orphan.bin')).toEqual(orphan);
     });
 
     it.each(['missing', 'weak'] as const)(

@@ -7,10 +7,15 @@
 // Out of scope by design: CloudKit and self-hosted mindwtr-cloud.
 
 import {
+    DEFAULT_TIMEOUT_MS,
     decryptRemoteArtifactOrThrow,
     deriveSyncKeyMaterial,
+    fetchWithTimeout,
     getBaseSyncUrl,
     inspectSyncArtifact,
+    isDropboxPathNotFoundTag,
+    parseDropboxApiErrorTag,
+    readResponseText,
     reaffirmRemoteEncryptionNoKey,
     runChangeSyncEncryptionPassphraseOverRemote,
     runDisableSyncEncryptionLocalOnly,
@@ -33,7 +38,9 @@ import {
     type SyncEncryptionRemoteRead,
     type SyncEncryptionStatus,
     type SyncEncryptionTransitionProgress,
+    type WebDavOptions,
 } from '@mindwtr/core';
+import { DOMParser } from '@xmldom/xmldom';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
@@ -42,6 +49,7 @@ import {
     uploadDropboxFileVersioned,
 } from './dropbox-sync';
 import {
+    bytesToBase64,
     getDropboxClientId,
     loadWebDavConfig,
     runDropboxAuthorized,
@@ -86,16 +94,9 @@ const assertManagedRemoteArtifactName = (name: string): string => {
 export type SyncEncryptionProgressCallback = (progress: SyncEncryptionTransitionProgress) => void;
 
 /**
- * The artifact set a transition covers, derived from the authoritative remote document
- * rather than from a remote directory listing.
- *
- * ponytail: neither WebDAV (PROPFIND) nor Dropbox (files/list_folder) has a listing
- * primitive in core today, and adding two new wire protocols inside a delete-capable
- * code path is a poor trade against deriving the exact set we actually manage. The
- * accepted ceiling: an ORPHANED remote attachment — one no remote record points
- * at — is not migrated by enable/disable. Orphans are already the attachment-cleanup
- * pass's job, and leaving one untouched can never lose data. Add real listings here if
- * "old plaintext attachment left behind after enabling" ever becomes a real report.
+ * The artifact set a transition covers, derived from authoritative provider enumeration
+ * plus the remote document. The provider list includes unreferenced files; the document
+ * keeps referenced-but-missing keys in the inventory so a peer creation is also detected.
  *
  * Both the plaintext and `.enc` names are listed for every document: core uses the `.enc`
  * entries to resume (re-deriving the key from an already-written header) and the plain
@@ -121,6 +122,114 @@ const buildTransitionEntries = (appData: AppData | null): SyncEncryptionRemoteEn
         }
     }
     return entries;
+};
+
+const PROVIDER_INVENTORY_MAX_BYTES = 4 * 1024 * 1024;
+const DROPBOX_LIST_FOLDER_ENDPOINT = 'https://api.dropboxapi.com/2/files/list_folder';
+const DROPBOX_LIST_FOLDER_CONTINUE_ENDPOINT = 'https://api.dropboxapi.com/2/files/list_folder/continue';
+const MAX_DROPBOX_INVENTORY_PAGES = 1_000;
+
+const listWebdavAttachmentKeys = async (
+    baseUrl: string,
+    options: WebDavOptions,
+): Promise<string[]> => {
+    const collectionUrl = `${baseUrl.replace(/\/+$/, '')}/attachments/`;
+    const headers: Record<string, string> = { ...(options.headers ?? {}), Depth: '1' };
+    if (options.username && typeof options.password === 'string') {
+        headers.Authorization = `Basic ${bytesToBase64(new TextEncoder().encode(`${options.username}:${options.password}`))}`;
+    }
+    const response = await fetchWithTimeout(
+        collectionUrl,
+        { method: 'PROPFIND', headers, signal: options.signal },
+        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        options.fetcher ?? fetch,
+        'WebDAV attachment inventory timed out',
+    );
+    if (response.status === 404) return [];
+    if (!response.ok) throw new Error(`WebDAV attachment inventory PROPFIND failed (${response.status})`);
+
+    const xml = await readResponseText(response, PROVIDER_INVENTORY_MAX_BYTES);
+    const document = new DOMParser().parseFromString(xml, 'application/xml');
+    const hrefs = Array.from(document.getElementsByTagNameNS('*', 'href'));
+    if (hrefs.length === 0) throw new Error('WebDAV attachment inventory response has no DAV:href entries');
+
+    const collectionPath = decodeURIComponent(new URL(collectionUrl).pathname).replace(/\/+$/, '/');
+    const keys = new Set<string>();
+    for (const href of hrefs) {
+        const raw = href.textContent?.trim();
+        if (!raw) continue;
+        const path = decodeURIComponent(new URL(raw, collectionUrl).pathname);
+        if (!path.startsWith(collectionPath)) continue;
+        const leaf = path.slice(collectionPath.length).replace(/\/+$/, '');
+        if (!leaf || leaf.includes('/')) continue;
+        const key = sanitizeBlobAttachmentKey(`attachments/${leaf}`);
+        if (key) keys.add(key);
+    }
+    return Array.from(keys).sort();
+};
+
+type DropboxListFolderPayload = {
+    entries?: Array<{ '.tag'?: unknown; name?: unknown; path_display?: unknown }>;
+    cursor?: unknown;
+    has_more?: unknown;
+};
+
+const listDropboxAttachmentKeys = async (
+    accessToken: string,
+    fetcher: typeof fetch = fetch,
+): Promise<string[]> => {
+    const keys = new Set<string>();
+    let cursor: string | null = null;
+    for (let page = 0; page < MAX_DROPBOX_INVENTORY_PAGES; page += 1) {
+        const response = await fetcher(
+            cursor ? DROPBOX_LIST_FOLDER_CONTINUE_ENDPOINT : DROPBOX_LIST_FOLDER_ENDPOINT,
+            {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(cursor
+                    ? { cursor }
+                    : {
+                        path: '/attachments',
+                        recursive: false,
+                        include_deleted: false,
+                        include_non_downloadable_files: false,
+                        limit: 2_000,
+                    }),
+            },
+        );
+        if (!cursor && response.status === 409) {
+            const tag = await parseDropboxApiErrorTag(response);
+            if (isDropboxPathNotFoundTag(tag)) return [];
+            throw new Error(`Dropbox attachment inventory failed: HTTP 409${tag ? ` (${tag})` : ''}`);
+        }
+        if (response.status === 401) throw new Error('Dropbox attachment inventory failed: HTTP 401');
+        if (!response.ok) throw new Error(`Dropbox attachment inventory failed: HTTP ${response.status}`);
+
+        const payload = JSON.parse(
+            await readResponseText(response, PROVIDER_INVENTORY_MAX_BYTES),
+        ) as DropboxListFolderPayload;
+        if (!Array.isArray(payload.entries) || typeof payload.has_more !== 'boolean') {
+            throw new Error('Dropbox attachment inventory response is malformed');
+        }
+        for (const entry of payload.entries) {
+            if (entry?.['.tag'] !== 'file') continue;
+            const path = typeof entry.path_display === 'string' ? entry.path_display : null;
+            const name = typeof entry.name === 'string' ? entry.name : null;
+            const key = sanitizeBlobAttachmentKey(
+                path?.replace(/^\//, '') ?? (name ? `attachments/${name}` : undefined),
+            );
+            if (key) keys.add(key);
+        }
+        if (!payload.has_more) return Array.from(keys).sort();
+        if (typeof payload.cursor !== 'string' || !payload.cursor || payload.cursor === cursor) {
+            throw new Error('Dropbox attachment inventory cursor is malformed');
+        }
+        cursor = payload.cursor;
+    }
+    throw new Error('Dropbox attachment inventory exceeded the pagination limit');
 };
 
 const decodeInventoryDocument = async (
@@ -162,21 +271,46 @@ const decodeInventoryDocument = async (
  * snapshot for CAS instead of opening a list-to-preflight race with a second document read. */
 const captureTransitionInventory = async (
     read: (name: string) => Promise<SyncEncryptionRemoteRead>,
+    listAttachmentKeys: () => Promise<string[]>,
     recoveryPassphrase?: string,
-): Promise<SyncEncryptionRemoteInventory> => {
+): Promise<SyncEncryptionRemoteInventory & { referencedAttachmentKeys: string[] }> => {
     const documentEntries = buildTransitionEntries(null);
     const snapshot = new Map<string, SyncEncryptionRemoteRead>();
     for (const entry of documentEntries) snapshot.set(entry.name, await read(entry.name));
+    const listedAttachmentKeys = await listAttachmentKeys();
     const key = (await getSyncEncryptionMaterial())?.key ?? null;
     let data: AppData | null = null;
     for (const name of [`${SYNC_FILE_NAME}.enc`, SYNC_FILE_NAME, `${SYNC_FILE_NAME}.enc.bak`, BACKUP_FILE_NAME]) {
         data = await decodeInventoryDocument(snapshot.get(name)?.bytes ?? null, key, recoveryPassphrase);
         if (data) break;
     }
-    return { entries: buildTransitionEntries(data), snapshot };
+    const referencedAttachmentKeys = buildTransitionEntries(data)
+        .filter((entry) => entry.kind === 'attachment')
+        .map((entry) => entry.name);
+    const attachmentKeys = new Set([...listedAttachmentKeys, ...referencedAttachmentKeys]);
+    for (const name of attachmentKeys) snapshot.set(name, await read(name));
+    return {
+        entries: [
+            ...documentEntries,
+            ...Array.from(attachmentKeys).sort().map((name) => ({ name, kind: 'attachment' as const })),
+        ],
+        snapshot,
+        referencedAttachmentKeys,
+    };
 };
 
+const listTransitionEntries = async (
+    listAttachmentKeys: () => Promise<string[]>,
+    referencedAttachmentKeys: readonly string[],
+): Promise<SyncEncryptionRemoteEntry[]> => [
+    ...buildTransitionEntries(null),
+    ...Array.from(new Set([...await listAttachmentKeys(), ...referencedAttachmentKeys]))
+        .sort()
+        .map((name) => ({ name, kind: 'attachment' as const })),
+];
+
 const createWebdavRemotePort = async (appData: AppData | null): Promise<SyncEncryptionRemotePort> => {
+    void appData;
     const config = await loadWebDavConfig();
     if (!config?.url) throw new Error('WebDAV is not configured');
     const baseSyncUrl = getBaseSyncUrl(config.url);
@@ -190,9 +324,15 @@ const createWebdavRemotePort = async (appData: AppData | null): Promise<SyncEncr
     const urlFor = (name: string): string => `${baseSyncUrl}/${assertManagedRemoteArtifactName(name)}`;
     const read = (name: string): Promise<SyncEncryptionRemoteRead> =>
         webdavGetFileVersioned(urlFor(name), requestOptions);
+    const listAttachmentKeys = () => listWebdavAttachmentKeys(baseSyncUrl, requestOptions);
+    let referencedAttachmentKeys: string[] = [];
     return {
-        list: async () => buildTransitionEntries(appData),
-        captureInventory: (recoveryPassphrase) => captureTransitionInventory(read, recoveryPassphrase),
+        list: () => listTransitionEntries(listAttachmentKeys, referencedAttachmentKeys),
+        captureInventory: async (recoveryPassphrase) => {
+            const inventory = await captureTransitionInventory(read, listAttachmentKeys, recoveryPassphrase);
+            referencedAttachmentKeys = inventory.referencedAttachmentKeys;
+            return inventory;
+        },
         read,
         write: async (name, bytes, expectedVersion) => {
             await webdavPutFileVersioned(
@@ -206,15 +346,22 @@ const createWebdavRemotePort = async (appData: AppData | null): Promise<SyncEncr
 };
 
 const createDropboxRemotePort = async (appData: AppData | null): Promise<SyncEncryptionRemotePort> => {
+    void appData;
     const clientId = await getDropboxClientId();
     if (!clientId) throw new Error('Dropbox is not configured');
     const authorized = <T,>(operation: (accessToken: string) => Promise<T>): Promise<T> =>
         runDropboxAuthorized(clientId, operation);
     const read = (name: string): Promise<SyncEncryptionRemoteRead> =>
         authorized((token) => downloadDropboxFileVersioned(token, `/${assertManagedRemoteArtifactName(name)}`));
+    const listAttachmentKeys = () => authorized((token) => listDropboxAttachmentKeys(token));
+    let referencedAttachmentKeys: string[] = [];
     return {
-        list: async () => buildTransitionEntries(appData),
-        captureInventory: (recoveryPassphrase) => captureTransitionInventory(read, recoveryPassphrase),
+        list: () => listTransitionEntries(listAttachmentKeys, referencedAttachmentKeys),
+        captureInventory: async (recoveryPassphrase) => {
+            const inventory = await captureTransitionInventory(read, listAttachmentKeys, recoveryPassphrase);
+            referencedAttachmentKeys = inventory.referencedAttachmentKeys;
+            return inventory;
+        },
         read,
         write: async (name, bytes, expectedVersion) => {
             await authorized((token) => uploadDropboxFileVersioned(
@@ -405,6 +552,8 @@ export const declineSyncEncryptionPassphrase = async (): Promise<void> => {
 export const __syncEncryptionServiceTestUtils = {
     buildTransitionEntries,
     captureTransitionInventory,
+    listDropboxAttachmentKeys,
+    listWebdavAttachmentKeys,
     createDropboxRemotePort,
     createWebdavRemotePort,
 };

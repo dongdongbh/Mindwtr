@@ -224,11 +224,89 @@ describe('WebDAV remote port error boundaries', () => {
     await expect(port.remove('data.json', '"v1"')).rejects.toThrow('WebDAV DELETE failed (500)');
   });
 
+  it('round-trips an unreferenced attachment from the authoritative collection inventory', async () => {
+    const baseUrl = 'https://dav.example.com/mindwtr';
+    const remote = new Map<string, Uint8Array>([
+      ['data.json', new TextEncoder().encode(JSON.stringify(appData([])))],
+      ['attachments/orphan.bin', new Uint8Array([3, 1, 4, 1, 5])],
+    ]);
+    const revisions = new Map<string, number>(Array.from(remote.keys()).map((name) => [name, 1]));
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const key = url.startsWith(`${baseUrl}/`) ? url.slice(baseUrl.length + 1) : url;
+      if (method === 'PROPFIND') {
+        const hrefs = [
+          `${baseUrl}/attachments/`,
+          ...Array.from(remote.keys())
+            .filter((name) => name.startsWith('attachments/'))
+            .map((name) => `${baseUrl}/${name}`),
+        ];
+        return new Response(
+          `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">${hrefs
+            .map((href) => `<d:response><d:href>${href}</d:href></d:response>`)
+            .join('')}</d:multistatus>`,
+          { status: 207, headers: { 'content-type': 'application/xml' } },
+        );
+      }
+      if (method === 'GET') {
+        const bytes = remote.get(key);
+        if (!bytes) return new Response(null, { status: 404 });
+        return new Response(bytes.slice() as unknown as BodyInit, {
+          status: 200,
+          headers: { etag: `"v${revisions.get(key) ?? 1}"` },
+        });
+      }
+      if (method === 'PUT') {
+        const headers = new Headers(init?.headers);
+        const current = remote.has(key) ? `"v${revisions.get(key) ?? 1}"` : null;
+        if ((headers.get('if-none-match') === '*' && current)
+          || (headers.has('if-match') && headers.get('if-match') !== current)) {
+          return new Response(null, { status: 412 });
+        }
+        remote.set(key, new Uint8Array(await new Response(init?.body as BodyInit).arrayBuffer()));
+        revisions.set(key, (revisions.get(key) ?? 0) + 1);
+        return new Response(null, { status: 201 });
+      }
+      if (method === 'DELETE') {
+        const current = remote.has(key) ? `"v${revisions.get(key) ?? 1}"` : null;
+        if (!current || new Headers(init?.headers).get('if-match') !== current) {
+          return new Response(null, { status: 412 });
+        }
+        remote.delete(key);
+        revisions.delete(key);
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`unexpected WebDAV request ${method} ${url}`);
+    }));
+    const port = await createPort();
+
+    await runEnableSyncEncryptionOverRemote(
+      PASSPHRASE, port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    );
+    expect(inspectSyncArtifact(remote.get('attachments/orphan.bin')!).kind).toBe('encrypted');
+
+    await runChangeSyncEncryptionPassphraseOverRemote(
+      PASSPHRASE, 'next passphrase', port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    );
+    await runDisableSyncEncryptionOverRemote(
+      port, syncEncryptionKeyCache, syncEncryptionLocalState, undefined, mobileSyncCryptoPrimitives,
+    );
+    expect(remote.get('attachments/orphan.bin')).toEqual(new Uint8Array([3, 1, 4, 1, 5]));
+  }, 30_000);
+
   it.each([
     ['missing', undefined],
     ['weak', 'W/"v1"'],
   ] as const)('fails an end-to-end transition before writes for a %s ETag', async (_case, etag) => {
-    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'PROPFIND') {
+        return new Response(
+          `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"><d:response><d:href>${url}</d:href></d:response></d:multistatus>`,
+          { status: 207, headers: { 'content-type': 'application/xml' } },
+        );
+      }
       if ((init?.method ?? 'GET') !== 'GET') throw new Error('transition attempted an unsafe write');
       return new Response(new TextEncoder().encode('{"tasks":[]}'), {
         status: 200,
@@ -250,7 +328,7 @@ describe('WebDAV remote port error boundaries', () => {
 
     expect(syncEncryptionLocalState.read()).toBeNull();
     await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
-    expect(fetcher.mock.calls.every(([, init]) => (init?.method ?? 'GET') === 'GET')).toBe(true);
+    expect(fetcher.mock.calls.every(([, init]) => ['GET', 'PROPFIND'].includes(init?.method ?? 'GET'))).toBe(true);
   });
 });
 
@@ -265,6 +343,17 @@ describe('Dropbox remote port + core transition round trip', () => {
     remote.clear();
     revisions.clear();
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/files/list_folder')) {
+        const entries = Array.from(remote.keys())
+          .filter((path) => path.startsWith('/attachments/'))
+          .map((path) => ({
+            '.tag': 'file',
+            name: path.slice('/attachments/'.length),
+            path_display: path,
+            rev: `rev${revisions.get(path) ?? 1}`,
+          }));
+        return jsonResponse({ entries, cursor: 'done', has_more: false });
+      }
       const arg = JSON.parse(String((init?.headers as Record<string, string>)?.['Dropbox-API-Arg'] ?? '{}'));
       const path = String(arg.path ?? '');
       if (url.includes('/files/download')) {
@@ -394,6 +483,29 @@ describe('Dropbox remote port + core transition round trip', () => {
     expect(remote.get(`/${attachmentName}`)).toEqual(attachmentBytes);
   }, 30_000);
 
+  it('migrates an unreferenced Dropbox attachment from the provider inventory', async () => {
+    const orphanName = '/attachments/orphan.bin';
+    const orphanBytes = new Uint8Array([8, 5, 3, 0, 9]);
+    remote.set('/data.json', new TextEncoder().encode(JSON.stringify(appData([]))));
+    remote.set(orphanName, orphanBytes);
+
+    const port = await __syncEncryptionServiceTestUtils.createDropboxRemotePort(appData([]));
+    await runEnableSyncEncryptionOverRemote(
+      PASSPHRASE, port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    );
+    expect(inspectSyncArtifact(remote.get(orphanName)!).kind).toBe('encrypted');
+
+    await runChangeSyncEncryptionPassphraseOverRemote(
+      PASSPHRASE, 'next passphrase', port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    );
+    await runDisableSyncEncryptionOverRemote(
+      port, syncEncryptionKeyCache, syncEncryptionLocalState, undefined, mobileSyncCryptoPrimitives,
+    );
+    expect(remote.get(orphanName)).toEqual(orphanBytes);
+  }, 30_000);
+
   it('re-running an interrupted enable is a no-op on already-sealed artifacts', async () => {
     const data = appData(['attachments/a0.png']);
     remote.set('/data.json', new TextEncoder().encode(JSON.stringify(data)));
@@ -423,6 +535,17 @@ describe('Dropbox remote port + core transition round trip', () => {
     remote.set('/data.json', new TextEncoder().encode(JSON.stringify(data)));
     let failDelete = true;
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/files/list_folder')) {
+        const entries = Array.from(remote.keys())
+          .filter((path) => path.startsWith('/attachments/'))
+          .map((path) => ({
+            '.tag': 'file',
+            name: path.slice('/attachments/'.length),
+            path_display: path,
+            rev: `rev${revisions.get(path) ?? 1}`,
+          }));
+        return jsonResponse({ entries, cursor: 'done', has_more: false });
+      }
       const arg = JSON.parse(String((init?.headers as Record<string, string>)?.['Dropbox-API-Arg'] ?? '{}'));
       const path = String(arg.path ?? '');
       if (url.includes('/files/download')) {
