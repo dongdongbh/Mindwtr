@@ -14,6 +14,7 @@ import {
 import {
     parseContextsInput,
     parseTagsInput,
+    useProcessingTitleFocus,
     type InboxProcessingOptionLists,
     type InboxProcessingVisibility,
 } from './views/inbox/inbox-processing-utils';
@@ -160,6 +161,7 @@ export function InboxProcessingQuickPanel({
     // The body keeps its own names for the draft fields: one alias block beats
     // rewriting every reference (and re-growing the prop list to do it).
     const processingTitle = draft.title;
+    const titleInputRef = useProcessingTitleFocus(processingTask?.id);
     const processingDescription = draft.description;
     const contextsDraft = draft.contexts;
     const tagsDraft = draft.tags;
@@ -379,6 +381,7 @@ export function InboxProcessingQuickPanel({
                     <div className="space-y-1">
                         <label className="text-[11px] text-muted-foreground font-medium">{t('taskEdit.titleLabel')}</label>
                         <input
+                            ref={titleInputRef}
                             aria-label={t('taskEdit.titleLabel')}
                             value={processingTitle}
                             onChange={(event) => setProcessingTitle(event.target.value)}

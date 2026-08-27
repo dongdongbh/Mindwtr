@@ -2,16 +2,18 @@ import { useCallback, useEffect, useMemo } from 'react';
 import {
     advanceProcessInboxSession,
     addBreadcrumb,
+    buildQuickAddParseOptions,
     commitProcessInboxWorkflowEvent,
     DEFAULT_PROJECT_COLOR,
     enterProcessInboxStep,
     getPersonOptionNames,
     goBackProcessInboxStep,
-    parseQuickAddDateCommands,
+    parseProcessInboxTitleInput,
     resolveProcessInboxContainerFields,
     skipCurrentProcessInboxTask,
     startProcessInboxSession,
     tFallback,
+    withParsedProcessInboxFields,
     useTaskStore,
     type AppData,
     type Area,
@@ -159,6 +161,23 @@ export function useInboxProcessingController({
         settings,
     });
     const { showAreaField, showContextsField, showTagsField } = visibility;
+    // One options bag for every parse in this flow, from the same builder the
+    // capture surfaces use — a hand-rolled bag is how surfaces drift apart.
+    const quickAddParseOptions = useMemo(
+        () => buildQuickAddParseOptions(settings, { tasks, people }),
+        [people, settings, tasks],
+    );
+    const parseProcessingTitle = useCallback(
+        (input: string) => parseProcessInboxTitleInput(input, {
+            projects,
+            areas,
+            parseOptions: quickAddParseOptions,
+        }),
+        [areas, projects, quickAddParseOptions],
+    );
+    // The title the user is holding, parsed once: the commit reads its title and
+    // the decision's fields read its tokens, so the two cannot disagree.
+    const parsedTitle = useMemo(() => parseProcessingTitle(draft.title), [draft.title, parseProcessingTitle]);
     // The draft holds the raw token text; the commit path needs the parsed
     // lists, keyed on the text so callbacks keep their identity between edits.
     const selectedContexts = useMemo(() => parseContextsInput(draft.contexts), [draft.contexts]);
@@ -256,36 +275,48 @@ export function useInboxProcessingController({
         fallbackTitle?: string,
     ): Partial<Task> | null => {
         if (!processingTask) return null;
-        const { title: parsedTitle, props: parsedDateProps, invalidDateCommands } = parseQuickAddDateCommands(
-            titleInput,
-            new Date(),
-            { preserveText: settings?.quickAddAutoClean !== true },
-        );
+        const parsed = titleInput === draft.title ? parsedTitle : parseProcessingTitle(titleInput);
+        const { invalidDateCommands } = parsed;
         if (invalidDateCommands && invalidDateCommands.length > 0) {
             showToast(`${t('quickAdd.invalidDateCommand')}: ${invalidDateCommands.join(', ')}`, 'error');
             return null;
         }
-        const trimmedTitle = parsedTitle.trim();
+        const trimmedTitle = parsed.title.trim();
         const title = trimmedTitle.length > 0 ? trimmedTitle : (fallbackTitle ?? processingTask.title);
-        const description = draft.description.trim();
+        // `/note:` adds to the note the user can see rather than replacing it —
+        // clarifying must never quietly drop the text the capture arrived with.
+        const description = [draft.description.trim(), parsed.props.description?.trim()]
+            .filter(Boolean)
+            .join('\n');
         return {
             title,
             description: description.length > 0 ? description : undefined,
-            ...parsedDateProps,
+            ...(parsed.props.startTime ? { startTime: parsed.props.startTime } : {}),
+            ...(parsed.props.dueDate ? { dueDate: parsed.props.dueDate } : {}),
+            ...(parsed.props.reviewAt ? { reviewAt: parsed.props.reviewAt } : {}),
+            // A `/link:` adds to what the capture already carried; assigning the
+            // parsed list alone would drop the task's existing attachments.
+            ...(parsed.props.attachments
+                ? { attachments: [...(processingTask.attachments ?? []), ...parsed.props.attachments] }
+                : {}),
+            ...(parsed.props.isFocusedToday ? { isFocusedToday: true } : {}),
         };
-    }, [draft.description, draft.title, processingTask, settings?.quickAddAutoClean, showToast, t]);
+    }, [draft.description, draft.title, parseProcessingTitle, parsedTitle, processingTask, showToast, t]);
 
     const applyWorkflowEvent = useCallback(async (
-        event: ProcessInboxWorkflowEvent,
+        incoming: ProcessInboxWorkflowEvent,
         titleInput?: string,
         fallbackTitle?: string,
         options: { advance?: boolean } = {},
     ): Promise<boolean> => {
         if (!processingTask) return false;
-        const taskUpdates = event.type === 'discard'
+        const taskUpdates = incoming.type === 'discard'
             ? undefined
             : prepareProcessingEdits(titleInput, fallbackTitle);
-        if (event.type !== 'discard' && !taskUpdates) return false;
+        if (incoming.type !== 'discard' && !taskUpdates) return false;
+        // Every decision routes through here, so the title's tokens fold into
+        // the fields once instead of at each of the six call sites.
+        const event = withParsedProcessInboxFields(incoming, parsedTitle.props);
         try {
             const outcome = await commitProcessInboxWorkflowEvent(
                 processingSession,
@@ -313,6 +344,7 @@ export function useInboxProcessingController({
         applySessionTransition,
         deleteTask,
         eligibleInboxTasks,
+        parsedTitle.props,
         prepareProcessingEdits,
         processingSession,
         processingTask,
@@ -414,16 +446,13 @@ export function useInboxProcessingController({
     }, [continueFromProjectCheck]);
 
     const handleProjectCheckYes = useCallback(() => {
-        const { title: parsedTitle } = parseQuickAddDateCommands(draft.title, new Date(), {
-            preserveText: settings?.quickAddAutoClean !== true,
-        });
-        const baseTitle = parsedTitle.trim() || draft.title.trim() || processingTask?.title || '';
+        const baseTitle = parsedTitle.title.trim() || draft.title.trim() || processingTask?.title || '';
         setConvertToProject(true);
         setProjectTitleDraft(baseTitle);
         setNextActionDraft(baseTitle);
         setExtraActionDrafts([]);
         goToStep('project');
-    }, [draft.title, goToStep, processingTask?.title, setExtraActionDrafts, settings?.quickAddAutoClean]);
+    }, [draft.title, goToStep, parsedTitle.title, processingTask?.title, setExtraActionDrafts]);
 
     const handleTwoMinDone = useCallback(async () => {
         if (!processingTask) return;

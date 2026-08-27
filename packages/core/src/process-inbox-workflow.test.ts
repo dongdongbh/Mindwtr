@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { startProcessInboxSession } from './process-inbox-session';
 import {
     commitProcessInboxWorkflowEvent,
+    mergeParsedProcessInboxFields,
     resolveProcessInboxContainerFields,
     resolveProcessInboxWorkflowEvent,
+    withParsedProcessInboxFields,
 } from './process-inbox-workflow';
 
 describe('resolveProcessInboxWorkflowEvent', () => {
@@ -137,5 +139,63 @@ describe('resolveProcessInboxWorkflowEvent', () => {
         );
 
         expect(committed.session.currentTaskId).toBe('task-2');
+    });
+});
+
+describe('withParsedProcessInboxFields', () => {
+    const parsed = {
+        contexts: ['@phone'],
+        tags: ['#urgent'],
+        assignedTo: 'Bob',
+        energyLevel: 'low' as const,
+    };
+
+    it('adds parsed tokens to the chips the user toggled instead of replacing them', () => {
+        const event = withParsedProcessInboxFields(
+            { type: 'next', fields: { contexts: ['@office'], tags: ['#home'] } },
+            parsed,
+        );
+        expect(event).toEqual({
+            type: 'next',
+            fields: {
+                contexts: ['@office', '@phone'],
+                tags: ['#home', '#urgent'],
+                assignedTo: 'Bob',
+                energyLevel: 'low',
+            },
+        });
+    });
+
+    it('keeps a delegate follow-up date while folding the tokens in', () => {
+        const event = withParsedProcessInboxFields(
+            { type: 'waiting', fields: {}, followUpAt: '2026-09-01T09:00:00.000Z' },
+            parsed,
+        );
+        expect(event).toMatchObject({
+            type: 'waiting',
+            followUpAt: '2026-09-01T09:00:00.000Z',
+            fields: { contexts: ['@phone'], assignedTo: 'Bob' },
+        });
+    });
+
+    it('leaves a discard alone — trashing writes nothing for a token to land on', () => {
+        expect(withParsedProcessInboxFields({ type: 'discard' }, parsed)).toEqual({ type: 'discard' });
+    });
+});
+
+describe('mergeParsedProcessInboxFields container exclusivity', () => {
+    it('drops a picked area when the title names a project (#958)', () => {
+        expect(mergeParsedProcessInboxFields({ areaId: 'a1' }, { projectId: 'p1' }))
+            .toEqual({ projectId: 'p1', areaId: undefined });
+    });
+
+    it('leaves a picked project alone when the title only names an area', () => {
+        expect(mergeParsedProcessInboxFields({ projectId: 'p1' }, { areaId: 'a1' }))
+            .toEqual({ projectId: 'p1', areaId: undefined });
+    });
+
+    it('is a no-op when the title carried no tokens', () => {
+        const fields = { contexts: ['@office'], projectId: 'p1' };
+        expect(mergeParsedProcessInboxFields(fields, {})).toEqual(fields);
     });
 });

@@ -1,8 +1,8 @@
 import { afterEach, describe, it, expect } from 'vitest';
 import { getTaskDateCoherenceIssues } from './task-date-coherence';
 import { configureDateFormatting } from './date';
-import type { Person, Task } from './types';
-import { buildQuickAddParseOptions, getQuickAddProjectInitialProps, parseProjectNextActionInput, parseQuickAdd, parseQuickAddDateCommands, splitQuickAddBulkLines } from './quick-add';
+import type { Area, Person, Project, Task } from './types';
+import { buildQuickAddParseOptions, getQuickAddProjectInitialProps, parseProcessInboxTitleInput, parseProjectNextActionInput, parseQuickAdd, parseQuickAddDateCommands, splitQuickAddBulkLines } from './quick-add';
 
 describe('quick-add', () => {
     it('splits bulk quick-add text into trimmed nonblank lines', () => {
@@ -1395,5 +1395,46 @@ describe('quick-add', () => {
             });
             expect(withoutPeople.props.assignedTo).toBe('Jim');
         });
+    });
+});
+
+describe('parseProcessInboxTitleInput', () => {
+    const projects = [{ id: 'p1', title: 'Vacation', status: 'active' } as Project];
+    const areas = [{ id: 'a1', name: 'Work' } as Area];
+
+    it('reads the same grammar the capture box does (#1088)', () => {
+        const parsed = parseProcessInboxTitleInput('Call Alice @phone #urgent !Work +Vacation %Bob /energy:low', {
+            projects,
+            areas,
+            parseOptions: { knownPeople: ['Bob'] },
+        });
+        expect(parsed.title).toBe('Call Alice');
+        expect(parsed.props).toMatchObject({
+            contexts: ['@phone'],
+            tags: ['#urgent'],
+            areaId: 'a1',
+            projectId: 'p1',
+            assignedTo: 'Bob',
+            energyLevel: 'low',
+        });
+    });
+
+    it('drops a status token so the clarify decision keeps the destination', () => {
+        const parsed = parseProcessInboxTitleInput('Ask Bob /waiting @phone', { projects, areas });
+        expect(parsed.props.status).toBeUndefined();
+        expect(parsed.props.contexts).toEqual(['@phone']);
+        expect(parsed.title).toBe('Ask Bob');
+    });
+
+    it('never creates a project: an unknown +Name goes back into the title', () => {
+        const parsed = parseProcessInboxTitleInput('Book hotel +"Summer Trip"', { projects, areas });
+        expect(parsed.props.projectId).toBeUndefined();
+        expect(parsed.title).toBe('Book hotel +"Summer Trip"');
+    });
+
+    it('still parses the date commands it already supported (#370)', () => {
+        const parsed = parseProcessInboxTitleInput('Submit paper /due:2026-09-01', { projects, areas });
+        expect(parsed.props.dueDate).toContain('2026-09-01');
+        expect(parsed.title).toBe('Submit paper');
     });
 });

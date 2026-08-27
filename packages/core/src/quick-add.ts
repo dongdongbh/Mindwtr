@@ -153,6 +153,45 @@ export function parseProjectNextActionInput(
     return { title: title || input.trim(), props, invalidDateCommands: parsed.invalidDateCommands };
 }
 
+export interface ProcessInboxTitleParseContext {
+    projects?: Project[];
+    areas?: Area[];
+    now?: Date;
+    parseOptions?: QuickAddParseOptions;
+}
+
+/**
+ * Parse an Inbox-processing title with the quick-add grammar, so `@context`,
+ * `#tag`, `!Area`, `+Project`, `%Person`, `/energy:` and the date commands work
+ * while clarifying exactly as they do at capture (#1088). Processing used to
+ * run `parseQuickAddDateCommands` alone, which made it the one editable task
+ * title in the app with its own smaller grammar.
+ *
+ * Two rules keep the clarify workflow in charge of the decision it exists to
+ * make:
+ * - A status token (`/waiting`, `/done`, ...) is consumed and dropped. The
+ *   destination the user picks owns the status, so a stale token typed at
+ *   capture cannot silently overrule the button they just pressed.
+ * - An unknown `+Name` never creates a project. Processing has its own picker
+ *   and a "turn this into a project" step, so the token goes back into the
+ *   title as the text it now is — same rule as the next-action prompt.
+ */
+export function parseProcessInboxTitleInput(
+    input: string,
+    context: ProcessInboxTitleParseContext = {},
+): { title: string; props: Partial<Task>; invalidDateCommands?: string[] } {
+    const { projects, areas, now = new Date(), parseOptions } = context;
+    const parsed = parseQuickAdd(input, projects, now, areas, parseOptions);
+    let title = parsed.title;
+    if (parsed.projectTitle) {
+        const token = /\s/.test(parsed.projectTitle) ? `+"${parsed.projectTitle}"` : `+${parsed.projectTitle}`;
+        title = `${title} ${token}`.trim();
+    }
+    const props: Partial<Task> = { ...parsed.props };
+    delete props.status;
+    return { title, props, invalidDateCommands: parsed.invalidDateCommands };
+}
+
 export interface QuickAddDateCommandsResult {
     title: string;
     props: Pick<Partial<Task>, 'startTime' | 'dueDate' | 'reviewAt'>;

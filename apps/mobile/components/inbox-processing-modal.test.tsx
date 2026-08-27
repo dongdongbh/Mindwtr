@@ -755,6 +755,41 @@ describe('InboxProcessingModal', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  // #1088: mobile clarify never parsed the title at all, so even the date
+  // commands desktop already understood were literal text here.
+  it('applies quick-add tokens typed into the clarify title', async () => {
+    storeState.tasks = [{ ...baseInboxTask, contexts: [], tags: [] }];
+    storeState.projects = [workProject];
+    storeState.areas = [workArea, homeArea];
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+
+    const root = tree!.root;
+    const titleInput = root.findByProps({ placeholder: 'taskEdit.titleLabel', accessibilityLabel: 'taskEdit.titleLabel' });
+    act(() => {
+      titleInput.props.onChangeText('Call Alice @phone #urgent !Home /due:2026-09-01');
+    });
+
+    walkToFileStep(root);
+    pressStep(root, 'File it');
+    await flushAsyncActions();
+
+    expect(updateTask).toHaveBeenCalledWith(
+      'inbox-1',
+      expect.objectContaining({
+        status: 'next',
+        title: 'Call Alice',
+        contexts: ['@phone'],
+        tags: ['#urgent'],
+        areaId: homeArea.id,
+      })
+    );
+    expect(updateTask.mock.calls[0][1].dueDate).toContain('2026-09-01');
+  });
+
   it('hides the two-minute section when that shortcut is disabled', () => {
     mockSettings.features = undefined;
     mockSettings.gtd.inboxProcessing = { twoMinuteEnabled: false };

@@ -10,6 +10,8 @@ import { useRouter } from 'expo-router';
 import {
   advanceProcessInboxSession,
   addBreadcrumb,
+  buildQuickAddParseOptions,
+  parseProcessInboxTitleInput,
   createProcessInboxSession,
   DEFAULT_PROJECT_COLOR,
   collectTaskTokenUsage,
@@ -41,6 +43,7 @@ import {
 import {
   commitProcessInboxWorkflowEvent,
   resolveProcessInboxContainerFields,
+  withParsedProcessInboxFields,
   type ProcessInboxWorkflowEvent,
   type ProcessInboxWorkflowFields,
 } from '@mindwtr/core/process-inbox-workflow';
@@ -519,28 +522,70 @@ export function useInboxProcessingController({
     });
   }, [showToast, t]);
 
+  // Same grammar as capture, same builder for its options — the clarify title
+  // is a task title, so `@context`, `!Area`, `+Project` and the date commands
+  // read there exactly as they do in quick add (#1088).
+  const quickAddParseOptions = useMemo(
+    () => buildQuickAddParseOptions(settings, { tasks, people }),
+    [people, settings, tasks],
+  );
+  const parseProcessingTitle = useCallback(
+    (input: string) => parseProcessInboxTitleInput(input, {
+      projects,
+      areas,
+      parseOptions: quickAddParseOptions,
+    }),
+    [areas, projects, quickAddParseOptions],
+  );
+  // Parsed once: the commit reads its title and the decision's fields read its
+  // tokens, so the two cannot disagree.
+  const parsedTitle = useMemo(() => parseProcessingTitle(processingTitle), [parseProcessingTitle, processingTitle]);
+
   const prepareProcessingEdits = useCallback((titleOverride?: string, fallbackTitle?: string): Partial<Task> | null => {
     if (!currentTask) return null;
     const titleSource = titleOverride ?? processingTitle;
-    const title = titleSource.trim() || fallbackTitle?.trim() || currentTask.title;
-    const description = processingDescription.trim();
+    const parsed = titleSource === processingTitle ? parsedTitle : parseProcessingTitle(titleSource);
+    if (parsed.invalidDateCommands && parsed.invalidDateCommands.length > 0) {
+      showProcessingError(
+        `${tFallback(t, 'quickAdd.invalidDateCommand', 'Invalid date command')}: ${parsed.invalidDateCommands.join(', ')}`,
+      );
+      return null;
+    }
+    const title = parsed.title.trim() || fallbackTitle?.trim() || currentTask.title;
+    // `/note:` adds to the note the user can see rather than replacing it —
+    // clarifying must never quietly drop the text the capture arrived with.
+    const description = [processingDescription.trim(), parsed.props.description?.trim()]
+      .filter(Boolean)
+      .join('\n');
     return {
       title,
       description: description.length > 0 ? description : undefined,
+      ...(parsed.props.startTime ? { startTime: parsed.props.startTime } : {}),
+      ...(parsed.props.dueDate ? { dueDate: parsed.props.dueDate } : {}),
+      ...(parsed.props.reviewAt ? { reviewAt: parsed.props.reviewAt } : {}),
+      // A `/link:` adds to what the capture already carried; assigning the
+      // parsed list alone would drop the task's existing attachments.
+      ...(parsed.props.attachments
+        ? { attachments: [...(currentTask.attachments ?? []), ...parsed.props.attachments] }
+        : {}),
+      ...(parsed.props.isFocusedToday ? { isFocusedToday: true } : {}),
     };
-  }, [currentTask, processingDescription, processingTitle]);
+  }, [currentTask, parseProcessingTitle, parsedTitle, processingDescription, processingTitle, showProcessingError, t]);
 
   const applyWorkflowEvent = useCallback(async (
-    event: ProcessInboxWorkflowEvent,
+    incoming: ProcessInboxWorkflowEvent,
     titleOverride?: string,
     fallbackTitle?: string,
     options: { advance?: boolean } = {},
   ): Promise<boolean> => {
     if (!currentTask) return false;
-    const taskUpdates = event.type === 'discard'
+    const taskUpdates = incoming.type === 'discard'
       ? undefined
       : prepareProcessingEdits(titleOverride, fallbackTitle);
-    if (event.type !== 'discard' && !taskUpdates) return false;
+    if (incoming.type !== 'discard' && !taskUpdates) return false;
+    // Every decision routes through here, so the title's tokens fold into the
+    // fields once instead of at each call site.
+    const event = withParsedProcessInboxFields(incoming, parsedTitle.props);
     try {
       const outcome = await commitProcessInboxWorkflowEvent(
         processingSession,
@@ -568,6 +613,7 @@ export function useInboxProcessingController({
     deleteTask,
     handleClose,
     inboxTasks,
+    parsedTitle.props,
     prepareProcessingEdits,
     processingSession,
     showProcessingError,
@@ -838,13 +884,13 @@ export function useInboxProcessingController({
   }, [addProject, exactProjectMatch, projectFilterAreaId, projectSearch, selectProjectEarly]);
 
   const handleProjectConversionStart = useCallback(() => {
-    const baseTitle = processingTitle.trim() || currentTask?.title || '';
+    const baseTitle = parsedTitle.title.trim() || processingTitle.trim() || currentTask?.title || '';
     setConvertToProject(true);
     setProjectTitleDraft((prev) => prev.trim() || baseTitle);
     setNextActionDraft((prev) => prev.trim() || baseTitle);
     setSelectedProjectId(null);
     setProjectSearch('');
-  }, [currentTask?.title, processingTitle]);
+  }, [currentTask?.title, parsedTitle.title, processingTitle]);
 
   const handleProjectConversionCancel = useCallback(() => {
     setConvertToProject(false);

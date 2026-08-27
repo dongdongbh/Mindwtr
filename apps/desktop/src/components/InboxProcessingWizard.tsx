@@ -14,6 +14,7 @@ import {
 import {
     parseContextsInput,
     parseTagsInput,
+    useProcessingTitleFocus,
     type InboxProcessingOptionLists,
     type InboxProcessingVisibility,
 } from './views/inbox/inbox-processing-utils';
@@ -192,6 +193,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     // The body keeps its own names for the draft fields: one alias block beats
     // rewriting every reference (and re-growing the prop list to do it).
     const processingTitle = draft.title;
+    const titleInputRef = useProcessingTitleFocus(processingTask?.id, processingStep);
     const processingDescription = draft.description;
     const selectedContexts = parseContextsInput(draft.contexts);
     const selectedTags = parseTagsInput(draft.tags);
@@ -361,6 +363,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                         <div className="space-y-1">
                             <label className="text-[11px] text-muted-foreground font-medium">{t('taskEdit.titleLabel')}</label>
                             <input
+                                ref={titleInputRef}
                                 value={processingTitle}
                                 onChange={(e) => setProcessingTitle(e.target.value)}
                                 className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"

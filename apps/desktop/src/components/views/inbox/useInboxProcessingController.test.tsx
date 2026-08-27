@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { Project, Task } from '@mindwtr/core';
+import type { Area, Project, Task } from '@mindwtr/core';
 import { useInboxProcessingController } from './useInboxProcessingController';
 
 const makeTask = (id: string, status: Task['status'] = 'inbox'): Task => ({
@@ -217,5 +217,64 @@ describe('useInboxProcessingController draft writes', () => {
             result.current.wizardProps.setField('areaId', 'area-1');
         });
         expect(result.current.wizardProps.draft).toMatchObject({ areaId: 'area-1', projectId: 'p2' });
+    });
+});
+
+// #1088: the clarify title used to run a date-only parser, so it was the one
+// editable task title in the app with a smaller grammar than quick add.
+describe('useInboxProcessingController title grammar', () => {
+    const tasks = [makeTask('one')];
+    const projects = [{ id: 'p1', title: 'Vacation', status: 'active' } as Project];
+    const areas = [{ id: 'a1', name: 'Work', order: 0 } as Area];
+
+    const renderController = (updateTask: ReturnType<typeof vi.fn>) => renderHook(() => {
+        const [isProcessing, setIsProcessing] = useState(true);
+        return useInboxProcessingController({
+            t: (key) => key,
+            tasks,
+            projects,
+            areas,
+            settings: {},
+            addProject: async () => null,
+            addTask: async () => ({ success: true }),
+            updateTask,
+            deleteTask: async () => ({ success: true }),
+            allContexts: [],
+            allTags: [],
+            isProcessing,
+            setIsProcessing,
+        });
+    });
+
+    it('applies the quick-add tokens typed into the title to the clarified task', async () => {
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderController(updateTask);
+
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+
+        act(() => {
+            result.current.wizardProps.toggleContext('@office');
+            result.current.wizardProps.setField(
+                'title',
+                'Call Alice @phone #urgent !Work /due:2026-09-01',
+            );
+        });
+        await act(async () => {
+            await result.current.wizardProps.handleSetProject(null);
+        });
+
+        expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+            status: 'next',
+            title: 'Call Alice',
+            // The typed context joins the chip the user toggled; it never wins alone.
+            contexts: ['@office', '@phone'],
+            tags: ['#urgent'],
+            areaId: 'a1',
+        }));
+        expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+            dueDate: expect.stringContaining('2026-09-01'),
+        }));
     });
 });
