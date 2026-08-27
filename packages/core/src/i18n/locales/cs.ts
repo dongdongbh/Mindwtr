@@ -2283,6 +2283,7 @@ export const csOverrides: Record<string, string> = {
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} nepodporovaných pravidel opakování bylo zachováno v poznámkách.",
         'settings.syncRemoteBusy': 'Jiné kompatibilní zařízení s Mindwtr právě aktualizuje toto umístění synchronizace. Počkejte na dokončení a poté synchronizaci spusťte znovu.',
         'settings.syncRemoteCleanupDeferred': 'Operace synchronizace byla dokončena. Mindwtr nemohl odebrat dočasný zámek synchronizace, ale jeho platnost automaticky vyprší. Není třeba akci opakovat.',
+        'settings.syncAttachmentWriteDeferred': 'Některé změny příloh se nepodařilo dokončit. Obnovte chybějící místní soubory nebo odeberte dotčené přílohy a poté synchronizaci spusťte znovu.',
         'settings.syncFileLockBusy': 'Jiná operace Mindwtr používá synchronizaci souborů. Počkejte na její dokončení; Mindwtr to zkusí znovu automaticky.',
         'settings.syncFileLockActivationBusy': 'Jiná operace Mindwtr používá synchronizaci souborů. Počkejte na její dokončení a pak znovu zvolte Synchronizovat nyní.',
         'settings.syncFileLockCleanupDeferred': 'Synchronizace byla dokončena, ale Mindwtr nemohl uvolnit zámek synchronizace souborů. Před další synchronizací Mindwtr restartujte. Opakování není potřeba.',

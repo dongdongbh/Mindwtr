@@ -24,6 +24,7 @@ vi.mock('@/contexts/language-context', () => ({
         'settings.syncMobile.pleaseSetAWebdavUrlFirst': 'Please set a WebDAV URL first',
         'settings.syncQueued': 'Sync queued',
         'settings.syncQueuedBody': 'Local changes arrived during sync. A retry was queued automatically.',
+        'settings.syncAttachmentWriteDeferred': 'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
         'settings.syncRemoteBusy': 'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
         'settings.syncRemoteCleanupDeferred': 'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
         'settings.syncFileLockBusy': 'Another Mindwtr operation is using File Sync. Wait for it to finish; Mindwtr will retry automatically.',
@@ -232,6 +233,26 @@ describe('useManualPullSync', () => {
       message: 'Remote write failed. Retrying in the background.',
       tone: 'error',
     }));
+  });
+
+  it('shows attachment recovery guidance without a green manual-sync result', async () => {
+    mocked.performMobileSync.mockResolvedValue({
+      success: true,
+      attachmentWriteDeferred: true,
+    });
+    renderHarness();
+
+    await act(async () => {
+      await latest?.onRefresh();
+    });
+
+    expect(latest?.indicatorState).toBe('idle');
+    expect(mocked.showToast).toHaveBeenCalledWith({
+      title: 'Notice',
+      message: 'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
+      tone: 'warning',
+      durationMs: 6000,
+    });
   });
 
   it.each([

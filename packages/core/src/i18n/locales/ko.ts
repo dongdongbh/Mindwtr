@@ -2355,6 +2355,7 @@ export const koOverrides: Record<string, string> = {
         'settings.importDiagnostics.unsupportedRecurrence': "지원하지 않는 반복 규칙 {{count}}개를 메모로 보존했습니다.",
         'settings.syncRemoteBusy': '호환되는 다른 Mindwtr 기기가 이 동기화 위치를 업데이트하고 있습니다. 완료될 때까지 기다린 후 다시 동기화하세요.',
         'settings.syncRemoteCleanupDeferred': '동기화 작업이 완료되었습니다. Mindwtr가 임시 동기화 잠금을 제거하지 못했지만 잠금은 자동으로 만료됩니다. 다시 시도할 필요가 없습니다.',
+        'settings.syncAttachmentWriteDeferred': '일부 첨부 파일 변경을 완료하지 못했습니다. 누락된 로컬 파일을 복원하거나 해당 첨부 파일을 제거한 다음 다시 동기화하세요.',
         'settings.syncFileLockBusy': '다른 Mindwtr 작업이 파일 동기화를 사용 중입니다. 작업이 끝날 때까지 기다리세요. Mindwtr가 자동으로 다시 시도합니다.',
         'settings.syncFileLockActivationBusy': '다른 Mindwtr 작업이 파일 동기화를 사용 중입니다. 작업이 끝난 뒤 지금 동기화를 다시 선택하세요.',
         'settings.syncFileLockCleanupDeferred': '동기화는 완료되었지만 Mindwtr가 파일 동기화 잠금을 해제하지 못했습니다. 다시 동기화하기 전에 Mindwtr를 다시 시작하세요. 다시 시도할 필요는 없습니다.',

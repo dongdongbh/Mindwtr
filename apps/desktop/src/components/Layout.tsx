@@ -549,6 +549,12 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
             }
             if (result.skipped === 'requeued') {
                 showToast(tFallback(t, 'settings.syncRetryQueued', 'Local changes arrived during sync. Retry queued.'), 'info');
+            } else if (result.success && result.attachmentWriteDeferred) {
+                showToast(tFallback(
+                    t,
+                    'settings.syncAttachmentWriteDeferred',
+                    'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
+                ), 'info', 6000);
             } else if (result.success && result.fileSyncLockDeferred === 'busy') {
                 showToast(tFallback(
                     t,

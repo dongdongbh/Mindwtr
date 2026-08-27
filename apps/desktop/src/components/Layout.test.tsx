@@ -365,6 +365,30 @@ describe('Layout sync conflict surface', () => {
         performSyncSpy.mockRestore();
     });
 
+    it('shows attachment recovery guidance instead of reporting a completed manual sync', async () => {
+        const showToast = vi.fn();
+        const performSyncSpy = vi.spyOn(SyncService, 'performSync').mockResolvedValue({
+            success: true,
+            attachmentWriteDeferred: true,
+        } as Awaited<ReturnType<typeof SyncService.performSync>>);
+        act(() => {
+            useUiStore.setState((state) => ({ ...state, showToast }));
+        });
+
+        const { getByRole } = renderLayout();
+        fireEvent.click(getByRole('button', { name: /Sync now/i }));
+
+        await waitFor(() => expect(performSyncSpy).toHaveBeenCalledWith({ manual: true }));
+        expect(showToast).toHaveBeenCalledWith(
+            'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
+            'info',
+            6000,
+        );
+        expect(showToast).not.toHaveBeenCalledWith('Sync completed', 'success');
+
+        performSyncSpy.mockRestore();
+    });
+
     it.each([
         {
             deferred: 'busy' as const,

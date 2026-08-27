@@ -1125,15 +1125,22 @@ class SharedSyncRunMachine {
             getLocalSnapshotChangeAt: () => this.state.localSnapshotChangeAt,
             acceptCoveredSnapshot: (expectedData) => this.acceptCoveredLocalSnapshot(expectedData),
         });
+        const attachmentWriteDeferred = findPendingAttachmentUploads(mergedData)
+            .some((pending) => pending.reason === 'content-replacement');
         if (mergedData.settings.pendingRemoteWriteRetryAt) {
             return {
                 success: true,
                 remoteWriteDeferred: true,
+                attachmentWriteDeferred: attachmentWriteDeferred || undefined,
                 error: mergedData.settings.lastSyncError,
                 stats,
             };
         }
-        return { success: true, stats };
+        return {
+            success: true,
+            attachmentWriteDeferred: attachmentWriteDeferred || undefined,
+            stats,
+        };
     }
 
     private async handleRunError(error: unknown): Promise<SyncRunResult> {

@@ -33,6 +33,10 @@ export type SyncRunResult = {
      *  flag lets manual-sync UI avoid reporting a plain success while the
      *  sidebar still shows `lastSyncStatus: 'error'`. */
     remoteWriteDeferred?: boolean;
+    /** The document sync completed, but at least one attachment still has
+     *  durable content-upload work. No automatic retry is implied: callers
+     *  should suppress plain-success UI and offer recovery guidance. */
+    attachmentWriteDeferred?: boolean;
     /** A compatible peer currently owns the mutation fence, or this run could
      *  not conditionally remove its own lease. Suppresses plain-success UI. */
     remoteFenceDeferred?: 'busy' | 'cleanup';

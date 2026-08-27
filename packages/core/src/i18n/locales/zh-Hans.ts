@@ -2423,6 +2423,7 @@ export const zhHans: Record<string, string> = {
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} 条不支持的重复规则已保留为备注。",
         'settings.syncRemoteBusy': '另一台兼容的 Mindwtr 设备正在更新此同步位置。请等待其完成，然后再次同步。',
         'settings.syncRemoteCleanupDeferred': '同步操作已完成。Mindwtr 无法移除临时同步锁，但该锁会自动过期。无需重试。',
+        'settings.syncAttachmentWriteDeferred': '部分附件更改未能完成。请恢复缺失的本地文件或移除受影响的附件，然后再次同步。',
         'settings.syncFileLockBusy': '另一个 Mindwtr 操作正在使用文件同步。请等待其完成；Mindwtr 会自动重试。',
         'settings.syncFileLockActivationBusy': '另一个 Mindwtr 操作正在使用文件同步。请等待其完成，然后再次选择“立即同步”。',
         'settings.syncFileLockCleanupDeferred': '同步已完成，但 Mindwtr 无法释放文件同步锁。再次同步前请重启 Mindwtr。无需重试。',

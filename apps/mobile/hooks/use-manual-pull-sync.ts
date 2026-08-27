@@ -129,6 +129,21 @@ export function useManualPullSync() {
         return;
       }
 
+      if (result.success && result.attachmentWriteDeferred) {
+        finishDeferredIndicator();
+        showToast({
+          title: tFallback(t, 'common.notice', 'Notice'),
+          message: tFallback(
+            t,
+            'settings.syncAttachmentWriteDeferred',
+            'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.'
+          ),
+          tone: 'warning',
+          durationMs: 6000,
+        });
+        return;
+      }
+
       if (result.success && result.fileSyncLockDeferred) {
         const cleanupDeferred = result.fileSyncLockDeferred === 'cleanup';
         if (cleanupDeferred) finishIndicator('success');

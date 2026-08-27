@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { AppData, Task } from './types';
+import type { AppData, Project, Task } from './types';
 import type {
     SyncBackendIO,
     SyncRunNotifier,
@@ -427,6 +427,7 @@ describe('runSharedSyncCycle', () => {
         const result = await run();
 
         expect(result.success).toBe(true);
+        expect(result.attachmentWriteDeferred).toBeFalsy();
         expect(io.writeRemote).toHaveBeenCalledTimes(1);
     });
 
@@ -1450,6 +1451,67 @@ describe('runSharedSyncCycle', () => {
 
         expect(result.success).toBe(true);
         expect(result.remoteWriteDeferred).toBeFalsy();
+        expect(result.attachmentWriteDeferred).toBeFalsy();
+    });
+
+    it('reports durable attachment work without hiding synced task and project data or queuing retries', async () => {
+        const task = createTask('t-attachment-deferred', 'Task data still syncs');
+        task.attachments = [{
+            id: 'attachment-deferred',
+            kind: 'file',
+            title: 'notes.txt',
+            uri: '/local/notes.txt',
+            cloudKey: 'attachments/notes.txt',
+            fileHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            contentRev: 1,
+            contentMtimeMs: 1000,
+            contentSize: 10,
+            localStatus: 'available',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const local = createData([task]);
+        local.projects = [{
+            id: 'p-attachment-deferred',
+            title: 'Project data still syncs',
+            status: 'active',
+            color: '#3b82f6',
+            order: 0,
+            tagIds: [],
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        } satisfies Project];
+        let attachmentPass = 0;
+        const syncAttachments = vi.fn(async (data: AppData) => {
+            attachmentPass += 1;
+            if (attachmentPass === 1) return data;
+            const next = cloneAppData(data);
+            const attachment = next.tasks[0]?.attachments?.[0];
+            if (attachment) {
+                attachment.pendingContentUpload = true;
+                attachment.localStatus = 'missing';
+            }
+            return next;
+        });
+        const { harness, hooks, run } = createHarness({
+            local,
+            remote: null,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result.success).toBe(true);
+        expect(result.attachmentWriteDeferred).toBe(true);
+        expect(syncAttachments).toHaveBeenCalledTimes(2);
+        expect(harness.remote?.tasks[0]?.title).toBe('Task data still syncs');
+        expect(harness.remote?.projects[0]?.title).toBe('Project data still syncs');
+        expect(harness.persisted.tasks[0]?.attachments?.[0]).toMatchObject({
+            pendingContentUpload: true,
+            localStatus: 'missing',
+        });
+        expect(hooks.requestFollowUp).not.toHaveBeenCalled();
+        expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
     });
 
     it('aborts to a requeued skip when local data changes mid-cycle', async () => {

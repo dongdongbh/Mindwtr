@@ -622,6 +622,7 @@ export const nlOverrides: Record<string, string> = {
         'digest.noItems': 'Vandaag geen urgente items.',
         'settings.syncRemoteBusy': 'Een ander compatibel Mindwtr-apparaat werkt deze synchronisatielocatie bij. Wacht tot het klaar is en synchroniseer daarna opnieuw.',
         'settings.syncRemoteCleanupDeferred': 'De synchronisatie is voltooid. Mindwtr kon de tijdelijke synchronisatievergrendeling niet verwijderen, maar deze verloopt automatisch. Opnieuw proberen is niet nodig.',
+        'settings.syncAttachmentWriteDeferred': 'Sommige wijzigingen aan bijlagen konden niet worden voltooid. Herstel ontbrekende lokale bestanden of verwijder de betrokken bijlagen en synchroniseer opnieuw.',
         'settings.syncFileLockBusy': 'Een andere Mindwtr-bewerking gebruikt Bestandssynchronisatie. Wacht tot deze klaar is; Mindwtr probeert het automatisch opnieuw.',
         'settings.syncFileLockActivationBusy': 'Een andere Mindwtr-bewerking gebruikt Bestandssynchronisatie. Wacht tot deze klaar is en kies daarna opnieuw Nu synchroniseren.',
         'settings.syncFileLockCleanupDeferred': 'De synchronisatie is voltooid, maar Mindwtr kon de vergrendeling van Bestandssynchronisatie niet vrijgeven. Start Mindwtr opnieuw voordat je weer synchroniseert. Opnieuw proberen is niet nodig.',

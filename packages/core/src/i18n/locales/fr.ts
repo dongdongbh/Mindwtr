@@ -2091,6 +2091,7 @@ export const frOverrides: Record<string, string> = {
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} règles de répétition non prises en charge ont été conservées dans les notes.",
         'settings.syncRemoteBusy': 'Un autre appareil Mindwtr compatible met à jour cet emplacement de synchronisation. Attendez qu’il ait terminé, puis relancez la synchronisation.',
         'settings.syncRemoteCleanupDeferred': 'L’opération de synchronisation est terminée. Mindwtr n’a pas pu supprimer le verrou de synchronisation temporaire, mais il expirera automatiquement. Aucune nouvelle tentative n’est nécessaire.',
+        'settings.syncAttachmentWriteDeferred': 'Certaines modifications de pièces jointes n’ont pas pu aboutir. Restaurez les fichiers locaux manquants ou supprimez les pièces jointes concernées, puis relancez la synchronisation.',
         'settings.syncFileLockBusy': 'Une autre opération Mindwtr utilise la synchronisation de fichiers. Attendez qu’elle se termine ; Mindwtr réessaiera automatiquement.',
         'settings.syncFileLockActivationBusy': 'Une autre opération Mindwtr utilise la synchronisation de fichiers. Attendez qu’elle se termine, puis relancez Synchroniser maintenant.',
         'settings.syncFileLockCleanupDeferred': 'La synchronisation est terminée, mais Mindwtr n’a pas pu libérer le verrou de synchronisation de fichiers. Redémarrez Mindwtr avant de synchroniser à nouveau. Aucune nouvelle tentative n’est nécessaire.',

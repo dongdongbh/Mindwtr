@@ -2452,6 +2452,7 @@ export const faOverrides: Record<string, string> = {
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} قانون تکرار پشتیبانی‌نشده به‌صورت یادداشت نگه داشته شد.",
         'settings.syncRemoteBusy': 'یک دستگاه سازگار دیگرِ Mindwtr در حال به‌روزرسانی این مکان همگام‌سازی است. صبر کنید تا کارش تمام شود، سپس دوباره همگام‌سازی کنید.',
         'settings.syncRemoteCleanupDeferred': 'عملیات همگام‌سازی کامل شد. Mindwtr نتوانست قفل موقت همگام‌سازی را حذف کند، اما این قفل خودکار منقضی می‌شود. نیازی به تلاش دوباره نیست.',
+        'settings.syncAttachmentWriteDeferred': 'برخی تغییرات پیوست‌ها کامل نشد. فایل‌های محلی گم‌شده را بازیابی کنید یا پیوست‌های مربوط را حذف کنید، سپس دوباره همگام‌سازی کنید.',
         'settings.syncFileLockBusy': 'یک عملیات دیگر Mindwtr از همگام‌سازی فایل استفاده می‌کند. تا پایان آن صبر کنید؛ Mindwtr به‌طور خودکار دوباره تلاش می‌کند.',
         'settings.syncFileLockActivationBusy': 'یک عملیات دیگر Mindwtr از همگام‌سازی فایل استفاده می‌کند. تا پایان آن صبر کنید، سپس «اکنون همگام‌سازی شود» را دوباره بزنید.',
         'settings.syncFileLockCleanupDeferred': 'همگام‌سازی کامل شد، اما Mindwtr نتوانست قفل همگام‌سازی فایل را آزاد کند. پیش از همگام‌سازی دوباره، Mindwtr را راه‌اندازی مجدد کنید. نیازی به تکرار نیست.',
