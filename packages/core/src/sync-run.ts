@@ -648,6 +648,17 @@ class SharedSyncRunMachine {
         } catch (error) {
             if (error instanceof SyncRemoteWriteConflict) {
                 // Another device wrote between readRemote and writeRemote; retry next cycle.
+                if (
+                    this.options.activationProbe
+                    && this.backend === 'file'
+                    && this.hooks.reconcileActivationFileSyncAttachmentInventory
+                ) {
+                    const authoritativeData = await this.readRemoteForCycle(true);
+                    if (!authoritativeData) {
+                        throw new Error('File Sync conflict recovery could not read the authoritative document');
+                    }
+                    await this.hooks.reconcileActivationFileSyncAttachmentInventory(authoritativeData);
+                }
                 this.requestFollowUp();
                 throw new LocalSyncAbort();
             }
@@ -1086,6 +1097,11 @@ class SharedSyncRunMachine {
                 // Removing an attachment must not leave its files sitting in the
                 // local and sync folders until the daily pass (#1064).
                 || hasFreshAttachmentCleanupWork(mergedData)
+                // A process can die after publishing an immutable File Sync
+                // generation but before its device-local journal is saved.
+                // Reconcile the authoritative folder inventory every File
+                // cycle so that durable filename evidence remains recoverable.
+                || this.backend === 'file'
             )) {
             await this.ensureRemoteMutationFence();
             const cleanupResult = await this.hooks.runAttachmentCleanup(mergedData, {

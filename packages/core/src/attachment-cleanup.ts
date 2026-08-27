@@ -105,6 +105,30 @@ export const journalFileSyncGenerationPublications = (
     });
 };
 
+/**
+ * Rebuild publication-journal coverage from an authoritative File Sync folder
+ * inventory. A process can die after an immutable generation is published but
+ * before the returned AppData clone is saved; the generation filename is still
+ * durable evidence of that publication. Only digest-qualified generations
+ * absent from the authoritative document are queued, so stable legacy names
+ * and peer-live generations are never made eligible for deletion.
+ */
+export const journalUnreferencedFileSyncGenerationInventory = (
+    appData: AppData,
+    inventoryCloudKeys: Iterable<string>,
+): AppData => {
+    const liveCloudKeys = findLiveAttachmentResourceReferences(appData).cloudKeys;
+    const publications: FileSyncGenerationPublication[] = [];
+    const seen = new Set<string>();
+    for (const value of inventoryCloudKeys) {
+        const cloudKey = normalizeFileSyncGenerationCloudKey(value);
+        if (!cloudKey || liveCloudKeys.has(cloudKey) || seen.has(cloudKey)) continue;
+        seen.add(cloudKey);
+        publications.push({ publishedCloudKey: cloudKey });
+    }
+    return journalFileSyncGenerationPublications(appData, appData, publications);
+};
+
 export interface CleanupResult {
     orphanedCount: number;
     cleanedIds: string[];

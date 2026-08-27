@@ -4,6 +4,7 @@ import { LocalSyncAbort, type AppData } from '@mindwtr/core';
 import {
     cleanupOrphanedAttachments,
     deleteAttachmentFile,
+    reconcileFileSyncAttachmentInventory,
     type AttachmentCleanupDeps,
 } from './sync-attachment-cleanup';
 
@@ -17,8 +18,14 @@ const pathMocks = vi.hoisted(() => ({
     join: vi.fn(),
 }));
 
+const syncFsMocks = vi.hoisted(() => ({
+    exists: vi.fn(),
+    remove: vi.fn(),
+}));
+
 vi.mock('@tauri-apps/plugin-fs', () => fsMocks);
 vi.mock('@tauri-apps/api/path', () => pathMocks);
+vi.mock('./sync-fs', () => syncFsMocks);
 vi.mock('./managed-paths', () => ({
     getManagedPath: async (...segments: string[]) => ['/new-profile', ...segments].join('/'),
 }));
@@ -74,6 +81,73 @@ describe('desktop attachment cleanup freshness', () => {
         expect(pathMocks.join).toHaveBeenCalled();
         expect(ensureLocalSnapshotFresh).toHaveBeenCalledTimes(2);
         expect(fsMocks.remove).not.toHaveBeenCalled();
+    });
+});
+
+describe('File Sync attachment inventory reconciliation', () => {
+    const H1_FILENAME = `a1.${'1'.repeat(64)}.pdf`;
+    const H2_FILENAME = `a1.${'2'.repeat(64)}.pdf`;
+
+    const buildAuthoritativeData = (): AppData => ({
+        tasks: [{
+            id: 't1',
+            title: 'Task',
+            status: 'next',
+            contexts: [],
+            tags: [],
+            createdAt: '2026-08-16T00:00:00.000Z',
+            updatedAt: '2026-08-16T00:00:00.000Z',
+            attachments: [{
+                id: 'a1',
+                kind: 'file',
+                title: 'report.pdf',
+                uri: '/managed/report.pdf',
+                cloudKey: `attachments/${H2_FILENAME}`,
+                createdAt: '2026-08-16T00:00:00.000Z',
+                updatedAt: '2026-08-16T00:00:00.000Z',
+            }],
+        }],
+        projects: [],
+        sections: [],
+        areas: [],
+        people: [],
+        settings: {},
+    });
+
+    it('reclaims crash-left scratch and an unjournaled losing generation only', async () => {
+        pathMocks.join.mockImplementation(async (...parts: string[]) => parts.join('/'));
+        syncFsMocks.exists.mockResolvedValue(true);
+        syncFsMocks.remove.mockResolvedValue(undefined);
+        fsMocks.readDir.mockResolvedValue([
+            { name: '.mindwtr-attachment-generation-crashed.tmp', isFile: true, isSymlink: false },
+            { name: H1_FILENAME, isFile: true, isSymlink: false },
+            { name: H2_FILENAME, isFile: true, isSymlink: false },
+            { name: 'legacy.pdf', isFile: true, isSymlink: false },
+            { name: '.mindwtr-attachment-generation-peer.tmp', isFile: true, isSymlink: true },
+        ]);
+        const guards = {
+            ensureLocalSnapshotFresh: vi.fn(),
+            assertRemoteMutationFenceHeld: vi.fn(async () => undefined),
+        };
+
+        const discovered = await reconcileFileSyncAttachmentInventory(
+            buildAuthoritativeData(),
+            buildDeps(),
+            guards,
+        );
+        const cleaned = await cleanupOrphanedAttachments(discovered, 'file', buildDeps(), guards);
+
+        expect(syncFsMocks.remove).toHaveBeenCalledWith(
+            '/sync/attachments/.mindwtr-attachment-generation-crashed.tmp',
+        );
+        expect(syncFsMocks.remove).toHaveBeenCalledWith(`/sync/attachments/${H1_FILENAME}`);
+        expect(syncFsMocks.remove).not.toHaveBeenCalledWith(`/sync/attachments/${H2_FILENAME}`);
+        expect(syncFsMocks.remove).not.toHaveBeenCalledWith('/sync/attachments/legacy.pdf');
+        expect(syncFsMocks.remove).not.toHaveBeenCalledWith(
+            '/sync/attachments/.mindwtr-attachment-generation-peer.tmp',
+        );
+        expect(cleaned.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
+        expect(cleaned.tasks[0].attachments?.[0]?.cloudKey).toBe(`attachments/${H2_FILENAME}`);
     });
 });
 

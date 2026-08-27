@@ -95,6 +95,7 @@ import { buildChangedEntityBaseline } from './storage-save-baseline';
 import {
     cleanupAttachmentTempFiles,
     cleanupOrphanedAttachments,
+    reconcileFileSyncAttachmentInventory,
     type AttachmentCleanupDeps,
 } from './sync-attachment-cleanup';
 import {
@@ -625,6 +626,7 @@ const attachmentBackendDeps: AttachmentBackendDeps = {
 
 const getAttachmentCleanupDeps = (
     dropboxCredentialHandle?: string | null,
+    fileSyncPathOverride?: string,
 ): AttachmentCleanupDeps => ({
     getCloudConfig: () => SyncService.getCloudConfig(),
     getCloudProvider: () => SyncService.getCloudProvider(),
@@ -633,7 +635,9 @@ const getAttachmentCleanupDeps = (
         credentialHandle: dropboxCredentialHandle ?? undefined,
     }),
     getDropboxAppKey: () => SyncService.getDropboxAppKey(),
-    getSyncPath: () => SyncService.getSyncPath(),
+    getSyncPath: () => fileSyncPathOverride !== undefined
+        ? Promise.resolve(fileSyncPathOverride)
+        : SyncService.getSyncPath(),
     getTauriFetch,
     getWebDavConfig: () => SyncService.getWebDavConfig(),
     isTauriRuntimeEnv,
@@ -2958,21 +2962,38 @@ export class SyncService {
                     cleanupAttachmentTempFiles: () => cleanupAttachmentTempFiles(getAttachmentCleanupDeps()),
                     shouldRunAttachmentPhase: async (data) => hasAttachmentSyncWork(data),
                     runAttachmentCleanup: async (data, cleanupContext) => {
-                        const orphanedAttachments = findOrphanedAttachments(data);
-                        const deletedAttachments = findDeletedAttachmentsForFileCleanup(data);
-                        const pendingRemoteDeletes = data.settings.attachments?.pendingRemoteDeletes ?? [];
-                        if (orphanedAttachments.length === 0 && deletedAttachments.length === 0 && pendingRemoteDeletes.length === 0) {
-                            return null;
-                        }
                         cleanupContext.setStep('attachments_cleanup');
                         await yieldToRenderer();
                         cleanupContext.ensureLocalSnapshotFresh(data);
                         await cleanupContext.ensureNetworkStillAvailable();
                         const ensureLocalSnapshotFresh = () => cleanupContext.ensureLocalSnapshotFresh(data);
+                        const cleanupDeps = getAttachmentCleanupDeps(
+                            context.dropboxCredentialHandle,
+                            context.backend === 'file' ? context.syncPath : undefined,
+                        );
+                        const inventoryData = context.backend === 'file'
+                            ? await reconcileFileSyncAttachmentInventory(
+                                data,
+                                cleanupDeps,
+                                {
+                                    ensureLocalSnapshotFresh,
+                                    assertRemoteMutationFenceHeld: cleanupContext.assertRemoteMutationFenceHeld,
+                                },
+                            )
+                            : data;
+                        const orphanedAttachments = findOrphanedAttachments(inventoryData);
+                        const deletedAttachments = findDeletedAttachmentsForFileCleanup(inventoryData);
+                        const pendingRemoteDeletes = inventoryData.settings.attachments?.pendingRemoteDeletes ?? [];
+                        if (orphanedAttachments.length === 0 && deletedAttachments.length === 0 && pendingRemoteDeletes.length === 0) {
+                            return inventoryData === data
+                                ? null
+                                : { data: inventoryData, invalidateFastSyncState: false };
+                        }
+                        cleanupContext.ensureLocalSnapshotFresh(data);
                         const cleanedData = await cleanupOrphanedAttachments(
-                            data,
+                            inventoryData,
                             context.backend,
-                            getAttachmentCleanupDeps(context.dropboxCredentialHandle),
+                            cleanupDeps,
                             {
                                 ensureLocalSnapshotFresh,
                                 assertRemoteMutationFenceHeld: cleanupContext.assertRemoteMutationFenceHeld,
@@ -2982,6 +3003,41 @@ export class SyncService {
                             data: cleanedData,
                             invalidateFastSyncState: orphanedAttachments.length > 0,
                         };
+                    },
+                    reconcileActivationFileSyncAttachmentInventory: async (authoritativeData) => {
+                        if (context.backend !== 'file' || !context.fileSyncLeaseToken) {
+                            throw new Error('File Sync activation cleanup requires the candidate folder lease');
+                        }
+                        const cleanupDeps = getAttachmentCleanupDeps(
+                            context.dropboxCredentialHandle,
+                            context.syncPath,
+                        );
+                        const guards = {
+                            // Candidate data is never installed in the active
+                            // store. The reread CAS winner plus the held folder
+                            // lease is the authoritative cleanup snapshot.
+                            ensureLocalSnapshotFresh: () => undefined,
+                            assertRemoteMutationFenceHeld: async () => {
+                                if (!context.fileSyncLeaseToken) {
+                                    throw new Error('File Sync activation cleanup lost the candidate folder lease');
+                                }
+                            },
+                        };
+                        const inventoriedData = await reconcileFileSyncAttachmentInventory(
+                            authoritativeData,
+                            cleanupDeps,
+                            guards,
+                            true,
+                        );
+                        const cleanedData = await cleanupOrphanedAttachments(
+                            inventoriedData,
+                            'file',
+                            cleanupDeps,
+                            guards,
+                        );
+                        if (cleanedData.settings.attachments?.pendingRemoteDeletes?.length) {
+                            throw new Error('File Sync activation cleanup remains incomplete');
+                        }
                     },
                     formatErrorMessage: (error, backend) => formatSyncErrorMessage(error, backend),
                     finalizeErrorStatus: async ({ at, message, history }) => {

@@ -3,7 +3,10 @@ import { hasFreshAttachmentCleanupWork, LocalSyncAbort, type AppData } from '@mi
 
 import * as AttachmentSyncUtils from './attachment-sync-utils';
 import * as FileSystem from './file-system';
-import { runMobileAttachmentCleanup } from './sync-attachment-cleanup';
+import {
+  reconcileMobileFileSyncAttachmentInventory,
+  runMobileAttachmentCleanup,
+} from './sync-attachment-cleanup';
 
 const now = '2026-01-01T00:00:00.000Z';
 const h1 = '1'.repeat(64);
@@ -328,6 +331,7 @@ describe('runMobileAttachmentCleanup', () => {
     const result = await runMobileAttachmentCleanup({
       ...buildCleanupOptions(data),
       fileSyncPath: safSyncPath,
+      skipFileSyncInventory: true,
     });
 
     expect(resolveFileSyncDir).not.toHaveBeenCalled();
@@ -338,6 +342,62 @@ describe('runMobileAttachmentCleanup', () => {
         cloudKey: 'attachments/live-attachment.pdf',
         attempts: 1,
       }),
+    ]);
+  });
+
+  it('rebuilds a path File Sync journal and removes a crash-left publication stage', async () => {
+    const h1FileName = `live-attachment.${h1}.pdf`;
+    const h2FileName = `live-attachment.${h2}.pdf`;
+    vi.spyOn(AttachmentSyncUtils, 'resolveFileSyncDir').mockResolvedValue({
+      type: 'file',
+      dirUri: '/sync/',
+      attachmentsDirUri: '/sync/attachments/',
+    });
+    vi.spyOn(FileSystem, 'readDirectoryAsync').mockResolvedValue([
+      h1FileName,
+      h2FileName,
+      `${h1FileName}.mindwtr-staged`,
+      'legacy.pdf',
+    ]);
+    const deleteAsync = vi.spyOn(FileSystem, 'deleteAsync').mockResolvedValue(undefined);
+    const data = buildSafGenerationCleanupData();
+    data.settings = {};
+
+    const result = await reconcileMobileFileSyncAttachmentInventory(
+      data,
+      '/sync/data.json',
+      { ensureLocalSnapshotFresh: vi.fn() },
+    );
+
+    expect(deleteAsync).toHaveBeenCalledWith(
+      `/sync/attachments/${h1FileName}.mindwtr-staged`,
+      { idempotent: true },
+    );
+    expect(result.settings.attachments?.pendingRemoteDeletes).toEqual([
+      { cloudKey: h1CloudKey, attempts: 0 },
+    ]);
+  });
+
+  it('rebuilds a lost SAF journal without queueing the authoritative generation', async () => {
+    mockSafAttachmentsDirectory();
+    vi.spyOn(AttachmentSyncUtils, 'inspectSafDirectoryEntriesByName').mockResolvedValue({
+      status: 'available',
+      entries: new Map([
+        [`live-attachment.${h1}.pdf`, h1SafUri],
+        [`live-attachment.${h2}.pdf`, h2SafUri],
+      ]),
+    });
+    const data = buildSafGenerationCleanupData();
+    data.settings = {};
+
+    const result = await reconcileMobileFileSyncAttachmentInventory(
+      data,
+      safSyncPath,
+      { ensureLocalSnapshotFresh: vi.fn() },
+    );
+
+    expect(result.settings.attachments?.pendingRemoteDeletes).toEqual([
+      { cloudKey: h1CloudKey, attempts: 0 },
     ]);
   });
 });

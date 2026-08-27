@@ -496,6 +496,38 @@ describe('runSharedSyncCycle', () => {
         expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
     });
 
+    it('reconciles a losing File Sync activation publication against the CAS winner', async () => {
+        const initialRemote = createData([createTask('t-remote', 'Initial remote')]);
+        const winningRemote = createData([createTask('t-winner', 'Peer winner')]);
+        const readRemote = vi.fn()
+            .mockResolvedValueOnce(cloneAppData(initialRemote))
+            .mockResolvedValueOnce(cloneAppData(winningRemote));
+        const reconcileActivationFileSyncAttachmentInventory = vi.fn(async () => undefined);
+        const { storage, run } = createHarness({
+            activationProbe: true,
+            backend: 'file',
+            remote: initialRemote,
+            io: {
+                readRemote,
+                writeRemote: vi.fn(async () => {
+                    throw new SyncRemoteWriteConflict();
+                }),
+            },
+            hooks: { reconcileActivationFileSyncAttachmentInventory },
+        });
+
+        const result = await run();
+
+        expect(result).toEqual({ success: true, skipped: 'requeued' });
+        expect(readRemote).toHaveBeenCalledTimes(2);
+        expect(reconcileActivationFileSyncAttachmentInventory).toHaveBeenCalledWith(
+            expect.objectContaining({
+                tasks: [expect.objectContaining({ id: 't-winner' })],
+            }),
+        );
+        expect(storage.persistLocal).not.toHaveBeenCalled();
+    });
+
     it('does not persist candidate attachment metadata when an activation probe requeues', async () => {
         const localTask = createTask('t-attached-requeue', 'Attached task');
         localTask.attachments = [{
@@ -1871,6 +1903,24 @@ describe('runSharedSyncCycle', () => {
 
         expect(result.success).toBe(true);
         expect(runAttachmentCleanup).not.toHaveBeenCalled();
+    });
+
+    it('reconciles File Sync publication inventory inside the cleanup interval', async () => {
+        const local = createData([createTask('t-local', 'Local task')], {
+            attachments: { lastCleanupAt: new Date().toISOString() },
+        });
+        const runAttachmentCleanup = vi.fn(async () => null);
+        const { run } = createHarness({
+            backend: 'file',
+            local,
+            remote: createData([createTask('t-remote', 'Remote task')]),
+            hooks: { runAttachmentCleanup },
+        });
+
+        const result = await run();
+
+        expect(result.success).toBe(true);
+        expect(runAttachmentCleanup).toHaveBeenCalledTimes(1);
     });
 
     it('keeps local purge metadata through merge until attachment cleanup removes it', async () => {

@@ -6,6 +6,7 @@ import {
     getErrorStatus,
     isSyncRemoteMutationFenceError,
     isWebdavRemoteWriteConflictError,
+    journalUnreferencedFileSyncGenerationInventory,
     LEGACY_SYNC_FILE_NAME,
     sanitizeAttachmentUriForSyncMerge,
     type CloudProvider,
@@ -66,6 +67,9 @@ const describeAttachmentCleanupErrorForLog = (error: unknown): Error => {
             : `Attachment cleanup operation failed (${status})`,
     );
 };
+
+const FILE_SYNC_ATTACHMENT_SCRATCH_PREFIX = '.mindwtr-attachment-generation-';
+const FILE_SYNC_ATTACHMENT_SCRATCH_SUFFIX = '.tmp';
 
 const logAttachmentCleanupWarning = (
     deps: Pick<AttachmentCleanupDeps, 'logSyncWarning'>,
@@ -270,4 +274,63 @@ export const cleanupOrphanedAttachments = async (
 
     await cleanupAttachmentTempFiles(deps);
     return result.appData;
+};
+
+/**
+ * Reconcile the authoritative File Sync document with the folder while its
+ * lease is held. This discovers immutable generations whose process died
+ * before the JS publication journal could be persisted, and removes only the
+ * reserved scratch files that no live publisher can still own under the lease.
+ */
+export const reconcileFileSyncAttachmentInventory = async (
+    appData: AppData,
+    deps: AttachmentCleanupDeps,
+    guards: AttachmentCleanupGuards,
+    strict = false,
+): Promise<AppData> => {
+    let journaledData = appData;
+    try {
+        const syncPath = await deps.getSyncPath();
+        const fileBaseDir = getFileSyncDir(syncPath, SYNC_FILE_NAME, LEGACY_SYNC_FILE_NAME) || null;
+        if (!fileBaseDir) return appData;
+
+        const { readDir } = await import('@tauri-apps/plugin-fs');
+        const { join } = await import('@tauri-apps/api/path');
+        const { exists, remove } = await import('./sync-fs');
+        const attachmentsDir = await join(fileBaseDir, ATTACHMENTS_DIR_NAME);
+        if (!(await exists(attachmentsDir))) return appData;
+
+        const inventoryCloudKeys: string[] = [];
+        for (const entry of await readDir(attachmentsDir)) {
+            if (!entry.isFile || entry.isSymlink) continue;
+            const name = entry.name;
+            if (
+                name.startsWith(FILE_SYNC_ATTACHMENT_SCRATCH_PREFIX)
+                && name.endsWith(FILE_SYNC_ATTACHMENT_SCRATCH_SUFFIX)
+            ) {
+                try {
+                    const scratchPath = await join(attachmentsDir, name);
+                    guards.ensureLocalSnapshotFresh();
+                    await guards.assertRemoteMutationFenceHeld?.();
+                    await remove(scratchPath);
+                } catch (error) {
+                    if (error instanceof Error && error.name === 'LocalSyncAbort') throw error;
+                    if (isSyncRemoteMutationFenceError(error)) throw error;
+                    if (strict) throw error;
+                    logAttachmentCleanupWarning(deps, 'Failed to remove File Sync publication scratch', error);
+                }
+                continue;
+            }
+            inventoryCloudKeys.push(`${ATTACHMENTS_DIR_NAME}/${name}`);
+        }
+        journaledData = journalUnreferencedFileSyncGenerationInventory(appData, inventoryCloudKeys);
+    } catch (error) {
+        if (error instanceof Error && error.name === 'LocalSyncAbort') throw error;
+        if (isSyncRemoteMutationFenceError(error)) throw error;
+        if (strict) throw error;
+        logAttachmentCleanupWarning(deps, 'Failed to reconcile File Sync attachment inventory', error);
+        return appData;
+    }
+
+    return journaledData;
 };

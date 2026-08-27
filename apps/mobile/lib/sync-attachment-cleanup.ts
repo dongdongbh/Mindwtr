@@ -6,6 +6,7 @@ import {
   isFileSyncGenerationCloudKey,
   isSyncRemoteMutationFenceError,
   isWebdavRemoteWriteConflictError,
+  journalUnreferencedFileSyncGenerationInventory,
   normalizeStrongWebdavEtag,
   runAttachmentCleanupLifecycle,
   sanitizeAttachmentCloudKeyForSyncMerge,
@@ -50,6 +51,7 @@ type MobileAttachmentCleanupOptions = {
   fetcher: typeof fetch;
   ensureLocalSnapshotFresh: () => void;
   assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
+  skipFileSyncInventory?: boolean;
   deleteDropboxAttachment: (
     cloudKey: string,
     ensureBeforeProviderDelete: () => void
@@ -62,6 +64,51 @@ type MobileAttachmentCleanupOptions = {
 type MobileAttachmentCleanupResult = {
   appData: AppData;
   shouldInvalidateFastSyncState: boolean;
+};
+
+const FILE_SYNC_PUBLICATION_STAGE_SUFFIX = '.mindwtr-staged';
+
+const isSafeInventoryLeafName = (name: string): boolean => (
+  Boolean(name)
+  && name !== '.'
+  && name !== '..'
+  && !name.includes('/')
+  && !name.includes('\\')
+);
+
+export const reconcileMobileFileSyncAttachmentInventory = async (
+  appData: AppData,
+  fileSyncPath: string,
+  guards: Pick<MobileAttachmentCleanupOptions,
+    'ensureLocalSnapshotFresh' | 'assertRemoteMutationFenceHeld'>,
+): Promise<AppData> => {
+  const syncDir = await resolveFileSyncDir(fileSyncPath);
+  if (!syncDir) throw new Error('File Sync attachments directory is unavailable');
+
+  const inventoryCloudKeys: string[] = [];
+  if (syncDir.type === 'saf') {
+    const inventory = await inspectSafDirectoryEntriesByName(syncDir.attachmentsDirUri);
+    if (inventory.status !== 'available') {
+      throw new Error('SAF File Sync attachments directory is unreadable');
+    }
+    for (const name of inventory.entries.keys()) {
+      if (isSafeInventoryLeafName(name)) {
+        inventoryCloudKeys.push(`${ATTACHMENTS_DIR_NAME}/${name}`);
+      }
+    }
+  } else {
+    for (const name of await FileSystem.readDirectoryAsync(syncDir.attachmentsDirUri)) {
+      if (!isSafeInventoryLeafName(name)) continue;
+      if (name.endsWith(FILE_SYNC_PUBLICATION_STAGE_SUFFIX)) {
+        guards.ensureLocalSnapshotFresh();
+        await guards.assertRemoteMutationFenceHeld?.();
+        await FileSystem.deleteAsync(`${syncDir.attachmentsDirUri}${name}`, { idempotent: true });
+        continue;
+      }
+      inventoryCloudKeys.push(`${ATTACHMENTS_DIR_NAME}/${name}`);
+    }
+  }
+  return journalUnreferencedFileSyncGenerationInventory(appData, inventoryCloudKeys);
 };
 
 const getManagedAttachmentCleanupPrefixes = (): string[] => {
@@ -98,6 +145,20 @@ const deleteAttachmentFile = async (
 export const runMobileAttachmentCleanup = async (
   options: MobileAttachmentCleanupOptions
 ): Promise<MobileAttachmentCleanupResult> => {
+  let cleanupData = options.appData;
+  if (!options.skipFileSyncInventory && options.backend === 'file' && options.fileSyncPath) {
+    try {
+      cleanupData = await reconcileMobileFileSyncAttachmentInventory(
+        cleanupData,
+        options.fileSyncPath,
+        options,
+      );
+    } catch (error) {
+      if (error instanceof Error && error.name === 'LocalSyncAbort') throw error;
+      if (isSyncRemoteMutationFenceError(error)) throw error;
+      options.logSyncWarning('Failed to reconcile File Sync attachment inventory', error);
+    }
+  }
   const isWebdavBackend = options.backend === 'webdav' && Boolean(options.webdavConfig?.url);
   const isCloudBackend = options.backend === 'cloud'
     && options.cloudProvider === 'selfhosted'
@@ -189,7 +250,7 @@ export const runMobileAttachmentCleanup = async (
     : undefined;
 
   const result = await runAttachmentCleanupLifecycle({
-    appData: options.appData,
+    appData: cleanupData,
     maxAttachmentTargets: ATTACHMENT_CLEANUP_BATCH_LIMIT,
     beforeEachAttachment: options.ensureLocalSnapshotFresh,
     beforeEachRemoteDelete: options.ensureLocalSnapshotFresh,

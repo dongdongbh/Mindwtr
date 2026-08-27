@@ -6,6 +6,7 @@ import {
     findOrphanedAttachments,
     hasFreshAttachmentCleanupWork,
     journalFileSyncGenerationPublications,
+    journalUnreferencedFileSyncGenerationInventory,
     isAttachmentCloudResourceReferenced,
     isAttachmentLocalResourceReferenced,
     PENDING_REMOTE_ATTACHMENT_DELETE_MAX_ATTEMPTS,
@@ -642,6 +643,44 @@ describe('File Sync generation publication journal', () => {
 
         expect(journaled).toBe(data);
         expect(journaled.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
+    });
+
+    it('rebuilds a lost publication journal from the authoritative folder inventory', () => {
+        const data = withAttachments(makeAttachment(H2));
+        const journaled = journalUnreferencedFileSyncGenerationInventory(data, [
+            H1,
+            H2,
+            H1,
+            'attachments/legacy.pdf',
+            '../outside.pdf',
+        ]);
+
+        expect(journaled.settings.attachments?.pendingRemoteDeletes).toEqual([
+            { cloudKey: H1, attempts: 0 },
+        ]);
+        expect(journaled.tasks[0].attachments?.[0]?.cloudKey).toBe(H2);
+    });
+
+    it('preserves retry state while rediscovering an unreferenced generation', () => {
+        const data = withAttachments(makeAttachment(H2));
+        data.settings.attachments = {
+            pendingRemoteDeletes: [{
+                cloudKey: H1,
+                title: 'report.pdf',
+                attempts: 3,
+                lastErrorAt: now,
+            }],
+        };
+
+        const journaled = journalUnreferencedFileSyncGenerationInventory(data, [H1]);
+
+        expect(journaled).toBe(data);
+        expect(journaled.settings.attachments?.pendingRemoteDeletes).toEqual([{
+            cloudKey: H1,
+            title: 'report.pdf',
+            attempts: 3,
+            lastErrorAt: now,
+        }]);
     });
 });
 
