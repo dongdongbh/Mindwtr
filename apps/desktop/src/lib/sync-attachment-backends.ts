@@ -28,6 +28,7 @@ import {
 import { sanitizeLogMessage } from './app-log';
 import {
     collectAttachmentsById,
+    createAttachmentUploadSnapshotFactory,
     reportProgress,
     syncBasicRemoteAttachments,
     validateAttachmentHash,
@@ -332,6 +333,7 @@ export async function syncWebdavAttachments(
     });
     const computeLocalFileHash = async (path: string, attachment: Attachment): Promise<string | null> =>
         computeSha256Hex(await readLocalFile(path, attachment));
+    const createUploadSnapshot = createAttachmentUploadSnapshotFactory({ readLocalFile, statLocalFile });
 
     let abortedByRateLimit = false;
 
@@ -436,6 +438,7 @@ export async function syncWebdavAttachments(
         localFileExists,
         getLocalFileStat: statLocalFile,
         computeLocalFileHash,
+        createUploadSnapshot,
         contentChangePhase: helpers?.phase,
         isFatalError: (error) => (
             isSyncRemoteMutationFenceError(error)
@@ -446,9 +449,10 @@ export async function syncWebdavAttachments(
             shouldUpload,
             shouldDownload,
         },
-        onUpload: async (attachment, localPath) => {
+        onUpload: async (attachment, _localPath, snapshot) => {
             const cloudKey = buildCloudKey(attachment);
-            const fileData = await readLocalFile(localPath, attachment);
+            if (!snapshot?.bytes) throw new Error('Immutable attachment upload bytes are unavailable');
+            const fileData = snapshot.bytes;
             const validation = await validateAttachmentForUpload(attachment, fileData.length);
             if (!validation.valid) {
                 const failure = handleAttachmentValidationFailure(attachment, validation.error);
@@ -662,6 +666,7 @@ export async function syncCloudAttachments(
     });
     const computeLocalFileHash = async (path: string, attachment: Attachment): Promise<string | null> =>
         computeSha256Hex(await readLocalFile(path, attachment));
+    const createUploadSnapshot = createAttachmentUploadSnapshotFactory({ readLocalFile, statLocalFile });
 
     const { patches } = await syncBasicRemoteAttachments({
         attachmentsById,
@@ -670,11 +675,13 @@ export async function syncCloudAttachments(
         localFileExists,
         getLocalFileStat: statLocalFile,
         computeLocalFileHash,
+        createUploadSnapshot,
         contentChangePhase: helpers?.phase,
         isFatalError: isSyncRemoteMutationFenceError,
-        onUpload: async (attachment, localPath) => {
+        onUpload: async (attachment, _localPath, snapshot) => {
             const cloudKey = buildCloudKey(attachment);
-            const fileData = await readLocalFile(localPath, attachment);
+            if (!snapshot?.bytes) throw new Error('Immutable attachment upload bytes are unavailable');
+            const fileData = snapshot.bytes;
             const validation = await validateAttachmentForUpload(attachment, fileData.length);
             if (!validation.valid) {
                 const failure = handleAttachmentValidationFailure(attachment, validation.error);
@@ -837,6 +844,7 @@ export async function syncDropboxAttachments(
     });
     const computeLocalFileHash = async (path: string, attachment: Attachment): Promise<string | null> =>
         computeSha256Hex(await readLocalFile(path, attachment));
+    const createUploadSnapshot = createAttachmentUploadSnapshotFactory({ readLocalFile, statLocalFile });
 
     const { patches } = await syncBasicRemoteAttachments({
         attachmentsById,
@@ -845,14 +853,16 @@ export async function syncDropboxAttachments(
         localFileExists,
         getLocalFileStat: statLocalFile,
         computeLocalFileHash,
+        createUploadSnapshot,
         contentChangePhase: helpers?.phase,
         isFatalError: (error) => (
             isSyncRemoteMutationFenceError(error)
             || error instanceof DropboxConflictError
         ),
-        onUpload: async (attachment, localPath) => {
+        onUpload: async (attachment, _localPath, snapshot) => {
             const cloudKey = buildCloudKey(attachment);
-            const fileData = await readLocalFile(localPath, attachment);
+            if (!snapshot?.bytes) throw new Error('Immutable attachment upload bytes are unavailable');
+            const fileData = snapshot.bytes;
             const validation = await validateAttachmentForUpload(attachment, fileData.length);
             if (!validation.valid) {
                 const failure = handleAttachmentValidationFailure(attachment, validation.error);
@@ -980,7 +990,7 @@ export async function syncCloudKitAttachments(
 ): Promise<AppData | false> {
     if (!deps.isTauriRuntimeEnv()) return false;
 
-    const { BaseDirectory, exists, mkdir, readFile, stat } = await import('@tauri-apps/plugin-fs');
+    const { BaseDirectory, exists, mkdir, readFile, stat, writeFile, rename, remove } = await import('@tauri-apps/plugin-fs');
     const { dataDir, join } = await import('@tauri-apps/api/path');
 
     try {
@@ -1002,6 +1012,23 @@ export async function syncCloudKitAttachments(
     );
     const computeLocalFileHash = async (path: string, attachment: Attachment): Promise<string | null> =>
         computeSha256Hex(await readLocalFile(path, attachment));
+    const createUploadSnapshot = createAttachmentUploadSnapshotFactory({
+        readLocalFile,
+        statLocalFile,
+        stageBytes: async (bytes, attachment) => {
+            const sourcePath = await join(
+                managedAttachmentsDir,
+                `.upload-${attachment.id}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+            );
+            await writeFileSafelyAbsolute(sourcePath, bytes, { writeFile, rename, remove });
+            return {
+                sourcePath,
+                dispose: async () => {
+                    await remove(sourcePath);
+                },
+            };
+        },
+    });
 
     deps.logSyncInfo('CloudKit attachment sync start', {
         count: String(attachmentsById.size),
@@ -1014,14 +1041,16 @@ export async function syncCloudKitAttachments(
         localFileExists,
         getLocalFileStat: statLocalFile,
         computeLocalFileHash,
+        createUploadSnapshot,
         contentChangePhase: helpers?.phase,
         // A cloudKey written by a different backend before a provider switch isn't a valid
         // CloudKit record key, so CloudKit must still treat the attachment as needing upload.
         hasCloudCopy: (attachment) => Boolean(parseCloudKitAttachmentKey(attachment.cloudKey)),
-        onUpload: async (attachment, localPath) => {
+        onUpload: async (attachment, localPath, snapshot) => {
             const owned = ownerByAttachmentId.get(attachment.id);
             if (!owned) return false;
-            const fileData = await readLocalFile(localPath, attachment);
+            if (!snapshot?.bytes) throw new Error('Immutable attachment upload bytes are unavailable');
+            const fileData = snapshot.bytes;
             const validation = await validateAttachmentForUpload(attachment, fileData.length);
             if (!validation.valid) {
                 const failure = handleAttachmentValidationFailure(attachment, validation.error);
@@ -1039,7 +1068,11 @@ export async function syncCloudKitAttachments(
 
             clearAttachmentValidationFailure(attachment.id);
             reportProgress(attachment.id, 'upload', 0, fileData.length, 'active');
-            const metadata = buildCloudKitAttachmentMetadata(attachment, owned, fileData.length);
+            const metadata = buildCloudKitAttachmentMetadata(
+                { ...attachment, fileHash: snapshot.fileHash },
+                owned,
+                fileData.length,
+            );
             const savedMetadata = await saveCloudKitAttachmentAsset(attachment.id, localPath, metadata);
             attachment.cloudKey = buildCloudKitAttachmentKey(attachment.id);
             attachment.localStatus = 'available';
@@ -1146,6 +1179,7 @@ export async function syncFileAttachments(
     });
     const computeLocalFileHash = async (path: string, attachment: Attachment): Promise<string | null> =>
         computeSha256Hex(await readLocalFile(path, attachment));
+    const createUploadSnapshot = createAttachmentUploadSnapshotFactory({ readLocalFile, statLocalFile });
 
     // Mirror the WebDAV presence pre-pass: a cloudKey recorded against a
     // previous sync folder (or a file deleted from this one) must not stop
@@ -1176,10 +1210,12 @@ export async function syncFileAttachments(
         localFileExists,
         getLocalFileStat: statLocalFile,
         computeLocalFileHash,
+        createUploadSnapshot,
         contentChangePhase: helpers?.phase,
-        onUpload: async (attachment, localPath) => {
+        onUpload: async (attachment, _localPath, snapshot) => {
             const cloudKey = buildCloudKey(attachment);
-            const fileData = await readLocalFile(localPath, attachment);
+            if (!snapshot?.bytes) throw new Error('Immutable attachment upload bytes are unavailable');
+            const fileData = snapshot.bytes;
             const validation = await validateAttachmentForUpload(
                 attachment,
                 fileData.length,

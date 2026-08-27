@@ -1,9 +1,11 @@
 import type { AppData, Attachment, SyncKeyMaterial } from '@mindwtr/core';
 import {
   applyAttachmentPatches,
+  applyAttachmentContentStat,
   isAbortError,
   isSyncRemoteMutationFenceError,
   validateAttachmentForUpload,
+  type LocalFileStat,
 } from '@mindwtr/core';
 import {
   DropboxConflictError,
@@ -38,8 +40,8 @@ import {
 } from '../attachment-sync-utils';
 import {
   migrateAttachmentsLocallyBeforeSync,
+  createMobileAttachmentUploadSnapshot,
   openAttachmentBytesFromDownload,
-  pendingBespokeAttachmentContentStillMatches,
   prepareBespokeAttachmentContentCandidate,
   sealAttachmentBytesForUpload,
 } from './common';
@@ -57,6 +59,8 @@ export type DropboxAttachmentSyncOptions = {
 type PendingDropboxUploadMutation = {
   attachment: Attachment;
   cloudKey: string;
+  fileHash: string;
+  stat: LocalFileStat;
   fileSize?: number;
   totalBytes: number;
 };
@@ -136,12 +140,6 @@ export const syncDropboxAttachments = async (
       && (!attachment.cloudKey || attachment.pendingContentUpload === true)
       && mayUploadLocalFile
     ) {
-      if (
-        attachment.pendingContentUpload === true
-        && !(await pendingBespokeAttachmentContentStillMatches(attachment, uri))
-      ) {
-        continue;
-      }
       if (!options.activationProbe && uploadCount >= DROPBOX_ATTACHMENT_MAX_UPLOADS_PER_SYNC) {
         if (!uploadLimitLogged) {
           uploadLimitLogged = true;
@@ -152,20 +150,18 @@ export const syncDropboxAttachments = async (
         continue;
       }
       uploadCount += 1;
-      let localReadFailed = false;
+      let snapshot: Awaited<ReturnType<typeof createMobileAttachmentUploadSnapshot>> = null;
       try {
         assertNotAborted(options.signal);
-        let fileSize = await getAttachmentByteSize(attachment, uri);
-        let fileData: Uint8Array | null = null;
-        if (!Number.isFinite(fileSize ?? NaN)) {
-          const readResult = await readAttachmentBytesForUpload(uri);
-          if (readResult.readFailed) {
-            localReadFailed = true;
-            throw readResult.error;
-          }
-          fileData = readResult.data;
-          fileSize = fileData.byteLength;
+        snapshot = await createMobileAttachmentUploadSnapshot(uri, attachment);
+        if (!snapshot) continue;
+        if (
+          attachment.pendingContentUpload === true
+          && snapshot.fileHash !== attachment.fileHash?.trim().toLowerCase()
+        ) {
+          continue;
         }
+        const fileSize = snapshot.stat.size;
 
         const validation = await validateAttachmentForUpload(attachment, fileSize);
         if (!validation.valid) {
@@ -176,15 +172,9 @@ export const syncDropboxAttachments = async (
         reportProgress(attachment.id, 'upload', 0, totalBytes, 'active');
 
         const cloudKey = buildCloudKey(attachment);
-        let uploadBytes = fileData;
-        if (!uploadBytes) {
-          const readResult = await readAttachmentBytesForUpload(uri);
-          if (readResult.readFailed) {
-            localReadFailed = true;
-            throw readResult.error;
-          }
-          uploadBytes = readResult.data;
-        }
+        const readResult = await readAttachmentBytesForUpload(snapshot.sourcePath);
+        if (readResult.readFailed) throw readResult.error;
+        const uploadBytes = readResult.data;
         const wireBytes = await sealAttachmentBytesForUpload(uploadBytes, options.material);
         const expectedRev = await runDropboxAuthorized(
           dropboxClientId,
@@ -218,6 +208,8 @@ export const syncDropboxAttachments = async (
         pendingUploadMutations.push({
           attachment,
           cloudKey,
+          fileHash: snapshot.fileHash,
+          stat: snapshot.stat,
           fileSize: Number.isFinite(fileSize ?? NaN) ? Number(fileSize) : undefined,
           totalBytes,
         });
@@ -228,12 +220,6 @@ export const syncDropboxAttachments = async (
         if (isSyncRemoteMutationFenceError(error) || error instanceof DropboxConflictError) {
           throw error;
         }
-        if (localReadFailed) {
-          if (markAttachmentUnrecoverable(attachment)) {
-            recordPatch(attachment);
-          }
-          logAttachmentWarn(`Attachment local file is unreadable; marking unrecoverable (${attachment.id})`, error);
-        }
         reportProgress(
           attachment.id,
           'upload',
@@ -243,6 +229,12 @@ export const syncDropboxAttachments = async (
           error instanceof Error ? error.message : String(error)
         );
         logAttachmentWarn(`Failed to upload attachment ${attachment.id}`, error);
+      } finally {
+        if (snapshot) {
+          await snapshot.dispose().catch((error) => {
+            logAttachmentWarn(`Failed to clean up attachment upload snapshot ${attachment.id}`, error);
+          });
+        }
       }
     }
 
@@ -261,6 +253,7 @@ export const syncDropboxAttachments = async (
   for (const pending of pendingUploadMutations) {
     pending.attachment.cloudKey = pending.cloudKey;
     pending.attachment.pendingContentUpload = undefined;
+    applyAttachmentContentStat(pending.attachment, pending.stat, pending.fileHash);
     if (!Number.isFinite(pending.attachment.size ?? NaN) && Number.isFinite(pending.fileSize ?? NaN)) {
       pending.attachment.size = Number(pending.fileSize);
     }

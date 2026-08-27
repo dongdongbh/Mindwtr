@@ -1,12 +1,14 @@
 import type { AppData } from '@mindwtr/core';
 import {
   applyAttachmentPatches,
+  applyAttachmentContentStat,
   cloudGetFile,
   cloudPutFile,
   isAbortError,
   validateAttachmentHash,
   validateAttachmentForUpload,
   type Attachment,
+  type LocalFileStat,
 } from '@mindwtr/core';
 import { logAttachmentWarn } from '../attachment-sync-utils';
 import { getMobileCloudRequestOptions } from '../webdav-request-options';
@@ -28,7 +30,7 @@ import {
 } from '../attachment-sync-utils';
 import {
   migrateAttachmentsLocallyBeforeSync,
-  pendingBespokeAttachmentContentStillMatches,
+  createMobileAttachmentUploadSnapshot,
   prepareBespokeAttachmentContentCandidate,
   uploadCloudFileWithFileSystem,
 } from './common';
@@ -46,6 +48,8 @@ const CLOUD_REMOTE_MUTATION_REQUEST_HORIZON_MS = 35_000;
 type PendingCloudUploadMutation = {
   attachment: Attachment;
   cloudKey: string;
+  fileHash: string;
+  stat: LocalFileStat;
   fileSize?: number;
   totalBytes: number;
 };
@@ -143,14 +147,8 @@ export const syncCloudAttachments = async (
       && (!attachment.cloudKey || attachment.pendingContentUpload === true)
       && mayUploadLocalFile
     ) {
-      if (
-        attachment.pendingContentUpload === true
-        && !(await pendingBespokeAttachmentContentStillMatches(attachment, uri))
-      ) {
-        continue;
-      }
-      let localReadFailed = false;
       let shouldPropagateError = false;
+      let snapshot: Awaited<ReturnType<typeof createMobileAttachmentUploadSnapshot>> = null;
       try {
         assertNotAborted(options.signal);
         try {
@@ -159,17 +157,15 @@ export const syncCloudAttachments = async (
           shouldPropagateError = true;
           throw error;
         }
-        let fileSize = await getAttachmentByteSize(attachment, uri);
-        let fileData: Uint8Array | null = null;
-        if (!Number.isFinite(fileSize ?? NaN)) {
-          const readResult = await readAttachmentBytesForUpload(uri);
-          if (readResult.readFailed) {
-            localReadFailed = true;
-            throw readResult.error;
-          }
-          fileData = readResult.data;
-          fileSize = fileData.byteLength;
+        snapshot = await createMobileAttachmentUploadSnapshot(uri, attachment);
+        if (!snapshot) continue;
+        if (
+          attachment.pendingContentUpload === true
+          && snapshot.fileHash !== attachment.fileHash?.trim().toLowerCase()
+        ) {
+          continue;
         }
+        const fileSize = snapshot.stat.size;
 
         const validation = await validateAttachmentForUpload(attachment, fileSize);
         if (!validation.valid) {
@@ -188,7 +184,7 @@ export const syncCloudAttachments = async (
         }
         const uploadedWithFileSystem = await uploadCloudFileWithFileSystem(
           uploadUrl,
-          uri,
+          snapshot.sourcePath,
           attachment.mimeType || DEFAULT_CONTENT_TYPE,
           cloudConfig.token,
           (loaded, total) => reportProgress(attachment.id, 'upload', loaded, total, 'active'),
@@ -197,15 +193,9 @@ export const syncCloudAttachments = async (
         );
         if (!uploadedWithFileSystem) {
           assertNotAborted(options.signal);
-          let uploadBytes = fileData;
-          if (!uploadBytes) {
-            const readResult = await readAttachmentBytesForUpload(uri);
-            if (readResult.readFailed) {
-              localReadFailed = true;
-              throw readResult.error;
-            }
-            uploadBytes = readResult.data;
-          }
+          const readResult = await readAttachmentBytesForUpload(snapshot.sourcePath);
+          if (readResult.readFailed) throw readResult.error;
+          const uploadBytes = readResult.data;
           const buffer = toArrayBuffer(uploadBytes);
           try {
             await options.assertRemoteMutationFenceHeld?.(CLOUD_REMOTE_MUTATION_REQUEST_HORIZON_MS);
@@ -231,6 +221,8 @@ export const syncCloudAttachments = async (
         pendingUploadMutations.push({
           attachment,
           cloudKey,
+          fileHash: snapshot.fileHash,
+          stat: snapshot.stat,
           fileSize: Number.isFinite(fileSize ?? NaN) ? Number(fileSize) : undefined,
           totalBytes,
         });
@@ -241,12 +233,6 @@ export const syncCloudAttachments = async (
           // here could erase another device's winning blob.
           throw error;
         }
-        if (localReadFailed) {
-          if (markAttachmentUnrecoverable(attachment)) {
-            recordPatch(attachment);
-          }
-          logAttachmentWarn(`Attachment local file is unreadable; marking unrecoverable (${attachment.id})`, error);
-        }
         reportProgress(
           attachment.id,
           'upload',
@@ -256,6 +242,12 @@ export const syncCloudAttachments = async (
           error instanceof Error ? error.message : String(error)
         );
         logAttachmentWarn(`Failed to upload attachment ${attachment.id}`, error);
+      } finally {
+        if (snapshot) {
+          await snapshot.dispose().catch((error) => {
+            logAttachmentWarn(`Failed to clean up attachment upload snapshot ${attachment.id}`, error);
+          });
+        }
       }
     }
   }
@@ -263,6 +255,7 @@ export const syncCloudAttachments = async (
   for (const pending of pendingUploadMutations) {
     pending.attachment.cloudKey = pending.cloudKey;
     pending.attachment.pendingContentUpload = undefined;
+    applyAttachmentContentStat(pending.attachment, pending.stat, pending.fileHash);
     if (!Number.isFinite(pending.attachment.size ?? NaN) && Number.isFinite(pending.fileSize ?? NaN)) {
       pending.attachment.size = Number(pending.fileSize);
     }

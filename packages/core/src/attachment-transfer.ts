@@ -113,10 +113,26 @@ export const collectAttachmentsById = (appData: AppData): Map<string, Attachment
     return attachmentsById;
 };
 
+/** Immutable byte source prepared immediately before an attachment upload.
+ * Adapters may provide in-memory bytes (desktop/small mobile transports) or a
+ * private staged path (streaming mobile transports), but every retry must read
+ * this source rather than the live attachment URI. */
+export type AttachmentUploadSnapshot = {
+    sourcePath: string;
+    fileHash: string;
+    stat: LocalFileStat;
+    bytes?: Uint8Array;
+    dispose: () => Promise<void>;
+};
+
 export type AttachmentTransferLifecycleOptions = {
     attachmentsById: Map<string, Attachment>;
     localFileExists: (path: string, attachment: Attachment) => Promise<boolean>;
-    onUpload: (attachment: Attachment, localPath: string) => Promise<boolean>;
+    onUpload: (
+        attachment: Attachment,
+        localPath: string,
+        snapshot?: AttachmentUploadSnapshot,
+    ) => Promise<boolean>;
     onUploadError: (attachment: Attachment, error: unknown) => void;
     onDownload: (attachment: Attachment) => Promise<boolean>;
     onDownloadError: (attachment: Attachment, error: unknown) => void;
@@ -181,6 +197,15 @@ export type AttachmentTransferLifecycleOptions = {
     getLocalFileStat?: (path: string, attachment: Attachment) => Promise<LocalFileStat | null>;
     /** Only invoked when the cheap stat compare already mismatched. */
     computeLocalFileHash?: (path: string, attachment: Attachment) => Promise<string | null>;
+    /** Prepare one immutable upload source and its digest. When present, the
+     * lifecycle never asks the uploader to reread the live attachment path. */
+    createUploadSnapshot?: (
+        path: string,
+        attachment: Attachment,
+    ) => Promise<AttachmentUploadSnapshot | null>;
+    /** Production backends opt in so a missing/unhashable snapshot fails closed
+     * instead of silently falling back to the mutable live path. */
+    requireUploadSnapshot?: boolean;
     /**
      * Which half of the sync cycle this call represents (see sync-run.ts's
      * `SyncRunAttachmentPhase`). Meaningless without `getLocalFileStat`. A confirmed
@@ -310,6 +335,42 @@ export async function runAttachmentTransferLifecycle(
         if (stat) applyAttachmentContentStat(attachment, stat);
     };
 
+    const attemptUpload = async (
+        attachment: Attachment,
+        localPath: string,
+        expectedHash?: string,
+    ): Promise<boolean> => {
+        const snapshot = options.createUploadSnapshot
+            ? await options.createUploadSnapshot(localPath, attachment)
+            : null;
+        if (!snapshot) {
+            if (options.requireUploadSnapshot) return false;
+            return await options.onUpload(attachment, localPath);
+        }
+
+        try {
+            const snapshotHash = snapshot.fileHash.trim().toLowerCase();
+            const normalizedExpectedHash = expectedHash?.trim().toLowerCase();
+            if (!isSha256Hex(snapshotHash)
+                || (expectedHash !== undefined
+                    && (!isSha256Hex(normalizedExpectedHash) || snapshotHash !== normalizedExpectedHash))) {
+                options.onLocalEditRace?.(attachment);
+                return false;
+            }
+            if (!await options.onUpload(attachment, snapshot.sourcePath, snapshot)) return false;
+            applyAttachmentContentStat(attachment, snapshot.stat, snapshotHash);
+            return true;
+        } finally {
+            try {
+                await snapshot.dispose();
+            } catch (error) {
+                // Cleanup failure must not discard a successful remote mutation;
+                // surface it through the existing per-attachment warning channel.
+                options.onUploadError(attachment, error);
+            }
+        }
+    };
+
     for (const original of options.attachmentsById.values()) {
         await options.beforeEachAttachment?.();
         if (original.kind !== 'file') continue;
@@ -320,6 +381,7 @@ export async function runAttachmentTransferLifecycle(
         // recorded as a patch when anything changed; `original` stays pristine.
         const attachment: Attachment = { ...original };
         let itemMutated = false;
+        let uploadedThisPass = false;
 
         const rawUri = attachment.uri ? resolveLocalPath(attachment.uri) : '';
         const isHttp = /^https?:\/\//i.test(rawUri);
@@ -344,7 +406,19 @@ export async function runAttachmentTransferLifecycle(
             // the file immediately before upload so an edit landing between prepare and
             // post-merge cannot be published under stale hash/revision metadata. A missing
             // or unhashable file fails closed and remains pending for the next prepare pass.
-            if (mayReadForSync && options.getLocalFileStat) {
+            if (mayReadForSync && options.createUploadSnapshot) {
+                if (!options.policy?.shouldUpload || options.policy.shouldUpload(attachment)) {
+                    try {
+                        if (await attemptUpload(attachment, localPath, attachment.fileHash)) {
+                            attachment.pendingContentUpload = undefined;
+                            itemMutated = true;
+                        }
+                    } catch (error) {
+                        if (options.isFatalError?.(error)) throw error;
+                        options.onUploadError(attachment, error);
+                    }
+                }
+            } else if (mayReadForSync && options.getLocalFileStat) {
                 const stat = await options.getLocalFileStat(localPath, attachment).catch(() => null);
                 if (stat) {
                     const check = await checkAttachmentContentChange(
@@ -366,10 +440,12 @@ export async function runAttachmentTransferLifecycle(
                         }
                         if (!options.policy?.shouldUpload || options.policy.shouldUpload(attachment)) {
                             try {
-                                if (await options.onUpload(attachment, localPath)) {
+                                if (await attemptUpload(attachment, localPath, attachment.fileHash)) {
                                     attachment.pendingContentUpload = undefined;
                                     itemMutated = true;
-                                    await refreshContentStat(attachment, localPath);
+                                    if (!options.createUploadSnapshot) {
+                                        await refreshContentStat(attachment, localPath);
+                                    }
                                 }
                             } catch (error) {
                                 if (options.isFatalError?.(error)) throw error;
@@ -390,20 +466,32 @@ export async function runAttachmentTransferLifecycle(
         if (!hasCloudCopy(attachment) && mayReadForSync && !options.deferUploads) {
             if (!options.policy?.shouldUpload || options.policy.shouldUpload(attachment)) {
                 try {
-                    if (await options.onUpload(attachment, localPath)) {
+                    if (await attemptUpload(attachment, localPath)) {
                         attachment.pendingContentUpload = undefined;
                         itemMutated = true;
-                        if (!attachment.fileHash && options.computeLocalFileHash) {
+                        uploadedThisPass = true;
+                        if (!options.createUploadSnapshot && !attachment.fileHash && options.computeLocalFileHash) {
                             const hash = await options.computeLocalFileHash(localPath, attachment).catch(() => null);
                             if (hash) attachment.fileHash = hash;
                         }
-                        await refreshContentStat(attachment, localPath);
+                        if (!options.createUploadSnapshot) {
+                            await refreshContentStat(attachment, localPath);
+                        }
                     }
                 } catch (error) {
                     if (options.isFatalError?.(error)) throw error;
                     options.onUploadError(attachment, error);
                 }
             }
+        }
+
+        // The immutable snapshot is now the published remote identity. The live
+        // path may already contain a newer edit; post-merge change detection would
+        // misclassify that as stale local content and download over it. Leave the
+        // newer live bytes for the next cycle's prepare phase instead.
+        if (uploadedThisPass) {
+            patches.set(attachment.id, attachment);
+            continue;
         }
 
         if (hasCloudCopy(attachment) && !existsLocally && !hasPendingContentUpload) {
@@ -477,8 +565,10 @@ export async function runAttachmentTransferLifecycle(
                         itemMutated = true;
                     } else if (!options.policy?.shouldUpload || options.policy.shouldUpload(attachment)) {
                         try {
-                            if (await options.onUpload(attachment, localPath)) {
-                                applyAttachmentContentStat(attachment, check.stat, check.hash);
+                            if (await attemptUpload(attachment, localPath, check.hash ?? undefined)) {
+                                if (!options.createUploadSnapshot) {
+                                    applyAttachmentContentStat(attachment, check.stat, check.hash);
+                                }
                                 attachment.contentRev = bumpAttachmentContentRevision(attachment);
                                 itemMutated = true;
                             }

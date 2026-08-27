@@ -467,6 +467,135 @@ describe('runAttachmentTransferLifecycle', () => {
             expect(after().cloudKey).toBeUndefined();
         });
 
+        it('binds a first upload and its published hash to one immutable snapshot', async () => {
+            const attachment = makeAttachment({ localStatus: 'available' });
+            const snapshotHash = 'a'.repeat(64);
+            const dispose = vi.fn(async () => undefined);
+            const computeLocalFileHash = vi.fn(async () => 'b'.repeat(64));
+            const onUpload = vi.fn(async (
+                item: Attachment,
+                sourcePath: string,
+                snapshot?: { bytes?: Uint8Array; fileHash: string },
+            ) => {
+                expect(sourcePath).toBe('/staged/attachment-1');
+                expect(snapshot?.bytes).toEqual(new Uint8Array([1, 2, 3]));
+                expect(snapshot?.fileHash).toBe(snapshotHash);
+                item.cloudKey = 'attachments/attachment-1.txt';
+                return true;
+            });
+            const { after } = await runLifecycle({
+                attachmentsById: new Map([[attachment.id, attachment]]),
+                localFileExists: vi.fn(async () => true),
+                getLocalFileStat: vi.fn(async () => ({ mtimeMs: 9000, size: 99 })),
+                computeLocalFileHash,
+                createUploadSnapshot: vi.fn(async () => ({
+                    sourcePath: '/staged/attachment-1',
+                    bytes: new Uint8Array([1, 2, 3]),
+                    fileHash: snapshotHash,
+                    stat: { mtimeMs: 1000, size: 3 },
+                    dispose,
+                })),
+                requireUploadSnapshot: true,
+                contentChangePhase: 'post-merge',
+                onUpload,
+                onUploadError: vi.fn(),
+                onDownload: vi.fn(),
+                onDownloadError: vi.fn(),
+            });
+
+            expect(onUpload).toHaveBeenCalledOnce();
+            expect(after()).toMatchObject({
+                cloudKey: 'attachments/attachment-1.txt',
+                fileHash: snapshotHash,
+                contentMtimeMs: 1000,
+                contentSize: 3,
+            });
+            expect(computeLocalFileHash).not.toHaveBeenCalled();
+            expect(dispose).toHaveBeenCalledOnce();
+        });
+
+        it('retains a pending candidate when its immutable snapshot has different bytes', async () => {
+            const expectedHash = 'a'.repeat(64);
+            const dispose = vi.fn(async () => undefined);
+            const attachment = makeAttachment({
+                cloudKey: 'attachments/attachment-1.txt',
+                fileHash: expectedHash,
+                contentRev: 3,
+                contentMtimeMs: 1000,
+                contentSize: 3,
+                pendingContentUpload: true,
+            });
+            const onUpload = vi.fn(async () => true);
+            const onLocalEditRace = vi.fn();
+            const { after } = await runLifecycle({
+                attachmentsById: new Map([[attachment.id, attachment]]),
+                localFileExists: vi.fn(async () => true),
+                createUploadSnapshot: vi.fn(async () => ({
+                    sourcePath: '/staged/attachment-1',
+                    fileHash: 'b'.repeat(64),
+                    stat: { mtimeMs: 1000, size: 3 },
+                    dispose,
+                })),
+                requireUploadSnapshot: true,
+                contentChangePhase: 'post-merge',
+                onUpload,
+                onUploadError: vi.fn(),
+                onDownload: vi.fn(),
+                onDownloadError: vi.fn(),
+                onLocalEditRace,
+            });
+
+            expect(onUpload).not.toHaveBeenCalled();
+            expect(onLocalEditRace).toHaveBeenCalledOnce();
+            expect(after().pendingContentUpload).toBe(true);
+            expect(after().fileHash).toBe(expectedHash);
+            expect(dispose).toHaveBeenCalledOnce();
+        });
+
+        it('fails closed when a production backend cannot create an upload snapshot', async () => {
+            const attachment = makeAttachment({ localStatus: 'available' });
+            const onUpload = vi.fn(async () => true);
+            const { after } = await runLifecycle({
+                attachmentsById: new Map([[attachment.id, attachment]]),
+                localFileExists: vi.fn(async () => true),
+                createUploadSnapshot: vi.fn(async () => null),
+                requireUploadSnapshot: true,
+                onUpload,
+                onUploadError: vi.fn(),
+                onDownload: vi.fn(),
+                onDownloadError: vi.fn(),
+            });
+
+            expect(onUpload).not.toHaveBeenCalled();
+            expect(after().cloudKey).toBeUndefined();
+        });
+
+        it('disposes an immutable snapshot after an upload error', async () => {
+            const attachment = makeAttachment({ localStatus: 'available' });
+            const dispose = vi.fn(async () => undefined);
+            const onUploadError = vi.fn();
+            await runLifecycle({
+                attachmentsById: new Map([[attachment.id, attachment]]),
+                localFileExists: vi.fn(async () => true),
+                createUploadSnapshot: vi.fn(async () => ({
+                    sourcePath: '/staged/attachment-1',
+                    fileHash: 'a'.repeat(64),
+                    stat: { mtimeMs: 1000, size: 3 },
+                    dispose,
+                })),
+                requireUploadSnapshot: true,
+                onUpload: vi.fn(async () => { throw new Error('network failed'); }),
+                onUploadError,
+                onDownload: vi.fn(),
+                onDownloadError: vi.fn(),
+            });
+
+            expect(onUploadError).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+                message: 'network failed',
+            }));
+            expect(dispose).toHaveBeenCalledOnce();
+        });
+
         describe('prepare phase: a failed/skipped upload must not publish metadata (review B2)', () => {
             const staleAttachment = () => makeAttachment({
                 cloudKey: 'attachments/attachment-1.txt',

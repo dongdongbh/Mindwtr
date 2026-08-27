@@ -2,6 +2,7 @@ import {
   applyAttachmentContentStat,
   bumpAttachmentContentRevision,
   checkAttachmentContentChange,
+  computeSha256Hex,
   decryptRemoteArtifactOrThrow,
   encryptSyncArtifact,
   inspectSyncArtifact,
@@ -22,6 +23,7 @@ import {
   computeAttachmentFileHash,
   createAttachmentLocalMigrationLimiter,
   DEFAULT_CONTENT_TYPE,
+  readFileAsBytes,
   statAttachmentFile,
 } from '../attachment-sync-utils';
 import { mobileSyncCryptoPrimitives } from '../sync-crypto-native';
@@ -125,6 +127,64 @@ export const isAttachmentSyncAbortError = (error: unknown, signal?: AbortSignal)
   Boolean(signal?.aborted) || (error instanceof Error && error.name === 'AbortError')
 );
 
+let uploadSnapshotSequence = 0;
+
+/**
+ * Copy the live attachment into an app-private file before hashing or uploading
+ * it. Native streaming transports and every retry then read the same immutable
+ * source instead of reopening a URI that another app may still be editing.
+ */
+export const createMobileAttachmentUploadSnapshot: NonNullable<
+  AttachmentTransferLifecycleOptions['createUploadSnapshot']
+> = async (sourcePath, attachment) => {
+  const baseDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+  if (!baseDir) return null;
+
+  const sourceStatBefore = sourcePath.startsWith('content://')
+    ? null
+    : await statAttachmentFile(sourcePath);
+
+  const normalizedBaseDir = baseDir.endsWith('/') ? baseDir : `${baseDir}/`;
+  uploadSnapshotSequence += 1;
+  const stagedPath = `${normalizedBaseDir}mindwtr-upload-${Date.now()}-${uploadSnapshotSequence}-${attachment.id}`;
+  let retainStagedFile = false;
+  try {
+    await FileSystem.copyAsync({ from: sourcePath, to: stagedPath });
+    const [stagedStat, stagedBytes, sourceStatAfter] = await Promise.all([
+      statAttachmentFile(stagedPath),
+      readFileAsBytes(stagedPath),
+      sourcePath.startsWith('content://') ? Promise.resolve(null) : statAttachmentFile(sourcePath),
+    ]);
+    const fileHash = await computeSha256Hex(stagedBytes);
+    if (!fileHash) return null;
+    if (
+      sourceStatBefore
+      && (
+        !sourceStatAfter
+        || sourceStatBefore.mtimeMs !== sourceStatAfter.mtimeMs
+        || sourceStatBefore.size !== sourceStatAfter.size
+        || sourceStatAfter.size !== stagedBytes.byteLength
+      )
+    ) {
+      return null;
+    }
+
+    retainStagedFile = true;
+    return {
+      sourcePath: stagedPath,
+      fileHash,
+      stat: sourceStatAfter ?? stagedStat ?? { mtimeMs: 0, size: stagedBytes.byteLength },
+      dispose: async () => {
+        await FileSystem.deleteAsync(stagedPath, { idempotent: true });
+      },
+    };
+  } finally {
+    if (!retainStagedFile) {
+      await FileSystem.deleteAsync(stagedPath, { idempotent: true }).catch(() => undefined);
+    }
+  }
+};
+
 /**
  * Thin adapter over core's shared reconciliation loop (`runAttachmentTransferLifecycle`),
  * mirroring desktop's `syncBasicRemoteAttachments` (apps/desktop/src/lib/sync-attachments.ts).
@@ -137,12 +197,17 @@ export const isAttachmentSyncAbortError = (error: unknown, signal?: AbortSignal)
  * patches for `applyAttachmentPatches` to fold into a fresh document.
  */
 export async function runMobileAttachmentLifecycle(
-  options: Omit<AttachmentTransferLifecycleOptions, 'resolveLocalPath' | 'canUploadFrom'>
+  options: Omit<
+    AttachmentTransferLifecycleOptions,
+    'resolveLocalPath' | 'canUploadFrom' | 'createUploadSnapshot' | 'requireUploadSnapshot'
+  >
 ): Promise<AttachmentTransferResult> {
   return await runAttachmentTransferLifecycle({
     ...options,
     resolveLocalPath: (uri) => uri,
     canUploadFrom: canUploadAttachmentFrom,
+    createUploadSnapshot: createMobileAttachmentUploadSnapshot,
+    requireUploadSnapshot: true,
   });
 }
 

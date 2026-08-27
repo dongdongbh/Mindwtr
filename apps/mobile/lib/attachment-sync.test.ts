@@ -695,10 +695,11 @@ describe('attachment sync', () => {
     const attachmentsDirUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fattachments/';
     const createdRemoteFileUri = `${attachmentsDirUri}upload-me.jpg`;
 
-    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => ({
-      exists: uri === 'file://document/attachments/upload-me.jpg',
-      size: uri === 'file://document/attachments/upload-me.jpg' ? 3 : 0,
-    }));
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => {
+      const exists = uri === 'file://document/attachments/upload-me.jpg'
+        || uri.startsWith('file://cache/mindwtr-upload-');
+      return { exists, size: exists ? 3 : 0, modificationTime: 1 };
+    });
     fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
     fileSystemMock.StorageAccessFramework.readDirectoryAsync.mockImplementation(async (uri: string) => {
       if (uri === attachmentsDirUri) {
@@ -766,7 +767,7 @@ describe('attachment sync', () => {
     const attachmentsDirUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fattachments/';
     const controller = new AbortController();
 
-    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: true, size: 3 });
+    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: true, size: 3, modificationTime: 1 });
     fileSystemMock.StorageAccessFramework.readDirectoryAsync.mockImplementation(async (uri: string) => {
       if (uri === attachmentsDirUri) {
         return [];
@@ -819,7 +820,7 @@ describe('attachment sync', () => {
   });
 
   it('passes abort signals through WebDAV attachment transfers', async () => {
-    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: true, size: 3 });
+    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: true, size: 3, modificationTime: 1 });
     fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
     const core = await import('@mindwtr/core');
     vi.mocked(core.webdavPutFileVersioned).mockResolvedValue(undefined);
@@ -878,7 +879,7 @@ describe('attachment sync', () => {
   it.each([false, true])(
     'prevents a mobile WebDAV attachment PUT after lease takeover (activation=%s)',
     async (activationProbe) => {
-      fileSystemMock.getInfoAsync.mockResolvedValue({ exists: true, size: 3 });
+      fileSystemMock.getInfoAsync.mockResolvedValue({ exists: true, size: 3, modificationTime: 1 });
       fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
       const core = await import('@mindwtr/core');
       const lost = new SyncRemoteMutationFenceLostError();
@@ -1145,8 +1146,16 @@ describe('attachment sync', () => {
       'application/octet-stream',
       { token: 'candidate-token' },
     );
+    expect(fileSystemMock.copyAsync).toHaveBeenCalledWith({
+      from: localUri,
+      to: expect.stringMatching(/^file:\/\/cache\/mindwtr-upload-/),
+    });
+    expect(fileSystemMock.readAsStringAsync.mock.calls.every(([uri]) => (
+      typeof uri === 'string' && uri.startsWith('file://cache/mindwtr-upload-')
+    ))).toBe(true);
     expect(data.tasks[0]?.attachments?.[0]).toMatchObject({
       cloudKey: 'attachments/notes.txt',
+      fileHash: sha256Hex(new Uint8Array([1, 2, 3])),
       localStatus: 'available',
     });
   });
@@ -2250,9 +2259,12 @@ describe('attachment sync', () => {
     });
 
     beforeEach(async () => {
-      fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
-        uri === localUri ? { exists: true, size: BYTES.length } : { exists: false }
-      ));
+      fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => {
+        const exists = uri === localUri || uri.startsWith('file://cache/mindwtr-upload-');
+        return exists
+          ? { exists: true, size: BYTES.length, modificationTime: 1 }
+          : { exists: false };
+      });
       fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(BYTES));
       const core = await import('@mindwtr/core');
       vi.mocked(core.webdavFileExists).mockResolvedValue(false);

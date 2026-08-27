@@ -148,6 +148,7 @@ describe('desktop sync attachment backends', () => {
         pathMocks.dataDir.mockResolvedValue('/app-data');
         pathMocks.join.mockImplementation(async (...parts: string[]) => parts.join('/'));
         fsMocks.mkdir.mockResolvedValue(undefined);
+        fsMocks.stat.mockResolvedValue({ mtime: new Date(1000), size: 3 });
         syncFsMocks.mkdir.mockResolvedValue(undefined);
         syncFsMocks.rename.mockResolvedValue(undefined);
         syncFsMocks.remove.mockResolvedValue(undefined);
@@ -292,11 +293,15 @@ describe('desktop sync attachment backends', () => {
         // form still has to be recognised as such for that to happen at all.
         expect(fsMocks.exists).toHaveBeenCalledWith(relativePath, { baseDir: fsMocks.BaseDirectory.Data });
         expect(fsMocks.readFile).toHaveBeenCalledWith(relativePath, { baseDir: fsMocks.BaseDirectory.Data });
+        expect(fsMocks.readFile).toHaveBeenCalledTimes(1);
         expect(fetcher).toHaveBeenCalledWith(
             'http://cloud.local/v1/attachments/attachment-1.txt',
             expect.objectContaining({ method: 'PUT' }),
         );
         expect(attachment?.cloudKey).toBe('attachments/attachment-1.txt');
+        expect(attachment?.fileHash).toBe(
+            '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
+        );
         expect(attachment?.localStatus).toBe('available');
         expect(logSyncWarning).not.toHaveBeenCalledWith(
             expect.stringContaining('Failed to upload attachment'),
@@ -345,7 +350,9 @@ describe('desktop sync attachment backends', () => {
             const assertRemoteMutationFenceHeld = vi.fn()
                 .mockResolvedValueOnce(undefined)
                 .mockRejectedValueOnce(lost);
-            const fetcher = vi.fn(async () => errorResponse(503, 'Unavailable'));
+            const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+                errorResponse(503, 'Unavailable'),
+            );
             coreMocks.withRetry.mockImplementationOnce(async (operation: () => Promise<unknown>) => {
                 await operation().catch(() => undefined);
                 return await operation();
@@ -947,14 +954,18 @@ describe('desktop sync attachment backends', () => {
         expect(cloudKitMocks.deleteCloudKitAttachmentAssets).toHaveBeenCalledWith(['old-attachment']);
         expect(cloudKitMocks.saveCloudKitAttachmentAsset).toHaveBeenCalledWith(
             'attachment-1',
-            '/app-data/mindwtr/attachments/photo.jpg',
+            expect.stringMatching(/^\/app-data\/mindwtr\/attachments\/\.upload-attachment-1-/),
             expect.objectContaining({
                 attachmentId: 'attachment-1',
+                fileHash: '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
                 ownerType: 'task',
                 ownerId: 'task-1',
                 title: 'photo.jpg',
                 size: 3,
             }),
+        );
+        expect(fsMocks.remove).toHaveBeenCalledWith(
+            expect.stringMatching(/^\/app-data\/mindwtr\/attachments\/\.upload-attachment-1-/),
         );
         expect(attachment?.cloudKey).toBe('cloudkit:attachment-1');
         expect(attachment?.localStatus).toBe('available');

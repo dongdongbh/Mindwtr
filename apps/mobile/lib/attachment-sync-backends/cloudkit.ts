@@ -176,7 +176,7 @@ export const syncCloudKitAttachments = async (
         // A cloudKey written by a different backend before a provider switch isn't a valid
         // CloudKit record key, so CloudKit must still treat the attachment as needing upload.
         hasCloudCopy: (attachment) => Boolean(parseCloudKitAttachmentKey(attachment.cloudKey)),
-        onUpload: async (attachment, localPath) => {
+        onUpload: async (attachment, localPath, snapshot) => {
             const owned = ownerByAttachmentId.get(attachment.id);
             if (!owned) return false;
             // A local content:// → managed-file migration must survive an upload
@@ -199,7 +199,11 @@ export const syncCloudKitAttachments = async (
                 await saveCloudKitAttachmentAsset(
                     attachment.id,
                     assetFile.uri,
-                    buildMetadata(attachment, owned, assetFile.size),
+                    buildMetadata(
+                        { ...attachment, fileHash: snapshot?.fileHash ?? attachment.fileHash },
+                        owned,
+                        assetFile.size,
+                    ),
                     { signal },
                 );
                 attachment.cloudKey = buildCloudKitAttachmentKey(attachment.id);
