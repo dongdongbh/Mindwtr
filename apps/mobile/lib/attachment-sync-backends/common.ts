@@ -7,6 +7,8 @@ import {
   encryptSyncArtifact,
   inspectSyncArtifact,
   isSha256Hex,
+  MAX_DOWNLOAD_BYTES,
+  ResponseTooLargeError,
   runAttachmentTransferLifecycle,
   SyncCryptoUnsupportedError,
   SyncEncryptionTerminalError,
@@ -20,6 +22,7 @@ import {
 import * as FileSystem from '../file-system';
 import * as LegacyFileSystem from 'expo-file-system/legacy';
 import {
+  base64ToBytes,
   bytesToBase64,
   attachmentNeedsManagedLocalCopy,
   canUploadAttachmentFrom,
@@ -137,6 +140,7 @@ export const isAttachmentSyncAbortError = (error: unknown, signal?: AbortSignal)
 
 let uploadSnapshotSequence = 0;
 let downloadStageSequence = 0;
+const DOWNLOAD_READ_CHUNK_BYTES = 64 * 1024;
 
 const buildAttachmentDownloadStagePath = (
   attachmentsDir: string,
@@ -151,6 +155,118 @@ const buildAttachmentDownloadStagePath = (
 
 export const deleteAttachmentDownloadStageBestEffort = async (stagedPath: string): Promise<void> => {
   await FileSystem.deleteAsync(stagedPath, { idempotent: true }).catch(() => undefined);
+};
+
+const assertAttachmentDownloadSize = (size: number): void => {
+  if (!Number.isFinite(size) || size < 0 || size > MAX_DOWNLOAD_BYTES) {
+    throw new ResponseTooLargeError(MAX_DOWNLOAD_BYTES);
+  }
+};
+
+type AttachmentDownloadFileSnapshot = {
+  modificationTime: number | null;
+  size: number;
+};
+
+const readAttachmentDownloadFileSnapshot = async (
+  path: string,
+): Promise<AttachmentDownloadFileSnapshot> => {
+  const info = await FileSystem.getInfoAsync(path);
+  if (!info.exists || typeof info.size !== 'number') {
+    throw new Error('Attachment download scratch file is unavailable');
+  }
+  assertAttachmentDownloadSize(info.size);
+  return {
+    modificationTime: typeof info.modificationTime === 'number' ? info.modificationTime : null,
+    size: info.size,
+  };
+};
+
+const snapshotsMatch = (
+  before: AttachmentDownloadFileSnapshot,
+  after: AttachmentDownloadFileSnapshot,
+): boolean => (
+  before.size === after.size
+  && (
+    before.modificationTime === null
+    || after.modificationTime === null
+    || before.modificationTime === after.modificationTime
+  )
+);
+
+/** Native-copy a File/SAF generation into app-private scratch. The remote size is
+ * rejected before copying whenever its provider reports one; the owned scratch
+ * is always statted afterward, so unknown SAF metadata never authorizes a JS read. */
+export const copyAttachmentDownloadToStage = async (
+  attachment: Attachment,
+  attachmentsDir: string,
+  sourcePath: string,
+): Promise<string> => {
+  const stagedPath = buildAttachmentDownloadStagePath(attachmentsDir, attachment);
+  const sourceBefore = await FileSystem.getInfoAsync(sourcePath)
+    .then((info): AttachmentDownloadFileSnapshot | null => {
+      if (!info.exists || typeof info.size !== 'number') return null;
+      assertAttachmentDownloadSize(info.size);
+      return {
+        modificationTime: typeof info.modificationTime === 'number' ? info.modificationTime : null,
+        size: info.size,
+      };
+    })
+    .catch((error) => {
+      if (error instanceof ResponseTooLargeError) throw error;
+      return null;
+    });
+  let copied = false;
+  try {
+    await FileSystem.copyAsync({ from: sourcePath, to: stagedPath });
+    const staged = await readAttachmentDownloadFileSnapshot(stagedPath);
+    if (sourceBefore) {
+      const sourceAfter = await readAttachmentDownloadFileSnapshot(sourcePath);
+      if (!snapshotsMatch(sourceBefore, sourceAfter) || sourceAfter.size !== staged.size) {
+        throw new Error('File Sync attachment changed while staging');
+      }
+    }
+    copied = true;
+    return stagedPath;
+  } finally {
+    if (!copied) await deleteAttachmentDownloadStageBestEffort(stagedPath);
+  }
+};
+
+/** Bounded fallback for encrypted or unverifiable File Sync generations. Reads
+ * fixed-size native chunks from an already-owned scratch file, never base64-ing
+ * the entire provider document in one JS allocation. */
+export const readAttachmentDownloadStageBytes = async (
+  stagedPath: string,
+): Promise<Uint8Array> => {
+  const before = await readAttachmentDownloadFileSnapshot(stagedPath);
+  const chunks: Uint8Array[] = [];
+  let offset = 0;
+  while (offset < before.size) {
+    const length = Math.min(DOWNLOAD_READ_CHUNK_BYTES, before.size - offset);
+    const base64 = await LegacyFileSystem.readAsStringAsync(stagedPath, {
+      encoding: LegacyFileSystem.EncodingType.Base64,
+      position: offset,
+      length,
+    });
+    const chunk = base64ToBytes(base64);
+    if (chunk.byteLength !== length) {
+      throw new Error('Attachment download scratch file changed while reading');
+    }
+    chunks.push(chunk);
+    offset += chunk.byteLength;
+  }
+  const after = await readAttachmentDownloadFileSnapshot(stagedPath);
+  if (!snapshotsMatch(before, after)) {
+    throw new Error('Attachment download scratch file changed while reading');
+  }
+  const bytes = new Uint8Array(before.size);
+  let resultOffset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, resultOffset);
+    resultOffset += chunk.byteLength;
+  }
+  return bytes;
 };
 
 type InstallStagedAttachmentDownloadOptions = {
@@ -179,13 +295,24 @@ export const installStagedAttachmentDownload = async ({
   let nativeInstallStarted = false;
   try {
     assertAttachmentSyncNotAborted(signal);
-    const stagedBytes = await readFileAsBytes(stagedPath);
-    const actualStagedHash = await computeSha256Hex(stagedBytes);
-    if (!actualStagedHash) throw new Error('Attachment download hash is unavailable');
-    if (expectedStagedHash && actualStagedHash !== expectedStagedHash) {
+    const stagedBefore = await readAttachmentDownloadFileSnapshot(stagedPath);
+    let actualStagedHash: string;
+    if (isSha256Hex(expectedStagedHash)) {
+      actualStagedHash = expectedStagedHash.toLowerCase();
+      if (isSha256Hex(attachment.fileHash) && attachment.fileHash.toLowerCase() !== actualStagedHash) {
+        throw new Error('Integrity validation failed');
+      }
+    } else {
+      const stagedBytes = await readAttachmentDownloadStageBytes(stagedPath);
+      const computedStagedHash = await computeSha256Hex(stagedBytes);
+      if (!computedStagedHash) throw new Error('Attachment download hash is unavailable');
+      await validateAttachmentHash(attachment, stagedBytes);
+      actualStagedHash = computedStagedHash;
+    }
+    const stagedAfter = await readAttachmentDownloadFileSnapshot(stagedPath);
+    if (!snapshotsMatch(stagedBefore, stagedAfter)) {
       throw new Error('Attachment download scratch file changed before installation');
     }
-    await validateAttachmentHash(attachment, stagedBytes);
     assertAttachmentSyncNotAborted(signal);
     nativeInstallStarted = true;
     const result = await installAttachmentFileGeneration(

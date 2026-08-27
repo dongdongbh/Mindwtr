@@ -163,6 +163,14 @@ const singleAttachmentData = (attachment: Partial<Attachment> & Pick<Attachment,
   settings: {},
 });
 
+const mockMissingTargetWithDownloadStage = (bytes: Uint8Array): void => {
+  fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+    uri.includes('.mindwtr-download-')
+      ? { exists: true, size: bytes.byteLength, modificationTime: 1 }
+      : { exists: false }
+  ));
+};
+
 beforeAll(async () => {
   attachmentSync = await import('./attachment-sync');
 }, 30_000);
@@ -1483,7 +1491,7 @@ describe('attachment sync', () => {
       cloudKey: 'attachments/webdav-install-conflict.txt',
       fileHash: sha256Hex(bytes),
     });
-    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+    mockMissingTargetWithDownloadStage(bytes);
     fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(bytes));
     attachmentFileInstallerMock.installAttachmentFileGeneration.mockResolvedValue({
       status: 'conflict',
@@ -1527,7 +1535,7 @@ describe('attachment sync', () => {
       cloudKey: 'cloudkit:cloudkit-bad-hash',
       fileHash: sha256Hex(expectedBytes),
     });
-    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+    mockMissingTargetWithDownloadStage(badBytes);
     fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(badBytes));
     const cloudkit = await import('./cloudkit-sync');
     vi.mocked(cloudkit.fetchCloudKitAttachmentAsset).mockResolvedValue({
@@ -1579,7 +1587,7 @@ describe('attachment sync', () => {
       fileHash,
       updatedAt: '2026-08-27T01:00:00.000Z',
     });
-    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+    mockMissingTargetWithDownloadStage(bytes);
     fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(bytes));
     const cloudkit = await import('./cloudkit-sync');
     vi.mocked(cloudkit.fetchCloudKitAttachmentAsset).mockResolvedValue({
@@ -1650,7 +1658,7 @@ describe('attachment sync', () => {
       cloudKey: 'cloudkit:cloudkit-install-conflict',
       fileHash: sha256Hex(bytes),
     });
-    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+    mockMissingTargetWithDownloadStage(bytes);
     fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(bytes));
     attachmentFileInstallerMock.installAttachmentFileGeneration.mockResolvedValue({
       status: 'conflict',
@@ -3002,7 +3010,9 @@ describe('attachment sync', () => {
         fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
           uri === localUri
             ? { exists: true, size: NEW_BYTES.length, modificationTime: 2 }
-            : { exists: false }
+            : uri.includes('.mindwtr-download-')
+              ? { exists: true, size: OLD_BYTES.length, modificationTime: 1 }
+              : { exists: false }
         ));
         fileSystemMock.readAsStringAsync.mockImplementation(async (uri: string) => (
           uri.includes('.mindwtr-download-') ? base64Of(OLD_BYTES) : base64Of(NEW_BYTES)

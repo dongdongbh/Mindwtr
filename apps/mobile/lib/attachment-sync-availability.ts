@@ -1,8 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from './file-system';
 import type { Attachment } from '@mindwtr/core';
 import {
   cloudGetFile,
+  computeSha256Hex,
   isSha256Hex,
   parseCloudKitAttachmentKey,
   validateAttachmentHash,
@@ -16,7 +16,6 @@ import {
   SYNC_PATH_KEY,
 } from './sync-constants';
 import {
-  base64ToBytes,
   CLOUD_PROVIDER_DROPBOX,
   ensureAttachmentStoredLocally,
   extractExtension,
@@ -34,15 +33,17 @@ import {
   reportProgress,
   resolveFileSyncDir,
   runDropboxAuthorized,
-  StorageAccessFramework,
+  writeBytesSafely,
 } from './attachment-sync-utils';
 import { getMobileCloudRequestOptions, getMobileWebDavRequestOptions } from './webdav-request-options';
 import {
   createAttachmentDownloadStagePath,
+  copyAttachmentDownloadToStage,
   deleteAttachmentDownloadStageBestEffort,
   installAttachmentDownloadBytes,
   installStagedAttachmentDownload,
   openAttachmentBytesFromDownload,
+  readAttachmentDownloadStageBytes,
 } from './attachment-sync-backends/common';
 import { fetchCloudKitAttachmentAsset } from './cloudkit-sync';
 import { getSyncEncryptionMaterial } from './sync-encryption-state';
@@ -120,6 +121,46 @@ const installMissingAttachmentBytes = async (
   return { ...attachment, uri: targetUri, localStatus: 'available' };
 };
 
+const installMissingAttachmentStage = async (
+  attachment: Attachment,
+  stagedPath: string,
+  targetUri: string,
+  material: Awaited<ReturnType<typeof getSyncEncryptionMaterial>>,
+): Promise<InternalAvailabilityOutcome> => {
+  let installHelperOwnsStage = false;
+  try {
+    let expectedStagedHash = !material && isSha256Hex(attachment.fileHash)
+      ? attachment.fileHash.toLowerCase()
+      : null;
+    if (!expectedStagedHash) {
+      const wireBytes = await readAttachmentDownloadStageBytes(stagedPath);
+      const plaintextBytes = await openAttachmentBytesFromDownload(wireBytes, material);
+      const plaintextHash = await computeSha256Hex(plaintextBytes);
+      if (!plaintextHash) throw new Error('Attachment download hash is unavailable');
+      await validateAttachmentHash(attachment, plaintextBytes);
+      if (plaintextBytes !== wireBytes) {
+        await writeBytesSafely(stagedPath, plaintextBytes);
+      }
+      expectedStagedHash = plaintextHash;
+    }
+    installHelperOwnsStage = true;
+    const installed = await installStagedAttachmentDownload({
+      attachment,
+      stagedPath,
+      targetPath: targetUri,
+      expectation: { kind: 'absent' },
+      expectedStagedHash,
+    });
+    if (!installed) return GENERATION_CONFLICT;
+    return { ...attachment, uri: targetUri, localStatus: 'available' };
+  } catch (error) {
+    if (!installHelperOwnsStage) {
+      await deleteAttachmentDownloadStageBestEffort(stagedPath);
+    }
+    throw error;
+  }
+};
+
 const ensureFileAttachmentAvailable = async (
   attachment: Attachment,
   syncPath: string
@@ -137,6 +178,8 @@ const ensureFileAttachmentAvailable = async (
     return resolveMatchingManagedTarget(attachment, targetUri);
   }
 
+  let stagedPath: string | null = null;
+  let installerOwnsStage = false;
   try {
     // #1056: the local attachments directory always holds plaintext, so an encrypted
     // sync folder's bytes are opened on the way in. `null` material keeps the
@@ -145,20 +188,23 @@ const ensureFileAttachmentAvailable = async (
     // returning `null`, and that must fail this fetch closed (logged, `null` result),
     // never fall through to a plaintext path as if encryption were off.
     const material = await getSyncEncryptionMaterial();
+    let sourceUri: string;
     if (syncDir.type === 'file') {
-      const sourceUri = `${syncDir.attachmentsDirUri}${filename}`;
+      sourceUri = `${syncDir.attachmentsDirUri}${filename}`;
       const sourcePresence = await getLocalAttachmentPresence(sourceUri);
       if (sourcePresence !== 'present') return null;
-      const sourceBytes = await readFileAsBytes(sourceUri);
-      const bytes = await openAttachmentBytesFromDownload(sourceBytes, material);
-      return await installMissingAttachmentBytes(attachment, attachmentsDir, targetUri, bytes);
+    } else {
+      const entry = await findSafEntry(syncDir.attachmentsDirUri, filename);
+      if (!entry) return null;
+      sourceUri = entry;
     }
-    const entry = await findSafEntry(syncDir.attachmentsDirUri, filename);
-    if (!entry || !StorageAccessFramework?.readAsStringAsync) return null;
-    const base64 = await StorageAccessFramework.readAsStringAsync(entry, { encoding: FileSystem.EncodingType.Base64 });
-    const bytes = await openAttachmentBytesFromDownload(base64ToBytes(base64), material);
-    return await installMissingAttachmentBytes(attachment, attachmentsDir, targetUri, bytes);
+    stagedPath = await copyAttachmentDownloadToStage(attachment, attachmentsDir, sourceUri);
+    installerOwnsStage = true;
+    return await installMissingAttachmentStage(attachment, stagedPath, targetUri, material);
   } catch (error) {
+    if (stagedPath && !installerOwnsStage) {
+      await deleteAttachmentDownloadStageBestEffort(stagedPath);
+    }
     logAttachmentWarn(`Failed to make attachment ${attachment.id} available from sync folder`, error);
     return null;
   }
