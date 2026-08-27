@@ -948,6 +948,31 @@ describe('quick-add', () => {
         }
     });
 
+    it('accepts a closing-glyph opener after the marker (#1094 macOS smart quotes)', () => {
+        // macOS smart punctuation sees the marker character before the quote and
+        // substitutes the CLOSING glyph for both quotes: %"Jim" becomes %”Jim”.
+        const now = new Date('2026-08-27T10:00:00Z');
+        for (const input of ['Do something %”my neighbor”', 'Do something %”my neighbor"']) {
+            const result = parseQuickAdd(input, undefined, now);
+            expect(result.props.assignedTo, input).toBe('my neighbor');
+            expect(result.title, input).toBe('Do something');
+        }
+        const areas = [{ id: 'area-1', name: 'Deep Work' }];
+        const area = parseQuickAdd('Task !”Deep Work”', undefined, now, areas as any);
+        expect(area.props.areaId).toBe('area-1');
+        expect(area.title).toBe('Task');
+    });
+
+    it('accepts curly quotes around @/# tokens (#1094)', () => {
+        const now = new Date('2026-08-27T10:00:00Z');
+        for (const input of ['Call @”deep work” #”home office”', 'Call @“deep work” #“home office”']) {
+            const result = parseQuickAdd(input, undefined, now);
+            expect(result.props.contexts, input).toEqual(['@deep work']);
+            expect(result.props.tags, input).toEqual(['#home office']);
+            expect(result.title, input).toBe('Call');
+        }
+    });
+
     it('supports quoted person names for explicit delimiting', () => {
         const now = new Date('2026-07-11T10:00:00Z');
         const result = parseQuickAdd('task %"Jane Doe" more words', undefined, now);

@@ -532,14 +532,18 @@ function isQuickAddTokenEndBoundary(working: string, index: number): boolean {
 }
 
 function pushQuickAddQuotedTokenMatches(working: string, prefix: '@' | '#', matches: QuickAddTokenMatch[]) {
-    const quotedRe = /(?:^|\s)([@#])"((?:\\.|[^"\\])*)"/gu;
+    // Same typographic-quote tolerance as matchQuickAddQuotedName (#849, #1094):
+    // smart punctuation substitutes curly quotes as the user types — macOS even
+    // picks the CLOSING glyph (”) right after @/#, since a symbol precedes it —
+    // so any curly double works as the opener.
+    const quotedRe = /(?:^|\s)([@#])(?:"((?:\\.|[^"\\])*)"|[“”„]([^"“”]*)["“”])/gu;
     for (const match of working.matchAll(quotedRe)) {
         if (match[1] !== prefix) continue;
-        const rawOffset = match[0].indexOf(`${prefix}"`);
+        const rawOffset = match[0].indexOf(prefix);
         if (rawOffset < 0) continue;
         const index = (match.index ?? 0) + rawOffset;
         const raw = match[0].slice(rawOffset);
-        const value = (match[2] ?? '').replace(/\\(["\\])/g, '$1').replace(/\s+/g, ' ').trim();
+        const value = (match[2] ?? match[3] ?? '').replace(/\\(["\\])/g, '$1').replace(/\s+/g, ' ').trim();
         if (!value) continue;
         matches.push({
             token: `${prefix}${restoreEscapes(value)}`,
@@ -668,12 +672,15 @@ function matchQuickAddQuotedName(working: string, marker: '+' | '!' | '%'): { ra
     // the pair), so accept the common quote styles and mixed pairs — a name
     // that parses when pasted must also parse as typed (#849):
     //   "..."  straight doubles, with backslash escapes (canonical form)
-    //   “...”  or mixed “..."  curly/straight doubles
+    //   “...”  or mixed “..."  curly/straight doubles — macOS also produces a
+    //          CLOSING glyph as the opener (”...”), since the marker character
+    //          before the quote reads as "not a word start" to smart
+    //          punctuation (#1094)
     //   „..."  German low-9 opening with any double-quote close
     //   '...'  straight singles
     //   ‘...’  or ’...’  smart singles
     const match = working.match(new RegExp(
-        String.raw`(?:^|\s)${escapedMarker}(?:"((?:\\.|[^"\\])*)"|“([^"”]*)["”]|„([^"“”]*)["“”]|'([^']*)'|[‘’]([^’]*)’)`,
+        String.raw`(?:^|\s)${escapedMarker}(?:"((?:\\.|[^"\\])*)"|[“”]([^"”]*)["”]|„([^"“”]*)["“”]|'([^']*)'|[‘’]([^’]*)’)`,
         'u',
     ));
     if (!match) return null;
