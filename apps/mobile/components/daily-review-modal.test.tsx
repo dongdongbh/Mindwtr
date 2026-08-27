@@ -278,6 +278,38 @@ describe('DailyReviewScreen', () => {
         expect(mockStorageRemoveItem).toHaveBeenCalledWith('mindwtr:dailyReview:currentStep');
     });
 
+    it('does not let delayed resume hydration overwrite an immediate step choice', async () => {
+        storeState.tasks = [
+            makeTask({ id: 'today-1', dueDate: '2026-07-15' }),
+            makeTask({ id: 'inbox-1', status: 'inbox', dueDate: undefined }),
+            makeTask({ id: 'waiting-1', status: 'waiting', dueDate: undefined }),
+        ];
+        let resolveStored!: (value: string | null) => void;
+        mockStorageGetItem.mockReturnValue(new Promise((resolve) => {
+            resolveStored = resolve;
+        }));
+
+        let tree!: ReturnType<typeof create>;
+        await act(async () => {
+            tree = create(<DailyReviewScreen onClose={vi.fn()} />);
+        });
+        const nextLabel = tree.root.find((node) => node.props?.children === 'Next Step');
+        await act(async () => {
+            nextLabel.parent?.props.onPress();
+        });
+        expect(tree.root.findAll((node) => node.props?.children === 'Inbox').length).toBeGreaterThan(0);
+
+        await act(async () => {
+            resolveStored(JSON.stringify({
+                step: 'waiting',
+                startedAt: new Date('2026-07-15T08:00:00.000Z').toISOString(),
+            }));
+            await Promise.resolve();
+        });
+
+        expect(tree.root.findAll((node) => node.props?.children === 'Inbox').length).toBeGreaterThan(0);
+    });
+
     it('renders Follow up today as a compact action inside its waiting task card', async () => {
         storeState.tasks = [makeTask({
             id: 'waiting-1',

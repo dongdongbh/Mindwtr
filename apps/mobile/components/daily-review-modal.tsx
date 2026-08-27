@@ -81,9 +81,11 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
         startedAt: new Date().toISOString(),
     }));
     const [sessionHydrated, setSessionHydrated] = useState(false);
+    const sessionTouchedRef = useRef(false);
     const sessionWriteRef = useRef<Promise<void>>(Promise.resolve());
     const currentStep = reviewSession.step;
     const setCurrentStep = useCallback((step: DailyReviewStep) => {
+        sessionTouchedRef.current = true;
         setReviewSession((session) => ({ ...session, step }));
     }, []);
     const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -102,7 +104,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                 const restored = parseStoredReviewStepSession(stored, DAILY_REVIEW_STEPS, {
                     cadence: 'daily',
                 });
-                if (restored) setReviewSession(restored);
+                if (restored && !sessionTouchedRef.current) setReviewSession(restored);
             })
             .catch(() => undefined)
             .finally(() => {

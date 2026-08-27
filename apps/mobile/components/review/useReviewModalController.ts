@@ -96,9 +96,11 @@ export function useReviewModalController({
         startedAt: new Date().toISOString(),
     }));
     const [sessionHydrated, setSessionHydrated] = useState(false);
+    const sessionTouchedRef = useRef(false);
     const sessionWriteRef = useRef<Promise<void>>(Promise.resolve());
     const currentStep = reviewSession.step;
     const setCurrentStep = useCallback((step: ReviewStep) => {
+        sessionTouchedRef.current = true;
         setReviewSession((session) => ({ ...session, step }));
     }, []);
     const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -129,6 +131,7 @@ export function useReviewModalController({
             setSessionHydrated(false);
             return;
         }
+        sessionTouchedRef.current = false;
         let cancelled = false;
         const now = new Date();
         void AsyncStorage.getItem(WEEKLY_REVIEW_STEP_STORAGE_KEY)
@@ -139,10 +142,14 @@ export function useReviewModalController({
                     now,
                     weekStart: settings?.weekStart,
                 });
-                setReviewSession(restored ?? { step: 'inbox', startedAt: now.toISOString() });
+                if (!sessionTouchedRef.current) {
+                    setReviewSession(restored ?? { step: 'inbox', startedAt: now.toISOString() });
+                }
             })
             .catch(() => {
-                if (!cancelled) setReviewSession({ step: 'inbox', startedAt: now.toISOString() });
+                if (!cancelled && !sessionTouchedRef.current) {
+                    setReviewSession({ step: 'inbox', startedAt: now.toISOString() });
+                }
             })
             .finally(() => {
                 if (!cancelled) setSessionHydrated(true);

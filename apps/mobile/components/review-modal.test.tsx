@@ -437,6 +437,35 @@ describe('ReviewModal', () => {
         expect(mockStorageRemoveItem).toHaveBeenCalledWith('mindwtr:weeklyReview:currentStep');
     });
 
+    it('does not let delayed resume hydration overwrite an immediate step choice', async () => {
+        let resolveStored!: (value: string | null) => void;
+        mockStorageGetItem.mockReturnValue(new Promise((resolve) => {
+            resolveStored = resolve;
+        }));
+
+        let tree!: ReturnType<typeof create>;
+        await act(async () => {
+            tree = create(<ReviewModal visible onClose={vi.fn()} />);
+        });
+        const nextLabel = tree.root.find((node) => flattenText(node.props?.children) === 'Next →');
+        await act(async () => {
+            nextLabel.parent?.props.onPress();
+        });
+        const hasWaitingTitle = () => tree.root
+            .findAll((node) => flattenText(node.props?.children).includes('Waiting For')).length > 0;
+        expect(hasWaitingTitle()).toBe(true);
+
+        await act(async () => {
+            resolveStored(JSON.stringify({
+                step: 'projects',
+                startedAt: new Date().toISOString(),
+            }));
+            await Promise.resolve();
+        });
+
+        expect(hasWaitingTitle()).toBe(true);
+    });
+
     it('keeps the full Process Inbox step inside one vertical scroll surface', async () => {
         let tree!: ReturnType<typeof create>;
 
