@@ -765,8 +765,16 @@ export function useSyncSettingsTransportActions({
                 || (
                     effectiveBackend === 'cloudkit'
                     && provenCloudProviderRef.current !== 'cloudkit'
-                );
+            );
             if (needsActivationProbe) {
+                if (configOverride.backend === 'webdav' && configOverride.webdav) {
+                    await assertWebdavStrongEtagSupport(normalizeWebdavUrl(configOverride.webdav.url), {
+                        ...getMobileWebDavRequestOptions(configOverride.webdav.allowInsecureHttp),
+                        username: configOverride.webdav.username,
+                        password: configOverride.webdav.password,
+                        timeoutMs: 10_000,
+                    });
+                }
                 const probeResult = await performMobileSync(
                     effectiveBackend === 'file' ? syncPath || undefined : undefined,
                     { activationProbe: true, manual: true, configOverride }

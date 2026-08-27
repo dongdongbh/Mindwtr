@@ -156,6 +156,7 @@ describe('useSyncSettings cloud token validation', () => {
         vi.spyOn(SyncService, 'rollbackDropboxCredentials').mockResolvedValue(undefined);
         vi.spyOn(SyncService, 'disconnectDropbox').mockResolvedValue(undefined);
         vi.spyOn(SyncService, 'testDropboxConnection').mockResolvedValue(undefined);
+        vi.spyOn(SyncService, 'testWebDavConnection').mockResolvedValue(undefined);
         vi.spyOn(SyncService, 'listDataSnapshots').mockResolvedValue([]);
         vi.spyOn(SyncService, 'subscribeSyncStatus').mockImplementation(() => () => {});
         vi.spyOn(SyncService, 'setSyncBackend').mockResolvedValue(undefined);
@@ -479,6 +480,35 @@ describe('useSyncSettings cloud token validation', () => {
         expect(SyncService.setSyncBackend).not.toHaveBeenCalled();
         expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
         expect(showSaved).not.toHaveBeenCalled();
+    });
+
+    it('requires WebDAV conditional-write capability before candidate activation', async () => {
+        vi.mocked(SyncService.testWebDavConnection).mockRejectedValueOnce(
+            new Error('WebDAV conditional writes are not enforced'),
+        );
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+
+        act(() => {
+            void result.current.syncPageProps.onSetSyncBackend('webdav');
+            result.current.syncPageProps.onWebdavUrlChange('https://dav.example.com/mindwtr/');
+            result.current.syncPageProps.onWebdavUsernameChange('alice');
+            result.current.syncPageProps.onWebdavPasswordChange('secret');
+        });
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.testWebDavConnection).toHaveBeenCalledWith({
+            allowInsecureHttp: false,
+            hasPassword: false,
+            password: 'secret',
+            url: 'https://dav.example.com/mindwtr/',
+            username: 'alice',
+        });
+        expect(SyncService.performSync).not.toHaveBeenCalled();
+        expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
     });
 
     it('activates the configuration when the probe finds an encrypted remote it has no key for (#1001)', async () => {

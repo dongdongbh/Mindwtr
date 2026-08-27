@@ -15,6 +15,7 @@ import {
     syncEncryptedArtifactName,
     SyncCryptoUnsupportedError,
     SyncEncryptionRemotePlaintextError,
+    SyncEncryptionRemoteVersionUnavailableError,
     SyncEncryptionTerminalError,
     buildCloudCalendarFeedUrl,
     cloudGetJson,
@@ -26,6 +27,7 @@ import {
     performSyncCycle,
     normalizeAppData,
     normalizeWebdavUrl,
+    normalizeStrongWebdavEtag,
     normalizeCloudUrl,
     runDataTransferTransactionWithoutSnapshot,
     runSerializedSyncDocumentOperation,
@@ -2123,6 +2125,11 @@ export class SyncService {
                     WEBDAV_READ_RETRY_OPTIONS,
                 );
                 if (result.state === 'encrypted-no-key') {
+                    if (!normalizeStrongWebdavEtag(result.strongEtag)) {
+                        throw new SyncEncryptionRemoteVersionUnavailableError(
+                            'WebDAV encrypted sync document',
+                        );
+                    }
                     await markRemoteSyncEncryptionDiscovered({ salt: result.salt, params: result.params });
                     // Carries the Rust-mirrored sentinel so string-form classification
                     // (classifySyncEncryptionFailure on a probe result's error text)

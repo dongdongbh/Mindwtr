@@ -1032,8 +1032,11 @@ export const useSyncSettings = ({
                 || (
                     configOverride.backend === 'cloud'
                     && configOverride.cloudProvider !== persistedCloudProvider
-                );
+            );
             if (needsActivationProbe) {
+                if (configOverride.backend === 'webdav' && configOverride.webdav) {
+                    await SyncService.testWebDavConnection(configOverride.webdav);
+                }
                 const probeResult = await SyncService.performSync({
                     activationProbe: true,
                     configOverride,

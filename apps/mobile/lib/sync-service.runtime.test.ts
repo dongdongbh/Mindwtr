@@ -421,6 +421,68 @@ describe('mobile sync-service runtime', () => {
     expect(storageFileMocks.writeSyncFile).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['missing', null],
+    ['weak', 'W/"encrypted-v1"'],
+  ])('refuses WebDAV encrypted-no-key activation with a %s artifact validator', async (_label, strongEtag) => {
+    coreMocks.webdavGetSyncDocument.mockResolvedValue({
+      state: 'encrypted-no-key',
+      salt: new Uint8Array(16).fill(3),
+      params: { mKib: 65_536, t: 3, p: 1 },
+      exists: true,
+      strongEtag,
+    });
+
+    const result = await syncServiceModule.performMobileSync(undefined, {
+      activationProbe: true,
+      manual: true,
+      configOverride: {
+        backend: 'webdav',
+        webdav: {
+          url: 'https://candidate.example.com/mindwtr',
+          username: 'candidate-user',
+          password: 'secret',
+          allowInsecureHttp: false,
+        },
+      },
+    });
+
+    expect(result).toMatchObject({ success: false });
+    expect(result.activationProof).toBeUndefined();
+    expect(result.error).toContain('safe backend version');
+    expect(coreMocks.webdavPutSyncDocument).not.toHaveBeenCalled();
+  });
+
+  it('accepts WebDAV encrypted-no-key activation proof with the artifact strong ETag', async () => {
+    coreMocks.webdavGetSyncDocument.mockResolvedValue({
+      state: 'encrypted-no-key',
+      salt: new Uint8Array(16).fill(4),
+      params: { mKib: 65_536, t: 3, p: 1 },
+      exists: true,
+      strongEtag: '"encrypted-v1"',
+    });
+
+    const result = await syncServiceModule.performMobileSync(undefined, {
+      activationProbe: true,
+      manual: true,
+      configOverride: {
+        backend: 'webdav',
+        webdav: {
+          url: 'https://candidate.example.com/mindwtr',
+          username: 'candidate-user',
+          password: 'secret',
+          allowInsecureHttp: false,
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      activationProof: 'remote-encrypted-no-key',
+    });
+    expect(coreMocks.webdavPutSyncDocument).not.toHaveBeenCalled();
+  });
+
   it('runs a first WebDAV round trip from session config without reading or activating persisted transport settings', async () => {
     asyncStorageMocks.getItem.mockImplementation(async (key: string) => {
       if (key === '@mindwtr_sync_backend') return 'off';

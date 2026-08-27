@@ -637,6 +637,31 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.showSettingsWarning).toHaveBeenCalled();
     });
 
+    it('does not activate WebDAV when the mandatory conditional-write probe fails', async () => {
+        await renderHarness();
+        mocked.performMobileSync.mockClear();
+        mocked.assertWebdavStrongEtagSupport.mockRejectedValueOnce(
+            new Error('WebDAV conditional writes are not enforced'),
+        );
+
+        await act(async () => {
+            await latestHookResult?.handleSync({
+                backend: 'webdav',
+                webdav: {
+                    allowInsecureHttp: false,
+                    password: 'secret',
+                    url: 'https://dav.example.com/mindwtr/',
+                    username: 'alice',
+                },
+            });
+        });
+
+        expect(mocked.assertWebdavStrongEtagSupport).toHaveBeenCalled();
+        expect(mocked.performMobileSync).not.toHaveBeenCalled();
+        expect(mocked.asyncStorage.setItem).not.toHaveBeenCalledWith(SYNC_BACKEND_KEY, 'webdav');
+        expect(mocked.showSettingsErrorToast).toHaveBeenCalled();
+    });
+
     it('does not activate from stale blocked state when the candidate produced no encryption proof', async () => {
         await renderHarness();
         mocked.performMobileSync.mockClear();
