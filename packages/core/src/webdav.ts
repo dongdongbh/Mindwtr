@@ -16,10 +16,11 @@ import {
     decryptRemoteArtifactOrThrow,
     detectForeignSaltArtifact,
     isPlaintextSyncArtifact,
+    SyncEncryptionTerminalError,
     SyncEncryptionRemoteVersionUnavailableError,
     syncEncryptedArtifactName,
 } from './sync-encryption';
-import { encryptSyncArtifact, inspectSyncArtifact, type SyncCryptoPrimitives, type SyncKeyMaterial } from './sync-crypto';
+import { encryptSyncArtifact, inspectSyncArtifact, SyncCryptoUnsupportedError, type SyncCryptoPrimitives, type SyncKeyMaterial } from './sync-crypto';
 
 export interface WebDavOptions {
     /** Download ceiling for this call. Defaults to the per-attachment cap; the sync
@@ -627,6 +628,10 @@ export type WebDavSyncDataResult<T> = WebDavDocumentVersion & (
     | { state: 'remote-plaintext' }
 );
 
+const unexpectedWebdavArtifact = (message: string): never => {
+    throw new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError(message));
+};
+
 /**
  * Encryption-aware sync-document read. `url` is always the PLAIN document URL — this
  * function derives the `.enc` URL itself when `material` is supplied.
@@ -652,9 +657,15 @@ export async function webdavGetSyncDocument<T>(
             // way: only the "nothing at my name" shape pays for it, so a healthy encrypted
             // install never reaches it.
             const plain = await webdavGetVersionedBytesOrNull(url, webdavOptions);
-            return isPlaintextSyncArtifact(plain.bytes)
-                ? { state: 'remote-plaintext', exists: true, strongEtag: plain.strongEtag }
-                : { state: 'data', data: null, exists: false, strongEtag: null };
+            if (isPlaintextSyncArtifact(plain.bytes)) {
+                return { state: 'remote-plaintext', exists: true, strongEtag: plain.strongEtag };
+            }
+            if (plain.bytes?.some((byte) => byte > 0x20)) {
+                return unexpectedWebdavArtifact(
+                    'Ciphertext or an unsupported artifact was found at the plaintext WebDAV artifact name',
+                );
+            }
+            return { state: 'data', data: null, exists: false, strongEtag: null };
         }
         // Sealed under another salt = this device's key is for a different encryption
         // generation; report it as a no-key discovery (which can prompt for the passphrase)
@@ -689,6 +700,9 @@ export async function webdavGetSyncDocument<T>(
                 strongEtag: remote.strongEtag,
             };
         }
+        if (inspected.kind === 'unsupported') {
+            return unexpectedWebdavArtifact(inspected.reason);
+        }
         const text = new TextDecoder().decode(remote.bytes);
         const normalizedBody = text.startsWith(UTF8_BOM) ? text.slice(1).trim() : text.trim();
         if (normalizedBody) {
@@ -719,6 +733,14 @@ export async function webdavGetSyncDocument<T>(
                 exists: true,
                 strongEtag: encrypted.strongEtag,
             };
+        }
+        if (inspected.kind === 'unsupported') {
+            return unexpectedWebdavArtifact(inspected.reason);
+        }
+        if (encrypted.bytes.some((byte) => byte > 0x20)) {
+            return unexpectedWebdavArtifact(
+                'Plaintext was found at the encrypted WebDAV artifact name',
+            );
         }
     }
     return { state: 'data', data: null, exists: remote.exists, strongEtag: remote.strongEtag };

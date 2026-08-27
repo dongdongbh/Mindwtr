@@ -191,6 +191,40 @@ describe('webdav sync-document encryption', () => {
         },
     );
 
+    it('treats nonempty plaintext under the encrypted fallback name as terminal', async () => {
+        const { files, fetcher, requests } = createFakeWebdavServer();
+        files.set(`${URL_}.enc`, new TextEncoder().encode('{"tasks":[]}'));
+
+        await expect(webdavGetSyncDocument(URL_, { fetcher })).rejects.toMatchObject({
+            name: 'SyncEncryptionTerminalError',
+        });
+        expect(requests.every((request) => request.method === 'GET')).toBe(true);
+    });
+
+    it('treats ciphertext under the plaintext fallback name as terminal for a keyed device', async () => {
+        const { files, fetcher, requests } = createFakeWebdavServer();
+        const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(10), FAST_KDF);
+        await webdavPutSyncDocument(URL_, { tasks: [] }, { fetcher, material, expectedEtag: null });
+        files.set(URL_, files.get(`${URL_}.enc`)!);
+        files.delete(`${URL_}.enc`);
+        requests.length = 0;
+
+        await expect(webdavGetSyncDocument(URL_, { fetcher, material })).rejects.toMatchObject({
+            name: 'SyncEncryptionTerminalError',
+        });
+        expect(requests.every((request) => request.method === 'GET')).toBe(true);
+    });
+
+    it('treats an unsupported MWENC1 body at the primary plaintext name as terminal', async () => {
+        const { files, fetcher, requests } = createFakeWebdavServer();
+        files.set(URL_, new TextEncoder().encode('MWENC1\u007ftruncated'));
+
+        await expect(webdavGetSyncDocument(URL_, { fetcher })).rejects.toMatchObject({
+            name: 'SyncEncryptionTerminalError',
+        });
+        expect(requests.every((request) => request.method === 'GET')).toBe(true);
+    });
+
     it('uses create-only then exact replacement validators on the plaintext path', async () => {
         const { fetcher, requests } = createFakeWebdavServer();
         await webdavPutSyncDocument(URL_, { tasks: [] }, { fetcher, expectedEtag: null });
