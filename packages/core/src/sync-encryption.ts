@@ -867,8 +867,8 @@ export async function runDisableSyncEncryptionOverRemote(
     }
 
     await revalidateRemoteDocuments(remote, snapshot, documentNames);
-    await keyCache.clearKey();
     await localState.write(null);
+    await keyCache.clearKey();
 }
 
 /** Passphrase change: decrypt-with-old, re-encrypt-with-new, under a fresh salt, over

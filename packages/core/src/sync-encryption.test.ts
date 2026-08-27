@@ -578,6 +578,34 @@ describe('runDisableSyncEncryptionOverRemote', () => {
         expect(localState.value).toBeNull();
     });
 
+    it('preserves the retry key when disabled-state persistence fails', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const enabledState = localState.value!;
+        const writeState = localState.write.bind(localState);
+        let failDisabledStateWrite = true;
+        localState.write = async (state) => {
+            if (state === null && failDisabledStateWrite) throw new Error('simulated state persistence failure');
+            await writeState(state);
+        };
+
+        await expect(runDisableSyncEncryptionOverRemote(remote, keyCache, localState))
+            .rejects.toThrow('simulated state persistence failure');
+
+        expect(text(remote.store.get('data.json')!)).toBe('{"tasks":[]}');
+        expect(localState.value).toEqual({ ...enabledState, incompleteTransition: 'disable' });
+        expect(await keyCache.getKey()).not.toBeNull();
+
+        failDisabledStateWrite = false;
+        await runDisableSyncEncryptionOverRemote(remote, keyCache, localState);
+        expect(localState.value).toBeNull();
+        expect(await keyCache.getKey()).toBeNull();
+    });
+
     it('throws if no key is cached and touches nothing', async () => {
         const remote = createFakeRemote({ 'data.json.enc': { bytes: utf8('whatever'), kind: 'document' } });
         const keyCache = createFakeKeyCache();
