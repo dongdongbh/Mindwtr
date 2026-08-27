@@ -394,6 +394,56 @@ describe('Layout sync conflict surface', () => {
         performSyncSpy.mockRestore();
     });
 
+    it.each([
+        {
+            deferred: 'busy' as const,
+            message: 'Another Mindwtr operation is using File Sync. Wait for it to finish; Mindwtr will retry automatically.',
+        },
+        {
+            deferred: 'cleanup' as const,
+            message: 'Sync completed, but Mindwtr could not release the File Sync lock. Restart Mindwtr before syncing again. No retry is needed.',
+        },
+    ])('explains a $deferred File Sync lock without reporting false success or failure', async ({ deferred, message }) => {
+        const showToast = vi.fn();
+        const performSyncSpy = vi.spyOn(SyncService, 'performSync').mockResolvedValue({
+            success: true,
+            fileSyncLockDeferred: deferred,
+        } as Awaited<ReturnType<typeof SyncService.performSync>>);
+        act(() => {
+            useUiStore.setState((state) => ({ ...state, showToast }));
+        });
+
+        const { getByRole } = renderLayout();
+        fireEvent.click(getByRole('button', { name: /Sync now/i }));
+
+        await waitFor(() => expect(performSyncSpy).toHaveBeenCalledWith({ manual: true }));
+        expect(showToast).toHaveBeenCalledWith(message, 'info', 6000);
+        expect(showToast).not.toHaveBeenCalledWith('Sync completed', 'success');
+
+        performSyncSpy.mockRestore();
+    });
+
+    it('shows localized recovery guidance when safe File Sync locking is unavailable', async () => {
+        const showToast = vi.fn();
+        const performSyncSpy = vi.spyOn(SyncService, 'performSync').mockResolvedValue({
+            success: false,
+            fileSyncLockUnavailable: true,
+        } as Awaited<ReturnType<typeof SyncService.performSync>>);
+        act(() => {
+            useUiStore.setState((state) => ({ ...state, showToast }));
+        });
+
+        const { getByRole } = renderLayout();
+        fireEvent.click(getByRole('button', { name: /Sync now/i }));
+
+        await waitFor(() => expect(showToast).toHaveBeenCalledWith(
+            'Mindwtr cannot safely lock this File Sync location. Re-select the folder, restart or update Mindwtr, or use WebDAV.',
+            'error',
+            6000,
+        ));
+        performSyncSpy.mockRestore();
+    });
+
     it('shows an error toast when the remote write was deferred despite success:true', async () => {
         const showToast = vi.fn();
         const performSyncSpy = vi.spyOn(SyncService, 'performSync').mockResolvedValue({

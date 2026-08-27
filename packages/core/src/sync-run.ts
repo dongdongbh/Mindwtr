@@ -1,6 +1,7 @@
 import type { AppData } from './types';
 import type { CloudProvider } from './sync-client-helpers';
 import type { SyncBackend } from './sync-service-utils';
+import { SyncFileLockBusyError, SyncFileLockUnavailableError } from './sync-service-utils';
 import type { SyncCycleIO, SyncCycleResult, SyncHistoryEntry } from './sync-types';
 import type {
     SyncBackendIO,
@@ -1087,6 +1088,15 @@ class SharedSyncRunMachine {
     }
 
     private async handleRunError(error: unknown): Promise<SyncRunResult> {
+        if (error instanceof SyncFileLockBusyError) {
+            if (!this.options.activationProbe) this.requestFollowUpAfter(error.retryAfterMs);
+            return {
+                success: true,
+                skipped: 'fileSyncLockBusy',
+                fileSyncLockDeferred: 'busy',
+                retryAfterMs: error.retryAfterMs,
+            };
+        }
         if (error instanceof SyncRemoteMutationFenceBusyError) {
             if (!this.options.activationProbe) this.requestFollowUpAfter(error.retryAfterMs);
             return {
@@ -1127,9 +1137,14 @@ class SharedSyncRunMachine {
         const afterResult = await this.hooks.handleRunErrorAfterRequeue?.(error, errorContext);
         if (afterResult) return afterResult;
 
+        const fileSyncLockUnavailable = error instanceof SyncFileLockUnavailableError;
         this.notifier.logWarning('Sync failed', error);
         if (this.options.activationProbe) {
-            return { success: false, error: this.hooks.formatErrorMessage(error, this.backend) };
+            return {
+                success: false,
+                error: this.hooks.formatErrorMessage(error, this.backend),
+                ...(fileSyncLockUnavailable ? { fileSyncLockUnavailable: true } : {}),
+            };
         }
         const now = this.nowIso();
         const safeMessage = this.hooks.formatErrorMessage(error, this.backend);
@@ -1169,7 +1184,11 @@ class SharedSyncRunMachine {
         } catch (persistError) {
             this.notifier.logWarning('Failed to persist sync error', persistError);
         }
-        return { success: false, error: finalErrorMessage };
+        return {
+            success: false,
+            error: finalErrorMessage,
+            ...(fileSyncLockUnavailable ? { fileSyncLockUnavailable: true } : {}),
+        };
     }
 }
 

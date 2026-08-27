@@ -1679,6 +1679,9 @@ export const itOverrides: Record<string, string> = {
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} regole di ripetizione non supportate sono state conservate nelle note.",
         'settings.syncRemoteBusy': 'Un altro dispositivo Mindwtr compatibile sta aggiornando questa posizione di sincronizzazione. Attendi che finisca, quindi sincronizza di nuovo.',
         'settings.syncRemoteCleanupDeferred': 'L’operazione di sincronizzazione è stata completata. Mindwtr non ha potuto rimuovere il blocco temporaneo della sincronizzazione, ma scadrà automaticamente. Non è necessario riprovare.',
+        'settings.syncFileLockBusy': 'Un’altra operazione di Mindwtr sta usando la sincronizzazione file. Attendi che termini; Mindwtr riproverà automaticamente.',
+        'settings.syncFileLockCleanupDeferred': 'La sincronizzazione è stata completata, ma Mindwtr non ha potuto rilasciare il blocco della sincronizzazione file. Riavvia Mindwtr prima di sincronizzare di nuovo. Non è necessario riprovare.',
+        'settings.syncFileLockUnavailable': 'Mindwtr non può bloccare in sicurezza questa posizione di sincronizzazione file. Seleziona di nuovo la cartella, riavvia o aggiorna Mindwtr oppure usa WebDAV.',
         'settings.syncEncryptionCleanupDeferred': 'La crittografia è stata aggiornata. Mindwtr non ha potuto rimuovere il blocco temporaneo della sincronizzazione, ma scadrà automaticamente. Non è necessario riprovare.',
         'settings.syncEncryptionFileCleanupDeferred': 'La crittografia è stata aggiornata, ma Mindwtr non ha potuto rilasciare il blocco di Sincronizzazione file. Riavvia Mindwtr prima di sincronizzare di nuovo. Non ripetere la modifica della crittografia.',
 };

@@ -15,7 +15,11 @@ import { normalizeRemoteWriteResult, runSharedSyncCycle } from './sync-run';
 import { normalizeAppData } from './sync-normalization';
 import { cloneAppData } from './sync-runtime-utils';
 import type { FastSyncState } from './sync-fast-sync';
-import type { SyncBackend } from './sync-service-utils';
+import {
+    SyncFileLockBusyError,
+    SyncFileLockUnavailableError,
+    type SyncBackend,
+} from './sync-service-utils';
 import type { SyncCycleIO, SyncCycleResult } from './sync-types';
 import { performSyncCycle } from './sync';
 import {
@@ -852,6 +856,70 @@ describe('runSharedSyncCycle', () => {
         expect(storage.persistLocal).not.toHaveBeenCalled();
         expect(hooks.finalizeSuccess).not.toHaveBeenCalled();
         expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
+    });
+
+    it('defers a busy File Sync lock with a bounded follow-up and no persisted error', async () => {
+        const { io, storage, hooks, run } = createHarness({
+            backend: 'file',
+            hooks: {
+                setupCycle: vi.fn(async () => {
+                    throw new SyncFileLockBusyError(5_000);
+                }),
+            },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: true,
+            skipped: 'fileSyncLockBusy',
+            fileSyncLockDeferred: 'busy',
+            retryAfterMs: 5_000,
+        });
+        expect(hooks.requestFollowUpAfter).toHaveBeenCalledWith(5_000);
+        expect(io.readRemote).not.toHaveBeenCalled();
+        expect(storage.persistLocal).not.toHaveBeenCalled();
+        expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
+    });
+
+    it('does not retain a transient activation candidate when its File Sync lock is busy', async () => {
+        const { hooks, run } = createHarness({
+            backend: 'file',
+            activationProbe: true,
+            hooks: {
+                setupCycle: vi.fn(async () => {
+                    throw new SyncFileLockBusyError(5_000);
+                }),
+            },
+        });
+
+        await expect(run()).resolves.toMatchObject({
+            success: true,
+            skipped: 'fileSyncLockBusy',
+            fileSyncLockDeferred: 'busy',
+        });
+        expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
+    });
+
+    it('fails closed with an actionable outcome when safe File Sync locking is unavailable', async () => {
+        const { hooks, run } = createHarness({
+            backend: 'file',
+            hooks: {
+                setupCycle: vi.fn(async () => {
+                    throw new SyncFileLockUnavailableError();
+                }),
+            },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: false,
+            fileSyncLockUnavailable: true,
+        });
+        expect(result.error).toContain('Safe File Sync locking is unavailable');
+        expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
+        expect(hooks.finalizeErrorStatus).toHaveBeenCalledTimes(1);
     });
 
     it('marks a successful run cleanup-deferred when conditional fence release fails', async () => {

@@ -2450,6 +2450,9 @@ export const faOverrides: Record<string, string> = {
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} قانون تکرار پشتیبانی‌نشده به‌صورت یادداشت نگه داشته شد.",
         'settings.syncRemoteBusy': 'یک دستگاه سازگار دیگرِ Mindwtr در حال به‌روزرسانی این مکان همگام‌سازی است. صبر کنید تا کارش تمام شود، سپس دوباره همگام‌سازی کنید.',
         'settings.syncRemoteCleanupDeferred': 'عملیات همگام‌سازی کامل شد. Mindwtr نتوانست قفل موقت همگام‌سازی را حذف کند، اما این قفل خودکار منقضی می‌شود. نیازی به تلاش دوباره نیست.',
+        'settings.syncFileLockBusy': 'یک عملیات دیگر Mindwtr از همگام‌سازی فایل استفاده می‌کند. تا پایان آن صبر کنید؛ Mindwtr به‌طور خودکار دوباره تلاش می‌کند.',
+        'settings.syncFileLockCleanupDeferred': 'همگام‌سازی کامل شد، اما Mindwtr نتوانست قفل همگام‌سازی فایل را آزاد کند. پیش از همگام‌سازی دوباره، Mindwtr را راه‌اندازی مجدد کنید. نیازی به تکرار نیست.',
+        'settings.syncFileLockUnavailable': 'Mindwtr نمی‌تواند این مکان همگام‌سازی فایل را با ایمنی قفل کند. پوشه را دوباره انتخاب کنید، Mindwtr را راه‌اندازی مجدد یا به‌روزرسانی کنید، یا از WebDAV استفاده کنید.',
         'settings.syncEncryptionCleanupDeferred': 'رمزگذاری به‌روزرسانی شد. Mindwtr نتوانست قفل موقت همگام‌سازی را حذف کند، اما این قفل خودکار منقضی می‌شود. نیازی به تلاش دوباره نیست.',
         'settings.syncEncryptionFileCleanupDeferred': 'رمزگذاری به‌روزرسانی شد، اما Mindwtr نتوانست قفل همگام‌سازی فایل را آزاد کند. پیش از همگام‌سازی دوباره، Mindwtr را راه‌اندازی مجدد کنید. تغییر رمزگذاری را تکرار نکنید.',
 };

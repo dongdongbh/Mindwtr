@@ -4,6 +4,7 @@ import {
   coerceSupportedSyncBackend,
   isLikelyOfflineSyncError as isCoreLikelyOfflineSyncError,
   isRemoteSyncBackend as isCoreRemoteSyncBackend,
+  isSyncFileLockUnavailableError,
   isSyncFilePath as isCoreSyncFilePath,
   LEGACY_SYNC_FILE_NAME,
   resolveSyncBackend,
@@ -24,6 +25,7 @@ export type SyncFailureKind =
   | 'conflict'
   | 'encryptionState'
   | 'encryption'
+  | 'fileLockUnavailable'
   | 'unknown';
 
 const FILE_EXTENSION_PATTERN = /\.[A-Za-z0-9]{1,16}$/;
@@ -61,6 +63,7 @@ export const classifySyncFailure = (errorOrMessage: unknown): SyncFailureKind =>
   if (!message.trim()) return 'unknown';
   if (ENCRYPTION_STATE_ERROR_PATTERN.test(message)) return 'encryptionState';
   if (ENCRYPTION_ERROR_PATTERN.test(message)) return 'encryption';
+  if (isSyncFileLockUnavailableError(message)) return 'fileLockUnavailable';
   if (isLikelyOfflineSyncError(message)) return 'offline';
   if (RATE_LIMIT_ERROR_PATTERN.test(message)) return 'rateLimited';
   if (AUTH_ERROR_PATTERN.test(message)) return 'auth';

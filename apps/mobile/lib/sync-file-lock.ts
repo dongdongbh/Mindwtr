@@ -1,7 +1,10 @@
 import { requireNativeModule } from 'expo-modules-core';
 import { Platform } from 'react-native';
-
-export const SYNC_FILE_LOCK_UNAVAILABLE = 'SYNC_FILE_LOCK_UNAVAILABLE';
+import {
+  normalizeSyncFileLockError,
+  SyncFileLockBusyError,
+  SyncFileLockUnavailableError,
+} from '@mindwtr/core';
 
 type SyncFileLockNativeModule = {
   acquireAsync(uri: string): Promise<string>;
@@ -43,17 +46,22 @@ export const acquireMobileFileSyncLease = async (syncFileUri: string): Promise<M
   if (platform === 'android') {
     const nativeModule = getModule();
     if (!nativeModule) {
-      throw new Error(`${SYNC_FILE_LOCK_UNAVAILABLE}: Android File Sync locking is unavailable in this build`);
+      throw new SyncFileLockUnavailableError('Safe File Sync locking is unavailable in this Android build. Update or restart Mindwtr, or use WebDAV.');
     }
-    const token = await nativeModule.acquireAsync(syncFileUri);
+    let token: string;
+    try {
+      token = await nativeModule.acquireAsync(syncFileUri);
+    } catch (error) {
+      throw normalizeSyncFileLockError(error);
+    }
     if (!token || typeof token !== 'string') {
-      throw new Error(`${SYNC_FILE_LOCK_UNAVAILABLE}: native File Sync lock returned no token`);
+      throw new SyncFileLockUnavailableError('Safe File Sync locking returned no lease. Restart Mindwtr or use WebDAV.');
     }
     return { token, native: true };
   }
 
   if (fallbackLeaseToken) {
-    throw new Error('SYNC_FILE_LOCK_BUSY: another File Sync operation is active');
+    throw new SyncFileLockBusyError();
   }
   fallbackLeaseSequence += 1;
   fallbackLeaseToken = `mobile-process-${fallbackLeaseSequence}`;
@@ -64,13 +72,17 @@ export const releaseMobileFileSyncLease = async (lease: MobileFileSyncLease): Pr
   if (lease.native) {
     const nativeModule = getModule();
     if (!nativeModule) {
-      throw new Error(`${SYNC_FILE_LOCK_UNAVAILABLE}: Android File Sync locking disappeared before release`);
+      throw new SyncFileLockUnavailableError('Safe File Sync locking disappeared before release. Restart Mindwtr before syncing again.');
     }
-    await nativeModule.releaseAsync(lease.token);
+    try {
+      await nativeModule.releaseAsync(lease.token);
+    } catch (error) {
+      throw normalizeSyncFileLockError(error);
+    }
     return;
   }
   if (fallbackLeaseToken !== lease.token) {
-    throw new Error(`${SYNC_FILE_LOCK_UNAVAILABLE}: unknown or already released File Sync lease`);
+    throw new SyncFileLockUnavailableError('The File Sync lease is unknown or already released. Restart Mindwtr before syncing again.');
   }
   fallbackLeaseToken = null;
 };

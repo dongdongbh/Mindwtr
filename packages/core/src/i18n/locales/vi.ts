@@ -2328,6 +2328,9 @@ export const viOverrides: Record<string, string> = {
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} quy tắc lặp lại không được hỗ trợ đã được giữ trong ghi chú.",
         'settings.syncRemoteBusy': 'Một thiết bị Mindwtr tương thích khác đang cập nhật vị trí đồng bộ này. Hãy đợi thiết bị đó hoàn tất rồi đồng bộ lại.',
         'settings.syncRemoteCleanupDeferred': 'Thao tác đồng bộ đã hoàn tất. Mindwtr không thể xóa khóa đồng bộ tạm thời, nhưng khóa sẽ tự động hết hạn. Bạn không cần thử lại.',
+        'settings.syncFileLockBusy': 'Một thao tác Mindwtr khác đang dùng Đồng bộ tệp. Hãy chờ thao tác đó hoàn tất; Mindwtr sẽ tự động thử lại.',
+        'settings.syncFileLockCleanupDeferred': 'Đồng bộ đã hoàn tất nhưng Mindwtr không thể nhả khóa Đồng bộ tệp. Hãy khởi động lại Mindwtr trước khi đồng bộ lần nữa. Bạn không cần thử lại.',
+        'settings.syncFileLockUnavailable': 'Mindwtr không thể khóa an toàn vị trí Đồng bộ tệp này. Hãy chọn lại thư mục, khởi động lại hoặc cập nhật Mindwtr, hoặc dùng WebDAV.',
         'settings.syncEncryptionCleanupDeferred': 'Mã hóa đã được cập nhật. Mindwtr không thể xóa khóa đồng bộ tạm thời, nhưng khóa sẽ tự động hết hạn. Bạn không cần thử lại.',
         'settings.syncEncryptionFileCleanupDeferred': 'Mã hóa đã được cập nhật, nhưng Mindwtr không thể giải phóng khóa Đồng bộ tệp. Hãy khởi động lại Mindwtr trước khi đồng bộ lại. Đừng lặp lại thay đổi mã hóa.',
 };

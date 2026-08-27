@@ -579,6 +579,53 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.showSettingsErrorToast).not.toHaveBeenCalled();
     });
 
+    it('waits without activating when another operation owns the candidate File Sync lock', async () => {
+        seedStorage([[SYNC_PATH_KEY, 'file:///sync-folder/data.json']]);
+        mocked.performMobileSync.mockResolvedValueOnce({
+            success: true,
+            skipped: 'fileSyncLockBusy',
+            fileSyncLockDeferred: 'busy',
+            retryAfterMs: 5_000,
+        });
+        await renderHarness();
+        mocked.asyncStorage.multiSet.mockClear();
+        mocked.asyncStorage.setItem.mockClear();
+
+        await act(async () => {
+            await latestHookResult?.handleSync({ backend: 'file' });
+        });
+
+        expect(mocked.asyncStorage.setItem).not.toHaveBeenCalledWith(SYNC_BACKEND_KEY, 'file');
+        expect(mocked.showToast).toHaveBeenCalledWith({
+            title: 'common.notice',
+            message: 'settings.syncFileLockBusy',
+            tone: 'warning',
+            durationMs: 6000,
+        });
+        expect(mocked.showSettingsErrorToast).not.toHaveBeenCalled();
+    });
+
+    it('commits a cleanup-deferred File Sync activation and warns without suggesting retry', async () => {
+        seedStorage([[SYNC_PATH_KEY, 'file:///sync-folder/data.json']]);
+        mocked.performMobileSync
+            .mockResolvedValueOnce({ success: true, fileSyncLockDeferred: 'cleanup' })
+            .mockResolvedValueOnce({ success: true, fileSyncLockDeferred: 'busy' });
+        await renderHarness();
+
+        await act(async () => {
+            await latestHookResult?.handleSync({ backend: 'file' });
+        });
+
+        expect(mocked.asyncStorage.setItem).toHaveBeenLastCalledWith(SYNC_BACKEND_KEY, 'file');
+        expect(mocked.showToast).toHaveBeenCalledWith({
+            title: 'common.notice',
+            message: 'settings.syncFileLockCleanupDeferred',
+            tone: 'warning',
+            durationMs: 6000,
+        });
+        expect(mocked.showSettingsErrorToast).not.toHaveBeenCalled();
+    });
+
     it('commits a cleanup-deferred activation and reports completed cleanup instead of failure', async () => {
         mocked.performMobileSync
             .mockResolvedValueOnce({

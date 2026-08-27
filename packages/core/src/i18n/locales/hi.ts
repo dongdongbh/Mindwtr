@@ -1475,6 +1475,9 @@ export const hiOverrides: Record<string, string> = {
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} असमर्थित दोहराव नियम नोट्स के रूप में रखे गए।",
         'settings.syncRemoteBusy': 'कोई अन्य संगत Mindwtr डिवाइस इस सिंक स्थान को अपडेट कर रहा है। उसके पूरा होने की प्रतीक्षा करें, फिर दोबारा सिंक करें।',
         'settings.syncRemoteCleanupDeferred': 'सिंक प्रक्रिया पूरी हो गई। Mindwtr अस्थायी सिंक लॉक नहीं हटा सका, लेकिन यह अपने आप समाप्त हो जाएगा। दोबारा प्रयास करने की आवश्यकता नहीं है।',
+        'settings.syncFileLockBusy': 'Mindwtr की कोई अन्य प्रक्रिया फ़ाइल सिंक का उपयोग कर रही है। उसके पूरा होने की प्रतीक्षा करें; Mindwtr अपने आप दोबारा प्रयास करेगा।',
+        'settings.syncFileLockCleanupDeferred': 'सिंक पूरा हुआ, लेकिन Mindwtr फ़ाइल सिंक लॉक जारी नहीं कर सका। फिर से सिंक करने से पहले Mindwtr को पुनः आरंभ करें। दोबारा प्रयास करने की आवश्यकता नहीं है।',
+        'settings.syncFileLockUnavailable': 'Mindwtr इस फ़ाइल सिंक स्थान को सुरक्षित रूप से लॉक नहीं कर सकता। फ़ोल्डर फिर से चुनें, Mindwtr को पुनः आरंभ या अपडेट करें, या WebDAV का उपयोग करें।',
         'settings.syncEncryptionCleanupDeferred': 'एन्क्रिप्शन अपडेट हो गया। Mindwtr अस्थायी सिंक लॉक नहीं हटा सका, लेकिन यह अपने आप समाप्त हो जाएगा। दोबारा प्रयास करने की आवश्यकता नहीं है।',
         'settings.syncEncryptionFileCleanupDeferred': 'एन्क्रिप्शन अपडेट हो गया, लेकिन Mindwtr फ़ाइल सिंक लॉक जारी नहीं कर सका। दोबारा सिंक करने से पहले Mindwtr को पुनः प्रारंभ करें। एन्क्रिप्शन परिवर्तन को दोहराएँ नहीं।',
 };

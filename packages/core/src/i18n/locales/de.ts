@@ -1566,6 +1566,9 @@ export const deOverrides: Record<string, string> = {
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} nicht unterstützte Wiederholungsregeln wurden als Notizen beibehalten.",
         'settings.syncRemoteBusy': 'Ein anderes kompatibles Mindwtr-Gerät aktualisiert gerade diesen Synchronisierungsort. Warten Sie, bis es fertig ist, und synchronisieren Sie dann erneut.',
         'settings.syncRemoteCleanupDeferred': 'Der Synchronisierungsvorgang wurde abgeschlossen. Mindwtr konnte die temporäre Synchronisierungssperre nicht entfernen, sie läuft jedoch automatisch ab. Es ist kein erneuter Versuch erforderlich.',
+        'settings.syncFileLockBusy': 'Ein anderer Mindwtr-Vorgang verwendet die Dateisynchronisierung. Warten Sie, bis er abgeschlossen ist; Mindwtr versucht es automatisch erneut.',
+        'settings.syncFileLockCleanupDeferred': 'Die Synchronisierung ist abgeschlossen, aber Mindwtr konnte die Sperre der Dateisynchronisierung nicht freigeben. Starten Sie Mindwtr vor der nächsten Synchronisierung neu. Ein erneuter Versuch ist nicht nötig.',
+        'settings.syncFileLockUnavailable': 'Mindwtr kann diesen Speicherort für die Dateisynchronisierung nicht sicher sperren. Wählen Sie den Ordner erneut aus, starten oder aktualisieren Sie Mindwtr oder verwenden Sie WebDAV.',
         'settings.syncEncryptionCleanupDeferred': 'Die Verschlüsselung wurde aktualisiert. Mindwtr konnte die temporäre Synchronisierungssperre nicht entfernen, sie läuft jedoch automatisch ab. Es ist kein erneuter Versuch erforderlich.',
         'settings.syncEncryptionFileCleanupDeferred': 'Die Verschlüsselung wurde aktualisiert, aber Mindwtr konnte die Dateisynchronisierungssperre nicht freigeben. Starten Sie Mindwtr vor der nächsten Synchronisierung neu. Wiederholen Sie die Verschlüsselungsänderung nicht.',
 };

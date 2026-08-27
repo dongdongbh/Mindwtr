@@ -61,6 +61,7 @@ import {
     createSyncOrchestrator,
     createSerializedAsyncQueue,
     formatSyncErrorMessage,
+    normalizeSyncFileLockError,
     getInMemoryAppDataSnapshot,
     createAbortableFetch,
     ensureFreshLocalSyncSnapshot,
@@ -440,11 +441,21 @@ async function invokeSyncNative<T>(command: string, args?: Record<string, unknow
     return syncServiceDependencies.invoke<T>(command, args);
 }
 
-const acquireFileSyncLease = (path?: string): Promise<string> =>
-    invokeSyncNative('acquire_file_sync_lease', path ? { path } : undefined);
+const acquireFileSyncLease = async (path?: string): Promise<string> => {
+    try {
+        return await invokeSyncNative('acquire_file_sync_lease', path ? { path } : undefined);
+    } catch (error) {
+        throw normalizeSyncFileLockError(error);
+    }
+};
 
-const releaseFileSyncLease = (token: string): Promise<void> =>
-    invokeSyncNative('release_file_sync_lease', { token });
+const releaseFileSyncLease = async (token: string): Promise<void> => {
+    try {
+        await invokeSyncNative('release_file_sync_lease', { token });
+    } catch (error) {
+        throw normalizeSyncFileLockError(error);
+    }
+};
 
 type LocalDataSaveOptions = {
     baseline?: AppData;
@@ -2827,6 +2838,7 @@ export class SyncService {
         await yieldToRenderer();
 
         let result: SyncRunResult;
+        let fileSyncLockCleanupDeferred = false;
         try {
             result = await runSharedSyncCycle({
                 options: {
@@ -2969,6 +2981,7 @@ export class SyncService {
                 try {
                     await releaseFileSyncLease(token);
                 } catch (error) {
+                    fileSyncLockCleanupDeferred = true;
                     // The native process still owns the handle if release
                     // failed; surface this loudly rather than pretending the
                     // folder is available for another mutation cycle.
@@ -2986,8 +2999,13 @@ export class SyncService {
             }
             SyncService.finalizeSyncWriteIgnoreWindow();
         }
+        if (result.success && fileSyncLockCleanupDeferred) {
+            result = { ...result, fileSyncLockDeferred: 'cleanup' };
+        }
         const skippedRequeue = result.skipped === 'requeued';
-        if (!options.activationProbe && !skippedRequeue) {
+        const skippedDeferredBusy = result.remoteFenceDeferred === 'busy'
+            || result.fileSyncLockDeferred === 'busy';
+        if (!options.activationProbe && !skippedRequeue && !skippedDeferredBusy) {
             SyncService.finalizeAttachmentWarningState(
                 { hadAttachmentWarning: result.hadAttachmentWarning === true },
                 result
@@ -2996,12 +3014,12 @@ export class SyncService {
         SyncService.updateSyncStatus({
             inFlight: false,
             step: null,
-            lastResult: options.activationProbe || skippedRequeue
+            lastResult: options.activationProbe || skippedRequeue || skippedDeferredBusy
                 ? SyncService.syncStatus.lastResult
                 : result.success
                     ? 'success'
                     : 'error',
-            lastResultAt: options.activationProbe || skippedRequeue
+            lastResultAt: options.activationProbe || skippedRequeue || skippedDeferredBusy
                 ? SyncService.syncStatus.lastResultAt
                 : new Date().toISOString(),
         });

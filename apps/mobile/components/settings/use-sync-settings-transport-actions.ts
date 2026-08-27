@@ -652,7 +652,7 @@ export function useSyncSettingsTransportActions({
     const handleSync = useCallback(async (options?: SyncActionOptions) => {
         addBreadcrumb('sync:manual');
         setIsSyncing(true);
-        let activationCleanupDeferred = false;
+        let activationCleanupDeferred: 'remote' | 'file' | null = null;
         const showRemoteFenceFeedback = (deferred: 'busy' | 'cleanup') => {
             showSettingsWarning(
                 tr('common.notice'),
@@ -661,6 +661,18 @@ export function useSyncSettingsTransportActions({
                     : 'settings.syncRemoteCleanupDeferred'),
                 6000,
             );
+        };
+        const showFileSyncLockFeedback = (outcome: 'busy' | 'cleanup' | 'unavailable') => {
+            showToast({
+                title: outcome === 'unavailable' ? tr('settings.syncMobile.error') : tr('common.notice'),
+                message: tr(outcome === 'busy'
+                    ? 'settings.syncFileLockBusy'
+                    : outcome === 'cleanup'
+                        ? 'settings.syncFileLockCleanupDeferred'
+                        : 'settings.syncFileLockUnavailable'),
+                tone: outcome === 'unavailable' ? 'error' : 'warning',
+                durationMs: 6000,
+            });
         };
         try {
             const previousLastSyncStatus = lastSyncStatus;
@@ -814,13 +826,28 @@ export function useSyncSettingsTransportActions({
                     showRemoteFenceFeedback('busy');
                     return;
                 }
-                const probeCleanupDeferred = probeResult.success
+                if (probeResult.success && probeResult.fileSyncLockDeferred === 'busy') {
+                    showFileSyncLockFeedback('busy');
+                    return;
+                }
+                if (probeResult.fileSyncLockUnavailable) {
+                    showFileSyncLockFeedback('unavailable');
+                    return;
+                }
+                const probeRemoteCleanupDeferred = probeResult.success
                     && probeResult.remoteFenceDeferred === 'cleanup';
-                activationCleanupDeferred = probeCleanupDeferred;
+                const probeFileCleanupDeferred = probeResult.success
+                    && probeResult.fileSyncLockDeferred === 'cleanup';
+                activationCleanupDeferred = probeFileCleanupDeferred
+                    ? 'file'
+                    : probeRemoteCleanupDeferred
+                        ? 'remote'
+                        : null;
                 if (
                     !probeResult.success
                     || probeResult.remoteWriteDeferred
-                    || (probeResult.remoteFenceDeferred && !probeCleanupDeferred)
+                    || (probeResult.remoteFenceDeferred && !probeRemoteCleanupDeferred)
+                    || (probeResult.fileSyncLockDeferred && !probeFileCleanupDeferred)
                     || probeResult.skipped === 'pendingRemoteWriteBackoff'
                 ) {
                     // An encrypted remote is transport PROOF, not a failed probe: the
@@ -871,8 +898,18 @@ export function useSyncSettingsTransportActions({
                 });
                 return;
             }
+            if (result.success && result.fileSyncLockDeferred) {
+                showFileSyncLockFeedback(
+                    activationCleanupDeferred === 'file' ? 'cleanup' : result.fileSyncLockDeferred,
+                );
+                return;
+            }
+            if (result.fileSyncLockUnavailable) {
+                showFileSyncLockFeedback('unavailable');
+                return;
+            }
             if (result.success && result.remoteFenceDeferred) {
-                showRemoteFenceFeedback(activationCleanupDeferred ? 'cleanup' : result.remoteFenceDeferred);
+                showRemoteFenceFeedback(activationCleanupDeferred === 'remote' ? 'cleanup' : result.remoteFenceDeferred);
                 return;
             }
             if (
@@ -881,7 +918,8 @@ export function useSyncSettingsTransportActions({
                 && result.skipped !== 'pendingRemoteWriteBackoff'
             ) {
                 if (activationCleanupDeferred) {
-                    showRemoteFenceFeedback('cleanup');
+                    if (activationCleanupDeferred === 'file') showFileSyncLockFeedback('cleanup');
+                    else showRemoteFenceFeedback('cleanup');
                     return;
                 }
                 const conflictCount = getSyncConflictCount(result.stats);

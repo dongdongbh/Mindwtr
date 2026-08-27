@@ -3064,6 +3064,119 @@ describe('SyncService orchestration', () => {
         }, 0)
     );
 
+    it('normalizes a native busy File Sync lease into a neutral deferred result', async () => {
+        __syncServiceTestUtils.setDependenciesForTests({
+            flushPendingSave: vi.fn(async () => undefined),
+            getStoreState: () => ({
+                fetchData: vi.fn(async () => undefined),
+                lastDataChangeAt: 0,
+                settings: {},
+                setError: vi.fn(),
+                updateSettings: vi.fn(async () => undefined),
+            }) as any,
+            invoke: vi.fn(async (command: string) => {
+                if (command === 'acquire_file_sync_lease') {
+                    throw new Error('SYNC_FILE_LOCK_BUSY: lock held by another process');
+                }
+                throw new Error(`unexpected command: ${command}`);
+            }) as any,
+            isTauriRuntime: () => false,
+        });
+
+        const result = await SyncService.performSync({
+            manual: true,
+            configOverride: { backend: 'file', syncPath: '/tmp/mindwtr-sync/data.json' },
+        });
+
+        expect(result).toMatchObject({
+            success: true,
+            skipped: 'fileSyncLockBusy',
+            fileSyncLockDeferred: 'busy',
+        });
+        expect(result.error).toBeUndefined();
+        expect(SyncService.getSyncStatus()).toMatchObject({
+            inFlight: false,
+            lastResult: null,
+            lastResultAt: null,
+        });
+    });
+
+    it('returns an actionable failure when the native File Sync lease is unavailable', async () => {
+        __syncServiceTestUtils.setDependenciesForTests({
+            flushPendingSave: vi.fn(async () => undefined),
+            getStoreState: () => ({
+                fetchData: vi.fn(async () => undefined),
+                lastDataChangeAt: 0,
+                settings: {},
+                setError: vi.fn(),
+                updateSettings: vi.fn(async () => undefined),
+            }) as any,
+            invoke: vi.fn(async (command: string) => {
+                if (command === 'acquire_file_sync_lease') {
+                    throw new Error('SYNC_FILE_LOCK_UNAVAILABLE: platform lease API failed');
+                }
+                throw new Error(`unexpected command: ${command}`);
+            }) as any,
+            isTauriRuntime: () => false,
+        });
+
+        const result = await SyncService.performSync({
+            manual: true,
+            configOverride: { backend: 'file', syncPath: '/tmp/mindwtr-sync/data.json' },
+        });
+
+        expect(result).toMatchObject({ success: false, fileSyncLockUnavailable: true });
+        expect(result.error).toContain('Safe File Sync locking is unavailable');
+    });
+
+    it('keeps a completed desktop File Sync cycle successful when lease release is deferred', async () => {
+        const setupSpy = vi.spyOn(SyncService as any, 'setupDesktopCycle').mockImplementation(async (context: any) => {
+            context.backend = 'file';
+            context.fileSyncLeaseToken = 'cycle-lease';
+            return {
+                kind: 'ready',
+                backend: 'file',
+                cloudProvider: 'selfhosted',
+                fastSyncScope: null,
+                io: {
+                    readRemote: vi.fn(async () => null),
+                    writeRemote: vi.fn(async () => undefined),
+                },
+            };
+        });
+        try {
+            __syncServiceTestUtils.setDependenciesForTests({
+                flushPendingSave: vi.fn(async () => undefined),
+                getStoreState: () => ({
+                    fetchData: vi.fn(async () => undefined),
+                    lastDataChangeAt: 0,
+                    settings: {},
+                    setError: vi.fn(),
+                    updateSettings: vi.fn(async () => undefined),
+                }) as any,
+                applySyncedDataToStore: vi.fn(),
+                performSyncCycle: vi.fn(async () => ({
+                    data: { tasks: [], projects: [], sections: [], areas: [], settings: {} },
+                    status: 'success',
+                    stats: { tasks: {}, projects: {}, sections: {}, areas: {} },
+                })) as any,
+                invoke: vi.fn(async (command: string) => {
+                    if (command === 'release_file_sync_lease') {
+                        throw new Error('SYNC_FILE_LOCK_UNAVAILABLE: release failed');
+                    }
+                    throw new Error(`unexpected command: ${command}`);
+                }) as any,
+                isTauriRuntime: () => false,
+            });
+
+            const result = await SyncService.performSync({ manual: true });
+
+            expect(result).toMatchObject({ success: true, fileSyncLockDeferred: 'cleanup' });
+        } finally {
+            setupSpy.mockRestore();
+        }
+    });
+
     it('re-runs a queued sync cycle after the in-flight sync finishes', async () => {
         const firstRun = createDeferred();
         const backendSpy = vi.spyOn(SyncService as any, 'getSyncBackend');

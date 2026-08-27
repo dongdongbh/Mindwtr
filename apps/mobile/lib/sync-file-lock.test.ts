@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { SyncFileLockBusyError, SyncFileLockUnavailableError } from '@mindwtr/core';
 
 vi.mock('expo-modules-core', () => ({
   requireNativeModule: vi.fn(() => { throw new Error('native module unavailable'); }),
@@ -8,7 +9,6 @@ import {
   acquireMobileFileSyncLease,
   releaseMobileFileSyncLease,
   setSyncFileLockNativeModuleForTests,
-  SYNC_FILE_LOCK_UNAVAILABLE,
 } from './sync-file-lock';
 
 afterEach(() => {
@@ -19,7 +19,7 @@ describe('sync-file-lock', () => {
   it('fails closed when Android native locking is unavailable', async () => {
     setSyncFileLockNativeModuleForTests(null, 'android');
     await expect(acquireMobileFileSyncLease('content://provider/tree/root/document/root/data.json'))
-      .rejects.toThrow(SYNC_FILE_LOCK_UNAVAILABLE);
+      .rejects.toBeInstanceOf(SyncFileLockUnavailableError);
   });
 
   it('retains and releases the opaque native token for SAF and path providers', async () => {
@@ -42,15 +42,28 @@ describe('sync-file-lock', () => {
       releaseAsync: vi.fn(async () => undefined),
     }, 'android');
     await expect(acquireMobileFileSyncLease('file:///tmp/data.json'))
-      .rejects.toThrow(SYNC_FILE_LOCK_UNAVAILABLE);
+      .rejects.toBeInstanceOf(SyncFileLockUnavailableError);
+  });
+
+  it.each([
+    ['SYNC_FILE_LOCK_BUSY: another File Sync operation is active', SyncFileLockBusyError],
+    ['SYNC_FILE_LOCK_UNAVAILABLE: provider cannot open the lock document', SyncFileLockUnavailableError],
+  ])('normalizes the native %s sentinel before it reaches orchestration', async (message, ExpectedError) => {
+    setSyncFileLockNativeModuleForTests({
+      acquireAsync: vi.fn(async () => { throw new Error(message); }),
+      releaseAsync: vi.fn(async () => undefined),
+    }, 'android');
+
+    await expect(acquireMobileFileSyncLease('content://provider/tree/root/document/root/data.json'))
+      .rejects.toBeInstanceOf(ExpectedError);
   });
 
   it('keeps the non-Android process lease exclusive and rejects stale releases', async () => {
     setSyncFileLockNativeModuleForTests(null, 'ios');
     const lease = await acquireMobileFileSyncLease('file:///tmp/data.json');
     await expect(acquireMobileFileSyncLease('file:///tmp/data.json'))
-      .rejects.toThrow('SYNC_FILE_LOCK_BUSY');
+      .rejects.toBeInstanceOf(SyncFileLockBusyError);
     await releaseMobileFileSyncLease(lease);
-    await expect(releaseMobileFileSyncLease(lease)).rejects.toThrow(SYNC_FILE_LOCK_UNAVAILABLE);
+    await expect(releaseMobileFileSyncLease(lease)).rejects.toBeInstanceOf(SyncFileLockUnavailableError);
   });
 });

@@ -620,6 +620,9 @@ export const nlOverrides: Record<string, string> = {
         'digest.noItems': 'Vandaag geen urgente items.',
         'settings.syncRemoteBusy': 'Een ander compatibel Mindwtr-apparaat werkt deze synchronisatielocatie bij. Wacht tot het klaar is en synchroniseer daarna opnieuw.',
         'settings.syncRemoteCleanupDeferred': 'De synchronisatie is voltooid. Mindwtr kon de tijdelijke synchronisatievergrendeling niet verwijderen, maar deze verloopt automatisch. Opnieuw proberen is niet nodig.',
+        'settings.syncFileLockBusy': 'Een andere Mindwtr-bewerking gebruikt Bestandssynchronisatie. Wacht tot deze klaar is; Mindwtr probeert het automatisch opnieuw.',
+        'settings.syncFileLockCleanupDeferred': 'De synchronisatie is voltooid, maar Mindwtr kon de vergrendeling van Bestandssynchronisatie niet vrijgeven. Start Mindwtr opnieuw voordat je weer synchroniseert. Opnieuw proberen is niet nodig.',
+        'settings.syncFileLockUnavailable': 'Mindwtr kan deze locatie voor Bestandssynchronisatie niet veilig vergrendelen. Selecteer de map opnieuw, herstart of update Mindwtr, of gebruik WebDAV.',
         'settings.syncEncryptionCleanupDeferred': 'De versleuteling is bijgewerkt. Mindwtr kon de tijdelijke synchronisatievergrendeling niet verwijderen, maar deze verloopt automatisch. Opnieuw proberen is niet nodig.',
         'settings.syncEncryptionFileCleanupDeferred': 'De versleuteling is bijgewerkt, maar Mindwtr kon de vergrendeling voor Bestandssynchronisatie niet vrijgeven. Start Mindwtr opnieuw voordat u weer synchroniseert. Herhaal de versleutelingswijziging niet.',
 };

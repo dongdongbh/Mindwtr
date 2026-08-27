@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { AppData, MergeStats, acquireSyncRemoteMutationFence, assertWebdavStrongEtagSupport, createDropboxSyncRemoteMutationFencePort, createSyncOrchestrator, createWebdavSyncRemoteMutationFencePort, runSerializedSyncDocumentOperation, runSharedSyncCycle, useTaskStore, webdavGetSyncDocument, webdavHeadFile, webdavPutSyncDocument, syncEncryptedArtifactName, markRemoteEncryptionDiscovered, markRemotePlaintextDiscovered, SyncEncryptionRemoteConflictError, SyncEncryptionRemotePlaintextError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, SyncEncryptionTransitionIncompleteError, SyncRemoteWriteConflict, type SyncKeyMaterial, cloudGetJson, cloudHeadJson, cloudPutJson, flushPendingSave, performSyncCycle, withRetry, isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeStrongWebdavEtag, normalizeWebdavUrl, normalizeCloudUrl, createSyncBackendIO, buildFastSyncScope, hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, getInMemoryAppDataSnapshot, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, isDropboxUnauthorizedError, parseFastSyncState, serializeFastSyncState, summarizeTaskLifecycleCounts, decodeUriSafe, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES, SYNC_FILE_NAME, SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type Attachment, type CloudProvider, type FastSyncState, type SyncBackendContext, type SyncBackendIO, type SyncRunDiagnosticEvent, type SyncRunNotifier, type SyncRunPlatformHooks, type SyncRunStorage, type SyncTransport } from '@mindwtr/core';
+import { AppData, acquireSyncRemoteMutationFence, assertWebdavStrongEtagSupport, createDropboxSyncRemoteMutationFencePort, createSyncOrchestrator, createWebdavSyncRemoteMutationFencePort, runSerializedSyncDocumentOperation, runSharedSyncCycle, useTaskStore, webdavGetSyncDocument, webdavHeadFile, webdavPutSyncDocument, syncEncryptedArtifactName, markRemoteEncryptionDiscovered, markRemotePlaintextDiscovered, SyncEncryptionRemoteConflictError, SyncEncryptionRemotePlaintextError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, SyncEncryptionTransitionIncompleteError, SyncRemoteWriteConflict, type SyncKeyMaterial, cloudGetJson, cloudHeadJson, cloudPutJson, flushPendingSave, performSyncCycle, withRetry, isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeStrongWebdavEtag, normalizeWebdavUrl, normalizeCloudUrl, createSyncBackendIO, buildFastSyncScope, hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, getInMemoryAppDataSnapshot, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, isDropboxUnauthorizedError, parseFastSyncState, serializeFastSyncState, summarizeTaskLifecycleCounts, decodeUriSafe, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES, SYNC_FILE_NAME, SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type Attachment, type CloudProvider, type FastSyncState, type SyncBackendContext, type SyncBackendIO, type SyncRunDiagnosticEvent, type SyncRunNotifier, type SyncRunPlatformHooks, type SyncRunResult, type SyncRunStorage, type SyncTransport } from '@mindwtr/core';
 import { mobileStorage } from './storage-adapter';
 import { logInfo, logSyncError, logWarn, sanitizeLogMessage } from './app-log';
 import { readSyncFileVersioned, resolveSyncFileUri, writeSyncFile } from './storage-file';
@@ -100,11 +100,10 @@ type MobileSyncActivityListener = (state: MobileSyncActivityState) => void;
 // an unresolvable file-backend config, or an automatic run without the
 // encryption key. Mobile callers gate on configuration status before syncing,
 // so none branch on it today.
-type MobileSyncSkipReason = 'offline' | 'requeued' | 'unchanged' | 'pendingRemoteWriteBackoff' | 'remoteFenceBusy' | 'disabled';
 // 'network': the OS reported the device offline. 'request': the device looked
 // online but the app's requests failed (per-app cellular block, VPN/firewall).
 type MobileSyncOfflineCause = 'network' | 'request';
-type MobileSyncResult = { success: boolean; stats?: MergeStats; error?: string; skipped?: MobileSyncSkipReason; offlineCause?: MobileSyncOfflineCause; remoteWriteDeferred?: boolean; remoteFenceDeferred?: 'busy' | 'cleanup'; retryAfterMs?: number; activationProof?: 'remote-encrypted-no-key' };
+type MobileSyncResult = SyncRunResult & { offlineCause?: MobileSyncOfflineCause; activationProof?: 'remote-encrypted-no-key' };
 export type MobileWebDavSyncConfig = { url: string; username: string; password: string; allowInsecureHttp?: boolean; allowWeakFingerprint?: boolean };
 export type MobileCloudSyncConfig = { url: string; token: string; allowInsecureHttp?: boolean };
 export type MobileDropboxSyncCredentials = { tokens: DropboxAuthTokens };
@@ -586,9 +585,11 @@ class MobileSyncRun {
     const backend = this.backend;
     logSyncInfo('Sync start', { backend });
     logSyncInfo('Sync diagnostic start', { backend });
+    let result: MobileSyncResult;
+    let fileSyncLockCleanupDeferred = false;
     try {
       this.subscribeNetworkListener();
-      const result = await runSharedSyncCycle({
+      const cycleResult = await runSharedSyncCycle({
         options: {
           manual: this.manual,
           activationProbe: this.activationProbe,
@@ -616,10 +617,13 @@ class MobileSyncRun {
         },
         performSyncCycle: (io) => performSyncCycle(io),
       });
-      return this.activationProof ? { ...result, activationProof: this.activationProof } : result;
+      result = this.activationProof ? { ...cycleResult, activationProof: this.activationProof } : cycleResult;
     } finally {
-      await this.releaseResources();
+      fileSyncLockCleanupDeferred = await this.releaseResources();
     }
+    return result.success && fileSyncLockCleanupDeferred
+      ? { ...result, fileSyncLockDeferred: 'cleanup' }
+      : result;
   }
 
   private queueFollowUp(): void {
@@ -1606,13 +1610,15 @@ class MobileSyncRun {
     };
   }
 
-  private async releaseResources(): Promise<void> {
+  private async releaseResources(): Promise<boolean> {
+    let fileSyncLockCleanupDeferred = false;
     if (this.fileSyncLease) {
       const lease = this.fileSyncLease;
       this.fileSyncLease = null;
       try {
         await releaseMobileFileSyncLease(lease);
       } catch (error) {
+        fileSyncLockCleanupDeferred = true;
         logSyncWarning('Failed to release File Sync lease', error);
       }
     }
@@ -1625,6 +1631,7 @@ class MobileSyncRun {
     } catch (error) {
       logSyncWarning('Failed to unsubscribe network listener after sync', error);
     }
+    return fileSyncLockCleanupDeferred;
   }
 }
 

@@ -1498,6 +1498,9 @@ export const plOverrides: Record<string, string> = {
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} nieobsługiwanych reguł powtarzania zachowano jako notatki.",
         'settings.syncRemoteBusy': 'Inne zgodne urządzenie z Mindwtr aktualizuje tę lokalizację synchronizacji. Poczekaj, aż skończy, a następnie zsynchronizuj ponownie.',
         'settings.syncRemoteCleanupDeferred': 'Operacja synchronizacji została zakończona. Mindwtr nie mógł usunąć tymczasowej blokady synchronizacji, ale wygaśnie ona automatycznie. Ponawianie próby nie jest potrzebne.',
+        'settings.syncFileLockBusy': 'Inna operacja Mindwtr korzysta z synchronizacji plików. Poczekaj na jej zakończenie; Mindwtr ponowi próbę automatycznie.',
+        'settings.syncFileLockCleanupDeferred': 'Synchronizacja została zakończona, ale Mindwtr nie mógł zwolnić blokady synchronizacji plików. Uruchom Mindwtr ponownie przed następną synchronizacją. Ponawianie próby nie jest potrzebne.',
+        'settings.syncFileLockUnavailable': 'Mindwtr nie może bezpiecznie zablokować tej lokalizacji synchronizacji plików. Wybierz folder ponownie, uruchom ponownie lub zaktualizuj Mindwtr albo użyj WebDAV.',
         'settings.syncEncryptionCleanupDeferred': 'Szyfrowanie zostało zaktualizowane. Mindwtr nie mógł usunąć tymczasowej blokady synchronizacji, ale wygaśnie ona automatycznie. Ponawianie próby nie jest potrzebne.',
         'settings.syncEncryptionFileCleanupDeferred': 'Szyfrowanie zostało zaktualizowane, ale Mindwtr nie mógł zwolnić blokady Synchronizacji plików. Uruchom ponownie Mindwtr przed kolejną synchronizacją. Nie powtarzaj zmiany szyfrowania.',
 };

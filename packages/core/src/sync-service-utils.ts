@@ -3,6 +3,48 @@ import { isWebdavRateLimitedError } from './sync-runtime-utils';
 
 export type SyncBackend = 'off' | 'file' | 'webdav' | 'cloud' | 'cloudkit';
 export type SyncCloudProvider = 'dropbox' | 'selfhosted';
+export const SYNC_FILE_LOCK_BUSY_CODE = 'SYNC_FILE_LOCK_BUSY';
+export const SYNC_FILE_LOCK_UNAVAILABLE_CODE = 'SYNC_FILE_LOCK_UNAVAILABLE';
+export const DEFAULT_FILE_SYNC_LOCK_RETRY_AFTER_MS = 5_000;
+const FILE_SYNC_LOCK_UNAVAILABLE_PATTERN = /SYNC_FILE_LOCK_UNAVAILABLE|Safe File Sync locking is unavailable|cannot safely lock this File Sync location/i;
+
+export class SyncFileLockBusyError extends Error {
+    constructor(public readonly retryAfterMs = DEFAULT_FILE_SYNC_LOCK_RETRY_AFTER_MS) {
+        super('File Sync is temporarily busy because another Mindwtr operation holds the folder lock.');
+        this.name = 'SyncFileLockBusyError';
+    }
+}
+
+export class SyncFileLockUnavailableError extends Error {
+    constructor(message = 'Safe File Sync locking is unavailable for this location. Re-select the sync folder, restart Mindwtr, or use WebDAV.') {
+        super(message);
+        this.name = 'SyncFileLockUnavailableError';
+    }
+}
+
+/** Native adapters have to cross string-only error bridges. Normalize those strings
+ * immediately so orchestration policy never depends on a platform's wording. */
+export const normalizeSyncFileLockError = (error: unknown): unknown => {
+    if (error instanceof SyncFileLockBusyError || error instanceof SyncFileLockUnavailableError) return error;
+    const message = String(error ?? '');
+    if (message.includes(SYNC_FILE_LOCK_BUSY_CODE) || /sync lock held by another process/i.test(message)) {
+        return new SyncFileLockBusyError();
+    }
+    if (
+        message.includes(SYNC_FILE_LOCK_UNAVAILABLE_CODE)
+        || /failed to acquire an exclusive sync lock/i.test(message)
+    ) {
+        const normalized = new SyncFileLockUnavailableError();
+        (normalized as Error & { cause?: unknown }).cause = error;
+        return normalized;
+    }
+    return error;
+};
+
+export const isSyncFileLockUnavailableError = (errorOrMessage: unknown): boolean => (
+    errorOrMessage instanceof SyncFileLockUnavailableError
+    || FILE_SYNC_LOCK_UNAVAILABLE_PATTERN.test(String(errorOrMessage ?? ''))
+);
 export type AutoSyncConfig = {
     backend: SyncBackend;
     filePath?: string;
@@ -109,6 +151,7 @@ export const sanitizeSyncErrorMessage = (value: string): string => {
 };
 
 export const formatSyncErrorMessage = (error: unknown, backend: SyncBackend): string => {
+    if (error instanceof SyncFileLockUnavailableError) return error.message;
     const raw = sanitizeSyncErrorMessage(String(error));
     if (backend === 'file') {
         if (READONLY_ERROR_PATTERN.test(raw)) {

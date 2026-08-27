@@ -67,6 +67,11 @@ export function useManualPullSync() {
     }, PULL_SYNC_SETTLE_MS);
   }, [clearHideTimer]);
 
+  const finishDeferredIndicator = useCallback(() => {
+    clearHideTimer();
+    setIndicatorState('idle');
+  }, [clearHideTimer]);
+
   useEffect(() => clearHideTimer, [clearHideTimer]);
 
   const onRefresh = useCallback(async () => {
@@ -124,9 +129,48 @@ export function useManualPullSync() {
         return;
       }
 
+      if (result.success && result.fileSyncLockDeferred) {
+        const cleanupDeferred = result.fileSyncLockDeferred === 'cleanup';
+        if (cleanupDeferred) finishIndicator('success');
+        else finishDeferredIndicator();
+        showToast({
+          title: tFallback(t, 'common.notice', 'Notice'),
+          message: cleanupDeferred
+            ? tFallback(
+              t,
+              'settings.syncFileLockCleanupDeferred',
+              'Sync completed, but Mindwtr could not release the File Sync lock. Restart Mindwtr before syncing again. No retry is needed.'
+            )
+            : tFallback(
+              t,
+              'settings.syncFileLockBusy',
+              'Another Mindwtr operation is using File Sync. Wait for it to finish; Mindwtr will retry automatically.'
+            ),
+          tone: 'info',
+          durationMs: 6000,
+        });
+        return;
+      }
+
+      if (result.fileSyncLockUnavailable) {
+        finishIndicator('error');
+        showToast({
+          title: tFallback(t, 'settings.lastSyncError', 'Sync failed'),
+          message: tFallback(
+            t,
+            'settings.syncFileLockUnavailable',
+            'Mindwtr cannot safely lock this File Sync location. Re-select the folder, restart or update Mindwtr, or use WebDAV.'
+          ),
+          tone: 'error',
+          durationMs: 6000,
+        });
+        return;
+      }
+
       if (result.success && result.remoteFenceDeferred) {
-        finishIndicator('success');
         const cleanupDeferred = result.remoteFenceDeferred === 'cleanup';
+        if (cleanupDeferred) finishIndicator('success');
+        else finishDeferredIndicator();
         showToast({
           title: tFallback(t, 'common.notice', 'Notice'),
           message: cleanupDeferred
@@ -178,7 +222,7 @@ export function useManualPullSync() {
     } finally {
       runningRef.current = false;
     }
-  }, [clearHideTimer, finishIndicator, showToast, t]);
+  }, [clearHideTimer, finishDeferredIndicator, finishIndicator, showToast, t]);
 
   return {
     indicatorState,

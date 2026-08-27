@@ -1521,6 +1521,9 @@ export const trOverrides: Record<string, string> = {
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} desteklenmeyen yineleme kuralı not olarak korundu.",
         'settings.syncRemoteBusy': 'Başka bir uyumlu Mindwtr cihazı bu eşitleme konumunu güncelliyor. Bitmesini bekleyin, ardından yeniden eşitleyin.',
         'settings.syncRemoteCleanupDeferred': 'Eşitleme işlemi tamamlandı. Mindwtr geçici eşitleme kilidini kaldıramadı, ancak kilit otomatik olarak sona erecek. Yeniden denemeniz gerekmez.',
+        'settings.syncFileLockBusy': 'Başka bir Mindwtr işlemi Dosya Eşitleme’yi kullanıyor. Bitmesini bekleyin; Mindwtr otomatik olarak yeniden deneyecek.',
+        'settings.syncFileLockCleanupDeferred': 'Eşitleme tamamlandı ancak Mindwtr Dosya Eşitleme kilidini bırakamadı. Yeniden eşitlemeden önce Mindwtr’ı yeniden başlatın. Tekrar denemeniz gerekmez.',
+        'settings.syncFileLockUnavailable': 'Mindwtr bu Dosya Eşitleme konumunu güvenli biçimde kilitleyemiyor. Klasörü yeniden seçin, Mindwtr’ı yeniden başlatın veya güncelleyin ya da WebDAV kullanın.',
         'settings.syncEncryptionCleanupDeferred': 'Şifreleme güncellendi. Mindwtr geçici eşitleme kilidini kaldıramadı, ancak kilit otomatik olarak sona erecek. Yeniden denemeniz gerekmez.',
         'settings.syncEncryptionFileCleanupDeferred': 'Şifreleme güncellendi, ancak Mindwtr Dosya Eşitleme kilidini serbest bırakamadı. Yeniden eşitlemeden önce Mindwtr’ı yeniden başlatın. Şifreleme değişikliğini tekrarlamayın.',
 };

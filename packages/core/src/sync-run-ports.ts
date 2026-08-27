@@ -17,7 +17,7 @@ import type { SyncRemoteMutationFenceLease } from './sync-remote-fence';
  * transports, platform storage, and UI notification behind these ports.
  */
 
-export type SyncRunSkipReason = 'offline' | 'requeued' | 'unchanged' | 'pendingRemoteWriteBackoff' | 'remoteFenceBusy' | 'disabled';
+export type SyncRunSkipReason = 'offline' | 'requeued' | 'unchanged' | 'pendingRemoteWriteBackoff' | 'remoteFenceBusy' | 'fileSyncLockBusy' | 'disabled';
 
 export type SyncRunResult = {
     success: boolean;
@@ -36,6 +36,12 @@ export type SyncRunResult = {
     /** A compatible peer currently owns the mutation fence, or this run could
      *  not conditionally remove its own lease. Suppresses plain-success UI. */
     remoteFenceDeferred?: 'busy' | 'cleanup';
+    /** A local File Sync writer owns the safe folder lock, or a completed run
+     * could not release that lock. Busy is a no-write deferral; cleanup is a
+     * committed run that requires an app restart before the next attempt. */
+    fileSyncLockDeferred?: 'busy' | 'cleanup';
+    /** Safe exclusive locking could not be established for this File Sync location. */
+    fileSyncLockUnavailable?: boolean;
     /** Provider-time-derived lower bound before the deferred retry is useful. */
     retryAfterMs?: number;
 };

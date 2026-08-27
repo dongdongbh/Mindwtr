@@ -1503,6 +1503,9 @@ export const arOverrides: Record<string, string> = {
         'settings.importDiagnostics.unsupportedRecurrence': "تم الاحتفاظ بـ {{count}} من قواعد التكرار غير المدعومة كملاحظات.",
         'settings.syncRemoteBusy': 'يقوم جهاز Mindwtr متوافق آخر بتحديث موقع المزامنة هذا. انتظر حتى ينتهي، ثم قم بالمزامنة مرة أخرى.',
         'settings.syncRemoteCleanupDeferred': 'اكتملت عملية المزامنة. تعذّر على Mindwtr إزالة قفل المزامنة المؤقت، لكنه سينتهي تلقائيًا. لا حاجة إلى إعادة المحاولة.',
+        'settings.syncFileLockBusy': 'هناك عملية أخرى في Mindwtr تستخدم مزامنة الملفات. انتظر حتى تنتهي؛ سيعيد Mindwtr المحاولة تلقائيًا.',
+        'settings.syncFileLockCleanupDeferred': 'اكتملت المزامنة، لكن تعذّر على Mindwtr تحرير قفل مزامنة الملفات. أعد تشغيل Mindwtr قبل المزامنة مرة أخرى. لا حاجة إلى إعادة المحاولة.',
+        'settings.syncFileLockUnavailable': 'يتعذّر على Mindwtr قفل موقع مزامنة الملفات هذا بأمان. أعد اختيار المجلد، أو أعد تشغيل Mindwtr أو حدّثه، أو استخدم WebDAV.',
         'settings.syncEncryptionCleanupDeferred': 'تم تحديث التشفير. تعذّر على Mindwtr إزالة قفل المزامنة المؤقت، لكنه سينتهي تلقائيًا. لا حاجة إلى إعادة المحاولة.',
         'settings.syncEncryptionFileCleanupDeferred': 'تم تحديث التشفير، لكن تعذّر على Mindwtr تحرير قفل مزامنة الملفات. أعد تشغيل Mindwtr قبل المزامنة مرة أخرى. لا تكرر تغيير التشفير.',
 };

@@ -26,6 +26,9 @@ vi.mock('@/contexts/language-context', () => ({
         'settings.syncQueuedBody': 'Local changes arrived during sync. A retry was queued automatically.',
         'settings.syncRemoteBusy': 'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
         'settings.syncRemoteCleanupDeferred': 'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
+        'settings.syncFileLockBusy': 'Another Mindwtr operation is using File Sync. Wait for it to finish; Mindwtr will retry automatically.',
+        'settings.syncFileLockCleanupDeferred': 'Sync completed, but Mindwtr could not release the File Sync lock. Restart Mindwtr before syncing again. No retry is needed.',
+        'settings.syncFileLockUnavailable': 'Mindwtr cannot safely lock this File Sync location. Re-select the folder, restart or update Mindwtr, or use WebDAV.',
         'settings.syncSkippedOffline': 'No internet connection. Sync skipped.',
         'settings.syncServerUnreachable': "Couldn't reach the sync server. Check that Mindwtr is allowed to use the network (cellular data, VPN, or firewall).",
       }[key] ?? key),
@@ -233,14 +236,16 @@ describe('useManualPullSync', () => {
 
   it.each([
     {
-      deferred: 'busy' as const,
+        deferred: 'busy' as const,
+        indicator: 'idle' as const,
       message: 'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
     },
     {
-      deferred: 'cleanup' as const,
+        deferred: 'cleanup' as const,
+        indicator: 'success' as const,
       message: 'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
     },
-  ])('explains a $deferred remote fence without blaming local edits', async ({ deferred, message }) => {
+  ])('explains a $deferred remote fence without blaming local edits', async ({ deferred, indicator, message }) => {
     mocked.performMobileSync.mockResolvedValue({
       success: true,
       remoteFenceDeferred: deferred,
@@ -251,7 +256,7 @@ describe('useManualPullSync', () => {
       await latest?.onRefresh();
     });
 
-    expect(latest?.indicatorState).toBe('success');
+    expect(latest?.indicatorState).toBe(indicator);
     expect(mocked.showToast).toHaveBeenCalledWith(expect.objectContaining({
       title: 'Notice',
       message,
@@ -259,6 +264,44 @@ describe('useManualPullSync', () => {
     }));
     expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({
       message: 'Local changes arrived during sync. A retry was queued automatically.',
+    }));
+  });
+
+  it.each([
+    {
+      deferred: 'busy' as const,
+      indicator: 'idle' as const,
+      message: 'Another Mindwtr operation is using File Sync. Wait for it to finish; Mindwtr will retry automatically.',
+    },
+    {
+      deferred: 'cleanup' as const,
+      indicator: 'success' as const,
+      message: 'Sync completed, but Mindwtr could not release the File Sync lock. Restart Mindwtr before syncing again. No retry is needed.',
+    },
+  ])('shows a $deferred File Sync outcome without false green feedback', async ({ deferred, indicator, message }) => {
+    mocked.performMobileSync.mockResolvedValue({ success: true, fileSyncLockDeferred: deferred });
+    renderHarness();
+
+    await act(async () => {
+      await latest?.onRefresh();
+    });
+
+    expect(latest?.indicatorState).toBe(indicator);
+    expect(mocked.showToast).toHaveBeenCalledWith(expect.objectContaining({ message, tone: 'info' }));
+  });
+
+  it('shows localized recovery guidance when safe File Sync locking is unavailable', async () => {
+    mocked.performMobileSync.mockResolvedValue({ success: false, fileSyncLockUnavailable: true });
+    renderHarness();
+
+    await act(async () => {
+      await latest?.onRefresh();
+    });
+
+    expect(latest?.indicatorState).toBe('error');
+    expect(mocked.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Mindwtr cannot safely lock this File Sync location. Re-select the folder, restart or update Mindwtr, or use WebDAV.',
+      tone: 'error',
     }));
   });
 

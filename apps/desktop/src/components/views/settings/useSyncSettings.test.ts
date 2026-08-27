@@ -511,6 +511,61 @@ describe('useSyncSettings cloud token validation', () => {
         );
     });
 
+    it('waits without activating when another operation owns the candidate File Sync lock', async () => {
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: true,
+            skipped: 'fileSyncLockBusy',
+            fileSyncLockDeferred: 'busy',
+            retryAfterMs: 5_000,
+        });
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        act(() => {
+            void result.current.syncPageProps.onSetSyncBackend('file');
+            result.current.syncPageProps.onSyncPathChange('/tmp/mindwtr-sync');
+        });
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
+        expect(showToast).toHaveBeenCalledWith(
+            'Another Mindwtr operation is using File Sync. Wait for it to finish; Mindwtr will retry automatically.',
+            'info',
+            6000,
+        );
+    });
+
+    it('commits a cleanup-deferred File Sync activation and warns without suggesting a retry', async () => {
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.mocked(SyncService.performSync)
+            .mockResolvedValueOnce({ success: true, fileSyncLockDeferred: 'cleanup' })
+            .mockResolvedValueOnce({ success: true, fileSyncLockDeferred: 'busy' });
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        act(() => {
+            void result.current.syncPageProps.onSetSyncBackend('file');
+            result.current.syncPageProps.onSyncPathChange('/tmp/mindwtr-sync');
+        });
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.commitProvenSyncConfiguration).toHaveBeenCalledWith(
+            expect.objectContaining({ backend: 'file', syncPath: '/tmp/mindwtr-sync' }),
+        );
+        expect(showToast).toHaveBeenCalledWith(
+            'Sync completed, but Mindwtr could not release the File Sync lock. Restart Mindwtr before syncing again. No retry is needed.',
+            'info',
+            6000,
+        );
+    });
+
     it('commits a cleanup-deferred activation and reports completed cleanup instead of failure', async () => {
         const showToast = vi.fn();
         useUiStore.setState({ showToast } as never);

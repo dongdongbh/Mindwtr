@@ -5,6 +5,8 @@ import {
   computeSyncPayloadFingerprint,
   runDataTransferTransaction,
   SyncEncryptionRemoteConflictError,
+  SyncFileLockBusyError,
+  SyncFileLockUnavailableError,
   type AppData,
 } from '@mindwtr/core';
 import { __resetSyncEncryptionStateForTests, SyncEncryptionNoKeyError } from './sync-encryption-state';
@@ -562,6 +564,53 @@ describe('mobile sync-service runtime', () => {
       token: 'file-cycle-lease',
       native: true,
     });
+  });
+
+  it('returns a neutral deferred result when another operation owns the File Sync lease', async () => {
+    fileSyncLockMocks.acquireMobileFileSyncLease.mockRejectedValueOnce(new SyncFileLockBusyError(5_000));
+
+    const result = await syncServiceModule.performMobileSync(undefined, {
+      manual: true,
+      configOverride: { backend: 'file', syncPath: 'file:///candidate/data.json' },
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      skipped: 'fileSyncLockBusy',
+      fileSyncLockDeferred: 'busy',
+      retryAfterMs: 5_000,
+    });
+    expect(storageFileMocks.readSyncFileVersioned).not.toHaveBeenCalled();
+    expect(storageMocks.saveData).not.toHaveBeenCalled();
+    expect(fileSyncLockMocks.releaseMobileFileSyncLease).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when safe File Sync locking is unavailable', async () => {
+    fileSyncLockMocks.acquireMobileFileSyncLease.mockRejectedValueOnce(new SyncFileLockUnavailableError());
+
+    const result = await syncServiceModule.performMobileSync(undefined, {
+      manual: true,
+      configOverride: { backend: 'file', syncPath: 'file:///candidate/data.json' },
+    });
+
+    expect(result).toMatchObject({ success: false, fileSyncLockUnavailable: true });
+    expect(result.error).toContain('Safe File Sync locking is unavailable');
+    expect(storageFileMocks.readSyncFileVersioned).not.toHaveBeenCalled();
+  });
+
+  it('reports a committed File Sync cycle as cleanup-deferred when lease release fails', async () => {
+    fileSyncLockMocks.releaseMobileFileSyncLease.mockRejectedValueOnce(
+      new SyncFileLockUnavailableError('release failed'),
+    );
+
+    const result = await syncServiceModule.performMobileSync(undefined, {
+      manual: true,
+      configOverride: { backend: 'file', syncPath: 'file:///candidate/data.json' },
+    });
+
+    expect(result).toMatchObject({ success: true, fileSyncLockDeferred: 'cleanup' });
+    expect(storageFileMocks.writeSyncFile).toHaveBeenCalled();
+    expect(storageMocks.saveData).toHaveBeenCalled();
   });
 
   it.each([

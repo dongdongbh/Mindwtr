@@ -2421,6 +2421,9 @@ export const zhHans: Record<string, string> = {
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} 条不支持的重复规则已保留为备注。",
         'settings.syncRemoteBusy': '另一台兼容的 Mindwtr 设备正在更新此同步位置。请等待其完成，然后再次同步。',
         'settings.syncRemoteCleanupDeferred': '同步操作已完成。Mindwtr 无法移除临时同步锁，但该锁会自动过期。无需重试。',
+        'settings.syncFileLockBusy': '另一个 Mindwtr 操作正在使用文件同步。请等待其完成；Mindwtr 会自动重试。',
+        'settings.syncFileLockCleanupDeferred': '同步已完成，但 Mindwtr 无法释放文件同步锁。再次同步前请重启 Mindwtr。无需重试。',
+        'settings.syncFileLockUnavailable': 'Mindwtr 无法安全锁定此文件同步位置。请重新选择文件夹、重启或更新 Mindwtr，或使用 WebDAV。',
         'settings.syncEncryptionCleanupDeferred': '加密已更新。Mindwtr 无法移除临时同步锁，但该锁会自动过期。无需重试。',
         'settings.syncEncryptionFileCleanupDeferred': '加密已更新，但 Mindwtr 无法释放文件同步锁。请先重启 Mindwtr，再次同步。请勿重复更改加密设置。',
 };
