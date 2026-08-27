@@ -107,6 +107,7 @@ const baseProps: Parameters<typeof TaskItemEditor>[0] = {
     projects: [],
     sections: [],
     areas: [],
+    somedaySections: [],
     onCreateProject: vi.fn().mockResolvedValue(null),
     onCreateArea: vi.fn().mockResolvedValue(null),
     onCreateSection: vi.fn().mockResolvedValue(null),
@@ -136,6 +137,36 @@ const baseProps: Parameters<typeof TaskItemEditor>[0] = {
 };
 
 describe('TaskItemEditor', () => {
+    it('assigns a Someday section without changing project or project-section membership', () => {
+        const setField = vi.fn();
+        const somedayTask: Task = {
+            ...baseTask,
+            status: 'someday',
+            projectId: 'project-1',
+            sectionId: 'project-section-1',
+            viewSectionIds: { waiting: 'waiting-heading' },
+        };
+        const { getByRole } = render(
+            <TaskItemEditor
+                {...baseProps}
+                draft={createTaskDraft(somedayTask)}
+                setField={setField}
+                somedaySections={[{ id: 'books', title: 'Books to read', order: 0 }]}
+            />
+        );
+
+        fireEvent.change(getByRole('combobox', { name: 'Someday section' }), {
+            target: { value: 'books' },
+        });
+
+        expect(setField).toHaveBeenCalledWith('viewSectionIds', {
+            someday: 'books',
+            waiting: 'waiting-heading',
+        });
+        expect(setField).not.toHaveBeenCalledWith('projectId', expect.anything());
+        expect(setField).not.toHaveBeenCalledWith('sectionId', expect.anything());
+    });
+
     it('keeps optional sections collapsed when their defaults are off', () => {
         const { getByRole, queryByText } = render(<TaskItemEditor {...baseProps} />);
 

@@ -187,6 +187,7 @@ const taskColumnValues = (task: Task): Record<string, unknown> => {
         location: task.location ?? null,
         projectId: task.projectId ?? null,
         sectionId: task.sectionId ?? null,
+        viewSectionIds: toJson(task.viewSectionIds),
         areaId: task.areaId ?? null,
         // `order` and `orderNum` are the same SQLite column (legacy alias); a plain object
         // literal can't have two entries for one key, so this naturally collapses them the
@@ -245,6 +246,7 @@ export const taskFromSqliteRow = (row: Record<string, unknown>): Task => {
         location: fromOptional(row.location as string | null),
         projectId: fromOptional(row.projectId as string | null),
         sectionId: fromOptional(row.sectionId as string | null),
+        viewSectionIds: fromJson<unknown>(row.viewSectionIds, undefined) as Task['viewSectionIds'],
         areaId: fromOptional(row.areaId as string | null),
         order,
         orderNum: order,

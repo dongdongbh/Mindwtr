@@ -187,6 +187,7 @@ export const GTD_SYNCED_FIELD_KEYS = [
     'defaultProjectFlowMode',
     'naturalLanguageDates',
     'taskEditor',
+    'viewSections',
 ] as const satisfies readonly (keyof GtdSettings)[];
 
 export type GtdSyncedFieldKey = (typeof GTD_SYNCED_FIELD_KEYS)[number];

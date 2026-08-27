@@ -1591,6 +1591,15 @@ export const jaOverrides: Record<string, string> = {
         'someday.archive': 'アーカイブ',
         'someday.empty': '「いつか・たぶん」のリストは空です',
         'someday.emptyHint': 'いつかやるかもしれないアイデアや目標を預けておく場所です。手放しても、忘れずに済みます。',
+        'viewSections.somedaySections': 'いつか・たぶんのセクション',
+        'viewSections.somedaySection': 'いつか・たぶんのセクション',
+        'viewSections.noSection': 'セクションなし',
+        'viewSections.add': 'セクションを追加',
+        'viewSections.rename': 'セクション名を変更',
+        'viewSections.manageHint': 'プロジェクトやプロジェクト内のセクションを変えずにアイデアを整理します。',
+        'viewSections.nameHint': 'セクション名',
+        'viewSections.namePlaceholder': '読みたい本',
+        'viewSections.updateFailed': 'いつか・たぶんのセクションを更新できませんでした。',
         'done.emptyHint': '完了したタスクがここに溜まります。やり遂げたことの記録になります。',
 
         // Search

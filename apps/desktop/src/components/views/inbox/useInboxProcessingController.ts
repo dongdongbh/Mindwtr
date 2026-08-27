@@ -11,6 +11,7 @@ import {
     isProcessInboxReturningTask,
     parseProcessInboxTitleInput,
     resolveProcessInboxContainerFields,
+    setTaskViewSectionId,
     skipCurrentProcessInboxTask,
     startProcessInboxSession,
     tFallback,
@@ -374,6 +375,14 @@ export function useInboxProcessingController({
         ...(showContextsField ? { contexts: selectedContexts } : {}),
         ...(showTagsField ? { tags: selectedTags } : {}),
     }), [draft.areaId, draft.projectId, selectedContexts, selectedTags, showContextsField, showTagsField]);
+    const buildSomedaySelectionFields = useCallback((): ProcessInboxWorkflowFields => ({
+        ...buildSelectionFields(),
+        viewSectionIds: setTaskViewSectionId(
+            processingTask?.viewSectionIds,
+            'someday',
+            draft.viewSectionIds?.someday,
+        ),
+    }), [buildSelectionFields, draft.viewSectionIds?.someday, processingTask?.viewSectionIds]);
 
     const handleNotActionable = useCallback(async (action: 'trash' | 'someday' | 'reference') => {
         if (!processingTask) return;
@@ -389,17 +398,22 @@ export function useInboxProcessingController({
             await applyWorkflowEvent({ type: 'reference', fields: buildSelectionFields() });
             return;
         }
-        if (processingMode === 'guided' && (showProjectField || showAreaField)) {
+        if (processingMode === 'guided' && (
+            showProjectField
+            || showAreaField
+            || (settings?.gtd?.viewSections?.someday?.length ?? 0) > 0
+        )) {
             goToStep('someday');
             return;
         }
-        await applyWorkflowEvent({ type: 'someday', fields: buildSelectionFields() });
+        await applyWorkflowEvent({ type: 'someday', fields: buildSomedaySelectionFields() });
     }, [
         applyWorkflowEvent,
-        buildSelectionFields,
+        buildSomedaySelectionFields,
         goToStep,
         processingMode,
         processingTask,
+        settings?.gtd?.viewSections?.someday?.length,
         showAreaField,
         showContextsField,
         showProjectField,
@@ -413,8 +427,8 @@ export function useInboxProcessingController({
 
     const handleConfirmSomeday = useCallback(async () => {
         if (!processingTask) return;
-        await applyWorkflowEvent({ type: 'someday', fields: buildSelectionFields() });
-    }, [applyWorkflowEvent, buildSelectionFields, processingTask]);
+        await applyWorkflowEvent({ type: 'someday', fields: buildSomedaySelectionFields() });
+    }, [applyWorkflowEvent, buildSomedaySelectionFields, processingTask]);
 
     /**
      * Incubate: park the item without deciding what it is, and bring it back to
@@ -432,11 +446,11 @@ export function useInboxProcessingController({
         }
         await applyWorkflowEvent({
             type: 'someday',
-            fields: { ...buildSelectionFields(), reviewAt },
+            fields: { ...buildSomedaySelectionFields(), reviewAt },
         });
     }, [
         applyWorkflowEvent,
-        buildSelectionFields,
+        buildSomedaySelectionFields,
         handleReviewTimeCommit,
         processingTask,
         reviewDate,
@@ -882,6 +896,7 @@ export function useInboxProcessingController({
             setField,
             visibility,
             options,
+            settings,
             processingMode,
             onModeChange: setProcessingMode,
             onSkip: handleSkip,

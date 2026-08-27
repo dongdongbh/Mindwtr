@@ -20,6 +20,7 @@ export type ProcessInboxWorkflowFields = Partial<Pick<
     | 'startTime'
     | 'dueDate'
     | 'reviewAt'
+    | 'viewSectionIds'
 >>;
 
 /**

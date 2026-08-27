@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { parseRRuleString, tFallback, type Attachment, type Task, type TaskEditorFieldId, type TaskEditorSectionId, type TimeEstimate } from '@mindwtr/core';
+import { parseRRuleString, tFallback, type Attachment, type Task, type TaskEditorFieldId, type TaskEditorSectionId, type TimeEstimate, type ViewSectionDefinition } from '@mindwtr/core';
 import type { TaskDraft } from '@mindwtr/core/task-draft';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { CollapsibleSection } from './CollapsibleSection';
@@ -44,6 +44,9 @@ type TaskEditFormTabProps = {
     timeEstimatesEnabled: boolean;
     renderField: (fieldId: TaskEditorFieldId) => React.ReactNode;
     basicFields: TaskEditorFieldId[];
+    somedaySections?: readonly ViewSectionDefinition[];
+    selectedSomedaySectionId?: string;
+    onSomedaySectionChange?: (sectionId: string | undefined) => void;
     schedulingFields: TaskEditorFieldId[];
     organizationFields: TaskEditorFieldId[];
     detailsFields: TaskEditorFieldId[];
@@ -90,6 +93,9 @@ function TaskEditFormTabComponent({
     timeEstimatesEnabled,
     renderField,
     basicFields,
+    somedaySections = [],
+    selectedSomedaySectionId,
+    onSomedaySectionChange,
     schedulingFields,
     organizationFields,
     detailsFields,
@@ -485,6 +491,40 @@ function TaskEditFormTabComponent({
                     {basicFields.map((fieldId) => (
                         <React.Fragment key={fieldId}>{renderField(fieldId)}</React.Fragment>
                     ))}
+
+                    {draft?.status === 'someday' && somedaySections.length > 0 && onSomedaySectionChange ? (
+                        <View style={styles.formGroup}>
+                            <Text style={[styles.label, { color: tc.secondaryText }]}>
+                                {tFallback(t, 'viewSections.somedaySection', 'Someday section')}
+                            </Text>
+                            <View style={styles.statusContainer}>
+                                {[{ id: '', title: tFallback(t, 'viewSections.noSection', 'No section') }, ...somedaySections]
+                                    .map((section) => {
+                                        const selected = (selectedSomedaySectionId ?? '') === section.id;
+                                        return (
+                                            <TouchableOpacity
+                                                key={section.id || 'no-section'}
+                                                accessibilityRole="button"
+                                                accessibilityLabel={section.title}
+                                                accessibilityState={{ selected }}
+                                                onPress={() => onSomedaySectionChange(section.id || undefined)}
+                                                style={[
+                                                    styles.statusChip,
+                                                    {
+                                                        backgroundColor: selected ? tc.tint : tc.filterBg,
+                                                        borderColor: selected ? tc.tint : tc.border,
+                                                    },
+                                                ]}
+                                            >
+                                                <Text style={[styles.statusText, { color: selected ? tc.onTint : tc.text }]}>
+                                                    {section.title}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                            </View>
+                        </View>
+                    ) : null}
 
                     {schedulingFields.length > 0 && (
                         <CollapsibleSection

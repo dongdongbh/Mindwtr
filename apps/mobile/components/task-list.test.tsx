@@ -439,7 +439,7 @@ describe('TaskList', () => {
     });
   });
 
-  it('shows a Someday task inside its Someday project under the project group', async () => {
+  it('does not leak a Someday task from a Someday project into the Someday task list', async () => {
     const workArea: Area = {
       id: 'area-work',
       name: 'Work',
@@ -481,8 +481,7 @@ describe('TaskList', () => {
     });
 
     const data = flatListPropsSpy.mock.calls.at(-1)?.[0].data as { type: string; title?: string; task?: Task }[];
-    expect(data.some((item) => item.type === 'section' && item.title === 'Someday ideas')).toBe(true);
-    expect(data.some((item) => item.type === 'task' && item.task?.id === somedayTask.id)).toBe(true);
+    expect(data.some((item) => item.type === 'task' && item.task?.id === somedayTask.id)).toBe(false);
 
     act(() => {
       tree.unmount();

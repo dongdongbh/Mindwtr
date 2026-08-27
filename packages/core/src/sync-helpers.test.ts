@@ -32,6 +32,9 @@ const GTD_SYNCED_FIELD_SAMPLE_VALUES: Record<GtdSyncedFieldKey, GtdSettings[GtdS
         sectionOpen: { scheduling: true },
         defaultsVersion: 4,
     },
+    viewSections: {
+        someday: [{ id: 'books', title: 'Books to read', order: 0 }],
+    },
 };
 
 const now = '2026-02-19T00:00:00.000Z';

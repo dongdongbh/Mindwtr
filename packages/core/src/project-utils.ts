@@ -1,4 +1,4 @@
-import type { Project, Task, TaskSortBy, TaskStatus } from './types';
+import type { Project, Task, TaskSortBy } from './types';
 import { isTaskActionable } from './task-status';
 
 export function normalizeProjectSequentialScope(value: unknown): Project['sequentialScope'] {
@@ -117,28 +117,6 @@ export function isTaskInActiveProject(
     if (!project) return true;
     if (project.deletedAt) return false;
     return project.status === 'active' || project.isFocused === true;
-}
-
-/**
- * Project eligibility for a status list.
- *
- * Active-project semantics remain the default. Someday is the one deferred
- * list whose matching tasks also belong in matching Someday projects, while
- * completed history keeps its existing project-independent visibility.
- */
-export function isTaskVisibleInStatusList(
-    task: Task,
-    projectLookup: Map<string, Project> | Record<string, Project>,
-    statusFilter: TaskStatus | 'all',
-): boolean {
-    if (statusFilter === 'done' || statusFilter === 'archived') return true;
-    if (isTaskInActiveProject(task, projectLookup)) return true;
-    if (statusFilter !== 'someday' || task.status !== 'someday' || !task.projectId) return false;
-
-    const project = projectLookup instanceof Map
-        ? projectLookup.get(task.projectId)
-        : projectLookup[task.projectId];
-    return Boolean(project && !project.deletedAt && project.status === 'someday');
 }
 
 /**

@@ -1,6 +1,6 @@
 import { createWithEqualityFn } from 'zustand/traditional';
 import { useTaskStore, type FilterCriteria, type TaskSortBy } from '@mindwtr/core';
-import { DONE_AXES, FOCUS_AXES, REFERENCE_AXES, sanitizeAxis, type DoneGroupBy, type NextGroupBy, type ReferenceGroupBy } from '../components/views/list/next-grouping';
+import { DONE_AXES, FOCUS_AXES, REFERENCE_AXES, SOMEDAY_AXES, sanitizeAxis, type DoneGroupBy, type NextGroupBy, type ReferenceGroupBy, type SomedayGroupBy } from '../components/views/list/next-grouping';
 import { DONE_SORT_OPTIONS } from '../lib/task-list-sort';
 
 const toastTimeouts = new Map<string, number>();
@@ -11,6 +11,7 @@ const toastTimeouts = new Map<string, number>();
 type ListNextGroupBy = NextGroupBy;
 type ListReferenceGroupBy = ReferenceGroupBy;
 type ListDoneGroupBy = DoneGroupBy;
+type ListSomedayGroupBy = SomedayGroupBy;
 type ListOptions = {
     showDetails: boolean;
     // One axis per list: these all share FOCUS_AXES, but "group Focus by
@@ -20,7 +21,7 @@ type ListOptions = {
     inboxGroupBy: ListNextGroupBy;
     nextGroupBy: ListNextGroupBy;
     waitingGroupBy: ListNextGroupBy;
-    somedayGroupBy: ListNextGroupBy;
+    somedayGroupBy: ListSomedayGroupBy;
     referenceGroupBy: ListReferenceGroupBy;
     // Done keeps its own axis rather than sharing nextGroupBy: 'completedDate'
     // is not in FOCUS_AXES, so that sanitizer would reset it on every launch.
@@ -86,7 +87,11 @@ function readStoredListOptions(): ListOptions {
             inboxGroupBy: perViewAxis(parsed?.inboxGroupBy),
             nextGroupBy: sanitizeAxis(FOCUS_AXES, parsed?.nextGroupBy, DEFAULT_LIST_OPTIONS.nextGroupBy),
             waitingGroupBy: perViewAxis(parsed?.waitingGroupBy),
-            somedayGroupBy: perViewAxis(parsed?.somedayGroupBy),
+            somedayGroupBy: sanitizeAxis(
+                SOMEDAY_AXES,
+                parsed?.somedayGroupBy ?? parsed?.nextGroupBy,
+                DEFAULT_LIST_OPTIONS.somedayGroupBy,
+            ),
             referenceGroupBy: sanitizeAxis(REFERENCE_AXES, parsed?.referenceGroupBy, DEFAULT_LIST_OPTIONS.referenceGroupBy),
             doneGroupBy: sanitizeAxis(DONE_AXES, parsed?.doneGroupBy, DEFAULT_LIST_OPTIONS.doneGroupBy),
             ...(doneSortBy ? { doneSortBy } : {}),

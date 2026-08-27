@@ -569,6 +569,9 @@ export const styles = StyleSheet.create({
     gap: 10,
     marginTop: 12,
   },
+  stepChoiceSection: {
+    marginTop: 18,
+  },
   stepSecondaryButton: {
     flexGrow: 1,
     flexBasis: 96,

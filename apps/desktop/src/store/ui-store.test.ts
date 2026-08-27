@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { DONE_AXES, FOCUS_AXES, REFERENCE_AXES } from '../components/views/list/next-grouping';
+import { DONE_AXES, FOCUS_AXES, REFERENCE_AXES, SOMEDAY_AXES } from '../components/views/list/next-grouping';
 
 // The `===` chains these sanitizers used before the rosters were unified,
 // copied verbatim. Shipped builds persisted exactly what these accepted, so
@@ -110,6 +110,9 @@ describe('useUiStore list options', () => {
         for (const axis of DONE_AXES) {
             expect((await hydrate({ doneGroupBy: axis })).doneGroupBy).toBe(axis);
         }
+        for (const axis of SOMEDAY_AXES) {
+            expect((await hydrate({ somedayGroupBy: axis })).somedayGroupBy).toBe(axis);
+        }
     // One module reload per axis (13) — well under a second idle, but the
     // default 5s timeout is not enough when another suite has the CPU.
     }, 20000);
@@ -158,6 +161,11 @@ describe('useUiStore per-view grouping axes (#1063)', () => {
             waitingGroupBy: 'person',
             somedayGroupBy: 'area',
         });
+    });
+
+    it('round-trips the Someday section axis without replacing the project axis', async () => {
+        expect(SOMEDAY_AXES).toContain('project');
+        expect((await hydrate({ somedayGroupBy: 'viewSection' })).somedayGroupBy).toBe('viewSection');
     });
 
     // Before the split every list read nextGroupBy, so an upgrade that ignored

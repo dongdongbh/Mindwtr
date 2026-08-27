@@ -24,6 +24,8 @@ import {
   hasTimeComponent,
   normalizeClockTimeInput,
   resolveFeatureFlags,
+  setTaskViewSectionId,
+  sortViewSectionDefinitions,
   safeFormatDate,
   safeParseDate,
   isProcessInboxReturningTask,
@@ -72,7 +74,7 @@ import { styles } from '../inbox-processing-modal.styles';
 
 const MAX_TOKEN_SUGGESTIONS = 6;
 const PRIORITY_OPTIONS: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
-const ENERGY_LEVEL_OPTIONS: Array<NonNullable<Task['energyLevel']>> = ['low', 'medium', 'high'];
+const ENERGY_LEVEL_OPTIONS: NonNullable<Task['energyLevel']>[] = ['low', 'medium', 'high'];
 type ActionabilityChoice = 'actionable' | 'later' | 'incubate' | 'trash' | 'someday' | 'reference' | null;
 type TwoMinuteChoice = 'yes' | 'no' | null;
 type ExecutionChoice = 'defer' | 'delegate' | null;
@@ -134,6 +136,7 @@ export function useInboxProcessingController({
   const [selectedContexts, setSelectedContexts] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedPriority, setSelectedPriority] = useState<TaskPriority | undefined>(undefined);
+  const [selectedSomedaySectionId, setSelectedSomedaySectionId] = useState<string | undefined>(undefined);
 
   const titleInputRef = useRef<any>(null);
   const processingScrollRef = useRef<any>(null);
@@ -186,6 +189,10 @@ export function useInboxProcessingController({
   const showContextSection = showContextsField || showTagsField;
   const showOrganizationSection = showPriorityField || showEnergyLevelField || showAssignedToField || showTimeEstimateField;
   const showSchedulingSection = showStartDateField || showDueDateField || showReviewDateField;
+  const somedaySections = useMemo(
+    () => sortViewSectionDefinitions(settings?.gtd?.viewSections?.someday ?? []),
+    [settings?.gtd?.viewSections?.someday],
+  );
   const timeEstimateOptions = useMemo<TimeEstimate[]>(() => {
     const savedPresets = settings?.gtd?.timeEstimatePresets ?? [];
     const normalizedPresets = MOBILE_TIME_ESTIMATE_OPTIONS.filter((value) => savedPresets.includes(value));
@@ -438,6 +445,7 @@ export function useInboxProcessingController({
     setSelectedEnergyLevel(task?.energyLevel);
     setSelectedAssignedTo(task?.assignedTo ?? '');
     setSelectedTimeEstimate(task?.timeEstimate);
+    setSelectedSomedaySectionId(task?.viewSectionIds?.someday);
     setNewContext('');
     setProjectSearch('');
     setSelectedProjectId(task?.projectId ?? null);
@@ -644,6 +652,14 @@ export function useInboxProcessingController({
     ...(showContextsField ? { contexts: selectedContexts } : {}),
     ...(showTagsField ? { tags: selectedTags } : {}),
   }), [selectedAreaId, selectedContexts, selectedProjectId, selectedTags, showContextsField, showTagsField]);
+  const buildSomedaySelectionFields = useCallback((): ProcessInboxWorkflowFields => ({
+    ...buildSelectionFields(),
+    viewSectionIds: setTaskViewSectionId(
+      currentTask?.viewSectionIds,
+      'someday',
+      selectedSomedaySectionId,
+    ),
+  }), [buildSelectionFields, currentTask?.viewSectionIds, selectedSomedaySectionId]);
 
   // Undo the decision just committed: a discard is a soft delete that left the
   // task where it was, everything else moved its status out of that list.
@@ -667,10 +683,10 @@ export function useInboxProcessingController({
       return applyWorkflowEvent({ type: 'discard' });
     }
     if (action === 'someday') {
-      return applyWorkflowEvent({ type: 'someday', fields: buildSelectionFields() });
+      return applyWorkflowEvent({ type: 'someday', fields: buildSomedaySelectionFields() });
     }
     return applyWorkflowEvent({ type: 'reference', fields: buildSelectionFields() });
-  }, [applyWorkflowEvent, buildSelectionFields, currentTask]);
+  }, [applyWorkflowEvent, buildSelectionFields, buildSomedaySelectionFields, currentTask]);
 
   const handleLaterMobile = useCallback(async () => {
     if (!currentTask) return false;
@@ -729,7 +745,7 @@ export function useInboxProcessingController({
     const applied = await applyWorkflowEvent({
       type: 'someday',
       fields: {
-        ...buildSelectionFields(),
+        ...buildSomedaySelectionFields(),
         reviewAt: formatScheduledDateValue(pendingReviewDate, pendingReviewDateOnly),
       },
     });
@@ -738,7 +754,7 @@ export function useInboxProcessingController({
     return true;
   }, [
     applyWorkflowEvent,
-    buildSelectionFields,
+    buildSomedaySelectionFields,
     currentTask,
     formatScheduledDateValue,
     pendingReviewDate,
@@ -1359,6 +1375,7 @@ export function useInboxProcessingController({
     selectedEnergyLevel,
     selectedPriority,
     selectedProjectId,
+    selectedSomedaySectionId,
     selectedTags,
     selectedTimeEstimate,
     setSelectedAreaId,
@@ -1386,6 +1403,7 @@ export function useInboxProcessingController({
     setExtraActionDrafts,
     setSelectedEnergyLevel,
     setSelectedPriority,
+    setSelectedSomedaySectionId,
     setSelectedTimeEstimate,
     setShowDelegateDatePicker,
     setShowDueDatePicker,
@@ -1415,6 +1433,7 @@ export function useInboxProcessingController({
     showStartDateField,
     showTagsField,
     showTimeEstimateField,
+    somedaySections,
     t,
     tagCopilotSuggestions,
     taskDisplayMaxHeight,

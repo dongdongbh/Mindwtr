@@ -1200,6 +1200,7 @@ export const TaskItem = memo(function TaskItem({
             timeEstimatesEnabled={timeEstimatesEnabled}
             projects={projects}
             areas={areas}
+            somedaySections={settings?.gtd?.viewSections?.someday ?? []}
             sections={projectSections}
             onCreateProject={handleCreateProject}
             onCreateArea={handleCreateArea}

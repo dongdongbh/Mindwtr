@@ -164,6 +164,35 @@ describe('TaskEditFormTab keyboard handling', () => {
     });
   });
 
+  it('offers Someday-section assignment only for a Someday draft', () => {
+    const onSomedaySectionChange = vi.fn();
+    const somedayDraft = createTaskDraft({
+      id: 'someday-task',
+      title: 'Read DDIA',
+      status: 'someday',
+      tags: [],
+      contexts: [],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <TaskEditFormTab
+          {...baseProps}
+          draft={somedayDraft}
+          somedaySections={[{ id: 'books', title: 'Books to read', order: 0 }]}
+          onSomedaySectionChange={onSomedaySectionChange}
+        />
+      );
+    });
+
+    act(() => {
+      tree.root.findByProps({ accessibilityLabel: 'Books to read' }).props.onPress();
+    });
+    expect(onSomedaySectionChange).toHaveBeenCalledWith('books');
+  });
+
   it('does not render collapsible sections that have no fields', () => {
     const renderField = vi.fn((fieldId: string) => React.createElement('Field', { fieldId }));
 

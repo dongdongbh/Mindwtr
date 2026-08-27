@@ -17,7 +17,7 @@ import {
   normalizeFocusTaskLimit,
   resolveFeatureFlags,
   tFallback,
-  isTaskVisibleInStatusList,
+  isTaskInActiveProject,
   getTaskMetadataFilterVisibility,
 } from '@mindwtr/core';
 
@@ -464,7 +464,7 @@ function TaskListComponent({
       if (statusFilter === 'all' && !includeDone && task.status === 'done') return false;
       const matchesStatus = statusFilter === 'all' ? true : task.status === statusFilter;
       const matchesProject = projectId ? task.projectId === projectId : true;
-      if (!projectId && !isTaskVisibleInStatusList(task, projectById, statusFilter)) return false;
+      if (!projectId && !isTaskInActiveProject(task, projectById)) return false;
       if (!taskMatchesAreaFilterSelection(task, resolvedAreaFilter, projectById, areaById)) return false;
       return matchesStatus && matchesProject;
     });

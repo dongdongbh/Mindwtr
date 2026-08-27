@@ -1586,6 +1586,15 @@ export const en: Record<string, string> = {
         'someday.archive': 'Archive',
         'someday.empty': 'Nothing on your someday list',
         'someday.emptyHint': 'Park ideas and goals you might pursue later — off your plate, not out of mind.',
+        'viewSections.somedaySections': 'Someday sections',
+        'viewSections.somedaySection': 'Someday section',
+        'viewSections.noSection': 'No section',
+        'viewSections.add': 'Add section',
+        'viewSections.rename': 'Rename section',
+        'viewSections.manageHint': 'Organize ideas without changing their projects or project sections.',
+        'viewSections.nameHint': 'Section name',
+        'viewSections.namePlaceholder': 'Books to read',
+        'viewSections.updateFailed': 'Could not update Someday sections.',
         'done.emptyHint': 'Completed tasks land here — a running log of what you finished.',
 
         // Search

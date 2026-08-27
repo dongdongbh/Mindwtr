@@ -979,10 +979,16 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
                     localTask.purgedAt ? undefined : localTask.attachments,
                     incomingTask.purgedAt ? undefined : incomingTask.attachments,
                 );
+            const otherTask = winner === localTask ? incomingTask : localTask;
+            const winnerWithForwardCompatibleViewSections = Object.prototype.hasOwnProperty.call(winner, 'viewSectionIds')
+                ? winner
+                : Object.prototype.hasOwnProperty.call(otherTask, 'viewSectionIds')
+                    ? { ...winner, viewSectionIds: otherTask.viewSectionIds }
+                    : winner;
             return repairTaskRecurrenceSeriesIdentity(
                 localTask,
                 incomingTask,
-                { ...winner, attachments },
+                { ...winnerWithForwardCompatibleViewSections, attachments },
             );
         },
         normalizeTaskForContentComparison,

@@ -56,6 +56,7 @@ export * from './sync-crypto';
 export * from './sync-encryption';
 export * from './diceware';
 export * from './task-utils';
+export * from './view-sections';
 export * from './task-speech';
 export * from './completion-grouping';
 export * from './filter-criteria';

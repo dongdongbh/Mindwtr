@@ -375,8 +375,47 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
     />
   );
 
+  const renderSomedaySection = () => controller.somedaySections.length > 0 ? (
+    <View style={styles.stepChoiceSection}>
+      <Text style={[styles.stepHint, { color: tc.secondaryText }]}>
+        {tFallback(t, 'viewSections.somedaySection', 'Someday section')}
+      </Text>
+      <View style={styles.stepSecondaryRow}>
+        {[
+          { id: '', title: tFallback(t, 'viewSections.noSection', 'No section') },
+          ...controller.somedaySections,
+        ].map((section) => {
+          const selected = controller.somedaySections.some(
+            (candidate) => candidate.id === controller.selectedSomedaySectionId,
+          )
+            ? controller.selectedSomedaySectionId === section.id
+            : section.id === '';
+          return (
+            <TouchableOpacity
+              key={section.id || 'no-section'}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              onPress={() => controller.setSelectedSomedaySectionId(section.id || undefined)}
+              style={[
+                styles.stepSecondaryButton,
+                {
+                  backgroundColor: selected ? tc.tint : tc.cardBg,
+                  borderColor: selected ? tc.tint : tc.border,
+                },
+              ]}
+            >
+              <Text style={[styles.stepSecondaryText, { color: selected ? tc.onTint : tc.text }]}>
+                {section.title}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  ) : null;
+
   const chooseSomeday = () => {
-    if (controller.showProjectSection) {
+    if (controller.showProjectSection || controller.somedaySections.length > 0) {
       setActionabilityChoice('someday');
       return;
     }
@@ -571,6 +610,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
         return (
           <View>
             {renderProjectSection(false)}
+            {renderSomedaySection()}
           </View>
         );
 
@@ -621,6 +661,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
               {tFallback(t, 'process.incubateHint', 'Park this without deciding. It comes back to clarify on the date you choose.')}
             </Text>
             {renderProjectSection(false)}
+            {renderSomedaySection()}
             <InboxDateSelectorRow
               t={t}
               label={t('taskEdit.reviewDateLabel')}

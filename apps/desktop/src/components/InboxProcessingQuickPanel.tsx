@@ -1,6 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react';
 import { ArrowRight, BookOpen, CheckCircle, ClipboardList, Clock, Hourglass, Trash2, User, X } from 'lucide-react';
-import { DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimateLabel, safeFormatDate, safeParseDate, tFallback, type Project, type Task, type TaskDraft, type TaskDraftSetter, type TaskPriority, type TimeEstimate,
+import { DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimateLabel, resolveTaskViewSection, safeFormatDate, safeParseDate, setTaskViewSectionId, sortViewSectionDefinitions, tFallback, type AppData, type Project, type Task, type TaskDraft, type TaskDraftSetter, type TaskPriority, type TimeEstimate,
     numericTextCollator,
 } from '@mindwtr/core';
 
@@ -38,6 +38,7 @@ export type InboxProcessingQuickPanelProps = {
     setField: TaskDraftSetter;
     visibility: InboxProcessingVisibility;
     options: InboxProcessingOptionLists;
+    settings?: AppData['settings'];
     processingMode: 'guided' | 'quick';
     onModeChange: (mode: 'guided' | 'quick') => void;
     onSkip: () => void;
@@ -108,6 +109,7 @@ export function InboxProcessingQuickPanel({
     setField,
     visibility,
     options,
+    settings,
     processingMode,
     onModeChange,
     onSkip,
@@ -186,6 +188,29 @@ export function InboxProcessingQuickPanel({
     const setSelectedTimeEstimate = (value: TimeEstimate | undefined) => setField('timeEstimate', value ?? '');
     const setSelectedProjectId = (value: string | null) => setField('projectId', value ?? '');
     const setSelectedAreaId = (value: string | null) => setField('areaId', value ?? '');
+    const somedaySections = sortViewSectionDefinitions(settings?.gtd?.viewSections?.someday ?? []);
+    const selectedSomedaySection = resolveTaskViewSection(draft, 'someday', somedaySections);
+    const somedaySectionField = somedaySections.length > 0 ? (
+        <div className="space-y-1">
+            <label className="text-[11px] text-muted-foreground font-medium">
+                {tFallback(t, 'viewSections.somedaySection', 'Someday section')}
+            </label>
+            <select
+                aria-label={tFallback(t, 'viewSections.somedaySection', 'Someday section')}
+                value={selectedSomedaySection?.id ?? ''}
+                onChange={(event) => setField(
+                    'viewSectionIds',
+                    setTaskViewSectionId(draft.viewSectionIds, 'someday', event.target.value || undefined),
+                )}
+                className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+            >
+                <option value="">{tFallback(t, 'viewSections.noSection', 'No section')}</option>
+                {somedaySections.map((section) => (
+                    <option key={section.id} value={section.id}>{section.title}</option>
+                ))}
+            </select>
+        </div>
+    ) : null;
 
     const showActionFields = actionabilityChoice === 'actionable';
     const showLaterFields = actionabilityChoice === 'later';
@@ -589,9 +614,12 @@ export function InboxProcessingQuickPanel({
                     </div>
                 ) : null}
 
-                {showDeferredOrganizationFields && organizationContainerFields ? (
+                {showDeferredOrganizationFields && (organizationContainerFields || somedaySectionField) ? (
                     <div className="rounded-lg border border-status-someday/20 bg-status-someday/5 p-3">
-                        {organizationContainerFields}
+                        <div className="space-y-3">
+                            {organizationContainerFields}
+                            {somedaySectionField}
+                        </div>
                     </div>
                 ) : null}
 

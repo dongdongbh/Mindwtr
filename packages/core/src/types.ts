@@ -198,6 +198,15 @@ export interface ChecklistItem {
     isCompleted: boolean;
 }
 
+export type ViewSectionScope = 'someday' | 'waiting' | 'focus';
+export type ViewSectionIds = Partial<Record<ViewSectionScope, string>>;
+
+export interface ViewSectionDefinition {
+    id: string;
+    title: string;
+    order: number;
+}
+
 
 export type RelativeStartOffsetUnit = 'minute' | 'hour' | 'day' | 'week';
 
@@ -230,6 +239,7 @@ export interface Task {
     location?: string;
     projectId?: string;
     sectionId?: string;
+    viewSectionIds?: ViewSectionIds;
     areaId?: string;
     isFocusedToday?: boolean; // Marked as today's focus list.
     timeEstimate?: TimeEstimate; // Estimated time to complete
@@ -346,6 +356,7 @@ export interface GtdSettings {
     focusGroupBy?: FocusGroupBy;
     focusGroupByDefaultsVersion?: number;
     defaultProjectFlowMode?: DefaultProjectFlowMode;
+    viewSections?: Partial<Record<ViewSectionScope, ViewSectionDefinition[]>>;
     defaultScheduleTime?: string; // HH:mm, used to prefill manual scheduling fields.
     saveAudioAttachments?: boolean;
     // Quick-add: when false, bare natural-language phrases in the title ("next
