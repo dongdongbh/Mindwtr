@@ -17,6 +17,7 @@ import {
     getBaseSyncUrl,
     inspectSyncArtifact,
     isDropboxPathNotFoundTag,
+    isSyncRemoteMutationFenceError,
     parseDropboxApiErrorTag,
     readResponseText,
     reaffirmRemoteEncryptionNoKey,
@@ -452,6 +453,10 @@ const runWithRemoteMutationFence = async <T>(
         return remote.captureInventory!(recoveryPassphrase);
       }
       : undefined,
+    read: async (name) => {
+      await assertHeld();
+      return remote.read(name);
+    },
     write: async (name, bytes, expectedVersion) => {
       await assertHeld();
       await remote.write(name, bytes, expectedVersion);
@@ -708,21 +713,48 @@ export const changeSyncEncryptionPassphrase = async (
       ));
 });
 
+const runProvidePassphraseOverRemote = async (
+  passphrase: string,
+  port: SyncEncryptionRemotePort,
+): Promise<'ok' | 'wrong-passphrase'> => {
+  const previousState = syncEncryptionLocalState.read();
+  const previousKey = await syncEncryptionKeyCache.getKey();
+  let operationStarted = false;
+  try {
+    return await runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) => {
+      operationStarted = true;
+      return runProvideSyncEncryptionPassphraseOverRemote(
+        passphrase,
+        SYNC_FILE_NAME,
+        guardedRemote,
+        keyCache,
+        localState,
+        mobileSyncCryptoPrimitives,
+      );
+    });
+  } catch (error) {
+    if (!operationStarted || !isSyncRemoteMutationFenceError(error)) throw error;
+    try {
+      if (previousKey) await syncEncryptionKeyCache.setKey(previousKey);
+      else await syncEncryptionKeyCache.clearKey();
+      await syncEncryptionLocalState.write(previousState);
+      await flushSyncEncryptionLocalState();
+    } catch (rollbackError) {
+      const failure = new Error('Failed to roll back sync encryption passphrase provisioning after fence loss');
+      (failure as Error & { cause?: unknown; rollbackError?: unknown }).cause = error;
+      (failure as Error & { rollbackError?: unknown }).rollbackError = rollbackError;
+      throw failure;
+    }
+    throw error;
+  }
+};
+
 export const provideSyncEncryptionPassphrase = async (
     passphrase: string,
 ): Promise<'ok' | 'wrong-passphrase'> => runSerializedSyncDocumentOperation(async () => {
     await loadSyncEncryptionLocalState();
     const port = await requireTransitionPort(null);
-    const outcome = await runProvideSyncEncryptionPassphraseOverRemote(
-        passphrase,
-        SYNC_FILE_NAME,
-        port,
-        syncEncryptionKeyCache,
-        syncEncryptionLocalState,
-        mobileSyncCryptoPrimitives,
-    );
-    await flushSyncEncryptionLocalState();
-    return outcome;
+    return runProvidePassphraseOverRemote(passphrase, port);
 });
 
 /** "Not now". Re-affirms the persisted no-key state; automatic and background sync stay
@@ -741,5 +773,6 @@ export const __syncEncryptionServiceTestUtils = {
   parseWebdavAttachmentKeys,
   createDropboxRemotePort,
   createWebdavRemotePort,
+  runProvidePassphraseOverRemote,
   runWithRemoteMutationFence,
 };

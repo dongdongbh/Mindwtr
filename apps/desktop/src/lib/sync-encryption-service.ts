@@ -26,6 +26,7 @@ import {
     fetchWithTimeout,
     inspectSyncArtifact,
     isDropboxPathNotFoundTag,
+    isSyncRemoteMutationFenceError,
     parseDropboxApiErrorTag,
     readResponseText,
     runChangeSyncEncryptionPassphraseOverRemote,
@@ -416,6 +417,10 @@ const runWithRemoteMutationFence = async <T>(
                 return remote.captureInventory!(recoveryPassphrase);
             }
             : undefined,
+        read: async (name) => {
+            await assertHeld();
+            return remote.read(name);
+        },
         write: async (name, bytes, expectedVersion) => {
             await assertHeld();
             await remote.write(name, bytes, expectedVersion);
@@ -925,16 +930,36 @@ export async function runProvidePassphraseOverRemote(
     remote: SyncEncryptionRemotePort,
 ): Promise<'ok' | 'wrong-passphrase'> {
     const ports = await openTransitionPorts();
-    const outcome = await runProvideSyncEncryptionPassphraseOverRemote(
-        passphrase,
-        'data.json',
-        remote,
-        ports.keyCache,
-        ports.localState,
-        desktopSyncCryptoPrimitives,
-    );
-    await ports.flush();
-    return outcome;
+    const previousState = ports.localState.read();
+    const previousKey = await ports.keyCache.getKey();
+    let operationStarted = false;
+    try {
+        return await runWithRemoteMutationFence(remote, ports, (guardedRemote, keyCache, localState) => {
+            operationStarted = true;
+            return runProvideSyncEncryptionPassphraseOverRemote(
+                passphrase,
+                'data.json',
+                guardedRemote,
+                keyCache,
+                localState,
+                desktopSyncCryptoPrimitives,
+            );
+        });
+    } catch (error) {
+        if (!operationStarted || !isSyncRemoteMutationFenceError(error)) throw error;
+        try {
+            if (previousKey) await ports.keyCache.setKey(previousKey);
+            else await ports.keyCache.clearKey();
+            await ports.localState.write(previousState);
+            await ports.flush();
+        } catch (rollbackError) {
+            const failure = new Error('Failed to roll back sync encryption passphrase provisioning after fence loss');
+            (failure as Error & { cause?: unknown; rollbackError?: unknown }).cause = error;
+            (failure as Error & { rollbackError?: unknown }).rollbackError = rollbackError;
+            throw failure;
+        }
+        throw error;
+    }
 }
 
 // ---------------------------------------------------------------------------

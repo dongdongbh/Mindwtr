@@ -16,6 +16,7 @@ import {
     SyncEncryptionRemoteVersionUnavailableError,
     SyncEncryptionTerminalError,
     SyncRemoteMutationFenceBusyError,
+    SyncRemoteMutationFenceLostError,
 } from '@mindwtr/core';
 
 type NativeState = {
@@ -570,6 +571,84 @@ describe('Dropbox sync encryption transitions', () => {
 
         expect(await runProvidePassphraseOverRemote('correct horse battery', noKeyPort)).toBe('ok');
         expect((await getSyncEncryptionStatus()).state).toBe('enabled');
+    });
+
+    it('holds the provider fence through passphrase provisioning and the durable local commit', async () => {
+        const store = seedRemote();
+        const transport = createDropboxFetch(store);
+        await runEnableOverRemote('correct horse battery', createDropboxRemotePort((o) => o('token'), transport));
+        native.state = { state: 'remote-encrypted-no-key' };
+        clearSyncEncryptionMaterialCache();
+        const events: string[] = [];
+        const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input);
+            const apiArg = new Headers(init?.headers).get('Dropbox-API-Arg');
+            const body = url.endsWith('/files/delete_v2') ? JSON.parse(String(init?.body ?? '{}')) : {};
+            const path = apiArg ? JSON.parse(apiArg).path : body.path;
+            if (path === '/.mindwtr-sync-fence-v1.json' && url.endsWith('/files/upload')) {
+                events.push(`acquired:${native.state.state}`);
+            }
+            if (path === '/.mindwtr-sync-fence-v1.json' && url.endsWith('/files/delete_v2')) {
+                events.push(`released:${native.state.state}`);
+            }
+            return transport(input, init);
+        }) as typeof fetch;
+
+        await expect(runProvidePassphraseOverRemote(
+            'correct horse battery',
+            createDropboxRemotePort((o) => o('token'), fetcher),
+        )).resolves.toBe('ok');
+
+        expect(events).toEqual(['acquired:remote-encrypted-no-key', 'released:enabled']);
+    });
+
+    it('does not provision a key while a peer provider transition holds the fence', async () => {
+        const store = seedRemote();
+        const fetcher = createDropboxFetch(store);
+        await runEnableOverRemote('correct horse battery', createDropboxRemotePort((o) => o('token'), fetcher));
+        native.state = { state: 'remote-encrypted-no-key' };
+        clearSyncEncryptionMaterialCache();
+        store.files.set('.mindwtr-sync-fence-v1.json', jsonBytes({
+            schema: 1,
+            leaseId: 'peer-lease',
+            ownerId: 'peer-device',
+            purpose: 'encryption-transition',
+            expiresAt: Date.parse(SERVER_DATE) + 60_000,
+        }));
+        store.versions.set('.mindwtr-sync-fence-v1.json', 1);
+
+        await expect(runProvidePassphraseOverRemote(
+            'correct horse battery',
+            createDropboxRemotePort((o) => o('token'), fetcher),
+        )).rejects.toBeInstanceOf(SyncRemoteMutationFenceBusyError);
+
+        expect(native.state).toEqual({ state: 'remote-encrypted-no-key' });
+        await expect(getSyncEncryptionMaterial()).resolves.toBeNull();
+    });
+
+    it('rolls back provisioned local material when the provider fence is lost before finalization', async () => {
+        const store = seedRemote();
+        const fetcher = createDropboxFetch(store);
+        await runEnableOverRemote('correct horse battery', createDropboxRemotePort((o) => o('token'), fetcher));
+        native.state = { state: 'remote-encrypted-no-key' };
+        clearSyncEncryptionMaterialCache();
+        const remote = createDropboxRemotePort((o) => o('token'), fetcher);
+        let assertions = 0;
+        remote.acquireRemoteMutationFence = async () => ({
+            assertHeld: async () => {
+                assertions += 1;
+                if (assertions === 4) throw new SyncRemoteMutationFenceLostError();
+            },
+            renew: async () => undefined,
+            retryAfterMs: () => 0,
+            release: async () => undefined,
+        });
+
+        await expect(runProvidePassphraseOverRemote('correct horse battery', remote))
+            .rejects.toBeInstanceOf(SyncRemoteMutationFenceLostError);
+
+        expect(native.state).toEqual({ state: 'remote-encrypted-no-key' });
+        await expect(getSyncEncryptionMaterial()).resolves.toBeNull();
     });
 
     it('disable restores readable plaintext and clears the key', async () => {

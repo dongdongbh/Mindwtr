@@ -170,6 +170,8 @@ import {
   SyncEncryptionRemotePlaintextError,
   SyncEncryptionRemoteConflictError,
   SyncEncryptionTerminalError,
+  SyncRemoteMutationFenceBusyError,
+  SyncRemoteMutationFenceLostError,
   encryptSyncArtifact,
   type SyncKeyMaterial,
 } from '@mindwtr/core';
@@ -608,6 +610,7 @@ describe('remote mutation fence lifecycle', () => {
     const lease: SyncRemoteMutationFenceLease = {
       assertHeld: vi.fn(async () => { events.push('assert'); }),
       renew: vi.fn(async () => undefined),
+      retryAfterMs: () => 0,
       release: vi.fn(async () => {
         events.push(`release:${asyncStorage.has(SYNC_ENCRYPTION_STATE_KEY) ? 'persisted' : 'missing'}`);
       }),
@@ -645,6 +648,64 @@ describe('remote mutation fence lifecycle', () => {
     expect(events.indexOf('capture')).toBeGreaterThan(events.indexOf('assert'));
     expect(events.at(-1)).toBe('release:persisted');
     expect(vi.mocked(lease.assertHeld).mock.calls.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('does not provision a provider key while a peer holds the fence', async () => {
+    const encrypted = await encryptSyncArtifact(
+      new TextEncoder().encode(JSON.stringify(appData('remote'))),
+      material,
+      mobileSyncCryptoPrimitives,
+    );
+    await syncEncryptionLocalState.write({ state: 'remote-encrypted-no-key' });
+    await flushSyncEncryptionLocalState();
+    const remote: SyncEncryptionRemotePort & {
+      acquireRemoteMutationFence: () => Promise<SyncRemoteMutationFenceLease>;
+    } = {
+      acquireRemoteMutationFence: async () => { throw new SyncRemoteMutationFenceBusyError(30_000); },
+      list: async () => [],
+      read: async (name) => ({ bytes: name === 'data.json.enc' ? encrypted : null, version: 'v1' }),
+      write: async () => undefined,
+      remove: async () => undefined,
+    };
+
+    await expect(__syncEncryptionServiceTestUtils.runProvidePassphraseOverRemote(PASSPHRASE, remote))
+      .rejects.toBeInstanceOf(SyncRemoteMutationFenceBusyError);
+    await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
+    expect(syncEncryptionLocalState.read()).toEqual({ state: 'remote-encrypted-no-key' });
+  });
+
+  it('rolls back provisioned provider material when the fence is lost before finalization', async () => {
+    const encrypted = await encryptSyncArtifact(
+      new TextEncoder().encode(JSON.stringify(appData('remote'))),
+      material,
+      mobileSyncCryptoPrimitives,
+    );
+    await syncEncryptionLocalState.write({ state: 'remote-encrypted-no-key' });
+    await flushSyncEncryptionLocalState();
+    let assertions = 0;
+    const remote: SyncEncryptionRemotePort & {
+      acquireRemoteMutationFence: () => Promise<SyncRemoteMutationFenceLease>;
+    } = {
+      acquireRemoteMutationFence: async () => ({
+        assertHeld: async () => {
+          assertions += 1;
+          if (assertions === 4) throw new SyncRemoteMutationFenceLostError();
+        },
+        renew: async () => undefined,
+        retryAfterMs: () => 0,
+        release: async () => undefined,
+      }),
+      list: async () => [],
+      read: async (name) => ({ bytes: name === 'data.json.enc' ? encrypted : null, version: 'v1' }),
+      write: async () => undefined,
+      remove: async () => undefined,
+    };
+
+    await expect(__syncEncryptionServiceTestUtils.runProvidePassphraseOverRemote(PASSPHRASE, remote))
+      .rejects.toBeInstanceOf(SyncRemoteMutationFenceLostError);
+    await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
+    expect(syncEncryptionLocalState.read()).toEqual({ state: 'remote-encrypted-no-key' });
+    expect(JSON.parse(asyncStorage.get(SYNC_ENCRYPTION_STATE_KEY)!)).toEqual({ state: 'remote-encrypted-no-key' });
   });
 });
 
