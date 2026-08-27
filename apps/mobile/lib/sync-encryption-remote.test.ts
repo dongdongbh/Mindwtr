@@ -436,6 +436,7 @@ describe('Dropbox remote port + core transition round trip', () => {
           .map((path) => ({
             '.tag': 'file',
             name: path.slice('/attachments/'.length),
+            path_lower: path.toLowerCase(),
             path_display: path,
             rev: `rev${revisions.get(path) ?? 1}`,
           }));
@@ -476,6 +477,38 @@ describe('Dropbox remote port + core transition round trip', () => {
       }
       throw new Error(`unexpected fetch ${url}`);
     }));
+  });
+
+  it('validates path_lower while preserving the Dropbox file name casing', async () => {
+    const fetcher = vi.fn(async () => jsonResponse({
+      entries: [{
+        '.tag': 'file',
+        name: 'Photo.PNG',
+        path_lower: '/attachments/photo.png',
+        path_display: '/ATTACHMENTS/Photo.PNG',
+      }],
+      cursor: 'done',
+      has_more: false,
+    }));
+
+    await expect(__syncEncryptionServiceTestUtils.listDropboxAttachmentKeys('token', fetcher))
+      .resolves.toEqual(['attachments/Photo.PNG']);
+  });
+
+  it('fails closed when Dropbox path_lower and name identify different files', async () => {
+    const fetcher = vi.fn(async () => jsonResponse({
+      entries: [{
+        '.tag': 'file',
+        name: 'Other.bin',
+        path_lower: '/attachments/first.bin',
+        path_display: '/Attachments/Other.bin',
+      }],
+      cursor: 'done',
+      has_more: false,
+    }));
+
+    await expect(__syncEncryptionServiceTestUtils.listDropboxAttachmentKeys('token', fetcher))
+      .rejects.toThrow('file identity is inconsistent');
   });
 
   it('encrypts and then restores documents and attachments over the wire', async () => {
@@ -652,6 +685,7 @@ describe('Dropbox remote port + core transition round trip', () => {
           .map((path) => ({
             '.tag': 'file',
             name: path.slice('/attachments/'.length),
+            path_lower: path.toLowerCase(),
             path_display: path,
             rev: `rev${revisions.get(path) ?? 1}`,
           }));

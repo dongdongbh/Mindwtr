@@ -194,6 +194,7 @@ const createDropboxFetch = (store: ReturnType<typeof createBlobStore>) =>
                 .map((name) => ({
                     '.tag': 'file',
                     name: name.slice('attachments/'.length),
+                    path_lower: `/${name.toLowerCase()}`,
                     path_display: `/${name}`,
                     rev: `rev${store.versions.get(name) ?? 1}`,
                 }));
@@ -376,28 +377,53 @@ describe('WebDAV authoritative attachment inventory', () => {
 });
 
 describe('Dropbox sync encryption transitions', () => {
-    it('paginates the provider attachment inventory and filters unmanaged entries', async () => {
+    it('paginates the provider inventory, validates path_lower, and preserves name casing', async () => {
         const fetcher = vi.fn()
             .mockResolvedValueOnce(new Response(JSON.stringify({
                 entries: [
-                    { '.tag': 'file', name: 'first.bin', path_display: '/attachments/first.bin' },
+                    {
+                        '.tag': 'file',
+                        name: 'First.BIN',
+                        path_lower: '/attachments/first.bin',
+                        path_display: '/ATTACHMENTS/First.BIN',
+                    },
                     { '.tag': 'folder', name: 'nested', path_display: '/attachments/nested' },
-                    { '.tag': 'file', name: '../victim', path_display: '/attachments/../victim' },
                 ],
                 cursor: 'page-2',
                 has_more: true,
             }), { status: 200 }))
             .mockResolvedValueOnce(new Response(JSON.stringify({
                 entries: [
-                    { '.tag': 'file', name: 'second.bin', path_display: '/attachments/second.bin' },
+                    {
+                        '.tag': 'file',
+                        name: 'Second.bin',
+                        path_lower: '/attachments/second.bin',
+                        path_display: '/Attachments/Second.bin',
+                    },
                 ],
                 cursor: 'done',
                 has_more: false,
             }), { status: 200 }));
 
         await expect(__syncEncryptionServiceTestUtils.listDropboxAttachmentKeys('token', fetcher))
-            .resolves.toEqual(['attachments/first.bin', 'attachments/second.bin']);
+            .resolves.toEqual(['attachments/First.BIN', 'attachments/Second.bin']);
         expect(JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body))).toEqual({ cursor: 'page-2' });
+    });
+
+    it('fails closed when Dropbox path_lower and name do not identify the same file', async () => {
+        const fetcher = vi.fn(async () => new Response(JSON.stringify({
+            entries: [{
+                '.tag': 'file',
+                name: 'Other.bin',
+                path_lower: '/attachments/first.bin',
+                path_display: '/Attachments/Other.bin',
+            }],
+            cursor: 'done',
+            has_more: false,
+        }), { status: 200 }));
+
+        await expect(__syncEncryptionServiceTestUtils.listDropboxAttachmentKeys('token', fetcher))
+            .rejects.toThrow('file identity is inconsistent');
     });
 
     it('encrypts every artifact, removes the plaintext documents, and leaves attachment names alone', async () => {

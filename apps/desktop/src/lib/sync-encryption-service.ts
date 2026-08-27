@@ -518,7 +518,7 @@ const listWebdavAttachmentKeys = async (
 };
 
 type DropboxListFolderPayload = {
-    entries?: Array<{ '.tag'?: unknown; name?: unknown; path_display?: unknown }>;
+    entries?: Array<{ '.tag'?: unknown; name?: unknown; path_lower?: unknown; path_display?: unknown }>;
     cursor?: unknown;
     has_more?: unknown;
 };
@@ -565,12 +565,20 @@ const listDropboxAttachmentKeys = async (
         }
         for (const entry of payload.entries) {
             if (entry?.['.tag'] !== 'file') continue;
-            const path = typeof entry.path_display === 'string' ? entry.path_display : null;
-            const name = typeof entry.name === 'string' ? entry.name : null;
-            const key = sanitizeBlobAttachmentKey(
-                path?.replace(/^\//, '') ?? (name ? `attachments/${name}` : undefined),
-            );
-            if (key) keys.add(key);
+            if (typeof entry.path_lower !== 'string' || typeof entry.name !== 'string') {
+                throw new Error('Dropbox attachment inventory file identity is malformed');
+            }
+            const name = entry.name;
+            const expectedLowerPath = `/attachments/${name.toLowerCase()}`;
+            if (entry.path_lower !== expectedLowerPath) {
+                throw new Error('Dropbox attachment inventory file identity is inconsistent');
+            }
+            const candidate = `attachments/${name}`;
+            const key = sanitizeBlobAttachmentKey(candidate);
+            if (key !== candidate) {
+                throw new Error('Dropbox attachment inventory returned an invalid attachment name');
+            }
+            keys.add(key);
         }
         if (!payload.has_more) return Array.from(keys).sort();
         if (typeof payload.cursor !== 'string' || !payload.cursor || payload.cursor === cursor) {
