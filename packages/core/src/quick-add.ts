@@ -601,6 +601,12 @@ function getQuickAddTokenMatches(
         const token = match[0];
         if (token.startsWith(prefix)) {
             const index = match.index ?? 0;
+            // A marker only opens a token at a word start (#1087). Without this
+            // the `@` inside `bob@example.com` became the context `@example` and
+            // tore the address out of the title — and a `#fragment` in a pasted
+            // URL became a tag. Every other matcher here (quoted, known, rich)
+            // already requires this boundary; this one was the outlier.
+            if (!isQuickAddTokenStartBoundary(working, index)) continue;
             matches.push({
                 token: restoreEscapes(token),
                 raw: token,

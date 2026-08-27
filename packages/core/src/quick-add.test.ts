@@ -31,6 +31,29 @@ describe('quick-add', () => {
         expect(result.props.dueDate).toBe(expectedLocal);
     });
 
+    it('leaves an email address alone instead of reading its @ as a context (#1087)', () => {
+        const now = new Date('2026-08-27T10:00:00Z');
+        const result = parseQuickAdd('Email bob@example.com', undefined, now);
+
+        expect(result.title).toBe('Email bob@example.com');
+        expect(result.props.contexts ?? []).toEqual([]);
+    });
+
+    it('only opens a context or tag at a word start (#1087)', () => {
+        const now = new Date('2026-08-27T10:00:00Z');
+        // A marker mid-word belongs to the word: an address, a URL fragment.
+        const url = parseQuickAdd('Read https://example.com/docs#install', undefined, now);
+        expect(url.title).toBe('Read https://example.com/docs#install');
+        expect(url.props.tags ?? []).toEqual([]);
+
+        // A real token still parses when it starts a word, including alongside
+        // an address in the same line.
+        const mixed = parseQuickAdd('Email bob@example.com @phone #followup', undefined, now);
+        expect(mixed.title).toBe('Email bob@example.com');
+        expect(mixed.props.contexts).toEqual(['@phone']);
+        expect(mixed.props.tags).toEqual(['#followup']);
+    });
+
     it('parses focus quick-add tokens and implies next when no status is supplied', () => {
         const result = parseQuickAdd('Call plumber /* focus');
 
