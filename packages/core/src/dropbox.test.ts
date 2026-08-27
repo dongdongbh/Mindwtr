@@ -22,7 +22,10 @@ function createFakeDropbox() {
         if (target.includes('/download')) {
             const bytes = files.get(arg.path);
             if (!bytes) {
-                return { ok: false, status: 409, headers: { get: () => null } as unknown as Headers, text: async () => '' } as Response;
+                return Response.json({
+                    error_summary: 'path/not_found/...',
+                    error: { '.tag': 'path', path: { '.tag': 'not_found' } },
+                }, { status: 409 });
             }
             return {
                 ok: true,
@@ -133,6 +136,107 @@ describe('dropbox sync-document encryption', () => {
         expect(result.data).toBeNull();
         expect(result.remotePlaintext).toBeUndefined();
     });
+
+    it.each([
+        ['off', {}],
+        ['keyed', { material: null }],
+    ] as const)('a %s device requires explicit path/not_found before opposite-generation discovery', async (_posture, cryptoTemplate) => {
+        const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(6), FAST_KDF);
+        const crypto = cryptoTemplate.material === null ? { material } : {};
+        const urls: string[] = [];
+        let downloadCalls = 0;
+        const fetcher = async (url: string | URL): Promise<Response> => {
+            urls.push(String(url));
+            if (String(url).includes('/upload')) return Response.json({ rev: 'unexpected-upload' });
+            downloadCalls += 1;
+            if (downloadCalls === 1) {
+                return Response.json({
+                    error_summary: 'path/conflict/file/...',
+                    error: { '.tag': 'path', path: { '.tag': 'conflict' } },
+                }, { status: 409 });
+            }
+            return Response.json({
+                error_summary: 'path/not_found/...',
+                error: { '.tag': 'path', path: { '.tag': 'not_found' } },
+            }, { status: 409 });
+        };
+        const attempt = async () => {
+            const remote = await downloadDropboxAppData('token', fetcher, crypto);
+            await uploadDropboxAppData('token', { tasks: [] } as unknown as AppData, remote.rev, fetcher, crypto);
+        };
+
+        await expect(attempt()).rejects.toThrow(/Dropbox download failed: HTTP 409/);
+        expect(downloadCalls).toBe(1);
+        expect(urls.some((url) => url.includes('/upload'))).toBe(false);
+    });
+
+    it.each([
+        ['off', {}],
+        ['keyed', { material: null }],
+    ] as const)('a %s device propagates an unreadable primary 409 body without probing or uploading', async (_posture, cryptoTemplate) => {
+        const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(7), FAST_KDF);
+        const crypto = cryptoTemplate.material === null ? { material } : {};
+        const urls: string[] = [];
+        const fetcher = async (url: string | URL): Promise<Response> => {
+            urls.push(String(url));
+            if (String(url).includes('/upload')) return Response.json({ rev: 'unexpected-upload' });
+            return new Response('not-json', { status: 409 });
+        };
+        const attempt = async () => {
+            const remote = await downloadDropboxAppData('token', fetcher, crypto);
+            await uploadDropboxAppData('token', { tasks: [] } as unknown as AppData, remote.rev, fetcher, crypto);
+        };
+
+        await expect(attempt()).rejects.toThrow(/Dropbox download failed: HTTP 409/);
+        expect(urls).toHaveLength(1);
+        expect(urls.some((url) => url.includes('/upload'))).toBe(false);
+    });
+
+    it.each([
+        ['off', 429, null, {}],
+        ['off', 503, null, {}],
+        ['off', 409, 'path/conflict', {}],
+        ['off', 409, 'invalid-body', {}],
+        ['keyed', 429, null, { material: null }],
+        ['keyed', 503, null, { material: null }],
+        ['keyed', 409, 'path/conflict', { material: null }],
+        ['keyed', 409, 'invalid-body', { material: null }],
+    ] as const)(
+        'a %s device propagates opposite-generation HTTP %i (%s) and never uploads',
+        async (_posture, probeStatus, probeTag, cryptoTemplate) => {
+            const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(8), FAST_KDF);
+            const crypto = cryptoTemplate.material === null ? { material } : {};
+            const urls: string[] = [];
+            let downloadCalls = 0;
+            const fetcher = async (url: string | URL): Promise<Response> => {
+                urls.push(String(url));
+                if (String(url).includes('/upload')) return Response.json({ rev: 'unexpected-upload' });
+                downloadCalls += 1;
+                if (downloadCalls === 1) {
+                    return Response.json({
+                        error_summary: 'path/not_found/...',
+                        error: { '.tag': 'path', path: { '.tag': 'not_found' } },
+                    }, { status: 409 });
+                }
+                if (probeTag === 'path/conflict') {
+                    return Response.json({
+                        error_summary: 'path/conflict/file/...',
+                        error: { '.tag': 'path', path: { '.tag': 'conflict' } },
+                    }, { status: probeStatus });
+                }
+                if (probeTag === 'invalid-body') return new Response('not-json', { status: probeStatus });
+                return new Response(null, { status: probeStatus });
+            };
+            const attempt = async () => {
+                const remote = await downloadDropboxAppData('token', fetcher, crypto);
+                await uploadDropboxAppData('token', { tasks: [] } as unknown as AppData, remote.rev, fetcher, crypto);
+            };
+
+            await expect(attempt()).rejects.toThrow(new RegExp(`Dropbox download failed: HTTP ${probeStatus}`));
+            expect(downloadCalls).toBe(2);
+            expect(urls.some((url) => url.includes('/upload'))).toBe(false);
+        },
+    );
 
     it('a wrong key fails closed on download instead of returning garbage', async () => {
         const { fetcher } = createFakeDropbox();

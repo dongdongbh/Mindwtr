@@ -67,6 +67,27 @@ export type DropboxSyncCrypto = {
     cryptoPrims?: SyncCryptoPrimitives;
 };
 
+const requireDropboxPathNotFound = async (response: Response): Promise<void> => {
+    const errorTag = await parseDropboxApiErrorTag(response);
+    if (isDropboxPathNotFoundTag(errorTag)) return;
+    const detail = errorTag ? ` (${errorTag})` : ' (missing path/not_found error tag)';
+    throw new Error(`Dropbox download failed: HTTP ${response.status}${detail}`);
+};
+
+const requireDropboxDownloadOrNotFound = async (response: Response): Promise<'ok' | 'not-found'> => {
+    if (response.status === 401) {
+        throw new DropboxUnauthorizedError('Dropbox download failed: HTTP 401');
+    }
+    if (response.status === 409) {
+        await requireDropboxPathNotFound(response);
+        return 'not-found';
+    }
+    if (!response.ok) {
+        throw new Error(`Dropbox download failed: HTTP ${response.status}`);
+    }
+    return 'ok';
+};
+
 export async function getDropboxAppDataMetadata(
     accessToken: string,
     fetcher: typeof fetch = fetch,
@@ -114,7 +135,7 @@ export async function downloadDropboxAppData(
         },
     });
 
-    if (response.status === 409) {
+    if (await requireDropboxDownloadOrNotFound(response) === 'not-found') {
         if (!crypto.material) {
             // Nothing at the plain path — the common "first sync" shape. Only when this
             // device doesn't already have a key do we take one extra look at the `.enc`
@@ -129,13 +150,13 @@ export async function downloadDropboxAppData(
                     'Dropbox-API-Arg': JSON.stringify({ path: syncEncryptedArtifactName(DROPBOX_SYNC_PATH) }),
                 },
             });
-            if (probe.status === 401) throw new DropboxUnauthorizedError('Dropbox download failed: HTTP 401');
-            if (probe.ok) {
-                const encBytes = new Uint8Array(await readResponseBody(probe, undefined, MAX_SYNC_DOCUMENT_BYTES));
-                const inspected = inspectSyncArtifact(encBytes);
-                if (inspected.kind === 'encrypted') {
-                    return { data: null, rev: null, encryptedNoKey: { salt: inspected.salt, params: inspected.params } };
-                }
+            if (await requireDropboxDownloadOrNotFound(probe) === 'not-found') {
+                return { data: null, rev: null };
+            }
+            const encBytes = new Uint8Array(await readResponseBody(probe, undefined, MAX_SYNC_DOCUMENT_BYTES));
+            const inspected = inspectSyncArtifact(encBytes);
+            if (inspected.kind === 'encrypted') {
+                return { data: null, rev: null, encryptedNoKey: { salt: inspected.salt, params: inspected.params } };
             }
         } else {
             // Mirror of the probe above, in the other direction and gated the same way: this
@@ -148,18 +169,14 @@ export async function downloadDropboxAppData(
                     'Dropbox-API-Arg': JSON.stringify({ path: DROPBOX_SYNC_PATH }),
                 },
             });
-            if (probe.status === 401) throw new DropboxUnauthorizedError('Dropbox download failed: HTTP 401');
-            if (probe.ok && isPlaintextSyncArtifact(new Uint8Array(await readResponseBody(probe, undefined, MAX_SYNC_DOCUMENT_BYTES)))) {
+            if (await requireDropboxDownloadOrNotFound(probe) === 'not-found') {
+                return { data: null, rev: null };
+            }
+            if (isPlaintextSyncArtifact(new Uint8Array(await readResponseBody(probe, undefined, MAX_SYNC_DOCUMENT_BYTES)))) {
                 return { data: null, rev: null, remotePlaintext: true };
             }
         }
         return { data: null, rev: null };
-    }
-    if (response.status === 401) {
-        throw new DropboxUnauthorizedError('Dropbox download failed: HTTP 401');
-    }
-    if (!response.ok) {
-        throw new Error(`Dropbox download failed: HTTP ${response.status}`);
     }
 
     const metadata = parseDropboxMetadataRev(response.headers.get('dropbox-api-result'));
