@@ -483,8 +483,10 @@ describe('useSyncSettings cloud token validation', () => {
     });
 
     it('requires WebDAV conditional-write capability before candidate activation', async () => {
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
         vi.mocked(SyncService.testWebDavConnection).mockRejectedValueOnce(
-            new Error('WebDAV conditional writes are not enforced'),
+            new Error('SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE: WebDAV conditional writes are not enforced'),
         );
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
@@ -509,6 +511,10 @@ describe('useSyncSettings cloud token validation', () => {
         });
         expect(SyncService.performSync).not.toHaveBeenCalled();
         expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
+        expect(showToast).toHaveBeenCalledWith(
+            'This WebDAV server does not provide or enforce safe version checks (strong ETags and conditional writes), so Mindwtr cannot safely sync or change encryption. Use a compatible WebDAV provider, File Sync, or Dropbox.',
+            'error',
+        );
     });
 
     it('activates the configuration when the probe finds an encrypted remote it has no key for (#1001)', async () => {

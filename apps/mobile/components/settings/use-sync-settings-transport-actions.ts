@@ -43,6 +43,8 @@ import {
 } from '@/lib/sync-configuration-transaction';
 import { syncMobileBackgroundSyncRegistration } from '@/lib/background-sync-task';
 import { getMobileCloudRequestOptions, getMobileWebDavRequestOptions } from '@/lib/webdav-request-options';
+import { rememberWebdavCapabilityProof } from '@/lib/webdav-capability-proof';
+import { getIncompleteSyncEncryptionTransition } from '@/lib/sync-encryption-state';
 import {
     getSyncConflictCount,
     getSyncMaxClockSkewMs,
@@ -612,6 +614,7 @@ export function useSyncSettingsTransportActions({
                 clearDropboxTokens,
                 deleteSecret: deleteSecureConfigValue,
                 getDropboxTokens: getStoredDropboxTokens,
+                getIncompleteSyncEncryptionTransition,
                 getSecret: getSecureConfigValue,
                 multiGet: (keys) => AsyncStorage.multiGet(keys),
                 multiSet: (entries) => AsyncStorage.multiSet(entries),
@@ -774,6 +777,7 @@ export function useSyncSettingsTransportActions({
                         password: configOverride.webdav.password,
                         timeoutMs: 10_000,
                     });
+                    await rememberWebdavCapabilityProof(configOverride.webdav);
                 }
                 const probeResult = await performMobileSync(
                     effectiveBackend === 'file' ? syncPath || undefined : undefined,
@@ -897,7 +901,12 @@ export function useSyncSettingsTransportActions({
                 );
                 return;
             }
-            showSettingsErrorToast(tr('settings.syncMobile.error'), getSyncFailureToastMessage(error));
+            showSettingsErrorToast(
+                tr('settings.syncMobile.error'),
+                isSyncEncryptionRemoteVersionUnavailableError(error)
+                    ? tr('settings.syncEncryptionErrorBackendIncompatible')
+                    : getSyncFailureToastMessage(error),
+            );
         } finally {
             setIsSyncing(false);
         }
@@ -1018,6 +1027,7 @@ export function useSyncSettingsTransportActions({
                     password: effectiveWebdav.password,
                     timeoutMs: 10_000,
                 });
+                await rememberWebdavCapabilityProof(effectiveWebdav);
                 showToast({
                     title: tr('settings.syncMobile.connectionOk'),
                     message: tr('settings.syncMobile.webdavEndpointIsReachable'),

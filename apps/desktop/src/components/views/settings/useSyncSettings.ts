@@ -1173,7 +1173,12 @@ export const useSyncSettings = ({
                 await resolveCapturedCredential();
             }
             void logError(error, { scope: 'sync', step: 'perform' });
-            const message = resolveText('settings.lastSyncError', 'Sync failed');
+            const message = isSyncEncryptionRemoteVersionUnavailableError(error)
+                ? resolveText(
+                    'settings.syncEncryptionErrorBackendIncompatible',
+                    'This WebDAV server does not provide or enforce safe version checks (strong ETags and conditional writes), so Mindwtr cannot safely sync or change encryption. Use a compatible WebDAV provider, File Sync, or Dropbox.',
+                )
+                : resolveText('settings.lastSyncError', 'Sync failed');
             setSyncError(message);
             showToast(message, 'error');
         }
