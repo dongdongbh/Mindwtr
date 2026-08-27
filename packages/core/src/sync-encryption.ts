@@ -386,6 +386,28 @@ const verifyRemoteBytes = async (
     return written;
 };
 
+/** Revalidate the document generations the transition is about to make authoritative on
+ * this device. Mutating calls update `expected` with their verified post-write state; entries
+ * that required no work keep their captured version. A peer replacement after inventory (or
+ * after our own read-back) must abort before the device caches/clears a key and commits local
+ * state for a generation that is no longer current. */
+const revalidateRemoteDocuments = async (
+    remote: SyncEncryptionRemotePort,
+    expected: Map<string, SyncEncryptionRemoteRead>,
+    documentNames: ReadonlySet<string>,
+): Promise<void> => {
+    for (const name of documentNames) {
+        const before = snapshotRemoteRead(expected, name);
+        const current = await remote.read(name);
+        const sameBytes = before.bytes === null
+            ? current.bytes === null
+            : current.bytes !== null && bytesEqual(before.bytes, current.bytes);
+        if (!sameBytes || before.version !== current.version) {
+            throw new SyncEncryptionRemoteConflictError(`${name} changed before sync encryption state commit`);
+        }
+    }
+};
+
 /** ASCII space — the byte a non-truncating write pads a shrinking artifact with (see
  * `padBytesForNonTruncatingOverwrite` on mobile and the MWENC1 header comment for the
  * ciphertext-domain equivalent). */
@@ -590,6 +612,7 @@ export async function runEnableSyncEncryptionOverRemote(
     const documents = entries
         .filter((e) => e.kind === 'document' && !e.name.includes('.enc'))
         .sort((a, b) => Number(isBaseDocument(a.name)) - Number(isBaseDocument(b.name)));
+    const documentNames = new Set(entries.filter((entry) => entry.kind === 'document').map((entry) => entry.name));
 
     const total = attachments.length + documents.length;
     let completed = 0;
@@ -614,24 +637,26 @@ export async function runEnableSyncEncryptionOverRemote(
                 const sealed = await encryptSyncArtifact(bytes, material, prims);
                 await ensureTransitionJournal();
                 await remote.write(entry.name, sealed, version);
-                await verifyRemoteBytes(remote, entry.name, async (verify) => {
+                const verified = await verifyRemoteBytes(remote, entry.name, async (verify) => {
                     const plain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
                     if (!bytesEqual(plain, bytes)) {
                         throw new SyncEncryptionRemoteConflictError(`${entry.name} changed during sync encryption enable verification`);
                     }
                 });
+                snapshot.set(entry.name, verified);
             } else if (!(await triesDecrypt(bytes, material.key, prims))) {
                 const oldMaterial = await recoverMaterialForSalt(inspected.salt, inspected.params);
                 const plain = await decryptRemoteArtifactOrThrow(bytes, oldMaterial.key, prims);
                 const sealed = await encryptSyncArtifact(plain, material, prims);
                 await ensureTransitionJournal();
                 await remote.write(entry.name, sealed, version);
-                await verifyRemoteBytes(remote, entry.name, async (verify) => {
+                const verified = await verifyRemoteBytes(remote, entry.name, async (verify) => {
                     const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
                     if (!bytesEqual(verifiedPlain, plain)) {
                         throw new SyncEncryptionRemoteConflictError(`${entry.name} changed during sync encryption enable verification`);
                     }
                 });
+                snapshot.set(entry.name, verified);
             }
         }
         completed += 1;
@@ -661,20 +686,24 @@ export async function runEnableSyncEncryptionOverRemote(
                 } else {
                     await ensureTransitionJournal();
                     await remote.write(encName, sealed, null);
-                    await verifyRemoteBytes(remote, encName, async (verify) => {
+                    const verified = await verifyRemoteBytes(remote, encName, async (verify) => {
                         const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
                         if (!bytesEqual(verifiedPlain, bytes)) {
                             throw new SyncEncryptionRemoteConflictError(`${encName} changed during sync encryption enable verification`);
                         }
                     });
+                    snapshot.set(encName, verified);
+                    documentNames.add(encName);
                 }
                 await ensureTransitionJournal();
                 await remote.remove(entry.name, sourceVersion);
+                snapshot.set(entry.name, { bytes: null, version: null });
             }
         }
         completed += 1;
     }
 
+    await revalidateRemoteDocuments(remote, snapshot, documentNames);
     await keyCache.setKey(material.key);
     await localState.write({
         state: 'enabled',
@@ -703,6 +732,7 @@ export async function runDisableSyncEncryptionOverRemote(
     const encDocuments = entries
         .filter((e) => e.kind === 'document' && e.name.includes('.enc'))
         .sort((a, b) => Number(isBaseEncDocument(a.name)) - Number(isBaseEncDocument(b.name)));
+    const documentNames = new Set(entries.filter((entry) => entry.kind === 'document').map((entry) => entry.name));
 
     const total = attachments.length + encDocuments.length;
     let completed = 0;
@@ -727,11 +757,12 @@ export async function runDisableSyncEncryptionOverRemote(
                 const plain = await decryptRemoteArtifactOrThrow(bytes, key, prims);
                 await ensureTransitionJournal();
                 await remote.write(entry.name, plain, version);
-                await verifyRemoteBytes(remote, entry.name, (verify) => {
+                const verified = await verifyRemoteBytes(remote, entry.name, (verify) => {
                     if (!bytesMatchWithTrailingPadding(verify, plain)) {
                         throw new SyncEncryptionRemoteConflictError(`${entry.name} changed during sync encryption disable verification`);
                     }
                 });
+                snapshot.set(entry.name, verified);
             }
         }
         // ponytail: an attachment already lacking MWENC1 magic is treated as "already
@@ -761,18 +792,22 @@ export async function runDisableSyncEncryptionOverRemote(
             } else {
                 await ensureTransitionJournal();
                 await remote.write(plainName, plain, null);
-                await verifyRemoteBytes(remote, plainName, (verify) => {
+                const verified = await verifyRemoteBytes(remote, plainName, (verify) => {
                     if (!bytesMatchWithTrailingPadding(verify, plain)) {
                         throw new SyncEncryptionRemoteConflictError(`${plainName} changed during sync encryption disable verification`);
                     }
                 });
+                snapshot.set(plainName, verified);
+                documentNames.add(plainName);
             }
             await ensureTransitionJournal();
             await remote.remove(entry.name, sourceVersion);
+            snapshot.set(entry.name, { bytes: null, version: null });
         }
         completed += 1;
     }
 
+    await revalidateRemoteDocuments(remote, snapshot, documentNames);
     await keyCache.clearKey();
     await localState.write(null);
 }
@@ -816,6 +851,7 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
     const encDocuments = entries
         .filter((e) => e.kind === 'document' && e.name.includes('.enc'))
         .sort((a, b) => Number(isBaseEncDocument(a.name)) - Number(isBaseEncDocument(b.name)));
+    const documentNames = new Set(entries.filter((entry) => entry.kind === 'document').map((entry) => entry.name));
 
     const newSalt = prims.randomBytes(16);
     const newMaterial = await deriveSyncKeyMaterial(nextPassphrase, newSalt, kdfParams, prims);
@@ -867,12 +903,13 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
         const sealed = await encryptSyncArtifact(plain, newMaterial, prims);
         await ensureTransitionJournal();
         await remote.write(name, sealed, version);
-        await verifyRemoteBytes(remote, name, async (verify) => {
+        const verified = await verifyRemoteBytes(remote, name, async (verify) => {
             const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, newMaterial.key, prims);
             if (!bytesEqual(verifiedPlain, plain)) {
                 throw new SyncEncryptionRemoteConflictError(`${name} changed during sync encryption passphrase verification`);
             }
         });
+        snapshot.set(name, verified);
     };
 
     for (const entry of attachments) {
@@ -886,6 +923,7 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
         completed += 1;
     }
 
+    await revalidateRemoteDocuments(remote, snapshot, documentNames);
     await keyCache.setKey(newMaterial.key);
     await localState.write({
         state: 'enabled',

@@ -378,6 +378,51 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         for (const [name, bytes] of before) expect(remote.store.get(name)).toEqual(bytes);
     });
 
+    it('revalidates an already-encrypted document generation before committing the local key', async () => {
+        const originalMaterial = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(13), FAST_KDF);
+        const peerMaterial = await deriveSyncKeyMaterial('peer passphrase', new Uint8Array(16).fill(17), FAST_KDF);
+        const remote = createFakeRemote({
+            'data.json.enc': {
+                bytes: await encryptSyncArtifact(utf8('{"tasks":[]}'), originalMaterial),
+                kind: 'document',
+            },
+        });
+        const originalRead = remote.read.bind(remote);
+        let encryptedDocumentReads = 0;
+        remote.read = async (name) => {
+            if (name === 'data.json.enc') {
+                encryptedDocumentReads += 1;
+                if (encryptedDocumentReads === 2) {
+                    remote.peerWrite(name, await encryptSyncArtifact(utf8('{"tasks":["peer"]}'), peerMaterial));
+                }
+            }
+            return originalRead(name);
+        };
+        const write = vi.spyOn(remote, 'write');
+        const remove = vi.spyOn(remote, 'remove');
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'correct horse',
+            remote,
+            keyCache,
+            localState,
+            undefined,
+            undefined,
+            FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(remove).not.toHaveBeenCalled();
+        expect(await keyCache.getKey()).toBeNull();
+        expect(localState.value).toBeNull();
+        await expect(decryptRemoteArtifactOrThrow(
+            remote.store.get('data.json.enc')!,
+            originalMaterial.key,
+        )).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+    });
+
     it('is resumable when the crash happens during the attachment phase, before any document is sealed (self-heals an abandoned salt)', async () => {
         const remote = createFakeRemote({
             'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
