@@ -5141,6 +5141,56 @@ mod tests {
     }
 
     #[test]
+    fn transitions_round_trip_legitimate_scratch_like_attachment_names() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        let attachments = dir.path().join(SYNC_ATTACHMENTS_DIR_NAME);
+        let cases = [
+            ("attachment.tmp", b"temporary extension".as_slice()),
+            ("attachment.previous", b"previous extension".as_slice()),
+            ("attachment.lock", b"lock extension".as_slice()),
+            (".dot-name", b"dot-prefixed attachment".as_slice()),
+        ];
+        for (name, bytes) in cases {
+            fs::write(attachments.join(name), bytes).expect("write attachment");
+        }
+
+        let first = enable_sync_encryption_in_dir(dir.path(), "first pass").expect("enable");
+        for (name, bytes) in cases {
+            let sealed = fs::read(attachments.join(name)).expect("sealed attachment");
+            assert_eq!(
+                decrypt_sync_artifact(&sealed, &first.key).expect("open enabled attachment"),
+                bytes,
+                "{name} must be included in enable",
+            );
+        }
+
+        let next = change_sync_encryption_passphrase_in_dir(dir.path(), &first.key, "second pass")
+            .expect("rotate");
+        for (name, bytes) in cases {
+            let rotated = fs::read(attachments.join(name)).expect("rotated attachment");
+            assert!(
+                decrypt_sync_artifact(&rotated, &first.key).is_err(),
+                "{name} must not remain under the old key",
+            );
+            assert_eq!(
+                decrypt_sync_artifact(&rotated, &next.key).expect("open rotated attachment"),
+                bytes,
+                "{name} must be included in rotation",
+            );
+        }
+
+        disable_sync_encryption_in_dir(dir.path(), &next.key).expect("disable");
+        for (name, bytes) in cases {
+            assert_eq!(
+                fs::read(attachments.join(name)).expect("plaintext attachment"),
+                bytes,
+                "{name} must be included in disable",
+            );
+        }
+    }
+
+    #[test]
     fn transition_quarantine_cas_preserves_racing_replace_remove_and_create_generations() {
         fn replace_quarantine_bytes(target: &Path, bytes: &[u8]) -> Result<(), String> {
             let parent = target.parent().ok_or_else(|| "target has no parent".to_string())?;
@@ -11318,11 +11368,11 @@ fn is_transition_recovery_dir(name: &str) -> bool {
 }
 
 fn is_transition_scratch(name: &str) -> bool {
+    // Only names Mindwtr itself reserves for encryption-transition recovery are scratch.
+    // Attachment cloud keys preserve a user's original extension, so `.tmp`, `.previous`,
+    // `.lock`, and dot-prefixed names are all legitimate attachment generations.
     name.ends_with(SYNC_ENCRYPTION_TRANSITION_TMP_SUFFIX)
-        || name.ends_with(".tmp")
-        || name.ends_with(".previous")
-        || name.ends_with(".lock")
-        || name.starts_with('.')
+        || name.starts_with(SYNC_ENCRYPTION_MOBILE_SCRATCH_PREFIX)
 }
 
 fn transition_directory_entries(dir: &Path) -> Result<fs::ReadDir, String> {
