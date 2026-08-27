@@ -138,6 +138,7 @@ const {
     runEnableOverRemote,
     runProvidePassphraseOverRemote,
     sealAttachmentBytes,
+    SyncEncryptionCleanupDeferredError,
 } = await import('./sync-encryption-service');
 
 /** A blob store both fakes serve from, keyed exactly the way the remote names it. */
@@ -497,6 +498,75 @@ describe('Dropbox sync encryption transitions', () => {
 
         expect(store.files).toEqual(baseline);
         expect(native.state).toEqual({ state: 'off' });
+    });
+
+    it('preserves the primary transition error when conditional fence cleanup also fails', async () => {
+        const primaryError = new Error('primary transition failure');
+        const cleanupError = new Error('fence cleanup failure');
+        const remote = {
+            acquireRemoteMutationFence: async () => ({
+                assertHeld: async () => undefined,
+                renew: async () => undefined,
+                retryAfterMs: () => 12_000,
+                release: async () => { throw cleanupError; },
+            }),
+            list: async () => [],
+            read: async () => ({ bytes: null, version: null }),
+            write: async () => undefined,
+            remove: async () => undefined,
+        };
+        const ports = {
+            keyCache: {
+                getKey: async () => null,
+                setKey: async () => undefined,
+                clearKey: async () => undefined,
+            },
+            localState: { read: () => null, write: async () => undefined },
+            flush: async () => undefined,
+        };
+
+        await expect(__syncEncryptionServiceTestUtils.runWithRemoteMutationFence(
+            remote,
+            ports,
+            async () => { throw primaryError; },
+        )).rejects.toBe(primaryError);
+        expect((primaryError as Error & { cleanupError?: unknown }).cleanupError).toBe(cleanupError);
+    });
+
+    it('reports a committed transition with cleanup deferred after a release failure', async () => {
+        const cleanupError = new Error('fence cleanup failure');
+        const events: string[] = [];
+        const remote = {
+            acquireRemoteMutationFence: async () => ({
+                assertHeld: async () => { events.push('assert'); },
+                renew: async () => undefined,
+                retryAfterMs: () => 12_000,
+                release: async () => { events.push('release'); throw cleanupError; },
+            }),
+            list: async () => [],
+            read: async () => ({ bytes: null, version: null }),
+            write: async () => undefined,
+            remove: async () => undefined,
+        };
+        const ports = {
+            keyCache: {
+                getKey: async () => null,
+                setKey: async () => undefined,
+                clearKey: async () => undefined,
+            },
+            localState: { read: () => null, write: async () => undefined },
+            flush: async () => { events.push('flush'); },
+        };
+
+        const error = await __syncEncryptionServiceTestUtils.runWithRemoteMutationFence(
+            remote,
+            ports,
+            async () => { events.push('committed'); return 'done'; },
+        ).then(() => null, (failure: unknown) => failure);
+
+        expect(error).toBeInstanceOf(SyncEncryptionCleanupDeferredError);
+        expect(error).toMatchObject({ outcome: 'done', cleanupCause: cleanupError, retryAfterMs: 12_000 });
+        expect(events).toEqual(['committed', 'assert', 'flush', 'assert', 'release']);
     });
 
     it('encrypts every artifact, removes the plaintext documents, and leaves attachment names alone', async () => {

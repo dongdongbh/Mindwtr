@@ -2087,4 +2087,5 @@ export const frOverrides: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "{{count}} valeurs de date n’ont pas pu être converties et ont été omises.",
         'settings.importDiagnostics.unmappedStatus': "{{count}} valeurs d’état n’ont pas pu être converties ; une valeur sûre a été utilisée.",
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} règles de répétition non prises en charge ont été conservées dans les notes.",
+        'settings.syncEncryptionCleanupDeferred': 'Le chiffrement a été mis à jour. Mindwtr n’a pas pu supprimer le verrou de synchronisation temporaire, mais il expirera automatiquement. Aucune nouvelle tentative n’est nécessaire.',
 };

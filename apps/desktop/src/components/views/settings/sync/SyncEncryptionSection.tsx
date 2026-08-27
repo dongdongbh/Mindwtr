@@ -23,7 +23,7 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
     const [mismatch, setMismatch] = useState(false);
     const [generated, setGenerated] = useState(false);
 
-    const { busy, error, progress, state, supported } = encryption;
+    const { busy, error, progress, state, supported, warning } = encryption;
 
     const closeFlow = () => {
         setFlow('none');
@@ -38,6 +38,7 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
 
     const openFlow = (next: Flow) => {
         closeFlow();
+        encryption.clearWarning();
         setFlow(next);
     };
 
@@ -117,6 +118,9 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
 
     const progressLabel = progress
         ? `${progress.phase === 'attachments' ? t.syncEncryptionProgressAttachments : t.syncEncryptionProgressDocuments} ${progress.completed} / ${progress.total}`
+        : null;
+    const warningMessage = warning === 'cleanup-deferred'
+        ? t.syncEncryptionCleanupDeferred
         : null;
 
     const passphraseInput = (
@@ -303,6 +307,7 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
                 )}
 
                 {progressLabel && <p className="text-sm text-muted-foreground" role="status">{progressLabel}</p>}
+                {warningMessage && <p className="text-sm text-warning" role="status">{warningMessage}</p>}
                 {errorMessage && <p className="text-sm text-destructive" role="alert">{errorMessage}</p>}
             </div>
         </section>

@@ -213,6 +213,7 @@ import {
   enableSyncEncryption,
   isSyncEncryptionBackendPending,
   provideSyncEncryptionPassphrase,
+  SyncEncryptionCleanupDeferredError,
 } from './sync-encryption-service';
 import { __resetSecureSecretStoreForTests } from './secure-secret-store';
 import { SYNC_BACKEND_KEY, SYNC_ENCRYPTION_STATE_KEY, SYNC_PATH_KEY } from './sync-constants';
@@ -706,6 +707,59 @@ describe('remote mutation fence lifecycle', () => {
     await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
     expect(syncEncryptionLocalState.read()).toEqual({ state: 'remote-encrypted-no-key' });
     expect(JSON.parse(asyncStorage.get(SYNC_ENCRYPTION_STATE_KEY)!)).toEqual({ state: 'remote-encrypted-no-key' });
+  });
+
+  it('preserves the primary transition error when conditional fence cleanup also fails', async () => {
+    const primaryError = new Error('primary transition failure');
+    const cleanupError = new Error('fence cleanup failure');
+    const remote: SyncEncryptionRemotePort & {
+      acquireRemoteMutationFence: () => Promise<SyncRemoteMutationFenceLease>;
+    } = {
+      acquireRemoteMutationFence: async () => ({
+        assertHeld: async () => undefined,
+        renew: async () => undefined,
+        retryAfterMs: () => 12_000,
+        release: async () => { throw cleanupError; },
+      }),
+      list: async () => [],
+      read: async () => ({ bytes: null, version: null }),
+      write: async () => undefined,
+      remove: async () => undefined,
+    };
+
+    await expect(__syncEncryptionServiceTestUtils.runWithRemoteMutationFence(
+      remote,
+      async () => { throw primaryError; },
+    )).rejects.toBe(primaryError);
+    expect((primaryError as Error & { cleanupError?: unknown }).cleanupError).toBe(cleanupError);
+  });
+
+  it('reports a committed transition with cleanup deferred after a release failure', async () => {
+    const cleanupError = new Error('fence cleanup failure');
+    const events: string[] = [];
+    const remote: SyncEncryptionRemotePort & {
+      acquireRemoteMutationFence: () => Promise<SyncRemoteMutationFenceLease>;
+    } = {
+      acquireRemoteMutationFence: async () => ({
+        assertHeld: async () => { events.push('assert'); },
+        renew: async () => undefined,
+        retryAfterMs: () => 12_000,
+        release: async () => { events.push('release'); throw cleanupError; },
+      }),
+      list: async () => [],
+      read: async () => ({ bytes: null, version: null }),
+      write: async () => undefined,
+      remove: async () => undefined,
+    };
+
+    const error = await __syncEncryptionServiceTestUtils.runWithRemoteMutationFence(
+      remote,
+      async () => { events.push('committed'); return 'done'; },
+    ).then(() => null, (failure: unknown) => failure);
+
+    expect(error).toBeInstanceOf(SyncEncryptionCleanupDeferredError);
+    expect(error).toMatchObject({ outcome: 'done', cleanupCause: cleanupError, retryAfterMs: 12_000 });
+    expect(events).toEqual(['committed', 'assert', 'assert', 'release']);
   });
 });
 

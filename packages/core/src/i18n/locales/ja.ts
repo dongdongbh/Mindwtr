@@ -2491,4 +2491,5 @@ export const jaOverrides: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': '{{count}}件の日付は対応づけられなかったため、取り込みませんでした。',
         'settings.importDiagnostics.unmappedStatus': '{{count}}件のステータスは対応づけられなかったため、安全な既定値を使いました。',
         'settings.importDiagnostics.unsupportedRecurrence': '対応していない繰り返しルール{{count}}件は、メモとして残しました。',
+        'settings.syncEncryptionCleanupDeferred': '暗号化は更新されました。Mindwtr は一時的な同期ロックを削除できませんでしたが、ロックは自動的に期限切れになります。再試行は不要です。',
 };

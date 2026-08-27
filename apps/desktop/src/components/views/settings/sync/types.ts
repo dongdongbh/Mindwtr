@@ -183,6 +183,7 @@ export type SettingsSyncLabels = {
     syncEncryptionErrorBackendRequired: string;
     syncEncryptionErrorBackendIncompatible: string;
     syncEncryptionErrorTransitionIncomplete: string;
+    syncEncryptionCleanupDeferred: string;
     syncEncryptionStateUnavailable: string;
     syncEncryptionRetry: string;
     syncEncryptionEnableBeforeFirstSyncHint: string;
@@ -214,6 +215,8 @@ export type SyncEncryptionErrorKind =
     | 'transition-incomplete'
     | 'generic';
 
+export type SyncEncryptionWarningKind = 'cleanup-deferred';
+
 /**
  * Everything the Encryption section needs, as one object rather than a dozen flat
  * props: it is a single self-contained flow, and `useSyncEncryptionSettings` is its
@@ -233,7 +236,9 @@ export type SyncEncryptionController = {
     busy: boolean;
     progress: SyncEncryptionTransitionProgress | null;
     error: SyncEncryptionErrorKind | null;
+    warning: SyncEncryptionWarningKind | null;
     clearError: () => void;
+    clearWarning: () => void;
     retryState: () => Promise<void>;
     generatePassphrase: () => string;
     enable: (passphrase: string) => Promise<boolean>;

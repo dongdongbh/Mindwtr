@@ -2487,4 +2487,5 @@ export const en: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "{{count}} date value(s) could not be mapped and were omitted.",
         'settings.importDiagnostics.unmappedStatus': "{{count}} status value(s) could not be mapped and used a safe default.",
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} unsupported repeat rule(s) were kept as notes.",
+        'settings.syncEncryptionCleanupDeferred': 'Encryption was updated. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
 };

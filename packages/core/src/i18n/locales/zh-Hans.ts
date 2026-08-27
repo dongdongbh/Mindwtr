@@ -2419,4 +2419,5 @@ export const zhHans: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "{{count}} 个日期值无法转换，已省略。",
         'settings.importDiagnostics.unmappedStatus': "{{count}} 个状态值无法转换，已使用安全默认值。",
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} 条不支持的重复规则已保留为备注。",
+        'settings.syncEncryptionCleanupDeferred': '加密已更新。Mindwtr 无法移除临时同步锁，但该锁会自动过期。无需重试。',
 };

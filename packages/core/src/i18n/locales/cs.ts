@@ -2279,4 +2279,5 @@ export const csOverrides: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "{{count}} hodnot data nebylo možné převést a byly vynechány.",
         'settings.importDiagnostics.unmappedStatus': "{{count}} hodnot stavu nebylo možné převést; byla použita bezpečná výchozí hodnota.",
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} nepodporovaných pravidel opakování bylo zachováno v poznámkách.",
+        'settings.syncEncryptionCleanupDeferred': 'Šifrování bylo aktualizováno. Mindwtr nemohl odebrat dočasný zámek synchronizace, ale jeho platnost automaticky vyprší. Není třeba akci opakovat.',
 };

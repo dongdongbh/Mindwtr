@@ -1677,4 +1677,5 @@ export const itOverrides: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "Non è stato possibile associare {{count}} valori di data, che sono stati omessi.",
         'settings.importDiagnostics.unmappedStatus': "Non è stato possibile associare {{count}} valori di stato; è stato usato un valore sicuro.",
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} regole di ripetizione non supportate sono state conservate nelle note.",
+        'settings.syncEncryptionCleanupDeferred': 'La crittografia è stata aggiornata. Mindwtr non ha potuto rimuovere il blocco temporaneo della sincronizzazione, ma scadrà automaticamente. Non è necessario riprovare.',
 };

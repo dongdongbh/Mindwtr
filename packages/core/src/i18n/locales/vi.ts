@@ -2326,4 +2326,5 @@ export const viOverrides: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "Không thể ánh xạ {{count}} giá trị ngày và đã lược bỏ.",
         'settings.importDiagnostics.unmappedStatus': "Không thể ánh xạ {{count}} giá trị trạng thái; đã dùng giá trị mặc định an toàn.",
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} quy tắc lặp lại không được hỗ trợ đã được giữ trong ghi chú.",
+        'settings.syncEncryptionCleanupDeferred': 'Mã hóa đã được cập nhật. Mindwtr không thể xóa khóa đồng bộ tạm thời, nhưng khóa sẽ tự động hết hạn. Bạn không cần thử lại.',
 };

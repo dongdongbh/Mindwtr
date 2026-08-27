@@ -403,6 +403,7 @@ export const SETTINGS_LABEL_KEYS = [
     'syncEncryptionErrorBackendRequired',
     'syncEncryptionErrorBackendIncompatible',
     'syncEncryptionErrorTransitionIncomplete',
+    'syncEncryptionCleanupDeferred',
     'syncEncryptionStateUnavailable',
     'syncEncryptionRetry',
     'syncEncryptionEnableBeforeFirstSyncHint',

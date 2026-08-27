@@ -19,6 +19,7 @@ import {
     enableSyncEncryption,
     getSyncEncryptionStatus,
     isSyncEncryptionBackendPending,
+    isSyncEncryptionCleanupDeferredError,
     provideSyncEncryptionPassphrase,
 } from '@/lib/sync-encryption-service';
 
@@ -38,6 +39,7 @@ type ErrorKind =
     | 'generic';
 
 type Flow = 'none' | 'enable' | 'change' | 'disable' | 'unlock';
+type WarningKind = 'cleanup-deferred';
 
 export type SyncEncryptionCardProps = {
     /** Supplies the attachment worklist; phase 2 leaves attachments plaintext without it. */
@@ -62,6 +64,7 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
     const [busy, setBusy] = useState(false);
     const [progress, setProgress] = useState<SyncEncryptionTransitionProgress | null>(null);
     const [error, setError] = useState<ErrorKind | null>(null);
+    const [warning, setWarning] = useState<WarningKind | null>(null);
     const [currentPassphrase, setCurrentPassphrase] = useState('');
     const [nextPassphrase, setNextPassphrase] = useState('');
     const [confirmPassphrase, setConfirmPassphrase] = useState('');
@@ -125,6 +128,7 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
 
     const openFlow = (next: Flow) => {
         closeFlow();
+        setWarning(null);
         setFlow(next);
     };
 
@@ -135,6 +139,7 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
         setRevealed(true);
         setGenerated(true);
         setError(null);
+        setWarning(null);
     };
 
     const run = async (operation: () => Promise<void>, terminal: ErrorKind) => {
@@ -142,12 +147,19 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
         setError(null);
         setProgress(null);
         let succeeded = false;
+        let cleanupDeferred = false;
         try {
             await operation();
             succeeded = true;
         } catch (failure) {
             logSettingsError(failure);
-            setError(classifyFailure(failure, terminal));
+            if (isSyncEncryptionCleanupDeferredError(failure)) {
+                succeeded = true;
+                cleanupDeferred = true;
+                setWarning('cleanup-deferred');
+            } else {
+                setError(classifyFailure(failure, terminal));
+            }
         }
         // Transitions are resumable, so a half-finished run still moved the state.
         const nextState = await readState();
@@ -157,7 +169,10 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
         setPendingFirstSync(await isSyncEncryptionBackendPending().catch(() => false));
         setProgress(null);
         setBusy(false);
-        if (succeeded) closeFlow();
+        if (succeeded) {
+            closeFlow();
+            if (cleanupDeferred) setWarning('cleanup-deferred');
+        }
     };
 
     const submitEnable = () => {
@@ -190,19 +205,34 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
         void (async () => {
             setBusy(true);
             setError(null);
+            setWarning(null);
             let accepted = false;
+            let cleanupDeferred = false;
             try {
                 accepted = (await provideSyncEncryptionPassphrase(currentPassphrase)) === 'ok';
                 if (!accepted) setError('wrong-passphrase');
             } catch (failure) {
                 logSettingsError(failure);
-                setError(classifyFailure(failure, 'wrong-passphrase'));
+                if (isSyncEncryptionCleanupDeferredError(failure)) {
+                    accepted = failure.outcome === 'ok';
+                    if (accepted) {
+                        cleanupDeferred = true;
+                        setWarning('cleanup-deferred');
+                    } else {
+                        setError('wrong-passphrase');
+                    }
+                } else {
+                    setError(classifyFailure(failure, 'wrong-passphrase'));
+                }
             }
             const nextState = await readState();
             setState(nextState.state);
             setStateUnavailable(nextState.unavailable);
             setBusy(false);
-            if (accepted) closeFlow();
+            if (accepted) {
+                closeFlow();
+                if (cleanupDeferred) setWarning('cleanup-deferred');
+            }
         })();
     };
 
@@ -277,6 +307,9 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
         ? `${progress.phase === 'attachments'
             ? t('settings.syncEncryptionProgressAttachments')
             : t('settings.syncEncryptionProgressDocuments')} ${progress.completed} / ${progress.total}`
+        : null;
+    const warningMessage = warning === 'cleanup-deferred'
+        ? t('settings.syncEncryptionCleanupDeferred')
         : null;
 
     const renderPassphraseInput = (label: string, value: string, onChange: (value: string) => void) => (
@@ -469,6 +502,13 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
                     <View style={[styles.settingRowColumn, { borderTopWidth: 1, borderTopColor: tc.border }]}>
                         <Text accessibilityLiveRegion="polite" style={[styles.settingDescription, { color: tc.secondaryText }]}>
                             {progressLabel}
+                        </Text>
+                    </View>
+                )}
+                {warningMessage && (
+                    <View style={[styles.settingRowColumn, { borderTopWidth: 1, borderTopColor: tc.border }]}>
+                        <Text accessibilityLiveRegion="polite" style={[styles.settingDescription, { color: tc.warning }]}>
+                            {warningMessage}
                         </Text>
                     </View>
                 )}

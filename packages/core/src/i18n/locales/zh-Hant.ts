@@ -2419,4 +2419,5 @@ export const zhHant: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "{{count}} 個日期值無法轉換，已省略。",
         'settings.importDiagnostics.unmappedStatus': "{{count}} 個狀態值無法轉換，已使用安全預設值。",
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} 條不支援的重複規則已保留為備註。",
+        'settings.syncEncryptionCleanupDeferred': '加密已更新。Mindwtr 無法移除暫時同步鎖，但該鎖會自動失效。無需重試。',
 };

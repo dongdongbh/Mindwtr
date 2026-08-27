@@ -23,6 +23,9 @@ const encryptionMocks = vi.hoisted(() => ({
   provideSyncEncryptionPassphrase: vi.fn(
     async (_passphrase: string): Promise<'ok' | 'wrong-passphrase'> => 'ok',
   ),
+  isSyncEncryptionCleanupDeferredError: (error: unknown) => (
+    error instanceof Error && error.name === 'SyncEncryptionCleanupDeferredError'
+  ),
 }));
 
 vi.mock('@/lib/sync-encryption-service', () => encryptionMocks);
@@ -249,6 +252,29 @@ describe('SyncEncryptionCard', () => {
 
     expect(texts(tree)).toContain('settings.syncEncryptionErrorTransitionIncomplete');
     expect(texts(tree)).not.toContain('settings.syncEncryptionErrorRotationFirst');
+  });
+
+  it('closes a committed transition and shows a non-retry cleanup warning', async () => {
+    encryptionMocks.getSyncEncryptionStatus
+      .mockResolvedValueOnce({ state: 'off' })
+      .mockResolvedValue({ state: 'enabled' });
+    const cleanupError = Object.assign(new Error('SYNC_ENCRYPTION_COMMITTED_CLEANUP_DEFERRED'), {
+      name: 'SyncEncryptionCleanupDeferredError',
+      outcome: undefined,
+      cleanupCause: new Error('release failed'),
+      retryAfterMs: 12_000,
+    });
+    encryptionMocks.enableSyncEncryption.mockRejectedValueOnce(cleanupError);
+    const tree = await renderCard();
+
+    await press(tree, 'settings.syncEncryptionEnable');
+    await typeInto(tree, 'settings.syncEncryptionPassphrase', 'correct horse battery');
+    await typeInto(tree, 'settings.syncEncryptionPassphraseConfirm', 'correct horse battery');
+    await press(tree, 'settings.syncEncryptionEnable');
+
+    expect(texts(tree)).toContain('settings.syncEncryptionCleanupDeferred');
+    expect(texts(tree)).not.toContain('settings.syncEncryptionErrorGeneric');
+    expect(inputLabels(tree)).not.toContain('settings.syncEncryptionPassphrase');
   });
 
   it('re-prompts inline when the entered passphrase is wrong', async () => {

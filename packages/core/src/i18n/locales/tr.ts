@@ -1519,4 +1519,5 @@ export const trOverrides: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "{{count}} tarih değeri eşlenemedi ve çıkarıldı.",
         'settings.importDiagnostics.unmappedStatus': "{{count}} durum değeri eşlenemedi; güvenli bir varsayılan kullanıldı.",
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} desteklenmeyen yineleme kuralı not olarak korundu.",
+        'settings.syncEncryptionCleanupDeferred': 'Şifreleme güncellendi. Mindwtr geçici eşitleme kilidini kaldıramadı, ancak kilit otomatik olarak sona erecek. Yeniden denemeniz gerekmez.',
 };

@@ -85,6 +85,30 @@ type TransitionRemotePort = SyncEncryptionRemotePort & {
   acquireRemoteMutationFence?: () => Promise<SyncRemoteMutationFenceLease>;
 };
 
+/** The transition and durable local commit completed, but the conditional remote
+ * fence cleanup did not. Callers must refresh/close as success and show a bounded
+ * cleanup warning; retrying the already-completed transition is the wrong remedy. */
+export class SyncEncryptionCleanupDeferredError<T = void> extends Error {
+  readonly retryAfterMs: number;
+
+  constructor(
+    public readonly outcome: T,
+    public readonly cleanupCause: unknown,
+    retryAfterMs: number,
+  ) {
+    super('SYNC_ENCRYPTION_COMMITTED_CLEANUP_DEFERRED');
+    this.name = 'SyncEncryptionCleanupDeferredError';
+    this.retryAfterMs = Math.max(0, Math.floor(retryAfterMs));
+    (this as Error & { cause?: unknown }).cause = cleanupCause;
+  }
+}
+
+export const isSyncEncryptionCleanupDeferredError = (
+  error: unknown,
+): error is SyncEncryptionCleanupDeferredError<unknown> => (
+  error instanceof SyncEncryptionCleanupDeferredError
+);
+
 const TRANSITION_FENCE_OPTIONS = {
   ownerId: 'mindwtr-mobile',
   purpose: 'encryption-transition' as const,
@@ -485,15 +509,36 @@ const runWithRemoteMutationFence = async <T>(
     },
   };
 
+  let result: T;
   try {
-    const result = await operation(guardedRemote, guardedKeyCache, guardedLocalState);
+    result = await operation(guardedRemote, guardedKeyCache, guardedLocalState);
     await assertHeld();
     await flushSyncEncryptionLocalState();
     await assertHeld();
-    return result;
-  } finally {
-    await lease.release();
+  } catch (primaryError) {
+    try {
+      await lease.release();
+    } catch (cleanupError) {
+      if (primaryError instanceof Error) {
+        (primaryError as Error & { cleanupError?: unknown }).cleanupError = cleanupError;
+      }
+    }
+    throw primaryError;
   }
+
+  try {
+    await lease.release();
+  } catch (cleanupError) {
+    let retryAfterMs = 0;
+    try {
+      retryAfterMs = lease.retryAfterMs();
+    } catch {
+      // The cleanup failure remains bounded by the lease protocol even if
+      // the adapter cannot provide a more precise remaining duration.
+    }
+    throw new SyncEncryptionCleanupDeferredError(result, cleanupError, retryAfterMs);
+  }
+  return result;
 };
 
 const createWebdavRemotePort = async (appData: AppData | null): Promise<TransitionRemotePort> => {

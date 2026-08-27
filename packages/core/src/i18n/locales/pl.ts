@@ -1496,4 +1496,5 @@ export const plOverrides: Record<string, string> = {
         'settings.importDiagnostics.unmappedDate': "Nie udało się odwzorować {{count}} wartości daty, więc je pominięto.",
         'settings.importDiagnostics.unmappedStatus': "Nie udało się odwzorować {{count}} wartości stanu; użyto bezpieślnej wartości domyślnej.",
         'settings.importDiagnostics.unsupportedRecurrence': "{{count}} nieobsługiwanych reguł powtarzania zachowano jako notatki.",
+        'settings.syncEncryptionCleanupDeferred': 'Szyfrowanie zostało zaktualizowane. Mindwtr nie mógł usunąć tymczasowej blokady synchronizacji, ale wygaśnie ona automatycznie. Ponawianie próby nie jest potrzebne.',
 };
