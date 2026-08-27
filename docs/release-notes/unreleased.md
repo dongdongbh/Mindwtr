@@ -6,6 +6,7 @@ Changes collected after `v1.2.1` and before the next version tag.
 
 ## Full Change List
 
+- Focus now surfaces Review Due above Next Actions on desktop and mobile, and each task appears in only its highest-priority section: Schedule, then Review Due, then Next Actions. (#1092)
 - Tasks assigned to a project section now show that section beside the project name in task metadata on desktop and mobile, so their project context stays specific outside the project view. (#1091)
 - Someday/Maybe can now work as a set of named lists: tasks filed inside Someday projects remain visible in the Someday view, can be grouped under those project names, and Inbox Processing now offers Area and Project before filing to Someday or Incubate on desktop and mobile. (#1090)
 - Processing the inbox gained **Incubate**: park an item without deciding what it is, pick a date, and it comes back to the clarify pass on that date so you can decide again. It waits in Someday/Maybe meanwhile, and the pass marks it "Back to clarify" so it doesn't read as a fresh capture. **Later** is now called **Start later** and moved next to "Yes, it's actionable", since it does what it always did — set a start date and file the task under Next Actions. Deciding to defer an action and deciding not to decide yet are different calls, and they now sit on the branch each belongs to. (#1089)

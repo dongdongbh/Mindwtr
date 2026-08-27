@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { safeFormatDate, useTaskStore, type Project, type Task } from '@mindwtr/core';
 import { LanguageProvider } from '../../contexts/language-context';
+import { KeybindingProvider } from '../../contexts/keybinding-context';
 import { AgendaView } from './AgendaView';
 import { useUiStore } from '../../store/ui-store';
 import { MINDWTR_NAVIGATE_EVENT } from '../../lib/navigation-events';
@@ -65,6 +66,36 @@ const renderAgenda = () => render(
         <AgendaView />
     </LanguageProvider>
 );
+
+const renderAgendaWithKeyboard = () => render(
+    <LanguageProvider>
+        <KeybindingProvider currentView="agenda" onNavigate={() => undefined}>
+            <AgendaView />
+        </KeybindingProvider>
+    </LanguageProvider>
+);
+
+const makeAgendaTask = (id: string, title: string, overrides: Partial<Task> = {}): Task => ({
+    id,
+    title,
+    status: 'next',
+    tags: [],
+    contexts: [],
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    ...overrides,
+});
+
+const setAgendaTasks = (tasks: Task[]) => useTaskStore.setState({
+    tasks,
+    _allTasks: tasks,
+    projects: [],
+    _allProjects: [],
+    areas: [],
+    _allAreas: [],
+    settings: {},
+    highlightTaskId: null,
+});
 
 describe('AgendaView', () => {
     beforeEach(() => {
@@ -220,6 +251,33 @@ describe('AgendaView', () => {
         expect(getByText('Top task 2')).toBeInTheDocument();
         expect(getByText('Top task 3')).toBeInTheDocument();
         expect(queryByText('Top task 4')).not.toBeInTheDocument();
+    });
+
+    it('prioritizes a review-due task over ordinary Next Actions in Top 3 mode', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(nowIso));
+        const tasks = [
+            makeAgendaTask('next-1', 'Next task 1', { createdAt: '2026-02-28T09:00:00.000Z' }),
+            makeAgendaTask('next-2', 'Next task 2', { createdAt: '2026-02-28T10:00:00.000Z' }),
+            makeAgendaTask('next-3', 'Next task 3', { createdAt: '2026-02-28T11:00:00.000Z' }),
+            makeAgendaTask('review-due', 'Review due task', {
+                status: 'waiting',
+                reviewAt: '2026-02-27T09:00:00.000Z',
+            }),
+        ];
+
+        setAgendaTasks(tasks);
+        useUiStore.setState((state) => ({
+            ...state,
+            listOptions: { ...state.listOptions, focusTop3Only: true },
+        }));
+
+        const { getByText, queryByText } = renderAgenda();
+
+        expect(getByText('Review due task')).toBeInTheDocument();
+        expect(getByText('Next task 1')).toBeInTheDocument();
+        expect(getByText('Next task 2')).toBeInTheDocument();
+        expect(queryByText('Next task 3')).not.toBeInTheDocument();
     });
 
     it('collapses expanded task details when page details are turned off', () => {
@@ -951,6 +1009,98 @@ describe('AgendaView', () => {
         expect(queryByRole('heading', { name: /today/i })).not.toBeInTheDocument();
         expect(getByRole('heading', { name: /review due/i })).toBeInTheDocument();
         expect(getAllByText('Waiting review task')).toHaveLength(1);
+    });
+
+    it('renders Review Due between Schedule and Next Actions', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(nowIso));
+        const tasks = [
+            makeAgendaTask('schedule-task', 'Schedule task', { dueDate: '2026-02-28' }),
+            makeAgendaTask('review-task', 'Review task', {
+                status: 'waiting',
+                reviewAt: '2026-02-27T09:00:00.000Z',
+            }),
+            makeAgendaTask('next-task', 'Next task'),
+        ];
+        setAgendaTasks(tasks);
+
+        renderAgenda();
+
+        const scheduleSection = document.getElementById('agenda-section-schedule');
+        const reviewSection = document.getElementById('agenda-section-reviewDue');
+        const nextSection = document.getElementById('agenda-section-nextActions');
+        expect(scheduleSection).not.toBeNull();
+        expect(reviewSection).not.toBeNull();
+        expect(nextSection).not.toBeNull();
+        expect(scheduleSection!.compareDocumentPosition(reviewSection!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(reviewSection!.compareDocumentPosition(nextSection!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('walks visible Focus tasks in rendered section order', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(nowIso));
+        const tasks = [
+            makeAgendaTask('schedule-task', 'Schedule task', { dueDate: '2026-02-28' }),
+            makeAgendaTask('review-task', 'Review task', {
+                status: 'waiting',
+                reviewAt: '2026-02-27T09:00:00.000Z',
+            }),
+            makeAgendaTask('next-task', 'Next task'),
+            makeAgendaTask('upcoming-task', 'Upcoming task', { startTime: '2026-03-03T09:00:00.000Z' }),
+        ];
+        setAgendaTasks(tasks);
+
+        renderAgendaWithKeyboard();
+        const focusedTaskId = () => document.activeElement
+            ?.closest<HTMLElement>('[data-task-id]')
+            ?.dataset.taskId;
+
+        fireEvent.keyDown(window, { key: 'j' });
+        expect(focusedTaskId()).toBe('review-task');
+        fireEvent.keyDown(window, { key: 'j' });
+        expect(focusedTaskId()).toBe('next-task');
+        fireEvent.keyDown(window, { key: 'j' });
+        expect(focusedTaskId()).toBe('upcoming-task');
+    });
+
+    it('shows a review-due Next task only in Review Due and walks it once', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(nowIso));
+        const reviewNext = makeAgendaTask('review-next', 'Review next task', {
+            reviewAt: '2026-02-27T09:00:00.000Z',
+        });
+        const plainNext = makeAgendaTask('plain-next', 'Plain next task');
+        const tasks = [reviewNext, plainNext];
+        setAgendaTasks(tasks);
+
+        const { container } = renderAgendaWithKeyboard();
+        const reviewRow = container.querySelector<HTMLElement>('[data-task-id="review-next"]');
+
+        expect(container.querySelectorAll('[data-task-id="review-next"]')).toHaveLength(1);
+        expect(document.getElementById('agenda-section-reviewDue')).toContainElement(reviewRow);
+        expect(document.getElementById('agenda-section-nextActions')).not.toContainElement(reviewRow);
+
+        fireEvent.keyDown(window, { key: 'j' });
+        expect(document.activeElement?.closest<HTMLElement>('[data-task-id]')?.dataset.taskId)
+            .toBe('plain-next');
+    });
+
+    it('keeps a review-due Next task due today only in Schedule', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(nowIso));
+        const task = makeAgendaTask('scheduled-review-next', 'Scheduled review next task', {
+            dueDate: '2026-02-28',
+            reviewAt: '2026-02-27T09:00:00.000Z',
+        });
+        setAgendaTasks([task]);
+
+        const { container } = renderAgenda();
+        const row = container.querySelector<HTMLElement>('[data-task-id="scheduled-review-next"]');
+
+        expect(container.querySelectorAll('[data-task-id="scheduled-review-next"]')).toHaveLength(1);
+        expect(document.getElementById('agenda-section-schedule')).toContainElement(row);
+        expect(document.getElementById('agenda-section-reviewDue')).toBeNull();
+        expect(document.getElementById('agenda-section-nextActions')).toBeNull();
     });
 
     it('opens a project due for review from Focus', () => {

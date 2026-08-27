@@ -789,18 +789,7 @@ export default function FocusScreen() {
       return !sequentialFirstTaskIds.has(task.id);
     };
 
-    const reviewDueItems = nonFocusedTasks
-      .filter((task) => isDueForReview(task.reviewAt, now))
-      .sort((a, b) => {
-        const aReview = safeParseDate(a.reviewAt)?.getTime() ?? Number.POSITIVE_INFINITY;
-        const bReview = safeParseDate(b.reviewAt)?.getTime() ?? Number.POSITIVE_INFINITY;
-        if (aReview !== bReview) return aReview - bReview;
-        return a.title.localeCompare(b.title);
-      });
-    const reviewDueIds = new Set(reviewDueItems.map((task) => task.id));
-
     const scheduleItems = nonFocusedTasks.filter((task) => {
-      if (reviewDueIds.has(task.id)) return false;
       if (task.status !== 'next') return false;
       if (isSequentialBlocked(task)) return false;
       const due = safeParseDueDate(task.dueDate);
@@ -814,6 +803,15 @@ export default function FocusScreen() {
     });
 
     const scheduleIds = new Set(scheduleItems.map((task) => task.id));
+    const reviewDueItems = nonFocusedTasks
+      .filter((task) => !scheduleIds.has(task.id) && isDueForReview(task.reviewAt, now))
+      .sort((a, b) => {
+        const aReview = safeParseDate(a.reviewAt)?.getTime() ?? Number.POSITIVE_INFINITY;
+        const bReview = safeParseDate(b.reviewAt)?.getTime() ?? Number.POSITIVE_INFINITY;
+        if (aReview !== bReview) return aReview - bReview;
+        return a.title.localeCompare(b.title);
+      });
+    const reviewDueIds = new Set(reviewDueItems.map((task) => task.id));
 
     const nextItems = nonFocusedTasks.filter((task) => {
       if (reviewDueIds.has(task.id)) return false;
@@ -1035,6 +1033,13 @@ export default function FocusScreen() {
         type: 'schedule',
       },
       {
+        title: t('agenda.reviewDue') ?? 'Review Due',
+        data: expandedSections.reviewDue ? buildTaskItems(reviewDue) : [],
+        totalCount: reviewDue.length,
+        expanded: expandedSections.reviewDue,
+        type: 'reviewDue',
+      },
+      {
         title: t('focus.nextActions') ?? t('list.next'),
         data: buildGroupedNextItems(),
         totalCount: nextActions.length,
@@ -1048,13 +1053,6 @@ export default function FocusScreen() {
         expanded: expandedSections.upcoming,
         type: 'upcoming' as const,
       }] : []),
-      {
-        title: t('agenda.reviewDue') ?? 'Review Due',
-        data: expandedSections.reviewDue ? buildTaskItems(reviewDue) : [],
-        totalCount: reviewDue.length,
-        expanded: expandedSections.reviewDue,
-        type: 'reviewDue',
-      },
       {
         title: t('agenda.reviewDueProjects') ?? 'Projects to review',
         data: expandedSections.reviewProjects ? buildProjectItems(reviewDueProjects) : [],
