@@ -233,6 +233,8 @@ const nodeQuickCrypto: SyncCryptoNativeModule = {
 const SYNC_DIR = 'file://sync';
 const SYNC_URI = `${SYNC_DIR}/data.json`;
 const ENC_URI = `${SYNC_DIR}/data.json.enc`;
+const SAF_SYNC_URI = 'content://provider/tree/root/document/root%2Fdata.json';
+const SAF_ENC_URI = 'content://provider/tree/root/document/root%2Fdata.json.enc';
 const PASSPHRASE = 'correct horse battery staple';
 // Cheap Argon2 params keep the suite fast; the real defaults are exercised by the
 // transition tests below, which go through the production code path unchanged.
@@ -257,6 +259,16 @@ beforeEach(async () => {
   material = await deriveSyncKeyMaterial(
     PASSPHRASE, new Uint8Array(16).fill(7), FAST_PARAMS, mobileSyncCryptoPrimitives,
   );
+  const fileSystem = await import('./file-system');
+  const readStored = async (uri: string, options?: { encoding?: string }): Promise<string> => {
+    const bytes = fs.files.get(uri);
+    if (!bytes) throw new Error(`ENOENT ${uri}`);
+    return Buffer.from(bytes).toString(options?.encoding === 'base64' ? 'base64' : 'utf8');
+  };
+  vi.mocked(fileSystem.StorageAccessFramework!.readAsStringAsync!).mockImplementation(readStored);
+  vi.mocked(fileSystem.StorageAccessFramework!.readDirectoryAsync!)
+    .mockImplementation(async (dir: string) => childUrisOf(dir));
+  vi.mocked(fileSystem.readAsStringAsync).mockImplementation(readStored);
 });
 
 afterEach(() => { vi.clearAllMocks(); });
@@ -409,6 +421,30 @@ describe('File Sync encryption — no-key discovery (decisions #2 and #5)', () =
     const before = fs.files.size;
     await expect(readSyncFile(SYNC_URI)).resolves.toMatchObject({ tasks: [{ title: 'plain' }] });
     expect(fs.files.size).toBe(before);
+    expect(asyncStorage.get(SYNC_ENCRYPTION_STATE_KEY)).toBeUndefined();
+  });
+
+  it('fails closed without writes or local-state mutation when a listed encrypted sibling is unreadable', async () => {
+    fs.files.set(SAF_SYNC_URI, new Uint8Array(0));
+    const sealed = await seedEncrypted(appData('peer'), material, SAF_ENC_URI);
+    const { StorageAccessFramework, readAsStringAsync, writeAsStringAsync } = await import('./file-system');
+    const readStored = async (uri: string, options?: { encoding?: string }): Promise<string> => {
+      if (uri === SAF_ENC_URI) throw new Error('provider encrypted sibling read denied');
+      const bytes = fs.files.get(uri);
+      if (!bytes) throw new Error(`ENOENT ${uri}`);
+      return Buffer.from(bytes).toString(options?.encoding === 'base64' ? 'base64' : 'utf8');
+    };
+    vi.mocked(StorageAccessFramework!.readDirectoryAsync!).mockResolvedValue([SAF_SYNC_URI, SAF_ENC_URI]);
+    vi.mocked(StorageAccessFramework!.readAsStringAsync!).mockImplementation(readStored);
+    vi.mocked(readAsStringAsync).mockImplementation(readStored);
+
+    await expect(readSyncFile(SAF_SYNC_URI)).rejects.toThrow('provider encrypted sibling read denied');
+
+    expect(fs.files.get(SAF_SYNC_URI)).toEqual(new Uint8Array(0));
+    expect(fs.files.get(SAF_ENC_URI)).toEqual(sealed);
+    expect(StorageAccessFramework!.writeAsStringAsync).not.toHaveBeenCalled();
+    expect(writeAsStringAsync).not.toHaveBeenCalled();
+    expect(syncEncryptionLocalState.read()).toBeNull();
     expect(asyncStorage.get(SYNC_ENCRYPTION_STATE_KEY)).toBeUndefined();
   });
 });
@@ -1054,6 +1090,42 @@ describe('local-state persistence and the remote-plaintext state', () => {
   it('File Sync: a genuinely empty folder still reads as empty', async () => {
     syncEncryptionLocalState.write({ state: 'enabled', discoveredSalt: 'aabb', discoveredParams: FAST_PARAMS });
     await expect(readSyncFile(SYNC_URI, { material })).resolves.toBeNull();
+  });
+
+  it('File Sync: a keyed SAF device fails closed without writes or state mutation when plaintext discovery is unreadable', async () => {
+    fs.files.set(SAF_SYNC_URI, new TextEncoder().encode(JSON.stringify(appData('peer'), null, 2)));
+    syncEncryptionLocalState.write({ state: 'enabled', discoveredSalt: '07'.repeat(16), discoveredParams: FAST_PARAMS });
+    await flushSyncEncryptionLocalState();
+    vi.clearAllMocks();
+    const stateBefore = syncEncryptionLocalState.read();
+    const bytesBefore = new Uint8Array(fs.files.get(SAF_SYNC_URI)!);
+    const { StorageAccessFramework, readAsStringAsync, writeAsStringAsync } = await import('./file-system');
+    const readStored = async (uri: string, options?: { encoding?: string }): Promise<string> => {
+      if (uri === SAF_SYNC_URI) throw new Error('provider plaintext sibling read denied');
+      const bytes = fs.files.get(uri);
+      if (!bytes) throw new Error(`ENOENT ${uri}`);
+      return Buffer.from(bytes).toString(options?.encoding === 'base64' ? 'base64' : 'utf8');
+    };
+    vi.mocked(StorageAccessFramework!.readDirectoryAsync!).mockResolvedValue([SAF_SYNC_URI]);
+    vi.mocked(StorageAccessFramework!.readAsStringAsync!).mockImplementation(readStored);
+    vi.mocked(readAsStringAsync).mockImplementation(readStored);
+
+    await expect(readSyncFile(SAF_SYNC_URI, { material }))
+      .rejects.toThrow('provider plaintext sibling read denied');
+
+    expect(fs.files.get(SAF_SYNC_URI)).toEqual(bytesBefore);
+    expect(StorageAccessFramework!.writeAsStringAsync).not.toHaveBeenCalled();
+    expect(writeAsStringAsync).not.toHaveBeenCalled();
+    expect(syncEncryptionLocalState.read()).toEqual(stateBefore);
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('File Sync: a keyed SAF device still treats confirmed absence of both generations as empty', async () => {
+    syncEncryptionLocalState.write({ state: 'enabled', discoveredSalt: '07'.repeat(16), discoveredParams: FAST_PARAMS });
+    const { StorageAccessFramework } = await import('./file-system');
+    vi.mocked(StorageAccessFramework!.readDirectoryAsync!).mockResolvedValue([]);
+
+    await expect(readSyncFile(SAF_SYNC_URI, { material })).resolves.toBeNull();
   });
 
   it('remote-plaintext blocks auto-sync but keeps the key resolvable so disable can still run', async () => {

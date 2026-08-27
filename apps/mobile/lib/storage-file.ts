@@ -647,7 +647,10 @@ const readEncryptedSyncFile = async (
         // the `.enc` artifact is gone and the plaintext original is back. Never "no data" —
         // that would merge this device's store into a fresh plaintext generation and fork the
         // folder, and this device never follows the remote down to plaintext on its own.
-        const plain = await readSyncArtifactBytes(resolvedUri).catch(() => null);
+        // A provider failure here is not proof that the plaintext generation is absent.
+        // Propagate it so the keyed cycle cannot recreate `.enc` from local data while a
+        // peer-restored plaintext document is merely unreadable.
+        const plain = await readSyncArtifactBytes(resolvedUri);
         if (isPlaintextSyncArtifact(plain)) {
             markRemotePlaintextDiscovered(syncEncryptionLocalState);
             await flushSyncEncryptionLocalState();

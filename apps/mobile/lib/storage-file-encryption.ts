@@ -79,8 +79,12 @@ export const readSyncArtifactBytes = async (uri: string): Promise<Uint8Array | n
             if (!info.exists) return null;
             const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
             return base64 ? base64ToBytes(base64) : new Uint8Array(0);
-        } catch {
-            if (isSaf(uri)) return null; // SAF has no exists() — an unreadable doc is an absent one.
+        } catch (fallbackError) {
+            // A failed SAF read is absence only when the explicit info probe above confirms
+            // `exists: false`. If both read ladders fail, propagate that provider error:
+            // treating an unreadable opposite encryption generation as missing can license
+            // an ordinary sync write beside (or over) peer bytes.
+            if (isSaf(uri)) throw fallbackError;
             throw error;
         }
     }
