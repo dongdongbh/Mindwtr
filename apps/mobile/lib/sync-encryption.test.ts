@@ -46,8 +46,9 @@ vi.mock('./file-system', () => {
     readDirectoryAsync: vi.fn(async (dir: string) =>
       [...fs.files.keys()].filter((uri) => dirOf(uri) === dir.replace(/\/+$/, ''))),
     createFileAsync: vi.fn(async (dir: string, name: string) => {
-      const uri = `${dir.replace(/\/+$/, '')}/${name}`;
-      if (!fs.files.has(uri)) fs.files.set(uri, new Uint8Array(0));
+      const requested = `${dir.replace(/\/+$/, '')}/${name}`;
+      const uri = fs.files.has(requested) ? `${requested}.provider-copy` : requested;
+      fs.files.set(uri, new Uint8Array(0));
       return uri;
     }),
     deleteAsync: vi.fn(async (uri: string) => { fs.files.delete(uri); }),
@@ -83,7 +84,10 @@ vi.mock('expo-file-system', () => {
   class File {
     constructor(public uri: string) {}
     get exists() { return fs.files.has(this.uri); }
-    create() { if (!fs.files.has(this.uri)) fs.files.set(this.uri, new Uint8Array(0)); }
+    create(options?: { overwrite?: boolean }) {
+      if (fs.files.has(this.uri) && !options?.overwrite) throw new Error(`EEXIST ${this.uri}`);
+      fs.files.set(this.uri, new Uint8Array(0));
+    }
     write(content: string | Uint8Array) {
       fs.write(this.uri, typeof content === 'string' ? fs.toBytes(content) : content);
     }
@@ -91,6 +95,15 @@ vi.mock('expo-file-system', () => {
     async text() { return Buffer.from(fs.files.get(this.uri) ?? new Uint8Array(0)).toString('utf8'); }
     delete() { fs.files.delete(this.uri); }
     copy(target: { uri: string }) { fs.files.set(target.uri, fs.files.get(this.uri) ?? new Uint8Array(0)); }
+    rename(name: string) {
+      const target = `${dirOf(this.uri)}/${name}`;
+      if (fs.files.has(target)) throw new Error(`EEXIST ${target}`);
+      const bytes = fs.files.get(this.uri);
+      if (!bytes) throw new Error(`ENOENT ${this.uri}`);
+      fs.files.set(target, bytes);
+      fs.files.delete(this.uri);
+      this.uri = target;
+    }
   }
   class Directory {
     constructor(public uri: string) {}
@@ -105,6 +118,17 @@ vi.mock('expo-file-system', () => {
 
 vi.mock('expo-document-picker', () => ({ getDocumentAsync: vi.fn() }));
 vi.mock('expo-sharing', () => ({ isAvailableAsync: vi.fn(), shareAsync: vi.fn() }));
+vi.mock('./sync-file-transition-cas', () => ({
+  renameSafTransitionDocument: vi.fn(async (uri: string, name: string) => {
+    const target = `${dirOf(uri)}/${name}`;
+    if (fs.files.has(target)) throw new Error(`EEXIST ${target}`);
+    const bytes = fs.files.get(uri);
+    if (!bytes) throw new Error(`ENOENT ${uri}`);
+    fs.files.set(target, bytes);
+    fs.files.delete(uri);
+    return { uri: target, name };
+  }),
+}));
 vi.mock('./sync-path-bookmarks', () => ({
   createSyncPathBookmark: vi.fn(async () => null),
   readBookmarkedSyncFileText: vi.fn(async () => null),
@@ -494,6 +518,7 @@ describe('File Sync transitions through core orchestration', () => {
     expect(inspectSyncArtifact(fs.files.get(`${SYNC_DIR}/attachments/a1.png`)!).kind).toBe('encrypted');
     expect(fs.files.has(SYNC_URI)).toBe(false);
     expect(fs.files.has(`${SYNC_DIR}/data.json.bak`)).toBe(false);
+    expect([...fs.files.keys()].filter((uri) => uri.includes('.mindwtr-et-'))).toEqual([]);
 
     await expect(getMobileSyncEncryptionStatus()).resolves.toMatchObject({
       state: 'enabled',
@@ -526,6 +551,115 @@ describe('File Sync transitions through core orchestration', () => {
     await expect(port!.write('data.json.enc', new Uint8Array([8, 8]), missing.version))
       .rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
     expect(fs.files.get(ENC_URI)).toEqual(peerCreated);
+  });
+
+  it('atomically quarantines the displaced path generation before replace and remove', async () => {
+    seedPlaintextFolder();
+    const attachmentName = 'attachments/a1.png';
+    const attachmentUri = `${SYNC_DIR}/${attachmentName}`;
+    const peerReplace = new Uint8Array([4, 4, 4]);
+    let replaceInjected = false;
+    const replacePort = await createFileSyncEncryptionRemotePort(SYNC_URI, {
+      onMutationPoint: (point, name) => {
+        if (!replaceInjected && point === 'before-quarantine' && name === attachmentName) {
+          replaceInjected = true;
+          fs.files.set(attachmentUri, peerReplace);
+        }
+      },
+    });
+    const replaceBaseline = await replacePort!.read(attachmentName);
+
+    await expect(replacePort!.write(attachmentName, new Uint8Array([2, 2]), replaceBaseline.version))
+      .rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+    expect(fs.files.get(attachmentUri)).toEqual(peerReplace);
+    expect([...fs.files.entries()].find(([uri]) => uri.includes('.mindwtr-et-q-'))?.[1]).toEqual(peerReplace);
+    expect([...fs.files.keys()].some((uri) => uri.includes('.mindwtr-et-s-'))).toBe(true);
+
+    fs.files.clear();
+    seedPlaintextFolder();
+    const peerRemove = new Uint8Array([5, 5, 5]);
+    let removeInjected = false;
+    const removePort = await createFileSyncEncryptionRemotePort(SYNC_URI, {
+      onMutationPoint: (point, name) => {
+        if (!removeInjected && point === 'before-quarantine' && name === attachmentName) {
+          removeInjected = true;
+          fs.files.set(attachmentUri, peerRemove);
+        }
+      },
+    });
+    const removeBaseline = await removePort!.read(attachmentName);
+
+    await expect(removePort!.remove(attachmentName, removeBaseline.version!))
+      .rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+    expect(fs.files.get(attachmentUri)).toEqual(peerRemove);
+    expect([...fs.files.entries()].find(([uri]) => uri.includes('.mindwtr-et-q-'))?.[1]).toEqual(peerRemove);
+
+    fs.files.clear();
+    seedPlaintextFolder();
+    const peerRecreated = new Uint8Array([6, 6, 6]);
+    let recreateInjected = false;
+    const recreatePort = await createFileSyncEncryptionRemotePort(SYNC_URI, {
+      onMutationPoint: (point, name) => {
+        if (!recreateInjected && point === 'before-remove-commit' && name === attachmentName) {
+          recreateInjected = true;
+          fs.files.set(attachmentUri, peerRecreated);
+        }
+      },
+    });
+    const recreateBaseline = await recreatePort!.read(attachmentName);
+
+    await expect(recreatePort!.remove(attachmentName, recreateBaseline.version!))
+      .rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+    expect(fs.files.get(attachmentUri)).toEqual(peerRecreated);
+    expect([...fs.files.keys()].some((uri) => uri.includes('.mindwtr-et-q-'))).toBe(true);
+  });
+
+  it('uses bounded exclusive create-new install and preserves a peer collision', async () => {
+    const peer = new Uint8Array([7, 7, 7]);
+    let injected = false;
+    let stagedLeaf = '';
+    const port = await createFileSyncEncryptionRemotePort(SYNC_URI, {
+      onMutationPoint: (point, name) => {
+        if (!injected && point === 'before-install' && name === 'data.json.enc') {
+          injected = true;
+          stagedLeaf = [...fs.files.keys()].map(leafOf).find((leaf) => leaf.startsWith('.mindwtr-et-s-')) ?? '';
+          fs.files.set(ENC_URI, peer);
+        }
+      },
+    });
+    const missing = await port!.read('data.json.enc');
+
+    await expect(port!.write('data.json.enc', new Uint8Array([8, 8]), missing.version))
+      .rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+    expect(fs.files.get(ENC_URI)).toEqual(peer);
+    expect(stagedLeaf).toMatch(/^\.mindwtr-et-s-/);
+    expect(stagedLeaf).not.toContain('data.json.enc');
+    expect(stagedLeaf.length).toBeLessThan(48);
+    expect([...fs.files.keys()].some((uri) => uri.includes('.mindwtr-et-s-'))).toBe(true);
+  });
+
+  it('uses the SAF native atomic rename so a provider-side peer edit is preserved', async () => {
+    const configuredUri = 'content://provider/tree/root/document/root%2Fdata.json';
+    const canonicalUri = 'content://provider/tree/root/document/root/data.json';
+    const original = new Uint8Array([1, 2, 3]);
+    const peer = new Uint8Array([9, 9, 9]);
+    fs.files.set(canonicalUri, original);
+    let injected = false;
+    const port = await createFileSyncEncryptionRemotePort(configuredUri, {
+      onMutationPoint: (point, name) => {
+        if (!injected && point === 'before-quarantine' && name === 'data.json') {
+          injected = true;
+          fs.files.set(canonicalUri, peer);
+        }
+      },
+    });
+    const baseline = await port!.read('data.json');
+
+    await expect(port!.write('data.json', new Uint8Array([4, 5, 6]), baseline.version))
+      .rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+    expect(fs.files.get(canonicalUri)).toEqual(peer);
+    expect([...fs.files.entries()].find(([uri]) => uri.includes('.mindwtr-et-q-'))?.[1]).toEqual(peer);
+    expect([...fs.files.keys()].some((uri) => uri.includes('.mindwtr-et-s-'))).toBe(true);
   });
 
   it('resumes an interrupted enable without re-deriving a second salt', async () => {

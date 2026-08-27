@@ -4905,24 +4905,167 @@ mod tests {
     }
 
     #[test]
-    fn transition_version_guard_preserves_peer_bytes_and_create_new_refuses_a_peer_file() {
+    fn transition_quarantine_cas_preserves_racing_replace_remove_and_create_generations() {
         let dir = tempfile::tempdir().expect("temp dir");
         let target = dir.path().join("artifact.bin");
         fs::write(&target, b"initial").expect("initial");
         let expected = transition_artifact_fingerprint(b"initial");
-        fs::write(&target, b"peer").expect("peer update");
-
-        let error = write_and_verify(&target, b"ours", Some(&expected), |_| Ok(()))
-            .expect_err("stale replacement must conflict");
+        let mut replace_injected = false;
+        let error = write_and_verify_with_hook(
+            &target,
+            b"ours",
+            Some(&expected),
+            |_| Ok(()),
+            |point, path| {
+                if point == TransitionMutationPoint::BeforeQuarantine && !replace_injected {
+                    replace_injected = true;
+                    fs::write(path, b"peer").map_err(|error| error.to_string())?;
+                }
+                Ok(())
+            },
+        )
+        .expect_err("stale replacement must conflict");
         assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
         assert_eq!(fs::read(&target).expect("peer bytes"), b"peer");
+        assert!(
+            dir.path().read_dir().expect("list").any(|entry| {
+                entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .contains("encryption-stage")
+            }),
+            "the proposed generation remains staged after conflict"
+        );
+
+        let remove_target = dir.path().join("remove.bin");
+        fs::write(&remove_target, b"remove-initial").expect("remove initial");
+        let remove_expected = transition_artifact_fingerprint(b"remove-initial");
+        let mut remove_injected = false;
+        let error = remove_transition_artifact_if_version_with_hook(
+            &remove_target,
+            &remove_expected,
+            |point, path| {
+                if point == TransitionMutationPoint::BeforeQuarantine && !remove_injected {
+                    remove_injected = true;
+                    fs::write(path, b"remove-peer").map_err(|error| error.to_string())?;
+                }
+                Ok(())
+            },
+        )
+        .expect_err("stale remove must conflict");
+        assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
+        assert_eq!(
+            fs::read(&remove_target).expect("peer remove bytes"),
+            b"remove-peer"
+        );
+
+        let recreated_target = dir.path().join("remove-recreated.bin");
+        fs::write(&recreated_target, b"remove-current").expect("remove current");
+        let recreated_expected = transition_artifact_fingerprint(b"remove-current");
+        let mut recreate_injected = false;
+        let error = remove_transition_artifact_if_version_with_hook(
+            &recreated_target,
+            &recreated_expected,
+            |point, path| {
+                if point == TransitionMutationPoint::BeforeRemoveCommit && !recreate_injected {
+                    recreate_injected = true;
+                    fs::write(path, b"peer-recreated").map_err(|error| error.to_string())?;
+                }
+                Ok(())
+            },
+        )
+        .expect_err("a peer generation recreated before remove commit must conflict");
+        assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
+        assert_eq!(
+            fs::read(&recreated_target).expect("peer recreated bytes"),
+            b"peer-recreated"
+        );
+        assert!(
+            dir.path().read_dir().expect("list").any(|entry| {
+                entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .contains("encryption-quarantine")
+            }),
+            "the displaced generation remains quarantined after a remove race"
+        );
 
         let create_target = dir.path().join("new.bin");
-        fs::write(&create_target, b"peer-created").expect("peer create");
-        let error = write_and_verify(&create_target, b"ours", None, |_| Ok(()))
-            .expect_err("create-new must not replace");
+        let mut create_injected = false;
+        let error = write_and_verify_with_hook(
+            &create_target,
+            b"ours",
+            None,
+            |_| Ok(()),
+            |point, path| {
+                if point == TransitionMutationPoint::BeforeInstall && !create_injected {
+                    create_injected = true;
+                    fs::write(path, b"peer-created").map_err(|error| error.to_string())?;
+                }
+                Ok(())
+            },
+        )
+        .expect_err("create-new must not replace");
         assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
-        assert_eq!(fs::read(&create_target).expect("peer-created bytes"), b"peer-created");
+        assert_eq!(
+            fs::read(&create_target).expect("peer-created bytes"),
+            b"peer-created"
+        );
+
+        let install_target = dir.path().join("install-race.bin");
+        fs::write(&install_target, b"install-initial").expect("install initial");
+        let install_expected = transition_artifact_fingerprint(b"install-initial");
+        let mut install_injected = false;
+        let error = write_and_verify_with_hook(
+            &install_target,
+            b"ours",
+            Some(&install_expected),
+            |_| Ok(()),
+            |point, path| {
+                if point == TransitionMutationPoint::BeforeInstall && !install_injected {
+                    install_injected = true;
+                    fs::write(path, b"late-peer").map_err(|error| error.to_string())?;
+                }
+                Ok(())
+            },
+        )
+        .expect_err("a peer create after quarantine must conflict");
+        assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
+        assert_eq!(
+            fs::read(&install_target).expect("late peer bytes"),
+            b"late-peer"
+        );
+    }
+
+    #[test]
+    fn transition_create_new_uses_portable_exclusive_copy_without_hard_links() {
+        let source_dir = tempfile::tempdir().expect("source temp dir");
+        let target_dir = tempfile::tempdir().expect("target temp dir");
+        let source = source_dir.path().join("source.bin");
+        let target = target_dir.path().join("target.bin");
+        fs::write(&source, b"portable copy").expect("source");
+
+        copy_file_create_new(&source, &target).expect("portable create-new copy");
+        assert_eq!(fs::read(&target).expect("target"), b"portable copy");
+        assert_eq!(
+            fs::read(&source).expect("source retained"),
+            b"portable copy"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_ne!(
+                fs::metadata(&source).expect("source metadata").ino(),
+                fs::metadata(&target).expect("target metadata").ino(),
+                "create-new must copy bytes instead of requiring a hard link"
+            );
+        }
+        assert_eq!(
+            copy_file_create_new(&source, &target).expect_err("must not overwrite"),
+            SYNC_FILE_WRITE_CONFLICT,
+        );
     }
 
     #[test]
@@ -10259,61 +10402,189 @@ fn collect_sync_folder_artifacts(sync_dir: &Path, encrypting: bool) -> SyncFolde
     SyncFolderArtifacts { attachments: collect_sync_folder_attachments(sync_dir), documents }
 }
 
-fn write_new_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    // Create-new + rename everywhere on the sync path: a cache-off rclone/WinFSP mount refuses
-    // to reopen an existing file for truncating overwrite (#1001).
-    let _ = fs::remove_file(path);
-    let mut file = File::create(path).map_err(|error| error.to_string())?;
-    file.write_all(bytes).map_err(|error| error.to_string())?;
-    file.sync_all().map_err(|error| error.to_string())
-}
-
-fn install_replacing(tmp: &Path, target: &Path) -> Result<(), String> {
-    if cfg!(windows) && target.exists() {
-        let previous = target.with_extension("enctransition.previous");
-        replace_sync_file_preserving_previous(
-            tmp,
-            target,
-            &previous,
-            |path| fs::remove_file(path),
-            |from, to| fs::rename(from, to),
-        )?;
-    } else {
-        fs::rename(tmp, target).map_err(|error| error.to_string())?;
-    }
-    sync_parent_directory_for_durability(target)
-        .map_err(|error| format!("Failed to flush sync directory metadata: {error}"))
-}
-
-fn transition_tmp_path(target: &Path) -> PathBuf {
-    let mut name = target.as_os_str().to_os_string();
-    name.push(SYNC_ENCRYPTION_TRANSITION_TMP_SUFFIX);
-    PathBuf::from(name)
-}
-
 fn transition_artifact_fingerprint(bytes: &[u8]) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(bytes))
 }
 
-fn require_transition_artifact_version(path: &Path, expected: &str) -> Result<Vec<u8>, String> {
-    let bytes = fs::read(path).map_err(|error| {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TransitionMutationPoint {
+    BeforeQuarantine,
+    BeforeInstall,
+    BeforeRemoveCommit,
+}
+
+struct TransitionScratch {
+    directory: PathBuf,
+    path: PathBuf,
+}
+
+fn create_transition_scratch(
+    target: &Path,
+    label: &str,
+    bytes: Option<&[u8]>,
+) -> Result<TransitionScratch, String> {
+    let parent = target
+        .parent()
+        .ok_or_else(|| format!("{} has no parent directory", target.display()))?;
+    let leaf = target
+        .file_name()
+        .ok_or_else(|| format!("{} has no file name", target.display()))?;
+    for _ in 0..32 {
+        let nonce = rand::thread_rng().next_u64();
+        let directory = parent.join(format!(".mindwtr-{label}-{nonce:016x}"));
+        match fs::create_dir(&directory) {
+            Ok(()) => {
+                let path = directory.join(leaf);
+                if let Some(payload) = bytes {
+                    let mut file = OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&path)
+                        .map_err(|error| {
+                            format!(
+                                "Failed to create transition scratch {}: {error}",
+                                path.display()
+                            )
+                        })?;
+                    file.write_all(payload).map_err(|error| {
+                        format!(
+                            "Failed to write transition scratch {}: {error}",
+                            path.display()
+                        )
+                    })?;
+                    file.sync_all().map_err(|error| {
+                        format!(
+                            "Failed to flush transition scratch {}: {error}",
+                            path.display()
+                        )
+                    })?;
+                }
+                sync_parent_directory_for_durability(&path).map_err(|error| {
+                    format!("Failed to flush transition scratch directory: {error}")
+                })?;
+                return Ok(TransitionScratch { directory, path });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(format!(
+                    "Failed to create transition scratch directory: {error}"
+                ))
+            }
+        }
+    }
+    Err("Failed to allocate a unique transition scratch directory".to_string())
+}
+
+fn copy_file_create_new(source: &Path, target: &Path) -> Result<(), String> {
+    let mut input = File::open(source).map_err(|error| {
+        format!(
+            "Failed to open transition source {}: {error}",
+            source.display()
+        )
+    })?;
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(target)
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                SYNC_FILE_WRITE_CONFLICT.to_string()
+            } else {
+                format!(
+                    "Failed to create transition target {}: {error}",
+                    target.display()
+                )
+            }
+        })?;
+    std::io::copy(&mut input, &mut output).map_err(|error| {
+        format!(
+            "Failed to copy transition target {}: {error}",
+            target.display()
+        )
+    })?;
+    output.sync_all().map_err(|error| {
+        format!(
+            "Failed to flush transition target {}: {error}",
+            target.display()
+        )
+    })?;
+    sync_parent_directory_for_durability(target)
+        .map_err(|error| format!("Failed to flush sync directory metadata: {error}"))
+}
+
+fn restore_quarantined_generation(quarantine: &TransitionScratch, target: &Path) {
+    // Conflict recovery is deliberately best-effort and non-destructive: create_new cannot
+    // overwrite a peer that already restored/created the canonical name, and the exact bytes
+    // atomically displaced into quarantine remain there if restoration is not possible.
+    let _ = copy_file_create_new(&quarantine.path, target);
+}
+
+fn quarantine_transition_artifact<Hook>(
+    target: &Path,
+    hook: &mut Hook,
+) -> Result<TransitionScratch, String>
+where
+    Hook: FnMut(TransitionMutationPoint, &Path) -> Result<(), String>,
+{
+    let quarantine = create_transition_scratch(target, "encryption-quarantine", None)?;
+    hook(TransitionMutationPoint::BeforeQuarantine, target)?;
+    fs::rename(target, &quarantine.path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             SYNC_FILE_WRITE_CONFLICT.to_string()
         } else {
-            format!("Failed to read {}: {error}", path.display())
+            format!("Failed to quarantine {}: {error}", target.display())
         }
     })?;
-    if transition_artifact_fingerprint(&bytes) != expected {
+    sync_parent_directory_for_durability(target)
+        .map_err(|error| format!("Failed to flush sync directory metadata: {error}"))?;
+    Ok(quarantine)
+}
+
+fn cleanup_transition_scratch(scratch: TransitionScratch) -> Result<(), String> {
+    if scratch.path.exists() {
+        fs::remove_file(&scratch.path).map_err(|error| {
+            format!(
+                "Failed to remove transition scratch {}: {error}",
+                scratch.path.display()
+            )
+        })?;
+    }
+    fs::remove_dir(&scratch.directory).map_err(|error| {
+        format!(
+            "Failed to remove transition scratch directory {}: {error}",
+            scratch.directory.display()
+        )
+    })
+}
+
+fn remove_transition_artifact_if_version_with_hook<Hook>(
+    path: &Path,
+    expected: &str,
+    mut hook: Hook,
+) -> Result<(), String>
+where
+    Hook: FnMut(TransitionMutationPoint, &Path) -> Result<(), String>,
+{
+    let quarantine = quarantine_transition_artifact(path, &mut hook)?;
+    let displaced = fs::read(&quarantine.path)
+        .map_err(|error| format!("Failed to inspect quarantined {}: {error}", path.display()))?;
+    if transition_artifact_fingerprint(&displaced) != expected {
+        restore_quarantined_generation(&quarantine, path);
         return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
     }
-    Ok(bytes)
+    hook(TransitionMutationPoint::BeforeRemoveCommit, path)?;
+    if path.exists() {
+        // A peer created a new canonical generation after quarantine. Keep both it and the
+        // exact displaced generation; never call remove_file on either one.
+        return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
+    }
+    cleanup_transition_scratch(quarantine)?;
+    sync_parent_directory_for_durability(path)
+        .map_err(|error| format!("Failed to flush sync directory metadata: {error}"))
 }
 
 fn remove_transition_artifact_if_version(path: &Path, expected: &str) -> Result<(), String> {
-    require_transition_artifact_version(path, expected)?;
-    fs::remove_file(path).map_err(|error| format!("Failed to remove {}: {error}", path.display()))?;
-    sync_parent_directory_for_durability(path)
-        .map_err(|error| format!("Failed to flush sync directory metadata: {error}"))
+    remove_transition_artifact_if_version_with_hook(path, expected, |_, _| Ok(()))
 }
 
 /// An artifact whose MWENC1 header is present but unreadable (truncated, a future format
@@ -10336,35 +10607,46 @@ fn write_and_verify<Verify>(
 where
     Verify: Fn(&[u8]) -> Result<(), String>,
 {
-    let tmp = transition_tmp_path(target);
-    write_new_file(&tmp, bytes)?;
-    match expected_version {
-        Some(expected) => {
-            require_transition_artifact_version(target, expected)?;
-            install_replacing(&tmp, target)?;
+    write_and_verify_with_hook(target, bytes, expected_version, verify, |_, _| Ok(()))
+}
+
+fn write_and_verify_with_hook<Verify, Hook>(
+    target: &Path,
+    bytes: &[u8],
+    expected_version: Option<&str>,
+    verify: Verify,
+    mut hook: Hook,
+) -> Result<(), String>
+where
+    Verify: Fn(&[u8]) -> Result<(), String>,
+    Hook: FnMut(TransitionMutationPoint, &Path) -> Result<(), String>,
+{
+    let staged = create_transition_scratch(target, "encryption-stage", Some(bytes))?;
+    let quarantined = if let Some(expected) = expected_version {
+        let quarantine = quarantine_transition_artifact(target, &mut hook)?;
+        let displaced = fs::read(&quarantine.path).map_err(|error| {
+            format!(
+                "Failed to inspect quarantined {}: {error}",
+                target.display()
+            )
+        })?;
+        if transition_artifact_fingerprint(&displaced) != expected {
+            restore_quarantined_generation(&quarantine, target);
+            return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
         }
-        None => {
-            if target.exists() {
-                return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
-            }
-            // hard_link is an atomic create-new operation: it cannot replace a peer file
-            // that appears after the existence check, while the already-flushed scratch
-            // keeps the final bytes off the visible name until this point.
-            fs::hard_link(&tmp, target).map_err(|error| {
-                if target.exists() {
-                    SYNC_FILE_WRITE_CONFLICT.to_string()
-                } else {
-                    format!("Failed to install {} with create-new semantics: {error}", target.display())
-                }
-            })?;
-            fs::remove_file(&tmp).map_err(|error| error.to_string())?;
-            sync_parent_directory_for_durability(target)
-                .map_err(|error| format!("Failed to flush sync directory metadata: {error}"))?;
-        }
-    }
+        Some(quarantine)
+    } else {
+        None
+    };
+    hook(TransitionMutationPoint::BeforeInstall, target)?;
+    copy_file_create_new(&staged.path, target)?;
     let written = fs::read(target)
         .map_err(|error| format!("Failed to read back {}: {error}", target.display()))?;
-    verify(&written)
+    verify(&written)?;
+    if let Some(quarantine) = quarantined {
+        cleanup_transition_scratch(quarantine)?;
+    }
+    cleanup_transition_scratch(staged)
 }
 
 fn seal_artifact_in_place(path: &Path, material: &SyncKeyMaterial) -> Result<(), String> {
