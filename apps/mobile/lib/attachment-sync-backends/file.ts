@@ -1,6 +1,7 @@
 import type { AppData, Attachment, SyncKeyMaterial } from '@mindwtr/core';
 import {
   applyAttachmentPatches,
+  buildFileSyncGenerationCloudKey,
   computeSha256Hex,
   isSha256Hex,
   validateAttachmentForUpload,
@@ -12,7 +13,6 @@ import {
   attachmentNeedsManagedLocalCopy,
   bytesToBase64,
   collectAttachments,
-  copyFileSafely,
   createAttachmentLocalMigrationLimiter,
   DEFAULT_CONTENT_TYPE,
   extractExtension,
@@ -20,7 +20,6 @@ import {
   getAttachmentByteSize,
   getAttachmentsDir,
   getLocalAttachmentPresence,
-  isContentAttachmentUri,
   isHttpAttachmentUri,
   logAttachmentWarn,
   getSafLeafName,
@@ -77,16 +76,17 @@ export const syncFileAttachments = async (
   // Memoized across the whole pass: every attachment that needs a SAF lookup this round shares
   // one directory listing rather than re-reading it per attachment.
   let safEntriesByName: Map<string, string> | null = null;
-  const getSafEntriesByName = async (): Promise<Map<string, string>> => {
-    if (!safEntriesByName) {
-      const inventory = await inspectSafDirectoryEntriesByName(syncDir.attachmentsDirUri);
-      if (inventory.status === 'unreadable') {
-        throw new Error('SAF attachment inventory is unreadable');
-      }
-      safEntriesByName = inventory.entries;
+  const refreshSafEntriesByName = async (): Promise<Map<string, string>> => {
+    const inventory = await inspectSafDirectoryEntriesByName(syncDir.attachmentsDirUri);
+    if (inventory.status === 'unreadable') {
+      throw new Error('SAF attachment inventory is unreadable');
     }
-    return safEntriesByName;
+    safEntriesByName = inventory.entries;
+    return inventory.entries;
   };
+  const getSafEntriesByName = async (): Promise<Map<string, string>> => (
+    safEntriesByName ?? refreshSafEntriesByName()
+  );
   const remoteFilenameFor = (cloudKey: string, attachment: { id: string; title: string }): string =>
     cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.title)}`;
 
@@ -247,8 +247,9 @@ export const syncFileAttachments = async (
       return true;
     },
     onDownloadError: () => {},
-    onUpload: async (attachment, localPath) => {
-      const cloudKey = buildCloudKey(attachment);
+    onUpload: async (attachment, localPath, snapshot) => {
+      if (!snapshot) throw new Error('Immutable attachment upload snapshot is unavailable');
+      const cloudKey = buildFileSyncGenerationCloudKey(attachment, snapshot.fileHash);
       const filename = remoteFilenameFor(cloudKey, attachment);
       const size = await getAttachmentByteSize(attachment, localPath);
       if (size != null) {
@@ -259,52 +260,109 @@ export const syncFileAttachments = async (
         }
       }
       const material = options.material ?? null;
+      const verifyPublishedGeneration = async (targetUri: string): Promise<void> => {
+        const wireBytes = await readFileAsBytes(targetUri);
+        const plaintextBytes = await openAttachmentBytesFromDownload(wireBytes, material);
+        const actualHash = await computeSha256Hex(plaintextBytes);
+        if (actualHash?.toLowerCase() !== snapshot.fileHash.toLowerCase()) {
+          throw new Error('File Sync attachment generation failed integrity verification');
+        }
+      };
       if (syncDir.type === 'file') {
         const targetUri = `${syncDir.attachmentsDirUri}${filename}`;
-        if (isContentAttachmentUri(localPath) || material) {
-          // `copyFileSafely` would copy the local plaintext straight into the sync
-          // folder, so encryption always takes the read-seal-write route.
-          const bytes = await sealAttachmentBytesForUpload(await readFileAsBytes(localPath), material);
+        const initialPresence = await getLocalAttachmentPresence(targetUri);
+        if (initialPresence === 'unreadable') {
+          throw new Error('File Sync attachment generation is unreadable');
+        }
+        if (initialPresence === 'present') {
+          await verifyPublishedGeneration(targetUri);
+          attachment.cloudKey = cloudKey;
+          return true;
+        }
+
+        let invocationOwnsTarget = false;
+        try {
+          try {
+            new FileSystem.File(targetUri).create({ overwrite: false });
+            invocationOwnsTarget = true;
+          } catch (createError) {
+            // Another writer can win after the absence probe. Reuse its
+            // content-addressed object only after proving the plaintext hash.
+            const collisionPresence = await getLocalAttachmentPresence(targetUri);
+            if (collisionPresence === 'present') {
+              await verifyPublishedGeneration(targetUri);
+              attachment.cloudKey = cloudKey;
+              return true;
+            }
+            throw createError;
+          }
+
+          const wireBytes = await sealAttachmentBytesForUpload(await readFileAsBytes(localPath), material);
           assertAttachmentSyncNotAborted(signal);
-          await writeBytesSafely(targetUri, bytes);
-        } else {
-          assertAttachmentSyncNotAborted(signal);
-          await copyFileSafely(localPath, targetUri);
+          await FileSystem.writeAsStringAsync(targetUri, bytesToBase64(wireBytes), {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          await verifyPublishedGeneration(targetUri);
+          invocationOwnsTarget = false;
+        } catch (error) {
+          if (invocationOwnsTarget) {
+            await FileSystem.deleteAsync(targetUri, { idempotent: true }).catch(() => undefined);
+          }
+          throw error;
         }
       } else {
-        const base64 = await readFileAsBytes(localPath)
-          .then((bytes) => sealAttachmentBytesForUpload(bytes, material))
-          .then(bytesToBase64);
         assertAttachmentSyncNotAborted(signal);
         const safEntries = await getSafEntriesByName();
         let targetUri = safEntries.get(filename) ?? null;
+        if (targetUri) {
+          await verifyPublishedGeneration(targetUri);
+          attachment.cloudKey = cloudKey;
+          return true;
+        }
         let invocationOwnedTarget: string | null = null;
-        if (!targetUri) {
-          if (!StorageAccessFramework?.createFileAsync || !StorageAccessFramework?.writeAsStringAsync) {
-            throw new Error('SAF attachment writes are unavailable');
-          }
+        if (!StorageAccessFramework?.createFileAsync || !StorageAccessFramework?.writeAsStringAsync) {
+          throw new Error('SAF attachment writes are unavailable');
+        }
+        try {
           assertAttachmentSyncNotAborted(signal);
-          targetUri = await StorageAccessFramework.createFileAsync(
-            syncDir.attachmentsDirUri,
-            filename,
-            attachment.mimeType || DEFAULT_CONTENT_TYPE
-          );
+          try {
+            targetUri = await StorageAccessFramework.createFileAsync(
+              syncDir.attachmentsDirUri,
+              filename,
+              attachment.mimeType || DEFAULT_CONTENT_TYPE
+            );
+          } catch (createError) {
+            const peerTarget = (await refreshSafEntriesByName()).get(filename) ?? null;
+            if (peerTarget) {
+              await verifyPublishedGeneration(peerTarget);
+              attachment.cloudKey = cloudKey;
+              return true;
+            }
+            throw createError;
+          }
           if (!targetUri) throw new Error('SAF attachment target creation failed');
           invocationOwnedTarget = targetUri;
           if (getSafLeafName(targetUri) !== filename) {
             await FileSystem.deleteAsync(targetUri, { idempotent: true }).catch(() => undefined);
+            invocationOwnedTarget = null;
+            const peerTarget = (await refreshSafEntriesByName()).get(filename) ?? null;
+            if (peerTarget) {
+              await verifyPublishedGeneration(peerTarget);
+              attachment.cloudKey = cloudKey;
+              return true;
+            }
             throw new Error('SAF provider did not create the requested attachment name');
           }
-        }
-        try {
+          const base64 = await readFileAsBytes(localPath)
+            .then((bytes) => sealAttachmentBytesForUpload(bytes, material))
+            .then(bytesToBase64);
           assertAttachmentSyncNotAborted(signal);
-          if (!StorageAccessFramework?.writeAsStringAsync) {
-            throw new Error('SAF attachment writes are unavailable');
-          }
           await StorageAccessFramework.writeAsStringAsync(targetUri, base64, {
             encoding: FileSystem.EncodingType.Base64,
           });
+          await verifyPublishedGeneration(targetUri);
           safEntries.set(filename, targetUri);
+          invocationOwnedTarget = null;
         } catch (error) {
           if (invocationOwnedTarget) {
             await FileSystem.deleteAsync(invocationOwnedTarget, { idempotent: true }).catch(() => undefined);

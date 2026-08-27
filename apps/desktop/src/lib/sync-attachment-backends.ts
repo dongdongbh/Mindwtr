@@ -9,6 +9,7 @@ import {
     withAttachmentSettingsPatch,
     createWebdavDownloadBackoff,
     buildCloudKitAttachmentKey,
+    buildFileSyncGenerationCloudKey,
     cloudGetFile,
     cloudPutFile,
     computeSha256Hex,
@@ -50,7 +51,6 @@ import {
     exists as syncFsExists,
     mkdir as syncFsMkdir,
     remove as syncFsRemove,
-    rename as syncFsRename,
     stat as syncFsStat,
 } from './sync-fs';
 import {
@@ -1449,6 +1449,98 @@ export async function syncFileAttachments(
         computeSha256Hex(await readLocalFile(path, attachment));
     const createUploadSnapshot = createAttachmentUploadSnapshotFactory({ readLocalFile, statLocalFile });
 
+    const readFileSyncWireData = async (sourcePath: string): Promise<Uint8Array> => {
+        const sourceStat = await syncFsStat(sourcePath);
+        if (
+            !Number.isFinite(sourceStat.size)
+            || sourceStat.size < 0
+            || sourceStat.size > MAX_DOWNLOAD_BYTES
+        ) {
+            throw new ResponseTooLargeError(MAX_DOWNLOAD_BYTES);
+        }
+        const source = await open(sourcePath, { read: true });
+        const chunks: Uint8Array[] = [];
+        let totalBytes = 0;
+        try {
+            const buffer = new Uint8Array(FILE_DOWNLOAD_READ_CHUNK_BYTES);
+            while (true) {
+                const bytesRead = await source.read(buffer);
+                if (bytesRead === null) break;
+                if (!Number.isInteger(bytesRead) || bytesRead <= 0 || bytesRead > buffer.byteLength) {
+                    throw new Error('File Sync attachment read returned an invalid byte count');
+                }
+                totalBytes += bytesRead;
+                if (totalBytes > MAX_DOWNLOAD_BYTES) {
+                    throw new ResponseTooLargeError(MAX_DOWNLOAD_BYTES);
+                }
+                chunks.push(buffer.slice(0, bytesRead));
+            }
+        } finally {
+            await source.close();
+        }
+        const wireData = new Uint8Array(totalBytes);
+        let wireOffset = 0;
+        for (const chunk of chunks) {
+            wireData.set(chunk, wireOffset);
+            wireOffset += chunk.byteLength;
+        }
+        return wireData;
+    };
+
+    const verifyFileSyncGeneration = async (
+        targetPath: string,
+        expectedPlaintextHash: string,
+    ): Promise<void> => {
+        const plaintext = await openAttachmentBytes(await readFileSyncWireData(targetPath));
+        const actualHash = await computeSha256Hex(plaintext);
+        if (actualHash?.toLowerCase() !== expectedPlaintextHash.toLowerCase()) {
+            throw new Error('File Sync attachment generation failed integrity verification');
+        }
+    };
+
+    const publishFileSyncGeneration = async (
+        targetPath: string,
+        wireData: Uint8Array,
+        expectedPlaintextHash: string,
+    ): Promise<void> => {
+        if (await syncFsExists(targetPath)) {
+            await verifyFileSyncGeneration(targetPath, expectedPlaintextHash);
+            return;
+        }
+
+        let target: Awaited<ReturnType<typeof open>>;
+        try {
+            target = await open(targetPath, { write: true, createNew: true });
+        } catch (error) {
+            // Another device may have published the same content-addressed key
+            // between the presence check and create-new. Reuse it only after
+            // proving that it opens to the expected plaintext generation.
+            if (await syncFsExists(targetPath).catch(() => false)) {
+                await verifyFileSyncGeneration(targetPath, expectedPlaintextHash);
+                return;
+            }
+            throw error;
+        }
+
+        let closed = false;
+        try {
+            const written = await target.write(wireData);
+            if (written !== wireData.byteLength) {
+                throw new Error('File Sync attachment generation write was incomplete');
+            }
+            await target.close();
+            closed = true;
+            await verifyFileSyncGeneration(targetPath, expectedPlaintextHash);
+        } catch (error) {
+            if (!closed) await target.close().catch(() => undefined);
+            // createNew proves this invocation owns the path. It is not yet
+            // referenced by data.json, so cleaning a failed publication cannot
+            // remove another generation or the current document winner.
+            await syncFsRemove(targetPath).catch(() => undefined);
+            throw error;
+        }
+    };
+
     // Mirror the WebDAV presence pre-pass: a cloudKey recorded against a
     // previous sync folder (or a file deleted from this one) must not stop
     // the copy into the current folder. Clearing it lets the lifecycle below
@@ -1491,8 +1583,8 @@ export async function syncFileAttachments(
         createUploadSnapshot,
         contentChangePhase: helpers?.phase,
         onUpload: async (attachment, _localPath, snapshot) => {
-            const cloudKey = buildCloudKey(attachment);
             if (!snapshot?.bytes) throw new Error('Immutable attachment upload bytes are unavailable');
+            const cloudKey = buildFileSyncGenerationCloudKey(attachment, snapshot.fileHash);
             const fileData = snapshot.bytes;
             const validation = await validateAttachmentForUpload(
                 attachment,
@@ -1511,11 +1603,11 @@ export async function syncFileAttachments(
             // encrypted here for the same reason WebDAV's and Dropbox's are. The LOCAL managed
             // copy (below, in onDownload) stays plaintext — encryption never touches local data.
             const wireData = await sealAttachmentBytes(fileData);
-            await writeFileSafelyAbsolute(await resolveFileBackendPath(join, baseSyncDir, cloudKey), wireData, {
-                writeFile,
-                rename: syncFsRename,
-                remove: syncFsRemove,
-            });
+            await publishFileSyncGeneration(
+                await resolveFileBackendPath(join, baseSyncDir, cloudKey),
+                wireData,
+                snapshot.fileHash,
+            );
             attachment.cloudKey = cloudKey;
             attachment.localStatus = 'available';
             return true;
@@ -1527,37 +1619,7 @@ export async function syncFileAttachments(
             if (!attachment.cloudKey) return false;
             const sourcePath = await resolveFileBackendPath(join, baseSyncDir, attachment.cloudKey);
             if (!(await syncFsExists(sourcePath))) return false;
-            const sourceStat = await syncFsStat(sourcePath);
-            if (sourceStat.size > MAX_DOWNLOAD_BYTES) {
-                throw new ResponseTooLargeError(MAX_DOWNLOAD_BYTES);
-            }
-            const source = await open(sourcePath, { read: true });
-            const chunks: Uint8Array[] = [];
-            let totalBytes = 0;
-            try {
-                const buffer = new Uint8Array(FILE_DOWNLOAD_READ_CHUNK_BYTES);
-                while (true) {
-                    const bytesRead = await source.read(buffer);
-                    if (bytesRead === null) break;
-                    if (!Number.isInteger(bytesRead) || bytesRead <= 0 || bytesRead > buffer.byteLength) {
-                        throw new Error('File Sync attachment read returned an invalid byte count');
-                    }
-                    totalBytes += bytesRead;
-                    if (totalBytes > MAX_DOWNLOAD_BYTES) {
-                        throw new ResponseTooLargeError(MAX_DOWNLOAD_BYTES);
-                    }
-                    chunks.push(buffer.slice(0, bytesRead));
-                }
-            } finally {
-                await source.close();
-            }
-            const wireData = new Uint8Array(totalBytes);
-            let wireOffset = 0;
-            for (const chunk of chunks) {
-                wireData.set(chunk, wireOffset);
-                wireOffset += chunk.byteLength;
-            }
-            const fileData = await openAttachmentBytes(wireData);
+            const fileData = await openAttachmentBytes(await readFileSyncWireData(sourcePath));
             const expectedDownloadSha256 = await validateAndHashAttachmentDownload(attachment, fileData);
             const filename =
                 attachment.cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.uri)}`;

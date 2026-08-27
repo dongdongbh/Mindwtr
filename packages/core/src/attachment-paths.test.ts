@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { ATTACHMENTS_DIR_NAME, buildCloudKey, extractExtension, getBaseSyncUrl, getCloudBaseUrl } from './attachment-paths';
+import {
+    ATTACHMENTS_DIR_NAME,
+    buildCloudKey,
+    buildFileSyncGenerationCloudKey,
+    extractExtension,
+    getBaseSyncUrl,
+    getCloudBaseUrl,
+} from './attachment-paths';
 import type { Attachment } from './types';
 
 const makeAttachment = (overrides: Partial<Attachment> = {}): Attachment => ({
@@ -25,6 +32,14 @@ describe('attachment-paths', () => {
     it('produces no extension when neither title nor uri has one', () => {
         expect(buildCloudKey(makeAttachment({ title: 'photo', uri: 'file:///tmp/photo' })))
             .toBe(`${ATTACHMENTS_DIR_NAME}/att-1`);
+    });
+
+    it('binds File Sync keys to an immutable lowercase content generation', () => {
+        const hash = 'A'.repeat(64);
+        expect(buildFileSyncGenerationCloudKey(makeAttachment(), hash))
+            .toBe(`${ATTACHMENTS_DIR_NAME}/att-1.${hash.toLowerCase()}.png`);
+        expect(() => buildFileSyncGenerationCloudKey(makeAttachment(), 'not-a-hash'))
+            .toThrow('requires a SHA-256 digest');
     });
 
     it('extractExtension ignores query strings and fragments', () => {

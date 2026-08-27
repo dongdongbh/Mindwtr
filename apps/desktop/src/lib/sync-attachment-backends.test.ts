@@ -175,7 +175,13 @@ describe('desktop sync attachment backends', () => {
         clearAttachmentSyncState();
         pathMocks.dataDir.mockResolvedValue('/app-data');
         pathMocks.join.mockImplementation(async (...parts: string[]) => parts.join('/'));
-        fsMocks.open.mockImplementation(async (path: string) => {
+        fsMocks.open.mockImplementation(async (path: string, options?: { write?: boolean }) => {
+            if (options?.write) {
+                return {
+                    write: vi.fn(async (bytes: Uint8Array) => bytes.byteLength),
+                    close: vi.fn().mockResolvedValue(undefined),
+                };
+            }
             const bytes = await fsMocks.readFile(path) as Uint8Array;
             let offset = 0;
             return {
@@ -722,18 +728,17 @@ describe('desktop sync attachment backends', () => {
             activationHelpers(),
         );
 
-        expect(fsMocks.writeFile).toHaveBeenCalledWith(
-            expect.stringMatching(/^\/candidate-sync\/attachments\/attachment-1\.txt\.tmp-/),
-            bytes,
+        const generationKey = `attachments/attachment-1.${DOWNLOAD_BYTES_HASH}.txt`;
+        expect(fsMocks.open).toHaveBeenCalledWith(
+            `/candidate-sync/${generationKey}`,
+            { write: true, createNew: true },
         );
-        // Never the fs plugin's rename: it is a main-thread command and the
-        // sync folder may be a slow mount (#1037).
-        expect(fsMocks.rename).not.toHaveBeenCalled();
-        expect(syncFsMocks.rename).toHaveBeenCalledWith(
-            expect.stringMatching(/^\/candidate-sync\/attachments\/attachment-1\.txt\.tmp-/),
-            '/candidate-sync/attachments/attachment-1.txt',
+        expect(fsMocks.writeFile).not.toHaveBeenCalledWith(
+            expect.stringContaining('/candidate-sync'),
+            expect.anything(),
         );
-        expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
+        expect(syncFsMocks.rename).not.toHaveBeenCalled();
+        expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBe(generationKey);
     });
 
     it('re-copies a locally available attachment into a sync folder that is missing it on a regular sync', async () => {
@@ -754,11 +759,13 @@ describe('desktop sync attachment backends', () => {
 
         const mutated = await syncFileAttachments(appData, '/candidate-sync', deps);
 
-        expect(syncFsMocks.rename).toHaveBeenCalledWith(
-            expect.stringMatching(/^\/candidate-sync\/attachments\/attachment-1\.txt\.tmp-/),
-            '/candidate-sync/attachments/attachment-1.txt',
+        const generationKey = `attachments/attachment-1.${DOWNLOAD_BYTES_HASH}.txt`;
+        expect(fsMocks.open).toHaveBeenCalledWith(
+            `/candidate-sync/${generationKey}`,
+            { write: true, createNew: true },
         );
-        expect(expectFoldedData(mutated).tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
+        expect(syncFsMocks.rename).not.toHaveBeenCalled();
+        expect(expectFoldedData(mutated).tasks[0].attachments?.[0]?.cloudKey).toBe(generationKey);
         // The sync folder is only ever touched off the main thread (#1037). The fs
         // plugin is still how the app reads its OWN data dir, so the assertion names
         // the sync folder rather than banning the plugin outright.
@@ -1388,17 +1395,73 @@ describe('desktop sync attachment backends', () => {
                 postMergeHelpers(),
             ));
 
-            expect(syncFsMocks.exists).not.toHaveBeenCalled();
-            expect(syncFsMocks.rename).toHaveBeenCalledWith(
-                expect.stringMatching(/^\/candidate-sync\/attachments\/attachment-1\.txt\.tmp-/),
-                '/candidate-sync/attachments/attachment-1.txt',
+            const generationKey = `attachments/attachment-1.${BYTES_HASH}.txt`;
+            expect(syncFsMocks.exists).toHaveBeenCalledWith(`/candidate-sync/${generationKey}`);
+            expect(fsMocks.open).toHaveBeenCalledWith(
+                `/candidate-sync/${generationKey}`,
+                { write: true, createNew: true },
             );
+            expect(syncFsMocks.rename).not.toHaveBeenCalled();
             expect(result.tasks[0].attachments?.[0]).toMatchObject({
-                cloudKey: 'attachments/attachment-1.txt',
+                cloudKey: generationKey,
                 fileHash: BYTES_HASH,
                 contentRev: 7,
                 pendingContentUpload: undefined,
             });
+        });
+
+        it('publishes a losing File Sync candidate under its own generation key', async () => {
+            const appData = makePendingData();
+            const winningHash = '787c798e39a5bc1910355bae6d0cd87a36b2e10fd0202a83e3bb6b005da83472';
+            const winningPath = `/candidate-sync/attachments/attachment-1.${winningHash}.txt`;
+            const candidateKey = `attachments/attachment-1.${BYTES_HASH}.txt`;
+            fsMocks.exists.mockResolvedValue(true);
+            fsMocks.readFile.mockResolvedValue(bytes);
+            fsMocks.stat.mockResolvedValue({ mtime: new Date(1000), size: bytes.length });
+            syncFsMocks.exists.mockImplementation(async (path: string) => path === winningPath);
+
+            const result = expectFoldedData(await syncFileAttachments(
+                appData,
+                '/candidate-sync',
+                depsFor(),
+                postMergeHelpers(),
+            ));
+
+            expect(fsMocks.open).toHaveBeenCalledWith(
+                `/candidate-sync/${candidateKey}`,
+                { write: true, createNew: true },
+            );
+            expect(fsMocks.open).not.toHaveBeenCalledWith(
+                winningPath,
+                expect.objectContaining({ write: true }),
+            );
+            expect(syncFsMocks.remove).not.toHaveBeenCalledWith(winningPath);
+            expect(result.tasks[0].attachments?.[0]?.cloudKey).toBe(candidateKey);
+        });
+
+        it('reuses an existing verified File Sync generation without overwriting it', async () => {
+            const appData = makePendingData();
+            const generationKey = `attachments/attachment-1.${BYTES_HASH}.txt`;
+            const generationPath = `/candidate-sync/${generationKey}`;
+            fsMocks.exists.mockResolvedValue(true);
+            fsMocks.readFile.mockResolvedValue(bytes);
+            fsMocks.stat.mockResolvedValue({ mtime: new Date(1000), size: bytes.length });
+            syncFsMocks.exists.mockImplementation(async (path: string) => path === generationPath);
+
+            const result = expectFoldedData(await syncFileAttachments(
+                appData,
+                '/candidate-sync',
+                depsFor(),
+                postMergeHelpers(),
+            ));
+
+            expect(fsMocks.open).toHaveBeenCalledWith(generationPath, { read: true });
+            expect(fsMocks.open).not.toHaveBeenCalledWith(
+                generationPath,
+                expect.objectContaining({ write: true }),
+            );
+            expect(syncFsMocks.rename).not.toHaveBeenCalled();
+            expect(result.tasks[0].attachments?.[0]?.cloudKey).toBe(generationKey);
         });
 
         it('defers a missing pending Cloud candidate without touching its remote generation', async () => {
@@ -1703,7 +1766,8 @@ describe('desktop sync attachment backends', () => {
         it('file', async () => {
             const appData = frozenData();
             const result = await syncFileAttachments(appData, '/candidate-sync', frozenDeps(), postMergeHelpers());
-            expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
+            expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey)
+                .toBe(`attachments/attachment-1.${DOWNLOAD_BYTES_HASH}.txt`);
             expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
         });
 
