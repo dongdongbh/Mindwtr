@@ -106,7 +106,7 @@ export const deleteAttachmentFile = async (
         await remove(normalizedRawUri);
     } catch (error) {
         if (error instanceof Error && error.name === 'LocalSyncAbort') throw error;
-        deps.logSyncWarning(`Failed to delete attachment file ${attachment.title}`, error);
+        deps.logSyncWarning(`Failed to delete attachment file ${attachment.id}`, error);
     }
 };
 
@@ -238,18 +238,16 @@ export const cleanupOrphanedAttachments = async (
         isRemoteMissingError: (error) => (
             error instanceof DropboxFileNotFoundError || getErrorStatus(error) === 404
         ),
-        onRemoteAttachmentMissing: (target) => {
-            deps.logSyncInfo('Remote attachment already missing during cleanup', {
-                cloudKey: target.cloudKey,
-            });
+        onRemoteAttachmentMissing: (_target) => {
+            deps.logSyncInfo('Remote attachment already missing during cleanup');
         },
-        onRemoteDeleteError: (target, error) => {
+        onRemoteDeleteError: (_target, error) => {
             if (
                 isSyncRemoteMutationFenceError(error)
                 || isWebdavRemoteWriteConflictError(error)
                 || error instanceof DropboxConflictError
             ) throw error;
-            deps.logSyncWarning('Failed to delete remote attachment ' + target.title, error);
+            deps.logSyncWarning('Failed to delete remote attachment', error);
         },
     });
 

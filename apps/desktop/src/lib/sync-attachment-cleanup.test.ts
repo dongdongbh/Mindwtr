@@ -114,4 +114,25 @@ describe('deleteAttachmentFile', () => {
 
         expect(fsMocks.remove).not.toHaveBeenCalled();
     });
+
+    it('logs an attachment id instead of a private title or path when deletion fails', async () => {
+        const privateTitle = 'Divorce settlement draft.pdf';
+        const privatePath = `/new-profile/attachments/${privateTitle}`;
+        const logSyncWarning = vi.fn();
+        fsMocks.remove.mockRejectedValueOnce(new Error('safe remove failure'));
+
+        await deleteAttachmentFile(
+            { ...attachment(privatePath), title: privateTitle },
+            { logSyncWarning },
+            { ensureLocalSnapshotFresh: vi.fn() },
+        );
+
+        const serialized = JSON.stringify(logSyncWarning.mock.calls);
+        expect(serialized).not.toContain(privateTitle);
+        expect(serialized).not.toContain(privatePath);
+        expect(logSyncWarning).toHaveBeenCalledWith(
+            'Failed to delete attachment file a1',
+            expect.any(Error),
+        );
+    });
 });

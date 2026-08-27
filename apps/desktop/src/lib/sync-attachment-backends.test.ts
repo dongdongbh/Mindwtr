@@ -869,6 +869,50 @@ describe('desktop sync attachment backends', () => {
         );
     });
 
+    it('keeps private attachment titles and paths out of serialized desktop sync logs', async () => {
+        const privateTitle = 'Divorce settlement draft.pdf';
+        const privatePath = `/app-data/mindwtr/attachments/${privateTitle}`;
+        const appData = createCandidateAttachmentData();
+        const attachment = appData.tasks[0].attachments![0];
+        attachment.title = privateTitle;
+        attachment.uri = privatePath;
+        attachment.cloudKey = undefined;
+        const logSyncInfo = vi.fn();
+        const logSyncWarning = vi.fn();
+        const deps: AttachmentBackendDeps = {
+            getTauriFetch: async () => vi.fn() as unknown as typeof fetch,
+            isTauriRuntimeEnv: () => true,
+            logSyncInfo,
+            logSyncWarning,
+            resolveWebdavPassword: vi.fn(async () => 'secret'),
+        };
+        fsMocks.exists.mockResolvedValue(true);
+        fsMocks.readFile.mockRejectedValue(new Error('safe read failure'));
+
+        await syncWebdavAttachments(
+            appData,
+            { url: 'https://dav.example/mindwtr', username: 'alice' },
+            'https://dav.example/mindwtr',
+            deps,
+        );
+
+        const serialized = JSON.stringify({
+            info: logSyncInfo.mock.calls,
+            warnings: logSyncWarning.mock.calls,
+        });
+        expect(serialized).not.toContain(privateTitle);
+        expect(serialized).not.toContain(privatePath);
+        expect(serialized).toContain('attachment-1');
+        expect(logSyncInfo).toHaveBeenCalledWith(
+            'WebDAV attachment check',
+            expect.objectContaining({ uri: 'path:managed.pdf' }),
+        );
+        expect(logSyncWarning).toHaveBeenCalledWith(
+            'Failed to upload attachment attachment-1',
+            expect.any(Error),
+        );
+    });
+
     it('uploads a candidate-cleared local attachment during a WebDAV activation probe', async () => {
         const bytes = new Uint8Array([1, 2, 3]);
         const fetcher = vi.fn(async () => new Response(null, { status: 200 }));

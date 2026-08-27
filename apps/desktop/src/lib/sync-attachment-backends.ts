@@ -122,6 +122,33 @@ const WEBDAV_ATTACHMENT_MAX_UPLOADS_PER_SYNC = 10;
 const WEBDAV_ATTACHMENT_MISSING_BACKOFF_MS = 15 * 60_000;
 const WEBDAV_ATTACHMENT_ERROR_BACKOFF_MS = 2 * 60_000;
 
+/** Attachment paths and file names are user content. Keep only the transport,
+ * managed/external location, and extension needed to diagnose sync routing. */
+const describeAttachmentUriForLog = (
+    uri: string | undefined,
+    managedAttachmentsDir: string,
+): string => {
+    if (!uri) return 'none';
+    const trimmed = uri.trim();
+    const isWindowsPath = /^[A-Za-z]:[\\/]/.test(trimmed);
+    const scheme = isWindowsPath
+        ? 'path:'
+        : (/^[A-Za-z][A-Za-z0-9+.-]*:/.exec(trimmed)?.[0]?.toLowerCase() ?? 'path:');
+    const normalizePath = (value: string): string => value
+        .replace(/^file:\/\//i, '')
+        .replace(/\\/g, '/')
+        .replace(/\/+$/, '');
+    const normalizedPath = normalizePath(trimmed);
+    const normalizedManagedDir = normalizePath(managedAttachmentsDir);
+    const comparePath = isWindowsPath ? normalizedPath.toLowerCase() : normalizedPath;
+    const compareManagedDir = isWindowsPath ? normalizedManagedDir.toLowerCase() : normalizedManagedDir;
+    const location = comparePath === compareManagedDir
+        || comparePath.startsWith(`${compareManagedDir}/`)
+        ? 'managed'
+        : 'external';
+    return `${scheme}${location}${extractExtension(normalizedPath.split(/[?#]/, 1)[0])}`;
+};
+
 type AttachmentDownloadStageOps = {
     join: (...paths: string[]) => Promise<string>;
     writeFile: (path: string, bytes: Uint8Array) => Promise<void>;
@@ -482,8 +509,7 @@ export async function syncWebdavAttachments(
         const existsLocally = localPresence === 'present';
         deps.logSyncInfo('WebDAV attachment check', {
             id: attachment.id,
-            title: attachment.title || 'attachment',
-            uri: localPath || rawUri,
+            uri: describeAttachmentUriForLog(localPath || rawUri, managedAttachmentsDir),
             cloud: attachment.cloudKey ? 'set' : 'missing',
             local: hasLocalPath ? 'true' : 'false',
             exists: existsLocally ? 'true' : 'false',
@@ -677,7 +703,7 @@ export async function syncWebdavAttachments(
                 'failed',
                 error instanceof Error ? error.message : String(error),
             );
-            deps.logSyncWarning(`Failed to upload attachment ${attachment.title}`, error);
+            deps.logSyncWarning(`Failed to upload attachment ${attachment.id}`, error);
         },
         onDownload: async (attachment, expectation) => {
             if (!attachment.cloudKey) return false;
@@ -758,7 +784,7 @@ export async function syncWebdavAttachments(
                 'failed',
                 error instanceof Error ? error.message : String(error),
             );
-            deps.logSyncWarning(`Failed to download attachment ${attachment.title}`, error);
+            deps.logSyncWarning(`Failed to download attachment ${attachment.id}`, error);
         },
     });
 
@@ -886,7 +912,7 @@ export async function syncCloudAttachments(
                 'failed',
                 error instanceof Error ? error.message : String(error),
             );
-            deps.logSyncWarning(`Failed to upload attachment ${attachment.title}`, error);
+            deps.logSyncWarning(`Failed to upload attachment ${attachment.id}`, error);
         },
         onDownload: async (attachment, expectation) => {
             if (!attachment.cloudKey) return false;
@@ -946,7 +972,7 @@ export async function syncCloudAttachments(
                 'failed',
                 error instanceof Error ? error.message : String(error),
             );
-            deps.logSyncWarning(`Failed to download attachment ${attachment.title}`, error);
+            deps.logSyncWarning(`Failed to download attachment ${attachment.id}`, error);
         },
     });
 
@@ -1084,7 +1110,7 @@ export async function syncDropboxAttachments(
                 'failed',
                 error instanceof Error ? error.message : String(error),
             );
-            deps.logSyncWarning(`Failed to upload attachment ${attachment.title}`, error);
+            deps.logSyncWarning(`Failed to upload attachment ${attachment.id}`, error);
         },
         onDownload: async (attachment, expectation) => {
             if (!attachment.cloudKey) return false;
@@ -1140,7 +1166,7 @@ export async function syncDropboxAttachments(
                 'failed',
                 error instanceof Error ? error.message : String(error),
             );
-            deps.logSyncWarning(`Failed to download attachment ${attachment.title}`, error);
+            deps.logSyncWarning(`Failed to download attachment ${attachment.id}`, error);
         },
     });
 
@@ -1255,7 +1281,7 @@ export async function syncCloudKitAttachments(
                 'failed',
                 error instanceof Error ? error.message : String(error),
             );
-            deps.logSyncWarning(`Failed to upload CloudKit attachment ${attachment.title}`, error);
+            deps.logSyncWarning(`Failed to upload CloudKit attachment ${attachment.id}`, error);
         },
         onDownload: async (attachment, expectation) => {
             const recordName = parseCloudKitAttachmentKey(attachment.cloudKey);
@@ -1309,7 +1335,7 @@ export async function syncCloudKitAttachments(
                 'failed',
                 error instanceof Error ? error.message : String(error),
             );
-            deps.logSyncWarning(`Failed to download CloudKit attachment ${attachment.title}`, error);
+            deps.logSyncWarning(`Failed to download CloudKit attachment ${attachment.id}`, error);
         },
     });
 
@@ -1446,7 +1472,7 @@ export async function syncFileAttachments(
             return true;
         },
         onUploadError: (attachment, error) => {
-            deps.logSyncWarning(`Failed to copy attachment ${attachment.title} to sync folder`, error);
+            deps.logSyncWarning(`Failed to copy attachment ${attachment.id} to sync folder`, error);
         },
         onDownload: async (attachment, expectation) => {
             if (!attachment.cloudKey) return false;
@@ -1481,7 +1507,7 @@ export async function syncFileAttachments(
             return true;
         },
         onDownloadError: (attachment, error) => {
-            deps.logSyncWarning(`Failed to copy attachment ${attachment.title} from sync folder`, error);
+            deps.logSyncWarning(`Failed to copy attachment ${attachment.id} from sync folder`, error);
         },
     });
 
