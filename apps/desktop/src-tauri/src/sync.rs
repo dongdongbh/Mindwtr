@@ -7018,6 +7018,27 @@ mod tests {
         assert!(!scratch.exists(), "atomic publication consumes the scratch");
     }
 
+    // `File::sync_all` requires a write-capable handle on Windows. Keep this
+    // test platform-neutral so the Windows native job exercises that contract
+    // instead of accepting the read-only handle that Unix permits.
+    #[test]
+    fn attachment_generation_verification_flushes_a_writable_scratch_handle() {
+        let dir = tempfile::tempdir().expect("generation flush test dir");
+        let expected_bytes = b"verified generation";
+        let expected_sha256 = bytes_to_hex(&Sha256::digest(expected_bytes));
+        let scratch = dir.path().join(".mindwtr-attachment-generation-flush.tmp");
+        fs::write(&scratch, expected_bytes).expect("seed verified scratch");
+
+        verify_and_flush_file_sync_generation_scratch(
+            &scratch,
+            expected_bytes.len() as u64,
+            &expected_sha256,
+        )
+        .expect("verified scratch must flush on every supported platform");
+
+        assert_eq!(fs::read(&scratch).expect("flushed scratch"), expected_bytes);
+    }
+
     #[test]
     fn attachment_generation_verification_failure_preserves_target_and_scratch() {
         let dir = tempfile::tempdir().expect("generation test dir");
@@ -14162,6 +14183,7 @@ fn verify_and_flush_file_sync_generation_scratch(
 
     let mut file = OpenOptions::new()
         .read(true)
+        .write(true)
         .open(scratch_path)
         .map_err(|error| format!("Failed to open attachment generation scratch: {error}"))?;
     let mut hasher = Sha256::new();
