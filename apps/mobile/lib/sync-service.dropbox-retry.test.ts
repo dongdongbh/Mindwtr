@@ -374,6 +374,18 @@ describe('mobile Dropbox sync transient retry', () => {
     );
   });
 
+  it('enables steady-state attachment content checks for Dropbox', async () => {
+    dropboxSyncMocks.downloadDropboxAppData.mockResolvedValue({ data: emptyData, rev: 'rev-1' });
+
+    const result = await syncServiceModule.performMobileSync();
+
+    expect(result.success).toBe(true);
+    expect(attachmentSyncMocks.hasPendingAttachmentSyncWork).toHaveBeenCalledWith(
+      expect.anything(),
+      { contentCheckEnabled: true },
+    );
+  });
+
   it('stops a Dropbox activation document retry when the lease is replaced', async () => {
       const assertHeld = vi.fn(async () => {
         if (dropboxSyncMocks.uploadDropboxAppData.mock.calls.length >= 1) {

@@ -42,10 +42,13 @@ import {
 } from '../attachment-sync-utils';
 import {
   migrateAttachmentsLocallyBeforeSync,
+  checkBespokeAttachmentRemoteWinner,
   createMobileAttachmentUploadSnapshot,
   installAttachmentDownloadBytes,
   openAttachmentBytesFromDownload,
   prepareBespokeAttachmentContentCandidate,
+  refreshBespokeAttachmentDownloadedContentStat,
+  resolveAttachmentDownloadTargetPath,
   sealAttachmentBytesForUpload,
 } from './common';
 
@@ -144,6 +147,26 @@ export const syncDropboxAttachments = async (
     if (options.phase === 'prepare' && attachment.cloudKey && mayUploadLocalFile) {
       if (await prepareBespokeAttachmentContentCandidate(attachment, uri)) {
         recordPatch(attachment);
+      }
+    }
+
+    if (
+      !options.activationProbe
+      && options.phase === 'post-merge'
+      && attachment.cloudKey
+      && mayUploadLocalFile
+      && attachment.pendingContentUpload !== true
+    ) {
+      const contentCheck = await checkBespokeAttachmentRemoteWinner(attachment, uri);
+      if (contentCheck.metadataChanged) recordPatch(attachment);
+      if (contentCheck.kind === 'local-edit-race') {
+        logAttachmentWarn(`Skipped remote attachment replacement after a local edit race (${attachment.id})`);
+      } else if (contentCheck.kind === 'download') {
+        downloadQueue.push({
+          attachment,
+          expectation: contentCheck.expectation,
+          recoverPendingUpload: false,
+        });
       }
     }
 
@@ -316,7 +339,11 @@ export const syncDropboxAttachments = async (
       );
       await validateAttachmentHash(attachment, bytes);
       const filename = cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.title)}`;
-      const targetUri = `${attachmentsDir}${filename}`;
+      const targetUri = resolveAttachmentDownloadTargetPath(
+        attachment,
+        `${attachmentsDir}${filename}`,
+        expectation,
+      );
       assertNotAborted(options.signal);
       const installed = await installAttachmentDownloadBytes(
         attachment,
@@ -326,28 +353,45 @@ export const syncDropboxAttachments = async (
         expectation,
         options.signal,
       );
-      if (!installed) continue;
-      let mutated = attachment.uri !== targetUri || attachment.localStatus !== 'available';
+      if (!installed) {
+        reportProgress(
+          attachment.id,
+          'download',
+          0,
+          attachment.size ?? 0,
+          'failed',
+          'Attachment changed locally during download',
+        );
+        logAttachmentWarn(`Skipped remote attachment replacement after a native conflict (${attachment.id})`);
+        continue;
+      }
       if (recoverPendingUpload && attachment.pendingContentUpload === true) {
         attachment.pendingContentUpload = undefined;
-        mutated = true;
       }
-      if (mutated) {
-        attachment.uri = targetUri;
-        attachment.localStatus = 'available';
-        recordPatch(attachment);
-      }
+      attachment.uri = targetUri;
+      attachment.localStatus = 'available';
+      await refreshBespokeAttachmentDownloadedContentStat(attachment, targetUri);
+      recordPatch(attachment);
       reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
     } catch (error) {
       if (isAbortLikeError(error, options.signal)) {
         throw error;
       }
-      if (!recoverPendingUpload && error instanceof DropboxFileNotFoundError && attachment.cloudKey) {
+      if (
+        expectation.kind === 'absent'
+        && !recoverPendingUpload
+        && error instanceof DropboxFileNotFoundError
+        && attachment.cloudKey
+      ) {
         if (markAttachmentUnrecoverable(attachment)) {
           recordPatch(attachment);
         }
       }
-      if (!(error instanceof DropboxFileNotFoundError) && attachment.localStatus !== 'missing') {
+      if (
+        expectation.kind === 'absent'
+        && !(error instanceof DropboxFileNotFoundError)
+        && attachment.localStatus !== 'missing'
+      ) {
         attachment.localStatus = 'missing';
         recordPatch(attachment);
       }

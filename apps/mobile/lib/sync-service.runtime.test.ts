@@ -1145,6 +1145,27 @@ describe('mobile sync-service runtime', () => {
     expect(attachmentSyncMocks.syncWebdavAttachments).not.toHaveBeenCalled();
   });
 
+  it('enables steady-state attachment content checks for self-hosted Cloud', async () => {
+    asyncStorageMocks.getItem.mockImplementation(async (key: string) => {
+      const values: Record<string, string | null> = {
+        '@mindwtr_sync_backend': 'cloud',
+        '@mindwtr_cloud_provider': 'selfhosted',
+        '@mindwtr_cloud_url': 'https://cloud.example/v1/data',
+        '@mindwtr_cloud_token': 'token',
+      };
+      return values[key] ?? null;
+    });
+    coreMocks.cloudGetJson.mockResolvedValue(emptyData);
+
+    const result = await syncServiceModule.performMobileSync();
+
+    expect(result.success).toBe(true);
+    expect(attachmentSyncMocks.hasPendingAttachmentSyncWork).toHaveBeenCalledWith(
+      expect.anything(),
+      { contentCheckEnabled: true },
+    );
+  });
+
   it('treats pending remote write backoff as a skipped sync', async () => {
     coreMocks.webdavGetJson.mockResolvedValue(remoteChangedData);
     coreMocks.performSyncCycle.mockResolvedValue({

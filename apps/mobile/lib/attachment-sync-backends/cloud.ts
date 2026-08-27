@@ -8,6 +8,7 @@ import {
   validateAttachmentForUpload,
   type AppData,
   type Attachment,
+  type AttachmentDownloadExpectation,
   type LocalFileStat,
 } from '@mindwtr/core';
 import { logAttachmentWarn } from '../attachment-sync-utils';
@@ -28,8 +29,11 @@ import {
 } from '../attachment-sync-utils';
 import {
   migrateAttachmentsLocallyBeforeSync,
+  checkBespokeAttachmentRemoteWinner,
   createMobileAttachmentUploadSnapshot,
+  installAttachmentDownloadBytes,
   prepareBespokeAttachmentContentCandidate,
+  refreshBespokeAttachmentDownloadedContentStat,
   uploadCloudFileWithFileSystem,
 } from './common';
 
@@ -73,7 +77,7 @@ export const syncCloudAttachments = async (
   baseSyncUrl: string,
   options: CloudAttachmentSyncOptions = {}
 ): Promise<AppData | false> => {
-  await getAttachmentsDir();
+  const attachmentsDir = await getAttachmentsDir();
 
   const attachmentsById = collectAttachments(appData);
   // This backend runs its own loop rather than the shared lifecycle, so it does the same
@@ -126,6 +130,23 @@ export const syncCloudAttachments = async (
       }
     }
 
+    let remoteWinnerExpectation: AttachmentDownloadExpectation | undefined;
+    if (
+      !options.activationProbe
+      && options.phase === 'post-merge'
+      && attachment.cloudKey
+      && mayUploadLocalFile
+      && attachment.pendingContentUpload !== true
+    ) {
+      const contentCheck = await checkBespokeAttachmentRemoteWinner(attachment, uri);
+      if (contentCheck.metadataChanged) recordPatch(attachment);
+      if (contentCheck.kind === 'local-edit-race') {
+        logAttachmentWarn(`Skipped remote attachment replacement after a local edit race (${attachment.id})`);
+      } else if (contentCheck.kind === 'download') {
+        remoteWinnerExpectation = contentCheck.expectation;
+      }
+    }
+
     if (
       options.activationProbe
       && options.phase !== 'prepare'
@@ -147,6 +168,62 @@ export const syncCloudAttachments = async (
       } catch (error) {
         if (isAbortLikeError(error, options.signal)) throw error;
         logAttachmentWarn(`Failed to prove candidate attachment ${attachment.id}`, error);
+      }
+      continue;
+    }
+
+    // Self-hosted Cloud deliberately keeps missing remote attachments on-demand.
+    // A stale file that is already present is different: merged metadata selected
+    // the remote generation, so converge it through the same native present-CAS
+    // installer used by the shared lifecycle rather than uploading stale bytes.
+    if (remoteWinnerExpectation && attachmentsDir && attachment.cloudKey) {
+      try {
+        assertNotAborted(options.signal);
+        reportProgress(attachment.id, 'download', 0, attachment.size ?? 0, 'active');
+        const data = await cloudGetFile(
+          `${baseSyncUrl}/${attachment.cloudKey}`,
+          options.signal
+            ? { ...cloudRequestOptions, token: cloudConfig.token, signal: options.signal }
+            : { ...cloudRequestOptions, token: cloudConfig.token },
+        );
+        const bytes = new Uint8Array(data);
+        await validateAttachmentHash(attachment, bytes);
+        assertNotAborted(options.signal);
+        const installed = await installAttachmentDownloadBytes(
+          attachment,
+          attachmentsDir,
+          uri,
+          bytes,
+          remoteWinnerExpectation,
+          options.signal,
+        );
+        if (!installed) {
+          reportProgress(
+            attachment.id,
+            'download',
+            0,
+            attachment.size ?? 0,
+            'failed',
+            'Attachment changed locally during download',
+          );
+          logAttachmentWarn(`Skipped remote attachment replacement after a native conflict (${attachment.id})`);
+          continue;
+        }
+        attachment.localStatus = 'available';
+        await refreshBespokeAttachmentDownloadedContentStat(attachment, uri);
+        recordPatch(attachment);
+        reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
+      } catch (error) {
+        if (isAbortLikeError(error, options.signal)) throw error;
+        reportProgress(
+          attachment.id,
+          'download',
+          0,
+          attachment.size ?? 0,
+          'failed',
+          error instanceof Error ? error.message : String(error),
+        );
+        logAttachmentWarn(`Failed to download remote attachment winner ${attachment.id}`, error);
       }
       continue;
     }

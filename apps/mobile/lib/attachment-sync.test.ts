@@ -2405,6 +2405,249 @@ describe('attachment sync', () => {
       });
     });
 
+    it('installs a self-hosted Cloud remote winner over the exact stale local generation and makes the next prepare a no-op', async () => {
+      const id = 'remote-winner-cloud';
+      const localUri = `file://document/attachments/${id}.txt`;
+      let installed = false;
+      fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => {
+        if (uri === localUri) {
+          const bytes = installed ? OLD_BYTES : NEW_BYTES;
+          return { exists: true, size: bytes.length, modificationTime: installed ? 3 : 2 };
+        }
+        if (uri.includes('.mindwtr-download-')) {
+          return { exists: true, size: OLD_BYTES.length, modificationTime: 3 };
+        }
+        return { exists: false };
+      });
+      fileSystemMock.readAsStringAsync.mockImplementation(async (uri: string) => (
+        uri === localUri && !installed ? base64Of(NEW_BYTES) : base64Of(OLD_BYTES)
+      ));
+      attachmentFileInstallerMock.installAttachmentFileGeneration.mockImplementation(async () => {
+        installed = true;
+        return { status: 'installed' };
+      });
+      const core = await import('@mindwtr/core');
+      vi.mocked(core.cloudGetFile).mockResolvedValue(OLD_BYTES.slice().buffer as ArrayBuffer);
+      const merged = makeEditedAppData(id, {
+        contentRev: 2,
+        contentMtimeMs: undefined,
+        contentSize: undefined,
+        pendingContentUpload: undefined,
+      });
+
+      const result = syncResult(
+        await attachmentSync.syncCloudAttachments(
+          merged,
+          { url: 'https://cloud.example/v1/data', token: 'token' },
+          'https://cloud.example/v1',
+          { phase: 'post-merge' },
+        ),
+        merged,
+      );
+
+      expect(core.cloudPutFile).not.toHaveBeenCalled();
+      expect(core.cloudGetFile).toHaveBeenCalledWith(
+        `https://cloud.example/v1/attachments/${id}.txt`,
+        { token: 'token' },
+      );
+      expect(attachmentFileInstallerMock.installAttachmentFileGeneration).toHaveBeenCalledWith(
+        expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+        localUri,
+        { kind: 'present', sha256: sha256Hex(NEW_BYTES) },
+        sha256Hex(OLD_BYTES),
+      );
+      expect(result.data.tasks[0].attachments?.[0]).toMatchObject({
+        fileHash: sha256Hex(OLD_BYTES),
+        contentRev: 2,
+        contentMtimeMs: 3000,
+        contentSize: OLD_BYTES.length,
+        pendingContentUpload: undefined,
+      });
+
+      vi.clearAllMocks();
+      const nextPrepare = await attachmentSync.syncCloudAttachments(
+        result.data,
+        { url: 'https://cloud.example/v1/data', token: 'token' },
+        'https://cloud.example/v1',
+        { phase: 'prepare' },
+      );
+      expect(nextPrepare).toBe(false);
+      expect(core.cloudGetFile).not.toHaveBeenCalled();
+      expect(core.cloudPutFile).not.toHaveBeenCalled();
+      expect(attachmentFileInstallerMock.installAttachmentFileGeneration).not.toHaveBeenCalled();
+    });
+
+    it('adopts a verified local baseline for legacy Cloud metadata with no file hash', async () => {
+      const id = 'legacy-cloud-no-hash';
+      const localUri = `file://document/attachments/${id}.txt`;
+      fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+        uri === localUri
+          ? { exists: true, size: NEW_BYTES.length, modificationTime: 2 }
+          : { exists: false }
+      ));
+      fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(NEW_BYTES));
+      const core = await import('@mindwtr/core');
+      const merged = makeEditedAppData(id, {
+        fileHash: undefined,
+        contentMtimeMs: undefined,
+        contentSize: undefined,
+        pendingContentUpload: undefined,
+      });
+
+      const result = syncResult(
+        await attachmentSync.syncCloudAttachments(
+          merged,
+          { url: 'https://cloud.example/v1/data', token: 'token' },
+          'https://cloud.example/v1',
+          { phase: 'post-merge' },
+        ),
+        merged,
+      );
+
+      expect(result.data.tasks[0].attachments?.[0]).toMatchObject({
+        fileHash: sha256Hex(NEW_BYTES),
+        contentMtimeMs: 2000,
+        contentSize: NEW_BYTES.length,
+      });
+      expect(core.cloudGetFile).not.toHaveBeenCalled();
+      expect(core.cloudPutFile).not.toHaveBeenCalled();
+      expect(attachmentFileInstallerMock.installAttachmentFileGeneration).not.toHaveBeenCalled();
+
+      vi.clearAllMocks();
+      await expect(attachmentSync.syncCloudAttachments(
+        result.data,
+        { url: 'https://cloud.example/v1/data', token: 'token' },
+        'https://cloud.example/v1',
+        { phase: 'prepare' },
+      )).resolves.toBe(false);
+      expect(core.cloudGetFile).not.toHaveBeenCalled();
+      expect(core.cloudPutFile).not.toHaveBeenCalled();
+    });
+
+    it('terminates self-hosted Cloud progress when a stale-present remote winner hits a native conflict', async () => {
+      const id = 'remote-winner-cloud-conflict';
+      const localUri = `file://document/attachments/${id}.txt`;
+      fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => {
+        if (uri === localUri) {
+          return { exists: true, size: NEW_BYTES.length, modificationTime: 2 };
+        }
+        if (uri.includes('.mindwtr-download-')) {
+          return { exists: true, size: OLD_BYTES.length, modificationTime: 3 };
+        }
+        return { exists: false };
+      });
+      fileSystemMock.readAsStringAsync.mockImplementation(async (uri: string) => (
+        uri === localUri ? base64Of(NEW_BYTES) : base64Of(OLD_BYTES)
+      ));
+      attachmentFileInstallerMock.installAttachmentFileGeneration.mockResolvedValue({
+        status: 'conflict',
+        preservedPath: 'file://document/attachments/.mindwtr-preserved-cloud.staged',
+      });
+      const core = await import('@mindwtr/core');
+      vi.mocked(core.cloudGetFile).mockResolvedValue(OLD_BYTES.slice().buffer as ArrayBuffer);
+      const merged = deepFreeze(makeEditedAppData(id, {
+        contentRev: 2,
+        contentMtimeMs: undefined,
+        contentSize: undefined,
+        pendingContentUpload: undefined,
+      }));
+
+      const result = await attachmentSync.syncCloudAttachments(
+        merged,
+        { url: 'https://cloud.example/v1/data', token: 'token' },
+        'https://cloud.example/v1',
+        { phase: 'post-merge' },
+      );
+
+      expect(result).toBe(false);
+      expect(core.cloudPutFile).not.toHaveBeenCalled();
+      expect(attachmentFileInstallerMock.installAttachmentFileGeneration).toHaveBeenCalledWith(
+        expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+        localUri,
+        { kind: 'present', sha256: sha256Hex(NEW_BYTES) },
+        sha256Hex(OLD_BYTES),
+      );
+      const stagedPath = attachmentFileInstallerMock.installAttachmentFileGeneration.mock.calls[0]?.[0];
+      expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(stagedPath, expect.anything());
+      expect(core.globalProgressTracker.getProgress(id)).toMatchObject({
+        status: 'failed',
+        error: 'Attachment changed locally during download',
+      });
+      expect(merged.tasks[0].attachments?.[0]).toMatchObject({
+        uri: localUri,
+        localStatus: 'available',
+        fileHash: sha256Hex(OLD_BYTES),
+        contentRev: 2,
+        pendingContentUpload: undefined,
+      });
+    });
+
+    it('keeps Dropbox metadata and pending state unchanged when a stale-present remote winner hits a native conflict', async () => {
+      const id = 'remote-winner-dropbox-conflict';
+      const localUri = `file://document/attachments/${id}.txt`;
+      fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => {
+        if (uri === localUri) {
+          return { exists: true, size: NEW_BYTES.length, modificationTime: 2 };
+        }
+        if (uri.includes('.mindwtr-download-')) {
+          return { exists: true, size: OLD_BYTES.length, modificationTime: 3 };
+        }
+        return { exists: false };
+      });
+      fileSystemMock.readAsStringAsync.mockImplementation(async (uri: string) => (
+        uri === localUri ? base64Of(NEW_BYTES) : base64Of(OLD_BYTES)
+      ));
+      attachmentFileInstallerMock.installAttachmentFileGeneration.mockResolvedValue({
+        status: 'conflict',
+        preservedPath: 'file://document/attachments/.mindwtr-preserved-dropbox.staged',
+      });
+      const core = await import('@mindwtr/core');
+      const dropbox = await import('./dropbox-sync');
+      vi.mocked(dropbox.downloadDropboxFile).mockResolvedValue(OLD_BYTES.slice().buffer as ArrayBuffer);
+      const merged = deepFreeze(makeEditedAppData(id, {
+        contentRev: 2,
+        contentMtimeMs: undefined,
+        contentSize: undefined,
+        pendingContentUpload: undefined,
+      }));
+
+      const result = await attachmentSync.syncDropboxAttachments(
+        merged,
+        'dropbox-client-id',
+        fetch,
+        { phase: 'post-merge' },
+      );
+
+      expect(result).toBe(false);
+      expect(dropbox.downloadDropboxFile).toHaveBeenCalledWith(
+        expect.any(String),
+        `attachments/${id}.txt`,
+        fetch,
+        { signal: undefined },
+      );
+      expect(dropbox.getDropboxFileMetadata).not.toHaveBeenCalled();
+      expect(dropbox.uploadDropboxFileVersioned).not.toHaveBeenCalled();
+      expect(attachmentFileInstallerMock.installAttachmentFileGeneration).toHaveBeenCalledWith(
+        expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+        localUri,
+        { kind: 'present', sha256: sha256Hex(NEW_BYTES) },
+        sha256Hex(OLD_BYTES),
+      );
+      const stagedPath = attachmentFileInstallerMock.installAttachmentFileGeneration.mock.calls[0]?.[0];
+      expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(stagedPath, expect.anything());
+      expect(core.globalProgressTracker.getProgress(id)).toMatchObject({
+        status: 'failed',
+        error: 'Attachment changed locally during download',
+      });
+      expect(merged.tasks[0].attachments?.[0]).toMatchObject({
+        uri: localUri,
+        localStatus: 'available',
+        fileHash: sha256Hex(OLD_BYTES),
+        contentRev: 2,
+        pendingContentUpload: undefined,
+      });
+    });
+
     it('never puts an attachment title or file name into a log line (SEC-16, #854)', async () => {
       const appLog = await import('./app-log');
       const { syncWebdavAttachments } = attachmentSync;

@@ -1127,13 +1127,15 @@ class MobileSyncRun {
       },
       shouldRunAttachmentPhase: async (data, phase) => {
         const backend = this.backend;
-        // #1057 (review B3): only file/webdav/cloudkit wire check-on-touch content
-        // detection on mobile today (Dropbox and self-hosted Cloud use their own
-        // bespoke loops, unaffected). Without this, the steady state — cloudKey +
-        // managed local file + localStatus 'available' — always reported "no
-        // pending work" and both attachment phases never ran, so edit detection
-        // and cross-device re-download were dead code on every wired backend.
-        const contentCheckEnabled = backend === 'file' || backend === 'webdav' || backend === 'cloudkit';
+        // #1057 (review B3): every attachment backend now wires check-on-touch
+        // content detection, including the bespoke Dropbox/self-hosted Cloud loops.
+        // Without this, the steady state — cloudKey + managed local file +
+        // localStatus 'available' — reports "no pending work", so neither prepare
+        // nor post-merge can detect a local edit or converge a remote winner.
+        const contentCheckEnabled = backend === 'file'
+          || backend === 'webdav'
+          || backend === 'cloudkit'
+          || backend === 'cloud';
         if (phase === 'prepare') {
           const prepareCheckStartedAt = Date.now();
           const hasAttachmentWork = await hasPendingAttachmentSyncWork(data, { contentCheckEnabled });

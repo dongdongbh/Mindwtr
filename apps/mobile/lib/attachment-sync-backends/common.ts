@@ -6,6 +6,7 @@ import {
   decryptRemoteArtifactOrThrow,
   encryptSyncArtifact,
   inspectSyncArtifact,
+  isSha256Hex,
   runAttachmentTransferLifecycle,
   SyncCryptoUnsupportedError,
   SyncEncryptionTerminalError,
@@ -380,6 +381,99 @@ export const pendingBespokeAttachmentContentStillMatches = async (
   if (check.stat.mtimeMs !== attachment.contentMtimeMs || check.stat.size !== attachment.contentSize) {
     applyAttachmentContentStat(attachment, check.stat, check.hash);
   }
+  return true;
+};
+
+export type BespokeAttachmentRemoteWinnerCheck =
+  | { kind: 'none'; metadataChanged: boolean }
+  | { kind: 'local-edit-race'; metadataChanged: false }
+  | { kind: 'download'; metadataChanged: false; expectation: AttachmentDownloadExpectation };
+
+/**
+ * Post-merge companion to `prepareBespokeAttachmentContentCandidate` for the
+ * Cloud and Dropbox adapters that cannot use core's generic transfer loop.
+ *
+ * The merged attachment already names the winning remote content generation.
+ * A hash-confirmed mismatch therefore needs a generation-bound download, but
+ * only while the live file still has the exact stat that was hashed. This is
+ * the same hash + immediate re-stat rule used by core's lifecycle before its
+ * `{ kind: 'present' }` download callback.
+ */
+export const checkBespokeAttachmentRemoteWinner = async (
+  attachment: Attachment,
+  localPath: string,
+): Promise<BespokeAttachmentRemoteWinnerCheck> => {
+  if (attachment.pendingContentUpload === true) {
+    return { kind: 'none', metadataChanged: false };
+  }
+
+  const stat = await statAttachmentFile(localPath);
+  if (!stat) return { kind: 'none', metadataChanged: false };
+  const check = await checkAttachmentContentChange(
+    attachment,
+    stat,
+    () => computeAttachmentFileHash(localPath),
+  );
+  if (!check.changed) {
+    const metadataChanged = check.stat.mtimeMs !== attachment.contentMtimeMs
+      || check.stat.size !== attachment.contentSize;
+    if (metadataChanged) {
+      applyAttachmentContentStat(attachment, check.stat, check.hash);
+    }
+    return { kind: 'none', metadataChanged };
+  }
+  if (!check.hash || !isSha256Hex(check.hash.trim().toLowerCase())) {
+    return { kind: 'none', metadataChanged: false };
+  }
+  const expectedRemoteHash = attachment.fileHash?.trim().toLowerCase();
+  if (!attachment.fileHash) {
+    applyAttachmentContentStat(attachment, check.stat, check.hash);
+    return { kind: 'none', metadataChanged: true };
+  }
+  if (!isSha256Hex(expectedRemoteHash)) {
+    return { kind: 'none', metadataChanged: false };
+  }
+
+  const restat = await statAttachmentFile(localPath);
+  if (
+    !restat
+    || restat.mtimeMs !== check.stat.mtimeMs
+    || restat.size !== check.stat.size
+  ) {
+    return { kind: 'local-edit-race', metadataChanged: false };
+  }
+  return {
+    kind: 'download',
+    metadataChanged: false,
+    expectation: { kind: 'present', sha256: check.hash.trim().toLowerCase() },
+  };
+};
+
+/**
+ * Record a downloaded generation as the local baseline only if the path still
+ * contains the exact remote bytes and remains stable across hash + stat. A
+ * writer that edits immediately after native publication is left for the next
+ * prepare pass instead of being mislabeled as the remote baseline.
+ */
+export const refreshBespokeAttachmentDownloadedContentStat = async (
+  attachment: Attachment,
+  localPath: string,
+): Promise<boolean> => {
+  const expectedRemoteHash = attachment.fileHash?.trim().toLowerCase();
+  if (!isSha256Hex(expectedRemoteHash)) return false;
+  const stat = await statAttachmentFile(localPath);
+  if (!stat) return false;
+  const hash = await computeAttachmentFileHash(localPath);
+  const restat = await statAttachmentFile(localPath);
+  if (
+    hash?.trim().toLowerCase() !== expectedRemoteHash
+    || !restat
+    || restat.mtimeMs !== stat.mtimeMs
+    || restat.size !== stat.size
+  ) {
+    return false;
+  }
+  applyAttachmentContentStat(attachment, restat, expectedRemoteHash);
   return true;
 };
 
