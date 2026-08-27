@@ -17,6 +17,8 @@
 //! Nothing here is ever synced: no encryption state, salt, params or key enters the synced
 //! document, the content signature, or config.toml.
 
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
@@ -223,13 +225,164 @@ fn read_state_file(path: &Path) -> Result<Option<SyncEncryptionLocalState>, Stri
     }
 }
 
+#[cfg(unix)]
+fn sync_state_parent_directory(parent: &Path) -> Result<(), String> {
+    File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| format!("Failed to flush sync encryption state directory: {error}"))
+}
+
+#[cfg(not(unix))]
+fn sync_state_parent_directory(_parent: &Path) -> Result<(), String> {
+    // Windows namespace durability comes from MOVEFILE_WRITE_THROUGH below.
+    Ok(())
+}
+
+#[cfg(windows)]
+fn windows_state_path_wide(path: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+
+    path.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+#[cfg(windows)]
+fn windows_move_state_file_write_through(source: &Path, destination: &Path) -> Result<(), String> {
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = windows_state_path_wide(source);
+    let destination = windows_state_path_wide(destination);
+    // SAFETY: both buffers are NUL-terminated and remain alive for the call.
+    if unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn publish_state_temp_file(temp: &Path, destination: &Path) -> Result<(), String> {
+    windows_move_state_file_write_through(temp, destination)
+}
+
+#[cfg(not(windows))]
+fn publish_state_temp_file(temp: &Path, destination: &Path) -> Result<(), String> {
+    std::fs::rename(temp, destination).map_err(|error| error.to_string())
+}
+
+fn publish_state_temp_file_durably_with<SyncTemp, Publish, SyncParent>(
+    temp: &Path,
+    destination: &Path,
+    sync_temp: SyncTemp,
+    publish: Publish,
+    sync_parent: SyncParent,
+) -> Result<(), String>
+where
+    SyncTemp: FnOnce() -> Result<(), String>,
+    Publish: FnOnce(&Path, &Path) -> Result<(), String>,
+    SyncParent: FnOnce(&Path) -> Result<(), String>,
+{
+    sync_temp()?;
+    publish(temp, destination)?;
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "Failed to resolve sync encryption state directory".to_string())?;
+    sync_parent(parent)
+}
+
+#[cfg(windows)]
+fn state_deletion_tombstone_path(path: &Path) -> Result<PathBuf, String> {
+    use std::ffi::OsString;
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Failed to resolve sync encryption state directory".to_string())?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| "Failed to resolve sync encryption state file name".to_string())?;
+    let mut tombstone_name = OsString::from(".");
+    tombstone_name.push(file_name);
+    tombstone_name.push(".mindwtr-delete");
+    Ok(parent.join(tombstone_name))
+}
+
+#[cfg(windows)]
+fn securely_clear_state_deletion_tombstone(path: &Path) -> Result<(), String> {
+    let empty = path.with_extension("delete-empty.tmp");
+    let _ = std::fs::remove_file(&empty);
+    let file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&empty)
+        .map_err(|error| error.to_string())?;
+    file.sync_all().map_err(|error| error.to_string())?;
+    publish_state_temp_file(&empty, path)?;
+    std::fs::remove_file(path).map_err(|error| error.to_string())
+}
+
+#[cfg(windows)]
+fn remove_state_file_for_platform(path: &Path) -> Result<bool, String> {
+    let tombstone = state_deletion_tombstone_path(path)?;
+    if !path.try_exists().map_err(|error| error.to_string())? {
+        if tombstone.try_exists().map_err(|error| error.to_string())? {
+            securely_clear_state_deletion_tombstone(&tombstone)?;
+        }
+        return Ok(false);
+    }
+    windows_move_state_file_write_through(path, &tombstone)?;
+    securely_clear_state_deletion_tombstone(&tombstone)?;
+    Ok(true)
+}
+
+#[cfg(not(windows))]
+fn remove_state_file_for_platform(path: &Path) -> Result<bool, String> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn remove_state_file_durably_with<Remove, SyncParent>(
+    path: &Path,
+    remove: Remove,
+    sync_parent: SyncParent,
+) -> Result<(), String>
+where
+    Remove: FnOnce(&Path) -> Result<bool, String>,
+    SyncParent: FnOnce(&Path) -> Result<(), String>,
+{
+    if !remove(path)? {
+        return Ok(());
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Failed to resolve sync encryption state directory".to_string())?;
+    sync_parent(parent)
+}
+
+fn remove_state_file_durably(path: &Path) -> Result<(), String> {
+    remove_state_file_durably_with(
+        path,
+        remove_state_file_for_platform,
+        sync_state_parent_directory,
+    )
+}
+
 fn write_state_file(path: &Path, state: Option<&SyncEncryptionLocalState>) -> Result<(), String> {
     let Some(state) = state else {
-        match std::fs::remove_file(path) {
-            Ok(()) => return Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(format!("Failed to clear sync encryption state: {error}")),
-        }
+        return remove_state_file_durably(path)
+            .map_err(|error| format!("Failed to clear sync encryption state: {error}"));
     };
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -241,14 +394,25 @@ fn write_state_file(path: &Path, state: Option<&SyncEncryptionLocalState>) -> Re
     // existing file for truncating overwrite (#1001).
     let tmp = path.with_extension("json.tmp");
     let _ = std::fs::remove_file(&tmp);
-    std::fs::write(&tmp, serialized.as_bytes())
-        .map_err(|error| format!("Failed to write sync encryption state: {error}"))?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .map_err(|error| format!("Failed to create sync encryption state: {error}"))?;
     restrict_to_owner(&tmp, 0o600)?;
-    if cfg!(windows) {
-        let _ = std::fs::remove_file(path);
-    }
-    std::fs::rename(&tmp, path)
-        .map_err(|error| format!("Failed to install sync encryption state: {error}"))
+    file.write_all(serialized.as_bytes())
+        .map_err(|error| format!("Failed to write sync encryption state: {error}"))?;
+    publish_state_temp_file_durably_with(
+        &tmp,
+        path,
+        move || {
+            file.sync_all()
+                .map_err(|error| format!("Failed to flush sync encryption state: {error}"))
+        },
+        publish_state_temp_file,
+        sync_state_parent_directory,
+    )
+    .map_err(|error| format!("Failed to install sync encryption state: {error}"))
 }
 
 /// Reads the persisted state. `None` means the implicit, never-written 'off' default -- the
@@ -676,6 +840,94 @@ mod tests {
         assert!(read_state_file(&path).expect("read cleared state").is_none());
         // Clearing an already-absent file is not an error (idempotent disable).
         write_state_file(&path, None).expect("clear again");
+    }
+
+    #[test]
+    fn state_publish_acknowledges_parent_metadata_after_install() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let temp = dir.path().join("state.tmp");
+        let destination = dir.path().join(SYNC_ENCRYPTION_STATE_FILE_NAME);
+        let events = std::cell::RefCell::new(Vec::new());
+
+        publish_state_temp_file_durably_with(
+            &temp,
+            &destination,
+            || {
+                events.borrow_mut().push("sync-temp");
+                Ok(())
+            },
+            |_, _| {
+                events.borrow_mut().push("publish");
+                Ok(())
+            },
+            |_| {
+                events.borrow_mut().push("sync-parent");
+                Ok(())
+            },
+        )
+        .expect("durable publish");
+
+        assert_eq!(
+            &*events.borrow(),
+            &["sync-temp", "publish", "sync-parent"]
+        );
+    }
+
+    #[test]
+    fn failed_state_file_flush_prevents_publish() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let temp = dir.path().join("state.tmp");
+        let destination = dir.path().join(SYNC_ENCRYPTION_STATE_FILE_NAME);
+        let events = std::cell::RefCell::new(Vec::new());
+
+        let error = publish_state_temp_file_durably_with(
+            &temp,
+            &destination,
+            || {
+                events.borrow_mut().push("sync-temp");
+                Err("file flush failed".to_string())
+            },
+            |_, _| {
+                events.borrow_mut().push("publish");
+                Ok(())
+            },
+            |_| {
+                events.borrow_mut().push("sync-parent");
+                Ok(())
+            },
+        )
+        .expect_err("an unflushed state file must not be published");
+
+        assert_eq!(error, "file flush failed");
+        assert_eq!(&*events.borrow(), &["sync-temp"]);
+    }
+
+    #[test]
+    fn failed_state_removal_metadata_flush_blocks_key_clear() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(SYNC_ENCRYPTION_STATE_FILE_NAME);
+        let events = std::cell::RefCell::new(Vec::new());
+
+        let error = clear_encryption_state_with(
+            || {
+                remove_state_file_durably_with(
+                    &path,
+                    |_| {
+                        events.borrow_mut().push("remove");
+                        Ok(true)
+                    },
+                    |_| {
+                        events.borrow_mut().push("sync-parent");
+                        Err("directory flush failed".to_string())
+                    },
+                )
+            },
+            || events.borrow_mut().push("clear-key"),
+        )
+        .expect_err("metadata flush failure must preserve retry key");
+
+        assert_eq!(error, "directory flush failed");
+        assert_eq!(&*events.borrow(), &["remove", "sync-parent"]);
     }
 
     #[test]
