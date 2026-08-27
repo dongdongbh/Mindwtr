@@ -300,6 +300,50 @@ describe('ListView', () => {
     window.removeEventListener('mindwtr:quick-add', quickAddListener);
   });
 
+  it('shows a Someday task inside its Someday project and groups it under that project', () => {
+    const workArea = {
+      id: 'area-work',
+      name: 'Work',
+      color: '#3b82f6',
+      order: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const somedayProject = {
+      id: 'project-someday',
+      title: 'Someday ideas',
+      status: 'someday' as const,
+      color: '#8b5cf6',
+      order: 0,
+      tagIds: [],
+      areaId: workArea.id,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const somedayTask = makeTask('someday-project-task', {
+      title: 'Try a pottery class',
+      status: 'someday',
+      projectId: somedayProject.id,
+    });
+
+    useTaskStore.setState({
+      _allAreas: [workArea],
+      _allProjects: [somedayProject],
+      _allTasks: [somedayTask],
+      lastDataChangeAt: 1,
+      settings: { filters: { areaId: workArea.id } },
+    });
+    useUiStore.setState((state) => ({
+      ...state,
+      listOptions: { ...state.listOptions, somedayGroupBy: 'project' },
+    }));
+
+    const { getByText, getAllByText } = renderListView('someday', 'Someday');
+
+    expect(getByText('Try a pottery class')).toBeInTheDocument();
+    expect(getAllByText('Someday ideas').length).toBeGreaterThanOrEqual(2);
+  });
+
   it('keeps future-start inbox tasks visible while hiding future-start next actions', async () => {
     vi.useFakeTimers();
     try {

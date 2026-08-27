@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { type Task, type TaskStatus, useTaskStore, isTaskInActiveProject, getSequentialFirstTaskIds, isSequentialChainStatus } from '@mindwtr/core';
+import { type Task, type TaskStatus, useTaskStore, isTaskInActiveProject, isTaskVisibleInStatusList, getSequentialFirstTaskIds, isSequentialChainStatus } from '@mindwtr/core';
 import { useConditionalMemo } from './useConditionalMemo';
 import { useProgressiveComputation } from './useProgressiveComputation';
 
@@ -55,14 +55,13 @@ export function useListViewOptimizations(
             const perfApi = perfRef.current;
             perfApi?.trackUseMemo?.();
             const compute = () => {
-                const allowDeferredProjectTasks = statusFilter === 'done' || statusFilter === 'archived';
-                const hideProjectTasksInDeferredList = statusFilter === 'someday' || statusFilter === 'waiting';
+                const hideProjectTasksInDeferredList = statusFilter === 'waiting';
                 const counts: Record<string, number> = {};
                 tasks
                     .filter((task) => {
                         if (task.deletedAt) return false;
                         if (statusFilter !== 'all' && task.status !== statusFilter) return false;
-                        if (!allowDeferredProjectTasks && !isTaskInActiveProject(task, projectMap)) return false;
+                        if (!isTaskVisibleInStatusList(task, projectMap, statusFilter)) return false;
                         if (hideProjectTasksInDeferredList && task.projectId && projectMap.get(task.projectId)) return false;
                         return true;
                     })

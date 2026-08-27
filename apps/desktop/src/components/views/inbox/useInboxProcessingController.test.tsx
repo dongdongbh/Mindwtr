@@ -100,7 +100,7 @@ describe('useInboxProcessingController not-actionable destinations', () => {
     // used to write only the status, silently dropping the project.
     it.each([
         ['reference', (wizard: ReturnType<typeof renderController>['result']['current']['wizardProps']) => wizard.handleConfirmReference()],
-        ['someday', (wizard: ReturnType<typeof renderController>['result']['current']['wizardProps']) => wizard.handleNotActionable('someday')],
+        ['someday', (wizard: ReturnType<typeof renderController>['result']['current']['wizardProps']) => wizard.handleConfirmSomeday()],
     ] as const)('keeps the picked project when the item goes to %s', async (status, commit) => {
         const updateTask = vi.fn(async () => ({ success: true }));
         const { result } = renderController(updateTask);
@@ -120,6 +120,21 @@ describe('useInboxProcessingController not-actionable destinations', () => {
             status,
             projectId: 'p1',
         }));
+    });
+
+    it('routes guided Someday through organization controls before committing', async () => {
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderController(updateTask);
+
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+        await act(async () => {
+            await result.current.wizardProps.handleNotActionable('someday');
+        });
+
+        expect(result.current.wizardProps.processingStep).toBe('someday');
+        expect(updateTask).not.toHaveBeenCalled();
     });
 
     it('keeps picked organization fields when delegated to Waiting', async () => {

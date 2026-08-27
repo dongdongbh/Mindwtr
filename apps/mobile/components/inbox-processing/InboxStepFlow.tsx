@@ -42,7 +42,7 @@ type Controller = ReturnType<typeof useInboxProcessingController>;
 /** Which decision landed — picks the Undo toast wording. */
 type Committed = 'trash' | Extract<TaskStatus, 'next' | 'waiting' | 'someday' | 'reference' | 'done'>;
 
-type Step = 'actionable' | 'decisions' | 'later' | 'incubate' | 'twoMinute' | 'execution' | 'oneAction' | 'waiting' | 'file';
+type Step = 'actionable' | 'decisions' | 'someday' | 'later' | 'incubate' | 'twoMinute' | 'execution' | 'oneAction' | 'waiting' | 'file';
 
 const STEP_TRANSITION_MS = 200;
 const STEP_TRANSITION_OFFSET = 24;
@@ -153,6 +153,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
   const quick = mode === 'quick';
   const entryStep: Step = quick ? 'decisions' : 'actionable';
   const step: Step = (() => {
+    if (actionabilityChoice === 'someday') return 'someday';
     if (actionabilityChoice === 'later') return 'later';
     if (actionabilityChoice === 'incubate') return 'incubate';
     if (actionabilityChoice !== 'actionable') return entryStep;
@@ -162,7 +163,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
     if (showProjectField && !oneActionAnswered) return 'oneAction';
     return 'file';
   })();
-  const isTerminal = step === 'later' || step === 'incubate' || step === 'waiting' || step === 'file';
+  const isTerminal = step === 'someday' || step === 'later' || step === 'incubate' || step === 'waiting' || step === 'file';
 
   useEffect(() => {
     setOneActionAnswered(false);
@@ -253,7 +254,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
 
   const terminalOutcome: Committed = step === 'waiting'
     ? 'waiting'
-    : (step === 'incubate' ? 'someday' : 'next');
+    : (step === 'incubate' || step === 'someday' ? 'someday' : 'next');
 
   const moreOptionsDisclosure = (
     <>
@@ -344,6 +345,44 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
     </>
   );
 
+  const renderProjectSection = (allowConversion: boolean) => (
+    <InboxProjectSection
+      t={t}
+      tc={tc}
+      show={controller.showProjectSection}
+      showProjectField={showProjectField}
+      showAreaField={controller.showAreaField}
+      currentProject={controller.currentProject}
+      currentArea={controller.currentArea}
+      selectedProjectId={controller.selectedProjectId}
+      selectedAreaId={controller.selectedAreaId}
+      setSelectedAreaId={controller.setSelectedAreaId}
+      projectSearch={controller.projectSearch}
+      setProjectSearch={controller.setProjectSearch}
+      convertToProject={allowConversion && convertToProject}
+      projectTitleDraft={controller.projectTitleDraft}
+      setProjectTitleDraft={controller.setProjectTitleDraft}
+      nextActionDraft={controller.nextActionDraft}
+      setNextActionDraft={controller.setNextActionDraft}
+      extraActionDrafts={controller.extraActionDrafts}
+      setExtraActionDrafts={controller.setExtraActionDrafts}
+      filteredProjects={controller.filteredProjects}
+      areaById={controller.areaById}
+      hasExactProjectMatch={controller.hasExactProjectMatch}
+      handleCreateProjectEarly={controller.handleCreateProjectEarly}
+      handleConvertToProject={controller.handleConvertToProject}
+      selectProjectEarly={controller.selectProjectEarly}
+    />
+  );
+
+  const chooseSomeday = () => {
+    if (controller.showProjectSection) {
+      setActionabilityChoice('someday');
+      return;
+    }
+    void commit('someday', () => handleNotActionable('someday'));
+  };
+
   const renderStep = () => {
     switch (step) {
       // Quick mode: every destination on one screen. Terminal ones commit on
@@ -390,7 +429,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
                 icon={Cloud}
                 tc={tc}
                 label={t('inbox.someday')}
-                onPress={() => { void commit('someday', () => handleNotActionable('someday')); }}
+                onPress={chooseSomeday}
               />
               <SecondaryButton
                 icon={Hourglass}
@@ -448,7 +487,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
                 icon={Cloud}
                 tc={tc}
                 label={t('inbox.someday')}
-                onPress={() => { void commit('someday', () => handleNotActionable('someday')); }}
+                onPress={chooseSomeday}
               />
               <SecondaryButton
                 icon={BookOpen}
@@ -528,6 +567,13 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
           </View>
         );
 
+      case 'someday':
+        return (
+          <View>
+            {renderProjectSection(false)}
+          </View>
+        );
+
       case 'later':
         return (
           <View>
@@ -574,6 +620,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
             <Text style={[styles.stepHint, { color: tc.secondaryText }]}>
               {tFallback(t, 'process.incubateHint', 'Park this without deciding. It comes back to clarify on the date you choose.')}
             </Text>
+            {renderProjectSection(false)}
             <InboxDateSelectorRow
               t={t}
               label={t('taskEdit.reviewDateLabel')}
@@ -624,35 +671,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
         );
 
       case 'file': {
-        const projectRow = (
-            <InboxProjectSection
-              t={t}
-              tc={tc}
-              show={controller.showProjectSection}
-              showProjectField={showProjectField}
-              showAreaField={controller.showAreaField}
-              currentProject={controller.currentProject}
-              currentArea={controller.currentArea}
-              selectedProjectId={controller.selectedProjectId}
-              selectedAreaId={controller.selectedAreaId}
-              setSelectedAreaId={controller.setSelectedAreaId}
-              projectSearch={controller.projectSearch}
-              setProjectSearch={controller.setProjectSearch}
-              convertToProject={convertToProject}
-              projectTitleDraft={controller.projectTitleDraft}
-              setProjectTitleDraft={controller.setProjectTitleDraft}
-              nextActionDraft={controller.nextActionDraft}
-              setNextActionDraft={controller.setNextActionDraft}
-              extraActionDrafts={controller.extraActionDrafts}
-              setExtraActionDrafts={controller.setExtraActionDrafts}
-              filteredProjects={controller.filteredProjects}
-              areaById={controller.areaById}
-              hasExactProjectMatch={controller.hasExactProjectMatch}
-              handleCreateProjectEarly={controller.handleCreateProjectEarly}
-              handleConvertToProject={controller.handleConvertToProject}
-              selectProjectEarly={controller.selectProjectEarly}
-            />
-        );
+        const projectRow = renderProjectSection(true);
         const contextRow = (
             <InboxContextSection
               t={t}

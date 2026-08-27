@@ -17,7 +17,7 @@ import {
   normalizeFocusTaskLimit,
   resolveFeatureFlags,
   tFallback,
-  isTaskInActiveProject,
+  isTaskVisibleInStatusList,
   getTaskMetadataFilterVisibility,
 } from '@mindwtr/core';
 
@@ -383,11 +383,13 @@ function TaskListComponent({
   const timeSpentEnabled = resolvedFeatureFlags.pomodoro
     && settings?.gtd?.pomodoro?.linkTask === true;
   const showTaskAge = settings?.appearance?.showTaskAge === true;
+  const sectionById = useMemo(() => new Map(sections.map((section) => [section.id, section])), [sections]);
   const rowContext = useMemo<SwipeableTaskItemRowContext>(() => ({
     addTask,
     updateTask,
     restoreTask,
     projects,
+    sectionById,
     areas,
     focusedCount,
     focusTaskLimit,
@@ -400,6 +402,7 @@ function TaskListComponent({
     focusedCount,
     focusTaskLimit,
     projects,
+    sectionById,
     restoreTask,
     showTaskAge,
     timeEstimatesEnabled,
@@ -461,7 +464,7 @@ function TaskListComponent({
       if (statusFilter === 'all' && !includeDone && task.status === 'done') return false;
       const matchesStatus = statusFilter === 'all' ? true : task.status === statusFilter;
       const matchesProject = projectId ? task.projectId === projectId : true;
-      if (!projectId && !isTaskInActiveProject(task, projectById)) return false;
+      if (!projectId && !isTaskVisibleInStatusList(task, projectById, statusFilter)) return false;
       if (!taskMatchesAreaFilterSelection(task, resolvedAreaFilter, projectById, areaById)) return false;
       return matchesStatus && matchesProject;
     });

@@ -489,6 +489,7 @@
     "isTaskDraftDirty",
     "isTaskFutureStart",
     "isTaskInActiveProject",
+    "isTaskVisibleInStatusList",
     "isTaskVisible",
     "isValidCloudSyncToken",
     "isValidFeedbackEmail",

@@ -10,6 +10,7 @@ import {
     getProjectsByTag,
     isTaskInActiveProject,
     isTaskInCalendarHistoryProject,
+    isTaskVisibleInStatusList,
     isSelectableProjectForTaskAssignment,
     projectHasNextAction,
     shouldPromptForProjectNextAction,
@@ -283,6 +284,7 @@ describe('project-utils', () => {
         const archivedProject: Project = { id: 'p6', title: 'Archived', status: 'archived', tagIds: [], areaId: 'a1', createdAt: '', updatedAt: '' };
         const completedProject: Project = { id: 'p7', title: 'Completed', status: 'completed' as Project['status'], tagIds: [], areaId: 'a1', createdAt: '', updatedAt: '' };
         expect(isSelectableProjectForTaskAssignment(projects[0])).toBe(true);
+        expect(isSelectableProjectForTaskAssignment(projects[2])).toBe(true);
         expect(isSelectableProjectForTaskAssignment(projects[4])).toBe(false);
         expect(isSelectableProjectForTaskAssignment(archivedProject)).toBe(false);
         expect(isSelectableProjectForTaskAssignment(completedProject)).toBe(false);
@@ -302,6 +304,51 @@ describe('project-utils', () => {
         expect(isTaskInActiveProject(deletedProjectTask, projectMap)).toBe(false);
         expect(isTaskInActiveProject(missingProjectTask, projectMap)).toBe(true);
     });
+
+    it.each([
+        ['someday task without a project', 'someday', undefined, 'someday', true],
+        ['someday task in an active project', 'someday', 'active', 'someday', true],
+        ['someday task in a Someday project', 'someday', 'someday', 'someday', true],
+        ['someday task in a Waiting project', 'someday', 'waiting', 'someday', false],
+        ['someday task in an archived project', 'someday', 'archived', 'someday', false],
+        ['someday task in a deleted project', 'someday', 'deleted', 'someday', false],
+        ['Next task in a Someday project', 'next', 'someday', 'next', false],
+        ['Waiting task in a Someday project', 'waiting', 'someday', 'waiting', false],
+        ['Inbox task in a Someday project', 'inbox', 'someday', 'inbox', false],
+        ['Done task in a Someday project', 'done', 'someday', 'done', true],
+        ['archived task in a deleted project', 'archived', 'deleted', 'archived', true],
+    ] as const)(
+        'applies status-list project visibility for a %s',
+        (_label, taskStatus, parentStatus, statusFilter, expected) => {
+            const projectId = parentStatus ? `project-${parentStatus}` : undefined;
+            const task: Task = {
+                id: `task-${taskStatus}-${parentStatus ?? 'none'}`,
+                title: 'Matrix task',
+                status: taskStatus,
+                projectId,
+                tags: [],
+                contexts: [],
+                createdAt: '',
+                updatedAt: '',
+            };
+            const projectMap = new Map<string, Project>();
+            if (projectId) {
+                projectMap.set(projectId, {
+                    id: projectId,
+                    title: 'Parent project',
+                    status: parentStatus === 'deleted' ? 'someday' : parentStatus,
+                    color: '#000000',
+                    order: 0,
+                    tagIds: [],
+                    createdAt: '',
+                    updatedAt: '',
+                    ...(parentStatus === 'deleted' ? { deletedAt: '2026-08-27T00:00:00.000Z' } : {}),
+                });
+            }
+
+            expect(isTaskVisibleInStatusList(task, projectMap, statusFilter)).toBe(expected);
+        },
+    );
 
     it('includes archived projects only for the calendar history surface', () => {
         const archivedProject: Project = {

@@ -2028,14 +2028,82 @@ describe('InboxProcessingModal', () => {
       .map(([options]) => options)
       .find((options) => options?.actionLabel === 'Undo');
 
-    it('files Someday straight from the first question', async () => {
+    it.each([
+      ['guided', null],
+      ['quick', 'quick'],
+    ] as const)('offers Area and Someday-project controls before filing in %s mode', async (_mode, storedMode) => {
+      asyncStorageMock.getItem.mockResolvedValue(storedMode);
+      storeState.areas = [workArea];
+      storeState.projects = [{ ...workProject, status: 'someday' }];
+      const root = await openFlow();
+
+      await pressAsync(root, 'inbox.someday');
+
+      expect(updateTask).not.toHaveBeenCalled();
+      expect(findNodesWithText(root, 'taskEdit.areaLabel').length).toBeGreaterThan(0);
+      expect(findNodesWithText(root, 'Work Project').length).toBeGreaterThan(0);
+      await pressAsync(root, 'Work Project');
+      await act(async () => {
+        findPressableWithText(root, 'File it').props.onPress();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(updateTask).toHaveBeenCalledTimes(1);
+      expect(updateTask.mock.calls[0][1]).toMatchObject({
+        status: 'someday',
+        projectId: workProject.id,
+      });
+      expect(undoToast()?.message).toBe('Inbox task moved to someday');
+    });
+
+    it.each([
+      ['guided', null],
+      ['quick', 'quick'],
+    ] as const)('offers Area and Someday-project controls before incubating in %s mode', async (_mode, storedMode) => {
+      asyncStorageMock.getItem.mockResolvedValue(storedMode);
+      storeState.areas = [workArea];
+      storeState.projects = [{ ...workProject, status: 'someday' }];
+      const root = await openFlow();
+
+      await pressAsync(root, 'Incubate');
+
+      expect(updateTask).not.toHaveBeenCalled();
+      expect(findNodesWithText(root, 'taskEdit.areaLabel').length).toBeGreaterThan(0);
+      expect(findNodesWithText(root, 'Work Project').length).toBeGreaterThan(0);
+      await pressAsync(root, 'Work Project');
+      await act(async () => {
+        root.findByProps({ children: 'common.notSet' }).parent!.props.onPress();
+        await Promise.resolve();
+      });
+      await act(async () => {
+        root.findByType('DateTimePicker' as any).props.onChange(
+          { type: 'set' },
+          new Date(2026, 8, 10, 12, 0, 0),
+        );
+        await Promise.resolve();
+      });
+      await pressAsync(root, 'File it');
+
+      expect(updateTask).toHaveBeenCalledTimes(1);
+      expect(updateTask.mock.calls[0][1]).toMatchObject({
+        status: 'someday',
+        projectId: workProject.id,
+      });
+    });
+
+    it.each([
+      ['guided', null],
+      ['quick', 'quick'],
+    ] as const)('files Someday directly when organization fields are hidden in %s mode', async (_mode, storedMode) => {
+      asyncStorageMock.getItem.mockResolvedValue(storedMode);
+      mockSettings.gtd.taskEditor = { hidden: ['area', 'project'] };
       const root = await openFlow();
 
       await pressAsync(root, 'inbox.someday');
 
       expect(updateTask).toHaveBeenCalledTimes(1);
       expect(updateTask.mock.calls[0][1]).toMatchObject({ status: 'someday' });
-      expect(undoToast()?.message).toBe('Inbox task moved to someday');
     });
 
     it('files Reference straight from the first question', async () => {
@@ -2075,7 +2143,8 @@ describe('InboxProcessingModal', () => {
     it('restores a filed item to the Inbox from its Undo toast', async () => {
       const root = await openFlow();
 
-      await pressAsync(root, 'inbox.someday');
+      pressStep(root, 'inbox.someday');
+      await pressAsync(root, 'File it');
       const toast = undoToast();
 
       await act(async () => {
@@ -2091,7 +2160,8 @@ describe('InboxProcessingModal', () => {
 
       expect(hapticsMock.notificationAsync).not.toHaveBeenCalled();
 
-      await pressAsync(root, 'inbox.someday');
+      pressStep(root, 'inbox.someday');
+      await pressAsync(root, 'File it');
 
       expect(hapticsMock.notificationAsync).toHaveBeenCalledTimes(1);
       expect(hapticsMock.notificationAsync).toHaveBeenCalledWith('success');
@@ -2101,7 +2171,8 @@ describe('InboxProcessingModal', () => {
       updateTask.mockResolvedValue({ success: false, error: 'nope' });
       const root = await openFlow();
 
-      await pressAsync(root, 'inbox.someday');
+      pressStep(root, 'inbox.someday');
+      await pressAsync(root, 'File it');
 
       expect(hapticsMock.notificationAsync).not.toHaveBeenCalled();
       expect(undoToast()).toBeUndefined();
@@ -2533,6 +2604,11 @@ describe('InboxProcessingModal', () => {
 
       await act(async () => {
         findPressableWithText(root, 'inbox.someday').props.onPress();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      await act(async () => {
+        findPressableWithText(root, 'File it').props.onPress();
         await Promise.resolve();
         await Promise.resolve();
       });

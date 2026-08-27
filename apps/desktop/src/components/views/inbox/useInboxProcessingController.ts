@@ -161,7 +161,7 @@ export function useInboxProcessingController({
         areas,
         settings,
     });
-    const { showAreaField, showContextsField, showTagsField } = visibility;
+    const { showAreaField, showContextsField, showProjectField, showTagsField } = visibility;
     // One options bag for every parse in this flow, from the same builder the
     // capture surfaces use — a hand-rolled bag is how surfaces drift apart.
     const quickAddParseOptions = useMemo(
@@ -389,6 +389,10 @@ export function useInboxProcessingController({
             await applyWorkflowEvent({ type: 'reference', fields: buildSelectionFields() });
             return;
         }
+        if (processingMode === 'guided' && (showProjectField || showAreaField)) {
+            goToStep('someday');
+            return;
+        }
         await applyWorkflowEvent({ type: 'someday', fields: buildSelectionFields() });
     }, [
         applyWorkflowEvent,
@@ -396,13 +400,20 @@ export function useInboxProcessingController({
         goToStep,
         processingMode,
         processingTask,
+        showAreaField,
         showContextsField,
+        showProjectField,
         showTagsField,
     ]);
 
     const handleConfirmReference = useCallback(async () => {
         if (!processingTask) return;
         await applyWorkflowEvent({ type: 'reference', fields: buildSelectionFields() });
+    }, [applyWorkflowEvent, buildSelectionFields, processingTask]);
+
+    const handleConfirmSomeday = useCallback(async () => {
+        if (!processingTask) return;
+        await applyWorkflowEvent({ type: 'someday', fields: buildSelectionFields() });
     }, [applyWorkflowEvent, buildSelectionFields, processingTask]);
 
     /**
@@ -939,6 +950,7 @@ export function useInboxProcessingController({
         handleSendDelegateRequest,
         handleConfirmWaiting,
         handleConfirmReference,
+        handleConfirmSomeday,
         onCreatePerson: handleCreatePerson,
         customContext,
         setCustomContext,

@@ -27,7 +27,7 @@ import { ProjectSelector } from './ui/ProjectSelector';
 import { DateField } from './ui/DateField';
 import { QuickDateChips } from './QuickDateChips';
 
-export type ProcessingStep = 'refine' | 'actionable' | 'projectcheck' | 'twomin' | 'decide' | 'context' | 'reference' | 'project' | 'delegate';
+export type ProcessingStep = 'refine' | 'actionable' | 'projectcheck' | 'twomin' | 'decide' | 'context' | 'reference' | 'someday' | 'project' | 'delegate';
 
 export type InboxProcessingWizardProps = {
     t: (key: string) => string;
@@ -67,6 +67,7 @@ export type InboxProcessingWizardProps = {
     handleSendDelegateRequest: () => void;
     handleConfirmWaiting: () => void;
     handleConfirmReference: () => void;
+    handleConfirmSomeday: () => void;
     onCreatePerson: (name: string) => void | Promise<void>;
     customContext: string;
     setCustomContext: (value: string) => void;
@@ -140,6 +141,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     handleSendDelegateRequest,
     handleConfirmWaiting,
     handleConfirmReference,
+    handleConfirmSomeday,
     onCreatePerson,
     customContext,
     setCustomContext,
@@ -269,6 +271,57 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     const sortedProjects = [...projects].sort((a, b) => compareLabels(a.title, b.title));
     const projectFilterAreaId = selectedAreaId || undefined;
     const areaFilteredProjects = filterProjectsBySelectedArea(sortedProjects, projectFilterAreaId);
+    const projectAssignmentFields = showAreaField || showProjectField ? (
+        <div className="space-y-3">
+            {!selectedProjectId && showAreaField ? (
+                <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.areaLabel')}</label>
+                    <AreaSelector
+                        areas={areas}
+                        value={selectedAreaId ?? ''}
+                        onChange={(value) => setSelectedAreaId(value || null)}
+                        placeholder={t('projects.noArea')}
+                        noAreaLabel={t('projects.noArea')}
+                        searchPlaceholder={t('areas.search')}
+                        noMatchesLabel={t('common.noMatches')}
+                        controlClassName="bg-card rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
+                        menuClassName="text-sm"
+                    />
+                </div>
+            ) : null}
+            {showProjectField ? (
+                <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.projectLabel')}</label>
+                    <ProjectSelector
+                        projects={areaFilteredProjects}
+                        allProjects={sortedProjects}
+                        value={selectedProjectId ?? ''}
+                        onChange={(value) => {
+                            const nextProjectId = value || null;
+                            setSelectedProjectId(nextProjectId);
+                            if (nextProjectId) setSelectedAreaId(null);
+                        }}
+                        onCreateProject={async (title) => {
+                            const created = await addProject(
+                                title,
+                                DEFAULT_PROJECT_COLOR,
+                                projectFilterAreaId ? { areaId: projectFilterAreaId } : undefined,
+                            );
+                            return created?.id ?? null;
+                        }}
+                        placeholder={t('process.project')}
+                        noProjectLabel={t('process.noProject')}
+                        searchPlaceholder={t('projects.search')}
+                        noMatchesLabel={t('common.noMatches')}
+                        emptyLabel={projectFilterAreaId ? t('projects.noProjectsInArea') : undefined}
+                        createProjectLabel={t('projects.create')}
+                        controlClassName="bg-card rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
+                        menuClassName="text-sm"
+                    />
+                </div>
+            ) : null}
+        </div>
+    ) : null;
 
     const stepLabel: Record<ProcessingStep, string> = {
         refine: t('process.refineTitle'),
@@ -278,6 +331,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
         decide: t('process.nextStep'),
         context: t('process.context'),
         reference: t('process.reference'),
+        someday: t('process.someday'),
         project: t('process.project'),
         delegate: t('process.delegateTitle'),
     };
@@ -611,6 +665,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                 <ChevronLeft className="h-3.5 w-3.5" /> {t('common.back')}
                             </button>
                             <div className="text-xs text-muted-foreground">{incubateHint}</div>
+                            {projectAssignmentFields}
                             <InboxProcessingScheduleFields
                                 t={t}
                                 fields={scheduleFields}
@@ -992,6 +1047,22 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                         {selectedOrganizationCount > 0
                             ? `${t('process.next')} (${selectedOrganizationCount})`
                             : `${t('process.next')} (${t('process.noContext')})`} <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                </div>
+            )}
+
+            {processingStep === 'someday' && (
+                <div className="space-y-4">
+                    <p className="text-center text-sm text-muted-foreground">
+                        {t('process.someday')}
+                    </p>
+                    {projectAssignmentFields}
+                    <button
+                        type="button"
+                        onClick={handleConfirmSomeday}
+                        className="w-full flex items-center justify-center gap-2 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90"
+                    >
+                        {t('process.someday')}
                     </button>
                 </div>
             )}

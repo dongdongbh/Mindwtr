@@ -12,7 +12,7 @@ import { buildProjectOrderMap,
     getTaskMetadataFilterVisibility,
     getWaitingPerson,
     hasActiveFilterCriteria,
-    isTaskInActiveProject,
+    isTaskVisibleInStatusList,
     parseQuickAdd,
     getDefaultTaskAreaMode,
     getPersonOptionNames,
@@ -232,11 +232,10 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
     const showViewFilterInput = statusFilter !== 'inbox';
     const normalizedSearchQuery = searchQuery.trim().toLowerCase();
     const listFilterableTasks = useMemo(() => {
-        const allowDeferredProjectTasks = statusFilter === 'done' || statusFilter === 'archived';
         return baseTasks.filter((task) => {
             if (task.deletedAt) return false;
             if (statusFilter !== 'all' && task.status !== statusFilter) return false;
-            if (!allowDeferredProjectTasks && !isTaskInActiveProject(task, metadataProjectMap)) return false;
+            if (!isTaskVisibleInStatusList(task, metadataProjectMap, statusFilter)) return false;
             if (!taskMatchesAreaFilterSelection(task, resolvedAreaFilter, metadataProjectMap, areaById)) return false;
             return true;
         });
@@ -460,9 +459,6 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
         perf.trackUseMemo();
         return perf.measure('filteredTasks', () => {
             const now = new Date();
-            const allowDeferredProjectTasks =
-                deferredFilterInputs.statusFilter === 'done'
-                || deferredFilterInputs.statusFilter === 'archived';
             const criteriaPredicate = hasActiveFilterCriteria(deferredFilterInputs.filterCriteria)
                 ? createTaskFilterPredicate(deferredFilterInputs.filterCriteria, {
                     projects: deferredFilterInputs.projects,
@@ -475,7 +471,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
 
                 if (deferredFilterInputs.statusFilter !== 'all' && t.status !== deferredFilterInputs.statusFilter) return false;
                 // Respect statusFilter (handled above).
-                if (!allowDeferredProjectTasks && !isTaskInActiveProject(t, deferredFilterInputs.projectMap)) return false;
+                if (!isTaskVisibleInStatusList(t, deferredFilterInputs.projectMap, deferredFilterInputs.statusFilter)) return false;
                 if (!taskMatchesAreaFilterSelection(
                     t,
                     deferredFilterInputs.resolvedAreaFilter,
