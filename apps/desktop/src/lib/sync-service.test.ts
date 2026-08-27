@@ -478,7 +478,7 @@ describe('SyncService testability hooks', () => {
             }
             if (method === 'GET') {
                 if (!probeBytes) return new Response(null, { status: 404 });
-                return new Response(probeBytes, {
+                return new Response(probeBytes.slice().buffer, {
                     status: 200,
                     headers: { etag: `"probe-v${probeVersion}"` },
                 });
