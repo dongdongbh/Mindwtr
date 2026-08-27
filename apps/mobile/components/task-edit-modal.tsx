@@ -5,6 +5,7 @@ import { Task,
     TaskEditorFieldId,
     useTaskStore,
     type Attachment,
+    type AttachmentDraftSettlementInput,
     type RecurrenceWeekday,
     type RecurrenceByDay,
     type TaskStatus,
@@ -139,6 +140,10 @@ function TaskEditModalInner({
     const timeEstimatesEnabled = resolvedFeatureFlags.timeEstimates;
     const timeSpentEnabled = resolvedFeatureFlags.pomodoro && settings.gtd?.pomodoro?.linkTask === true;
     const resetCopilotStateRef = useRef<() => void>(() => {});
+    const settleAttachmentDraftRef = useRef<(input: AttachmentDraftSettlementInput) => void>(() => {});
+    const settleAttachmentDraft = useCallback((input: AttachmentDraftSettlementInput) => {
+        settleAttachmentDraftRef.current(input);
+    }, []);
     const descriptionToolbarInteractionUntilRef = useRef(0);
     const showTaskWriteError = useCallback((message?: string) => showToast({
         title: tFallback(t, 'common.error', 'Error'),
@@ -196,6 +201,7 @@ function TaskEditModalInner({
         onSave,
         onSaveError: showTaskWriteError,
         resetCopilotStateRef,
+        settleAttachmentDraft,
         sections,
         task,
         tasks,
@@ -292,6 +298,7 @@ function TaskEditModalInner({
         setLinkInput,
         setLinkInputTouched,
         setLinkModalVisible,
+        settleDraftAttachments,
         toggleAudioPlayback,
         visibleAttachments,
     } = useTaskEditAttachments({
@@ -302,6 +309,7 @@ function TaskEditModalInner({
         t,
         visible,
     });
+    settleAttachmentDraftRef.current = settleDraftAttachments;
 
     const {
         contextTokenSuggestions,

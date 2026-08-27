@@ -326,6 +326,28 @@ export const getAttachmentsDir = async (): Promise<string | null> => {
   return dir;
 };
 
+/**
+ * Removes a local attachment only when its URI proves it is the id-named copy
+ * owned by Mindwtr's managed attachments directory. Draft settlement passes
+ * candidates here; arbitrary user-picked paths and sibling directories are
+ * intentionally rejected.
+ */
+export const deleteManagedAttachmentFile = async (attachment: Attachment): Promise<boolean> => {
+  if (attachment.kind !== 'file' || !attachment.uri || !attachment.id) return false;
+  const dir = await getAttachmentsDir();
+  if (!dir || !attachment.uri.startsWith(dir)) return false;
+  const fileName = attachment.uri.slice(dir.length).split(/[?#]/, 1)[0];
+  if (!fileName || fileName.includes('/')) return false;
+  if (fileName !== attachment.id && !fileName.startsWith(`${attachment.id}.`)) return false;
+  try {
+    await FileSystem.deleteAsync(attachment.uri, { idempotent: true });
+    return true;
+  } catch (error) {
+    logAttachmentWarn('Failed to delete abandoned attachment draft file', error);
+    return false;
+  }
+};
+
 export const cleanupAttachmentTempFiles = async (): Promise<void> => {
   const dir = await getAttachmentsDir();
   if (!dir) return;

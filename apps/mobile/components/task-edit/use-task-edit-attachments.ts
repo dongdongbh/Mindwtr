@@ -1,13 +1,16 @@
 import React from 'react';
 import { Alert, Platform } from 'react-native';
-import type { Attachment, Task } from '@mindwtr/core';
 import {
     DEFAULT_PROJECT_COLOR,
     buildTaskUpdatesFromSpeechResult,
     findSelectableProjectByTitleAndArea,
     generateUUID,
     normalizeLinkAttachmentInput,
+    planAttachmentDraftSettlement,
     translateWithFallback,
+    type Attachment,
+    type AttachmentDraftSettlementInput,
+    type Task,
     useTaskStore,
     validateAttachmentForUpload,
 } from '@mindwtr/core';
@@ -20,7 +23,11 @@ import * as Sharing from 'expo-sharing';
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Paths } from 'expo-file-system';
 
-import { ensureAttachmentAvailable, persistAttachmentLocally } from '../../lib/attachment-sync';
+import {
+    deleteManagedAttachmentFile,
+    ensureAttachmentAvailable,
+    persistAttachmentLocally,
+} from '../../lib/attachment-sync';
 import { loadAIKey } from '../../lib/ai-config';
 import { tryOpenWithAndroidViewer } from '../../lib/open-file-externally';
 import { ensureWhisperModelPathForConfigAsync, processAudioCapture, resolveSpeechToTextRuntimeSettings } from '../../lib/speech-to-text';
@@ -66,6 +73,11 @@ export function useTaskEditAttachments({
     t,
     visible,
 }: UseTaskEditAttachmentsParams) {
+    const settleDraftAttachments = React.useCallback((input: AttachmentDraftSettlementInput) => {
+        for (const candidate of planAttachmentDraftSettlement(input)) {
+            void deleteManagedAttachmentFile(candidate.attachment);
+        }
+    }, []);
     const [linkModalVisible, setLinkModalVisible] = React.useState(false);
     const [audioModalVisible, setAudioModalVisible] = React.useState(false);
     const [imagePreviewAttachment, setImagePreviewAttachment] = React.useState<Attachment | null>(null);
@@ -619,6 +631,7 @@ export function useTaskEditAttachments({
         setLinkInput,
         setLinkInputTouched,
         setLinkModalVisible,
+        settleDraftAttachments,
         toggleAudioPlayback,
         visibleAttachments,
     };

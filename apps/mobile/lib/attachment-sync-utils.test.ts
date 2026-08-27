@@ -2,6 +2,9 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const fileSystemMock = vi.hoisted(() => ({
   __esModule: true,
+  documentDirectory: 'file:///documents/',
+  cacheDirectory: 'file:///cache/',
+  makeDirectoryAsync: vi.fn(),
   writeAsStringAsync: vi.fn(),
   moveAsync: vi.fn(),
   deleteAsync: vi.fn(),
@@ -24,7 +27,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 // module graph, and paying that transform cost inside `it()` (as a dynamic import)
 // counted against the per-test timeout and made this file flaky under a parallel
 // full-suite run even though it passed reliably alone.
-import { writeBytesSafely } from './attachment-sync-utils';
+import { deleteManagedAttachmentFile, writeBytesSafely } from './attachment-sync-utils';
 
 // #1057: attachment downloads must be write-temp-then-rename so a cut connection
 // can never leave a truncated file at the real target path that a later sync would
@@ -57,5 +60,42 @@ describe('writeBytesSafely', () => {
     expect(fileSystemMock.writeAsStringAsync).toHaveBeenCalledTimes(1);
     expect(fileSystemMock.writeAsStringAsync.mock.calls[0]?.[0]).not.toBe('file://attachments/a1.pdf');
     expect(fileSystemMock.moveAsync).not.toHaveBeenCalled();
+  });
+});
+
+describe('deleteManagedAttachmentFile', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fileSystemMock.makeDirectoryAsync.mockResolvedValue(undefined);
+    fileSystemMock.deleteAsync.mockResolvedValue(undefined);
+  });
+
+  it('deletes the id-named copy inside the managed attachment directory', async () => {
+    const attachment = {
+      id: 'draft-1',
+      kind: 'file' as const,
+      title: 'notes.txt',
+      uri: 'file:///documents/attachments/draft-1.txt',
+      createdAt: '2026-08-27T00:00:00.000Z',
+      updatedAt: '2026-08-27T00:00:00.000Z',
+    };
+
+    await expect(deleteManagedAttachmentFile(attachment)).resolves.toBe(true);
+    expect(fileSystemMock.deleteAsync).toHaveBeenCalledWith(attachment.uri, { idempotent: true });
+  });
+
+  it('rejects user files, sibling directories, and another attachment id', async () => {
+    const base = {
+      id: 'draft-1',
+      kind: 'file' as const,
+      title: 'notes.txt',
+      createdAt: '2026-08-27T00:00:00.000Z',
+      updatedAt: '2026-08-27T00:00:00.000Z',
+    };
+
+    await expect(deleteManagedAttachmentFile({ ...base, uri: 'file:///user/notes.txt' })).resolves.toBe(false);
+    await expect(deleteManagedAttachmentFile({ ...base, uri: 'file:///documents/attachments-old/draft-1.txt' })).resolves.toBe(false);
+    await expect(deleteManagedAttachmentFile({ ...base, uri: 'file:///documents/attachments/other.txt' })).resolves.toBe(false);
+    expect(fileSystemMock.deleteAsync).not.toHaveBeenCalled();
   });
 });

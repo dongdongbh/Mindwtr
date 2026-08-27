@@ -108,6 +108,7 @@ export * from './attachment-change-detection';
 export * from './attachment-progress';
 export * from './attachment-transfer';
 export * from './attachment-paths';
+export * from './attachment-draft-settlement';
 export * from './attachment-cleanup';
 export * from './ics';
 export * from './external-calendar-colors';
