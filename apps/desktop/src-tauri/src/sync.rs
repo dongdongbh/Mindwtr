@@ -4886,6 +4886,35 @@ mod tests {
     }
 
     #[test]
+    fn an_interrupted_enable_authenticates_the_resumed_key_before_mutating_attachments() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        enable_sync_encryption_in_dir(dir.path(), "correct horse battery").expect("enable");
+
+        let attachment = dir.path().join("attachments").join("a1.png");
+        fs::write(&attachment, b"plaintext left by an interrupted enable")
+            .expect("restore attachment");
+        let document = fs::read(dir.path().join("data.json.enc")).expect("encrypted document");
+        let attachment_before = fs::read(&attachment).expect("attachment before");
+
+        let error = enable_sync_encryption_in_dir(dir.path(), "typo passphrase")
+            .expect_err("wrong passphrase must fail before transition mutation");
+
+        assert!(
+            is_terminal_error(&error),
+            "expected a terminal error, got: {error}"
+        );
+        assert_eq!(
+            fs::read(dir.path().join("data.json.enc")).expect("document after"),
+            document
+        );
+        assert_eq!(
+            fs::read(&attachment).expect("attachment after"),
+            attachment_before
+        );
+    }
+
+    #[test]
     fn an_enable_interrupted_during_the_attachment_phase_resumes_under_the_same_key() {
         // Enable seals attachments before it writes any `.enc` document, so this crash window
         // leaves sealed attachments and no encrypted document to recover the salt from. If the
@@ -11320,7 +11349,7 @@ fn rewrap_artifact_in_place(
 /// which the next pass skips as "already encrypted" — would be unopenable under the new key.
 fn existing_folder_header(
     sync_dir: &Path,
-) -> Result<Option<([u8; SALT_LEN], SyncCryptoKdfParams)>, String> {
+) -> Result<Option<(Vec<u8>, [u8; SALT_LEN], SyncCryptoKdfParams)>, String> {
     let artifacts = collect_sync_folder_artifacts(sync_dir, false)?;
     // Base document first (documents are ordered with it last), then the rest, then
     // attachments — the most authoritative header wins.
@@ -11334,7 +11363,7 @@ fn existing_folder_header(
         let bytes = fs::read(path)
             .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
         if let SyncArtifactInspection::Encrypted(header) = inspect_sync_artifact(&bytes) {
-            return Ok(Some((header.salt, header.params)));
+            return Ok(Some((bytes, header.salt, header.params)));
         }
     }
     Ok(None)
@@ -11357,10 +11386,20 @@ where
     BeforeMutation: FnOnce() -> Result<(), String>,
 {
     let lock = acquire_sync_lock(sync_dir)?;
-    let (salt, params) = existing_folder_header(sync_dir)?
+    let existing = existing_folder_header(sync_dir)?;
+    let (salt, params) = existing
+        .as_ref()
+        .map(|(_, salt, params)| (*salt, *params))
         .unwrap_or((random_salt(), SYNC_CRYPTO_DEFAULT_KDF_PARAMS));
     let material =
         derive_sync_key_material(passphrase, salt, params).map_err(|error| terminal_error(error))?;
+    if let Some((bytes, _, _)) = existing {
+        // A public MWENC1 header selects KDF parameters but does not authenticate the
+        // passphrase. Open the exact generation that supplied those parameters before the
+        // attachment phase can mutate anything. This also covers the attachment-only crash
+        // window, where no encrypted document exists yet.
+        decrypt_sync_artifact(&bytes, &material.key).map_err(|error| terminal_error(error))?;
+    }
 
     let result = (|| -> Result<(), String> {
         let artifacts = collect_sync_folder_artifacts(sync_dir, true)?;
