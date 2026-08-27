@@ -11,7 +11,6 @@ import {
 import {
   base64ToBytes,
   CLOUD_PROVIDER_DROPBOX,
-  copyFileSafely,
   ensureAttachmentStoredLocally,
   extractExtension,
   findSafEntry,
@@ -24,19 +23,42 @@ import {
   loadCloudConfig,
   loadWebDavConfig,
   logAttachmentWarn,
+  readFileAsBytes,
   reportProgress,
   resolveFileSyncDir,
   runDropboxAuthorized,
   StorageAccessFramework,
-  validateAttachmentHash,
-  writeBytesSafely,
 } from './attachment-sync-utils';
 import { getMobileCloudRequestOptions, getMobileWebDavRequestOptions } from './webdav-request-options';
-import { openAttachmentBytesFromDownload } from './attachment-sync-backends/common';
-import { readSyncArtifactBytes } from './storage-file-encryption';
+import {
+  installAttachmentDownloadBytes,
+  openAttachmentBytesFromDownload,
+} from './attachment-sync-backends/common';
 import { getSyncEncryptionMaterial } from './sync-encryption-state';
 
 const downloadLocks = new Map<string, Promise<Attachment | null>>();
+
+/**
+ * Publish an on-demand download only while the managed target is still absent.
+ * The native installer owns the scratch generation once invoked; a false result
+ * is a late local create and already records centralized failed progress.
+ */
+const installMissingAttachmentBytes = async (
+  attachment: Attachment,
+  attachmentsDir: string,
+  targetUri: string,
+  bytes: Uint8Array,
+): Promise<Attachment | null> => {
+  const installed = await installAttachmentDownloadBytes(
+    attachment,
+    attachmentsDir,
+    targetUri,
+    bytes,
+    { kind: 'absent' },
+  );
+  if (!installed) return null;
+  return { ...attachment, uri: targetUri, localStatus: 'available' };
+};
 
 const ensureFileAttachmentAvailable = async (
   attachment: Attachment,
@@ -58,31 +80,26 @@ const ensureFileAttachmentAvailable = async (
   try {
     // #1056: the local attachments directory always holds plaintext, so an encrypted
     // sync folder's bytes are opened on the way in. `null` material keeps the
-    // byte-for-byte pre-feature behavior, including the plain `copyFileSafely` fast
-    // path. Inside the try: S3 — an `enabled`-but-no-key device throws instead of
+    // byte-for-byte pre-feature behavior. Inside the try: S3 — an enabled-but-no-key
+    // device throws instead of
     // returning `null`, and that must fail this fetch closed (logged, `null` result),
-    // never fall through to the plaintext `copyFileSafely` path as if encryption were off.
+    // never fall through to a plaintext path as if encryption were off.
     const material = await getSyncEncryptionMaterial();
     if (syncDir.type === 'file') {
       const sourceUri = `${syncDir.attachmentsDirUri}${filename}`;
       const sourcePresence = await getLocalAttachmentPresence(sourceUri);
       if (sourcePresence !== 'present') return null;
-      if (!material) {
-        await copyFileSafely(sourceUri, targetUri);
-        return { ...attachment, uri: targetUri, localStatus: 'available' };
-      }
-      const sourceBytes = await readSyncArtifactBytes(sourceUri);
-      if (!sourceBytes) return null;
-      await writeBytesSafely(targetUri, await openAttachmentBytesFromDownload(sourceBytes, material));
-      return { ...attachment, uri: targetUri, localStatus: 'available' };
+      const sourceBytes = await readFileAsBytes(sourceUri);
+      const bytes = await openAttachmentBytesFromDownload(sourceBytes, material);
+      return await installMissingAttachmentBytes(attachment, attachmentsDir, targetUri, bytes);
     }
     const entry = await findSafEntry(syncDir.attachmentsDirUri, filename);
     if (!entry || !StorageAccessFramework?.readAsStringAsync) return null;
     const base64 = await StorageAccessFramework.readAsStringAsync(entry, { encoding: FileSystem.EncodingType.Base64 });
-    await writeBytesSafely(targetUri, await openAttachmentBytesFromDownload(base64ToBytes(base64), material));
-    return { ...attachment, uri: targetUri, localStatus: 'available' };
+    const bytes = await openAttachmentBytesFromDownload(base64ToBytes(base64), material);
+    return await installMissingAttachmentBytes(attachment, attachmentsDir, targetUri, bytes);
   } catch (error) {
-    logAttachmentWarn(`Failed to copy attachment ${attachment.id} from sync folder`, error);
+    logAttachmentWarn(`Failed to make attachment ${attachment.id} available from sync folder`, error);
     return null;
   }
 };
@@ -139,10 +156,15 @@ const ensureAttachmentAvailableInternal = async (attachment: Attachment): Promis
           data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as ArrayBuffer),
           await getSyncEncryptionMaterial(),
         );
-        await validateAttachmentHash(localAttachment, bytes);
-        await writeBytesSafely(targetUri, bytes);
+        const installedAttachment = await installMissingAttachmentBytes(
+          localAttachment,
+          attachmentsDir,
+          targetUri,
+          bytes,
+        );
+        if (!installedAttachment) return null;
         reportProgress(localAttachment.id, 'download', bytes.length, bytes.length, 'completed');
-        return { ...localAttachment, uri: targetUri, localStatus: 'available' };
+        return installedAttachment;
       } catch (error) {
         reportProgress(
           localAttachment.id,
@@ -171,10 +193,15 @@ const ensureAttachmentAvailableInternal = async (attachment: Attachment): Promis
         data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as ArrayBuffer),
         await getSyncEncryptionMaterial(),
       );
-      await validateAttachmentHash(localAttachment, bytes);
-      await writeBytesSafely(targetUri, bytes);
+      const installedAttachment = await installMissingAttachmentBytes(
+        localAttachment,
+        attachmentsDir,
+        targetUri,
+        bytes,
+      );
+      if (!installedAttachment) return null;
       reportProgress(localAttachment.id, 'download', bytes.length, bytes.length, 'completed');
-      return { ...localAttachment, uri: targetUri, localStatus: 'available' };
+      return installedAttachment;
     } catch (error) {
       reportProgress(
         localAttachment.id,
@@ -215,10 +242,15 @@ const ensureAttachmentAvailableInternal = async (attachment: Attachment): Promis
         data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as ArrayBuffer),
         await getSyncEncryptionMaterial(),
       );
-      await validateAttachmentHash(localAttachment, bytes);
-      await writeBytesSafely(targetUri, bytes);
+      const installedAttachment = await installMissingAttachmentBytes(
+        localAttachment,
+        attachmentsDir,
+        targetUri,
+        bytes,
+      );
+      if (!installedAttachment) return null;
       reportProgress(localAttachment.id, 'download', bytes.length, bytes.length, 'completed');
-      return { ...localAttachment, uri: targetUri, localStatus: 'available' };
+      return installedAttachment;
     } catch (error) {
       reportProgress(
         localAttachment.id,
