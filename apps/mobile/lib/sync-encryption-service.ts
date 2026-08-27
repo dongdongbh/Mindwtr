@@ -168,9 +168,11 @@ const captureTransitionInventory = async (
     const snapshot = new Map<string, SyncEncryptionRemoteRead>();
     for (const entry of documentEntries) snapshot.set(entry.name, await read(entry.name));
     const key = (await getSyncEncryptionMaterial())?.key ?? null;
-    const data =
-        (await decodeInventoryDocument(snapshot.get(`${SYNC_FILE_NAME}.enc`)?.bytes ?? null, key, recoveryPassphrase))
-        ?? (await decodeInventoryDocument(snapshot.get(SYNC_FILE_NAME)?.bytes ?? null, key, recoveryPassphrase));
+    let data: AppData | null = null;
+    for (const name of [`${SYNC_FILE_NAME}.enc`, SYNC_FILE_NAME, `${SYNC_FILE_NAME}.enc.bak`, BACKUP_FILE_NAME]) {
+        data = await decodeInventoryDocument(snapshot.get(name)?.bytes ?? null, key, recoveryPassphrase);
+        if (data) break;
+    }
     return { entries: buildTransitionEntries(data), snapshot };
 };
 

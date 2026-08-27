@@ -353,6 +353,39 @@ describe('Dropbox sync encryption transitions', () => {
         expect(await getSyncEncryptionStatus()).toEqual({ state: 'off' });
     });
 
+    it('uses a backup-only document as the attachment authority through enable, change, and disable', async () => {
+        const attachment = new Uint8Array([6, 5, 4, 3]);
+        const store = createBlobStore({
+            'data.json.bak': jsonBytes(APP_DATA_WITH_ATTACHMENT),
+            'attachments/a1.png': attachment,
+        });
+        const fetcher = createDropboxFetch(store);
+
+        await runEnableOverRemote(
+            'old passphrase',
+            createDropboxRemotePort((operation) => operation('token'), fetcher),
+        );
+        expect(isEncrypted(store.files.get('data.json.enc.bak'))).toBe(true);
+        expect(isEncrypted(store.files.get('attachments/a1.png'))).toBe(true);
+
+        await runChangePassphraseOverRemote(
+            'old passphrase',
+            'new passphrase',
+            createDropboxRemotePort((operation) => operation('token'), fetcher),
+        );
+        const changedKey = base64ToBytes(native.state.key!);
+        await expect(decryptRemoteArtifactOrThrow(
+            store.files.get('attachments/a1.png')!,
+            changedKey,
+            desktopSyncCryptoPrimitives,
+        )).resolves.toEqual(attachment);
+
+        await runDisableOverRemote(createDropboxRemotePort((operation) => operation('token'), fetcher));
+        expect(JSON.parse(new TextDecoder().decode(store.files.get('data.json.bak')!)))
+            .toEqual(APP_DATA_WITH_ATTACHMENT);
+        expect(store.files.get('attachments/a1.png')).toEqual(attachment);
+    });
+
     it('a re-run after an interrupted enable converges instead of starting a second generation', async () => {
         const store = seedRemote();
         const fetcher = createDropboxFetch(store);
@@ -416,6 +449,31 @@ describe('WebDAV sync encryption transitions (config-override / web path)', () =
         expect(JSON.parse(new TextDecoder().decode(store.files.get('data.json')!))).toEqual(
             APP_DATA_WITH_ATTACHMENT,
         );
+    });
+
+    it('round-trips attachments when only the backup document is available', async () => {
+        const baseUrl = 'https://dav.example/sync';
+        const attachment = new Uint8Array([8, 6, 4, 2]);
+        const store = createBlobStore({
+            'data.json.bak': jsonBytes(APP_DATA_WITH_ATTACHMENT),
+            'attachments/a1.png': attachment,
+        });
+        const options = { fetcher: createWebdavFetch(store, baseUrl), username: 'u', password: 'p' };
+
+        await runEnableOverRemote('old passphrase', createWebdavRemotePort({ baseUrl, options }));
+        expect(isEncrypted(store.files.get('data.json.enc.bak'))).toBe(true);
+        expect(isEncrypted(store.files.get('attachments/a1.png'))).toBe(true);
+
+        await runChangePassphraseOverRemote(
+            'old passphrase',
+            'new passphrase',
+            createWebdavRemotePort({ baseUrl, options }),
+        );
+        await runDisableOverRemote(createWebdavRemotePort({ baseUrl, options }));
+
+        expect(JSON.parse(new TextDecoder().decode(store.files.get('data.json.bak')!)))
+            .toEqual(APP_DATA_WITH_ATTACHMENT);
+        expect(store.files.get('attachments/a1.png')).toEqual(attachment);
     });
 
     it.each(['missing', 'weak'] as const)(

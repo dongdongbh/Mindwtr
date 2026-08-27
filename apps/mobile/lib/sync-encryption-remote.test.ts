@@ -362,6 +362,38 @@ describe('Dropbox remote port + core transition round trip', () => {
     expect(remote.get(`/${peerAttachmentName}`)).toEqual(peerAttachmentBytes);
   }, 30_000);
 
+  it('uses a backup-only document as the attachment authority through every transition', async () => {
+    const attachmentName = 'attachments/backup-only.png';
+    const attachmentBytes = new Uint8Array([2, 4, 6, 8]);
+    const backupData = appData([attachmentName]);
+    remote.set('/data.json.bak', new TextEncoder().encode(JSON.stringify(backupData)));
+    remote.set(`/${attachmentName}`, attachmentBytes);
+
+    const port = await __syncEncryptionServiceTestUtils.createDropboxRemotePort(appData([]));
+    await runEnableSyncEncryptionOverRemote(
+      PASSPHRASE, port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    );
+    expect(inspectSyncArtifact(remote.get('/data.json.enc.bak')!).kind).toBe('encrypted');
+    expect(inspectSyncArtifact(remote.get(`/${attachmentName}`)!).kind).toBe('encrypted');
+
+    await runChangeSyncEncryptionPassphraseOverRemote(
+      PASSPHRASE, 'the next passphrase', port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    );
+    const changedKey = await syncEncryptionKeyCache.getKey();
+    expect(changedKey).not.toBeNull();
+    await expect(decryptSyncArtifact(
+      remote.get(`/${attachmentName}`)!, changedKey!, mobileSyncCryptoPrimitives,
+    )).resolves.toEqual(attachmentBytes);
+
+    await runDisableSyncEncryptionOverRemote(
+      port, syncEncryptionKeyCache, syncEncryptionLocalState, undefined, mobileSyncCryptoPrimitives,
+    );
+    expect(JSON.parse(new TextDecoder().decode(remote.get('/data.json.bak')!))).toEqual(backupData);
+    expect(remote.get(`/${attachmentName}`)).toEqual(attachmentBytes);
+  }, 30_000);
+
   it('re-running an interrupted enable is a no-op on already-sealed artifacts', async () => {
     const data = appData(['attachments/a0.png']);
     remote.set('/data.json', new TextEncoder().encode(JSON.stringify(data)));

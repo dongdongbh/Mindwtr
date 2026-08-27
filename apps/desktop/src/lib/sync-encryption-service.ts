@@ -359,9 +359,11 @@ const captureRemoteInventory = async (
     const snapshot = new Map<string, SyncEncryptionRemoteRead>();
     for (const name of REMOTE_DOCUMENT_NAMES) snapshot.set(name, await read(name));
     const key = (await getSyncEncryptionMaterial())?.key ?? null;
-    const data =
-        (await decodeDocument(snapshot.get('data.json.enc')?.bytes ?? null, key, recoveryPassphrase)) ??
-        (await decodeDocument(snapshot.get('data.json')?.bytes ?? null, key, recoveryPassphrase));
+    let data: AppData | null = null;
+    for (const name of ['data.json.enc', 'data.json', 'data.json.enc.bak', 'data.json.bak']) {
+        data = await decodeDocument(snapshot.get(name)?.bytes ?? null, key, recoveryPassphrase);
+        if (data) break;
+    }
     const entries: SyncEncryptionRemoteEntry[] = [
         ...REMOTE_DOCUMENT_NAMES.map((name) => ({ name, kind: 'document' as const })),
         ...collectRemoteAttachmentKeys(data).map((name) => ({ name, kind: 'attachment' as const })),
