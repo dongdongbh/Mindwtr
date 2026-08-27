@@ -557,7 +557,14 @@ export async function runEnableSyncEncryptionOverRemote(
         if (!bytes) continue;
         const inspected = inspectSyncArtifact(bytes);
         if (inspected.kind === 'encrypted') {
-            material = await deriveSyncKeyMaterial(passphrase, inspected.salt, inspected.params, prims);
+            const candidate = await deriveSyncKeyMaterial(passphrase, inspected.salt, inspected.params, prims);
+            // The header is not an authentication proof: any passphrase derives a key from
+            // its public salt/params. Authenticate the generation that supplied the material
+            // before the attachment phase can write anything, or an interrupted-enable retry
+            // with a typo could re-encrypt plaintext attachments under an unusable key and
+            // fail only when it eventually reaches this document.
+            await decryptRemoteArtifactOrThrow(bytes, candidate.key, prims);
+            material = candidate;
             break;
         }
     }
