@@ -29,6 +29,7 @@ const native = vi.hoisted(() => ({
     state: { state: 'off' } as NativeState,
     calls: [] as string[],
     failingCommand: null as string | null,
+    failSetAfterKeyWriteOnce: false,
 }));
 
 const bytesToBase64 = (bytes: Uint8Array): string => {
@@ -63,6 +64,13 @@ vi.mock('./tauri-invoke', () => {
                     ? { key: native.state.key, salt: native.state.salt, kdfParams: native.state.kdfParams }
                     : null;
             case 'set_sync_encryption_key_material':
+                if (native.failSetAfterKeyWriteOnce) {
+                    native.failSetAfterKeyWriteOnce = false;
+                    // Rust stores the keyring entry before replacing its state
+                    // sidecar. Model a sidecar failure at that exact boundary.
+                    native.state = { ...native.state, key: args?.key as string };
+                    throw new Error('local encryption state unavailable');
+                }
                 native.state = {
                     state: 'enabled',
                     key: args?.key as string,
@@ -285,6 +293,7 @@ beforeEach(() => {
     native.state = { state: 'off' };
     native.calls = [];
     native.failingCommand = null;
+    native.failSetAfterKeyWriteOnce = false;
     clearSyncEncryptionMaterialCache();
 });
 
@@ -680,6 +689,40 @@ describe('unsupported base document', () => {
 });
 
 describe('passphrase-change resume', () => {
+    it('restores the prior native material after a partial state commit and retries after restart', async () => {
+        const store = seedRemote();
+        const fetcher = createDropboxFetch(store);
+        await runEnableOverRemote('old-pw', createDropboxRemotePort((o) => o('token'), fetcher));
+        const previous = structuredClone(native.state);
+
+        native.failSetAfterKeyWriteOnce = true;
+        await expect(runChangePassphraseOverRemote(
+            'old-pw',
+            'new-pw',
+            createDropboxRemotePort((o) => o('token'), fetcher),
+        )).rejects.toThrow('local encryption state unavailable');
+
+        // Simulate a new webview: the native key and state must still describe
+        // the original material, with the retry journal retained.
+        clearSyncEncryptionMaterialCache();
+        expect(native.state).toEqual({
+            ...previous,
+            incompleteTransition: 'change-passphrase',
+        });
+        await expect(getSyncEncryptionMaterial()).resolves.toMatchObject({
+            key: base64ToBytes(previous.key!),
+        });
+
+        await expect(runChangePassphraseOverRemote(
+            'old-pw',
+            'new-pw',
+            createDropboxRemotePort((o) => o('token'), fetcher),
+        )).resolves.toBeUndefined();
+        expect(native.state.state).toBe('enabled');
+        expect(native.state.incompleteTransition).toBeUndefined();
+        expect(native.state.key).not.toBe(previous.key);
+    });
+
     it('finishes after an earlier attempt already rewrapped the base document under an abandoned salt', async () => {
         const store = seedRemote();
         const fetcher = createDropboxFetch(store);

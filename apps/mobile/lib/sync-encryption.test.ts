@@ -987,6 +987,49 @@ describe('File Sync transitions through core orchestration', () => {
     await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
   }, 30_000);
 
+  it('restores the previous key when rotation state persistence fails, then retries after restart', async () => {
+    seedPlaintextFolder();
+    await enableSyncEncryption(PASSPHRASE);
+    const previousKey = await syncEncryptionKeyCache.getKey();
+    const previousState = JSON.parse(asyncStorage.get(SYNC_ENCRYPTION_STATE_KEY)!) as Record<string, unknown>;
+    expect(previousKey).not.toBeNull();
+
+    // Rotation first persists its retry journal, then commits the new enabled
+    // material. Model the final AsyncStorage write failing after SecureStore has
+    // already accepted the newly derived key.
+    vi.mocked(AsyncStorage.setItem)
+      .mockImplementationOnce(async (key: string, value: string) => {
+        asyncStorage.set(key, value);
+      })
+      .mockRejectedValueOnce(new Error('state commit unavailable'));
+
+    await expect(changeSyncEncryptionPassphrase(PASSPHRASE, 'replacement passphrase'))
+      .rejects.toThrow('state commit unavailable');
+
+    // A process restart must load the durable journal alongside the OLD key,
+    // never the replacement key paired with the old salt.
+    __resetSyncEncryptionStateForTests();
+    await expect(syncEncryptionKeyCache.getKey()).resolves.toEqual(previousKey);
+    expect(JSON.parse(asyncStorage.get(SYNC_ENCRYPTION_STATE_KEY)!)).toEqual({
+      ...previousState,
+      incompleteTransition: 'change-passphrase',
+    });
+    await expect(getMobileSyncEncryptionStatus()).resolves.toMatchObject({
+      state: 'enabled',
+      incompleteTransition: 'change-passphrase',
+    });
+
+    await expect(changeSyncEncryptionPassphrase(PASSPHRASE, 'replacement passphrase'))
+      .resolves.toBeUndefined();
+
+    __resetSyncEncryptionStateForTests();
+    await expect(getMobileSyncEncryptionStatus()).resolves.toMatchObject({
+      state: 'enabled',
+      incompleteTransition: undefined,
+    });
+    await expect(syncEncryptionKeyCache.getKey()).resolves.not.toEqual(previousKey);
+  }, 30_000);
+
   it('S2: disable succeeds cleanly on a non-truncating provider instead of corrupting a shrinking attachment', async () => {
     seedPlaintextFolder();
     await enableSyncEncryption(PASSPHRASE);

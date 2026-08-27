@@ -209,24 +209,75 @@ export const desktopSyncCryptoPrimitives: SyncCryptoPrimitives = {
     },
 };
 
+const persistNativeEnabledMaterial = async (
+    key: Uint8Array,
+    state: SyncEncryptionLocalState,
+): Promise<void> => {
+    if (!state.discoveredSalt || !state.discoveredParams) {
+        throw new Error('sync encryption enabled material is incomplete');
+    }
+    await invokeNative('set_sync_encryption_key_material', {
+        key: bytesToBase64(key),
+        salt: state.discoveredSalt,
+        kdfParams: state.discoveredParams,
+    });
+};
+
+const restoreNativeTransitionSnapshot = async (
+    previousState: SyncEncryptionLocalState | null,
+    previousMaterial: SyncKeyMaterial | null,
+    attemptedState: SyncEncryptionLocalState,
+): Promise<void> => {
+    if (previousMaterial) {
+        await persistNativeEnabledMaterial(previousMaterial.key, {
+            state: 'enabled',
+            discoveredSalt: bytesToHex(previousMaterial.salt),
+            discoveredParams: previousMaterial.params,
+        });
+        if (previousState?.state === 'remote-plaintext') {
+            await invokeNative('mark_sync_encryption_remote_plaintext');
+        }
+    } else {
+        await invokeNative('clear_sync_encryption_key_material');
+        if (previousState?.state === 'remote-encrypted-no-key') {
+            const salt = previousState.discoveredSalt ?? attemptedState.discoveredSalt;
+            const params = previousState.discoveredParams ?? attemptedState.discoveredParams;
+            if (!salt || !params) throw new Error('sync encryption rollback material is incomplete');
+            await invokeNative('mark_sync_encryption_remote_discovered', {
+                salt,
+                kdfParams: params,
+            });
+        }
+    }
+    if (previousState?.incompleteTransition) {
+        await invokeNative('mark_sync_encryption_transition_incomplete', {
+            transitionKind: previousState.incompleteTransition,
+        });
+    }
+};
+
 /** Rust's keyring and sidecar, exposed as core's two ports.
  *
  *  Core always calls `keyCache.setKey(key)` and then `localState.write({state, salt, params})`
  *  — the key alone cannot rebuild a header, so the persist is deferred to the write, where
- *  both halves are in hand and can be stored atomically by the one Rust command. That also
+ *  both halves are in hand for the one Rust command. That also
  *  keeps the "persist the enabled flag only after the transition has fully succeeded" rule:
  *  core never reaches the write if any artifact failed.
  *
- *  `localState.write` is synchronous in core's port shape while Rust's persistence is not, so
- *  writes are queued and `flush()` awaits them once the transition returns. */
+ *  `localState.write` returns the native persistence promise. When Rust reports a partial
+ *  enabled-material commit, the adapter restores the preceding key/state/journal snapshot
+ *  before rejecting, so core's compensating key-cache write is not merely an in-memory update. */
 const createTransitionPorts = (initial: SyncEncryptionLocalState | null) => {
     let current = initial;
     let pendingKey: Uint8Array | null = null;
+    let persistedMaterial: SyncKeyMaterial | null | undefined;
     const queued: Promise<unknown>[] = [];
 
     const keyCache: SyncEncryptionKeyCachePort = {
         async getKey() {
-            return (await getSyncEncryptionMaterial())?.key ?? null;
+            const material = await getSyncEncryptionMaterial();
+            if (persistedMaterial === undefined) persistedMaterial = material;
+            return material?.key ?? null;
         },
         async setKey(key) {
             pendingKey = key;
@@ -239,9 +290,11 @@ const createTransitionPorts = (initial: SyncEncryptionLocalState | null) => {
     const localState: SyncEncryptionLocalStatePort = {
         read: () => current,
         write: (next) => {
+            const previous = current;
             current = next;
             const key = pendingKey;
             const operation = (async () => {
+                try {
                     if (next?.incompleteTransition) {
                         await invokeNative('mark_sync_encryption_transition_incomplete', {
                             transitionKind: next.incompleteTransition,
@@ -249,14 +302,35 @@ const createTransitionPorts = (initial: SyncEncryptionLocalState | null) => {
                     } else if (!next || next.state === 'off') {
                         await invokeNative('clear_sync_encryption_key_material');
                     } else if (key && next.discoveredSalt && next.discoveredParams) {
-                        await invokeNative('set_sync_encryption_key_material', {
-                            key: bytesToBase64(key),
-                            salt: next.discoveredSalt,
-                            kdfParams: next.discoveredParams,
-                        });
+                        await persistNativeEnabledMaterial(key, next);
                     }
                     clearSyncEncryptionMaterialCache();
-                })();
+                } catch (error) {
+                    if (current === next) current = previous;
+                    if (next && next.state === 'enabled' && key) {
+                        try {
+                            await restoreNativeTransitionSnapshot(
+                                previous,
+                                persistedMaterial ?? null,
+                                next,
+                            );
+                        } catch (rollbackError) {
+                            clearSyncEncryptionMaterialCache();
+                            const commitMessage = error instanceof Error ? error.message : String(error);
+                            const rollbackMessage = rollbackError instanceof Error
+                                ? rollbackError.message
+                                : String(rollbackError);
+                            const combined = new Error(
+                                `Failed to persist sync encryption material (${commitMessage}); rollback failed (${rollbackMessage})`,
+                            );
+                            (combined as Error & { cause?: unknown }).cause = error;
+                            throw combined;
+                        }
+                    }
+                    clearSyncEncryptionMaterialCache();
+                    throw error;
+                }
+            })();
             queued.push(operation);
             return operation;
         },
