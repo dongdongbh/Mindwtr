@@ -272,6 +272,7 @@ export const faOverrides: Record<string, string> = {
         'attachments.open': 'باز کردن',
         'attachments.download': 'دانلود',
         'attachments.missing': 'فایل موجود نیست',
+        'attachments.downloadConflict': 'این پیوست هنگام دانلود تغییر کرد. فایل محلی شما حفظ شد. برای رفع تعارض دوباره همگام‌سازی کنید.',
         'attachments.remove': 'حذف',
         'attachments.transferProgress': 'پیشرفت انتقال پیوست',
         'attachments.linkPlaceholder': 'https://example.com',

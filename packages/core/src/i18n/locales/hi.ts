@@ -241,6 +241,7 @@ export const hiOverrides: Record<string, string> = {
         'attachments.open': 'खुला',
         'attachments.download': 'डाउनलोड करना',
         'attachments.missing': 'गुम फ़ाइल',
+        'attachments.downloadConflict': 'डाउनलोड के दौरान यह अटैचमेंट बदल गया। आपकी स्थानीय फ़ाइल सुरक्षित रखी गई। टकराव सुलझाने के लिए फिर से सिंक करें।',
         'attachments.remove': 'निकालना',
         'attachments.transferProgress': 'अटैचमेंट ट्रांसफ़र प्रगति',
         'attachments.linkPlaceholder': 'https://example.com',

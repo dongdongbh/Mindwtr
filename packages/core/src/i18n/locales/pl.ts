@@ -241,6 +241,7 @@ export const plOverrides: Record<string, string> = {
         'attachments.open': 'Otwórz',
         'attachments.download': 'Pobierz',
         'attachments.missing': 'Brakujący plik',
+        'attachments.downloadConflict': 'Ten załącznik zmienił się podczas pobierania. Plik lokalny został zachowany. Zsynchronizuj ponownie, aby rozwiązać konflikt.',
         'attachments.remove': 'Usuń',
         'attachments.transferProgress': 'Postęp przesyłania załącznika',
         'attachments.linkPlaceholder': 'https://example.com',

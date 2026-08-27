@@ -335,6 +335,7 @@ export const viOverrides: Record<string, string> = {
         'attachments.open': 'Mở',
         'attachments.download': 'Tải xuống',
         'attachments.missing': 'Tệp bị thiếu',
+        'attachments.downloadConflict': 'Tệp đính kèm này đã thay đổi trong khi tải xuống. Tệp cục bộ đã được giữ lại. Hãy đồng bộ lại để giải quyết xung đột.',
         'attachments.remove': 'Xóa',
         'attachments.transferProgress': 'Tiến độ truyền tệp đính kèm',
         'attachments.linkPlaceholder': 'https://example.com',

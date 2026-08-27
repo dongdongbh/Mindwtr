@@ -292,6 +292,7 @@ export const jaOverrides: Record<string, string> = {
         'attachments.open': '開く',
         'attachments.download': 'ダウンロード',
         'attachments.missing': 'ファイルが見つかりません',
+        'attachments.downloadConflict': 'ダウンロード中にこの添付ファイルが変更されました。ローカルのファイルは保持されています。競合を解決するには、もう一度同期してください。',
         'attachments.remove': '削除',
         'attachments.transferProgress': '添付ファイルの転送状況',
         'attachments.linkPlaceholder': 'https://example.com',

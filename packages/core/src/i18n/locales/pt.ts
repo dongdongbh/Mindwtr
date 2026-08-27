@@ -233,6 +233,7 @@ export const ptOverrides: Record<string, string> = {
         'attachments.addLink': 'Adicionar link',
         'attachments.open': 'Abrir',
         'attachments.missing': 'Arquivo ausente',
+        'attachments.downloadConflict': 'Este anexo mudou durante o download. O arquivo local foi mantido. Sincronize novamente para resolver o conflito.',
         'attachments.remove': 'Remover',
         'attachments.transferProgress': 'Progresso da transferência do anexo',
         'attachments.linkPlaceholder': 'https://example.com',

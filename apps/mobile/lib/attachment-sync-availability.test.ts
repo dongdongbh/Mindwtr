@@ -36,8 +36,13 @@ const attachmentFileInstallerMock = vi.hoisted(() => ({
   installAttachmentFileGeneration: vi.fn(),
 }));
 
+const cloudKitSyncMock = vi.hoisted(() => ({
+  fetchCloudKitAttachmentAsset: vi.fn(),
+}));
+
 vi.mock('expo-file-system/legacy', () => fileSystemMock);
 vi.mock('./attachment-file-installer', () => attachmentFileInstallerMock);
+vi.mock('./cloudkit-sync', () => cloudKitSyncMock);
 
 const asyncStorageMock = vi.hoisted(() => {
   const store = new Map<string, string>();
@@ -125,9 +130,15 @@ describe('ensureAttachmentAvailable', () => {
   // under a loaded machine. The work itself cannot be lightened: running the real core is
   // the point of this suite (TEST-01).
   let ensureAttachmentAvailable: typeof import('./attachment-sync-availability')['ensureAttachmentAvailable'];
+  let ensureAttachmentAvailableDetailed: typeof import('./attachment-sync-availability')['ensureAttachmentAvailableDetailed'];
+  let getAttachmentAvailabilityPatch: typeof import('./attachment-sync-availability')['getAttachmentAvailabilityPatch'];
 
   beforeAll(async () => {
-    ({ ensureAttachmentAvailable } = await import('./attachment-sync-availability'));
+    ({
+      ensureAttachmentAvailable,
+      ensureAttachmentAvailableDetailed,
+      getAttachmentAvailabilityPatch,
+    } = await import('./attachment-sync-availability'));
   }, 30_000);
 
   beforeEach(() => {
@@ -145,6 +156,15 @@ describe('ensureAttachmentAvailable', () => {
       Buffer.from(REMOTE_BYTES).toString('base64'),
     );
     attachmentFileInstallerMock.installAttachmentFileGeneration.mockResolvedValue({ status: 'installed' });
+    cloudKitSyncMock.fetchCloudKitAttachmentAsset.mockResolvedValue({
+      attachmentId: 'unused',
+      ownerType: 'task',
+      ownerId: 'task-1',
+      title: 'stale-title.txt',
+      mimeType: 'application/x-stale',
+      size: REMOTE_BYTES.byteLength,
+      updatedAt: '2026-04-17T10:00:00.000Z',
+    });
   });
 
   it('does not download or mutate storage when a content uri is unreadable', async () => {
@@ -344,9 +364,9 @@ describe('ensureAttachmentAvailable', () => {
     });
     const attachment = makeAttachment(id, { fileHash: sha256Hex(REMOTE_BYTES) });
 
-    const result = await ensureAttachmentAvailable(attachment);
+    const result = await ensureAttachmentAvailableDetailed(attachment);
 
-    expect(result).toBeNull();
+    expect(result).toEqual({ status: 'generation-conflict' });
     expect(attachmentFileInstallerMock.installAttachmentFileGeneration).toHaveBeenCalledWith(
       expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
       `file://document/attachments/${id}.txt`,
@@ -368,6 +388,204 @@ describe('ensureAttachmentAvailable', () => {
       uri: '',
       localStatus: 'missing',
       fileHash: sha256Hex(REMOTE_BYTES),
+    });
+  });
+
+  it('does not share an in-flight download across different immutable content identities', async () => {
+    asyncStorageMock.store.set('@mindwtr_sync_backend', 'cloud');
+    asyncStorageMock.store.set('@mindwtr_cloud_url', 'https://cloud.example/v1/data');
+    asyncStorageMock.store.set('@mindwtr_cloud_token', 'cloud-token');
+    const core = await import('@mindwtr/core');
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    vi.mocked(core.cloudGetFile)
+      .mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => { releaseFirst = resolve; });
+        return toArrayBuffer(REMOTE_BYTES) as never;
+      })
+      .mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => { releaseSecond = resolve; });
+        return toArrayBuffer(REMOTE_BYTES) as never;
+      });
+    const firstAttachment = makeAttachment('identity-race', {
+      cloudKey: 'attachments/identity-race-h1.txt',
+      contentRev: 1,
+      fileHash: sha256Hex(REMOTE_BYTES),
+    });
+    const secondAttachment = makeAttachment('identity-race', {
+      cloudKey: 'attachments/identity-race-h2.txt',
+      contentRev: 2,
+      fileHash: sha256Hex(REMOTE_BYTES),
+    });
+
+    const first = ensureAttachmentAvailableDetailed(firstAttachment);
+    const second = ensureAttachmentAvailableDetailed(secondAttachment);
+    await vi.waitFor(() => expect(core.cloudGetFile).toHaveBeenCalledTimes(2));
+    releaseSecond();
+    releaseFirst();
+
+    await expect(first).resolves.toMatchObject({ status: 'available' });
+    await expect(second).resolves.toMatchObject({ status: 'available' });
+    expect(core.cloudGetFile).toHaveBeenNthCalledWith(
+      1,
+      'https://cloud.example/v1/attachments/identity-race-h1.txt',
+      expect.anything(),
+    );
+    expect(core.cloudGetFile).toHaveBeenNthCalledWith(
+      2,
+      'https://cloud.example/v1/attachments/identity-race-h2.txt',
+      expect.anything(),
+    );
+  });
+
+  it('never accepts stale H1 bytes as an available H2 generation after concurrent absent installs', async () => {
+    const h1Bytes = new Uint8Array([1, 1, 1, 1]);
+    const h2Bytes = new Uint8Array([2, 2, 2, 2]);
+    const targetUri = 'file://document/attachments/shared-generation.txt';
+    const scratchBytes = new Map<string, string>();
+    fileSystemMock.writeAsStringAsync.mockImplementation(async (uri: string, base64: string) => {
+      scratchBytes.set(uri, base64);
+    });
+    fileSystemMock.moveAsync.mockImplementation(async ({ from, to }: { from: string; to: string }) => {
+      const base64 = scratchBytes.get(from);
+      if (base64) scratchBytes.set(to, base64);
+    });
+    fileSystemMock.readAsStringAsync.mockImplementation(async (uri: string) => (
+      scratchBytes.get(uri) ?? Buffer.from(REMOTE_BYTES).toString('base64')
+    ));
+    asyncStorageMock.store.set('@mindwtr_sync_backend', 'cloud');
+    asyncStorageMock.store.set('@mindwtr_cloud_url', 'https://cloud.example/v1/data');
+    asyncStorageMock.store.set('@mindwtr_cloud_token', 'cloud-token');
+    const core = await import('@mindwtr/core');
+    let releaseH1!: () => void;
+    let releaseH2!: () => void;
+    vi.mocked(core.cloudGetFile)
+      .mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => { releaseH1 = resolve; });
+        return toArrayBuffer(h1Bytes) as never;
+      })
+      .mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => { releaseH2 = resolve; });
+        return toArrayBuffer(h2Bytes) as never;
+      });
+    attachmentFileInstallerMock.installAttachmentFileGeneration
+      .mockResolvedValueOnce({ status: 'installed' })
+      .mockResolvedValueOnce({
+        status: 'conflict',
+        preservedPath: 'file://document/attachments/.mindwtr-preserved-h2.staged',
+      });
+    const h1 = makeAttachment('shared-generation', {
+      cloudKey: 'attachments/shared-generation.txt',
+      contentRev: 1,
+      fileHash: sha256Hex(h1Bytes),
+    });
+    const h2 = makeAttachment('shared-generation', {
+      cloudKey: 'attachments/shared-generation.txt',
+      contentRev: 2,
+      fileHash: sha256Hex(h2Bytes),
+    });
+
+    const h1Run = ensureAttachmentAvailableDetailed(h1);
+    const h2Run = ensureAttachmentAvailableDetailed(h2);
+    await vi.waitFor(() => expect(core.cloudGetFile).toHaveBeenCalledTimes(2));
+    releaseH1();
+    await expect(h1Run).resolves.toMatchObject({ status: 'available' });
+    releaseH2();
+    await expect(h2Run).resolves.toEqual({ status: 'generation-conflict' });
+
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => ({
+      exists: uri === targetUri,
+      size: h1Bytes.length,
+    }));
+    fileSystemMock.readAsStringAsync.mockImplementation(async (uri: string) => (
+      uri === targetUri
+        ? Buffer.from(h1Bytes).toString('base64')
+        : Buffer.from(h2Bytes).toString('base64')
+    ));
+
+    await expect(ensureAttachmentAvailableDetailed(h2)).resolves.toEqual({
+      status: 'generation-conflict',
+    });
+    expect(core.cloudGetFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('downloads CloudKit assets to native scratch without falling through to stale WebDAV settings', async () => {
+    asyncStorageMock.store.set('@mindwtr_sync_backend', 'cloudkit');
+    asyncStorageMock.store.set('@mindwtr_webdav_url', 'https://stale-webdav.example/remote.php/dav/files/mindwtr');
+    asyncStorageMock.store.set('@mindwtr_webdav_username', 'stale-user');
+    asyncStorageMock.store.set('@mindwtr_webdav_password', 'stale-password');
+    const core = await import('@mindwtr/core');
+    const attachment = makeAttachment('cloudkit-on-demand', {
+      cloudKey: 'cloudkit:cloudkit-on-demand',
+      title: 'Current plan.pdf',
+      mimeType: 'application/pdf',
+      fileHash: sha256Hex(REMOTE_BYTES),
+    });
+
+    const result = await ensureAttachmentAvailableDetailed(attachment);
+
+    expect(cloudKitSyncMock.fetchCloudKitAttachmentAsset).toHaveBeenCalledWith(
+      'cloudkit-on-demand',
+      expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+    );
+    expect(core.webdavGetFile).not.toHaveBeenCalled();
+    expect(attachmentFileInstallerMock.installAttachmentFileGeneration).toHaveBeenCalledWith(
+      expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+      'file://document/attachments/cloudkit-on-demand.pdf',
+      { kind: 'absent' },
+      sha256Hex(REMOTE_BYTES),
+    );
+    expect(result).toMatchObject({
+      status: 'available',
+      attachment: {
+        title: 'Current plan.pdf',
+        mimeType: 'application/pdf',
+        uri: 'file://document/attachments/cloudkit-on-demand.pdf',
+        localStatus: 'available',
+      },
+    });
+  });
+
+  it('terminates CloudKit progress when the absent-generation installer reports a conflict', async () => {
+    asyncStorageMock.store.set('@mindwtr_sync_backend', 'cloudkit');
+    attachmentFileInstallerMock.installAttachmentFileGeneration.mockResolvedValue({
+      status: 'conflict',
+      preservedPath: 'file://document/attachments/.mindwtr-preserved-cloudkit.staged',
+    });
+    const attachment = makeAttachment('cloudkit-conflict', {
+      cloudKey: 'cloudkit:cloudkit-conflict',
+      fileHash: sha256Hex(REMOTE_BYTES),
+    });
+    const core = await import('@mindwtr/core');
+
+    await expect(ensureAttachmentAvailableDetailed(attachment)).resolves.toEqual({
+      status: 'generation-conflict',
+    });
+    expect(core.globalProgressTracker.getProgress(attachment.id)).toMatchObject({
+      status: 'failed',
+      error: 'Attachment changed locally during download',
+    });
+  });
+
+  it('patches only local availability and adopts a verified hash only for a legacy missing-hash record', () => {
+    const legacy = makeAttachment('legacy', { fileHash: undefined });
+    const verified = makeAttachment('legacy', {
+      title: 'Stale remote title.txt',
+      mimeType: 'application/x-stale',
+      uri: 'file://document/attachments/legacy.txt',
+      localStatus: 'available',
+      fileHash: sha256Hex(REMOTE_BYTES),
+    });
+    expect(getAttachmentAvailabilityPatch(legacy, verified)).toEqual({
+      uri: 'file://document/attachments/legacy.txt',
+      localStatus: 'available',
+      fileHash: sha256Hex(REMOTE_BYTES),
+    });
+
+    const current = makeAttachment('legacy', { fileHash: 'a'.repeat(64) });
+    expect(getAttachmentAvailabilityPatch(current, verified)).toEqual({
+      uri: 'file://document/attachments/legacy.txt',
+      localStatus: 'available',
     });
   });
 

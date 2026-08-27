@@ -288,6 +288,7 @@ export const itOverrides: Record<string, string> = {
         'attachments.open': 'Apri',
         'attachments.download': 'Scarica',
         'attachments.missing': 'File mancante',
+        'attachments.downloadConflict': 'Questo allegato è cambiato durante il download. Il file locale è stato conservato. Sincronizza di nuovo per risolvere il conflitto.',
         'attachments.remove': 'Rimuovi',
         'attachments.transferProgress': 'Avanzamento trasferimento allegato',
         'attachments.linkPlaceholder': 'https://esempio.com',

@@ -305,6 +305,7 @@ export const zhHant: Record<string, string> = {
         'attachments.open': '打開',
         'attachments.download': '下載',
         'attachments.missing': '文件缺失',
+        'attachments.downloadConflict': '此附件在下載期間發生了變更。本機檔案已保留。請再次同步以解決衝突。',
         'attachments.remove': '移除',
         'attachments.transferProgress': '附件傳輸進度',
         'attachments.linkPlaceholder': 'https://example.com',

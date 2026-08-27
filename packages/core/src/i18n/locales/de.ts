@@ -266,6 +266,7 @@ export const deOverrides: Record<string, string> = {
         'attachments.open': 'Öffnen',
         'attachments.download': 'Herunterladen',
         'attachments.missing': 'Fehlende Datei',
+        'attachments.downloadConflict': 'Dieser Anhang wurde während des Downloads geändert. Die lokale Datei wurde beibehalten. Synchronisiere erneut, um den Konflikt zu lösen.',
         'attachments.remove': 'Entfernen',
         'attachments.transferProgress': 'Fortschritt der Anhangsübertragung',
         'attachments.linkPlaceholder': 'https://beispiel.com',

@@ -236,6 +236,7 @@ export const arOverrides: Record<string, string> = {
         'attachments.open': 'يفتح',
         'attachments.download': 'تحميل',
         'attachments.missing': 'ملف مفقود',
+        'attachments.downloadConflict': 'تغيّر هذا المرفق أثناء التنزيل. تم الاحتفاظ بملفك المحلي. زامِن مرة أخرى لحل التعارض.',
         'attachments.remove': 'يزيل',
         'attachments.transferProgress': 'تقدم نقل المرفق',
         'attachments.linkPlaceholder': 'https://example.com',

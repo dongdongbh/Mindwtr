@@ -10,6 +10,7 @@ export const nlOverrides: Record<string, string> = {
         'settings.donateLinkValue': "Doneren",
         'settings.documentationLinkValue': "Documentatie",
         'markdown.copyCode': 'Code kopiëren',
+        'attachments.downloadConflict': 'Deze bijlage is tijdens het downloaden gewijzigd. Het lokale bestand is behouden. Synchroniseer opnieuw om het conflict op te lossen.',
         'nav.main': 'Start',
         'nav.board': 'Bordweergave',
         'nav.projects': 'Projecten',

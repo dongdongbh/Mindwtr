@@ -241,6 +241,7 @@ export const ruOverrides: Record<string, string> = {
         'attachments.open': 'Открыть',
         'attachments.download': 'Скачать',
         'attachments.missing': 'Отсутствует файл',
+        'attachments.downloadConflict': 'Это вложение изменилось во время загрузки. Локальный файл сохранён. Повторите синхронизацию, чтобы устранить конфликт.',
         'attachments.remove': 'Удалять',
         'attachments.transferProgress': 'Ход передачи вложения',
         'attachments.linkPlaceholder': 'https://example.com',
