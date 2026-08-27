@@ -578,6 +578,31 @@ describe('runDisableSyncEncryptionOverRemote', () => {
         expect(localState.value).toBeNull();
     });
 
+    it('authenticates every encrypted generation before writing any plaintext', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a-old.bin': { bytes: utf8('OLD'), kind: 'attachment' },
+            'attachments/z-foreign.bin': { bytes: utf8('FOREIGN'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('old-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const foreignMaterial = await deriveSyncKeyMaterial('foreign-pw', new Uint8Array(16).fill(29), FAST_KDF);
+        remote.peerWrite(
+            'attachments/z-foreign.bin',
+            await encryptSyncArtifact(utf8('FOREIGN'), foreignMaterial),
+        );
+        const write = vi.spyOn(remote, 'write');
+
+        await expect(runDisableSyncEncryptionOverRemote(remote, keyCache, localState))
+            .rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(localState.value).toEqual(expect.objectContaining({ state: 'enabled' }));
+        expect(localState.value?.incompleteTransition).toBeUndefined();
+        expect(await keyCache.getKey()).not.toBeNull();
+    });
+
     it('preserves the retry key when disabled-state persistence fails', async () => {
         const remote = createFakeRemote({
             'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
