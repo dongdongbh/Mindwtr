@@ -124,6 +124,14 @@ export type SyncEncryptionRemoteRead = {
     version: string | null;
 };
 
+/** One coherent remote inventory. Blob adapters derive `entries` from the document bytes in
+ * `snapshot`; core then reuses those exact document generations for every later CAS instead
+ * of listing from one generation and silently preflighting a newer one. */
+export type SyncEncryptionRemoteInventory = {
+    entries: SyncEncryptionRemoteEntry[];
+    snapshot: ReadonlyMap<string, SyncEncryptionRemoteRead>;
+};
+
 /** Raised when a transition observes that another writer changed an artifact after the
  * transition read it. The transition must stop before committing its device-local key/state. */
 export class SyncEncryptionRemoteConflictError extends Error {
@@ -156,6 +164,11 @@ export const isSyncEncryptionRemoteVersionUnavailableError = (error: unknown): b
  * two thin backend adapters, reused by both desktop and mobile. */
 export type SyncEncryptionRemotePort = {
     list(): Promise<SyncEncryptionRemoteEntry[]>;
+    /** Blob backends can bind their derived worklist to the document reads that
+     * produced it. File backends retain the `list` + `read` fallback because they enumerate
+     * the storage provider directly. The passphrase is only for decoding an interrupted
+     * transition's authoritative document; it is never persisted by the port. */
+    captureInventory?(recoveryPassphrase?: string): Promise<SyncEncryptionRemoteInventory>;
     read(name: string): Promise<SyncEncryptionRemoteRead>;
     /** `null` is create-only; a value replaces only the generation returned by `read`. */
     write(name: string, bytes: Uint8Array, expectedVersion: string | null): Promise<void>;
@@ -331,21 +344,27 @@ const requireExistingRemoteVersion = (name: string, read: SyncEncryptionRemoteRe
     return read.version;
 };
 
-/** Capture every listed generation before the first transition write. This is both a
- * compatibility preflight (one late weak/missing WebDAV ETag cannot strand an earlier
- * artifact mid-transition) and the CAS snapshot used by the mutation pass. */
-const preflightRemoteEntryVersions = async (
+/** Capture every listed generation before the first transition write. Blob ports can seed
+ * the snapshot with the exact document reads used to derive their attachment worklist; the
+ * fallback preserves File Sync's direct-listing contract. Every uncaptured entry is read once,
+ * and every captured/read generation becomes the CAS snapshot used by the mutation pass. */
+const captureRemoteEntryVersions = async (
     remote: SyncEncryptionRemotePort,
-    entries: SyncEncryptionRemoteEntry[],
-): Promise<Map<string, SyncEncryptionRemoteRead>> => {
-    const snapshot = new Map<string, SyncEncryptionRemoteRead>();
+    recoveryPassphrase?: string,
+): Promise<{ entries: SyncEncryptionRemoteEntry[]; snapshot: Map<string, SyncEncryptionRemoteRead> }> => {
+    const captured = remote.captureInventory
+        ? await remote.captureInventory(recoveryPassphrase)
+        : { entries: await remote.list(), snapshot: new Map<string, SyncEncryptionRemoteRead>() };
+    const { entries } = captured;
+    const snapshot = new Map<string, SyncEncryptionRemoteRead>(captured.snapshot);
     for (const entry of entries) {
-        if (snapshot.has(entry.name)) continue;
-        const current = await remote.read(entry.name);
+        const current = snapshot.has(entry.name)
+            ? snapshot.get(entry.name)!
+            : await remote.read(entry.name);
         if (current.bytes) requireExistingRemoteVersion(entry.name, current);
         snapshot.set(entry.name, current);
     }
-    return snapshot;
+    return { entries, snapshot };
 };
 
 const snapshotRemoteRead = (
@@ -526,8 +545,7 @@ export async function runEnableSyncEncryptionOverRemote(
     // only affects newly written artifacts; tests inject cheap params to stay under timeouts.
     kdfParams: SyncCryptoKdfParams = SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
 ): Promise<EnableRemoteEncryptionResult> {
-    const entries = await remote.list();
-    const snapshot = await preflightRemoteEntryVersions(remote, entries);
+    const { entries, snapshot } = await captureRemoteEntryVersions(remote, passphrase);
 
     // Resume: if a previous partial run already produced an `.enc` document, its header
     // salt/params are authoritative — reuse them so this run doesn't derive a second key
@@ -680,8 +698,7 @@ export async function runDisableSyncEncryptionOverRemote(
     const key = await keyCache.getKey();
     if (!key) throw new Error('sync encryption disable requires a cached key');
 
-    const entries = await remote.list();
-    const snapshot = await preflightRemoteEntryVersions(remote, entries);
+    const { entries, snapshot } = await captureRemoteEntryVersions(remote);
     const isBaseEncDocument = (name: string) => !KNOWN_ARTIFACT_SUFFIXES.some((s) => name.endsWith(`.enc${s}`));
     const attachments = entries.filter((e) => e.kind === 'attachment');
     const encDocuments = entries
@@ -795,8 +812,7 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
     }
 
     const isBaseEncDocument = (name: string) => !KNOWN_ARTIFACT_SUFFIXES.some((s) => name.endsWith(`.enc${s}`));
-    const entries = await remote.list();
-    const snapshot = await preflightRemoteEntryVersions(remote, entries);
+    const { entries, snapshot } = await captureRemoteEntryVersions(remote, nextPassphrase);
     const attachments = entries.filter((e) => e.kind === 'attachment');
     const encDocuments = entries
         .filter((e) => e.kind === 'document' && e.name.includes('.enc'))

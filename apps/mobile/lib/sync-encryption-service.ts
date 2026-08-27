@@ -7,8 +7,10 @@
 // Out of scope by design: CloudKit and self-hosted mindwtr-cloud.
 
 import {
-    collectAttachmentsById,
+    decryptRemoteArtifactOrThrow,
+    deriveSyncKeyMaterial,
     getBaseSyncUrl,
+    inspectSyncArtifact,
     reaffirmRemoteEncryptionNoKey,
     runChangeSyncEncryptionPassphraseOverRemote,
     runDisableSyncEncryptionLocalOnly,
@@ -21,9 +23,13 @@ import {
     webdavDeleteFileVersioned,
     webdavGetFileVersioned,
     webdavPutFileVersioned,
+    SyncCryptoUnsupportedError,
+    SyncEncryptionTerminalError,
     type AppData,
     type SyncEncryptionRemoteEntry,
+    type SyncEncryptionRemoteInventory,
     type SyncEncryptionRemotePort,
+    type SyncEncryptionRemoteRead,
     type SyncEncryptionStatus,
     type SyncEncryptionTransitionProgress,
 } from '@mindwtr/core';
@@ -44,6 +50,7 @@ import { getMobileWebDavRequestOptions } from './webdav-request-options';
 import { mobileSyncCryptoPrimitives } from './sync-crypto-native';
 import {
     flushSyncEncryptionLocalState,
+    getSyncEncryptionMaterial,
     getMobileSyncEncryptionStatus,
     syncEncryptionKeyCache,
     syncEncryptionLocalState,
@@ -61,13 +68,13 @@ const DROPBOX_PROVIDER = 'dropbox';
 export type SyncEncryptionProgressCallback = (progress: SyncEncryptionTransitionProgress) => void;
 
 /**
- * The artifact set a transition covers, derived from the local document rather than from
- * a remote directory listing.
+ * The artifact set a transition covers, derived from the authoritative remote document
+ * rather than from a remote directory listing.
  *
  * ponytail: neither WebDAV (PROPFIND) nor Dropbox (files/list_folder) has a listing
  * primitive in core today, and adding two new wire protocols inside a delete-capable
  * code path is a poor trade against deriving the exact set we actually manage. The
- * accepted ceiling: an ORPHANED remote attachment — one no live attachment record points
+ * accepted ceiling: an ORPHANED remote attachment — one no remote record points
  * at — is not migrated by enable/disable. Orphans are already the attachment-cleanup
  * pass's job, and leaving one untouched can never lose data. Add real listings here if
  * "old plaintext attachment left behind after enabling" ever becomes a real report.
@@ -86,13 +93,67 @@ const buildTransitionEntries = (appData: AppData | null): SyncEncryptionRemoteEn
     ];
     if (!appData) return entries;
     const seen = new Set<string>();
-    for (const attachment of collectAttachmentsById(appData).values()) {
-        const cloudKey = attachment.cloudKey;
-        if (!cloudKey || seen.has(cloudKey)) continue;
-        seen.add(cloudKey);
-        entries.push({ name: cloudKey, kind: 'attachment' });
+    for (const entity of [...(appData.tasks ?? []), ...(appData.projects ?? [])]) {
+        if (entity.deletedAt) continue;
+        for (const attachment of entity.attachments ?? []) {
+            const cloudKey = attachment.cloudKey;
+            if (!cloudKey || seen.has(cloudKey)) continue;
+            seen.add(cloudKey);
+            entries.push({ name: cloudKey, kind: 'attachment' });
+        }
     }
     return entries;
+};
+
+const decodeInventoryDocument = async (
+    bytes: Uint8Array | null,
+    key: Uint8Array | null,
+    recoveryPassphrase?: string,
+): Promise<AppData | null> => {
+    if (!bytes) return null;
+    const inspected = inspectSyncArtifact(bytes);
+    if (inspected.kind === 'unsupported') {
+        throw new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError(inspected.reason));
+    }
+    if (inspected.kind === 'plaintext') {
+        return JSON.parse(new TextDecoder().decode(bytes)) as AppData;
+    }
+    const candidates: Uint8Array[] = key ? [key] : [];
+    if (recoveryPassphrase) {
+        const recovered = await deriveSyncKeyMaterial(
+            recoveryPassphrase,
+            inspected.salt,
+            inspected.params,
+            mobileSyncCryptoPrimitives,
+        );
+        candidates.push(recovered.key);
+    }
+    for (const candidate of candidates) {
+        try {
+            const plain = await decryptRemoteArtifactOrThrow(bytes, candidate, mobileSyncCryptoPrimitives);
+            return JSON.parse(new TextDecoder().decode(plain)) as AppData;
+        } catch (error) {
+            if (!(error instanceof SyncEncryptionTerminalError)) throw error;
+        }
+    }
+    return null;
+};
+
+/** Reads every managed document once, derives the attachment worklist from those exact
+ * bytes, and returns the document generations alongside the entries. Core reuses this
+ * snapshot for CAS instead of opening a list-to-preflight race with a second document read. */
+const captureTransitionInventory = async (
+    read: (name: string) => Promise<SyncEncryptionRemoteRead>,
+    recoveryPassphrase?: string,
+): Promise<SyncEncryptionRemoteInventory> => {
+    const documentEntries = buildTransitionEntries(null);
+    const snapshot = new Map<string, SyncEncryptionRemoteRead>();
+    for (const entry of documentEntries) snapshot.set(entry.name, await read(entry.name));
+    const key = (await getSyncEncryptionMaterial())?.key ?? null;
+    const data =
+        (await decodeInventoryDocument(snapshot.get(`${SYNC_FILE_NAME}.enc`)?.bytes ?? null, key, recoveryPassphrase))
+        ?? (await decodeInventoryDocument(snapshot.get(SYNC_FILE_NAME)?.bytes ?? null, key, recoveryPassphrase));
+    return { entries: buildTransitionEntries(data), snapshot };
 };
 
 const createWebdavRemotePort = async (appData: AppData | null): Promise<SyncEncryptionRemotePort> => {
@@ -107,9 +168,12 @@ const createWebdavRemotePort = async (appData: AppData | null): Promise<SyncEncr
     // Documents sit at the sync root; attachment entry names are already the `cloudKey`
     // (`attachments/<id><ext>`), which is root-relative too.
     const urlFor = (name: string): string => `${baseSyncUrl}/${name}`;
+    const read = (name: string): Promise<SyncEncryptionRemoteRead> =>
+        webdavGetFileVersioned(urlFor(name), requestOptions);
     return {
         list: async () => buildTransitionEntries(appData),
-        read: (name) => webdavGetFileVersioned(urlFor(name), requestOptions),
+        captureInventory: (recoveryPassphrase) => captureTransitionInventory(read, recoveryPassphrase),
+        read,
         write: async (name, bytes, expectedVersion) => {
             await webdavPutFileVersioned(
                 urlFor(name), bytes, 'application/octet-stream', expectedVersion, requestOptions,
@@ -126,9 +190,12 @@ const createDropboxRemotePort = async (appData: AppData | null): Promise<SyncEnc
     if (!clientId) throw new Error('Dropbox is not configured');
     const authorized = <T,>(operation: (accessToken: string) => Promise<T>): Promise<T> =>
         runDropboxAuthorized(clientId, operation);
+    const read = (name: string): Promise<SyncEncryptionRemoteRead> =>
+        authorized((token) => downloadDropboxFileVersioned(token, `/${name}`));
     return {
         list: async () => buildTransitionEntries(appData),
-        read: (name) => authorized((token) => downloadDropboxFileVersioned(token, `/${name}`)),
+        captureInventory: (recoveryPassphrase) => captureTransitionInventory(read, recoveryPassphrase),
+        read,
         write: async (name, bytes, expectedVersion) => {
             await authorized((token) => uploadDropboxFileVersioned(token, `/${name}`, bytes, expectedVersion));
         },
@@ -311,4 +378,9 @@ export const declineSyncEncryptionPassphrase = async (): Promise<void> => {
     await flushSyncEncryptionLocalState();
 };
 
-export const __syncEncryptionServiceTestUtils = { buildTransitionEntries, createDropboxRemotePort, createWebdavRemotePort };
+export const __syncEncryptionServiceTestUtils = {
+    buildTransitionEntries,
+    captureTransitionInventory,
+    createDropboxRemotePort,
+    createWebdavRemotePort,
+};

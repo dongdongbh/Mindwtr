@@ -22,6 +22,7 @@ type NativeState = {
     salt?: string;
     kdfParams?: { mKib: number; t: number; p: number };
     key?: string;
+    incompleteTransition?: 'enable' | 'disable' | 'change-passphrase';
 };
 
 const native = vi.hoisted(() => ({
@@ -52,8 +53,8 @@ vi.mock('./tauri-invoke', () => {
         switch (command) {
             case 'get_sync_encryption_status':
                 return native.state.state === 'off'
-                    ? { state: 'off', hasKey: false }
-                    : { state: native.state.state, kdfParams: native.state.kdfParams, hasKey: Boolean(native.state.key) };
+                    ? { state: 'off', hasKey: false, incompleteTransition: native.state.incompleteTransition }
+                    : { state: native.state.state, kdfParams: native.state.kdfParams, hasKey: Boolean(native.state.key), incompleteTransition: native.state.incompleteTransition };
             case 'get_sync_encryption_key_material':
                 // `remote-plaintext` still holds a key on purpose (see SYNC_ENCRYPTION_KEYED_STATES).
                 return native.state.state !== 'off'
@@ -71,6 +72,12 @@ vi.mock('./tauri-invoke', () => {
                 return null;
             case 'clear_sync_encryption_key_material':
                 native.state = { state: 'off' };
+                return null;
+            case 'mark_sync_encryption_transition_incomplete':
+                native.state = {
+                    ...native.state,
+                    incompleteTransition: args?.transitionKind as NativeState['incompleteTransition'],
+                };
                 return null;
             case 'mark_sync_encryption_remote_plaintext':
                 if (native.state.state === 'enabled') {
@@ -273,6 +280,41 @@ describe('Dropbox sync encryption transitions', () => {
             state: 'enabled',
             kdfParams: expect.objectContaining({ mKib: expect.any(Number) }),
         });
+    });
+
+    it('CASes the exact document generation used to derive the attachment inventory', async () => {
+        const store = seedRemote();
+        const baseFetcher = createDropboxFetch(store);
+        const peerData = {
+            ...APP_DATA_WITH_ATTACHMENT,
+            tasks: [{ ...APP_DATA_WITH_ATTACHMENT.tasks[0], title: 'peer-updated task' }],
+        };
+        let peerAdvancedDocument = false;
+        const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+            const response = await baseFetcher(input, init);
+            const apiArg = init?.headers
+                ? JSON.parse((init.headers as Record<string, string>)['Dropbox-API-Arg'] ?? '{}')
+                : {};
+            if (
+                !peerAdvancedDocument
+                && String(input).endsWith('/files/download')
+                && apiArg.path === '/data.json'
+                && response.ok
+            ) {
+                peerAdvancedDocument = true;
+                store.files.set('data.json', jsonBytes(peerData));
+                store.versions.set('data.json', (store.versions.get('data.json') ?? 1) + 1);
+            }
+            return response;
+        }) as typeof fetch;
+
+        await expect(runEnableOverRemote(
+            'correct horse battery',
+            createDropboxRemotePort((operation) => operation('token'), fetcher),
+        )).rejects.toThrow('Dropbox artifact changed');
+
+        expect(JSON.parse(new TextDecoder().decode(store.files.get('data.json')!))).toEqual(peerData);
+        expect(store.files.has('data.json.enc')).toBe(true);
     });
 
     it('accepts the right passphrase and rejects the wrong one without touching the remote', async () => {

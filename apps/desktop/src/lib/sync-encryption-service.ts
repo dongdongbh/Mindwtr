@@ -42,6 +42,7 @@ import {
     type SyncEncryptionLocalState,
     type SyncEncryptionLocalStatePort,
     type SyncEncryptionRemoteEntry,
+    type SyncEncryptionRemoteInventory,
     type SyncEncryptionRemotePort,
     type SyncEncryptionRemoteRead,
     type SyncEncryptionStatus,
@@ -335,20 +336,29 @@ const decodeDocument = async (
 };
 
 /** The key is resolved here rather than taken as a parameter: a caller that passed `null` by
- *  mistake would enumerate zero attachments and a transition would silently skip all of them. */
-const listRemoteEntries = async (
+ * mistake would enumerate zero attachments and a transition would silently skip all of them.
+ * The returned snapshot includes the exact document generations used for that derivation, so
+ * core never rereads a newer document and treats its attachment list as if it came from it. */
+const captureRemoteInventory = async (
     read: (name: string) => Promise<SyncEncryptionRemoteRead>,
     recoveryPassphrase?: string,
-): Promise<SyncEncryptionRemoteEntry[]> => {
+): Promise<SyncEncryptionRemoteInventory> => {
+    const snapshot = new Map<string, SyncEncryptionRemoteRead>();
+    for (const name of REMOTE_DOCUMENT_NAMES) snapshot.set(name, await read(name));
     const key = (await getSyncEncryptionMaterial())?.key ?? null;
     const data =
-        (await decodeDocument((await read('data.json.enc')).bytes, key, recoveryPassphrase)) ??
-        (await decodeDocument((await read('data.json')).bytes, key, recoveryPassphrase));
-    return [
+        (await decodeDocument(snapshot.get('data.json.enc')?.bytes ?? null, key, recoveryPassphrase)) ??
+        (await decodeDocument(snapshot.get('data.json')?.bytes ?? null, key, recoveryPassphrase));
+    const entries: SyncEncryptionRemoteEntry[] = [
         ...REMOTE_DOCUMENT_NAMES.map((name) => ({ name, kind: 'document' as const })),
         ...collectRemoteAttachmentKeys(data).map((name) => ({ name, kind: 'attachment' as const })),
     ];
+    return { entries, snapshot };
 };
+
+const listRemoteEntries = async (
+    read: (name: string) => Promise<SyncEncryptionRemoteRead>,
+): Promise<SyncEncryptionRemoteEntry[]> => (await captureRemoteInventory(read)).entries;
 
 export type WebdavRemotePortConfig = {
     baseUrl: string;
@@ -361,6 +371,7 @@ export function createWebdavRemotePort(config: WebdavRemotePortConfig): SyncEncr
         webdavGetFileVersioned(urlFor(name), config.options);
     return {
         list: () => listRemoteEntries(read),
+        captureInventory: (recoveryPassphrase) => captureRemoteInventory(read, recoveryPassphrase),
         read,
         write: async (name, bytes, expectedVersion) => {
             await webdavPutFileVersioned(
@@ -381,6 +392,7 @@ export function createDropboxRemotePort(
         withToken((token) => downloadDropboxFileVersioned(token, name, fetcher));
     return {
         list: () => listRemoteEntries(read),
+        captureInventory: (recoveryPassphrase) => captureRemoteInventory(read, recoveryPassphrase),
         read,
         write: async (name, bytes, expectedVersion) => {
             await withToken((token) =>
@@ -449,17 +461,6 @@ export async function runDisableOverRemote(
     await ports.flush();
 }
 
-/** Re-lists through `nextPassphrase` so an interrupted earlier attempt — which left the base
- *  document sealed under an abandoned intermediate salt the cached key cannot open — still
- *  yields the full attachment worklist. */
-const withRecoveryListing = (
-    remote: SyncEncryptionRemotePort,
-    nextPassphrase: string,
-): SyncEncryptionRemotePort => ({
-    ...remote,
-    list: () => listRemoteEntries(remote.read, nextPassphrase),
-});
-
 export async function runChangePassphraseOverRemote(
     currentPassphrase: string,
     nextPassphrase: string,
@@ -470,7 +471,7 @@ export async function runChangePassphraseOverRemote(
     await runChangeSyncEncryptionPassphraseOverRemote(
         currentPassphrase,
         nextPassphrase,
-        withRecoveryListing(remote, nextPassphrase),
+        remote,
         ports.keyCache,
         ports.localState,
         onProgress,
@@ -583,5 +584,6 @@ export const __syncEncryptionServiceTestUtils = {
     bytesToHex,
     hexToBytes,
     collectRemoteAttachmentKeys,
+    captureRemoteInventory,
     REMOTE_DOCUMENT_NAMES,
 };

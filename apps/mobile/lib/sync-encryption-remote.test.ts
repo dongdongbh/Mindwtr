@@ -31,6 +31,7 @@ import {
   inspectSyncArtifact,
   SyncEncryptionRemoteVersionUnavailableError,
   SyncEncryptionTerminalError,
+  runChangeSyncEncryptionPassphraseOverRemote,
   runDisableSyncEncryptionOverRemote,
   runEnableSyncEncryptionOverRemote,
 } from '@mindwtr/core';
@@ -305,6 +306,37 @@ describe('Dropbox remote port + core transition round trip', () => {
     await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
   }, 30_000);
 
+  it('migrates a peer-only attachment from the authoritative remote document through every transition', async () => {
+    const peerAttachmentName = 'attachments/peer-only.png';
+    const peerAttachmentBytes = new Uint8Array([9, 8, 7, 6]);
+    const remoteData = appData([peerAttachmentName]);
+    const staleLocalData = appData([]);
+    remote.set('/data.json', new TextEncoder().encode(JSON.stringify(remoteData)));
+    remote.set(`/${peerAttachmentName}`, peerAttachmentBytes);
+
+    const port = await __syncEncryptionServiceTestUtils.createDropboxRemotePort(staleLocalData);
+    await runEnableSyncEncryptionOverRemote(
+      PASSPHRASE, port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    );
+    expect(inspectSyncArtifact(remote.get(`/${peerAttachmentName}`)!).kind).toBe('encrypted');
+
+    await runChangeSyncEncryptionPassphraseOverRemote(
+      PASSPHRASE, 'the next passphrase', port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    );
+    const rotatedKey = await syncEncryptionKeyCache.getKey();
+    expect(rotatedKey).not.toBeNull();
+    await expect(decryptSyncArtifact(
+      remote.get(`/${peerAttachmentName}`)!, rotatedKey!, mobileSyncCryptoPrimitives,
+    )).resolves.toEqual(peerAttachmentBytes);
+
+    await runDisableSyncEncryptionOverRemote(
+      port, syncEncryptionKeyCache, syncEncryptionLocalState, undefined, mobileSyncCryptoPrimitives,
+    );
+    expect(remote.get(`/${peerAttachmentName}`)).toEqual(peerAttachmentBytes);
+  }, 30_000);
+
   it('re-running an interrupted enable is a no-op on already-sealed artifacts', async () => {
     const data = appData(['attachments/a0.png']);
     remote.set('/data.json', new TextEncoder().encode(JSON.stringify(data)));
@@ -376,7 +408,10 @@ describe('Dropbox remote port + core transition round trip', () => {
       PASSPHRASE, port, syncEncryptionKeyCache, syncEncryptionLocalState,
       undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
     )).rejects.toThrow('Dropbox file delete failed: HTTP 500');
-    expect(syncEncryptionLocalState.read()).toBeNull();
+    expect(syncEncryptionLocalState.read()).toEqual({
+      state: 'off',
+      incompleteTransition: 'enable',
+    });
     await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
     expect(remote.has('/data.json')).toBe(true);
     expect(remote.has('/data.json.enc')).toBe(true);
