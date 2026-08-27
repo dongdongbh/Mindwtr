@@ -314,7 +314,7 @@ export class ResponseTooLargeError extends Error {
 
 const cancelUnlockedResponseBody = (res: Response): void => {
     const body = res.body;
-    if (!body || body.locked) return;
+    if (!body || body.locked || res.bodyUsed) return;
     try {
         if (typeof body.cancel === 'function') {
             void body.cancel().catch(() => undefined);
@@ -493,11 +493,12 @@ export const fetchWithTimeoutAndConsume = async <T>(
                 signal,
                 () => cancelUnlockedResponseBody(response),
             );
-        } catch (error) {
-            // A consumer can reject from status/size validation before it locks the
-            // stream. Do not leave that body and its connection alive across retries.
+        } finally {
+            // Status-only consumers can return normally for expected misses (404,
+            // Dropbox metadata 409) without ever locking the response stream. Close
+            // that body as eagerly as rejection/abort paths so the connection cannot
+            // stay occupied by an unbounded or malicious error payload.
             cancelUnlockedResponseBody(response);
-            throw error;
         }
     } catch (error) {
         if (isAbortError(error)) {

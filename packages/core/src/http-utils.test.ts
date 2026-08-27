@@ -231,6 +231,23 @@ describe('fetchWithTimeout', () => {
         expect(response.bodyUsed).toBe(true);
     });
 
+    it('cancels an unlocked response body when a status-only consumer returns normally', async () => {
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 404 });
+
+        await expect(fetchWithTimeoutAndConsume(
+            'https://example.com/missing.json',
+            {},
+            1_000,
+            async () => response,
+            'Request timed out',
+            async (res) => res.status === 404 ? null : 'unexpected',
+        )).resolves.toBeNull();
+
+        expect(cancel).toHaveBeenCalledOnce();
+        expect(response.bodyUsed).toBe(true);
+    });
+
     it('keeps the caller abort listener until body consumption finishes, then removes it', async () => {
         const controller = new AbortController();
         const reason = new DOMException('Sync cancelled during download', 'AbortError');
