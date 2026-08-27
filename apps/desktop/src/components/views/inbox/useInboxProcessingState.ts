@@ -93,6 +93,9 @@ export function useInboxProcessingState({
     const [reviewDate, setReviewDate] = useState('');
     const [reviewTime, setReviewTime] = useState('');
     const [reviewTimeDraft, setReviewTimeDraft] = useState('');
+    const [dirtyScheduleFieldKeys, setDirtyScheduleFieldKeys] = useState<ReadonlySet<InboxProcessingScheduleFieldKey>>(
+        () => new Set(),
+    );
 
     const defaultScheduleTime = normalizeClockTimeInput(settings?.gtd?.defaultScheduleTime) || '';
     const processInboxPlan = useMemo(() => resolveProcessInboxPlan(settings), [settings]);
@@ -235,6 +238,7 @@ export function useInboxProcessingState({
         setReviewDate('');
         setReviewTime('');
         setReviewTimeDraft('');
+        setDirtyScheduleFieldKeys(new Set());
     }, [defaultProcessingMode]);
 
     const hydrateProcessingTask = useCallback((
@@ -268,6 +272,7 @@ export function useInboxProcessingState({
         setReviewDate(reviewDraft.date);
         setReviewTime(reviewDraft.time);
         setReviewTimeDraft(reviewDraft.timeDraft);
+        setDirtyScheduleFieldKeys(new Set());
     }, []);
 
     const suggestedContexts = useMemo(
@@ -317,6 +322,13 @@ export function useInboxProcessingState({
         }
     }, [defaultScheduleTime]);
 
+    const markScheduleFieldDirty = useCallback((field: InboxProcessingScheduleFieldKey) => {
+        setDirtyScheduleFieldKeys((current) => {
+            if (current.has(field)) return current;
+            return new Set([...current, field]);
+        });
+    }, []);
+
     const handleScheduleTimeCommit = useCallback(() => {
         handleProcessingTimeCommit(scheduleTimeDraft, scheduleTime, setScheduleTimeDraft, setScheduleTime);
     }, [handleProcessingTimeCommit, scheduleTime, scheduleTimeDraft]);
@@ -330,49 +342,73 @@ export function useInboxProcessingState({
     }, [handleProcessingTimeCommit, reviewTime, reviewTimeDraft]);
 
     const handleScheduleDateChange = useCallback((value: string) => {
+        markScheduleFieldDirty('start');
         handleDateFieldChange(value, setScheduleDate, setScheduleTime, setScheduleTimeDraft, scheduleTime, scheduleTimeDraft);
-    }, [handleDateFieldChange, scheduleTime, scheduleTimeDraft]);
+    }, [handleDateFieldChange, markScheduleFieldDirty, scheduleTime, scheduleTimeDraft]);
 
     const handleDueDateChange = useCallback((value: string) => {
+        markScheduleFieldDirty('due');
         handleDateFieldChange(value, setDueDate, setDueTime, setDueTimeDraft, dueTime, dueTimeDraft);
-    }, [dueTime, dueTimeDraft, handleDateFieldChange]);
+    }, [dueTime, dueTimeDraft, handleDateFieldChange, markScheduleFieldDirty]);
 
     const handleReviewDateChange = useCallback((value: string) => {
+        markScheduleFieldDirty('review');
         handleDateFieldChange(value, setReviewDate, setReviewTime, setReviewTimeDraft, reviewTime, reviewTimeDraft);
-    }, [handleDateFieldChange, reviewTime, reviewTimeDraft]);
+    }, [handleDateFieldChange, markScheduleFieldDirty, reviewTime, reviewTimeDraft]);
 
     const clearScheduleDate = useCallback(() => {
+        markScheduleFieldDirty('start');
         setScheduleDate('');
         setScheduleTime('');
         setScheduleTimeDraft('');
-    }, []);
+    }, [markScheduleFieldDirty]);
 
     const clearDueDate = useCallback(() => {
+        markScheduleFieldDirty('due');
         setDueDate('');
         setDueTime('');
         setDueTimeDraft('');
-    }, []);
+    }, [markScheduleFieldDirty]);
 
     const clearReviewDate = useCallback(() => {
+        markScheduleFieldDirty('review');
         setReviewDate('');
         setReviewTime('');
         setReviewTimeDraft('');
-    }, []);
+    }, [markScheduleFieldDirty]);
 
     const setScheduleDateOnly = useCallback(() => {
+        markScheduleFieldDirty('start');
         setScheduleTime('');
         setScheduleTimeDraft('');
-    }, []);
+    }, [markScheduleFieldDirty]);
 
     const setDueDateOnly = useCallback(() => {
+        markScheduleFieldDirty('due');
         setDueTime('');
         setDueTimeDraft('');
-    }, []);
+    }, [markScheduleFieldDirty]);
 
     const setReviewDateOnly = useCallback(() => {
+        markScheduleFieldDirty('review');
         setReviewTime('');
         setReviewTimeDraft('');
-    }, []);
+    }, [markScheduleFieldDirty]);
+
+    const handleScheduleTimeDraftChange = useCallback((value: string) => {
+        markScheduleFieldDirty('start');
+        setScheduleTimeDraft(value);
+    }, [markScheduleFieldDirty]);
+
+    const handleDueTimeDraftChange = useCallback((value: string) => {
+        markScheduleFieldDirty('due');
+        setDueTimeDraft(value);
+    }, [markScheduleFieldDirty]);
+
+    const handleReviewTimeDraftChange = useCallback((value: string) => {
+        markScheduleFieldDirty('review');
+        setReviewTimeDraft(value);
+    }, [markScheduleFieldDirty]);
 
     const scheduleFields = useMemo<InboxProcessingScheduleFieldsControls>(() => ({
         start: {
@@ -380,7 +416,7 @@ export function useInboxProcessingState({
             timeDraft: scheduleTimeDraft,
             hasTime: Boolean(scheduleTime),
             onDateChange: handleScheduleDateChange,
-            onTimeDraftChange: setScheduleTimeDraft,
+            onTimeDraftChange: handleScheduleTimeDraftChange,
             onTimeCommit: handleScheduleTimeCommit,
             onClear: clearScheduleDate,
             onDateOnly: setScheduleDateOnly,
@@ -390,7 +426,7 @@ export function useInboxProcessingState({
             timeDraft: dueTimeDraft,
             hasTime: Boolean(dueTime),
             onDateChange: handleDueDateChange,
-            onTimeDraftChange: setDueTimeDraft,
+            onTimeDraftChange: handleDueTimeDraftChange,
             onTimeCommit: handleDueTimeCommit,
             onClear: clearDueDate,
             onDateOnly: setDueDateOnly,
@@ -400,7 +436,7 @@ export function useInboxProcessingState({
             timeDraft: reviewTimeDraft,
             hasTime: Boolean(reviewTime),
             onDateChange: handleReviewDateChange,
-            onTimeDraftChange: setReviewTimeDraft,
+            onTimeDraftChange: handleReviewTimeDraftChange,
             onTimeCommit: handleReviewTimeCommit,
             onClear: clearReviewDate,
             onDateOnly: setReviewDateOnly,
@@ -413,10 +449,13 @@ export function useInboxProcessingState({
         dueTime,
         dueTimeDraft,
         handleDueDateChange,
+        handleDueTimeDraftChange,
         handleDueTimeCommit,
         handleReviewDateChange,
+        handleReviewTimeDraftChange,
         handleReviewTimeCommit,
         handleScheduleDateChange,
+        handleScheduleTimeDraftChange,
         handleScheduleTimeCommit,
         reviewDate,
         reviewTime,
@@ -512,6 +551,7 @@ export function useInboxProcessingState({
         reviewDate,
         reviewTime,
         reviewTimeDraft,
+        dirtyScheduleFieldKeys,
         setScheduleTimeDraft,
         setDueTimeDraft,
         setReviewTimeDraft,

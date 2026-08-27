@@ -229,6 +229,68 @@ describe('prepareProcessInboxDecision', () => {
         },
     );
 
+    it('applies dirty visible date controls after title commands, including explicit clears', () => {
+        const prepared = prepareProcessInboxDecision({
+            task,
+            draft: {
+                ...fullDraft,
+                explicitDateFields: {
+                    startTime: '2026-09-10',
+                    dueDate: '2026-09-11',
+                    reviewAt: '2026-09-12',
+                },
+                dateControlFields: {
+                    startTime: '2026-09-20',
+                    dueDate: undefined,
+                    reviewAt: '2026-09-22',
+                },
+            },
+            decision: { type: 'next' },
+            plan,
+        });
+
+        expect(prepared).toMatchObject({
+            ok: true,
+            event: {
+                type: 'next',
+                fields: {
+                    startTime: '2026-09-20',
+                    dueDate: undefined,
+                    reviewAt: '2026-09-22',
+                },
+            },
+        });
+    });
+
+    it('keeps parsed due and review dates when Later overrides only the start date', () => {
+        const prepared = prepareProcessInboxDecision({
+            task,
+            draft: {
+                fields: { contexts: [], tags: [] },
+                explicitDateFields: {
+                    startTime: '2026-09-10',
+                    dueDate: '2026-09-11',
+                    reviewAt: '2026-09-12',
+                },
+                dateControlFields: { startTime: '2026-09-20' },
+            },
+            decision: { type: 'later' },
+            plan: resolveProcessInboxPlan(),
+        });
+
+        expect(prepared).toMatchObject({
+            ok: true,
+            event: {
+                type: 'later',
+                fields: {
+                    startTime: '2026-09-20',
+                    dueDate: '2026-09-11',
+                    reviewAt: '2026-09-12',
+                },
+            },
+        });
+    });
+
     it('prepares Waiting follow-up and reset policy together', () => {
         const prepared = prepareProcessInboxDecision({
             task,

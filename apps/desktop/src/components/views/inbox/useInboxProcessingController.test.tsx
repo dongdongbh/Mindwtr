@@ -75,7 +75,10 @@ describe('useInboxProcessingController not-actionable destinations', () => {
     const tokens: string[] = [];
     const settings = {};
 
-    const renderController = (updateTask: ReturnType<typeof vi.fn>) => renderHook(() => {
+    const renderController = (
+        updateTask: ReturnType<typeof vi.fn>,
+        controllerSettings: Parameters<typeof useInboxProcessingController>[0]['settings'] = settings,
+    ) => renderHook(() => {
         // The session closes itself once the queue drains, so isProcessing has
         // to be real state or the reconciliation effect never settles.
         const [isProcessing, setIsProcessing] = useState(true);
@@ -84,7 +87,7 @@ describe('useInboxProcessingController not-actionable destinations', () => {
             tasks,
             projects,
             areas,
-            settings,
+            settings: controllerSettings,
             addProject: async () => null,
             addTask: async () => ({ success: true }),
             updateTask,
@@ -178,7 +181,10 @@ describe('useInboxProcessingController not-actionable destinations', () => {
         });
 
         act(() => {
-            result.current.wizardProps.setField('title', 'Task one /start:2026-09-10');
+            result.current.wizardProps.setField(
+                'title',
+                'Task one /start:2026-09-10 /due:2026-09-11 /review:2026-09-12',
+            );
             result.current.wizardProps.scheduleFields.start.onDateChange('2026-09-20');
         });
         await act(async () => {
@@ -188,6 +194,69 @@ describe('useInboxProcessingController not-actionable destinations', () => {
         expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
             status: 'next',
             startTime: '2026-09-20',
+            dueDate: expect.stringContaining('2026-09-11'),
+            reviewAt: expect.stringContaining('2026-09-12'),
+        }));
+    });
+
+    it.each([
+        ['start', 'startTime', '/start:2026-09-10'],
+        ['due', 'dueDate', '/due:2026-09-10'],
+        ['review', 'reviewAt', '/review:2026-09-10'],
+    ] as const)(
+        'lets a changed visible %s control override its parsed title command',
+        async (control, field, command) => {
+            const updateTask = vi.fn(async () => ({ success: true }));
+            const { result } = renderController(updateTask, {
+                gtd: {
+                    inboxProcessing: { scheduleEnabled: true },
+                    taskEditor: { hidden: [] },
+                },
+            });
+
+            await waitFor(() => {
+                expect(result.current.wizardProps.processingTask?.id).toBe('one');
+            });
+
+            act(() => {
+                result.current.wizardProps.setField('title', `Call Sam ${command}`);
+                result.current.wizardProps.scheduleFields[control].onDateChange('2026-09-20');
+            });
+            await act(async () => {
+                await result.current.wizardProps.handleSetProject(null);
+            });
+
+            expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+                status: 'next',
+                [field]: '2026-09-20',
+            }));
+        },
+    );
+
+    it('lets an explicitly cleared visible date control override a parsed command on Complete', async () => {
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderController(updateTask, {
+            gtd: {
+                inboxProcessing: { scheduleEnabled: true },
+                taskEditor: { hidden: [] },
+            },
+        });
+
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+
+        act(() => {
+            result.current.wizardProps.setField('title', 'Call Sam /review:2026-09-10');
+            result.current.wizardProps.scheduleFields.review.onClear();
+        });
+        await act(async () => {
+            await result.current.wizardProps.handleTwoMinDone();
+        });
+
+        expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+            status: 'done',
+            reviewAt: undefined,
         }));
     });
 

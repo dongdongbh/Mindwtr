@@ -114,6 +114,9 @@ export type ProcessInboxDecisionDraft = {
     /** Date commands parsed directly from the title. Unlike hydrated editor
      * state, these are explicit user input and must survive hidden fields. */
     explicitDateFields?: Partial<Pick<ProcessInboxWorkflowFields, 'startTime' | 'dueDate' | 'reviewAt'>>;
+    /** Visible date controls touched during this decision. Property presence
+     * matters: `undefined` means the user explicitly cleared that control. */
+    dateControlFields?: Partial<Pick<ProcessInboxWorkflowFields, 'startTime' | 'dueDate' | 'reviewAt'>>;
     taskUpdates?: Partial<Pick<Task, 'title' | 'description'>>;
 };
 
@@ -162,12 +165,17 @@ function resolveActionFields(
         ...(plan.visibleFields.energyLevel ? { energyLevel: fields.energyLevel } : {}),
         ...(plan.visibleFields.assignedTo ? { assignedTo: fields.assignedTo } : {}),
         ...(plan.visibleFields.timeEstimate ? { timeEstimate: fields.timeEstimate } : {}),
-        ...explicitDateFields,
-        // Visible controls take precedence over a title command. The desktop
-        // adapter places the parsed value in `fields` until a control changes.
         ...(plan.visibleFields.startTime ? { startTime: fields.startTime } : {}),
         ...(plan.visibleFields.dueDate ? { dueDate: fields.dueDate } : {}),
         ...(plan.visibleFields.reviewAt ? { reviewAt: fields.reviewAt } : {}),
+        ...explicitDateFields,
+    };
+}
+
+function resolveExplicitDateFields(draft: ProcessInboxDecisionDraft): ProcessInboxWorkflowFields {
+    return {
+        ...draft.explicitDateFields,
+        ...draft.dateControlFields,
     };
 }
 
@@ -196,19 +204,26 @@ export function prepareProcessInboxDecision({
             event = { type: 'discard' };
             break;
         case 'skip':
-            event = { type: 'skip', fields: resolveActionFields(task, draft.fields, plan, draft.explicitDateFields) };
+            event = {
+                type: 'skip',
+                fields: {
+                    ...resolveActionFields(task, draft.fields, plan, draft.explicitDateFields),
+                    ...draft.dateControlFields,
+                },
+            };
             break;
         case 'someday':
         case 'reference':
         case 'complete':
-            event = { type: decision.type, fields: { ...selectionFields, ...draft.explicitDateFields } };
+            event = { type: decision.type, fields: { ...selectionFields, ...resolveExplicitDateFields(draft) } };
             break;
         case 'later': {
-            const startTime = draft.fields.startTime;
+            const explicitDates = resolveExplicitDateFields(draft);
+            const startTime = explicitDates.startTime ?? draft.fields.startTime;
             if (!startTime) {
                 return { ok: false, reason: 'later-start-required' };
             }
-            event = { type: 'later', fields: { ...selectionFields, startTime } };
+            event = { type: 'later', fields: { ...selectionFields, ...explicitDates, startTime } };
             resetFields = ['startTime'];
             break;
         }
@@ -219,6 +234,7 @@ export function prepareProcessInboxDecision({
                 // generic Assigned To editor field is hidden.
                 fields: {
                     ...resolveActionFields(task, draft.fields, plan, draft.explicitDateFields),
+                    ...draft.dateControlFields,
                     assignedTo: draft.fields.assignedTo,
                 },
                 followUpAt: decision.followUpAt,
@@ -226,7 +242,13 @@ export function prepareProcessInboxDecision({
             resetFields = ['delegate'];
             break;
         case 'next':
-            event = { type: 'next', fields: resolveActionFields(task, draft.fields, plan, draft.explicitDateFields) };
+            event = {
+                type: 'next',
+                fields: {
+                    ...resolveActionFields(task, draft.fields, plan, draft.explicitDateFields),
+                    ...draft.dateControlFields,
+                },
+            };
             resetFields = ['startTime', 'dueDate', 'reviewAt', 'projectConversion'];
             break;
     }

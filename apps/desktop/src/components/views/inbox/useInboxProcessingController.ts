@@ -16,6 +16,7 @@ import {
     type Area,
     type Project,
     type ProcessInboxDecision,
+    type ProcessInboxDecisionDraft,
     type ProcessInboxWorkflowFields,
     type StoreActionResult,
     type Task,
@@ -146,6 +147,7 @@ export function useInboxProcessingController({
         reviewDate,
         reviewTime,
         reviewTimeDraft,
+        dirtyScheduleFieldKeys,
         handleScheduleTimeCommit,
         handleDueTimeCommit,
         handleReviewTimeCommit,
@@ -313,17 +315,18 @@ export function useInboxProcessingController({
             ? undefined
             : prepareProcessingEdits(options.titleInput, options.fallbackTitle);
         if (decision.type !== 'discard' && !edits) return false;
+        const fields = buildDecisionFields(options.fields);
+        const dateControlFields: ProcessInboxDecisionDraft['dateControlFields'] = {
+            ...(dirtyScheduleFieldKeys.has('start') ? { startTime: fields.startTime } : {}),
+            ...(dirtyScheduleFieldKeys.has('due') ? { dueDate: fields.dueDate } : {}),
+            ...(dirtyScheduleFieldKeys.has('review') ? { reviewAt: fields.reviewAt } : {}),
+        };
         const prepared = prepareProcessInboxDecision({
             task: processingTask,
             draft: {
-                // Parsed date commands enter the shared draft before
-                // validation. Explicit destination controls (Later picker,
-                // Waiting follow-up) take final precedence.
-                fields: buildDecisionFields({
-                    ...edits?.decisionFields,
-                    ...options.fields,
-                }),
+                fields,
                 explicitDateFields: edits?.decisionFields,
+                dateControlFields,
                 taskUpdates: edits?.taskUpdates,
             },
             decision,
@@ -362,6 +365,7 @@ export function useInboxProcessingController({
         applySessionTransition,
         buildDecisionFields,
         deleteTask,
+        dirtyScheduleFieldKeys,
         eligibleInboxTasks,
         processInboxPlan,
         prepareProcessingEdits,
