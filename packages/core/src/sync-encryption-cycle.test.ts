@@ -20,19 +20,25 @@ import type { AppData } from './types';
 
 function createFakeRemote(): SyncEncryptionRemotePort & { store: Map<string, Uint8Array> } {
     const store = new Map<string, Uint8Array>();
+    const versions = new Map<string, number>();
+    const versionFor = (name: string): string | null => store.has(name) ? `v${versions.get(name) ?? 1}` : null;
     return {
         store,
         async list(): Promise<SyncEncryptionRemoteEntry[]> {
             return [...store.keys()].map((name) => ({ name, kind: 'document' as const }));
         },
         async read(name) {
-            return store.has(name) ? store.get(name)! : null;
+            return { bytes: store.has(name) ? store.get(name)! : null, version: versionFor(name) };
         },
-        async write(name, bytes) {
+        async write(name, bytes, expectedVersion) {
+            if (versionFor(name) !== expectedVersion) throw new Error(`${name} changed`);
             store.set(name, bytes);
+            versions.set(name, (versions.get(name) ?? 0) + 1);
         },
-        async remove(name) {
+        async remove(name, expectedVersion) {
+            if (versionFor(name) !== expectedVersion) throw new Error(`${name} changed`);
             store.delete(name);
+            versions.delete(name);
         },
     };
 }
@@ -78,7 +84,7 @@ describe('encrypted sync cycle convergence (S4, required test 4)', () => {
         const keyCache = createFakeKeyCache();
         const localState = createFakeLocalState();
         const initial = mockAppData([createMockTask('t1', '2026-08-01T00:00:00.000Z')]);
-        remote.store.set('data.json', utf8(JSON.stringify(initial)));
+        await remote.write('data.json', utf8(JSON.stringify(initial)), null);
 
         await runEnableSyncEncryptionOverRemote('correct horse', remote, keyCache, localState, undefined, undefined, { mKib: 8, t: 1, p: 1 });
         const material: SyncKeyMaterial = {
@@ -114,7 +120,7 @@ describe('encrypted sync cycle convergence (S4, required test 4)', () => {
         ]);
         // Two devices that happen to hold byte-identical data (e.g. a fresh clone) —
         // the remote is seeded with the SAME content this "device" already has locally.
-        remote.store.set('data.json', utf8(JSON.stringify(aligned)));
+        await remote.write('data.json', utf8(JSON.stringify(aligned)), null);
         await runEnableSyncEncryptionOverRemote('correct horse', remote, keyCache, localState, undefined, undefined, { mKib: 8, t: 1, p: 1 });
         const material: SyncKeyMaterial = {
             key: (await keyCache.getKey())!,
