@@ -10,11 +10,8 @@
 // a module reachable from src/ is barrel-reachable by construction. Guarded by
 // index-exports.test.ts.
 //
-// Two deliberate exceptions, both forced by a genuine name collision between two modules (not
-// a stylistic choice) -- see the explicit `export {}` lines interleaved below:
-//   - toStableSyncJson is also exported under its old alias toStableJson.
-//   - fetchWithTimeout exists as two unrelated functions (./http-utils and ./ai/utils); the
-//     http-utils one is the one that was previously public, so it wins explicitly.
+// One deliberate exception: toStableSyncJson is also exported under its old alias
+// toStableJson. This preserves the public name without duplicating its implementation.
 
 export * from './types';
 export * from './async-utils';
@@ -98,9 +95,9 @@ export * from './markdown';
 export * from './obsidian-parser';
 export * from './tasknotes-parser';
 export * from './webdav';
+export * from './webdav-attachment-inventory';
 export * from './cloud';
 export * from './http-utils';
-export { fetchWithTimeout } from './http-utils'; // resolves the name collision with ai/utils' own fetchWithTimeout below: this explicit re-export wins over both `export *` sources
 export * from './retry-utils';
 export * from './async-queue';
 export * from './attachment-hash';

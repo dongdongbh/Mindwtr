@@ -610,6 +610,7 @@
     "parseTimeEstimateInput",
     "parseTimeOfDay",
     "parseTodoistImportSource",
+    "parseWebdavAttachmentInventory",
     "partitionByReviewDate",
     "performSyncCycle",
     "persistExternalCalendars",

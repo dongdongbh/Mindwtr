@@ -18,6 +18,7 @@ import {
     inspectSyncArtifact,
     isSyncRemoteMutationFenceError,
     listDropboxFolderFiles,
+    parseWebdavAttachmentInventory,
     readResponseText,
     reaffirmRemoteEncryptionNoKey,
     runChangeSyncEncryptionPassphraseOverRemote,
@@ -174,96 +175,17 @@ const buildTransitionEntries = (appData: AppData | null): SyncEncryptionRemoteEn
 };
 
 const PROVIDER_INVENTORY_MAX_BYTES = 4 * 1024 * 1024;
-const DAV_NAMESPACE = 'DAV:';
 const DAV_PROPFIND_BODY = '<?xml version="1.0" encoding="utf-8"?>'
   + '<d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>';
 
-const directDavChildren = (element: Element, localName: string): Element[] =>
-  Array.from(element.childNodes).filter((node): node is Element => (
-    node.nodeType === 1
-    && (node as Element).namespaceURI === DAV_NAMESPACE
-    && (node as Element).localName === localName
-  ));
-
-const requireSuccessfulDavStatus = (element: Element, context: string): void => {
-  const statuses = directDavChildren(element, 'status');
-  if (statuses.length !== 1) throw new Error(`WebDAV attachment inventory ${context} status is ambiguous`);
-  const match = statuses[0]?.textContent?.trim().match(/^HTTP\/\d(?:\.\d)?\s+(\d{3})(?:\s|$)/i);
-  const status = match ? Number.parseInt(match[1]!, 10) : Number.NaN;
-  if (!Number.isInteger(status) || status < 200 || status >= 300) {
-    throw new Error(`WebDAV attachment inventory ${context} failed (${Number.isInteger(status) ? status : 'malformed status'})`);
-  }
-};
-
-const parseWebdavAttachmentKeys = (xml: string, collectionUrl: string): string[] => {
-  const parseErrors: string[] = [];
-  const document = new DOMParser({
-    errorHandler: (level, message) => parseErrors.push(`${level}: ${String(message)}`),
-  }).parseFromString(xml, 'application/xml');
-  const root = document.documentElement;
-  if (parseErrors.length > 0 || !root || root.namespaceURI !== DAV_NAMESPACE || root.localName !== 'multistatus') {
-    throw new Error('WebDAV attachment inventory response is not a valid DAV:multistatus document');
-  }
-
-  const responses = directDavChildren(root, 'response');
-  if (responses.length === 0) throw new Error('WebDAV attachment inventory has no DAV:response entries');
-  const requested = new URL(collectionUrl);
-  const collectionPath = decodeURIComponent(requested.pathname).replace(/\/+$/, '/');
-  const seenPaths = new Set<string>();
-  const keys = new Set<string>();
-  let matchedCollection = false;
-
-  for (const response of responses) {
-    const hrefs = directDavChildren(response, 'href');
-    if (hrefs.length !== 1 || !hrefs[0]?.textContent?.trim()) {
-      throw new Error('WebDAV attachment inventory DAV:response href is ambiguous');
-    }
-    const href = new URL(hrefs[0].textContent.trim(), collectionUrl);
-    if (href.origin !== requested.origin || href.search || href.hash) {
-      throw new Error('WebDAV attachment inventory returned an unmatched href');
-    }
-    const path = decodeURIComponent(href.pathname);
-    const normalizedPath = path.endsWith('/') ? path.replace(/\/+$/, '/') : path;
-    if (seenPaths.has(normalizedPath)) throw new Error('WebDAV attachment inventory returned a duplicate href');
-    seenPaths.add(normalizedPath);
-
-    const responseStatuses = directDavChildren(response, 'status');
-    if (responseStatuses.length > 0) requireSuccessfulDavStatus(response, `response for ${path}`);
-    const propstats = directDavChildren(response, 'propstat');
-    if (propstats.length === 0) throw new Error(`WebDAV attachment inventory response for ${path} has no DAV:propstat`);
-    let resourceType: Element | null = null;
-    for (const propstat of propstats) {
-      requireSuccessfulDavStatus(propstat, `propstat for ${path}`);
-      const props = directDavChildren(propstat, 'prop');
-      if (props.length !== 1) throw new Error(`WebDAV attachment inventory properties for ${path} are ambiguous`);
-      const resourceTypes = directDavChildren(props[0]!, 'resourcetype');
-      if (resourceTypes.length > 1 || (resourceTypes.length === 1 && resourceType)) {
-        throw new Error(`WebDAV attachment inventory resource type for ${path} is ambiguous`);
-      }
-      resourceType = resourceTypes[0] ?? resourceType;
-    }
-    if (!resourceType) throw new Error(`WebDAV attachment inventory response for ${path} has no DAV:resourcetype`);
-    const isCollection = directDavChildren(resourceType, 'collection').length > 0;
-    if (normalizedPath === collectionPath) {
-      if (!isCollection || matchedCollection) {
-        throw new Error('WebDAV attachment inventory requested collection is ambiguous');
-      }
-      matchedCollection = true;
-      continue;
-    }
-    if (!normalizedPath.startsWith(collectionPath)) {
-      throw new Error('WebDAV attachment inventory returned an unmatched href');
-    }
-    const leaf = normalizedPath.slice(collectionPath.length).replace(/\/+$/, '');
-    if (!leaf || leaf.includes('/')) throw new Error('WebDAV attachment inventory returned a non-child href');
-    if (isCollection) continue;
-    const key = sanitizeBlobAttachmentKey(`attachments/${leaf}`);
-    if (!key) throw new Error('WebDAV attachment inventory returned an invalid attachment name');
-    keys.add(key);
-  }
-  if (!matchedCollection) throw new Error('WebDAV attachment inventory did not identify the requested collection');
-  return Array.from(keys).sort();
-};
+const parseWebdavAttachmentKeys = (xml: string, collectionUrl: string): string[] =>
+  parseWebdavAttachmentInventory(xml, collectionUrl, (source) => {
+    const errors: string[] = [];
+    const document = new DOMParser({
+      errorHandler: (level, message) => errors.push(`${level}: ${String(message)}`),
+    }).parseFromString(source, 'application/xml') as unknown as Document;
+    return { document, errors };
+  });
 
 const listWebdavAttachmentKeys = async (
     baseUrl: string,
@@ -912,7 +834,6 @@ export const __syncEncryptionServiceTestUtils = {
   captureTransitionInventory,
   listDropboxAttachmentKeys,
   listWebdavAttachmentKeys,
-  parseWebdavAttachmentKeys,
   createDropboxRemotePort,
   createWebdavRemotePort,
   runProvidePassphraseOverRemote,

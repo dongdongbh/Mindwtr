@@ -332,38 +332,23 @@ beforeEach(() => {
 
 describe('WebDAV authoritative attachment inventory', () => {
     const baseUrl = 'https://dav.example/sync';
-    const collectionUrl = `${baseUrl}/attachments/`;
 
-    it('requires the exact collection response and excludes child collections', () => {
-        const xml = davMultistatusXml(
+    it('wires the platform PROPFIND request and Basic authentication', async () => {
+        const collectionUrl = `${baseUrl}/attachments/`;
+        const fetcher = vi.fn(async () => new Response(davMultistatusXml(
             davResponseXml(collectionUrl, { collection: true }),
-            davResponseXml(`${collectionUrl}folder/`, { collection: true }),
-            davResponseXml(`${collectionUrl}a.bin`),
-        );
+        ), { status: 207 }));
 
-        expect(__syncEncryptionServiceTestUtils.parseWebdavAttachmentKeys(xml, collectionUrl))
-            .toEqual(['attachments/a.bin']);
-    });
+        await expect(__syncEncryptionServiceTestUtils.listWebdavAttachmentKeys(baseUrl, {
+            fetcher,
+            username: 'user',
+            password: 'pass',
+        })).resolves.toEqual([]);
 
-    it.each([
-        ['malformed XML', '<d:multistatus xmlns:d="DAV:"><d:response>'],
-        ['missing collection response', davMultistatusXml(davResponseXml(`${collectionUrl}a.bin`))],
-        ['unmatched href', davMultistatusXml(
-            davResponseXml(collectionUrl, { collection: true }),
-            davResponseXml('https://other.example/attachments/a.bin'),
-        )],
-        ['ambiguous href', davMultistatusXml(
-            `<d:response><d:href>${collectionUrl}</d:href><d:href>${collectionUrl}a.bin</d:href>`
-            + '<d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>'
-            + '<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>',
-        )],
-        ['failed propstat', davMultistatusXml(
-            davResponseXml(collectionUrl, { collection: true }),
-            davResponseXml(`${collectionUrl}a.bin`, { status: 403 }),
-        )],
-    ] as const)('fails closed on %s', (_case, xml) => {
-        expect(() => __syncEncryptionServiceTestUtils.parseWebdavAttachmentKeys(xml, collectionUrl))
-            .toThrow(/WebDAV attachment inventory/);
+        expect(fetcher).toHaveBeenCalledWith(collectionUrl, expect.objectContaining({
+            method: 'PROPFIND',
+            headers: expect.objectContaining({ Depth: '1', Authorization: 'Basic dXNlcjpwYXNz' }),
+        }));
     });
 
     it.each([403, 404])('fails closed on an HTTP %s collection response', async (status) => {
