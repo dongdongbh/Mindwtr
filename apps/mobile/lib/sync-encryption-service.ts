@@ -356,15 +356,15 @@ const captureTransitionInventory = async (
     for (const entry of documentEntries) snapshot.set(entry.name, await read(entry.name));
     const listedAttachmentKeys = await listAttachmentKeys();
     const key = (await getSyncEncryptionMaterial())?.key ?? null;
-    let data: AppData | null = null;
-    for (const name of [`${SYNC_FILE_NAME}.enc`, SYNC_FILE_NAME, `${SYNC_FILE_NAME}.enc.bak`, BACKUP_FILE_NAME]) {
-        data = await decodeInventoryDocument(snapshot.get(name)?.bytes ?? null, key, recoveryPassphrase);
-        if (data) break;
+  const referencedAttachmentKeys = new Set<string>();
+  for (const name of [`${SYNC_FILE_NAME}.enc`, SYNC_FILE_NAME, `${SYNC_FILE_NAME}.enc.bak`, BACKUP_FILE_NAME]) {
+    const data = await decodeInventoryDocument(snapshot.get(name)?.bytes ?? null, key, recoveryPassphrase);
+    for (const entry of buildTransitionEntries(data)) {
+      if (entry.kind === 'attachment') referencedAttachmentKeys.add(entry.name);
     }
-    const referencedAttachmentKeys = buildTransitionEntries(data)
-        .filter((entry) => entry.kind === 'attachment')
-        .map((entry) => entry.name);
-    const attachmentKeys = new Set([...listedAttachmentKeys, ...referencedAttachmentKeys]);
+  }
+  const referenced = Array.from(referencedAttachmentKeys).sort();
+  const attachmentKeys = new Set([...listedAttachmentKeys, ...referenced]);
     for (const name of attachmentKeys) snapshot.set(name, await read(name));
     return {
         entries: [
@@ -372,8 +372,8 @@ const captureTransitionInventory = async (
             ...Array.from(attachmentKeys).sort().map((name) => ({ name, kind: 'attachment' as const })),
         ],
         snapshot,
-        referencedAttachmentKeys,
-    };
+    referencedAttachmentKeys: referenced,
+  };
 };
 
 const listTransitionEntries = async (

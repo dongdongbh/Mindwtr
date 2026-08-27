@@ -643,19 +643,21 @@ const captureRemoteInventory = async (
     for (const name of REMOTE_DOCUMENT_NAMES) snapshot.set(name, await read(name));
     const listedAttachmentKeys = await listAttachmentKeys();
     const key = (await getSyncEncryptionMaterial())?.key ?? null;
-    let data: AppData | null = null;
+    const referencedAttachmentKeys = new Set<string>();
     for (const name of ['data.json.enc', 'data.json', 'data.json.enc.bak', 'data.json.bak']) {
-        data = await decodeDocument(snapshot.get(name)?.bytes ?? null, key, recoveryPassphrase);
-        if (data) break;
+        const data = await decodeDocument(snapshot.get(name)?.bytes ?? null, key, recoveryPassphrase);
+        for (const attachmentKey of collectRemoteAttachmentKeys(data)) {
+            referencedAttachmentKeys.add(attachmentKey);
+        }
     }
-    const referencedAttachmentKeys = collectRemoteAttachmentKeys(data);
-    const attachmentKeys = new Set([...listedAttachmentKeys, ...referencedAttachmentKeys]);
+    const referenced = Array.from(referencedAttachmentKeys).sort();
+    const attachmentKeys = new Set([...listedAttachmentKeys, ...referenced]);
     for (const name of attachmentKeys) snapshot.set(name, await read(name));
     const entries: SyncEncryptionRemoteEntry[] = [
         ...REMOTE_DOCUMENT_NAMES.map((name) => ({ name, kind: 'document' as const })),
         ...Array.from(attachmentKeys).sort().map((name) => ({ name, kind: 'attachment' as const })),
     ];
-    return { entries, snapshot, referencedAttachmentKeys };
+    return { entries, snapshot, referencedAttachmentKeys: referenced };
 };
 
 const listRemoteEntries = async (

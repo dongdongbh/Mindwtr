@@ -570,6 +570,30 @@ describe('Dropbox remote port + core transition round trip', () => {
     expect(remote.get(`/${attachmentName}`)).toEqual(attachmentBytes);
   }, 30_000);
 
+  it('unions attachment references from every readable current and backup document', async () => {
+    const documents = new Map<string, Uint8Array>([
+      ['data.json', new TextEncoder().encode(JSON.stringify(appData(['attachments/current.png'])))],
+      ['data.json.bak', new TextEncoder().encode(JSON.stringify(appData(['attachments/backup.png'])))],
+    ]);
+    const reads: string[] = [];
+    const inventory = await __syncEncryptionServiceTestUtils.captureTransitionInventory(
+      async (name: string) => {
+        reads.push(name);
+        const bytes = documents.get(name) ?? null;
+        return { bytes, version: bytes ? `version:${name}` : null };
+      },
+      async () => [],
+    );
+
+    expect(inventory.referencedAttachmentKeys).toEqual([
+      'attachments/backup.png',
+      'attachments/current.png',
+    ]);
+    expect(inventory.entries.filter((entry) => entry.kind === 'attachment').map((entry) => entry.name))
+      .toEqual(['attachments/backup.png', 'attachments/current.png']);
+    expect(reads).toEqual(expect.arrayContaining(['attachments/backup.png', 'attachments/current.png']));
+  });
+
   it('migrates an unreferenced Dropbox attachment from the provider inventory', async () => {
     const orphanName = '/attachments/orphan.bin';
     const orphanBytes = new Uint8Array([8, 5, 3, 0, 9]);

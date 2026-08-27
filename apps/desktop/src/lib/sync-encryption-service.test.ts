@@ -522,6 +522,36 @@ describe('Dropbox sync encryption transitions', () => {
         expect(store.files.get('attachments/a1.png')).toEqual(attachment);
     });
 
+    it('unions attachment references from every readable current and backup document', async () => {
+        const documents = new Map<string, Uint8Array>([
+            ['data.json', jsonBytes({
+                tasks: [{ id: 'current', attachments: [{ cloudKey: 'attachments/current.png' }] }],
+                projects: [],
+            })],
+            ['data.json.bak', jsonBytes({
+                tasks: [],
+                projects: [{ id: 'backup', attachments: [{ cloudKey: 'attachments/backup.png' }] }],
+            })],
+        ]);
+        const reads: string[] = [];
+        const inventory = await __syncEncryptionServiceTestUtils.captureRemoteInventory(
+            async (name: string) => {
+                reads.push(name);
+                const bytes = documents.get(name) ?? null;
+                return { bytes, version: bytes ? `version:${name}` : null };
+            },
+            async () => [],
+        );
+
+        expect(inventory.referencedAttachmentKeys).toEqual([
+            'attachments/backup.png',
+            'attachments/current.png',
+        ]);
+        expect(inventory.entries.filter((entry) => entry.kind === 'attachment').map((entry) => entry.name))
+            .toEqual(['attachments/backup.png', 'attachments/current.png']);
+        expect(reads).toEqual(expect.arrayContaining(['attachments/backup.png', 'attachments/current.png']));
+    });
+
     it('migrates an unreferenced attachment discovered by the provider inventory', async () => {
         const orphan = new Uint8Array([9, 7, 5, 3]);
         const store = createBlobStore({
