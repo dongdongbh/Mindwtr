@@ -13,7 +13,7 @@ import {
     DEFAULT_TIMEOUT_MS,
     decryptRemoteArtifactOrThrow,
     deriveSyncKeyMaterial,
-    fetchWithTimeout,
+    fetchWithTimeoutAndConsume,
     getBaseSyncUrl,
     inspectSyncArtifact,
     isSyncRemoteMutationFenceError,
@@ -278,17 +278,20 @@ const listWebdavAttachmentKeys = async (
     if (options.username && typeof options.password === 'string') {
         headers.Authorization = `Basic ${bytesToBase64(new TextEncoder().encode(`${options.username}:${options.password}`))}`;
     }
-  const response = await fetchWithTimeout(
+  return fetchWithTimeoutAndConsume(
     collectionUrl,
     { method: 'PROPFIND', headers, body: DAV_PROPFIND_BODY, signal: options.signal },
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         options.fetcher ?? fetch,
         'WebDAV attachment inventory timed out',
+        async (response, signal) => {
+          if (!response.ok) {
+            throw new Error(`WebDAV attachment inventory PROPFIND failed (${response.status})`);
+          }
+          const xml = await readResponseText(response, PROVIDER_INVENTORY_MAX_BYTES, signal);
+          return parseWebdavAttachmentKeys(xml, collectionUrl);
+        },
     );
-  if (!response.ok) throw new Error(`WebDAV attachment inventory PROPFIND failed (${response.status})`);
-
-  const xml = await readResponseText(response, PROVIDER_INVENTORY_MAX_BYTES);
-  return parseWebdavAttachmentKeys(xml, collectionUrl);
 };
 
 const listDropboxAttachmentKeys = async (

@@ -23,7 +23,7 @@ import {
     deriveSyncKeyMaterial,
     downloadDropboxFileVersioned,
     encryptSyncArtifact,
-    fetchWithTimeout,
+    fetchWithTimeoutAndConsume,
     inspectSyncArtifact,
     isSyncRemoteMutationFenceError,
     listDropboxFolderFiles,
@@ -708,7 +708,7 @@ const listWebdavAttachmentKeys = async (
     options: WebDavOptions,
 ): Promise<string[]> => {
     const collectionUrl = `${baseUrl.replace(/\/+$/, '')}/attachments/`;
-    const response = await fetchWithTimeout(
+    return fetchWithTimeoutAndConsume(
         collectionUrl,
         {
             method: 'PROPFIND',
@@ -719,11 +719,14 @@ const listWebdavAttachmentKeys = async (
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         options.fetcher ?? fetch,
         'WebDAV attachment inventory timed out',
+        async (response, signal) => {
+            if (!response.ok) {
+                throw new Error(`WebDAV attachment inventory PROPFIND failed (${response.status})`);
+            }
+            const xml = await readResponseText(response, PROVIDER_INVENTORY_MAX_BYTES, signal);
+            return parseWebdavAttachmentKeys(xml, collectionUrl);
+        },
     );
-    if (!response.ok) throw new Error(`WebDAV attachment inventory PROPFIND failed (${response.status})`);
-
-    const xml = await readResponseText(response, PROVIDER_INVENTORY_MAX_BYTES);
-    return parseWebdavAttachmentKeys(xml, collectionUrl);
 };
 
 const listDropboxAttachmentKeys = async (

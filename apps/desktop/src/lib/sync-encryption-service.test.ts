@@ -372,6 +372,22 @@ describe('WebDAV authoritative attachment inventory', () => {
             .rejects.toThrow(`PROPFIND failed (${status})`);
     });
 
+    it('keeps the request deadline active while the PROPFIND response body stalls', async () => {
+        const cancel = vi.fn();
+        const fetcher = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(new TextEncoder().encode('<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">'));
+            },
+            cancel,
+        }), { status: 207, headers: { 'content-type': 'application/xml' } }));
+
+        await expect(__syncEncryptionServiceTestUtils.listWebdavAttachmentKeys(baseUrl, {
+            fetcher,
+            timeoutMs: 20,
+        })).rejects.toThrow('WebDAV attachment inventory timed out');
+        expect(cancel).toHaveBeenCalledTimes(1);
+    });
+
     it('does not write any transition artifact when collection validation fails', async () => {
         const store = seedRemote();
         const baseline = new Map(Array.from(store.files, ([name, bytes]) => [name, bytes.slice()]));
