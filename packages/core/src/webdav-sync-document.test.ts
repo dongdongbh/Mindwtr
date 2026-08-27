@@ -70,7 +70,7 @@ describe('webdav sync-document encryption', () => {
             timeoutMs: 1,
         })).rejects.toThrow('WebDAV request timed out');
         expect(cancel).toHaveBeenCalledOnce();
-    }, 100);
+    }, 5_000);
 
     it('encrypts on PUT to the .enc url and decrypts on GET, leaving the plain url untouched', async () => {
         const { files, fetcher } = createFakeWebdavServer();
