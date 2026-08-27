@@ -27,12 +27,16 @@ function renderRow({
   defaultScheduleTime = '09:00',
   label,
   notSetLabel = 'Not set',
-  t = (key) => key === 'settings.gtdMobile.defaultScheduleTime' ? 'Default schedule time' : key,
+  t = (key) => ({
+    'quickDate.today': 'Today',
+    'settings.gtdMobile.defaultScheduleTime': 'Default schedule time',
+  }[key] ?? key),
 }: RenderOptions) {
   const actions = {
     onClear: vi.fn(),
     onDateOnly: vi.fn(),
     onOpen: vi.fn(),
+    onQuickDateSelect: vi.fn(),
     onUseDefaultTime: vi.fn(),
   };
   let tree!: ReactTestRenderer;
@@ -64,6 +68,10 @@ describe('InboxDateSelectorRow accessibility', () => {
       const open = buttons.find((button) => button.props.accessibilityLabel === label);
       const clear = buttons.find((button) => button.props.accessibilityLabel === `${label}: Clear`);
       const dateOnly = buttons.find((button) => button.props.accessibilityLabel === `${label}: Date only`);
+      const quickToday = tree.root.findByProps({
+        accessibilityLabel: `${label}: Today`,
+        accessibilityRole: 'button',
+      });
 
       expect(open?.props).toMatchObject({
         accessibilityRole: 'button',
@@ -76,10 +84,12 @@ describe('InboxDateSelectorRow accessibility', () => {
         open?.props.onPress();
         clear?.props.onPress();
         dateOnly?.props.onPress();
+        quickToday.props.onPress();
       });
       expect(actions.onOpen).toHaveBeenCalledOnce();
       expect(actions.onClear).toHaveBeenCalledOnce();
       expect(actions.onDateOnly).toHaveBeenCalledOnce();
+      expect(actions.onQuickDateSelect).toHaveBeenCalledOnce();
       expect(actions.onUseDefaultTime).not.toHaveBeenCalled();
     }
   );

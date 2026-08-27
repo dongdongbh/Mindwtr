@@ -91,6 +91,7 @@ export function InboxDateSelectorRow({
         <QuickDateChips
           t={t}
           tc={tc}
+          accessibilityLabelPrefix={label}
           selectedDate={value}
           selectedPreset={selectedPreset}
           presets={quickDatePresets}
