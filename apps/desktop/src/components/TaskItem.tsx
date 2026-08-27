@@ -148,6 +148,7 @@ export const TaskItem = memo(function TaskItem({
         sections,
         areas,
         project: storeProject,
+        section: storeSection,
         projectArea,
         taskArea: storeTaskArea,
         settings,
@@ -1357,6 +1358,7 @@ export const TaskItem = memo(function TaskItem({
                                 task={task}
                                 language={language}
                                 project={project}
+                                section={storeSection}
                                 area={taskArea}
                                 projectColor={projectColor}
                                 selectionMode={selectionMode}

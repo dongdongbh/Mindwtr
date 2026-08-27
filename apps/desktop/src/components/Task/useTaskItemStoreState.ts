@@ -23,6 +23,7 @@ export const useTaskItemStoreState = ({ task, propProject, isEditing, hasQuickAc
             const includePickers = isEditing || hasQuickActionMenu;
             const includeQuickActionFocusData = hasQuickActionMenu;
             const project = propProject ?? (task.projectId ? derived.projectMap.get(task.projectId) : undefined);
+            const section = task.sectionId ? state._sectionsById.get(task.sectionId) : undefined;
             const projectArea = project?.areaId
                 ? state.areas.find((area) => area.id === project.areaId)
                 : undefined;
@@ -39,6 +40,7 @@ export const useTaskItemStoreState = ({ task, propProject, isEditing, hasQuickAc
             sections: isEditing ? state.sections : EMPTY_SECTIONS,
             areas: includePickers ? state.areas : EMPTY_AREAS,
             project,
+            section,
             projectArea,
             taskArea,
             settings: state.settings,
