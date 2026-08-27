@@ -43,6 +43,7 @@ import {
     type SyncEncryptionStatus,
     type SyncEncryptionTransitionProgress,
     type SyncEncryptionKeyCachePort,
+    type SyncEncryptionLocalState,
     type SyncEncryptionLocalStatePort,
     type SyncRemoteMutationFenceLease,
     type SyncRemoteMutationFencePort,
@@ -78,6 +79,7 @@ import {
     syncEncryptionKeyCache,
     syncEncryptionLocalState,
     loadSyncEncryptionLocalState,
+    reloadSyncEncryptionLocalStateForRecovery,
 } from './sync-encryption-state';
 import {
     CLOUD_PROVIDER_KEY,
@@ -438,6 +440,67 @@ const runWithRemoteMutationFence = async <T>(
   let localMaterialTouched = false;
   let finalStateWriteAttempted = false;
   let stateBeforeFinalCommit = previousState;
+  let attemptedFinalState: SyncEncryptionLocalState | null = previousState;
+  let attemptedFinalKey = previousKey;
+  const keysEqual = (left: Uint8Array | null, right: Uint8Array | null): boolean => {
+    if (!left || !right) return left === right;
+    if (left.length !== right.length) return false;
+    return left.every((value, index) => value === right[index]);
+  };
+  const writeLocalStateDurably = async (state: SyncEncryptionLocalState | null): Promise<void> => {
+    await syncEncryptionLocalState.write(state);
+    await flushSyncEncryptionLocalState();
+  };
+  const restoreKey = async (key: Uint8Array | null): Promise<void> => {
+    if (key) await syncEncryptionKeyCache.setKey(key);
+    else await syncEncryptionKeyCache.clearKey();
+  };
+  const stateWithRetryJournal = (
+    state: SyncEncryptionLocalState | null,
+  ): SyncEncryptionLocalState | null => {
+    const incompleteTransition = stateBeforeFinalCommit?.incompleteTransition;
+    if (!incompleteTransition) return state;
+    return state
+      ? { ...state, incompleteTransition }
+      : { state: 'off', incompleteTransition };
+  };
+  const restoreDurableStateAndMatchingKey = async (): Promise<void> => {
+    try {
+      // State/journal is the durable recovery authority. Persist it before changing
+      // SecureStore so a crash between the two writes always leaves a retry marker.
+      await writeLocalStateDurably(stateBeforeFinalCommit);
+      await restoreKey(previousKey);
+      return;
+    } catch (initialRollbackError) {
+      // A failed queued write may have reverted only the optimistic cache. Re-read both
+      // persistence domains before retrying the complete state-then-key compensation.
+      await reloadSyncEncryptionLocalStateForRecovery();
+      await syncEncryptionKeyCache.getKey();
+      try {
+        await writeLocalStateDurably(stateBeforeFinalCommit);
+        await restoreKey(previousKey);
+        return;
+      } catch (retryRollbackError) {
+        await reloadSyncEncryptionLocalStateForRecovery();
+        const durableKey = await syncEncryptionKeyCache.getKey();
+
+        // If one persistence domain did commit, leave a state/key pair that describes
+        // the key which actually survived. The incomplete journal remains present so
+        // restart cannot mistake this reconciliation for a completed transition.
+        if (keysEqual(durableKey, previousKey)) {
+          await writeLocalStateDurably(stateBeforeFinalCommit);
+          return;
+        } else if (finalStateWriteAttempted && keysEqual(durableKey, attemptedFinalKey)) {
+          await writeLocalStateDurably(stateWithRetryJournal(attemptedFinalState));
+        }
+
+        const failure = new Error('Failed to reconcile sync encryption state and key after remote fence loss');
+        (failure as Error & { cause?: unknown; retryRollbackError?: unknown }).cause = initialRollbackError;
+        (failure as Error & { retryRollbackError?: unknown }).retryRollbackError = retryRollbackError;
+        throw failure;
+      }
+    }
+  };
   const guardedRemote: SyncEncryptionRemotePort = {
     ...remote,
     list: async () => {
@@ -469,11 +532,13 @@ const runWithRemoteMutationFence = async <T>(
       await assertHeld(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
       localMaterialTouched = true;
       await syncEncryptionKeyCache.setKey(key);
+      attemptedFinalKey = key;
     },
     clearKey: async () => {
       await assertHeld(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
       localMaterialTouched = true;
       await syncEncryptionKeyCache.clearKey();
+      attemptedFinalKey = null;
     },
   };
   const guardedLocalState: SyncEncryptionLocalStatePort = {
@@ -483,6 +548,7 @@ const runWithRemoteMutationFence = async <T>(
         await assertHeld(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
       } else {
         stateBeforeFinalCommit = syncEncryptionLocalState.read();
+        attemptedFinalState = state;
         finalStateWriteAttempted = true;
         await renewHeld();
       }
@@ -500,10 +566,11 @@ const runWithRemoteMutationFence = async <T>(
     let failureToThrow = primaryError;
     if (isSyncRemoteMutationFenceError(primaryError) && (localMaterialTouched || finalStateWriteAttempted)) {
       try {
-        if (previousKey) await syncEncryptionKeyCache.setKey(previousKey);
-        else await syncEncryptionKeyCache.clearKey();
-        if (finalStateWriteAttempted) await syncEncryptionLocalState.write(stateBeforeFinalCommit);
-        await flushSyncEncryptionLocalState();
+        if (finalStateWriteAttempted) {
+          await restoreDurableStateAndMatchingKey();
+        } else {
+          await restoreKey(previousKey);
+        }
       } catch (rollbackError) {
         const failure = new Error('Failed to roll back sync encryption material after remote fence loss');
         (failure as Error & { cause?: unknown; rollbackError?: unknown }).cause = primaryError;

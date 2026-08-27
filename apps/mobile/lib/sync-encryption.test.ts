@@ -797,14 +797,61 @@ describe('remote mutation fence lifecycle', () => {
     expect(horizons).toEqual([35_000, 35_000]);
   });
 
-  it('restores the prior key and transition journal when the lease is lost after final persistence', async () => {
+  it.each(['enable', 'change-passphrase', 'disable'] as const)(
+    'restores a durable %s journal before the matching key after post-final fence loss, then retries after restart',
+    async (transition) => {
+    const previousState = transition === 'enable'
+      ? null
+      : {
+        state: 'enabled' as const,
+        discoveredSalt: '07'.repeat(16),
+        discoveredParams: FAST_PARAMS,
+      };
+    const previousKey = transition === 'enable' ? null : material.key;
+    const journal = {
+      ...(previousState ?? { state: 'off' as const }),
+      incompleteTransition: transition,
+    };
+    const nextKey = transition === 'disable' ? null : new Uint8Array(32).fill(transition === 'enable' ? 8 : 9);
+    const finalState = transition === 'disable'
+      ? null
+      : {
+        state: 'enabled' as const,
+        discoveredSalt: (transition === 'enable' ? '08' : '09').repeat(16),
+        discoveredParams: FAST_PARAMS,
+      };
+
+    await syncEncryptionLocalState.write(previousState);
+    await flushSyncEncryptionLocalState();
+    if (previousKey) await syncEncryptionKeyCache.setKey(previousKey);
+    else await syncEncryptionKeyCache.clearKey();
+
+    const rollbackEvents: string[] = [];
+    let operationFinished = false;
+    let loseAfterOperation = true;
+    let failFirstRollbackStateWrite = true;
+    vi.mocked(AsyncStorage.setItem).mockImplementation(async (key: string, value: string) => {
+      if (operationFinished && key === SYNC_ENCRYPTION_STATE_KEY) {
+        rollbackEvents.push('state');
+        if (failFirstRollbackStateWrite) {
+          failFirstRollbackStateWrite = false;
+          throw new Error('one-shot rollback state failure');
+        }
+      }
+      asyncStorage.set(key, value);
+    });
+    vi.mocked(AsyncStorage.removeItem).mockImplementation(async (key: string) => {
+      if (operationFinished && key !== SYNC_ENCRYPTION_STATE_KEY) rollbackEvents.push('key');
+      asyncStorage.delete(key);
+    });
+
     const renew = vi.fn(async () => undefined);
     const remote: SyncEncryptionRemotePort & {
       acquireRemoteMutationFence: () => Promise<SyncRemoteMutationFenceLease>;
     } = {
       acquireRemoteMutationFence: async () => ({
         assertHeld: async () => {
-          if (syncEncryptionLocalState.read()?.state === 'enabled') {
+          if (loseAfterOperation && operationFinished) {
             throw new SyncRemoteMutationFenceLostError();
           }
         },
@@ -821,22 +868,44 @@ describe('remote mutation fence lifecycle', () => {
     await expect(__syncEncryptionServiceTestUtils.runWithRemoteMutationFence(
       remote,
       async (_guardedRemote, keyCache, localState) => {
-        await localState.write({ state: 'off', incompleteTransition: 'enable' });
-        await keyCache.setKey(material.key);
-        await localState.write({
-          state: 'enabled',
-          discoveredSalt: '07'.repeat(16),
-          discoveredParams: FAST_PARAMS,
-        });
+        await localState.write(journal);
+        if (nextKey) await keyCache.setKey(nextKey);
+        else await keyCache.clearKey();
+        await localState.write(finalState);
+        operationFinished = true;
       },
     )).rejects.toBeInstanceOf(SyncRemoteMutationFenceLostError);
 
-    const expectedJournal = { state: 'off', incompleteTransition: 'enable' };
+    expect(failFirstRollbackStateWrite).toBe(false);
     expect(renew).toHaveBeenCalledTimes(1);
-    expect(syncEncryptionLocalState.read()).toEqual(expectedJournal);
-    expect(JSON.parse(asyncStorage.get(SYNC_ENCRYPTION_STATE_KEY)!)).toEqual(expectedJournal);
-    await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
-  });
+    expect(rollbackEvents.slice(0, 3)).toEqual(['state', 'state', 'key']);
+
+    __resetSyncEncryptionStateForTests();
+    await getMobileSyncEncryptionStatus();
+    expect(syncEncryptionLocalState.read()).toEqual(journal);
+    await expect(syncEncryptionKeyCache.getKey()).resolves.toEqual(previousKey);
+
+    operationFinished = false;
+    loseAfterOperation = false;
+    await __syncEncryptionServiceTestUtils.runWithRemoteMutationFence(
+      remote,
+      async (_guardedRemote, keyCache, localState) => {
+        expect(localState.read()).toEqual(journal);
+        await expect(keyCache.getKey()).resolves.toEqual(previousKey);
+        if (nextKey) await keyCache.setKey(nextKey);
+        else await keyCache.clearKey();
+        await localState.write(finalState);
+      },
+    );
+
+    __resetSyncEncryptionStateForTests();
+    await expect(getMobileSyncEncryptionStatus()).resolves.toEqual(
+      finalState
+        ? { state: 'enabled', kdfParams: FAST_PARAMS, incompleteTransition: undefined }
+        : { state: 'off' },
+    );
+    await expect(syncEncryptionKeyCache.getKey()).resolves.toEqual(nextKey);
+  }, 30_000);
 });
 
 describe('File Sync transitions through core orchestration', () => {

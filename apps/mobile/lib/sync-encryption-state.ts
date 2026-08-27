@@ -136,6 +136,15 @@ export const loadSyncEncryptionLocalState = async (): Promise<SyncEncryptionLoca
     return cachedLocalState;
 };
 
+/** Re-read the device-local sidecar after a compensated write failed. Recovery code must
+ * not make its next key decision from the optimistic cache: `write()` updates that cache
+ * before AsyncStorage acknowledges the durable value and restores it only after rejection. */
+export const reloadSyncEncryptionLocalStateForRecovery = async (): Promise<SyncEncryptionLocalState | null> => {
+    cachedLocalState = null;
+    hydrated = false;
+    return loadSyncEncryptionLocalState();
+};
+
 // Core's port shape is synchronous while AsyncStorage is not, so writes are queued behind this
 // chain and `flushSyncEncryptionLocalState()` awaits them — mirroring desktop's queued/flush
 // pair. Without it a transition could return (and its caller report success) while the state
