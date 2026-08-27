@@ -922,7 +922,11 @@ export function useSyncSettingsTransportActions({
                 showRemoteFenceFeedback(activationCleanupDeferred === 'remote' ? 'cleanup' : result.remoteFenceDeferred);
                 return;
             }
-            if (result.success && result.attachmentWriteDeferred) {
+            if (
+                result.success
+                && result.attachmentWriteDeferred
+                && !result.remoteWriteDeferred
+            ) {
                 if (activationCleanupDeferred) {
                     if (activationCleanupDeferred === 'file') showFileSyncLockFeedback('cleanup');
                     else showRemoteFenceFeedback('cleanup');

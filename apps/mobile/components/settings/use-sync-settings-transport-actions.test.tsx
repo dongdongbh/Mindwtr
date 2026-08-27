@@ -928,6 +928,39 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
     });
 
+    it('prioritizes a deferred remote document write over attachment recovery guidance', async () => {
+        seedStorage([
+            [SYNC_BACKEND_KEY, 'webdav'],
+            [WEBDAV_URL_KEY, 'https://dav.example.com/mindwtr/'],
+            [WEBDAV_USERNAME_KEY, 'alice'],
+            [WEBDAV_ALLOW_INSECURE_HTTP_KEY, 'false'],
+        ]);
+        seedSecrets([[WEBDAV_PASSWORD_KEY, 'persisted-secret']]);
+        await renderHarness();
+        mocked.performMobileSync.mockClear();
+        mocked.performMobileSync.mockResolvedValueOnce({
+            success: true,
+            remoteWriteDeferred: true,
+            attachmentWriteDeferred: true,
+            error: 'Remote write failed. Retrying in the background.',
+        });
+
+        await act(async () => {
+            await latestHookResult?.handleSync();
+        });
+
+        expect(mocked.showSettingsErrorToast).toHaveBeenCalledWith(
+            'settings.syncMobile.error',
+            'Retry sync later.',
+        );
+        expect(mocked.showSettingsWarning).not.toHaveBeenCalledWith(
+            'common.notice',
+            'settings.syncAttachmentWriteDeferred',
+            6000,
+        );
+        expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+    });
+
     it.each([
         ['offline', { success: true, skipped: 'offline', offlineCause: 'network' }],
         ['transport error', { success: false, error: 'request failed' }],

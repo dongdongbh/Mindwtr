@@ -1206,7 +1206,11 @@ export const useSyncSettings = ({
                 showFileSyncLockFeedback('unavailable');
             } else if (result.success && result.remoteFenceDeferred) {
                 showRemoteFenceFeedback(activationCleanupDeferred === 'remote' ? 'cleanup' : result.remoteFenceDeferred);
-            } else if (result.success && result.attachmentWriteDeferred) {
+            } else if (
+                result.success
+                && result.attachmentWriteDeferred
+                && !result.remoteWriteDeferred
+            ) {
                 if (activationCleanupDeferred) {
                     if (activationCleanupDeferred === 'file') showFileSyncLockFeedback('cleanup');
                     else showRemoteFenceFeedback('cleanup');
