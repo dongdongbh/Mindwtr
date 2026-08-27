@@ -423,6 +423,41 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         )).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
     });
 
+    it('converges mixed-salt encrypted documents to the authoritative base generation', async () => {
+        const baseMaterial = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(19), FAST_KDF);
+        const backupMaterial = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(23), FAST_KDF);
+        const remote = createFakeRemote({
+            'data.json.enc': {
+                bytes: await encryptSyncArtifact(utf8('{"tasks":[]}'), baseMaterial),
+                kind: 'document',
+            },
+            'data.json.enc.bak': {
+                bytes: await encryptSyncArtifact(utf8('{"tasks":["old"]}'), backupMaterial),
+                kind: 'document',
+            },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+
+        await runEnableSyncEncryptionOverRemote(
+            'correct horse',
+            remote,
+            keyCache,
+            localState,
+            undefined,
+            undefined,
+            FAST_KDF,
+        );
+
+        const key = (await keyCache.getKey())!;
+        expect(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key)).toEqual(utf8('{"tasks":[]}'));
+        expect(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc.bak')!, key)).toEqual(utf8('{"tasks":["old"]}'));
+
+        await runDisableSyncEncryptionOverRemote(remote, keyCache, localState);
+        expect(text(remote.store.get('data.json')!)).toBe('{"tasks":[]}');
+        expect(text(remote.store.get('data.json.bak')!)).toBe('{"tasks":["old"]}');
+    });
+
     it('is resumable when the crash happens during the attachment phase, before any document is sealed (self-heals an abandoned salt)', async () => {
         const remote = createFakeRemote({
             'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
@@ -602,6 +637,38 @@ describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
         expect(write).not.toHaveBeenCalled();
         expect(localState.value?.state).toBe('enabled');
         expect(await keyCache.getKey()).not.toBeNull();
+    });
+
+    it('authenticates the full interrupted rotation before rewrapping an early old-key artifact', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a-old.bin': { bytes: utf8('OLD'), kind: 'attachment' },
+            'attachments/z-abandoned.bin': { bytes: utf8('ABANDONED'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('old-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const abandonedMaterial = await deriveSyncKeyMaterial('intended-next', new Uint8Array(16).fill(31), FAST_KDF);
+        remote.peerWrite(
+            'attachments/z-abandoned.bin',
+            await encryptSyncArtifact(utf8('ABANDONED'), abandonedMaterial),
+        );
+        const write = vi.spyOn(remote, 'write');
+
+        await expect(runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'typo-next', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(localState.value?.incompleteTransition).toBeUndefined();
+
+        write.mockRestore();
+        await runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'intended-next', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        );
+        const finalKey = (await keyCache.getKey())!;
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a-old.bin')!, finalKey))).toBe('OLD');
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/z-abandoned.bin')!, finalKey))).toBe('ABANDONED');
     });
 
     it('re-encrypts every artifact under a fresh salt derived from the new passphrase', async () => {

@@ -588,7 +588,10 @@ export async function runEnableSyncEncryptionOverRemote(
     // Resume: an `.enc` document is authoritative when present. If the interruption happened
     // earlier, the first encrypted attachment supplies the generation instead. Reusing either
     // avoids inventing a fresh salt and needlessly rewrapping the partial generation.
-    let material: SyncKeyMaterial | null = null;
+    const isBaseEncryptedDocument = (name: string) =>
+        !KNOWN_ARTIFACT_SUFFIXES.some((suffix) => name.endsWith(`.enc${suffix}`));
+    let baseDocumentMaterial: SyncKeyMaterial | null = null;
+    let documentMaterial: SyncKeyMaterial | null = null;
     let attachmentMaterial: SyncKeyMaterial | null = null;
     for (const entry of entries) {
         const { bytes } = snapshotRemoteRead(snapshot, entry.name);
@@ -599,9 +602,12 @@ export async function runEnableSyncEncryptionOverRemote(
         const candidate = await recoverMaterialForSalt(inspected.salt, inspected.params);
         await decryptRemoteArtifactOrThrow(bytes, candidate.key, prims);
         if (!attachmentMaterial && entry.kind === 'attachment') attachmentMaterial = candidate;
-        if (!material && entry.kind === 'document' && entry.name.includes('.enc')) material = candidate;
+        if (entry.kind === 'document' && entry.name.includes('.enc')) {
+            documentMaterial ??= candidate;
+            if (isBaseEncryptedDocument(entry.name)) baseDocumentMaterial ??= candidate;
+        }
     }
-    material ??= attachmentMaterial;
+    let material = baseDocumentMaterial ?? documentMaterial ?? attachmentMaterial;
     if (!material) {
         const salt = prims.randomBytes(16);
         material = await deriveSyncKeyMaterial(passphrase, salt, kdfParams, prims);
@@ -609,12 +615,15 @@ export async function runEnableSyncEncryptionOverRemote(
 
     const isBaseDocument = (name: string) => !KNOWN_ARTIFACT_SUFFIXES.some((s) => name.endsWith(s));
     const attachments = entries.filter((e) => e.kind === 'attachment');
+    const encryptedDocuments = entries
+        .filter((entry) => entry.kind === 'document' && entry.name.includes('.enc'))
+        .sort((a, b) => Number(isBaseEncryptedDocument(a.name)) - Number(isBaseEncryptedDocument(b.name)));
     const documents = entries
         .filter((e) => e.kind === 'document' && !e.name.includes('.enc'))
         .sort((a, b) => Number(isBaseDocument(a.name)) - Number(isBaseDocument(b.name)));
     const documentNames = new Set(entries.filter((entry) => entry.kind === 'document').map((entry) => entry.name));
 
-    const total = attachments.length + documents.length;
+    const total = attachments.length + encryptedDocuments.length + documents.length;
     let completed = 0;
     const report = (phase: SyncEncryptionTransitionProgress['phase']) => onProgress?.({ phase, completed, total });
 
@@ -658,6 +667,39 @@ export async function runEnableSyncEncryptionOverRemote(
                 });
                 snapshot.set(entry.name, verified);
             }
+        }
+        completed += 1;
+    }
+
+    // A resumed enable may contain several authenticated salts (for example a base document
+    // from one interrupted attempt and a backup from another). The selected base generation
+    // is what this device will cache, so converge every other encrypted document to it before
+    // processing/removing plaintext counterparts.
+    for (const entry of encryptedDocuments) {
+        report('documents');
+        const current = snapshotRemoteRead(snapshot, entry.name);
+        if (current.bytes && !(await triesDecrypt(current.bytes, material.key, prims))) {
+            const version = requireExistingRemoteVersion(entry.name, current);
+            const inspected = inspectSyncArtifact(current.bytes);
+            if (inspected.kind !== 'encrypted') {
+                throw new SyncEncryptionTerminalError(
+                    new SyncCryptoUnsupportedError(`${entry.name} is not a valid MWENC1 container`),
+                );
+            }
+            const oldMaterial = await recoverMaterialForSalt(inspected.salt, inspected.params);
+            const plain = await decryptRemoteArtifactOrThrow(current.bytes, oldMaterial.key, prims);
+            const sealed = await encryptSyncArtifact(plain, material, prims);
+            await ensureTransitionJournal();
+            await remote.write(entry.name, sealed, version);
+            const verified = await verifyRemoteBytes(remote, entry.name, async (verify) => {
+                const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
+                if (!bytesEqual(verifiedPlain, plain)) {
+                    throw new SyncEncryptionRemoteConflictError(
+                        `${entry.name} changed during sync encryption enable convergence`,
+                    );
+                }
+            });
+            snapshot.set(entry.name, verified);
         }
         completed += 1;
     }
@@ -734,6 +776,24 @@ export async function runDisableSyncEncryptionOverRemote(
         .sort((a, b) => Number(isBaseEncDocument(a.name)) - Number(isBaseEncDocument(b.name)));
     const documentNames = new Set(entries.filter((entry) => entry.kind === 'document').map((entry) => entry.name));
 
+    // Build the complete decrypt plan before starting the journal or writing an early
+    // artifact. A folder containing a later foreign/abandoned generation must fail with every
+    // byte untouched; otherwise Disable can strand a plaintext prefix plus ciphertext suffix
+    // under a `disable` journal that blocks the required passphrase-change recovery.
+    const plaintextByName = new Map<string, Uint8Array>();
+    for (const entry of [...attachments, ...encDocuments]) {
+        const current = snapshotRemoteRead(snapshot, entry.name);
+        if (!current.bytes) continue;
+        const inspected = inspectSyncArtifact(current.bytes);
+        if (inspected.kind === 'unsupported') throw unsupportedArtifact(entry.name, inspected.reason);
+        if (inspected.kind === 'encrypted') {
+            plaintextByName.set(
+                entry.name,
+                await decryptRemoteArtifactOrThrow(current.bytes, key, prims),
+            );
+        }
+    }
+
     const total = attachments.length + encDocuments.length;
     let completed = 0;
     const report = (phase: SyncEncryptionTransitionProgress['phase']) => onProgress?.({ phase, completed, total });
@@ -754,7 +814,7 @@ export async function runDisableSyncEncryptionOverRemote(
             const inspected = inspectSyncArtifact(bytes);
             if (inspected.kind === 'unsupported') throw unsupportedArtifact(entry.name, inspected.reason);
             if (inspected.kind === 'encrypted') {
-                const plain = await decryptRemoteArtifactOrThrow(bytes, key, prims);
+                const plain = plaintextByName.get(entry.name)!;
                 await ensureTransitionJournal();
                 await remote.write(entry.name, plain, version);
                 const verified = await verifyRemoteBytes(remote, entry.name, (verify) => {
@@ -780,8 +840,7 @@ export async function runDisableSyncEncryptionOverRemote(
         const current = snapshotRemoteRead(snapshot, entry.name);
         if (current.bytes) {
             const sourceVersion = requireExistingRemoteVersion(entry.name, current);
-            const bytes = current.bytes;
-            const plain = await decryptRemoteArtifactOrThrow(bytes, key, prims);
+            const plain = plaintextByName.get(entry.name)!;
             const plainName = syncPlaintextArtifactName(entry.name);
             const target = snapshotRemoteRead(snapshot, plainName);
             if (target.bytes) {
@@ -883,23 +942,42 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
         return recovered;
     };
 
+    // Authenticate and decrypt the entire fixed inventory before the first write. Retrying an
+    // interrupted O→A rotation as O→B must not rewrite an early O artifact under B and only
+    // then discover a later A artifact that B cannot open. The plan also avoids repeating the
+    // expensive decrypt/KDF work in the mutation pass.
+    const rewrapPlan = new Map<string, Uint8Array | null>();
+    for (const entry of [...attachments, ...encDocuments]) {
+        const current = snapshotRemoteRead(snapshot, entry.name);
+        if (!current.bytes) continue;
+        const bytes = current.bytes;
+        if (await triesDecrypt(bytes, newMaterial.key, prims)) {
+            rewrapPlan.set(entry.name, null);
+            continue;
+        }
+        if (await triesDecrypt(bytes, oldKey, prims)) {
+            rewrapPlan.set(entry.name, await decryptRemoteArtifactOrThrow(bytes, oldKey, prims));
+            continue;
+        }
+        const inspected = inspectSyncArtifact(bytes);
+        if (inspected.kind !== 'encrypted') {
+            throw new SyncEncryptionTerminalError(
+                new SyncCryptoUnsupportedError(`${entry.name} is not a valid MWENC1 container`),
+            );
+        }
+        const recoveredMaterial = await recoverMaterialForSalt(inspected.salt, inspected.params);
+        rewrapPlan.set(
+            entry.name,
+            await decryptRemoteArtifactOrThrow(bytes, recoveredMaterial.key, prims),
+        );
+    }
+
     const rewrap = async (name: string): Promise<void> => {
         const current = snapshotRemoteRead(snapshot, name);
         if (!current.bytes) return;
         const version = requireExistingRemoteVersion(name, current);
-        const bytes = current.bytes;
-        if (await triesDecrypt(bytes, newMaterial.key, prims)) return; // already migrated (resume)
-        let plain: Uint8Array;
-        if (await triesDecrypt(bytes, oldKey, prims)) {
-            plain = await decryptRemoteArtifactOrThrow(bytes, oldKey, prims);
-        } else {
-            const inspected = inspectSyncArtifact(bytes);
-            if (inspected.kind !== 'encrypted') {
-                throw new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError(`${name} is not a valid MWENC1 container`));
-            }
-            const recoveredMaterial = await recoverMaterialForSalt(inspected.salt, inspected.params);
-            plain = await decryptRemoteArtifactOrThrow(bytes, recoveredMaterial.key, prims);
-        }
+        const plain = rewrapPlan.get(name);
+        if (!plain) return; // absent or already migrated under this run's new material
         const sealed = await encryptSyncArtifact(plain, newMaterial, prims);
         await ensureTransitionJournal();
         await remote.write(name, sealed, version);
