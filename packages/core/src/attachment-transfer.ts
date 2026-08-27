@@ -353,10 +353,40 @@ export async function runAttachmentTransferLifecycle(
     // upload, fileHash) from whatever's actually on disk once a transfer succeeds, so
     // the next cycle's check-on-touch compare has a baseline. Best-effort — a stat
     // failure here doesn't undo an otherwise-successful transfer.
-    const refreshContentStat = async (attachment: Attachment, path: string): Promise<void> => {
+    const refreshContentStat = async (
+        attachment: Attachment,
+        path: string,
+        verifyDownloadedGeneration = false,
+    ): Promise<void> => {
         if (!options.getLocalFileStat) return;
         const stat = await options.getLocalFileStat(path, attachment).catch(() => null);
-        if (stat) applyAttachmentContentStat(attachment, stat);
+        if (!stat) return;
+
+        const expectedHash = attachment.fileHash?.trim().toLowerCase();
+        if (
+            verifyDownloadedGeneration
+            && options.computeLocalFileHash
+            && isSha256Hex(expectedHash)
+        ) {
+            const hash = await options.computeLocalFileHash(path, attachment).catch(() => null);
+            const finalStat = await options.getLocalFileStat(path, attachment).catch(() => null);
+            if (
+                hash?.trim().toLowerCase() !== expectedHash
+                || !finalStat
+                || finalStat.mtimeMs !== stat.mtimeMs
+                || finalStat.size !== stat.size
+            ) {
+                // The native publication was generation-safe, but a fresh local
+                // edit landed immediately afterwards. Do not record that edit's
+                // stat as the remote baseline or the next prepare pass would miss it.
+                options.onLocalEditRace?.(attachment);
+                return;
+            }
+            applyAttachmentContentStat(attachment, finalStat, expectedHash);
+            return;
+        }
+
+        applyAttachmentContentStat(attachment, stat);
     };
 
     const attemptUpload = async (
@@ -479,7 +509,7 @@ export async function runAttachmentTransferLifecycle(
                     ) {
                         recovered.pendingContentUpload = undefined;
                         const freshPath = recovered.uri ? resolveLocalPath(recovered.uri) : '';
-                        if (freshPath) await refreshContentStat(recovered, freshPath);
+                        if (freshPath) await refreshContentStat(recovered, freshPath, true);
                         Object.assign(attachment, recovered);
                         itemMutated = true;
                     }
@@ -584,7 +614,7 @@ export async function runAttachmentTransferLifecycle(
                         // immediately, using the (possibly just-updated) uri — otherwise
                         // every subsequent cycle re-detects this download as a "change".
                         const freshPath = attachment.uri ? resolveLocalPath(attachment.uri) : localPath;
-                        if (freshPath) await refreshContentStat(attachment, freshPath);
+                        if (freshPath) await refreshContentStat(attachment, freshPath, true);
                     }
                 } catch (error) {
                     if (options.isFatalError?.(error)) throw error;
@@ -685,7 +715,7 @@ export async function runAttachmentTransferLifecycle(
                             })) {
                                 itemMutated = true;
                                 const freshPath = attachment.uri ? resolveLocalPath(attachment.uri) : localPath;
-                                if (freshPath) await refreshContentStat(attachment, freshPath);
+                                if (freshPath) await refreshContentStat(attachment, freshPath, true);
                             }
                         } catch (error) {
                             if (options.isFatalError?.(error)) throw error;

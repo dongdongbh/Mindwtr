@@ -1196,6 +1196,40 @@ describe('runAttachmentTransferLifecycle', () => {
             expect(onDownload).toHaveBeenCalledTimes(1);
             expect(secondPass.didMutate).toBe(false);
         });
+
+        it('does not record a post-install local edit as the downloaded generation baseline', async () => {
+            const remoteHash = 'a'.repeat(64);
+            const localEditHash = 'b'.repeat(64);
+            const attachment = makeAttachment({
+                cloudKey: 'attachments/attachment-1.txt',
+                fileHash: remoteHash,
+                localStatus: 'missing',
+            });
+            const onLocalEditRace = vi.fn();
+            const getLocalFileStat = vi.fn(async () => ({ mtimeMs: 42_000, size: 42 }));
+            const { after } = await runLifecycle({
+                attachmentsById: new Map([[attachment.id, attachment]]),
+                getLocalFilePresence: vi.fn(async () => 'confirmed-not-found' as const),
+                getLocalFileStat,
+                computeLocalFileHash: vi.fn(async () => localEditHash),
+                contentChangePhase: 'post-merge',
+                onUpload: vi.fn(),
+                onUploadError: vi.fn(),
+                onDownload: vi.fn(async (item: Attachment) => {
+                    item.uri = '/local/downloaded.txt';
+                    item.localStatus = 'available';
+                    item.fileHash = remoteHash;
+                    return true;
+                }),
+                onDownloadError: vi.fn(),
+                onLocalEditRace,
+            });
+
+            expect(onLocalEditRace).toHaveBeenCalledWith(after());
+            expect(after().contentMtimeMs).toBeUndefined();
+            expect(after().contentSize).toBeUndefined();
+            expect(after().fileHash).toBe(remoteHash);
+        });
     });
 
     it('lets platform adapters resolve local URI paths', async () => {
