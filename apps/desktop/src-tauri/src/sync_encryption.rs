@@ -362,9 +362,7 @@ where
     Remove: FnOnce(&Path) -> Result<bool, String>,
     SyncParent: FnOnce(&Path) -> Result<(), String>,
 {
-    if !remove(path)? {
-        return Ok(());
-    }
+    let _removed = remove(path)?;
     let parent = path
         .parent()
         .ok_or_else(|| "Failed to resolve sync encryption state directory".to_string())?;
@@ -928,6 +926,34 @@ mod tests {
 
         assert_eq!(error, "directory flush failed");
         assert_eq!(&*events.borrow(), &["remove", "sync-parent"]);
+    }
+
+    #[test]
+    fn already_absent_state_still_requires_durable_parent_sync_before_key_clear() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(SYNC_ENCRYPTION_STATE_FILE_NAME);
+        let events = std::cell::RefCell::new(Vec::new());
+
+        let error = clear_encryption_state_with(
+            || {
+                remove_state_file_durably_with(
+                    &path,
+                    |_| {
+                        events.borrow_mut().push("confirm-absent");
+                        Ok(false)
+                    },
+                    |_| {
+                        events.borrow_mut().push("sync-parent");
+                        Err("directory flush failed".to_string())
+                    },
+                )
+            },
+            || events.borrow_mut().push("clear-key"),
+        )
+        .expect_err("an unflushed prior deletion must preserve the retry key");
+
+        assert_eq!(error, "directory flush failed");
+        assert_eq!(&*events.borrow(), &["confirm-absent", "sync-parent"]);
     }
 
     #[test]
