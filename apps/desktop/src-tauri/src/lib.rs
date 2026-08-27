@@ -39,6 +39,7 @@ use time::OffsetDateTime;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 mod audio;
+mod attachment_installer;
 mod autostart;
 mod config;
 mod email_capture;
@@ -62,6 +63,7 @@ use audio::{
     download_parakeet_model, download_whisper_model, start_audio_recording, stop_audio_recording,
     transcribe_parakeet, transcribe_whisper, AudioRecorderState,
 };
+use attachment_installer::install_attachment_download;
 use autostart::{get_launch_at_startup_enabled, set_launch_at_startup_enabled};
 use config::{
     check_obsidian_vault_marker, expand_obsidian_vault_scope, get_ai_key, get_cloud_config,
@@ -1734,6 +1736,7 @@ pub fn run() {
             sync_fs_remove_file,
             sync_fs_rename,
             sync_fs_stat,
+            install_attachment_download,
             set_tray_visible,
             set_tray_tooltip,
             set_macos_activation_policy,

@@ -3121,6 +3121,7 @@ dependencies = [
  "hound",
  "imap",
  "keyring",
+ "libc",
  "libloading 0.8.9",
  "log",
  "mail-parser",
