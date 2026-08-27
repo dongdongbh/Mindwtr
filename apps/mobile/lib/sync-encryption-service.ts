@@ -478,8 +478,15 @@ const runWithRemoteMutationFence = async <T>(
     } catch (initialRollbackError) {
       // A failed queued write may have reverted only the optimistic cache. Re-read both
       // persistence domains before retrying the complete state-then-key compensation.
-      await reloadSyncEncryptionLocalStateForRecovery();
-      await syncEncryptionKeyCache.getKey();
+      // A transient recovery read must not strand the already-known journal: the
+      // authoritative pre-commit state and key are still safe to write in order.
+      let recoveryReadError: unknown = null;
+      try {
+        await reloadSyncEncryptionLocalStateForRecovery();
+        await syncEncryptionKeyCache.getKey();
+      } catch (error) {
+        recoveryReadError = error;
+      }
       try {
         await writeLocalStateDurably(stateBeforeFinalCommit);
         await restoreKey(previousKey);
@@ -501,6 +508,9 @@ const runWithRemoteMutationFence = async <T>(
         const failure = new Error('Failed to reconcile sync encryption state and key after remote fence loss');
         (failure as Error & { cause?: unknown; retryRollbackError?: unknown }).cause = initialRollbackError;
         (failure as Error & { retryRollbackError?: unknown }).retryRollbackError = retryRollbackError;
+        if (recoveryReadError) {
+          (failure as Error & { recoveryReadError?: unknown }).recoveryReadError = recoveryReadError;
+        }
         throw failure;
       }
     }

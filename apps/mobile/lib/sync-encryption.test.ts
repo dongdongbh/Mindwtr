@@ -834,6 +834,17 @@ describe('remote mutation fence lifecycle', () => {
     let operationFinished = false;
     let loseAfterOperation = true;
     let failFirstRollbackStateWrite = true;
+    let failFirstRollbackStateRead = true;
+    vi.mocked(AsyncStorage.getItem).mockImplementation(async (key: string) => {
+      if (operationFinished && key === SYNC_ENCRYPTION_STATE_KEY) {
+        rollbackEvents.push('read');
+        if (failFirstRollbackStateRead) {
+          failFirstRollbackStateRead = false;
+          throw new Error('one-shot rollback state read failure');
+        }
+      }
+      return asyncStorage.get(key) ?? null;
+    });
     vi.mocked(AsyncStorage.setItem).mockImplementation(async (key: string, value: string) => {
       if (operationFinished && key === SYNC_ENCRYPTION_STATE_KEY) {
         rollbackEvents.push('state');
@@ -881,8 +892,9 @@ describe('remote mutation fence lifecycle', () => {
     )).rejects.toBeInstanceOf(SyncRemoteMutationFenceLostError);
 
     expect(failFirstRollbackStateWrite).toBe(false);
+    expect(failFirstRollbackStateRead).toBe(false);
     expect(renew).toHaveBeenCalledTimes(1);
-    expect(rollbackEvents.slice(0, 3)).toEqual(['state', 'state', 'key']);
+    expect(rollbackEvents.slice(0, 4)).toEqual(['state', 'read', 'state', 'key']);
 
     __resetSyncEncryptionStateForTests();
     await getMobileSyncEncryptionStatus();
