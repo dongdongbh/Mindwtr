@@ -512,6 +512,7 @@ type MobileSyncRequest = {
   syncPathOverride?: string;
   manual?: boolean;
   activationProbe?: boolean;
+  fileSyncLockBusyRetryAttempt?: number;
   ignorePendingRemoteWriteBackoff?: boolean;
   configOverride?: MobileSyncConfigOverride;
 };
@@ -530,6 +531,7 @@ class MobileSyncRun {
   private readonly syncPathOverride: string | undefined;
   private readonly manual: boolean;
   private readonly activationProbe: boolean;
+  private readonly fileSyncLockBusyRetryAttempt: number;
   private readonly ignorePendingRemoteWriteBackoff: boolean;
   private readonly configOverride: MobileSyncConfigOverride | undefined;
   private readonly requestFollowUp: MobileRequestFollowUp;
@@ -573,6 +575,7 @@ class MobileSyncRun {
     this.syncPathOverride = request?.syncPathOverride;
     this.manual = request?.manual === true;
     this.activationProbe = request?.activationProbe === true;
+    this.fileSyncLockBusyRetryAttempt = request?.fileSyncLockBusyRetryAttempt ?? 0;
     this.ignorePendingRemoteWriteBackoff = request?.ignorePendingRemoteWriteBackoff === true;
     this.configOverride = request?.configOverride;
     this.requestFollowUp = requestFollowUp;
@@ -593,6 +596,7 @@ class MobileSyncRun {
         options: {
           manual: this.manual,
           activationProbe: this.activationProbe,
+          fileSyncLockBusyRetryAttempt: this.fileSyncLockBusyRetryAttempt,
           ignorePendingRemoteWriteBackoff: this.ignorePendingRemoteWriteBackoff,
         },
         storage: this.createStorage(),
@@ -631,16 +635,21 @@ class MobileSyncRun {
       syncPathOverride: this.syncPathOverride,
       manual: this.manual,
       activationProbe: this.activationProbe,
+      fileSyncLockBusyRetryAttempt: this.fileSyncLockBusyRetryAttempt,
       ignorePendingRemoteWriteBackoff: this.ignorePendingRemoteWriteBackoff,
       configOverride: this.configOverride,
     });
   }
 
-  private queueFollowUpAfter(delayMs: number): void {
+  private queueFollowUpAfter(
+    delayMs: number,
+    fileSyncLockBusyRetryAttempt = this.fileSyncLockBusyRetryAttempt,
+  ): void {
     this.requestFollowUpAfter(delayMs, {
       syncPathOverride: this.syncPathOverride,
       manual: this.manual,
       activationProbe: this.activationProbe,
+      fileSyncLockBusyRetryAttempt,
       ignorePendingRemoteWriteBackoff: this.ignorePendingRemoteWriteBackoff,
       configOverride: this.configOverride,
     });
@@ -1104,6 +1113,9 @@ class MobileSyncRun {
       },
       requestFollowUp: () => this.queueFollowUp(),
       requestFollowUpAfter: (delayMs) => this.queueFollowUpAfter(delayMs),
+      requestFileSyncLockBusyFollowUpAfter: (delayMs, nextAttempt) => (
+        this.queueFollowUpAfter(delayMs, nextAttempt)
+      ),
       ensureNetworkStillAvailable: this.ensureNetworkStillAvailable,
       onStaleSnapshot: ({ localSnapshotChangeAt, currentChangeAt, step }) => {
         logSyncInfo('Sync detected local data changes during cycle; queued follow-up', {

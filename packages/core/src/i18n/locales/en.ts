@@ -2490,6 +2490,7 @@ export const en: Record<string, string> = {
         'settings.syncRemoteBusy': 'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
         'settings.syncRemoteCleanupDeferred': 'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
         'settings.syncFileLockBusy': 'Another Mindwtr operation is using File Sync. Wait for it to finish; Mindwtr will retry automatically.',
+        'settings.syncFileLockActivationBusy': 'Another Mindwtr operation is using File Sync. Wait for it to finish, then try Sync Now again.',
         'settings.syncFileLockCleanupDeferred': 'Sync completed, but Mindwtr could not release the File Sync lock. Restart Mindwtr before syncing again. No retry is needed.',
         'settings.syncFileLockUnavailable': 'Mindwtr cannot safely lock this File Sync location. Re-select the folder, restart or update Mindwtr, or use WebDAV.',
         'settings.syncEncryptionCleanupDeferred': 'Encryption was updated. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',

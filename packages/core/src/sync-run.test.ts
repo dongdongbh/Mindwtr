@@ -173,11 +173,13 @@ const createHarness = (config: HarnessConfig = {}) => {
     const run = (options: {
         manual?: boolean;
         activationProbe?: boolean;
+        fileSyncLockBusyRetryAttempt?: number;
         ignorePendingRemoteWriteBackoff?: boolean;
     } = {}) => runSharedSyncCycle({
         options: {
             manual: config.manual ?? options.manual,
             activationProbe: config.activationProbe ?? options.activationProbe,
+            fileSyncLockBusyRetryAttempt: options.fileSyncLockBusyRetryAttempt,
             ignorePendingRemoteWriteBackoff: config.ignorePendingRemoteWriteBackoff
                 ?? options.ignorePendingRemoteWriteBackoff,
         },
@@ -894,6 +896,24 @@ describe('runSharedSyncCycle', () => {
         });
 
         await expect(run()).resolves.toMatchObject({
+            success: true,
+            skipped: 'fileSyncLockBusy',
+            fileSyncLockDeferred: 'busy',
+        });
+        expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
+    });
+
+    it('stops after one deferred File Sync lock retry while remaining neutral', async () => {
+        const { hooks, run } = createHarness({
+            backend: 'file',
+            hooks: {
+                setupCycle: vi.fn(async () => {
+                    throw new SyncFileLockBusyError(5_000);
+                }),
+            },
+        });
+
+        await expect(run({ fileSyncLockBusyRetryAttempt: 1 })).resolves.toMatchObject({
             success: true,
             skipped: 'fileSyncLockBusy',
             fileSyncLockDeferred: 'busy',

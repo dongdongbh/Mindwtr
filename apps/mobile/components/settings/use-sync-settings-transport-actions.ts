@@ -662,11 +662,16 @@ export function useSyncSettingsTransportActions({
                 6000,
             );
         };
-        const showFileSyncLockFeedback = (outcome: 'busy' | 'cleanup' | 'unavailable') => {
+        const showFileSyncLockFeedback = (
+            outcome: 'busy' | 'cleanup' | 'unavailable',
+            activationBusy = false,
+        ) => {
             showToast({
                 title: outcome === 'unavailable' ? tr('settings.syncMobile.error') : tr('common.notice'),
                 message: tr(outcome === 'busy'
-                    ? 'settings.syncFileLockBusy'
+                    ? activationBusy
+                        ? 'settings.syncFileLockActivationBusy'
+                        : 'settings.syncFileLockBusy'
                     : outcome === 'cleanup'
                         ? 'settings.syncFileLockCleanupDeferred'
                         : 'settings.syncFileLockUnavailable'),
@@ -827,7 +832,7 @@ export function useSyncSettingsTransportActions({
                     return;
                 }
                 if (probeResult.success && probeResult.fileSyncLockDeferred === 'busy') {
-                    showFileSyncLockFeedback('busy');
+                    showFileSyncLockFeedback('busy', true);
                     return;
                 }
                 if (probeResult.fileSyncLockUnavailable) {
@@ -872,6 +877,11 @@ export function useSyncSettingsTransportActions({
                     throw new Error(probeResult.error || 'Sync setup could not be verified');
                 }
                 await commitProvenSyncConfiguration(configOverride);
+                if (activationCleanupDeferred) {
+                    if (activationCleanupDeferred === 'file') showFileSyncLockFeedback('cleanup');
+                    else showRemoteFenceFeedback('cleanup');
+                    return;
+                }
             }
 
             const result = await performMobileSync(undefined, {

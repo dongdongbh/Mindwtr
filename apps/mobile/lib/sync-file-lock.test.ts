@@ -42,7 +42,10 @@ describe('sync-file-lock', () => {
       releaseAsync: vi.fn(async () => undefined),
     }, 'android');
     await expect(acquireMobileFileSyncLease('file:///tmp/data.json'))
-      .rejects.toBeInstanceOf(SyncFileLockUnavailableError);
+      .rejects.toMatchObject({
+        name: 'SyncFileLockUnavailableError',
+        message: expect.stringContaining('Safe File Sync locking is unavailable'),
+      });
   });
 
   it.each([

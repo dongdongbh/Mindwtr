@@ -1089,7 +1089,14 @@ class SharedSyncRunMachine {
 
     private async handleRunError(error: unknown): Promise<SyncRunResult> {
         if (error instanceof SyncFileLockBusyError) {
-            if (!this.options.activationProbe) this.requestFollowUpAfter(error.retryAfterMs);
+            const retryAttempt = this.options.fileSyncLockBusyRetryAttempt ?? 0;
+            if (!this.options.activationProbe && retryAttempt < 1) {
+                if (this.hooks.requestFileSyncLockBusyFollowUpAfter) {
+                    this.hooks.requestFileSyncLockBusyFollowUpAfter(error.retryAfterMs, retryAttempt + 1);
+                } else {
+                    this.requestFollowUpAfter(error.retryAfterMs);
+                }
+            }
             return {
                 success: true,
                 skipped: 'fileSyncLockBusy',

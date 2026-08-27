@@ -598,7 +598,7 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.asyncStorage.setItem).not.toHaveBeenCalledWith(SYNC_BACKEND_KEY, 'file');
         expect(mocked.showToast).toHaveBeenCalledWith({
             title: 'common.notice',
-            message: 'settings.syncFileLockBusy',
+            message: 'settings.syncFileLockActivationBusy',
             tone: 'warning',
             durationMs: 6000,
         });
@@ -608,8 +608,7 @@ describe('useSyncSettingsTransportActions', () => {
     it('commits a cleanup-deferred File Sync activation and warns without suggesting retry', async () => {
         seedStorage([[SYNC_PATH_KEY, 'file:///sync-folder/data.json']]);
         mocked.performMobileSync
-            .mockResolvedValueOnce({ success: true, fileSyncLockDeferred: 'cleanup' })
-            .mockResolvedValueOnce({ success: true, fileSyncLockDeferred: 'busy' });
+            .mockResolvedValueOnce({ success: true, fileSyncLockDeferred: 'cleanup' });
         await renderHarness();
 
         await act(async () => {
@@ -617,6 +616,7 @@ describe('useSyncSettingsTransportActions', () => {
         });
 
         expect(mocked.asyncStorage.setItem).toHaveBeenLastCalledWith(SYNC_BACKEND_KEY, 'file');
+        expect(mocked.performMobileSync).toHaveBeenCalledTimes(1);
         expect(mocked.showToast).toHaveBeenCalledWith({
             title: 'common.notice',
             message: 'settings.syncFileLockCleanupDeferred',
@@ -627,18 +627,11 @@ describe('useSyncSettingsTransportActions', () => {
     });
 
     it('commits a cleanup-deferred activation and reports completed cleanup instead of failure', async () => {
-        mocked.performMobileSync
-            .mockResolvedValueOnce({
-                success: true,
-                remoteFenceDeferred: 'cleanup',
-                retryAfterMs: 30_000,
-            })
-            .mockResolvedValueOnce({
-                success: true,
-                skipped: 'remoteFenceBusy',
-                remoteFenceDeferred: 'busy',
-                retryAfterMs: 30_000,
-            });
+        mocked.performMobileSync.mockResolvedValueOnce({
+            success: true,
+            remoteFenceDeferred: 'cleanup',
+            retryAfterMs: 30_000,
+        });
         await renderHarness();
 
         await act(async () => {
@@ -654,7 +647,7 @@ describe('useSyncSettingsTransportActions', () => {
         });
 
         expect(mocked.asyncStorage.setItem).toHaveBeenLastCalledWith(SYNC_BACKEND_KEY, 'webdav');
-        expect(mocked.performMobileSync).toHaveBeenCalledTimes(2);
+        expect(mocked.performMobileSync).toHaveBeenCalledTimes(1);
         expect(mocked.showSettingsWarning).toHaveBeenCalledWith(
             'common.notice',
             'settings.syncRemoteCleanupDeferred',

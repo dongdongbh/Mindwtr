@@ -533,7 +533,7 @@ describe('useSyncSettings cloud token validation', () => {
 
         expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
         expect(showToast).toHaveBeenCalledWith(
-            'Another Mindwtr operation is using File Sync. Wait for it to finish; Mindwtr will retry automatically.',
+            'Another Mindwtr operation is using File Sync. Wait for it to finish, then try Sync Now again.',
             'info',
             6000,
         );
@@ -543,8 +543,7 @@ describe('useSyncSettings cloud token validation', () => {
         const showToast = vi.fn();
         useUiStore.setState({ showToast } as never);
         vi.mocked(SyncService.performSync)
-            .mockResolvedValueOnce({ success: true, fileSyncLockDeferred: 'cleanup' })
-            .mockResolvedValueOnce({ success: true, fileSyncLockDeferred: 'busy' });
+            .mockResolvedValueOnce({ success: true, fileSyncLockDeferred: 'cleanup' });
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
         act(() => {
@@ -559,6 +558,7 @@ describe('useSyncSettings cloud token validation', () => {
         expect(SyncService.commitProvenSyncConfiguration).toHaveBeenCalledWith(
             expect.objectContaining({ backend: 'file', syncPath: '/tmp/mindwtr-sync' }),
         );
+        expect(SyncService.performSync).toHaveBeenCalledTimes(1);
         expect(showToast).toHaveBeenCalledWith(
             'Sync completed, but Mindwtr could not release the File Sync lock. Restart Mindwtr before syncing again. No retry is needed.',
             'info',
@@ -569,18 +569,11 @@ describe('useSyncSettings cloud token validation', () => {
     it('commits a cleanup-deferred activation and reports completed cleanup instead of failure', async () => {
         const showToast = vi.fn();
         useUiStore.setState({ showToast } as never);
-        vi.mocked(SyncService.performSync)
-            .mockResolvedValueOnce({
-                success: true,
-                remoteFenceDeferred: 'cleanup',
-                retryAfterMs: 30_000,
-            })
-            .mockResolvedValueOnce({
-                success: true,
-                skipped: 'remoteFenceBusy',
-                remoteFenceDeferred: 'busy',
-                retryAfterMs: 30_000,
-            });
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: true,
+            remoteFenceDeferred: 'cleanup',
+            retryAfterMs: 30_000,
+        });
         const { result } = setup();
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
         act(() => {
@@ -596,7 +589,7 @@ describe('useSyncSettings cloud token validation', () => {
         expect(SyncService.commitProvenSyncConfiguration).toHaveBeenCalledWith(
             expect.objectContaining({ backend: 'cloud', cloudProvider: 'selfhosted' }),
         );
-        expect(SyncService.performSync).toHaveBeenCalledTimes(2);
+        expect(SyncService.performSync).toHaveBeenCalledTimes(1);
         expect(showToast).toHaveBeenCalledWith(
             'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
             'info',

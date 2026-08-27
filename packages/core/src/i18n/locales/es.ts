@@ -1420,6 +1420,7 @@ export const esOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': 'Otro dispositivo compatible con Mindwtr está actualizando esta ubicación de sincronización. Espera a que termine y vuelve a sincronizar.',
         'settings.syncRemoteCleanupDeferred': 'La operación de sincronización se completó. Mindwtr no pudo eliminar el bloqueo temporal de sincronización, pero caducará automáticamente. No es necesario volver a intentarlo.',
         'settings.syncFileLockBusy': 'Otra operación de Mindwtr está usando la sincronización de archivos. Espera a que termine; Mindwtr volverá a intentarlo automáticamente.',
+        'settings.syncFileLockActivationBusy': 'Otra operación de Mindwtr está usando la sincronización de archivos. Espera a que termine y vuelve a pulsar Sincronizar ahora.',
         'settings.syncFileLockCleanupDeferred': 'La sincronización se completó, pero Mindwtr no pudo liberar el bloqueo de la sincronización de archivos. Reinicia Mindwtr antes de volver a sincronizar. No es necesario repetir la operación.',
         'settings.syncFileLockUnavailable': 'Mindwtr no puede bloquear de forma segura esta ubicación de sincronización de archivos. Vuelve a seleccionar la carpeta, reinicia o actualiza Mindwtr, o usa WebDAV.',
         'settings.syncEncryptionCleanupDeferred': 'El cifrado se actualizó. Mindwtr no pudo eliminar el bloqueo temporal de sincronización, pero caducará automáticamente. No es necesario volver a intentarlo.',

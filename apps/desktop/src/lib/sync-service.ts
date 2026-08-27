@@ -703,6 +703,8 @@ type SyncRunOptions = {
     /** Isolated candidate transport proof. The shared machine keeps merged
      *  local writes in memory and suppresses durable/finalization side effects. */
     activationProbe?: boolean;
+    /** Internal marker for the single automatic File Sync contention retry. */
+    fileSyncLockBusyRetryAttempt?: number;
     /** The candidate was just activated; do not inherit the previous
      *  transport's retry deadline on this first durable cycle. */
     ignorePendingRemoteWriteBackoff?: boolean;
@@ -890,6 +892,7 @@ export class SyncService {
         return (left?.backendOverride ?? undefined) === (right?.backendOverride ?? undefined)
             && (left?.configOverride ?? undefined) === (right?.configOverride ?? undefined)
             && (left?.activationProbe ?? false) === (right?.activationProbe ?? false)
+            && (left?.fileSyncLockBusyRetryAttempt ?? 0) === (right?.fileSyncLockBusyRetryAttempt ?? 0)
             && (left?.ignorePendingRemoteWriteBackoff ?? false)
                 === (right?.ignorePendingRemoteWriteBackoff ?? false);
     }
@@ -2844,6 +2847,7 @@ export class SyncService {
                 options: {
                     manual: options.manual,
                     activationProbe: options.activationProbe,
+                    fileSyncLockBusyRetryAttempt: options.fileSyncLockBusyRetryAttempt,
                     ignorePendingRemoteWriteBackoff: options.ignorePendingRemoteWriteBackoff,
                 },
                 storage: {
@@ -2897,6 +2901,12 @@ export class SyncService {
                     setupCycle: (setupContext) => SyncService.setupDesktopCycle(context, options, setupContext.setStep),
                     requestFollowUp: () => SyncService.requestQueuedSyncRun(options, false),
                     requestFollowUpAfter: (delayMs) => SyncService.requestQueuedSyncRunAfter(delayMs, options),
+                    requestFileSyncLockBusyFollowUpAfter: (delayMs, nextAttempt) => (
+                        SyncService.requestQueuedSyncRunAfter(delayMs, {
+                            ...options,
+                            fileSyncLockBusyRetryAttempt: nextAttempt,
+                        })
+                    ),
                     ensureNetworkStillAvailable: () => {
                         if (context.backend !== 'cloud' && context.backend !== 'webdav' && context.backend !== 'cloudkit') return;
                         if (

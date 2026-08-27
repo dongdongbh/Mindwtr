@@ -966,11 +966,16 @@ export const useSyncSettings = ({
                 );
             showToast(message, 'info', 6000);
         };
-        const showFileSyncLockFeedback = (outcome: 'busy' | 'cleanup' | 'unavailable') => {
+        const showFileSyncLockFeedback = (
+            outcome: 'busy' | 'cleanup' | 'unavailable',
+            activationBusy = false,
+        ) => {
             const message = outcome === 'busy'
                 ? resolveText(
-                    'settings.syncFileLockBusy',
-                    'Another Mindwtr operation is using File Sync. Wait for it to finish; Mindwtr will retry automatically.',
+                    activationBusy ? 'settings.syncFileLockActivationBusy' : 'settings.syncFileLockBusy',
+                    activationBusy
+                        ? 'Another Mindwtr operation is using File Sync. Wait for it to finish, then try Sync Now again.'
+                        : 'Another Mindwtr operation is using File Sync. Wait for it to finish; Mindwtr will retry automatically.',
                 )
                 : outcome === 'cleanup'
                     ? resolveText(
@@ -1094,7 +1099,7 @@ export const useSyncSettings = ({
                     if (configOverride.dropboxCredentialHandle) {
                         await resolveCapturedCredential();
                     }
-                    showFileSyncLockFeedback('busy');
+                    showFileSyncLockFeedback('busy', true);
                     return;
                 }
                 if (probeResult.fileSyncLockUnavailable) {
@@ -1177,6 +1182,11 @@ export const useSyncSettings = ({
                     activationGeneration,
                 );
                 if (!committedCurrentConfiguration) return;
+                if (activationCleanupDeferred) {
+                    if (activationCleanupDeferred === 'file') showFileSyncLockFeedback('cleanup');
+                    else showRemoteFenceFeedback('cleanup');
+                    return;
+                }
             }
 
             const result = await SyncService.performSync({

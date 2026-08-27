@@ -2494,6 +2494,7 @@ export const jaOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': '別の互換性のある Mindwtr デバイスがこの同期先を更新しています。完了するまで待ってから、もう一度同期してください。',
         'settings.syncRemoteCleanupDeferred': '同期処理は完了しました。Mindwtr は一時的な同期ロックを削除できませんでしたが、ロックは自動的に期限切れになります。再試行は不要です。',
         'settings.syncFileLockBusy': '別の Mindwtr 処理がファイル同期を使用しています。完了するまでお待ちください。Mindwtr は自動的に再試行します。',
+        'settings.syncFileLockActivationBusy': '別の Mindwtr 処理がファイル同期を使用しています。完了するまで待ってから、もう一度「今すぐ同期」を実行してください。',
         'settings.syncFileLockCleanupDeferred': '同期は完了しましたが、Mindwtr はファイル同期ロックを解除できませんでした。再度同期する前に Mindwtr を再起動してください。再試行は不要です。',
         'settings.syncFileLockUnavailable': 'Mindwtr はこのファイル同期先を安全にロックできません。フォルダーを選び直すか、Mindwtr を再起動または更新するか、WebDAV を使用してください。',
         'settings.syncEncryptionCleanupDeferred': '暗号化は更新されました。Mindwtr は一時的な同期ロックを削除できませんでしたが、ロックは自動的に期限切れになります。再試行は不要です。',

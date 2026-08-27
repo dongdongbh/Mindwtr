@@ -283,6 +283,8 @@ export interface SyncRunPlatformHooks {
     /** Queue no earlier than a provider-time-derived delay (remote lease
      *  contention/cleanup). Implementations may let an explicit user run win. */
     requestFollowUpAfter?(delayMs: number): void;
+    /** Queue the one bounded retry allowed after local File Sync contention. */
+    requestFileSyncLockBusyFollowUpAfter?(delayMs: number, nextAttempt: number): void;
     /** Throw when the platform knows the network is gone (remote backends
      *  only; implementations self-gate on their backend). The machine calls
      *  this before remote reads/writes/fingerprints and network-backend
@@ -363,6 +365,8 @@ export type SyncRunOptions = {
      *  external-calendar, fast-state, follow-up, and finalize side effects.
      *  Settings can commit the candidate only after this succeeds. */
     activationProbe?: boolean;
+    /** Internal retry budget carried only by a File Sync contention follow-up. */
+    fileSyncLockBusyRetryAttempt?: number;
     /** First durable cycle after activating a candidate transport: retry now
      *  instead of inheriting the previous backend's retry deadline, and adopt
      *  attachment keys from the candidate document just proven on that

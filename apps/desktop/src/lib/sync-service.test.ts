@@ -3129,6 +3129,35 @@ describe('SyncService orchestration', () => {
         expect(result.error).toContain('Safe File Sync locking is unavailable');
     });
 
+    it('normalizes the native lock-open failure into localized File Sync recovery', async () => {
+        __syncServiceTestUtils.setDependenciesForTests({
+            flushPendingSave: vi.fn(async () => undefined),
+            getStoreState: () => ({
+                fetchData: vi.fn(async () => undefined),
+                lastDataChangeAt: 0,
+                settings: {},
+                setError: vi.fn(),
+                updateSettings: vi.fn(async () => undefined),
+            }) as any,
+            invoke: vi.fn(async (command: string) => {
+                if (command === 'acquire_file_sync_lease') {
+                    throw new Error('Failed to open sync lock: permission denied');
+                }
+                throw new Error(`unexpected command: ${command}`);
+            }) as any,
+            isTauriRuntime: () => false,
+        });
+
+        await expect(SyncService.performSync({
+            manual: true,
+            configOverride: { backend: 'file', syncPath: '/tmp/mindwtr-sync/data.json' },
+        })).resolves.toMatchObject({
+            success: false,
+            fileSyncLockUnavailable: true,
+            error: expect.stringContaining('Safe File Sync locking is unavailable'),
+        });
+    });
+
     it('keeps a completed desktop File Sync cycle successful when lease release is deferred', async () => {
         const setupSpy = vi.spyOn(SyncService as any, 'setupDesktopCycle').mockImplementation(async (context: any) => {
             context.backend = 'file';

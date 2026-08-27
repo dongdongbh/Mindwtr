@@ -33,6 +33,8 @@ export const normalizeSyncFileLockError = (error: unknown): unknown => {
     if (
         message.includes(SYNC_FILE_LOCK_UNAVAILABLE_CODE)
         || /failed to acquire an exclusive sync lock/i.test(message)
+        || /failed to open sync lock/i.test(message)
+        || /File Sync lease state is unavailable/i.test(message)
     ) {
         const normalized = new SyncFileLockUnavailableError();
         (normalized as Error & { cause?: unknown }).cause = error;

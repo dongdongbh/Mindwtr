@@ -46,7 +46,7 @@ export const acquireMobileFileSyncLease = async (syncFileUri: string): Promise<M
   if (platform === 'android') {
     const nativeModule = getModule();
     if (!nativeModule) {
-      throw new SyncFileLockUnavailableError('Safe File Sync locking is unavailable in this Android build. Update or restart Mindwtr, or use WebDAV.');
+      throw new SyncFileLockUnavailableError();
     }
     let token: string;
     try {
@@ -55,7 +55,7 @@ export const acquireMobileFileSyncLease = async (syncFileUri: string): Promise<M
       throw normalizeSyncFileLockError(error);
     }
     if (!token || typeof token !== 'string') {
-      throw new SyncFileLockUnavailableError('Safe File Sync locking returned no lease. Restart Mindwtr or use WebDAV.');
+      throw new SyncFileLockUnavailableError();
     }
     return { token, native: true };
   }
@@ -72,7 +72,7 @@ export const releaseMobileFileSyncLease = async (lease: MobileFileSyncLease): Pr
   if (lease.native) {
     const nativeModule = getModule();
     if (!nativeModule) {
-      throw new SyncFileLockUnavailableError('Safe File Sync locking disappeared before release. Restart Mindwtr before syncing again.');
+      throw new SyncFileLockUnavailableError();
     }
     try {
       await nativeModule.releaseAsync(lease.token);
@@ -82,7 +82,7 @@ export const releaseMobileFileSyncLease = async (lease: MobileFileSyncLease): Pr
     return;
   }
   if (fallbackLeaseToken !== lease.token) {
-    throw new SyncFileLockUnavailableError('The File Sync lease is unknown or already released. Restart Mindwtr before syncing again.');
+    throw new SyncFileLockUnavailableError();
   }
   fallbackLeaseToken = null;
 };
