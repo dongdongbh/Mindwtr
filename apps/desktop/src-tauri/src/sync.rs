@@ -6,7 +6,7 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::error::Error as StdError;
 #[cfg(target_os = "macos")]
 use std::ffi::{CStr, CString};
@@ -5560,9 +5560,12 @@ mod tests {
         let encrypted = fs::read(dir.path().join("data.json.enc")).expect("encrypted before");
         let encrypted_attachment = fs::read(&attachment_path).expect("encrypted attachment before");
 
-        let error = disable_sync_encryption_in_dir_with(dir.path(), &material.key, || {
-            Err("journal blocked disable".to_string())
-        })
+        let error = disable_sync_encryption_in_dir_with(
+            dir.path(),
+            &material.key,
+            || Err("journal blocked disable".to_string()),
+            require_managed_sync_document_generations,
+        )
         .expect_err("journal failure must abort disable");
         assert_eq!(error, "journal blocked disable");
         assert_eq!(fs::read(dir.path().join("data.json.enc")).expect("encrypted after"), encrypted);
@@ -5583,11 +5586,11 @@ mod tests {
     }
 
     #[test]
-    fn no_op_enable_revalidates_the_authoritative_document_before_clearing_its_journal() {
+    fn no_op_enable_revalidates_every_managed_document_before_clearing_its_journal() {
         let dir = tempfile::tempdir().expect("temp dir");
         seed_transition_folder(dir.path());
         let material = enable_sync_encryption_in_dir(dir.path(), "first pass").expect("enable");
-        let encrypted_path = dir.path().join(encrypted_artifact_name(DATA_FILE_NAME));
+        let encrypted_path = dir.path().join(encrypted_artifact_name("data.json.bak"));
         let peer = encrypt_sync_artifact(
             br#"{"tasks":[{"id":"peer"}]}"#,
             &material,
@@ -5631,11 +5634,11 @@ mod tests {
     }
 
     #[test]
-    fn passphrase_rotation_revalidates_the_authoritative_document_before_persisting_the_new_key() {
+    fn passphrase_rotation_revalidates_every_managed_document_before_persisting_the_new_key() {
         let dir = tempfile::tempdir().expect("temp dir");
         seed_transition_folder(dir.path());
         let first = enable_sync_encryption_in_dir(dir.path(), "first pass").expect("enable");
-        let encrypted_path = dir.path().join(encrypted_artifact_name(DATA_FILE_NAME));
+        let encrypted_path = dir.path().join(encrypted_artifact_name("data.json.bak"));
         let journal_pending = Cell::new(false);
         let persisted = Cell::new(false);
 
@@ -5673,6 +5676,75 @@ mod tests {
         assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
         assert!(journal_pending.get(), "the retry journal must remain pending");
         assert!(!persisted.get(), "the stale key state must not be persisted");
+    }
+
+    #[test]
+    fn disable_revalidates_every_managed_document_before_persisting_disabled_state() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        let material = enable_sync_encryption_in_dir(dir.path(), "first pass").expect("enable");
+        let backup_path = dir.path().join("data.json.bak");
+        let peer = br#"{"tasks":[{"id":"peer"}]}"#;
+        let journal_pending = Cell::new(false);
+        let persisted = Cell::new(false);
+
+        let error = disable_sync_encryption_in_dir_with(
+            dir.path(),
+            &material.key,
+            || {
+                journal_pending.set(true);
+                Ok(())
+            },
+            |generation| {
+                fs::write(&backup_path, peer).map_err(|error| error.to_string())?;
+                require_managed_sync_document_generations(generation)?;
+                persisted.set(true);
+                journal_pending.set(false);
+                Ok(())
+            },
+        )
+        .expect_err("a peer replacement must abort disabled-state persistence");
+
+        assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
+        assert!(journal_pending.get(), "the retry journal must remain pending");
+        assert!(!persisted.get(), "disabled state must not be persisted");
+        assert_eq!(fs::read(&backup_path).expect("peer generation retained"), peer);
+    }
+
+    #[test]
+    fn no_op_enable_revalidates_new_seed_backup_presence_before_persisting_the_key() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        enable_sync_encryption_in_dir(dir.path(), "first pass").expect("enable");
+        let peer_path = dir.path().join("data-backup-peer.json.enc");
+        let persisted = Cell::new(false);
+
+        let error = enable_sync_encryption_in_dir_with(
+            dir.path(),
+            "first pass",
+            || Ok(()),
+            |next, generation| {
+                let peer = encrypt_sync_artifact(br#"{"tasks":[{"id":"peer"}]}"#, next)
+                    .map_err(|error| terminal_error(error))?;
+                finalize_enabled_file_generation_with(
+                    generation,
+                    next,
+                    || {
+                        fs::write(&peer_path, peer).map_err(|error| error.to_string())?;
+                        Ok(())
+                    },
+                    |_| {
+                        persisted.set(true);
+                        Ok(())
+                    },
+                )
+            },
+        )
+        .expect_err("a newly visible managed generation must abort key persistence");
+
+        assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
+        assert!(!persisted.get(), "the stale key must not be persisted");
+        assert!(peer_path.exists(), "the peer generation must be retained");
     }
 
     #[test]
@@ -5733,10 +5805,15 @@ mod tests {
         let document_before = fs::read(&document_path).expect("document before");
         let journal_started = Cell::new(false);
 
-        let error = disable_sync_encryption_in_dir_with(dir.path(), &current.key, || {
-            journal_started.set(true);
-            Ok(())
-        })
+        let error = disable_sync_encryption_in_dir_with(
+            dir.path(),
+            &current.key,
+            || {
+                journal_started.set(true);
+                Ok(())
+            },
+            require_managed_sync_document_generations,
+        )
         .expect_err("a foreign generation must fail the read-only preflight");
 
         assert!(is_terminal_error(&error), "unexpected error: {error}");
@@ -11070,9 +11147,9 @@ struct SyncDocumentGeneration {
     version: String,
 }
 
-struct AuthoritativeEncryptedDocumentGeneration {
-    path: PathBuf,
-    document: Option<SyncDocumentGeneration>,
+struct ManagedSyncDocumentGenerations {
+    sync_dir: PathBuf,
+    versions: BTreeMap<String, Option<String>>,
 }
 
 fn is_transition_recovery_dir(name: &str) -> bool {
@@ -11379,50 +11456,117 @@ fn require_sync_document_generation(document: &SyncDocumentGeneration) -> Result
     Ok(())
 }
 
-fn snapshot_authoritative_encrypted_document(
-    sync_dir: &Path,
-    material: &SyncKeyMaterial,
-    require_present: bool,
-) -> Result<AuthoritativeEncryptedDocumentGeneration, String> {
-    let path = sync_dir.join(encrypted_artifact_name(DATA_FILE_NAME));
-    if !transition_regular_file_exists(&path)? {
-        if require_present {
-            return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
-        }
-        return Ok(AuthoritativeEncryptedDocumentGeneration {
-            path,
-            document: None,
-        });
-    }
+fn is_seed_backup_document_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    (lower.starts_with("mindwtr-backup-") || lower.starts_with("data-backup-"))
+        && (lower.ends_with(".json") || lower.ends_with(".json.enc"))
+}
 
-    let document = snapshot_sync_document(path.clone())?;
-    let plaintext = decrypt_sync_artifact(&document.bytes, &material.key)
-        .map_err(|error| terminal_error(error))?;
-    serde_json::from_slice::<Value>(&plaintext).map_err(|error| {
-        terminal_error(format!(
-            "Encrypted sync document is not valid JSON: {error}"
-        ))
-    })?;
-    Ok(AuthoritativeEncryptedDocumentGeneration {
-        path,
-        document: Some(document),
+fn managed_sync_document_names(sync_dir: &Path) -> Result<BTreeSet<String>, String> {
+    let legacy = format!("{}-sync.json", APP_NAME);
+    let plaintext_names = [
+        DATA_FILE_NAME.to_string(),
+        format!("{DATA_FILE_NAME}.bak"),
+        format!("{DATA_FILE_NAME}.bak.previous"),
+        format!("{DATA_FILE_NAME}.previous"),
+        legacy,
+    ];
+    let mut names = BTreeSet::new();
+    for name in plaintext_names {
+        names.insert(encrypted_artifact_name(&name));
+        names.insert(name);
+    }
+    for entry in transition_directory_entries(sync_dir)? {
+        let entry = entry.map_err(|error| {
+            format!(
+                "Failed to enumerate an entry in sync transition directory {}: {error}",
+                sync_dir.display()
+            )
+        })?;
+        let name = entry
+            .file_name()
+            .into_string()
+            .map_err(|name| format!("Sync transition path is not valid UTF-8: {name:?}"))?;
+        if !is_seed_backup_document_name(&name) {
+            continue;
+        }
+        let file_type = entry.file_type().map_err(|error| {
+            format!(
+                "Failed to inspect sync transition artifact {}: {error}",
+                entry.path().display()
+            )
+        })?;
+        if file_type.is_symlink() {
+            return Err(format!(
+                "Refusing to follow symbolic link during sync encryption transition: {}",
+                entry.path().display()
+            ));
+        }
+        if !file_type.is_file() {
+            return Err(format!(
+                "Sync encryption transition expected a regular file at {}",
+                entry.path().display()
+            ));
+        }
+        if name.to_ascii_lowercase().ends_with(".json.enc") {
+            names.insert(plaintext_artifact_name(&name));
+        } else {
+            names.insert(encrypted_artifact_name(&name));
+        }
+        names.insert(name);
+    }
+    Ok(names)
+}
+
+fn snapshot_managed_sync_document_generations(
+    sync_dir: &Path,
+    material: Option<&SyncKeyMaterial>,
+    require_encrypted_base: bool,
+) -> Result<ManagedSyncDocumentGenerations, String> {
+    let encrypted_base = encrypted_artifact_name(DATA_FILE_NAME);
+    let mut versions = BTreeMap::new();
+    for name in managed_sync_document_names(sync_dir)? {
+        let path = sync_dir.join(&name);
+        if !transition_regular_file_exists(&path)? {
+            versions.insert(name, None);
+            continue;
+        }
+        let bytes = fs::read(&path)
+            .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+        if name == encrypted_base {
+            if let Some(material) = material {
+                let plaintext = decrypt_sync_artifact(&bytes, &material.key)
+                    .map_err(|error| terminal_error(error))?;
+                serde_json::from_slice::<Value>(&plaintext).map_err(|error| {
+                    terminal_error(format!(
+                        "Encrypted sync document is not valid JSON: {error}"
+                    ))
+                })?;
+            }
+        }
+        versions.insert(name, Some(transition_artifact_fingerprint(&bytes)));
+    }
+    if require_encrypted_base && !matches!(versions.get(&encrypted_base), Some(Some(_))) {
+        return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
+    }
+    Ok(ManagedSyncDocumentGenerations {
+        sync_dir: sync_dir.to_path_buf(),
+        versions,
     })
 }
 
-fn require_authoritative_encrypted_document_generation(
-    generation: &AuthoritativeEncryptedDocumentGeneration,
+fn require_managed_sync_document_generations(
+    generation: &ManagedSyncDocumentGenerations,
 ) -> Result<(), String> {
-    match &generation.document {
-        Some(document) => require_sync_document_generation(document),
-        None if transition_regular_file_exists(&generation.path)? => {
-            Err(SYNC_FILE_WRITE_CONFLICT.to_string())
-        }
-        None => Ok(()),
+    let current = snapshot_managed_sync_document_generations(&generation.sync_dir, None, false)?;
+    if current.versions != generation.versions {
+        return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
     }
+    Ok(())
 }
 
 fn finalize_enabled_file_generation_with<BeforeRevalidate, Persist>(
-    generation: &AuthoritativeEncryptedDocumentGeneration,
+    generation: &ManagedSyncDocumentGenerations,
     material: &SyncKeyMaterial,
     before_revalidate: BeforeRevalidate,
     persist: Persist,
@@ -11432,7 +11576,7 @@ where
     Persist: FnOnce(&SyncKeyMaterial) -> Result<(), String>,
 {
     before_revalidate()?;
-    require_authoritative_encrypted_document_generation(generation)?;
+    require_managed_sync_document_generations(generation)?;
     persist(material)
 }
 
@@ -12027,7 +12171,7 @@ where
     BeforeMutation: FnOnce() -> Result<(), String>,
     Finalize: FnOnce(
         &SyncKeyMaterial,
-        &AuthoritativeEncryptedDocumentGeneration,
+        &ManagedSyncDocumentGenerations,
     ) -> Result<(), String>,
 {
     let lock = acquire_sync_lock(sync_dir)?;
@@ -12108,7 +12252,8 @@ where
             // Only now, with the ciphertext on disk and proven readable, does the plaintext go.
             remove_transition_artifact_if_version(path, &document.version)?;
         }
-        let generation = snapshot_authoritative_encrypted_document(sync_dir, &material, false)?;
+        let generation =
+            snapshot_managed_sync_document_generations(sync_dir, Some(&material), false)?;
         finalize(&material, &generation)?;
         Ok(material)
     })();
@@ -12118,16 +12263,23 @@ where
 
 #[cfg(test)]
 fn disable_sync_encryption_in_dir(sync_dir: &Path, key: &[u8; KEY_LEN]) -> Result<(), String> {
-    disable_sync_encryption_in_dir_with(sync_dir, key, || Ok(()))
+    disable_sync_encryption_in_dir_with(
+        sync_dir,
+        key,
+        || Ok(()),
+        require_managed_sync_document_generations,
+    )
 }
 
-fn disable_sync_encryption_in_dir_with<BeforeMutation>(
+fn disable_sync_encryption_in_dir_with<BeforeMutation, Finalize>(
     sync_dir: &Path,
     key: &[u8; KEY_LEN],
     before_mutation: BeforeMutation,
+    finalize: Finalize,
 ) -> Result<(), String>
 where
     BeforeMutation: FnOnce() -> Result<(), String>,
+    Finalize: FnOnce(&ManagedSyncDocumentGenerations) -> Result<(), String>,
 {
     let lock = acquire_sync_lock(sync_dir)?;
     let result = (|| -> Result<(), String> {
@@ -12188,6 +12340,8 @@ where
             }
             remove_transition_artifact_if_version(path, &document.version)?;
         }
+        let generation = snapshot_managed_sync_document_generations(sync_dir, None, false)?;
+        finalize(&generation)?;
         Ok(())
     })();
     release_sync_lock(&lock);
@@ -12227,7 +12381,7 @@ where
     BeforeMutation: FnOnce() -> Result<(), String>,
     Finalize: FnOnce(
         &SyncKeyMaterial,
-        &AuthoritativeEncryptedDocumentGeneration,
+        &ManagedSyncDocumentGenerations,
     ) -> Result<(), String>,
 {
     let next = derive_sync_key_material(next_passphrase, random_salt(), SYNC_CRYPTO_DEFAULT_KDF_PARAMS)
@@ -12288,7 +12442,7 @@ where
                 &mut recovered_by_salt,
             )?;
         }
-        let generation = snapshot_authoritative_encrypted_document(sync_dir, &next, false)?;
+        let generation = snapshot_managed_sync_document_generations(sync_dir, Some(&next), false)?;
         finalize(&next, &generation)?;
         Ok(())
     })();
@@ -12346,10 +12500,15 @@ pub(crate) fn disable_sync_encryption(
 ) -> Result<(), String> {
     let sync_dir = require_file_backend_dir(&app, path)?;
     let key = cached_key_or_err(&app)?;
-    disable_sync_encryption_in_dir_with(&sync_dir, &key, || {
-        begin_sync_encryption_transition(&app, TRANSITION_DISABLE)
-    })?;
-    clear_encryption_state(&app)
+    disable_sync_encryption_in_dir_with(
+        &sync_dir,
+        &key,
+        || begin_sync_encryption_transition(&app, TRANSITION_DISABLE),
+        |generation| {
+            require_managed_sync_document_generations(generation)?;
+            clear_encryption_state(&app)
+        },
+    )
 }
 
 #[tauri::command(async)]
@@ -12437,8 +12596,11 @@ pub(crate) fn provide_sync_encryption_passphrase(
     })?;
     match outcome {
         Some(material) => {
-            let generation =
-                snapshot_authoritative_encrypted_document(&sync_dir, &material, true)?;
+            let generation = snapshot_managed_sync_document_generations(
+                &sync_dir,
+                Some(&material),
+                true,
+            )?;
             finalize_enabled_file_generation_with(
                 &generation,
                 &material,
