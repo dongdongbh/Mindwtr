@@ -987,6 +987,7 @@ describe('desktop sync-service runtime', () => {
     it('preserves local edits that land before a deferred file attachment upload', async () => {
         const syncServiceModule = await syncServiceModulePromise;
 
+        fsMocks.stat.mockResolvedValue({ mtime: new Date('2026-01-01T00:00:00.000Z'), size: 3 });
         performSyncCycleMock.mockResolvedValue({
             status: 'success',
             stats: emptyStats,
@@ -1055,6 +1056,7 @@ describe('desktop sync-service runtime', () => {
     it('splits file backend cloud keys into native path segments for Windows sync folders', async () => {
         const syncServiceModule = await syncServiceModulePromise;
 
+        fsMocks.stat.mockResolvedValue({ mtime: new Date('2026-01-01T00:00:00.000Z'), size: 3 });
         performSyncCycleMock.mockResolvedValue({
             status: 'success',
             stats: emptyStats,
@@ -1490,6 +1492,7 @@ describe('desktop sync-service runtime', () => {
 
     it('proves a first Dropbox connection with attachments using only the staged credential handle', async () => {
         const syncServiceModule = await syncServiceModulePromise;
+        fsMocks.stat.mockResolvedValue({ mtime: new Date('2026-01-01T00:00:00.000Z'), size: 3 });
         const fetchMock = withRemoteMutationFence(async (input: RequestInfo | URL, init?: RequestInit) => {
             const url = String(input);
             if (url === 'https://content.dropboxapi.com/2/files/upload') {
@@ -1582,6 +1585,7 @@ describe('desktop sync-service runtime', () => {
 
     it('never falls back to the old Dropbox account while refreshing reconnect attachment credentials', async () => {
         const syncServiceModule = await syncServiceModulePromise;
+        fsMocks.stat.mockResolvedValue({ mtime: new Date('2026-01-01T00:00:00.000Z'), size: 3 });
         let attachmentUploadAttempts = 0;
         const authorizationHeaders: string[] = [];
         const fetchMock = withRemoteMutationFence(async (input: RequestInfo | URL, init?: RequestInit) => {
