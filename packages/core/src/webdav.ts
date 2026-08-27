@@ -902,6 +902,7 @@ const assertWebdavConditionalWriteSupport = async (
         if (!webdavProbeBytesEqual(initial.bytes, initialBytes) || !initial.version) {
             throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV capability probe');
         }
+        const initialVersion = initial.version;
         hasSafeProbeVersion = true;
 
         await requireWebdavConditionalConflict(
@@ -919,14 +920,14 @@ const assertWebdavConditionalWriteSupport = async (
             probeUrl,
             replacementBytes,
             'application/octet-stream',
-            initial.version,
+            initialVersion,
             options,
         );
         const replacement = await webdavGetFileVersioned(probeUrl, options);
         if (
             !webdavProbeBytesEqual(replacement.bytes, replacementBytes)
             || !replacement.version
-            || replacement.version === initial.version
+            || replacement.version === initialVersion
         ) {
             throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV If-Match replacement');
         }
@@ -936,14 +937,14 @@ const assertWebdavConditionalWriteSupport = async (
                 probeUrl,
                 staleBytes,
                 'application/octet-stream',
-                initial.version,
+                initialVersion,
                 options,
             ),
             'WebDAV stale If-Match enforcement',
         );
 
         await requireWebdavConditionalConflict(
-            () => webdavDeleteFileVersioned(probeUrl, initial.version, options),
+            () => webdavDeleteFileVersioned(probeUrl, initialVersion, options),
             'WebDAV stale If-Match delete enforcement',
         );
         const retained = await webdavGetFileVersioned(probeUrl, options);
