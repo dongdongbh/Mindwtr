@@ -4486,7 +4486,8 @@ mod tests {
     fn renderer_cycle_lease_blocks_native_transitions_until_release() {
         let dir = tempfile::tempdir().expect("temp dir");
         let state = FileSyncLeaseState::default();
-        let token = acquire_file_sync_lease_for_dir(&state, dir.path()).expect("cycle lease");
+        let token =
+            acquire_file_sync_lease_for_dir(&state, dir.path(), "main").expect("cycle lease");
 
         // Enable, passphrase change and disable all enter through
         // `acquire_sync_lock`; none may cross the ordinary cycle's final
@@ -4499,7 +4500,7 @@ mod tests {
             );
         }
 
-        release_file_sync_lease_token(&state, &token).expect("release cycle lease");
+        release_file_sync_lease_token(&state, &token, "main").expect("release cycle lease");
         let transition = acquire_sync_lock(dir.path()).expect("transition after release");
         release_sync_lock(&transition);
     }
@@ -4508,7 +4509,8 @@ mod tests {
     fn renderer_cycle_lease_allows_its_own_document_write_without_relocking() {
         let dir = tempfile::tempdir().expect("temp dir");
         let state = FileSyncLeaseState::default();
-        let token = acquire_file_sync_lease_for_dir(&state, dir.path()).expect("cycle lease");
+        let token =
+            acquire_file_sync_lease_for_dir(&state, dir.path(), "main").expect("cycle lease");
         let leases = state.leases.lock().expect("lease state");
         let held = leases.get(&token).expect("held token");
         assert_eq!(held.sync_dir, normalize_lease_sync_dir(dir.path()));
@@ -4523,7 +4525,76 @@ mod tests {
         .expect("write under existing lease");
         drop(leases);
 
-        release_file_sync_lease_token(&state, &token).expect("release cycle lease");
+        release_file_sync_lease_token(&state, &token, "main").expect("release cycle lease");
+    }
+
+    #[test]
+    fn destroyed_renderer_releases_its_leases_and_allows_reacquisition() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let state = FileSyncLeaseState::default();
+        let _token =
+            acquire_file_sync_lease_for_dir(&state, dir.path(), "main").expect("renderer lease");
+
+        assert_eq!(
+            acquire_sync_lock(dir.path()).expect_err("live renderer must retain its lease"),
+            "Sync lock held by another process"
+        );
+        assert_eq!(
+            release_file_sync_leases_for_window(&state, "main")
+                .expect("destroyed renderer cleanup"),
+            1
+        );
+
+        let next = acquire_file_sync_lease_for_dir(&state, dir.path(), "replacement")
+            .expect("replacement renderer reacquires after teardown");
+        release_file_sync_lease_token(&state, &next, "replacement")
+            .expect("release replacement lease");
+    }
+
+    #[test]
+    fn renderer_teardown_only_releases_leases_owned_by_that_window() {
+        let first_dir = tempfile::tempdir().expect("first temp dir");
+        let second_dir = tempfile::tempdir().expect("second temp dir");
+        let state = FileSyncLeaseState::default();
+        let _first =
+            acquire_file_sync_lease_for_dir(&state, first_dir.path(), "main").expect("main lease");
+        let second = acquire_file_sync_lease_for_dir(&state, second_dir.path(), "quick-add")
+            .expect("quick-add lease");
+
+        assert_eq!(
+            release_file_sync_leases_for_window(&state, "main").expect("main teardown"),
+            1
+        );
+        let first_reacquired = acquire_sync_lock(first_dir.path()).expect("main lock released");
+        release_sync_lock(&first_reacquired);
+        assert_eq!(
+            acquire_sync_lock(second_dir.path())
+                .expect_err("unrelated live renderer lease must remain held"),
+            "Sync lock held by another process"
+        );
+
+        release_file_sync_lease_token(&state, &second, "quick-add")
+            .expect("release quick-add lease");
+    }
+
+    #[test]
+    fn renderer_cannot_release_another_windows_lease() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let state = FileSyncLeaseState::default();
+        let token =
+            acquire_file_sync_lease_for_dir(&state, dir.path(), "main").expect("main lease");
+
+        assert_eq!(
+            release_file_sync_lease_token(&state, &token, "quick-add")
+                .expect_err("wrong renderer must not release lease"),
+            "File Sync lease belongs to a different renderer window"
+        );
+        assert_eq!(
+            acquire_sync_lock(dir.path()).expect_err("lease must remain held"),
+            "Sync lock held by another process"
+        );
+
+        release_file_sync_lease_token(&state, &token, "main").expect("owner releases lease");
     }
 
     #[test]
@@ -10765,6 +10836,7 @@ struct SyncFileLock {
 #[derive(Debug)]
 struct HeldFileSyncLease {
     sync_dir: PathBuf,
+    owner_window_label: String,
     _sync_lock: SyncFileLock,
 }
 
@@ -10860,6 +10932,7 @@ fn normalize_lease_sync_dir(sync_dir: &Path) -> PathBuf {
 fn acquire_file_sync_lease_for_dir(
     state: &FileSyncLeaseState,
     sync_dir: &Path,
+    owner_window_label: &str,
 ) -> Result<String, String> {
     let sync_dir = normalize_lease_sync_dir(sync_dir);
     let sync_lock = acquire_sync_lock(&sync_dir)?;
@@ -10881,6 +10954,7 @@ fn acquire_file_sync_lease_for_dir(
         token.clone(),
         HeldFileSyncLease {
             sync_dir,
+            owner_window_label: owner_window_label.to_string(),
             _sync_lock: sync_lock,
         },
     );
@@ -10890,20 +10964,58 @@ fn acquire_file_sync_lease_for_dir(
 fn release_file_sync_lease_token(
     state: &FileSyncLeaseState,
     token: &str,
+    owner_window_label: &str,
 ) -> Result<(), String> {
-    let lease = state
+    let mut leases = state
         .leases
         .lock()
-        .map_err(|_| "File Sync lease state is unavailable".to_string())?
+        .map_err(|_| "File Sync lease state is unavailable".to_string())?;
+    let lease = leases
+        .get(token)
+        .ok_or_else(|| "Unknown or already released File Sync lease".to_string())?;
+    if lease.owner_window_label != owner_window_label {
+        return Err("File Sync lease belongs to a different renderer window".to_string());
+    }
+    let lease = leases
         .remove(token)
         .ok_or_else(|| "Unknown or already released File Sync lease".to_string())?;
+    drop(leases);
     release_sync_lock(&lease._sync_lock);
     Ok(())
+}
+
+/// Release only leases whose renderer window has been destroyed. A live
+/// renderer's lease is never reclaimed by age or by another window.
+pub(crate) fn release_file_sync_leases_for_window(
+    state: &FileSyncLeaseState,
+    owner_window_label: &str,
+) -> Result<usize, String> {
+    let mut leases = state
+        .leases
+        .lock()
+        .map_err(|_| "File Sync lease state is unavailable".to_string())?;
+    let owned_tokens = leases
+        .iter()
+        .filter_map(|(token, lease)| {
+            (lease.owner_window_label == owner_window_label).then(|| token.clone())
+        })
+        .collect::<Vec<_>>();
+    let owned_leases = owned_tokens
+        .iter()
+        .filter_map(|token| leases.remove(token))
+        .collect::<Vec<_>>();
+    drop(leases);
+    let released = owned_leases.len();
+    for lease in owned_leases {
+        release_sync_lock(&lease._sync_lock);
+    }
+    Ok(released)
 }
 
 #[tauri::command(async)]
 pub(crate) fn acquire_file_sync_lease(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, FileSyncLeaseState>,
     path: Option<String>,
 ) -> Result<String, String> {
@@ -10912,15 +11024,16 @@ pub(crate) fn acquire_file_sync_lease(
         None => configured_sync_dir(&app)?
             .ok_or_else(|| "Sync path is not configured".to_string())?,
     };
-    acquire_file_sync_lease_for_dir(&state, &sync_dir)
+    acquire_file_sync_lease_for_dir(&state, &sync_dir, window.label())
 }
 
 #[tauri::command(async)]
 pub(crate) fn release_file_sync_lease(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, FileSyncLeaseState>,
     token: String,
 ) -> Result<(), String> {
-    release_file_sync_lease_token(&state, &token)
+    release_file_sync_lease_token(&state, &token, window.label())
 }
 
 /// The "no remote yet" payload for a fresh sync folder. Must include every
@@ -11802,6 +11915,7 @@ fn write_sync_file_to_dir_with_lease(
 #[tauri::command(async)]
 pub(crate) fn write_sync_file(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     lease_state: tauri::State<'_, FileSyncLeaseState>,
     data: Value,
     path: Option<String>,
@@ -11827,6 +11941,9 @@ pub(crate) fn write_sync_file(
             .ok_or_else(|| "Unknown or already released File Sync lease".to_string())?;
         if lease.sync_dir != normalize_lease_sync_dir(&sync_dir) {
             return Err("File Sync lease does not belong to this sync folder".to_string());
+        }
+        if lease.owner_window_label != window.label() {
+            return Err("File Sync lease belongs to a different renderer window".to_string());
         }
         return write_sync_file_to_dir_with_lease(
             &sync_dir,
