@@ -306,6 +306,84 @@ describe('useTaskEditState', () => {
         expect(onClose).toHaveBeenCalledOnce();
     });
 
+    it('retries a failed attachment durability barrier even after the optimistic task becomes the baseline', async () => {
+        let state!: ReturnType<typeof useTaskEditState>;
+        let currentTask = task;
+        let visible = true;
+        const settleAttachmentDraft = vi.fn();
+        const onClose = vi.fn();
+        const onSave = vi.fn().mockResolvedValue({ success: true });
+        const resetCopilotStateRef = { current: vi.fn() };
+        const added = {
+            id: 'draft-file',
+            kind: 'file' as const,
+            title: 'draft.txt',
+            uri: 'file:///documents/attachments/draft-file.txt',
+            createdAt: '2026-08-27T00:00:00.000Z',
+            updatedAt: '2026-08-27T00:00:00.000Z',
+        };
+        let resolveRetry!: () => void;
+        flushPendingSaveMock
+            .mockRejectedValueOnce(new Error('sqlite unavailable'))
+            .mockImplementationOnce(() => new Promise<void>((resolve) => {
+                resolveRetry = resolve;
+            }));
+
+        function Probe() {
+            state = useTaskEditState({
+                onClose,
+                onSave,
+                onSaveError: vi.fn(),
+                resetCopilotStateRef,
+                settleAttachmentDraft,
+                sections: [],
+                task: currentTask,
+                tasks: [currentTask],
+                visible,
+            });
+            return null;
+        }
+
+        let tree!: renderer.ReactTestRenderer;
+        renderer.act(() => {
+            tree = renderer.create(React.createElement(Probe));
+        });
+        renderer.act(() => state.setAttachments([added]));
+        await renderer.act(async () => {
+            expect(await state.draftLifecycle.save()).toBe(false);
+        });
+
+        currentTask = {
+            ...task,
+            attachments: [added],
+            updatedAt: '2026-08-27T00:00:01.000Z',
+        };
+        visible = false;
+        renderer.act(() => tree.update(React.createElement(Probe)));
+        visible = true;
+        renderer.act(() => tree.update(React.createElement(Probe)));
+
+        let retry!: Promise<boolean>;
+        renderer.act(() => {
+            retry = state.draftLifecycle.save();
+        });
+        await Promise.resolve();
+        expect(onSave).toHaveBeenCalledOnce();
+        expect(settleAttachmentDraft).not.toHaveBeenCalled();
+        expect(onClose).not.toHaveBeenCalled();
+
+        resolveRetry();
+        await renderer.act(async () => {
+            expect(await retry).toBe(true);
+        });
+        expect(settleAttachmentDraft).toHaveBeenCalledWith({
+            baselineAttachments: [added],
+            draftAttachments: [added],
+            committedAttachments: [added],
+        });
+        expect(onClose).toHaveBeenCalledOnce();
+    });
+
     it('settles a copied attachment against the baseline when the editor unmounts', () => {
         let state!: ReturnType<typeof useTaskEditState>;
         const settleAttachmentDraft = vi.fn();

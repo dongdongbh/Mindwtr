@@ -219,27 +219,29 @@ export function useTaskEditState({
             title: titleDraftRef.current,
             description: descriptionDraftRef.current,
         });
+        const wasAwaitingDurability = attachmentSaveAwaitingDurabilityRef.current;
         if (updates && Object.keys(updates).length > 0) {
             const attachmentSaveRequiresDurability = areDraftAttachmentsDirty(
                 saveDraftState.attachments,
                 currentTask,
             );
-            attachmentSaveAwaitingDurabilityRef.current = attachmentSaveRequiresDurability;
+            attachmentSaveAwaitingDurabilityRef.current = wasAwaitingDurability
+                || attachmentSaveRequiresDurability;
             const saved = await Promise.resolve(writePatch(currentTask.id, updates));
             if (!saved) {
-                attachmentSaveAwaitingDurabilityRef.current = false;
+                attachmentSaveAwaitingDurabilityRef.current = wasAwaitingDurability;
                 return false;
             }
-            if (attachmentSaveRequiresDurability) {
-                try {
-                    await flushPendingSave();
-                } catch (error) {
-                    onSaveError(getUnknownErrorMessage(error));
-                    // Keep the guard raised. The store retains a retry snapshot, so
-                    // neither the baseline bytes nor newly submitted bytes are yet
-                    // safe to classify as orphaned.
-                    return false;
-                }
+        }
+        if (attachmentSaveAwaitingDurabilityRef.current) {
+            try {
+                await flushPendingSave();
+            } catch (error) {
+                onSaveError(getUnknownErrorMessage(error));
+                // Keep the guard raised. The store retains a retry snapshot, so
+                // neither the baseline bytes nor newly submitted bytes are yet
+                // safe to classify as orphaned.
+                return false;
             }
         }
         attachmentSaveAwaitingDurabilityRef.current = false;
