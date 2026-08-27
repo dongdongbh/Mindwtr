@@ -2,6 +2,7 @@ import {
     commitProvenSyncConfiguration,
     normalizeCloudProvider,
     normalizeSyncBackend,
+    SyncEncryptionTransitionIncompleteError,
     type PersistedSyncConfiguration,
     type SecretAuthority,
     type SyncConfigurationCandidate,
@@ -33,6 +34,7 @@ export type MobileSyncConfigurationTransactionDependencies = {
     clearDropboxTokens: () => Promise<void>;
     deleteSecret: (key: string) => Promise<void>;
     getDropboxTokens: () => Promise<DropboxAuthTokens | null>;
+    getIncompleteSyncEncryptionTransition: () => Promise<import('@mindwtr/core').SyncEncryptionTransitionKind | null>;
     getSecret: (key: string) => Promise<string | null>;
     multiGet: (keys: string[]) => Promise<readonly StorageSnapshotEntry[]>;
     multiSet: (entries: StorageEntry[]) => Promise<void>;
@@ -259,6 +261,10 @@ export async function commitProvenMobileSyncConfiguration(
     dependencies: MobileSyncConfigurationTransactionDependencies,
 ): Promise<void> {
     try {
+        const incompleteTransition = await dependencies.getIncompleteSyncEncryptionTransition();
+        if (incompleteTransition) {
+            throw new SyncEncryptionTransitionIncompleteError(incompleteTransition);
+        }
         await commitProvenSyncConfiguration(toCandidate(candidate), createPort(candidate, dependencies));
     } catch (error) {
         const syncRemainsDisabled = Boolean(

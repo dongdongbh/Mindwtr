@@ -46,6 +46,7 @@ import {
     type SyncEncryptionRemoteRead,
     type SyncEncryptionStatus,
     type SyncEncryptionTransitionProgress,
+    type SyncEncryptionTransitionKind,
     type SyncKeyMaterial,
     type WebDavOptions,
 } from '@mindwtr/core';
@@ -59,7 +60,12 @@ const OFF_STATUS: SyncEncryptionStatus = { state: 'off' };
 
 type NativeKdfParams = { mKib: number; t: number; p: number };
 type NativeKeyMaterial = { key: string; salt: string; kdfParams: NativeKdfParams };
-type NativeStatus = { state: SyncEncryptionStatus['state']; kdfParams?: NativeKdfParams; hasKey: boolean };
+type NativeStatus = {
+    state: SyncEncryptionStatus['state'];
+    kdfParams?: NativeKdfParams;
+    hasKey: boolean;
+    incompleteTransition?: SyncEncryptionTransitionKind;
+};
 
 const base64ToBytes = (value: string): Uint8Array => {
     const binary = atob(value);
@@ -131,8 +137,12 @@ export async function isSyncEncryptionEnabledButLocked(): Promise<boolean> {
 
 export async function getSyncEncryptionStatus(): Promise<SyncEncryptionStatus> {
     const status = await invokeNativeOr<NativeStatus | null>(null, 'get_sync_encryption_status');
-    if (!status || status.state === 'off') return OFF_STATUS;
-    return { state: status.state, kdfParams: status.kdfParams };
+    if (!status) return OFF_STATUS;
+    return {
+        state: status.state,
+        kdfParams: status.kdfParams,
+        incompleteTransition: status.incompleteTransition,
+    };
 }
 
 /** Persists `remote-encrypted-no-key` the moment a TS seam finds ciphertext it cannot open.
@@ -212,9 +222,12 @@ const createTransitionPorts = (initial: SyncEncryptionLocalState | null) => {
         write: (next) => {
             current = next;
             const key = pendingKey;
-            queued.push(
-                (async () => {
-                    if (!next || next.state === 'off') {
+            const operation = (async () => {
+                    if (next?.incompleteTransition) {
+                        await invokeNative('mark_sync_encryption_transition_incomplete', {
+                            transitionKind: next.incompleteTransition,
+                        });
+                    } else if (!next || next.state === 'off') {
                         await invokeNative('clear_sync_encryption_key_material');
                     } else if (key && next.discoveredSalt && next.discoveredParams) {
                         await invokeNative('set_sync_encryption_key_material', {
@@ -224,8 +237,9 @@ const createTransitionPorts = (initial: SyncEncryptionLocalState | null) => {
                         });
                     }
                     clearSyncEncryptionMaterialCache();
-                })(),
-            );
+                })();
+            queued.push(operation);
+            return operation;
         },
     };
 
@@ -239,7 +253,13 @@ const createTransitionPorts = (initial: SyncEncryptionLocalState | null) => {
 };
 
 const statusToLocalState = (status: SyncEncryptionStatus): SyncEncryptionLocalState | null =>
-    status.state === 'off' ? null : { state: status.state, discoveredParams: status.kdfParams };
+    status.state === 'off' && !status.incompleteTransition
+        ? null
+        : {
+            state: status.state,
+            discoveredParams: status.kdfParams,
+            incompleteTransition: status.incompleteTransition,
+        };
 
 const openTransitionPorts = async () =>
     createTransitionPorts(statusToLocalState(await getSyncEncryptionStatus()));
@@ -525,12 +545,14 @@ export const SYNC_ENCRYPTION_TERMINAL = 'SYNC_ENCRYPTION_TERMINAL';
 export const SYNC_ENCRYPTION_STATE_UNAVAILABLE = 'SYNC_ENCRYPTION_STATE_UNAVAILABLE';
 export const SYNC_ENCRYPTION_REMOTE_ENCRYPTED = 'SYNC_ENCRYPTION_REMOTE_ENCRYPTED';
 export const SYNC_ENCRYPTION_REMOTE_PLAINTEXT = 'SYNC_ENCRYPTION_REMOTE_PLAINTEXT';
+export const SYNC_ENCRYPTION_TRANSITION_INCOMPLETE = 'SYNC_ENCRYPTION_TRANSITION_INCOMPLETE';
 
 export type SyncEncryptionFailure =
     | 'local-state-unavailable'
     | 'needs-passphrase'
     | 'remote-encrypted-no-key'
-    | 'remote-plaintext';
+    | 'remote-plaintext'
+    | 'transition-incomplete';
 
 /** A decrypt failure is never a permission problem and never "corrupt data we repaired" — it
  *  is always "this device needs the passphrase again". Returning a discriminant (rather than a
@@ -545,6 +567,7 @@ export function classifySyncEncryptionFailure(error: unknown): SyncEncryptionFai
     // way. The two sentinels do not share a prefix, so order only decides which wins on the
     // (impossible) both-present case.
     if (message.includes(SYNC_ENCRYPTION_STATE_UNAVAILABLE)) return 'local-state-unavailable';
+    if (message.includes(SYNC_ENCRYPTION_TRANSITION_INCOMPLETE)) return 'transition-incomplete';
     if (message.includes(SYNC_ENCRYPTION_REMOTE_ENCRYPTED)) return 'remote-encrypted-no-key';
     if (message.includes(SYNC_ENCRYPTION_REMOTE_PLAINTEXT)) return 'remote-plaintext';
     if (message.includes(SYNC_ENCRYPTION_TERMINAL)) return 'needs-passphrase';

@@ -156,12 +156,21 @@ pub(crate) struct SyncEncryptionLocalState {
     /// backend that refuses to store). See `store_cached_key`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incomplete_transition: Option<String>,
 }
 
 pub(crate) const STATE_OFF: &str = "off";
 pub(crate) const STATE_ENABLED: &str = "enabled";
 pub(crate) const STATE_REMOTE_ENCRYPTED_NO_KEY: &str = "remote-encrypted-no-key";
 pub(crate) const STATE_REMOTE_PLAINTEXT: &str = "remote-plaintext";
+pub(crate) const TRANSITION_ENABLE: &str = "enable";
+pub(crate) const TRANSITION_DISABLE: &str = "disable";
+pub(crate) const TRANSITION_CHANGE_PASSPHRASE: &str = "change-passphrase";
+
+fn valid_transition_kind(kind: &str) -> bool {
+    matches!(kind, TRANSITION_ENABLE | TRANSITION_DISABLE | TRANSITION_CHANGE_PASSPHRASE)
+}
 
 /// The states in which this device owns a usable key. `remote-plaintext` is one of them on
 /// purpose: dropping to "encryption off" there is exactly the silent downgrade the state
@@ -203,7 +212,11 @@ fn read_state_file(path: &Path) -> Result<Option<SyncEncryptionLocalState>, Stri
     };
     let parsed: SyncEncryptionLocalState = serde_json::from_str(&raw)
         .map_err(|_| state_unavailable_error("local sync encryption state is invalid"))?;
-    if state_holds_key(&parsed.state) || parsed.state == STATE_REMOTE_ENCRYPTED_NO_KEY {
+    let valid_state = state_holds_key(&parsed.state)
+        || parsed.state == STATE_REMOTE_ENCRYPTED_NO_KEY
+        || (parsed.state == STATE_OFF && parsed.incomplete_transition.is_some());
+    let valid_transition = parsed.incomplete_transition.as_deref().map_or(true, valid_transition_kind);
+    if valid_state && valid_transition {
         Ok(Some(parsed))
     } else {
         Err(state_unavailable_error("local sync encryption state is invalid"))
@@ -252,6 +265,30 @@ pub(crate) fn write_local_state(
 ) -> Result<(), String> {
     let _guard = lock_sync_encryption_state();
     write_state_file(&sync_encryption_state_path(app), state)
+}
+
+pub(crate) fn begin_sync_encryption_transition(
+    app: &tauri::AppHandle,
+    kind: &str,
+) -> Result<(), String> {
+    if !valid_transition_kind(kind) {
+        return Err(format!("Invalid sync encryption transition kind: {kind}"));
+    }
+    let _guard = lock_sync_encryption_state();
+    let path = sync_encryption_state_path(app);
+    let mut current = read_state_file(&path)?.unwrap_or_else(|| SyncEncryptionLocalState {
+        state: STATE_OFF.to_string(),
+        ..SyncEncryptionLocalState::default()
+    });
+    if let Some(existing) = current.incomplete_transition.as_deref() {
+        if existing != kind {
+            return Err(format!(
+                "SYNC_ENCRYPTION_TRANSITION_INCOMPLETE: retry the {existing} sync encryption transition before starting {kind}"
+            ));
+        }
+    }
+    current.incomplete_transition = Some(kind.to_string());
+    write_state_file(&path, Some(&current))
 }
 
 fn keyring_key_available(app: &tauri::AppHandle) -> Option<String> {
@@ -333,6 +370,7 @@ pub(crate) fn persist_enabled_material(
             salt: Some(bytes_to_hex(&material.salt)),
             kdf_params: Some(material.params.into()),
             fallback_key,
+            incomplete_transition: None,
         }),
     )
 }
@@ -362,6 +400,7 @@ pub(crate) fn mark_remote_encrypted_no_key(
             salt: Some(bytes_to_hex(salt)),
             kdf_params: Some(params.into()),
             fallback_key: None,
+            incomplete_transition: None,
         }),
     )
 }
@@ -397,6 +436,8 @@ pub(crate) struct SyncEncryptionStatus {
     /// Whether the derived key is actually available on this device right now. Phase 3 needs
     /// this to tell "enabled and working" from "enabled but the keyring entry is gone".
     pub has_key: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub incomplete_transition: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -447,6 +488,7 @@ pub(crate) fn get_sync_encryption_status(
             state: STATE_OFF.to_string(),
             kdf_params: None,
             has_key: false,
+            incomplete_transition: None,
         });
     };
     let has_key = state_holds_key(&state.state)
@@ -454,7 +496,12 @@ pub(crate) fn get_sync_encryption_status(
             .or_else(|| state.fallback_key.clone())
             .and_then(|encoded| decode_key(&encoded))
             .is_some();
-    Ok(SyncEncryptionStatus { state: state.state, kdf_params: state.kdf_params, has_key })
+    Ok(SyncEncryptionStatus {
+        state: state.state,
+        kdf_params: state.kdf_params,
+        has_key,
+        incomplete_transition: state.incomplete_transition,
+    })
 }
 
 /// The key cache's `getKey`, and the material the TS-driven seams (Dropbox, and WebDAV under a
@@ -526,6 +573,14 @@ pub(crate) fn mark_sync_encryption_remote_discovered(
 #[tauri::command(async)]
 pub(crate) fn mark_sync_encryption_remote_plaintext(app: tauri::AppHandle) -> Result<(), String> {
     mark_remote_plaintext(&app)
+}
+
+#[tauri::command(async)]
+pub(crate) fn mark_sync_encryption_transition_incomplete(
+    app: tauri::AppHandle,
+    transition_kind: String,
+) -> Result<(), String> {
+    begin_sync_encryption_transition(&app, &transition_kind)
 }
 
 #[cfg(test)]
@@ -601,6 +656,7 @@ mod tests {
             salt: Some("00112233445566778899aabbccddeeff".to_string()),
             kdf_params: Some(SYNC_CRYPTO_DEFAULT_KDF_PARAMS.into()),
             fallback_key: None,
+            incomplete_transition: None,
         };
         write_state_file(&path, Some(&state)).expect("write state");
         assert_eq!(read_state_file(&path).expect("read state"), Some(state));
@@ -622,6 +678,19 @@ mod tests {
         assert!(read_state_file(&path)
             .expect_err("explicit off must fail")
             .contains(SYNC_ENCRYPTION_STATE_UNAVAILABLE));
+    }
+
+    #[test]
+    fn an_off_state_is_valid_only_with_a_matching_transition_journal() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join(SYNC_ENCRYPTION_STATE_FILE_NAME);
+        let state = SyncEncryptionLocalState {
+            state: STATE_OFF.to_string(),
+            incomplete_transition: Some(TRANSITION_ENABLE.to_string()),
+            ..SyncEncryptionLocalState::default()
+        };
+        write_state_file(&path, Some(&state)).expect("write journal");
+        assert_eq!(read_state_file(&path).expect("read journal"), Some(state));
     }
 
     #[test]

@@ -35,10 +35,12 @@ use crate::sync_crypto::{
     SyncKeyMaterial, KEY_LEN, SALT_LEN, SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
 };
 use crate::sync_encryption::{
-    bytes_to_hex, clear_encryption_state, encrypted_artifact_name, hex_to_bytes,
-    is_encryption_enabled, is_terminal_error, mark_remote_encrypted_no_key, mark_remote_plaintext,
-    persist_enabled_material, plaintext_artifact_name, resolve_key_material, terminal_error,
-    SYNC_ENCRYPTION_REMOTE_ENCRYPTED, SYNC_ENCRYPTION_REMOTE_PLAINTEXT,
+    begin_sync_encryption_transition, bytes_to_hex, clear_encryption_state,
+    encrypted_artifact_name, hex_to_bytes, is_encryption_enabled, is_terminal_error,
+    mark_remote_encrypted_no_key, mark_remote_plaintext, persist_enabled_material,
+    plaintext_artifact_name, resolve_key_material, terminal_error, TRANSITION_CHANGE_PASSPHRASE,
+    TRANSITION_DISABLE, TRANSITION_ENABLE, SYNC_ENCRYPTION_REMOTE_ENCRYPTED,
+    SYNC_ENCRYPTION_REMOTE_PLAINTEXT,
 };
 #[cfg(target_os = "macos")]
 use crate::{
@@ -5340,6 +5342,48 @@ mod tests {
         );
         assert!(dir.path().join(DATA_FILE_NAME).exists());
         assert!(!dir.path().join("data.json.enc").exists());
+    }
+
+    #[test]
+    fn transition_journal_hook_fails_before_any_artifact_mutation() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        let plaintext = fs::read(dir.path().join(DATA_FILE_NAME)).expect("plaintext before");
+        let attachment_path = dir.path().join(SYNC_ATTACHMENTS_DIR_NAME).join("a1.png");
+        let attachment_plaintext = fs::read(&attachment_path).expect("attachment before");
+
+        let error = enable_sync_encryption_in_dir_with(dir.path(), "first pass", || {
+            Err("journal blocked enable".to_string())
+        })
+        .expect_err("journal failure must abort enable");
+        assert_eq!(error, "journal blocked enable");
+        assert_eq!(fs::read(dir.path().join(DATA_FILE_NAME)).expect("plaintext after"), plaintext);
+        assert_eq!(fs::read(&attachment_path).expect("attachment after"), attachment_plaintext);
+        assert!(!dir.path().join("data.json.enc").exists());
+
+        let material = enable_sync_encryption_in_dir(dir.path(), "first pass").expect("enable");
+        let encrypted = fs::read(dir.path().join("data.json.enc")).expect("encrypted before");
+        let encrypted_attachment = fs::read(&attachment_path).expect("encrypted attachment before");
+
+        let error = disable_sync_encryption_in_dir_with(dir.path(), &material.key, || {
+            Err("journal blocked disable".to_string())
+        })
+        .expect_err("journal failure must abort disable");
+        assert_eq!(error, "journal blocked disable");
+        assert_eq!(fs::read(dir.path().join("data.json.enc")).expect("encrypted after"), encrypted);
+        assert_eq!(fs::read(&attachment_path).expect("attachment after"), encrypted_attachment);
+        assert!(!dir.path().join(DATA_FILE_NAME).exists());
+
+        let error = change_sync_encryption_passphrase_in_dir_with(
+            dir.path(),
+            &material.key,
+            "second pass",
+            || Err("journal blocked rotation".to_string()),
+        )
+        .expect_err("journal failure must abort rotation");
+        assert_eq!(error, "journal blocked rotation");
+        assert_eq!(fs::read(dir.path().join("data.json.enc")).expect("rotated after"), encrypted);
+        assert_eq!(fs::read(&attachment_path).expect("attachment after"), encrypted_attachment);
     }
 
     #[test]
@@ -11296,10 +11340,22 @@ fn existing_folder_header(
     Ok(None)
 }
 
+#[cfg(test)]
 fn enable_sync_encryption_in_dir(
     sync_dir: &Path,
     passphrase: &str,
 ) -> Result<SyncKeyMaterial, String> {
+    enable_sync_encryption_in_dir_with(sync_dir, passphrase, || Ok(()))
+}
+
+fn enable_sync_encryption_in_dir_with<BeforeMutation>(
+    sync_dir: &Path,
+    passphrase: &str,
+    before_mutation: BeforeMutation,
+) -> Result<SyncKeyMaterial, String>
+where
+    BeforeMutation: FnOnce() -> Result<(), String>,
+{
     let lock = acquire_sync_lock(sync_dir)?;
     let (salt, params) = existing_folder_header(sync_dir)?
         .unwrap_or((random_salt(), SYNC_CRYPTO_DEFAULT_KDF_PARAMS));
@@ -11308,6 +11364,7 @@ fn enable_sync_encryption_in_dir(
 
     let result = (|| -> Result<(), String> {
         let artifacts = collect_sync_folder_artifacts(sync_dir, true)?;
+        before_mutation()?;
         // The collection is a fixed pre-transition snapshot. Scratch created by the writes
         // below is therefore never recursively added, while every retained generation from
         // an earlier attempt must be sealed before enabled state can be committed.
@@ -11363,10 +11420,23 @@ fn enable_sync_encryption_in_dir(
     result.map(|()| material)
 }
 
+#[cfg(test)]
 fn disable_sync_encryption_in_dir(sync_dir: &Path, key: &[u8; KEY_LEN]) -> Result<(), String> {
+    disable_sync_encryption_in_dir_with(sync_dir, key, || Ok(()))
+}
+
+fn disable_sync_encryption_in_dir_with<BeforeMutation>(
+    sync_dir: &Path,
+    key: &[u8; KEY_LEN],
+    before_mutation: BeforeMutation,
+) -> Result<(), String>
+where
+    BeforeMutation: FnOnce() -> Result<(), String>,
+{
     let lock = acquire_sync_lock(sync_dir)?;
     let result = (|| -> Result<(), String> {
         let artifacts = collect_sync_folder_artifacts(sync_dir, false)?;
+        before_mutation()?;
         for path in artifacts
             .recovery
             .iter()
@@ -11413,16 +11483,30 @@ fn disable_sync_encryption_in_dir(sync_dir: &Path, key: &[u8; KEY_LEN]) -> Resul
     result
 }
 
+#[cfg(test)]
 fn change_sync_encryption_passphrase_in_dir(
     sync_dir: &Path,
     old_key: &[u8; KEY_LEN],
     next_passphrase: &str,
 ) -> Result<SyncKeyMaterial, String> {
+    change_sync_encryption_passphrase_in_dir_with(sync_dir, old_key, next_passphrase, || Ok(()))
+}
+
+fn change_sync_encryption_passphrase_in_dir_with<BeforeMutation>(
+    sync_dir: &Path,
+    old_key: &[u8; KEY_LEN],
+    next_passphrase: &str,
+    before_mutation: BeforeMutation,
+) -> Result<SyncKeyMaterial, String>
+where
+    BeforeMutation: FnOnce() -> Result<(), String>,
+{
     let next = derive_sync_key_material(next_passphrase, random_salt(), SYNC_CRYPTO_DEFAULT_KDF_PARAMS)
         .map_err(|error| terminal_error(error))?;
     let lock = acquire_sync_lock(sync_dir)?;
     let result = (|| -> Result<(), String> {
         let artifacts = collect_sync_folder_artifacts(sync_dir, false)?;
+        before_mutation()?;
         let mut recovered_by_salt: HashMap<[u8; SALT_LEN], SyncKeyMaterial> = HashMap::new();
         for path in artifacts
             .recovery
@@ -11465,7 +11549,9 @@ pub(crate) fn enable_sync_encryption(
     path: Option<String>,
 ) -> Result<(), String> {
     let sync_dir = require_file_backend_dir(&app, path)?;
-    let material = enable_sync_encryption_in_dir(&sync_dir, &passphrase)?;
+    let material = enable_sync_encryption_in_dir_with(&sync_dir, &passphrase, || {
+        begin_sync_encryption_transition(&app, TRANSITION_ENABLE)
+    })?;
     persist_enabled_material(&app, &material)
 }
 
@@ -11476,7 +11562,9 @@ pub(crate) fn disable_sync_encryption(
 ) -> Result<(), String> {
     let sync_dir = require_file_backend_dir(&app, path)?;
     let key = cached_key_or_err(&app)?;
-    disable_sync_encryption_in_dir(&sync_dir, &key)?;
+    disable_sync_encryption_in_dir_with(&sync_dir, &key, || {
+        begin_sync_encryption_transition(&app, TRANSITION_DISABLE)
+    })?;
     clear_encryption_state(&app)
 }
 
@@ -11488,7 +11576,12 @@ pub(crate) fn change_sync_encryption_passphrase(
 ) -> Result<(), String> {
     let sync_dir = require_file_backend_dir(&app, path)?;
     let old_key = cached_key_or_err(&app)?;
-    let next = change_sync_encryption_passphrase_in_dir(&sync_dir, &old_key, &next_passphrase)?;
+    let next = change_sync_encryption_passphrase_in_dir_with(
+        &sync_dir,
+        &old_key,
+        &next_passphrase,
+        || begin_sync_encryption_transition(&app, TRANSITION_CHANGE_PASSPHRASE),
+    )?;
     persist_enabled_material(&app, &next)
 }
 

@@ -27,6 +27,7 @@ import {
     type SyncEncryptionLocalState,
     type SyncEncryptionLocalStatePort,
     type SyncEncryptionStatus,
+    type SyncEncryptionTransitionKind,
     type SyncKeyMaterial,
 } from '@mindwtr/core';
 
@@ -91,15 +92,24 @@ const parseLocalState = (raw: string | null): SyncEncryptionLocalState | null =>
     if (raw === null) return null;
     try {
         const parsed = JSON.parse(raw) as Partial<SyncEncryptionLocalState>;
+        const incompleteTransition = parsed?.incompleteTransition;
+        if (incompleteTransition !== undefined
+            && incompleteTransition !== 'enable'
+            && incompleteTransition !== 'disable'
+            && incompleteTransition !== 'change-passphrase') {
+            throw new SyncEncryptionStateUnavailableError();
+        }
         if (parsed?.state !== 'enabled'
             && parsed?.state !== 'remote-encrypted-no-key'
-            && parsed?.state !== 'remote-plaintext') {
+            && parsed?.state !== 'remote-plaintext'
+            && !(parsed?.state === 'off' && incompleteTransition)) {
             throw new SyncEncryptionStateUnavailableError();
         }
         return {
             state: parsed.state,
             discoveredSalt: typeof parsed.discoveredSalt === 'string' ? parsed.discoveredSalt : undefined,
             discoveredParams: isKdfParams(parsed.discoveredParams) ? parsed.discoveredParams : undefined,
+            incompleteTransition,
         };
     } catch (error) {
         if (error instanceof SyncEncryptionStateUnavailableError) throw error;
@@ -140,6 +150,7 @@ export const flushSyncEncryptionLocalState = async (): Promise<void> => {
 export const syncEncryptionLocalState: SyncEncryptionLocalStatePort = {
     read: () => cachedLocalState,
     write: (state) => {
+        const previous = cachedLocalState;
         cachedLocalState = state;
         hydrated = true;
         const queuedWrite = localStateWriteQueue.then(async () => {
@@ -150,6 +161,7 @@ export const syncEncryptionLocalState: SyncEncryptionLocalStatePort = {
                     await AsyncStorage.setItem(SYNC_ENCRYPTION_STATE_KEY, JSON.stringify(state));
                 }
             } catch (error) {
+                if (cachedLocalState === state) cachedLocalState = previous;
                 void logWarn('Failed to persist sync encryption state', {
                     scope: 'sync',
                     extra: { error: error instanceof Error ? error.message : String(error) },
@@ -161,6 +173,7 @@ export const syncEncryptionLocalState: SyncEncryptionLocalStatePort = {
         // Keep the serializer usable after a failed write while leaving the
         // current write observable to flush/callers as a rejection.
         localStateWriteQueue = queuedWrite.catch(() => undefined);
+        return queuedWrite;
     },
 };
 
@@ -214,9 +227,18 @@ export const getSyncEncryptionMaterial = async (): Promise<SyncKeyMaterial | nul
 
 export const getMobileSyncEncryptionStatus = async (): Promise<SyncEncryptionStatus> => {
     const state = await loadSyncEncryptionLocalState();
-    if (!state || state.state === 'off') return { state: 'off' };
-    return { state: state.state, kdfParams: state.discoveredParams };
+    if (!state || state.state === 'off') {
+        return { state: 'off', incompleteTransition: state?.incompleteTransition };
+    }
+    return {
+        state: state.state,
+        kdfParams: state.discoveredParams,
+        incompleteTransition: state.incompleteTransition,
+    };
 };
+
+export const getIncompleteSyncEncryptionTransition = async (): Promise<SyncEncryptionTransitionKind | null> =>
+    (await loadSyncEncryptionLocalState())?.incompleteTransition ?? null;
 
 /** True when this device must NOT auto-sync: the remote is encrypted and we have no key
  *  (pinned decision #5 — automatic and background sync stay off until the user supplies
@@ -226,8 +248,10 @@ export const getMobileSyncEncryptionStatus = async (): Promise<SyncEncryptionSta
  *  user acts (supply the passphrase / turn encryption off here), and both would corrupt the
  *  remote's generation if a background cycle went ahead. */
 export const isSyncEncryptionBlocked = async (): Promise<boolean> => {
-    const state = (await loadSyncEncryptionLocalState())?.state;
-    return state === 'remote-encrypted-no-key' || state === 'remote-plaintext';
+    const localState = await loadSyncEncryptionLocalState();
+    return Boolean(localState?.incompleteTransition)
+        || localState?.state === 'remote-encrypted-no-key'
+        || localState?.state === 'remote-plaintext';
 };
 
 export const __resetSyncEncryptionStateForTests = (): void => {

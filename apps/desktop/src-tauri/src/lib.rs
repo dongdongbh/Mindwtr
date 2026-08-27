@@ -130,7 +130,7 @@ use sync_encryption::{
     clear_sync_encryption_key_material, derive_sync_encryption_key,
     get_sync_encryption_key_material, get_sync_encryption_status,
     mark_sync_encryption_remote_discovered, mark_sync_encryption_remote_plaintext,
-    set_sync_encryption_key_material,
+    mark_sync_encryption_transition_incomplete, set_sync_encryption_key_material,
 };
 use ui::{
     acknowledge_close_request, apply_global_quick_add_shortcut, consume_quick_add_pending,
@@ -1667,6 +1667,7 @@ pub fn run() {
             derive_sync_encryption_key,
             mark_sync_encryption_remote_discovered,
             mark_sync_encryption_remote_plaintext,
+            mark_sync_encryption_transition_incomplete,
             enable_sync_encryption,
             disable_sync_encryption,
             change_sync_encryption_passphrase,

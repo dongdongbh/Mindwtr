@@ -17,6 +17,7 @@ import {
     SyncEncryptionRemotePlaintextError,
     SyncEncryptionRemoteVersionUnavailableError,
     SyncEncryptionTerminalError,
+    SyncEncryptionTransitionIncompleteError,
     buildCloudCalendarFeedUrl,
     cloudGetJson,
     cloudHeadJson,
@@ -325,6 +326,11 @@ const resolveSyncFailureMessage = (rawError: string | undefined): string => {
             return resolveSyncText(
                 'settings.syncEncryptionStateUnavailable',
                 'Sync is paused because this device could not read its local encryption state. Restart Mindwtr and try again. If the problem continues, keep sync paused and contact support before changing this sync setup.',
+            );
+        case 'transition-incomplete':
+            return resolveSyncText(
+                'settings.syncEncryptionErrorTransitionIncomplete',
+                'This encryption change may be incomplete. Sync remains paused. Retry the same encryption action before changing or disconnecting this sync location.',
             );
         case 'remote-plaintext':
             return resolveSyncText(
@@ -1640,6 +1646,12 @@ export class SyncService {
         let result: SyncConfigurationCommitResult;
         try {
             result = await runSyncRestoreExclusive(async () => {
+                const encryptionStatus = await readSyncEncryptionStatus();
+                if (encryptionStatus.incompleteTransition) {
+                    throw new SyncEncryptionTransitionIncompleteError(
+                        encryptionStatus.incompleteTransition,
+                    );
+                }
                 const committed = await commitProvenSyncConfigurationTransaction(config, {
                     recoverDropboxCredentialsBeforeConfiguration: () => (
                         SyncService.recoverDropboxCredentialsBeforeConfigurationMutation()
@@ -1987,6 +1999,12 @@ export class SyncService {
             ?? await SyncService.getSyncBackend();
         if (context.backend === 'off') {
             return { kind: 'disabled' };
+        }
+
+        const encryptionStatus = await readSyncEncryptionStatus();
+        if (encryptionStatus.incompleteTransition) {
+            if (!options.manual && !options.activationProbe) return { kind: 'disabled' };
+            throw new SyncEncryptionTransitionIncompleteError(encryptionStatus.incompleteTransition);
         }
 
         if (

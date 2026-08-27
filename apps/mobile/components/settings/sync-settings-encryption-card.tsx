@@ -49,6 +49,7 @@ export type SyncEncryptionCardProps = {
 const classifyFailure = (error: unknown, terminal: ErrorKind): ErrorKind => {
     const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
     if (message.includes('SYNC_ENCRYPTION_BACKEND_REQUIRED')) return 'backend-required';
+    if (message.includes('SYNC_ENCRYPTION_TRANSITION_INCOMPLETE')) return 'transition-incomplete';
     if (isSyncEncryptionRemoteVersionUnavailableError(error)) return 'transition-incomplete';
     if (/MWENC1|SYNC_ENCRYPTION|passphrase/i.test(message)) return terminal;
     return 'generic';
@@ -74,12 +75,18 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
     const readState = useCallback(async (): Promise<{
         state: SyncEncryptionState | null;
         unavailable: boolean;
+        incomplete: boolean;
     }> => {
         try {
-            return { state: (await getSyncEncryptionStatus()).state, unavailable: false };
+            const status = await getSyncEncryptionStatus();
+            return {
+                state: status.state,
+                unavailable: false,
+                incomplete: Boolean(status.incompleteTransition),
+            };
         } catch (failure) {
             logSettingsError(failure);
-            return { state: null, unavailable: true };
+            return { state: null, unavailable: true, incomplete: false };
         }
     }, []);
 
@@ -93,6 +100,7 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
             if (!cancelled) {
                 setState(next.state);
                 setStateUnavailable(next.unavailable);
+                if (next.incomplete) setError('transition-incomplete');
             }
         });
         void isSyncEncryptionBackendPending()
@@ -145,6 +153,7 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
         const nextState = await readState();
         setState(nextState.state);
         setStateUnavailable(nextState.unavailable);
+        if (nextState.incomplete) setError('transition-incomplete');
         setPendingFirstSync(await isSyncEncryptionBackendPending().catch(() => false));
         setProgress(null);
         setBusy(false);

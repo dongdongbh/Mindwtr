@@ -56,7 +56,9 @@ export function useSyncEncryptionSettings(
     // without guessing that encryption is off.
     const readState = useCallback(async (): Promise<SyncEncryptionController['state']> => {
         try {
-            return (await SyncService.getSyncEncryptionStatus()).state;
+            const status = await SyncService.getSyncEncryptionStatus();
+            if (status.incompleteTransition) setError('transition-incomplete');
+            return status.state;
         } catch (failure) {
             void logError(failure, { scope: 'sync-encryption', step: 'status' });
             return null;

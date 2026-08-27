@@ -32,6 +32,7 @@ import {
  *  and the user's remedy (disabling encryption here too) needs it — and differs only in what
  *  status reports and in that sync is terminal until the user acts. */
 export type SyncEncryptionState = 'off' | 'enabled' | 'remote-encrypted-no-key' | 'remote-plaintext';
+export type SyncEncryptionTransitionKind = 'enable' | 'disable' | 'change-passphrase';
 
 /** The states in which this device owns a usable key. Every material/key resolver must treat
  *  them alike: dropping to "off" for `remote-plaintext` is precisely the silent downgrade
@@ -41,6 +42,7 @@ export const SYNC_ENCRYPTION_KEYED_STATES: readonly SyncEncryptionState[] = ['en
 export type SyncEncryptionStatus = {
     state: SyncEncryptionState;
     kdfParams?: SyncCryptoKdfParams;
+    incompleteTransition?: SyncEncryptionTransitionKind;
 };
 
 /** Device-local, never-synced persisted shape. Salt/params are not secret (they live in
@@ -50,12 +52,51 @@ export type SyncEncryptionLocalState = {
     state: SyncEncryptionState;
     discoveredSalt?: string; // hex
     discoveredParams?: SyncCryptoKdfParams;
+    incompleteTransition?: SyncEncryptionTransitionKind;
 };
 
 export type SyncEncryptionLocalStatePort = {
     read(): SyncEncryptionLocalState | null;
     /** `null` clears back to the implicit 'off' default. */
-    write(state: SyncEncryptionLocalState | null): void;
+    write(state: SyncEncryptionLocalState | null): void | Promise<void>;
+};
+
+export const SYNC_ENCRYPTION_TRANSITION_INCOMPLETE = 'SYNC_ENCRYPTION_TRANSITION_INCOMPLETE';
+
+export class SyncEncryptionTransitionIncompleteError extends Error {
+    constructor(kind: SyncEncryptionTransitionKind) {
+        super(`${SYNC_ENCRYPTION_TRANSITION_INCOMPLETE}: retry the ${kind} sync encryption transition before syncing or changing the sync location`);
+        this.name = 'SyncEncryptionTransitionIncompleteError';
+    }
+}
+
+const requireMatchingIncompleteTransition = (
+    localState: SyncEncryptionLocalStatePort,
+    kind: SyncEncryptionTransitionKind,
+): SyncEncryptionLocalState | null => {
+    const current = localState.read();
+    if (current?.incompleteTransition && current.incompleteTransition !== kind) {
+        throw new SyncEncryptionTransitionIncompleteError(current.incompleteTransition);
+    }
+    return current;
+};
+
+const beginSyncEncryptionTransition = async (
+    localState: SyncEncryptionLocalStatePort,
+    kind: SyncEncryptionTransitionKind,
+): Promise<void> => {
+    const current = requireMatchingIncompleteTransition(localState, kind);
+    await localState.write({
+        ...(current ?? { state: 'off' as const }),
+        incompleteTransition: kind,
+    });
+};
+
+export const assertNoIncompleteSyncEncryptionTransition = (
+    localState: SyncEncryptionLocalStatePort,
+): void => {
+    const kind = localState.read()?.incompleteTransition;
+    if (kind) throw new SyncEncryptionTransitionIncompleteError(kind);
 };
 
 /** Secret key cache — OS keyring on desktop (via Tauri commands), expo-secure-store on
@@ -352,8 +393,14 @@ function bytesMatchWithTrailingPadding(actual: Uint8Array, expected: Uint8Array)
 
 export function getSyncEncryptionStatusFromLocalState(localState: SyncEncryptionLocalStatePort): SyncEncryptionStatus {
     const persisted = localState.read();
-    if (!persisted || persisted.state === 'off') return { state: 'off' };
-    return { state: persisted.state, kdfParams: persisted.discoveredParams };
+    if (!persisted || persisted.state === 'off') {
+        return { state: 'off', incompleteTransition: persisted?.incompleteTransition };
+    }
+    return {
+        state: persisted.state,
+        kdfParams: persisted.discoveredParams,
+        incompleteTransition: persisted.incompleteTransition,
+    };
 }
 
 /** Called from a read seam (webdav.ts / dropbox.ts) the moment it discovers ciphertext
@@ -424,12 +471,13 @@ export async function runEnableSyncEncryptionLocalOnly(
     kdfParams: SyncCryptoKdfParams = SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
 ): Promise<EnableRemoteEncryptionResult> {
     const current = localState.read();
+    if (current?.incompleteTransition) throw new SyncEncryptionTransitionIncompleteError(current.incompleteTransition);
     if (current && current.state !== 'off') {
         throw new Error(`sync encryption local-only enable requires the off state, found ${current.state}`);
     }
     const material = await deriveSyncKeyMaterial(passphrase, prims.randomBytes(16), kdfParams, prims);
     await keyCache.setKey(material.key);
-    localState.write({
+    await localState.write({
         state: 'enabled',
         discoveredSalt: bytesToHex(material.salt),
         discoveredParams: material.params,
@@ -447,8 +495,9 @@ export async function runDisableSyncEncryptionLocalOnly(
     keyCache: SyncEncryptionKeyCachePort,
     localState: SyncEncryptionLocalStatePort,
 ): Promise<void> {
+    assertNoIncompleteSyncEncryptionTransition(localState);
     await keyCache.clearKey();
-    localState.write(null);
+    await localState.write(null);
 }
 
 /**
@@ -509,6 +558,13 @@ export async function runEnableSyncEncryptionOverRemote(
     let completed = 0;
     const report = (phase: SyncEncryptionTransitionProgress['phase']) => onProgress?.({ phase, completed, total });
 
+    let transitionJournalStarted = false;
+    const ensureTransitionJournal = async (): Promise<void> => {
+        if (transitionJournalStarted) return;
+        await beginSyncEncryptionTransition(localState, 'enable');
+        transitionJournalStarted = true;
+    };
+
     // Resume self-heal: attachments never rename, so an attachment already sealed by an
     // earlier, interrupted enable() attempt can exist BEFORE any `.enc` document does —
     // the salt-recovery scan above only looks at documents and would miss it, causing
@@ -539,6 +595,7 @@ export async function runEnableSyncEncryptionOverRemote(
             if (inspected.kind === 'unsupported') throw unsupportedArtifact(entry.name, inspected.reason);
             if (inspected.kind === 'plaintext') {
                 const sealed = await encryptSyncArtifact(bytes, material, prims);
+                await ensureTransitionJournal();
                 await remote.write(entry.name, sealed, version);
                 await verifyRemoteBytes(remote, entry.name, async (verify) => {
                     const plain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
@@ -550,6 +607,7 @@ export async function runEnableSyncEncryptionOverRemote(
                 const oldMaterial = await recoverMaterialForSalt(inspected.salt, inspected.params);
                 const plain = await decryptRemoteArtifactOrThrow(bytes, oldMaterial.key, prims);
                 const sealed = await encryptSyncArtifact(plain, material, prims);
+                await ensureTransitionJournal();
                 await remote.write(entry.name, sealed, version);
                 await verifyRemoteBytes(remote, entry.name, async (verify) => {
                     const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
@@ -584,6 +642,7 @@ export async function runEnableSyncEncryptionOverRemote(
                         throw new SyncEncryptionRemoteConflictError(`${encName} conflicts with the plaintext generation`);
                     }
                 } else {
+                    await ensureTransitionJournal();
                     await remote.write(encName, sealed, null);
                     await verifyRemoteBytes(remote, encName, async (verify) => {
                         const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
@@ -592,6 +651,7 @@ export async function runEnableSyncEncryptionOverRemote(
                         }
                     });
                 }
+                await ensureTransitionJournal();
                 await remote.remove(entry.name, sourceVersion);
             }
         }
@@ -599,7 +659,7 @@ export async function runEnableSyncEncryptionOverRemote(
     }
 
     await keyCache.setKey(material.key);
-    localState.write({
+    await localState.write({
         state: 'enabled',
         discoveredSalt: bytesToHex(material.salt),
         discoveredParams: material.params,
@@ -632,6 +692,13 @@ export async function runDisableSyncEncryptionOverRemote(
     let completed = 0;
     const report = (phase: SyncEncryptionTransitionProgress['phase']) => onProgress?.({ phase, completed, total });
 
+    let transitionJournalStarted = false;
+    const ensureTransitionJournal = async (): Promise<void> => {
+        if (transitionJournalStarted) return;
+        await beginSyncEncryptionTransition(localState, 'disable');
+        transitionJournalStarted = true;
+    };
+
     for (const entry of attachments) {
         report('attachments');
         const current = snapshotRemoteRead(snapshot, entry.name);
@@ -642,6 +709,7 @@ export async function runDisableSyncEncryptionOverRemote(
             if (inspected.kind === 'unsupported') throw unsupportedArtifact(entry.name, inspected.reason);
             if (inspected.kind === 'encrypted') {
                 const plain = await decryptRemoteArtifactOrThrow(bytes, key, prims);
+                await ensureTransitionJournal();
                 await remote.write(entry.name, plain, version);
                 await verifyRemoteBytes(remote, entry.name, (verify) => {
                     if (!bytesMatchWithTrailingPadding(verify, plain)) {
@@ -675,6 +743,7 @@ export async function runDisableSyncEncryptionOverRemote(
                     throw new SyncEncryptionRemoteConflictError(`${plainName} conflicts with the encrypted generation`);
                 }
             } else {
+                await ensureTransitionJournal();
                 await remote.write(plainName, plain, null);
                 await verifyRemoteBytes(remote, plainName, (verify) => {
                     if (!bytesMatchWithTrailingPadding(verify, plain)) {
@@ -682,13 +751,14 @@ export async function runDisableSyncEncryptionOverRemote(
                     }
                 });
             }
+            await ensureTransitionJournal();
             await remote.remove(entry.name, sourceVersion);
         }
         completed += 1;
     }
 
     await keyCache.clearKey();
-    localState.write(null);
+    await localState.write(null);
 }
 
 /** Passphrase change: decrypt-with-old, re-encrypt-with-new, under a fresh salt, over
@@ -739,6 +809,13 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
     let completed = 0;
     const report = (phase: SyncEncryptionTransitionProgress['phase']) => onProgress?.({ phase, completed, total });
 
+    let transitionJournalStarted = false;
+    const ensureTransitionJournal = async (): Promise<void> => {
+        if (transitionJournalStarted) return;
+        await beginSyncEncryptionTransition(localState, 'change-passphrase');
+        transitionJournalStarted = true;
+    };
+
     // Resume self-heal, same reasoning as runEnableSyncEncryptionOverRemote's attachment
     // loop: an artifact left over from an earlier, interrupted passphrase-change attempt
     // decrypts under neither `oldKey` nor this run's `newMaterial.key`. That abandoned
@@ -773,6 +850,7 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
             plain = await decryptRemoteArtifactOrThrow(bytes, recoveredMaterial.key, prims);
         }
         const sealed = await encryptSyncArtifact(plain, newMaterial, prims);
+        await ensureTransitionJournal();
         await remote.write(name, sealed, version);
         await verifyRemoteBytes(remote, name, async (verify) => {
             const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, newMaterial.key, prims);
@@ -794,7 +872,7 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
     }
 
     await keyCache.setKey(newMaterial.key);
-    localState.write({
+    await localState.write({
         state: 'enabled',
         discoveredSalt: bytesToHex(newMaterial.salt),
         discoveredParams: newMaterial.params,
@@ -813,6 +891,7 @@ export async function runProvideSyncEncryptionPassphraseOverRemote(
     localState: SyncEncryptionLocalStatePort,
     prims: SyncCryptoPrimitives = defaultSyncCryptoPrimitives,
 ): Promise<'ok' | 'wrong-passphrase'> {
+    assertNoIncompleteSyncEncryptionTransition(localState);
     const encName = syncEncryptedArtifactName(baseDocumentPlainName);
     const { bytes } = await remote.read(encName);
     if (!bytes) {
@@ -834,7 +913,7 @@ export async function runProvideSyncEncryptionPassphraseOverRemote(
         throw err;
     }
     await keyCache.setKey(material.key);
-    localState.write({
+    await localState.write({
         state: 'enabled',
         discoveredSalt: bytesToHex(material.salt),
         discoveredParams: material.params,

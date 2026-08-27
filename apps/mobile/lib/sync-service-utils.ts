@@ -40,7 +40,7 @@ const ENCRYPTION_STATE_ERROR_PATTERN = /SyncEncryptionStateUnavailableError/i;
 // `credentials?` alternative or by the read-only/permission pattern, producing a
 // "check your sync credentials" toast for something only a passphrase prompt can fix.
 const ENCRYPTION_ERROR_PATTERN =
-  /SyncEncryptionNoKeyError|SyncEncryptionTerminalError|SyncEncryptionKeyMissingError|SyncEncryptionRemotePlaintextError|sync passphrase|wrong passphrase or corrupted data|MWENC1|no longer encrypted/i;
+  /SyncEncryptionNoKeyError|SyncEncryptionTerminalError|SyncEncryptionKeyMissingError|SyncEncryptionRemotePlaintextError|SyncEncryptionTransitionIncompleteError|SYNC_ENCRYPTION_TRANSITION_INCOMPLETE|sync passphrase|wrong passphrase or corrupted data|MWENC1|no longer encrypted/i;
 
 export const formatSyncErrorMessage = (error: unknown, backend: SyncBackend): string => {
   const raw = sanitizeSyncErrorMessage(String(error));
