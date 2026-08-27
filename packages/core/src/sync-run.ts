@@ -43,6 +43,11 @@ import { buildMergeSummaryLog, buildPendingAttachmentUploadLogExtra } from './sy
 import { CLOCK_SKEW_THRESHOLD_MS } from './sync-types';
 import { appendSyncHistory, mergeAppData, performSyncCycle } from './sync';
 import { hasUncompactedPurgedTombstones } from './tombstone-compaction';
+import {
+    isSyncRemoteMutationFenceError,
+    SyncRemoteMutationFenceUnavailableError,
+    type SyncRemoteMutationFenceLease,
+} from './sync-remote-fence';
 
 /**
  * ADR 0014 — the platform-independent sync cycle state machine.
@@ -181,6 +186,7 @@ class SharedSyncRunMachine {
     private readonly cleanupIntervalMs: number;
     private readonly performSyncCycleImpl: (io: SyncCycleIO) => Promise<SyncCycleResult>;
     private io: SyncBackendIO | null = null;
+    private remoteMutationFence: SyncRemoteMutationFenceLease | null = null;
     private readonly state: SharedSyncRunState = {
         backend: 'off',
         cloudProvider: 'selfhosted',
@@ -213,9 +219,13 @@ class SharedSyncRunMachine {
     async run(): Promise<SyncRunResult> {
         let result: SyncRunResult;
         try {
-            result = await this.runPhases();
-        } catch (error) {
-            result = await this.handleRunError(error);
+            try {
+                result = await this.runPhases();
+            } catch (error) {
+                result = await this.handleRunError(error);
+            }
+        } finally {
+            await this.releaseRemoteMutationFence();
         }
         if (this.state.hadAttachmentWarning) {
             result.hadAttachmentWarning = true;
@@ -287,6 +297,63 @@ class SharedSyncRunMachine {
 
     private async ensureNetwork(): Promise<void> {
         await this.hooks.ensureNetworkStillAvailable?.();
+    }
+
+    /** Lazily acquire only when a run is about to enter a mutation-capable
+     *  path. A read-check performed before acquisition is advisory only: once
+     *  the fence is held, discard it and take the authoritative read again. */
+    private async ensureRemoteMutationFence(): Promise<void> {
+        if (this.remoteMutationFence) {
+            await this.runRemoteMutationFenceOperation(
+                'Remote sync mutation fence validation failed',
+                () => this.remoteMutationFence!.assertHeld(30_000),
+            );
+            return;
+        }
+        const acquire = this.requireIo().acquireRemoteMutationFence;
+        if (!acquire) return;
+        const lease = await this.runRemoteMutationFenceOperation(
+            'Remote sync mutation fence acquisition failed',
+            acquire,
+        );
+        if (!lease) return;
+        this.remoteMutationFence = lease;
+        this.state.readCheckRemoteData = undefined;
+        this.state.remoteDataForCompare = null;
+    }
+
+    private async assertRemoteMutationFenceHeld(): Promise<void> {
+        if (!this.remoteMutationFence) return;
+        await this.runRemoteMutationFenceOperation(
+            'Remote sync mutation fence validation failed',
+            () => this.remoteMutationFence!.assertHeld(30_000),
+        );
+    }
+
+    private async runRemoteMutationFenceOperation<T>(message: string, operation: () => Promise<T>): Promise<T> {
+        try {
+            return await operation();
+        } catch (error) {
+            if (isSyncRemoteMutationFenceError(error)) throw error;
+            const detail = error instanceof Error ? error.message : String(error);
+            throw new SyncRemoteMutationFenceUnavailableError(`${message}: ${detail}`);
+        }
+    }
+
+    private async releaseRemoteMutationFence(): Promise<void> {
+        const lease = this.remoteMutationFence;
+        this.remoteMutationFence = null;
+        if (!lease) return;
+        try {
+            await lease.release();
+        } catch (error) {
+            // Release is conditional, so an error can never justify deleting
+            // whatever generation is now present. A crashed lease is bounded
+            // by its server-time expiry; request a later retry and surface the
+            // delayed availability without rewriting an otherwise valid run.
+            this.notifier.logWarning('Failed to release remote sync mutation fence', error);
+            this.requestFollowUp();
+        }
     }
 
     private requestFollowUp(): void {
@@ -396,6 +463,7 @@ class SharedSyncRunMachine {
     }
 
     private async persistLocalDataWithTracking(data: AppData): Promise<AppData> {
+        await this.assertRemoteMutationFenceHeld();
         const persisted = await this.storage.persistLocal(data) ?? data;
         this.ensureLocalSnapshotFresh(persisted);
         if (this.storage.applyDataToStore) {
@@ -419,7 +487,10 @@ class SharedSyncRunMachine {
         await this.persistLocalDataWithTracking(reconciledData);
     }
 
-    private async readRemoteForCycle(): Promise<AppData | null> {
+    private async readRemoteForCycle(requireMutationFence = false): Promise<AppData | null> {
+        if (requireMutationFence) {
+            await this.ensureRemoteMutationFence();
+        }
         if (this.state.readCheckRemoteData !== undefined) {
             const data = this.state.readCheckRemoteData;
             this.state.readCheckRemoteData = undefined;
@@ -461,6 +532,8 @@ class SharedSyncRunMachine {
     }
 
     private async writeRemoteForCycle(data: AppData): Promise<void> {
+        await this.ensureRemoteMutationFence();
+        await this.assertRemoteMutationFenceHeld();
         await this.ensureNetwork();
         const state = this.state;
         state.lastRemoteWriteFingerprint = null;
@@ -505,6 +578,7 @@ class SharedSyncRunMachine {
             }
             throw error;
         }
+        await this.assertRemoteMutationFenceHeld();
         const fingerprint = outcome && typeof outcome.fingerprint === 'string' && outcome.fingerprint.trim()
             ? outcome.fingerprint
             : null;
@@ -654,7 +728,9 @@ class SharedSyncRunMachine {
             if (isRemoteSyncBackend(this.backend)) {
                 await this.ensureNetwork();
             }
+            await this.ensureRemoteMutationFence();
             const result = await io.syncAttachments(localData, this.attachmentHelpers('prepare'));
+            await this.assertRemoteMutationFenceHeld();
             const mutated = result === true || (Boolean(result) && typeof result === 'object');
             const mutatedData = result && typeof result === 'object' ? result : localData;
             if (mutated) {
@@ -671,6 +747,7 @@ class SharedSyncRunMachine {
             });
         } catch (error) {
             if (error instanceof LocalSyncAbort) throw error;
+            if (isSyncRemoteMutationFenceError(error)) throw error;
             if (this.hooks.isCycleAborted?.()) throw error;
             this.state.hadAttachmentWarning = true;
             this.notifier.logWarning('Attachment pre-sync warning', error);
@@ -692,10 +769,12 @@ class SharedSyncRunMachine {
             if (isRemoteSyncBackend(this.backend)) {
                 await this.ensureNetwork();
             }
+            await this.ensureRemoteMutationFence();
             const result = await io.syncAttachments(
                 activationSnapshot.data,
                 this.attachmentHelpers('post-merge'),
             );
+            await this.assertRemoteMutationFenceHeld();
             const provenData = result && typeof result === 'object'
                 ? result
                 : activationSnapshot.data;
@@ -722,7 +801,9 @@ class SharedSyncRunMachine {
         if (isRemoteSyncBackend(this.backend)) {
             await this.ensureNetwork();
         }
+        await this.ensureRemoteMutationFence();
         const result = await io.syncAttachments(data, this.attachmentHelpers('post-merge'));
+        await this.assertRemoteMutationFenceHeld();
         const nextData = result && typeof result === 'object' ? result : data;
         const remainingUploads = findPendingAttachmentUploads(nextData);
         this.notifier.logInfo('Attachment final sync done', {
@@ -758,11 +839,13 @@ class SharedSyncRunMachine {
             if (isRemoteSyncBackend(this.backend)) {
                 await this.ensureNetwork();
             }
+            await this.ensureRemoteMutationFence();
             // No defensive clone: the attachment backends are pure (they return a folded
             // document instead of writing to this one), so cloning a whole library here was
             // dead weight that also invalidated the storage layer's identity-keyed row cache
             // for every unchanged row (#766).
             const result = await io.syncAttachments(currentData, this.attachmentHelpers('post-merge'));
+            await this.assertRemoteMutationFenceHeld();
             const nextData = result && typeof result === 'object'
                 ? result
                 : result
@@ -783,6 +866,7 @@ class SharedSyncRunMachine {
             return currentData;
         } catch (error) {
             if (error instanceof LocalSyncAbort) throw error;
+            if (isSyncRemoteMutationFenceError(error)) throw error;
             if (this.policy.postMergeAttachmentErrorPolicy === 'fail') throw error;
             this.state.hadAttachmentWarning = true;
             this.notifier.logWarning('Attachment sync warning', error);
@@ -808,7 +892,7 @@ class SharedSyncRunMachine {
                 return data;
             },
             readRemote: async () => {
-                const data = await this.readRemoteForCycle();
+                const data = await this.readRemoteForCycle(true);
                 this.notifier.tracePayload?.('read-remote', data, { backend: this.backend });
                 return data;
             },
@@ -925,11 +1009,13 @@ class SharedSyncRunMachine {
                 // local and sync folders until the daily pass (#1064).
                 || hasFreshAttachmentCleanupWork(mergedData)
             )) {
+            await this.ensureRemoteMutationFence();
             const cleanupResult = await this.hooks.runAttachmentCleanup(mergedData, {
                 setStep: (step) => this.setStep(step),
                 ensureLocalSnapshotFresh: (expectedData) => this.ensureLocalSnapshotFresh(expectedData),
                 ensureNetworkStillAvailable: () => this.ensureNetwork(),
             });
+            await this.assertRemoteMutationFenceHeld();
             // Cleanup may resolve credentials, remote targets, and provider IO
             // before returning. Recheck the pre-cleanup snapshot here so a
             // local edit made anywhere in that window is requeued instead of
@@ -951,6 +1037,7 @@ class SharedSyncRunMachine {
         this.setStep('refresh');
         await this.yieldToUi();
         this.ensureLocalSnapshotFresh(mergedData);
+        await this.assertRemoteMutationFenceHeld();
         await this.hooks.finalizeSuccess(mergedData, {
             status: syncResult.status,
             wroteLocal: this.state.wroteLocal,

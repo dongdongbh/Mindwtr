@@ -18,6 +18,11 @@ import type { FastSyncState } from './sync-fast-sync';
 import type { SyncBackend } from './sync-service-utils';
 import type { SyncCycleIO, SyncCycleResult } from './sync-types';
 import { performSyncCycle } from './sync';
+import {
+    SyncRemoteMutationFenceBusyError,
+    SyncRemoteMutationFenceLostError,
+    type SyncRemoteMutationFenceLease,
+} from './sync-remote-fence';
 
 const NOW = new Date('2026-07-13T10:00:00.000Z');
 const STAMP = '2026-07-01T00:00:00.000Z';
@@ -37,6 +42,13 @@ const createData = (tasks: Task[] = [], settings: AppData['settings'] = {}): App
     areas: [],
     people: [],
     settings,
+});
+
+const createFenceLease = (overrides: Partial<SyncRemoteMutationFenceLease> = {}): SyncRemoteMutationFenceLease => ({
+    assertHeld: vi.fn().mockResolvedValue(undefined),
+    renew: vi.fn().mockResolvedValue(undefined),
+    release: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
 });
 
 type HarnessConfig = {
@@ -741,6 +753,115 @@ describe('runSharedSyncCycle', () => {
         expect(harness.statusUpdates.at(-1)).toMatchObject({ lastSyncStatus: 'success' });
         expect(harness.uiErrors.at(-1)).toBeNull();
         expect(harness.infos.some((info) => info.message === 'Sync fast check found no changes')).toBe(true);
+    });
+
+    it('keeps a genuine unchanged fast-check lock-free', async () => {
+        const aligned = createData([createTask('t-aligned', 'Aligned task')]);
+        const acquireRemoteMutationFence = vi.fn().mockResolvedValue(createFenceLease());
+        const { run } = createHarness({
+            local: aligned,
+            remote: aligned,
+            fastSyncScope: 'scope-fence-fast-skip',
+            io: { acquireRemoteMutationFence },
+        });
+
+        expect((await run()).skipped).toBeUndefined();
+        expect(acquireRemoteMutationFence).toHaveBeenCalledTimes(1);
+
+        expect(await run()).toMatchObject({ success: true, skipped: 'unchanged' });
+        expect(acquireRemoteMutationFence).toHaveBeenCalledTimes(1);
+    });
+
+    it('holds the remote mutation fence from the authoritative read through finalization', async () => {
+        const callOrder: string[] = [];
+        const lease = createFenceLease({
+            assertHeld: vi.fn(async () => { callOrder.push('assert-held'); }),
+            release: vi.fn(async () => { callOrder.push('release'); }),
+        });
+        const bundle = createHarness({
+            remote: createData([createTask('t-remote', 'Remote task')]),
+            io: {
+                acquireRemoteMutationFence: vi.fn(async () => {
+                    callOrder.push('acquire');
+                    return lease;
+                }),
+                readRemote: vi.fn(async () => {
+                    callOrder.push('read-remote');
+                    return cloneAppData(bundle.harness.remote!);
+                }),
+                writeRemote: vi.fn(async () => {
+                    callOrder.push('write-remote');
+                }),
+            },
+            hooks: {
+                finalizeSuccess: vi.fn(async () => { callOrder.push('finalize'); }),
+            },
+        });
+
+        expect((await bundle.run()).success).toBe(true);
+        expect(callOrder.indexOf('acquire')).toBeLessThan(callOrder.indexOf('read-remote'));
+        expect(callOrder.indexOf('read-remote')).toBeLessThan(callOrder.indexOf('write-remote'));
+        expect(callOrder.indexOf('write-remote')).toBeLessThan(callOrder.indexOf('finalize'));
+        expect(callOrder.indexOf('finalize')).toBeLessThan(callOrder.indexOf('release'));
+        expect(lease.assertHeld).toHaveBeenCalled();
+    });
+
+    it('discards a read-check snapshot and rereads after acquiring the fence', async () => {
+        const staleRemote = createData([createTask('t-stale', 'Stale remote task')]);
+        const authoritativeRemote = createData([createTask('t-current', 'Current remote task')]);
+        const bundle = createHarness({
+            local: createData([createTask('t-local', 'Local task')]),
+            remote: staleRemote,
+            policy: { enableReadCheckSkip: true },
+            io: {
+                acquireRemoteMutationFence: vi.fn(async () => {
+                    bundle.harness.remote = cloneAppData(authoritativeRemote);
+                    return createFenceLease();
+                }),
+            },
+        });
+
+        expect((await bundle.run()).success).toBe(true);
+        expect(bundle.io.readRemote).toHaveBeenCalledTimes(2);
+        expect(bundle.harness.persisted.tasks.map((task) => task.id).sort()).toEqual(['t-current', 't-local']);
+        expect(bundle.harness.persisted.tasks.some((task) => task.id === 't-stale')).toBe(false);
+    });
+
+    it('fails closed before remote or local mutation when fence acquisition is busy', async () => {
+        const { io, storage, hooks, run } = createHarness({
+            io: {
+                acquireRemoteMutationFence: vi.fn(async () => {
+                    throw new SyncRemoteMutationFenceBusyError(5_000);
+                }),
+            },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({ success: false });
+        expect(io.readRemote).not.toHaveBeenCalled();
+        expect(io.writeRemote).not.toHaveBeenCalled();
+        expect(storage.persistLocal).not.toHaveBeenCalled();
+        expect(hooks.finalizeSuccess).not.toHaveBeenCalled();
+    });
+
+    it('does not downgrade fence loss during attachment pre-sync into a warning', async () => {
+        const lost = new SyncRemoteMutationFenceLostError();
+        const lease = createFenceLease({ assertHeld: vi.fn().mockRejectedValue(lost) });
+        const { io, storage, run } = createHarness({
+            io: {
+                acquireRemoteMutationFence: vi.fn().mockResolvedValue(lease),
+                syncAttachments: vi.fn().mockResolvedValue(false),
+            },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({ success: false });
+        expect(io.readRemote).not.toHaveBeenCalled();
+        expect(io.writeRemote).not.toHaveBeenCalled();
+        expect(storage.persistLocal).not.toHaveBeenCalled();
+        expect(result.hadAttachmentWarning).toBeUndefined();
     });
 
     it('does not record an unchanged fast sync when local data changes during the remote fingerprint read', async () => {

@@ -5,6 +5,7 @@ import { SyncRemoteWriteConflict, type SyncBackendIO, type SyncRunAttachmentHelp
 import type { CloudProvider } from './sync-client-helpers';
 import type { SyncBackend } from './sync-service-utils';
 import type { AppData } from './types';
+import type { SyncRemoteMutationFenceLease } from './sync-remote-fence';
 import {
     getWebdavDocumentVersionFromError,
     isWebdavRemoteWriteConflictError,
@@ -68,6 +69,8 @@ export type FileSyncReadResult = {
  * that platform runs today. This ladder does not add or remove retries.
  */
 export type SyncTransport = {
+    acquireWebdavRemoteMutationFence?(): Promise<SyncRemoteMutationFenceLease>;
+    acquireDropboxRemoteMutationFence?(token: string): Promise<SyncRemoteMutationFenceLease>;
     webdavGet(): Promise<WebdavSyncReadResult>;
     /** null means create-only (If-None-Match:*); a value is the strong GET ETag (If-Match). */
     webdavPut(sanitized: AppData, expectedEtag: string | null): Promise<RemoteWriteResult>;
@@ -129,6 +132,16 @@ export function createSyncBackendIO(ctx: SyncBackendContext, transport: SyncTran
     };
 
     return {
+        acquireRemoteMutationFence: async () => {
+            if (ctx.backend === 'webdav' && ctx.webdav?.url) {
+                return transport.acquireWebdavRemoteMutationFence?.() ?? null;
+            }
+            if (ctx.backend === 'cloud' && ctx.cloudProvider === 'dropbox') {
+                if (!transport.acquireDropboxRemoteMutationFence) return null;
+                return runDropboxWithAuthRetry((token) => transport.acquireDropboxRemoteMutationFence!(token));
+            }
+            return null;
+        },
         getSyncUrl: () => ctx.syncUrl,
         getCachedRemoteFingerprint: () => (
             ctx.backend === 'cloud' && ctx.cloudProvider === 'dropbox' && ctx.dropboxRev

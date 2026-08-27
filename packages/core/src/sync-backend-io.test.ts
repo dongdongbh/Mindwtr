@@ -4,6 +4,7 @@ import { DropboxConflictError, DropboxUnauthorizedError } from './dropbox';
 import { SyncRemoteWriteConflict } from './sync-run-ports';
 import type { AppData } from './types';
 import { WebDavRemoteWriteConflictError } from './webdav';
+import type { SyncRemoteMutationFenceLease } from './sync-remote-fence';
 
 const APP_DATA: AppData = {
     tasks: [], projects: [], sections: [], areas: [], people: [], settings: {},
@@ -37,6 +38,11 @@ const makeTransport = (overrides: Partial<SyncTransport> = {}): SyncTransport =>
 });
 
 const helpers = { ensureLocalSnapshotFresh: () => {} };
+const fenceLease = (): SyncRemoteMutationFenceLease => ({
+    assertHeld: vi.fn().mockResolvedValue(undefined),
+    renew: vi.fn().mockResolvedValue(undefined),
+    release: vi.fn().mockResolvedValue(undefined),
+});
 
 describe('createSyncBackendIO', () => {
     describe('cloudkit', () => {
@@ -59,6 +65,18 @@ describe('createSyncBackendIO', () => {
     });
 
     describe('webdav', () => {
+        it('acquires the WebDAV mutation fence through the platform transport', async () => {
+            const lease = fenceLease();
+            const acquireWebdavRemoteMutationFence = vi.fn().mockResolvedValue(lease);
+            const io = createSyncBackendIO({
+                backend: 'webdav', cloudProvider: 'selfhosted',
+                webdav: { url: 'https://dav.example.com/data.json' }, dropboxRev: null,
+            }, makeTransport({ acquireWebdavRemoteMutationFence }));
+
+            await expect(io.acquireRemoteMutationFence!()).resolves.toBe(lease);
+            expect(acquireWebdavRemoteMutationFence).toHaveBeenCalledTimes(1);
+        });
+
         it('throws when unconfigured and never touches the transport', async () => {
             const ctx: SyncBackendContext = { backend: 'webdav', cloudProvider: 'selfhosted', webdav: null, dropboxRev: null };
             const transport = makeTransport();
@@ -200,6 +218,24 @@ describe('createSyncBackendIO', () => {
             await expect(io.readRemote()).rejects.toThrow('Dropbox app key is not configured');
         });
 
+        it('acquires the Dropbox mutation fence with the auth-retry contract', async () => {
+            const lease = fenceLease();
+            const resolveDropboxToken = vi.fn()
+                .mockResolvedValueOnce('stale-token')
+                .mockResolvedValueOnce('fresh-token');
+            const acquireDropboxRemoteMutationFence = vi.fn()
+                .mockRejectedValueOnce(new DropboxUnauthorizedError())
+                .mockResolvedValueOnce(lease);
+            const io = createSyncBackendIO(baseCtx(), makeTransport({
+                resolveDropboxToken,
+                acquireDropboxRemoteMutationFence,
+            }));
+
+            await expect(io.acquireRemoteMutationFence!()).resolves.toBe(lease);
+            expect(acquireDropboxRemoteMutationFence).toHaveBeenNthCalledWith(1, 'stale-token');
+            expect(acquireDropboxRemoteMutationFence).toHaveBeenNthCalledWith(2, 'fresh-token');
+        });
+
         it('reads, caches the rev, writes, and refreshes the fingerprint using the dropbox:v1:rev= format', async () => {
             const ctx = baseCtx();
             const transport = makeTransport();
@@ -279,6 +315,20 @@ describe('createSyncBackendIO', () => {
     });
 
     describe('file', () => {
+        it('does not acquire a provider fence for File Sync', async () => {
+            const transport = makeTransport({
+                acquireWebdavRemoteMutationFence: vi.fn().mockResolvedValue(fenceLease()),
+                acquireDropboxRemoteMutationFence: vi.fn().mockResolvedValue(fenceLease()),
+            });
+            const io = createSyncBackendIO({
+                backend: 'file', cloudProvider: 'selfhosted', filePath: '/tmp/sync', dropboxRev: null,
+            }, transport);
+
+            await expect(io.acquireRemoteMutationFence!()).resolves.toBeNull();
+            expect(transport.acquireWebdavRemoteMutationFence).not.toHaveBeenCalled();
+            expect(transport.acquireDropboxRemoteMutationFence).not.toHaveBeenCalled();
+        });
+
         it('reads, writes, and syncs attachments through the file transport', async () => {
             const ctx: SyncBackendContext = { backend: 'file', cloudProvider: 'selfhosted', filePath: '/tmp/sync', dropboxRev: null };
             const transport = makeTransport();

@@ -4,6 +4,7 @@ import type { FastSyncState } from './sync-fast-sync';
 import type { CloudProvider } from './sync-client-helpers';
 import type { SyncBackend } from './sync-service-utils';
 import type { buildMergeSummaryLog } from './sync-log-utils';
+import type { SyncRemoteMutationFenceLease } from './sync-remote-fence';
 
 /**
  * ADR 0014 — shared sync orchestration ports.
@@ -61,6 +62,9 @@ export class SyncRemoteWriteConflict extends Error {
  * lives in the machine — implementations do transport only.
  */
 export interface SyncBackendIO {
+    /** Acquire the backend's compatible-client remote mutation lease. Returns
+     *  null for backends that do not expose the shared WebDAV/Dropbox fence. */
+    acquireRemoteMutationFence?(): Promise<SyncRemoteMutationFenceLease | null>;
     /** Transport read of the remote sync document; null/undefined when missing.
      *  WebDAV implementations should let invalid-JSON errors propagate — the
      *  machine maps them to the treat-as-missing repair-write path. */
