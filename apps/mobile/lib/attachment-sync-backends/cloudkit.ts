@@ -115,12 +115,11 @@ const buildMetadata = (
 });
 
 const applyFetchedMetadata = (attachment: Attachment, metadata: CloudKitAttachmentMetadata): void => {
-    if (metadata.title) attachment.title = metadata.title;
-    if (metadata.mimeType) attachment.mimeType = metadata.mimeType;
+    // The merged sync document owns descriptive metadata. CloudKit asset metadata
+    // can lag behind title-only or MIME-only document edits because those edits do
+    // not upload a new byte generation. Only the byte-derived size is authoritative
+    // after fetching the asset; the installer has already recorded its exact hash.
     if (Number.isFinite(metadata.size ?? NaN)) attachment.size = metadata.size;
-    // The generation-bound installer records the SHA-256 of the exact plaintext
-    // it published. Metadata may omit a hash; it must never erase or replace
-    // that post-install identity.
 };
 
 /** The next `settings.attachments` value once the flushed keys are dropped, or `undefined`

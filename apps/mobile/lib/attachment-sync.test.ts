@@ -1567,6 +1567,49 @@ describe('attachment sync', () => {
     });
   });
 
+  it('keeps merged title and MIME metadata when downloading an older CloudKit asset', async () => {
+    const bytes = new Uint8Array([61, 62, 63]);
+    const fileHash = sha256Hex(bytes);
+    const appData = singleAttachmentData({
+      id: 'cloudkit-title-only-rename',
+      title: 'New name.pdf',
+      mimeType: 'application/pdf',
+      size: 99,
+      cloudKey: 'cloudkit:cloudkit-title-only-rename',
+      fileHash,
+      updatedAt: '2026-08-27T01:00:00.000Z',
+    });
+    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+    fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(bytes));
+    const cloudkit = await import('./cloudkit-sync');
+    vi.mocked(cloudkit.fetchCloudKitAttachmentAsset).mockResolvedValue({
+      attachmentId: 'cloudkit-title-only-rename',
+      ownerType: 'task',
+      ownerId: 'task-1',
+      title: 'Old name.pdf',
+      mimeType: 'application/octet-stream',
+      size: bytes.byteLength,
+      fileHash: 'ff'.repeat(32),
+      updatedAt: '2026-08-27T00:00:00.000Z',
+    });
+
+    const result = await attachmentSync.syncCloudKitAttachments(
+      appData,
+      undefined,
+      { phase: 'post-merge' },
+    );
+
+    const { didMutate, data } = syncResult(result, appData);
+    expect(didMutate).toBe(true);
+    expect(data.tasks[0].attachments?.[0]).toMatchObject({
+      title: 'New name.pdf',
+      mimeType: 'application/pdf',
+      size: bytes.byteLength,
+      fileHash,
+      localStatus: 'available',
+    });
+  });
+
   it('deletes CloudKit scratch when native fetch fails before installer handoff', async () => {
     const bytes = new Uint8Array([34, 35, 36]);
     const appData = singleAttachmentData({
