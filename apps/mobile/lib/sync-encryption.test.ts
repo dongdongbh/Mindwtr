@@ -624,6 +624,43 @@ describe('File Sync transitions through core orchestration', () => {
     expect([...fs.files.keys()].some((uri) => uri.includes('.mindwtr-et-'))).toBe(false);
   });
 
+  it('captures confirmed-missing fixed document counterparts', async () => {
+    seedPlaintextFolder();
+    const port = await createFileSyncEncryptionRemotePort(SYNC_URI);
+    const inventory = await port!.captureInventory!();
+
+    expect(inventory.entries.filter((entry) => entry.kind === 'document').map((entry) => entry.name))
+      .toEqual([
+        'data.json',
+        'data.json.bak',
+        'data.json.bak.previous',
+        'data.json.enc',
+        'data.json.enc.bak',
+        'data.json.enc.bak.previous',
+        'data.json.enc.previous',
+        'data.json.previous',
+        'mindwtr-sync.json',
+        'mindwtr-sync.json.enc',
+      ]);
+    expect(inventory.snapshot.get('data.json.enc')).toEqual({ bytes: null, version: null });
+    expect(inventory.snapshot.get('mindwtr-sync.json')).toEqual({ bytes: null, version: null });
+  });
+
+  it('rejects a peer-created fixed counterpart after the missing generation was captured', async () => {
+    seedPlaintextFolder();
+    const peer = new Uint8Array([7, 1, 7, 1]);
+    const port = await createFileSyncEncryptionRemotePort(SYNC_URI, {
+      onInventoryPoint: (point) => {
+        if (point === 'after-document-snapshot') fs.files.set(ENC_URI, peer);
+      },
+    });
+
+    await expect(port!.captureInventory!())
+      .rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+    expect(fs.files.get(ENC_URI)).toEqual(peer);
+    expect([...fs.files.keys()].some((uri) => uri.includes('.mindwtr-et-'))).toBe(false);
+  });
+
   it('binds attachment enumeration to one document generation and includes the peer generation on retry', async () => {
     seedPlaintextFolder();
     const peerAttachment = new Uint8Array([1, 3, 3, 7]);

@@ -410,6 +410,19 @@ const isSyncDocumentName = (name: string): boolean => {
     return base === SYNC_FILE_NAME || base === LEGACY_SYNC_FILE_NAME;
 };
 
+const FIXED_SYNC_DOCUMENT_NAMES = [
+    SYNC_FILE_NAME,
+    `${SYNC_FILE_NAME}.enc`,
+    `${SYNC_FILE_NAME}.bak`,
+    `${SYNC_FILE_NAME}.enc.bak`,
+    `${SYNC_FILE_NAME}.bak.previous`,
+    `${SYNC_FILE_NAME}.enc.bak.previous`,
+    `${SYNC_FILE_NAME}.previous`,
+    `${SYNC_FILE_NAME}.enc.previous`,
+    LEGACY_SYNC_FILE_NAME,
+    `${LEGACY_SYNC_FILE_NAME}.enc`,
+] as const;
+
 export type FileSyncEncryptionTarget = {
     /** The directory holding data.json — SAF tree/document URI or a `file://` dir. */
     dirUri: string;
@@ -591,11 +604,13 @@ export const createFileSyncEncryptionRemotePort = async (
     };
 
     const documentEntries = (): SyncEncryptionRemoteEntry[] => {
-        const entries: SyncEncryptionRemoteEntry[] = [];
+        const names = new Set<string>(FIXED_SYNC_DOCUMENT_NAMES);
         for (const name of documents.entries.keys()) {
-            if (isSyncDocumentName(name)) entries.push({ name, kind: 'document' });
+            if (isSyncDocumentName(name)) names.add(name);
         }
-        return entries.sort((left, right) => left.name.localeCompare(right.name));
+        return Array.from(names)
+            .sort((left, right) => left.localeCompare(right))
+            .map((name) => ({ name, kind: 'document' }));
     };
 
     const nonDocumentEntries = async (): Promise<SyncEncryptionRemoteEntry[]> => {
@@ -641,7 +656,7 @@ export const createFileSyncEncryptionRemotePort = async (
         const initialDocuments = documentEntries();
         const snapshot = new Map<string, SyncEncryptionRemoteRead>();
         for (const entry of initialDocuments) {
-            snapshot.set(entry.name, await readListedEntry(entry.name));
+            snapshot.set(entry.name, await read(entry.name));
         }
         await testHooks.onInventoryPoint?.('after-document-snapshot');
 
@@ -659,7 +674,7 @@ export const createFileSyncEncryptionRemotePort = async (
             throw new SyncEncryptionRemoteConflictError('sync document inventory changed during encryption transition');
         }
         for (const entry of initialDocuments) {
-            const current = await readListedEntry(entry.name);
+            const current = await read(entry.name);
             if (current.version !== snapshot.get(entry.name)?.version) {
                 throw new SyncEncryptionRemoteConflictError(`${entry.name} changed during sync encryption inventory`);
             }
