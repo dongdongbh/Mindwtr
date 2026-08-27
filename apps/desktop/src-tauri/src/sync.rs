@@ -10092,6 +10092,81 @@ mod tests {
         .expect("verify should not error");
         assert!(outcome.is_some());
     }
+
+    #[test]
+    fn passphrase_provisioning_holds_the_sync_lock_through_key_persistence() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        enable_sync_encryption_in_dir(dir.path(), "correct horse")
+            .expect("seed encrypted folder");
+
+        let sync_dir = Arc::new(dir.path().to_path_buf());
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let contender_dir = sync_dir.clone();
+        let contender_barrier = barrier.clone();
+        let contender = std::thread::spawn(move || {
+            contender_barrier.wait();
+            let attempt = acquire_sync_lock(&contender_dir);
+            contender_barrier.wait();
+            attempt
+        });
+        let persisted = Cell::new(false);
+
+        let outcome = provide_sync_encryption_passphrase_in_dir_with(
+            &sync_dir,
+            "correct horse",
+            || {
+                barrier.wait();
+                barrier.wait();
+                Ok(())
+            },
+            |_| {
+                persisted.set(true);
+                Ok(())
+            },
+        )
+        .expect("provision passphrase");
+
+        let contender_result = contender.join().expect("contender completes");
+        if let Ok(lock) = contender_result {
+            release_sync_lock(&lock);
+            panic!("a concurrent sync writer entered during passphrase provisioning");
+        }
+        assert_eq!(outcome, "ok");
+        assert!(persisted.get());
+    }
+
+    #[test]
+    fn passphrase_provisioning_rejects_a_generation_change_before_key_persistence() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        let material = enable_sync_encryption_in_dir(dir.path(), "correct horse")
+            .expect("seed encrypted folder");
+        let changed_path = dir
+            .path()
+            .join(encrypted_artifact_name("data.json.bak"));
+        let peer = encrypt_sync_artifact(
+            br#"{"tasks":[{"id":"peer"}]}"#,
+            &material,
+        )
+        .expect("peer generation");
+        let persisted = Cell::new(false);
+
+        let error = provide_sync_encryption_passphrase_in_dir_with(
+            dir.path(),
+            "correct horse",
+            || fs::write(&changed_path, &peer).map_err(|error| error.to_string()),
+            |_| {
+                persisted.set(true);
+                Ok(())
+            },
+        )
+        .expect_err("a changed authenticated generation must abort provisioning");
+
+        assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
+        assert!(!persisted.get(), "stale key material must not be committed");
+        assert_eq!(fs::read(&changed_path).expect("peer generation retained"), peer);
+    }
 }
 
 #[tauri::command]
@@ -13454,6 +13529,49 @@ fn verify_sync_passphrase_with_reread(
     Ok(None)
 }
 
+fn provide_sync_encryption_passphrase_in_dir_with<BeforeFinalize, Persist>(
+    sync_dir: &Path,
+    passphrase: &str,
+    before_finalize: BeforeFinalize,
+    persist: Persist,
+) -> Result<String, String>
+where
+    BeforeFinalize: FnOnce() -> Result<(), String>,
+    Persist: FnOnce(&SyncKeyMaterial) -> Result<(), String>,
+{
+    // Passphrase verification is a read-modify-persist operation over the remote folder's
+    // exact generation. Hold the same lock as ordinary File Sync and transitions from the
+    // first authentication read until the enabled material is durable; otherwise a writer can
+    // replace the authenticated generation before the local key/state commit.
+    let lock = acquire_sync_lock(sync_dir)?;
+    let result = (|| {
+        let encrypted = sync_dir.join(encrypted_artifact_name(DATA_FILE_NAME));
+        let label = encrypted.display().to_string();
+        let outcome = verify_sync_passphrase_with_reread(passphrase, &label, || {
+            fs::read(&encrypted).map_err(|error| format!("Failed to read {label}: {error}"))
+        })?;
+        match outcome {
+            Some(material) => {
+                let generation = snapshot_managed_sync_document_generations(
+                    sync_dir,
+                    Some(&material),
+                    true,
+                )?;
+                finalize_enabled_file_generation_with(
+                    &generation,
+                    &material,
+                    before_finalize,
+                    persist,
+                )?;
+                Ok("ok".to_string())
+            }
+            None => Ok("wrong-passphrase".to_string()),
+        }
+    })();
+    release_sync_lock(&lock);
+    result
+}
+
 /// Validates a passphrase against the folder's current `.enc` base document. Never mutates the
 /// remote either way: a wrong passphrase is a plain answer, not an error and not a write.
 #[tauri::command(async)]
@@ -13463,28 +13581,12 @@ pub(crate) fn provide_sync_encryption_passphrase(
     path: Option<String>,
 ) -> Result<String, String> {
     let sync_dir = require_file_backend_dir(&app, path)?;
-    let encrypted = sync_dir.join(encrypted_artifact_name(DATA_FILE_NAME));
-    let label = encrypted.display().to_string();
-    let outcome = verify_sync_passphrase_with_reread(&passphrase, &label, || {
-        fs::read(&encrypted).map_err(|error| format!("Failed to read {label}: {error}"))
-    })?;
-    match outcome {
-        Some(material) => {
-            let generation = snapshot_managed_sync_document_generations(
-                &sync_dir,
-                Some(&material),
-                true,
-            )?;
-            finalize_enabled_file_generation_with(
-                &generation,
-                &material,
-                || Ok(()),
-                |verified| persist_enabled_material(&app, verified),
-            )?;
-            Ok("ok".to_string())
-        }
-        None => Ok("wrong-passphrase".to_string()),
-    }
+    provide_sync_encryption_passphrase_in_dir_with(
+        &sync_dir,
+        &passphrase,
+        || Ok(()),
+        |verified| persist_enabled_material(&app, verified),
+    )
 }
 
 // tauri-plugin-fs declares `exists`, `mkdir`, `remove` and `rename` as plain
