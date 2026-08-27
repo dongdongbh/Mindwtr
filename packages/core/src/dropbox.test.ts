@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     deleteDropboxFileVersioned,
     downloadDropboxAppData,
+    downloadDropboxFile,
     downloadDropboxFileVersioned,
     DropboxConflictError,
     uploadDropboxAppData,
@@ -52,6 +53,24 @@ function createFakeDropbox() {
 }
 
 describe('dropbox sync-document encryption', () => {
+    it('aborts a bounded Dropbox request and reports a retryable timeout', async () => {
+        let requestSignal: AbortSignal | undefined;
+        const fetcher = async (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+            requestSignal = init?.signal ?? undefined;
+            return new Promise((_resolve, reject) => {
+                requestSignal?.addEventListener('abort', () => {
+                    const error = new Error('aborted');
+                    error.name = 'AbortError';
+                    reject(error);
+                }, { once: true });
+            });
+        };
+
+        await expect(downloadDropboxFile('token', '/attachment', fetcher, { timeoutMs: 1 }))
+            .rejects.toThrow('Dropbox file download timed out');
+        expect(requestSignal?.aborted).toBe(true);
+    });
+
     it('rejects a second plaintext or encrypted first-writer after both clients read an absent remote', async () => {
         const data: AppData = { tasks: [] } as unknown as AppData;
         const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(9), FAST_KDF);

@@ -3,6 +3,7 @@ import {
     downloadDropboxFileVersionedWithServerTime,
     isDropboxConflictError,
     uploadDropboxFileVersioned,
+    type DropboxRequestOptions,
 } from './dropbox';
 import {
     isWebdavRemoteWriteConflictError,
@@ -50,14 +51,21 @@ export const createWebdavSyncRemoteMutationFencePort = (
 export const createDropboxSyncRemoteMutationFencePort = (
     accessToken: string,
     fetcher: typeof fetch = fetch,
+    requestOptions: DropboxRequestOptions = {},
 ): SyncRemoteMutationFencePort => {
     const path = `/${SYNC_REMOTE_MUTATION_FENCE_NAME}`;
     return {
-        read: () => downloadDropboxFileVersionedWithServerTime(accessToken, path, fetcher),
+        read: () => downloadDropboxFileVersionedWithServerTime(accessToken, path, fetcher, requestOptions),
         write: async (bytes, expectedVersion) => {
-            await uploadDropboxFileVersioned(accessToken, path, bytes, expectedVersion, fetcher);
+            await uploadDropboxFileVersioned(accessToken, path, bytes, expectedVersion, fetcher, requestOptions);
         },
-        remove: (expectedVersion) => deleteDropboxFileVersioned(accessToken, path, expectedVersion, fetcher),
+        remove: (expectedVersion) => deleteDropboxFileVersioned(
+            accessToken,
+            path,
+            expectedVersion,
+            fetcher,
+            requestOptions,
+        ),
         isConflict: isDropboxConflictError,
     };
 };

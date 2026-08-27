@@ -6,7 +6,13 @@ import {
     parseDropboxMetadataRev,
     resolveDropboxPath,
 } from './dropbox-sync-utils';
-import { MAX_DOWNLOAD_BYTES, MAX_SYNC_DOCUMENT_BYTES, readResponseBody } from './http-utils';
+import {
+    DEFAULT_TIMEOUT_MS,
+    fetchWithTimeout,
+    MAX_DOWNLOAD_BYTES,
+    MAX_SYNC_DOCUMENT_BYTES,
+    readResponseBody,
+} from './http-utils';
 import { decryptRemoteArtifactOrThrow, detectForeignSaltArtifact, isPlaintextSyncArtifact, syncEncryptedArtifactName } from './sync-encryption';
 import { encryptSyncArtifact, inspectSyncArtifact, type SyncCryptoKdfParams, type SyncCryptoPrimitives, type SyncKeyMaterial } from './sync-crypto';
 
@@ -15,6 +21,25 @@ const DOWNLOAD_ENDPOINT = 'https://content.dropboxapi.com/2/files/download';
 const UPLOAD_ENDPOINT = 'https://content.dropboxapi.com/2/files/upload';
 const FILE_METADATA_ENDPOINT = 'https://api.dropboxapi.com/2/files/get_metadata';
 const FILE_DELETE_ENDPOINT = 'https://api.dropboxapi.com/2/files/delete_v2';
+
+export type DropboxRequestOptions = {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+};
+
+const fetchDropbox = (
+    fetcher: typeof fetch,
+    url: string,
+    init: RequestInit,
+    options: DropboxRequestOptions,
+    timeoutMessage: string,
+): Promise<Response> => fetchWithTimeout(
+    url,
+    { ...init, signal: options.signal },
+    options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    fetcher,
+    timeoutMessage,
+);
 
 export class DropboxConflictError extends Error {
     constructor(message = 'Dropbox remote data changed during sync') {
@@ -100,8 +125,9 @@ export async function getDropboxAppDataMetadata(
      *  `.enc` path so an encrypted remote reports a real rev instead of 409-ing to `null` and
      *  making every cycle look like a fresh remote. Omitting it is the pre-feature behavior. */
     crypto: DropboxSyncCrypto = {},
+    requestOptions: DropboxRequestOptions = {},
 ): Promise<{ rev: string | null }> {
-    const response = await fetcher(FILE_METADATA_ENDPOINT, {
+    const response = await fetchDropbox(fetcher, FILE_METADATA_ENDPOINT, {
         method: 'POST',
         headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -112,7 +138,7 @@ export async function getDropboxAppDataMetadata(
             include_media_info: false,
             include_deleted: false,
         }),
-    });
+    }, requestOptions, 'Dropbox metadata request timed out');
     if (response.status === 409) {
         return { rev: null };
     }
@@ -130,15 +156,16 @@ export async function downloadDropboxAppData(
     accessToken: string,
     fetcher: typeof fetch = fetch,
     crypto: DropboxSyncCrypto = {},
+    requestOptions: DropboxRequestOptions = {},
 ): Promise<DropboxDownloadResult> {
     const path = crypto.material ? syncEncryptedArtifactName(DROPBOX_SYNC_PATH) : DROPBOX_SYNC_PATH;
-    const response = await fetcher(DOWNLOAD_ENDPOINT, {
+    const response = await fetchDropbox(fetcher, DOWNLOAD_ENDPOINT, {
         method: 'POST',
         headers: {
             Authorization: `Bearer ${accessToken}`,
             'Dropbox-API-Arg': JSON.stringify({ path }),
         },
-    });
+    }, requestOptions, 'Dropbox download timed out');
 
     if (await requireDropboxDownloadOrNotFound(response) === 'not-found') {
         if (!crypto.material) {
@@ -148,13 +175,13 @@ export async function downloadDropboxAppData(
             // plaintext original (decision #2). A device syncing an existing plaintext
             // folder never reaches this branch — its plain download succeeds every
             // cycle — so invariant #1 (no extra requests for an existing install) holds.
-            const probe = await fetcher(DOWNLOAD_ENDPOINT, {
+            const probe = await fetchDropbox(fetcher, DOWNLOAD_ENDPOINT, {
                 method: 'POST',
                 headers: {
                     Authorization: `Bearer ${accessToken}`,
                     'Dropbox-API-Arg': JSON.stringify({ path: syncEncryptedArtifactName(DROPBOX_SYNC_PATH) }),
                 },
-            });
+            }, requestOptions, 'Dropbox encrypted-generation probe timed out');
             if (await requireDropboxDownloadOrNotFound(probe) === 'not-found') {
                 return { data: null, rev: null };
             }
@@ -167,13 +194,13 @@ export async function downloadDropboxAppData(
             // Mirror of the probe above, in the other direction and gated the same way: this
             // device HAS a key and its `.enc` path is empty, so one look at the plain path
             // tells "first sync" apart from "a peer disabled encryption here".
-            const probe = await fetcher(DOWNLOAD_ENDPOINT, {
+            const probe = await fetchDropbox(fetcher, DOWNLOAD_ENDPOINT, {
                 method: 'POST',
                 headers: {
                     Authorization: `Bearer ${accessToken}`,
                     'Dropbox-API-Arg': JSON.stringify({ path: DROPBOX_SYNC_PATH }),
                 },
-            });
+            }, requestOptions, 'Dropbox plaintext-generation probe timed out');
             if (await requireDropboxDownloadOrNotFound(probe) === 'not-found') {
                 return { data: null, rev: null };
             }
@@ -218,13 +245,13 @@ export async function downloadDropboxAppData(
         // fetch double with no arrayBuffer()) just falls through to the original error.
         let inspected: ReturnType<typeof inspectSyncArtifact> | null = null;
         try {
-            const raw = await fetcher(DOWNLOAD_ENDPOINT, {
+            const raw = await fetchDropbox(fetcher, DOWNLOAD_ENDPOINT, {
                 method: 'POST',
                 headers: {
                     Authorization: `Bearer ${accessToken}`,
                     'Dropbox-API-Arg': JSON.stringify({ path }),
                 },
-            });
+            }, requestOptions, 'Dropbox encrypted-generation inspection timed out');
             if (raw.ok) inspected = inspectSyncArtifact(new Uint8Array(await readResponseBody(raw, undefined, MAX_SYNC_DOCUMENT_BYTES)));
         } catch {
             // fall through to the original error below
@@ -243,6 +270,7 @@ export async function uploadDropboxAppData(
     expectedRev: string | null,
     fetcher: typeof fetch = fetch,
     crypto: DropboxSyncCrypto = {},
+    requestOptions: DropboxRequestOptions = {},
 ): Promise<{ rev: string | null }> {
     const mode = expectedRev
         ? { '.tag': 'update', update: expectedRev }
@@ -254,7 +282,7 @@ export async function uploadDropboxAppData(
     const body: BodyInit = crypto.material
         ? (await encryptSyncArtifact(new TextEncoder().encode(JSON.stringify(data)), crypto.material, crypto.cryptoPrims)).slice().buffer
         : JSON.stringify(data);
-    const response = await fetcher(UPLOAD_ENDPOINT, {
+    const response = await fetchDropbox(fetcher, UPLOAD_ENDPOINT, {
         method: 'POST',
         headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -268,7 +296,7 @@ export async function uploadDropboxAppData(
             'Content-Type': 'application/octet-stream',
         },
         body,
-    });
+    }, requestOptions, 'Dropbox upload timed out');
 
     if (response.status === 409) {
         const errorTag = await parseDropboxApiErrorTag(response);
@@ -290,15 +318,16 @@ export async function uploadDropboxAppData(
 export async function downloadDropboxFile(
     accessToken: string,
     path: string,
-    fetcher: typeof fetch = fetch
+    fetcher: typeof fetch = fetch,
+    requestOptions: DropboxRequestOptions = {},
 ): Promise<ArrayBuffer> {
-    const response = await fetcher(DOWNLOAD_ENDPOINT, {
+    const response = await fetchDropbox(fetcher, DOWNLOAD_ENDPOINT, {
         method: 'POST',
         headers: {
             Authorization: `Bearer ${accessToken}`,
             'Dropbox-API-Arg': JSON.stringify({ path: resolveDropboxPath(path) }),
         },
-    });
+    }, requestOptions, 'Dropbox file download timed out');
     if (response.status === 401) {
         throw new DropboxUnauthorizedError('Dropbox file download failed: HTTP 401');
     }
@@ -320,14 +349,15 @@ export async function downloadDropboxFileVersionedWithServerTime(
     accessToken: string,
     path: string,
     fetcher: typeof fetch = fetch,
+    requestOptions: DropboxRequestOptions = {},
 ): Promise<{ bytes: Uint8Array | null; version: string | null; serverNowMs: number | null }> {
-    const response = await fetcher(DOWNLOAD_ENDPOINT, {
+    const response = await fetchDropbox(fetcher, DOWNLOAD_ENDPOINT, {
         method: 'POST',
         headers: {
             Authorization: `Bearer ${accessToken}`,
             'Dropbox-API-Arg': JSON.stringify({ path: resolveDropboxPath(path) }),
         },
-    });
+    }, requestOptions, 'Dropbox versioned file download timed out');
     const parsedServerNow = Date.parse(response.headers.get('date') ?? '');
     const serverNowMs = Number.isFinite(parsedServerNow) ? parsedServerNow : null;
     if (response.status === 401) throw new DropboxUnauthorizedError('Dropbox file download failed: HTTP 401');
@@ -351,8 +381,14 @@ export async function downloadDropboxFileVersioned(
     accessToken: string,
     path: string,
     fetcher: typeof fetch = fetch,
+    requestOptions: DropboxRequestOptions = {},
 ): Promise<{ bytes: Uint8Array | null; version: string | null }> {
-    const { bytes, version } = await downloadDropboxFileVersionedWithServerTime(accessToken, path, fetcher);
+    const { bytes, version } = await downloadDropboxFileVersionedWithServerTime(
+        accessToken,
+        path,
+        fetcher,
+        requestOptions,
+    );
     return { bytes, version };
 }
 
@@ -361,13 +397,14 @@ export async function uploadDropboxFile(
     path: string,
     content: ArrayBuffer | Uint8Array,
     _contentType = 'application/octet-stream',
-    fetcher: typeof fetch = fetch
+    fetcher: typeof fetch = fetch,
+    requestOptions: DropboxRequestOptions = {},
 ): Promise<{ rev: string | null }> {
     const sourceBytes = content instanceof Uint8Array ? content : new Uint8Array(content);
     const bytes = new Uint8Array(sourceBytes.length);
     bytes.set(sourceBytes);
     const requestBody = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-    const response = await fetcher(UPLOAD_ENDPOINT, {
+    const response = await fetchDropbox(fetcher, UPLOAD_ENDPOINT, {
         method: 'POST',
         headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -380,7 +417,7 @@ export async function uploadDropboxFile(
             'Content-Type': 'application/octet-stream',
         },
         body: requestBody,
-    });
+    }, requestOptions, 'Dropbox file upload timed out');
     if (response.status === 401) {
         throw new DropboxUnauthorizedError('Dropbox file upload failed: HTTP 401');
     }
@@ -399,13 +436,14 @@ export async function uploadDropboxFileVersioned(
     content: ArrayBuffer | Uint8Array,
     expectedRev: string | null,
     fetcher: typeof fetch = fetch,
+    requestOptions: DropboxRequestOptions = {},
 ): Promise<{ rev: string | null }> {
     const sourceBytes = content instanceof Uint8Array ? content : new Uint8Array(content);
     const requestBody = new Uint8Array(sourceBytes).buffer;
     const mode = expectedRev
         ? { '.tag': 'update', update: expectedRev }
         : { '.tag': 'add' };
-    const response = await fetcher(UPLOAD_ENDPOINT, {
+    const response = await fetchDropbox(fetcher, UPLOAD_ENDPOINT, {
         method: 'POST',
         headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -419,7 +457,7 @@ export async function uploadDropboxFileVersioned(
             'Content-Type': 'application/octet-stream',
         },
         body: requestBody,
-    });
+    }, requestOptions, 'Dropbox versioned file upload timed out');
     if (response.status === 401) throw new DropboxUnauthorizedError('Dropbox file upload failed: HTTP 401');
     if (response.status === 409) throw new DropboxConflictError('Dropbox artifact changed during encryption transition');
     if (!response.ok) throw new Error(`Dropbox file upload failed: HTTP ${response.status}`);
@@ -430,16 +468,17 @@ export async function uploadDropboxFileVersioned(
 export async function deleteDropboxFile(
     accessToken: string,
     path: string,
-    fetcher: typeof fetch = fetch
+    fetcher: typeof fetch = fetch,
+    requestOptions: DropboxRequestOptions = {},
 ): Promise<void> {
-    const response = await fetcher(FILE_DELETE_ENDPOINT, {
+    const response = await fetchDropbox(fetcher, FILE_DELETE_ENDPOINT, {
         method: 'POST',
         headers: {
             Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({ path: resolveDropboxPath(path) }),
-    });
+    }, requestOptions, 'Dropbox file delete timed out');
     if (response.status === 401) {
         throw new DropboxUnauthorizedError('Dropbox file delete failed: HTTP 401');
     }
@@ -459,16 +498,17 @@ export async function deleteDropboxFileVersioned(
     path: string,
     expectedRev: string,
     fetcher: typeof fetch = fetch,
+    requestOptions: DropboxRequestOptions = {},
 ): Promise<void> {
     if (!expectedRev.trim()) throw new Error('Dropbox conditional delete requires a revision');
-    const response = await fetcher(FILE_DELETE_ENDPOINT, {
+    const response = await fetchDropbox(fetcher, FILE_DELETE_ENDPOINT, {
         method: 'POST',
         headers: {
             Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({ path: resolveDropboxPath(path), parent_rev: expectedRev }),
-    });
+    }, requestOptions, 'Dropbox versioned file delete timed out');
     if (response.status === 401) throw new DropboxUnauthorizedError('Dropbox file delete failed: HTTP 401');
     if (response.status === 409) throw new DropboxConflictError('Dropbox artifact changed during encryption transition');
     if (!response.ok) throw new Error(`Dropbox file delete failed: HTTP ${response.status}`);
@@ -476,9 +516,10 @@ export async function deleteDropboxFileVersioned(
 
 export async function testDropboxAccess(
     accessToken: string,
-    fetcher: typeof fetch = fetch
+    fetcher: typeof fetch = fetch,
+    requestOptions: DropboxRequestOptions = {},
 ): Promise<void> {
-    const response = await fetcher(FILE_METADATA_ENDPOINT, {
+    const response = await fetchDropbox(fetcher, FILE_METADATA_ENDPOINT, {
         method: 'POST',
         headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -489,7 +530,7 @@ export async function testDropboxAccess(
             include_media_info: false,
             include_deleted: false,
         }),
-    });
+    }, requestOptions, 'Dropbox connection test timed out');
     if (response.status === 409) {
         return;
     }

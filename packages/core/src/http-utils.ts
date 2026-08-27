@@ -377,13 +377,15 @@ export const fetchWithTimeout = async (
 
     const signal = abortController ? abortController.signal : init.signal;
     const externalSignal = init.signal;
+    let externalAbortListener: (() => void) | null = null;
     if (abortController && externalSignal) {
         if (externalSignal.aborted) {
             abortController.abort(getAbortSignalReason(externalSignal, 'Request cancelled'));
         } else {
-            externalSignal.addEventListener('abort', () => {
+            externalAbortListener = () => {
                 abortController.abort(getAbortSignalReason(externalSignal, 'Request cancelled'));
-            }, { once: true });
+            };
+            externalSignal.addEventListener('abort', externalAbortListener, { once: true });
         }
     }
 
@@ -412,5 +414,8 @@ export const fetchWithTimeout = async (
         throw appendErrorCauseChain(error);
     } finally {
         if (timeoutId) clearTimeout(timeoutId);
+        if (externalSignal && externalAbortListener) {
+            externalSignal.removeEventListener('abort', externalAbortListener);
+        }
     }
 };

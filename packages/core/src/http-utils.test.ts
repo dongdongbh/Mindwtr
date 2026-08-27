@@ -178,6 +178,23 @@ describe('fetchWithTimeout', () => {
         )).rejects.toThrow('Sync cancelled');
     });
 
+    it('removes the caller abort listener after a completed request', async () => {
+        const controller = new AbortController();
+        const add = vi.spyOn(controller.signal, 'addEventListener');
+        const remove = vi.spyOn(controller.signal, 'removeEventListener');
+
+        await fetchWithTimeout(
+            'https://example.com/data.json',
+            { signal: controller.signal },
+            1_000,
+            async () => new Response(null, { status: 200 }),
+            'Request timed out',
+        );
+
+        expect(add).toHaveBeenCalledOnce();
+        expect(remove).toHaveBeenCalledWith('abort', add.mock.calls[0]?.[1]);
+    });
+
     it('falls back to a cancellation message for non-Error abort reasons', async () => {
         const controller = new AbortController();
         controller.abort({ name: 'AbortError', message: 'Native cancellation' });

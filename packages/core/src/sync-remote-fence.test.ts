@@ -210,4 +210,28 @@ describe('remote sync mutation fence', () => {
         expect(lease.retryAfterMs()).toBeLessThanOrEqual(10_000);
         await lease.release();
     });
+
+    it('stops heartbeats after a bounded provider request fails', async () => {
+        const remote = createPort();
+        let failReads = false;
+        let readCalls = 0;
+        const port: SyncRemoteMutationFencePort = {
+            ...remote.port,
+            read: async () => {
+                readCalls += 1;
+                if (failReads) throw new Error('Dropbox versioned file download timed out');
+                return remote.port.read();
+            },
+        };
+        const lease = await acquire(port, { heartbeatMs: 10 });
+        failReads = true;
+
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        const readsAfterFailure = readCalls;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        expect(readCalls).toBe(readsAfterFailure);
+        await expect(lease.assertHeld()).rejects.toThrow('timed out');
+        await expect(lease.release()).rejects.toThrow('timed out');
+    });
 });
