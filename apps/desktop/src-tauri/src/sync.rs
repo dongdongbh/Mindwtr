@@ -5251,6 +5251,7 @@ mod tests {
         let error = remove_transition_artifact_if_version_with_hook(
             &remove_target,
             &remove_expected,
+            &remove_target,
             |point, path| {
                 if point == TransitionMutationPoint::BeforeQuarantine && !remove_injected {
                     remove_injected = true;
@@ -5273,6 +5274,7 @@ mod tests {
         let error = remove_transition_artifact_if_version_with_hook(
             &recreated_target,
             &recreated_expected,
+            &recreated_target,
             |point, path| {
                 if point == TransitionMutationPoint::BeforeRemoveCommit && !recreate_injected {
                     recreate_injected = true;
@@ -5373,6 +5375,7 @@ mod tests {
         let error = remove_transition_artifact_if_version_with_hook(
             &changed_remove_target,
             &changed_remove_expected,
+            &changed_remove_target,
             |point, path| {
                 if point == TransitionMutationPoint::BeforeRemoveCommit {
                     replace_quarantine_bytes(path, b"peer-remove-quarantine")?;
@@ -5416,6 +5419,125 @@ mod tests {
             copy_file_create_new(&source, &target).expect_err("must not overwrite"),
             SYNC_FILE_WRITE_CONFLICT,
         );
+    }
+
+    #[test]
+    fn transition_move_flushes_source_and_destination_metadata_in_order() {
+        let source = PathBuf::from("/sync/attachments/item.bin");
+        let destination = PathBuf::from("/sync/attachments/.mindwtr-encryption-quarantine/item.bin");
+        let events = std::cell::RefCell::new(Vec::new());
+
+        finish_transition_move_durably_with(
+            &source,
+            &destination,
+            |_, _| {
+                events.borrow_mut().push("move");
+                Ok(())
+            },
+            |path| {
+                events.borrow_mut().push(if path == source {
+                    "sync-source-parent"
+                } else {
+                    "sync-destination-parent"
+                });
+                Ok(())
+            },
+        )
+        .expect("durable move");
+
+        assert_eq!(
+            &*events.borrow(),
+            &["move", "sync-source-parent", "sync-destination-parent"]
+        );
+    }
+
+    #[test]
+    fn transition_move_flush_failure_aborts_before_later_metadata_acknowledgement() {
+        let source = PathBuf::from("/sync/item.bin");
+        let destination = PathBuf::from("/sync/recovery/item.bin");
+        let events = std::cell::RefCell::new(Vec::new());
+
+        let error = finish_transition_move_durably_with(
+            &source,
+            &destination,
+            |_, _| {
+                events.borrow_mut().push("move");
+                Ok(())
+            },
+            |_| {
+                events.borrow_mut().push("sync-source-parent");
+                Err(std::io::Error::other("injected flush failure"))
+            },
+        )
+        .expect_err("failed source metadata flush must abort");
+
+        assert!(error.contains("injected flush failure"));
+        assert_eq!(&*events.borrow(), &["move", "sync-source-parent"]);
+    }
+
+    #[test]
+    fn transition_cleanup_flushes_file_and_directory_deletions_in_order() {
+        let scratch = TransitionScratch {
+            directory: PathBuf::from("/sync/.mindwtr-encryption-quarantine-1.cleanup"),
+            path: PathBuf::from("/sync/.mindwtr-encryption-quarantine-1.cleanup/item.bin"),
+        };
+        let events = std::cell::RefCell::new(Vec::new());
+
+        finish_transition_scratch_cleanup_durably_with(
+            &scratch,
+            true,
+            |_| {
+                events.borrow_mut().push("remove-file");
+                Ok(())
+            },
+            |_| {
+                events.borrow_mut().push("remove-directory");
+                Ok(())
+            },
+            |path| {
+                events.borrow_mut().push(if path == scratch.path {
+                    "sync-recovery-parent"
+                } else {
+                    "sync-root-parent"
+                });
+                Ok(())
+            },
+        )
+        .expect("durable cleanup");
+
+        assert_eq!(
+            &*events.borrow(),
+            &[
+                "remove-file",
+                "sync-recovery-parent",
+                "remove-directory",
+                "sync-root-parent",
+            ]
+        );
+    }
+
+    #[test]
+    fn transition_cleanup_flush_failure_keeps_the_recovery_directory() {
+        let scratch = TransitionScratch {
+            directory: PathBuf::from("/sync/.mindwtr-encryption-quarantine-1.cleanup"),
+            path: PathBuf::from("/sync/.mindwtr-encryption-quarantine-1.cleanup/item.bin"),
+        };
+        let directory_removed = Cell::new(false);
+
+        let error = finish_transition_scratch_cleanup_durably_with(
+            &scratch,
+            true,
+            |_| Ok(()),
+            |_| {
+                directory_removed.set(true);
+                Ok(())
+            },
+            |_| Err(std::io::Error::other("injected deletion flush failure")),
+        )
+        .expect_err("unflushed file deletion must abort cleanup");
+
+        assert!(error.contains("injected deletion flush failure"));
+        assert!(!directory_removed.get(), "the recovery directory must remain discoverable");
     }
 
     #[test]
@@ -12070,6 +12192,60 @@ struct TransitionScratch {
     path: PathBuf,
 }
 
+#[cfg(windows)]
+fn transition_path_wide(path: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+
+    path.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+#[cfg(windows)]
+fn move_transition_path_durably(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_WRITE_THROUGH};
+
+    let source = transition_path_wide(source);
+    let destination = transition_path_wide(destination);
+    // SAFETY: both path buffers are NUL-terminated and remain alive for the call.
+    if unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn move_transition_path_durably(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::rename(source, destination)
+}
+
+fn finish_transition_move_durably_with<Move, SyncParent>(
+    source: &Path,
+    destination: &Path,
+    move_path: Move,
+    mut sync_parent: SyncParent,
+) -> Result<(), String>
+where
+    Move: FnOnce(&Path, &Path) -> Result<(), String>,
+    SyncParent: FnMut(&Path) -> std::io::Result<()>,
+{
+    move_path(source, destination)?;
+    sync_parent(source).map_err(|error| {
+        format!("Failed to flush transition source directory metadata: {error}")
+    })?;
+    sync_parent(destination).map_err(|error| {
+        format!("Failed to flush transition destination directory metadata: {error}")
+    })
+}
+
 fn create_transition_scratch(
     target: &Path,
     label: &str,
@@ -12086,6 +12262,9 @@ fn create_transition_scratch(
         let directory = parent.join(format!(".mindwtr-{label}-{nonce:016x}"));
         match fs::create_dir(&directory) {
             Ok(()) => {
+                sync_parent_directory_for_durability(&directory).map_err(|error| {
+                    format!("Failed to flush transition scratch parent directory: {error}")
+                })?;
                 let path = directory.join(leaf);
                 if let Some(payload) = bytes {
                     let mut file = OpenOptions::new()
@@ -12180,33 +12359,139 @@ where
 {
     let quarantine = create_transition_scratch(target, "encryption-quarantine", None)?;
     hook(TransitionMutationPoint::BeforeQuarantine, target)?;
-    fs::rename(target, &quarantine.path).map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            SYNC_FILE_WRITE_CONFLICT.to_string()
-        } else {
-            format!("Failed to quarantine {}: {error}", target.display())
-        }
-    })?;
-    sync_parent_directory_for_durability(target)
-        .map_err(|error| format!("Failed to flush sync directory metadata: {error}"))?;
+    finish_transition_move_durably_with(
+        target,
+        &quarantine.path,
+        |source, destination| {
+            move_transition_path_durably(source, destination).map_err(|error| {
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    SYNC_FILE_WRITE_CONFLICT.to_string()
+                } else {
+                    format!("Failed to quarantine {}: {error}", target.display())
+                }
+            })
+        },
+        sync_parent_directory_for_durability,
+    )?;
     Ok(quarantine)
 }
 
-fn cleanup_transition_scratch(scratch: TransitionScratch) -> Result<(), String> {
-    if scratch.path.exists() {
-        fs::remove_file(&scratch.path).map_err(|error| {
+#[cfg(windows)]
+fn replace_transition_scratch_with_safe_generation(
+    scratch: &TransitionScratch,
+    replacement: Option<&Path>,
+) -> Result<(), String> {
+    let Some(replacement) = replacement else {
+        return Ok(());
+    };
+    let bytes = fs::read(replacement).map_err(|error| {
+        format!(
+            "Failed to read verified transition replacement {}: {error}",
+            replacement.display()
+        )
+    })?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(&scratch.path)
+        .map_err(|error| {
+            format!(
+                "Failed to neutralize transition recovery {}: {error}",
+                scratch.path.display()
+            )
+        })?;
+    file.write_all(&bytes).map_err(|error| {
+        format!(
+            "Failed to neutralize transition recovery {}: {error}",
+            scratch.path.display()
+        )
+    })?;
+    file.sync_all().map_err(|error| {
+        format!(
+            "Failed to flush neutralized transition recovery {}: {error}",
+            scratch.path.display()
+        )
+    })
+}
+
+#[cfg(not(windows))]
+fn replace_transition_scratch_with_safe_generation(
+    _scratch: &TransitionScratch,
+    _replacement: Option<&Path>,
+) -> Result<(), String> {
+    Ok(())
+}
+
+fn finish_transition_scratch_cleanup_durably_with<RemoveFile, RemoveDir, SyncParent>(
+    scratch: &TransitionScratch,
+    file_exists: bool,
+    mut remove_file: RemoveFile,
+    remove_dir: RemoveDir,
+    mut sync_parent: SyncParent,
+) -> Result<(), String>
+where
+    RemoveFile: FnMut(&Path) -> std::io::Result<()>,
+    RemoveDir: FnOnce(&Path) -> std::io::Result<()>,
+    SyncParent: FnMut(&Path) -> std::io::Result<()>,
+{
+    if file_exists {
+        remove_file(&scratch.path).map_err(|error| {
             format!(
                 "Failed to remove transition scratch {}: {error}",
                 scratch.path.display()
             )
         })?;
     }
-    fs::remove_dir(&scratch.directory).map_err(|error| {
+    // Flush even when the file was already absent: a retry must durably acknowledge the
+    // earlier deletion before the containing recovery directory can disappear.
+    sync_parent(&scratch.path).map_err(|error| {
+        format!("Failed to flush transition recovery directory metadata: {error}")
+    })?;
+    remove_dir(&scratch.directory).map_err(|error| {
         format!(
             "Failed to remove transition scratch directory {}: {error}",
             scratch.directory.display()
         )
-    })
+    })?;
+    sync_parent(&scratch.directory)
+        .map_err(|error| format!("Failed to flush transition cleanup metadata: {error}"))
+}
+
+fn cleanup_transition_scratch(
+    scratch: TransitionScratch,
+    durable_replacement: Option<&Path>,
+) -> Result<(), String> {
+    // On Windows, MOVEFILE_WRITE_THROUGH makes the recovery-name displacement durable. A
+    // verified current-posture generation is copied over quarantine bytes first, so even if
+    // the subsequent delete is resurrected by a filesystem that cannot flush directories,
+    // no plaintext or obsolete-key generation can reappear after state commit.
+    replace_transition_scratch_with_safe_generation(&scratch, durable_replacement)?;
+    let cleanup_directory = scratch.directory.with_extension("cleanup");
+    let leaf = scratch
+        .path
+        .file_name()
+        .ok_or_else(|| format!("Transition scratch has no file name: {}", scratch.path.display()))?;
+    finish_transition_move_durably_with(
+        &scratch.directory,
+        &cleanup_directory,
+        |source, destination| {
+            move_transition_path_durably(source, destination).map_err(|error| {
+                format!("Failed to prepare transition scratch cleanup: {error}")
+            })
+        },
+        sync_parent_directory_for_durability,
+    )?;
+    let cleanup = TransitionScratch {
+        path: cleanup_directory.join(leaf),
+        directory: cleanup_directory,
+    };
+    finish_transition_scratch_cleanup_durably_with(
+        &cleanup,
+        cleanup.path.exists(),
+        |path| fs::remove_file(path),
+        |path| fs::remove_dir(path),
+        sync_parent_directory_for_durability,
+    )
 }
 
 fn require_quarantined_generation(
@@ -12229,6 +12514,7 @@ fn require_quarantined_generation(
 fn remove_transition_artifact_if_version_with_hook<Hook>(
     path: &Path,
     expected: &str,
+    durable_replacement: &Path,
     mut hook: Hook,
 ) -> Result<(), String>
 where
@@ -12248,13 +12534,22 @@ where
         return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
     }
     require_quarantined_generation(&quarantine, expected, path)?;
-    cleanup_transition_scratch(quarantine)?;
+    cleanup_transition_scratch(quarantine, Some(durable_replacement))?;
     sync_parent_directory_for_durability(path)
         .map_err(|error| format!("Failed to flush sync directory metadata: {error}"))
 }
 
-fn remove_transition_artifact_if_version(path: &Path, expected: &str) -> Result<(), String> {
-    remove_transition_artifact_if_version_with_hook(path, expected, |_, _| Ok(()))
+fn remove_transition_artifact_if_version(
+    path: &Path,
+    expected: &str,
+    durable_replacement: &Path,
+) -> Result<(), String> {
+    remove_transition_artifact_if_version_with_hook(
+        path,
+        expected,
+        durable_replacement,
+        |_, _| Ok(()),
+    )
 }
 
 /// An artifact whose MWENC1 header is present but unreadable (truncated, a future format
@@ -12315,9 +12610,9 @@ where
     verify(&written)?;
     if let Some((quarantine, expected)) = quarantined {
         require_quarantined_generation(&quarantine, expected, target)?;
-        cleanup_transition_scratch(quarantine)?;
+        cleanup_transition_scratch(quarantine, Some(target))?;
     }
-    cleanup_transition_scratch(staged)
+    cleanup_transition_scratch(staged, None)
 }
 
 fn seal_artifact_generation_in_place(
@@ -12773,7 +13068,7 @@ where
                 transition_artifact_fingerprint(&sealed)
             };
             // Only now, with the ciphertext on disk and proven readable, does the plaintext go.
-            remove_transition_artifact_if_version(path, &document.version)?;
+            remove_transition_artifact_if_version(path, &document.version, &target)?;
             set_expected_managed_sync_document_generation(
                 &mut generation,
                 &target,
@@ -12883,7 +13178,7 @@ where
                 })?;
                 transition_artifact_fingerprint(&plain)
             };
-            remove_transition_artifact_if_version(path, &document.version)?;
+            remove_transition_artifact_if_version(path, &document.version, &target)?;
             set_expected_managed_sync_document_generation(
                 &mut generation,
                 &target,
