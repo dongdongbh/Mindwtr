@@ -143,6 +143,10 @@ import {
     getAttachmentValidationFailureAttempts,
     handleAttachmentValidationFailure,
 } from './sync-attachment-validation';
+import {
+    ensureWebdavCapabilityProof,
+    rememberWebdavCapabilityProof,
+} from './webdav-capability-proof';
 import type { SyncBackend } from './sync-service-utils';
 import type { DropboxDownloadResult } from '@mindwtr/core';
 import {
@@ -1565,7 +1569,7 @@ export class SyncService {
         return writeWebDavConfig(config, getSyncConfigDeps());
     }
 
-    static async testWebDavConnection(config: { url: string; username?: string; password?: string; hasPassword?: boolean; allowInsecureHttp?: boolean }): Promise<void> {
+    private static async probeWebDavStrongEtagSupport(config: { url: string; username?: string; password?: string; hasPassword?: boolean; allowInsecureHttp?: boolean }): Promise<void> {
         const normalizedUrl = normalizeWebdavUrl(config.url.trim());
         if (!normalizedUrl) {
             throw new Error('WebDAV URL not configured');
@@ -1593,6 +1597,11 @@ export class SyncService {
             logSyncWarning('WebDAV connection test failed', error);
             throw error;
         }
+    }
+
+    static async testWebDavConnection(config: { url: string; username?: string; password?: string; hasPassword?: boolean; allowInsecureHttp?: boolean }): Promise<void> {
+        await SyncService.probeWebDavStrongEtagSupport(config);
+        rememberWebdavCapabilityProof(config);
     }
 
     static async getCloudConfig(options?: { silent?: boolean }): Promise<CloudConfig> {
@@ -2043,6 +2052,12 @@ export class SyncService {
         context.webdavConfig = context.backend === 'webdav'
             ? configOverride?.webdav ?? await SyncService.getWebDavConfig()
             : null;
+        if (context.webdavConfig) {
+            await ensureWebdavCapabilityProof(
+                context.webdavConfig,
+                () => SyncService.probeWebDavStrongEtagSupport(context.webdavConfig!),
+            );
+        }
         context.cloudProvider = context.backend === 'cloud'
             ? configOverride?.cloudProvider ?? await SyncService.getCloudProvider()
             : 'selfhosted';

@@ -30,6 +30,7 @@ import {
     WEBDAV_USERNAME_KEY,
 } from './sync-service-config';
 import { useUiStore } from '../store/ui-store';
+import { WEBDAV_CAPABILITY_PROOF_STORAGE_KEY } from './webdav-capability-proof';
 
 const markLocalWriteMock = vi.hoisted(() => vi.fn());
 const markLocalSqliteWriteMock = vi.hoisted(() => vi.fn());
@@ -604,6 +605,48 @@ describe('SyncService testability hooks', () => {
 
         expect(backend).toBe('cloud');
         expect(invoke).toHaveBeenCalledWith('get_sync_backend', undefined);
+    });
+
+    it('proves a legacy persisted WebDAV backend before any sync-document IO', async () => {
+        localStorage.setItem(SYNC_BACKEND_KEY, 'webdav');
+        localStorage.setItem(WEBDAV_URL_KEY, 'https://sync.example.com');
+        localStorage.setItem(WEBDAV_USERNAME_KEY, 'alice');
+        localStorage.setItem(WEBDAV_ALLOW_INSECURE_HTTP_KEY, 'false');
+        sessionStorage.setItem(WEBDAV_PASSWORD_KEY, 'secret');
+        const performSyncCycleMock = vi.fn();
+        const capabilityProbe = vi.spyOn(SyncService as any, 'probeWebDavStrongEtagSupport')
+            .mockRejectedValue(
+                new Error('SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE: conditional writes unavailable'),
+            );
+        __syncServiceTestUtils.setDependenciesForTests({
+            isTauriRuntime: () => false,
+            flushPendingSave: vi.fn(async () => undefined),
+            getInMemoryAppDataSnapshot: () => emptyAppData(),
+            getStoreState: () => ({
+                fetchData: vi.fn(async () => undefined),
+                lastDataChangeAt: 0,
+                settings: {},
+                setError: vi.fn(),
+                updateSettings: vi.fn(async () => undefined),
+            }) as any,
+            performSyncCycle: performSyncCycleMock as any,
+        });
+
+        try {
+            await expect(SyncService.performSync({ manual: true })).resolves.toMatchObject({
+                success: false,
+                error: expect.stringContaining('conditional writes unavailable'),
+            });
+            expect(capabilityProbe).toHaveBeenCalledWith(expect.objectContaining({
+                url: 'https://sync.example.com',
+                username: 'alice',
+                password: 'secret',
+            }));
+            expect(performSyncCycleMock).not.toHaveBeenCalled();
+            expect(localStorage.getItem(WEBDAV_CAPABILITY_PROOF_STORAGE_KEY)).toBeNull();
+        } finally {
+            capabilityProbe.mockRestore();
+        }
     });
 
     it('persists the cloud provider natively with exact readback before retiring legacy renderer state', async () => {
@@ -2708,7 +2751,7 @@ describe('SyncService testability hooks', () => {
             password: 'secret',
         });
 
-        expect(fetchSpy).toHaveBeenCalledTimes(9);
+        expect(fetchSpy).toHaveBeenCalledTimes(10);
         const firstCall = fetchSpy.mock.calls[0];
         expect(firstCall).toBeDefined();
         if (!firstCall) {
@@ -2730,11 +2773,12 @@ describe('SyncService testability hooks', () => {
             password: 'secret',
         });
 
-        expect(methods).toEqual(['GET', 'PUT', 'GET', 'PUT', 'PUT', 'GET', 'PUT', 'GET', 'DELETE']);
+        expect(methods).toEqual(['GET', 'PUT', 'GET', 'PUT', 'PUT', 'GET', 'PUT', 'DELETE', 'GET', 'DELETE']);
         expect(new Headers(fetchSpy.mock.calls[1]?.[1]?.headers).get('if-none-match')).toBe('*');
         expect(new Headers(fetchSpy.mock.calls[3]?.[1]?.headers).get('if-none-match')).toBe('*');
         expect(new Headers(fetchSpy.mock.calls[6]?.[1]?.headers).get('if-match')).toBe('"probe-v1"');
-        expect(new Headers(fetchSpy.mock.calls[8]?.[1]?.headers).get('if-match')).toBe('"probe-v2"');
+        expect(new Headers(fetchSpy.mock.calls[7]?.[1]?.headers).get('if-match')).toBe('"probe-v1"');
+        expect(new Headers(fetchSpy.mock.calls[9]?.[1]?.headers).get('if-match')).toBe('"probe-v2"');
     });
 
     it.each([

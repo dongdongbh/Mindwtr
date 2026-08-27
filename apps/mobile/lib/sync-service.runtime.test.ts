@@ -8,6 +8,7 @@ import {
 } from '@mindwtr/core';
 import { __resetSyncEncryptionStateForTests, SyncEncryptionNoKeyError } from './sync-encryption-state';
 import { SYNC_ENCRYPTION_STATE_KEY } from './sync-constants';
+import { WEBDAV_CAPABILITY_PROOF_STORAGE_KEY } from './webdav-capability-proof';
 
 const emptyData = {
   tasks: [],
@@ -108,6 +109,7 @@ const storeStateRef = vi.hoisted(() => ({
 }));
 
 const coreMocks = vi.hoisted(() => ({
+  assertWebdavStrongEtagSupport: vi.fn(),
   webdavGetJson: vi.fn(),
   webdavGetSyncDocument: vi.fn(),
   webdavHeadFile: vi.fn(),
@@ -221,6 +223,7 @@ vi.mock('@mindwtr/core', async () => {
   const actual = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
   return {
     ...actual,
+    assertWebdavStrongEtagSupport: coreMocks.assertWebdavStrongEtagSupport,
     webdavGetJson: coreMocks.webdavGetJson,
     webdavGetSyncDocument: coreMocks.webdavGetSyncDocument,
     webdavHeadFile: coreMocks.webdavHeadFile,
@@ -313,6 +316,7 @@ describe('mobile sync-service runtime', () => {
     logMocks.logSyncError.mockResolvedValue(null);
 
     coreMocks.flushPendingSave.mockResolvedValue(undefined);
+    coreMocks.assertWebdavStrongEtagSupport.mockResolvedValue(undefined);
     coreMocks.withRetry.mockImplementation(async (operation: () => Promise<unknown>) => await operation());
     coreMocks.webdavGetJson.mockResolvedValue(emptyData);
     coreMocks.webdavGetSyncDocument.mockReset();
@@ -367,6 +371,29 @@ describe('mobile sync-service runtime', () => {
     expect(result).toMatchObject({ success: false });
     expect(coreMocks.webdavGetJson).not.toHaveBeenCalled();
     expect(coreMocks.webdavPutJson).not.toHaveBeenCalled();
+  });
+
+  it('proves a legacy persisted WebDAV backend before any sync-document IO', async () => {
+    coreMocks.assertWebdavStrongEtagSupport.mockRejectedValueOnce(
+      new Error('SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE: conditional writes unavailable'),
+    );
+
+    const result = await syncServiceModule.performMobileSync(undefined, { manual: true });
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining('conditional writes unavailable'),
+    });
+    expect(coreMocks.assertWebdavStrongEtagSupport).toHaveBeenCalledWith(
+      'https://sync.example.com/data.json',
+      expect.objectContaining({ username: 'user', password: 'pass' }),
+    );
+    expect(coreMocks.webdavGetSyncDocument).not.toHaveBeenCalled();
+    expect(coreMocks.webdavPutSyncDocument).not.toHaveBeenCalled();
+    expect(asyncStorageMocks.setItem).not.toHaveBeenCalledWith(
+      WEBDAV_CAPABILITY_PROOF_STORAGE_KEY,
+      expect.any(String),
+    );
   });
 
   it.each([false, true])(
