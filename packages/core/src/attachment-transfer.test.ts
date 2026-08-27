@@ -86,7 +86,7 @@ describe('runAttachmentTransferLifecycle', () => {
         });
         const { didMutate, after } = await runLifecycle({
             attachmentsById: new Map([[attachment.id, attachment]]),
-            localFileExists: vi.fn(async () => true),
+            getLocalFilePresence: vi.fn(async () => 'present' as const),
             onUpload,
             onUploadError: vi.fn(),
             onDownload: vi.fn(),
@@ -111,7 +111,7 @@ describe('runAttachmentTransferLifecycle', () => {
         });
         const { didMutate, after } = await runLifecycle({
             attachmentsById: new Map([[attachment.id, attachment]]),
-            localFileExists: vi.fn(async () => false),
+            getLocalFilePresence: vi.fn(async () => 'confirmed-not-found' as const),
             onUpload: vi.fn(),
             onUploadError: vi.fn(),
             onDownload,
@@ -124,11 +124,56 @@ describe('runAttachmentTransferLifecycle', () => {
         expect(attachment.uri).toBe('/local/file.txt');
     });
 
+    it('preserves all metadata and performs no transfer work when local presence is unreadable', async () => {
+        const attachment = makeAttachment({
+            cloudKey: 'attachments/attachment-1.txt',
+            fileHash: 'ab'.repeat(32),
+            pendingContentUpload: true,
+            localStatus: 'available',
+            contentMtimeMs: 123,
+            contentSize: 456,
+        });
+        const onUpload = vi.fn();
+        const onDownload = vi.fn();
+        const getLocalFileStat = vi.fn();
+        const computeLocalFileHash = vi.fn();
+        const createUploadSnapshot = vi.fn();
+
+        const { didMutate, patches } = await runLifecycle({
+            attachmentsById: new Map([[attachment.id, attachment]]),
+            getLocalFilePresence: vi.fn(async () => 'unreadable' as const),
+            onUpload,
+            onUploadError: vi.fn(),
+            onDownload,
+            onDownloadError: vi.fn(),
+            getLocalFileStat,
+            computeLocalFileHash,
+            createUploadSnapshot,
+            contentChangePhase: 'post-merge',
+        });
+
+        expect(didMutate).toBe(false);
+        expect(patches.size).toBe(0);
+        expect(onUpload).not.toHaveBeenCalled();
+        expect(onDownload).not.toHaveBeenCalled();
+        expect(getLocalFileStat).not.toHaveBeenCalled();
+        expect(computeLocalFileHash).not.toHaveBeenCalled();
+        expect(createUploadSnapshot).not.toHaveBeenCalled();
+        expect(attachment).toEqual(makeAttachment({
+            cloudKey: 'attachments/attachment-1.txt',
+            fileHash: 'ab'.repeat(32),
+            pendingContentUpload: true,
+            localStatus: 'available',
+            contentMtimeMs: 123,
+            contentSize: 456,
+        }));
+    });
+
     it('is a no-op on the second aligned pass', async () => {
         const attachment = makeAttachment({ cloudKey: 'attachments/attachment-1.txt', localStatus: 'available' });
         const { didMutate, patches } = await runLifecycle({
             attachmentsById: new Map([[attachment.id, attachment]]),
-            localFileExists: vi.fn(async () => true),
+            getLocalFilePresence: vi.fn(async () => 'present' as const),
             onUpload: vi.fn(),
             onUploadError: vi.fn(),
             onDownload: vi.fn(),
@@ -152,7 +197,9 @@ describe('runAttachmentTransferLifecycle', () => {
                 [uploadAttachment.id, uploadAttachment],
                 [downloadAttachment.id, downloadAttachment],
             ]),
-            localFileExists: vi.fn(async (path) => path === '/local/upload.txt'),
+            getLocalFilePresence: vi.fn(async (path) => (
+                path === '/local/upload.txt' ? 'present' as const : 'confirmed-not-found' as const
+            )),
             onUpload: vi.fn(async () => { throw uploadError; }),
             onUploadError,
             onDownload: vi.fn(async () => { throw downloadError; }),
@@ -167,10 +214,10 @@ describe('runAttachmentTransferLifecycle', () => {
     it('skips deleted and non-file attachments', async () => {
         const deleted = makeAttachment({ id: 'deleted', deletedAt: '2026-01-02T00:00:00.000Z' });
         const link = makeAttachment({ id: 'link', kind: 'link', uri: 'https://example.test' });
-        const localFileExists = vi.fn(async () => true);
+        const getLocalFilePresence = vi.fn(async () => 'present' as const);
         const { didMutate } = await runLifecycle({
             attachmentsById: new Map([[deleted.id, deleted], [link.id, link]]),
-            localFileExists,
+            getLocalFilePresence,
             onUpload: vi.fn(),
             onUploadError: vi.fn(),
             onDownload: vi.fn(),
@@ -178,7 +225,7 @@ describe('runAttachmentTransferLifecycle', () => {
         });
 
         expect(didMutate).toBe(false);
-        expect(localFileExists).not.toHaveBeenCalled();
+        expect(getLocalFilePresence).not.toHaveBeenCalled();
     });
 
     it('supports a custom hasCloudCopy predicate for backends whose cloudKey format differs', async () => {
@@ -188,7 +235,7 @@ describe('runAttachmentTransferLifecycle', () => {
         const onUpload = vi.fn(async () => true);
         const { didMutate, after } = await runLifecycle({
             attachmentsById: new Map([[attachment.id, attachment]]),
-            localFileExists: vi.fn(async () => true),
+            getLocalFilePresence: vi.fn(async () => 'present' as const),
             hasCloudCopy: (item) => item.cloudKey?.startsWith('cloudkit:') ?? false,
             onUpload,
             onUploadError: vi.fn(),
@@ -208,7 +255,7 @@ describe('runAttachmentTransferLifecycle', () => {
 
         const { didMutate, after } = await runLifecycle({
             attachmentsById: new Map([[uploadA.id, uploadA], [uploadB.id, uploadB]]),
-            localFileExists: vi.fn(async () => true),
+            getLocalFilePresence: vi.fn(async () => 'present' as const),
             onUpload,
             onUploadError: vi.fn(),
             onDownload: vi.fn(),
@@ -225,10 +272,10 @@ describe('runAttachmentTransferLifecycle', () => {
 
     it('lets a policy skip an attachment entirely, including its local-status refresh', async () => {
         const attachment = makeAttachment({ localStatus: 'missing' });
-        const localFileExists = vi.fn(async () => true);
+        const getLocalFilePresence = vi.fn(async () => 'present' as const);
         const { didMutate, after } = await runLifecycle({
             attachmentsById: new Map([[attachment.id, attachment]]),
-            localFileExists,
+            getLocalFilePresence,
             onUpload: vi.fn(),
             onUploadError: vi.fn(),
             onDownload: vi.fn(),
@@ -237,7 +284,7 @@ describe('runAttachmentTransferLifecycle', () => {
         });
 
         expect(didMutate).toBe(false);
-        expect(localFileExists).not.toHaveBeenCalled();
+        expect(getLocalFilePresence).not.toHaveBeenCalled();
         expect(after().localStatus).toBe('missing');
     });
 
@@ -249,7 +296,7 @@ describe('runAttachmentTransferLifecycle', () => {
 
         const { didMutate, after } = await runLifecycle({
             attachmentsById: new Map([[backedOff.id, backedOff], [ready.id, ready]]),
-            localFileExists: vi.fn(async () => false),
+            getLocalFilePresence: vi.fn(async () => 'confirmed-not-found' as const),
             onUpload: vi.fn(),
             onUploadError: vi.fn(),
             onDownload,
@@ -281,7 +328,7 @@ describe('runAttachmentTransferLifecycle', () => {
 
         await expect(runAttachmentTransferLifecycle({
             attachmentsById: new Map([[first.id, first], [second.id, second]]),
-            localFileExists: vi.fn(async () => true),
+            getLocalFilePresence: vi.fn(async () => 'present' as const),
             onUpload,
             onUploadError,
             onDownload: vi.fn(),
@@ -306,7 +353,7 @@ describe('runAttachmentTransferLifecycle', () => {
             const onUpload = vi.fn(async () => true);
             const { didMutate, after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 getLocalFileStat: vi.fn(async () => ({ mtimeMs: 2000, size: 20 })),
                 computeLocalFileHash: vi.fn(async () => 'bbbb'),
                 contentChangePhase: 'prepare',
@@ -337,7 +384,7 @@ describe('runAttachmentTransferLifecycle', () => {
             const onUpload = vi.fn(async () => true);
             const { didMutate, after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 getLocalFileStat: vi.fn(async () => ({ mtimeMs: 2000, size: 20 })),
                 computeLocalFileHash: vi.fn(async () => 'bbbb'),
                 contentChangePhase: 'prepare',
@@ -372,7 +419,7 @@ describe('runAttachmentTransferLifecycle', () => {
             const onUpload = vi.fn(async () => true);
             const { didMutate, after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 getLocalFileStat: vi.fn(async () => ({ mtimeMs: 2000, size: 20 })),
                 computeLocalFileHash: vi.fn(async () => expectedHash),
                 contentChangePhase: 'post-merge',
@@ -403,7 +450,7 @@ describe('runAttachmentTransferLifecycle', () => {
             const onLocalEditRace = vi.fn();
             const { didMutate, after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 getLocalFileStat: vi.fn(async () => ({ mtimeMs: 3000, size: 30 })),
                 computeLocalFileHash: vi.fn(async () => 'b'.repeat(64)),
                 contentChangePhase: 'post-merge',
@@ -441,7 +488,7 @@ describe('runAttachmentTransferLifecycle', () => {
             });
             const { after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => false),
+                getLocalFilePresence: vi.fn(async () => 'confirmed-not-found' as const),
                 getLocalFileStat: vi.fn(async () => null),
                 computeLocalFileHash: vi.fn(async () => null),
                 contentChangePhase: 'post-merge',
@@ -477,7 +524,7 @@ describe('runAttachmentTransferLifecycle', () => {
             });
             const { didMutate, after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => false),
+                getLocalFilePresence: vi.fn(async () => 'confirmed-not-found' as const),
                 contentChangePhase: 'post-merge',
                 onUpload: vi.fn(),
                 onUploadError: vi.fn(),
@@ -505,7 +552,7 @@ describe('runAttachmentTransferLifecycle', () => {
             const onDownload = vi.fn(async () => true);
             const { after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => false),
+                getLocalFilePresence: vi.fn(async () => 'confirmed-not-found' as const),
                 contentChangePhase: 'post-merge',
                 onUpload: vi.fn(),
                 onUploadError: vi.fn(),
@@ -528,7 +575,7 @@ describe('runAttachmentTransferLifecycle', () => {
             const onLocalEditRace = vi.fn();
             const { after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 createUploadSnapshot: vi.fn(async () => ({
                     sourcePath: '/staged/attachment-1',
                     fileHash: 'a'.repeat(64),
@@ -558,7 +605,7 @@ describe('runAttachmentTransferLifecycle', () => {
             const onUpload = vi.fn(async () => true);
             const { after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 contentChangePhase: 'prepare',
                 deferUploads: true,
                 onUpload,
@@ -589,7 +636,7 @@ describe('runAttachmentTransferLifecycle', () => {
             });
             const { after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 getLocalFileStat: vi.fn(async () => ({ mtimeMs: 9000, size: 99 })),
                 computeLocalFileHash,
                 createUploadSnapshot: vi.fn(async () => ({
@@ -633,7 +680,7 @@ describe('runAttachmentTransferLifecycle', () => {
             const onLocalEditRace = vi.fn();
             const { after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 createUploadSnapshot: vi.fn(async () => ({
                     sourcePath: '/staged/attachment-1',
                     fileHash: 'b'.repeat(64),
@@ -671,7 +718,7 @@ describe('runAttachmentTransferLifecycle', () => {
             const onLocalEditRace = vi.fn();
             const { after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 createUploadSnapshot: vi.fn(async () => ({
                     sourcePath: '/staged/attachment-1',
                     fileHash: 'b'.repeat(64),
@@ -715,7 +762,7 @@ describe('runAttachmentTransferLifecycle', () => {
             });
             const { after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 createUploadSnapshot: vi.fn(async () => ({
                     sourcePath: '/staged/attachment-1',
                     fileHash: expectedHash,
@@ -745,7 +792,7 @@ describe('runAttachmentTransferLifecycle', () => {
             const onUpload = vi.fn(async () => true);
             const { after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 createUploadSnapshot: vi.fn(async () => null),
                 requireUploadSnapshot: true,
                 onUpload,
@@ -764,7 +811,7 @@ describe('runAttachmentTransferLifecycle', () => {
             const onUploadError = vi.fn();
             await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 createUploadSnapshot: vi.fn(async () => ({
                     sourcePath: '/staged/attachment-1',
                     fileHash: 'a'.repeat(64),
@@ -793,7 +840,7 @@ describe('runAttachmentTransferLifecycle', () => {
                 contentSize: 10,
             });
             const baseOptions = {
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 getLocalFileStat: vi.fn(async () => ({ mtimeMs: 2000, size: 20 })),
                 computeLocalFileHash: vi.fn(async () => 'new-hash'),
                 contentChangePhase: 'prepare' as const,
@@ -877,7 +924,7 @@ describe('runAttachmentTransferLifecycle', () => {
             const onUpload = vi.fn(async () => true);
             const { didMutate, after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 getLocalFileStat: vi.fn(async () => ({ mtimeMs: 2000, size: 20 })),
                 computeLocalFileHash: vi.fn(async () => null),
                 contentChangePhase: 'prepare',
@@ -914,7 +961,7 @@ describe('runAttachmentTransferLifecycle', () => {
                 .mockResolvedValueOnce({ mtimeMs: 5678, size: 34 });
             const { didMutate, after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 getLocalFileStat,
                 computeLocalFileHash: vi.fn(async () => 'loser-hash'),
                 contentChangePhase: 'post-merge',
@@ -952,7 +999,7 @@ describe('runAttachmentTransferLifecycle', () => {
                 .mockResolvedValueOnce({ mtimeMs: 5678, size: 34 });
             const { didMutate } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 getLocalFileStat,
                 computeLocalFileHash: vi.fn(async () => 'loser-hash'),
                 contentChangePhase: 'post-merge',
@@ -980,7 +1027,7 @@ describe('runAttachmentTransferLifecycle', () => {
             const onUpload = vi.fn(async () => true);
             const { didMutate, after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 getLocalFileStat: vi.fn(async () => ({ mtimeMs: 5000, size: 10 })),
                 computeLocalFileHash: vi.fn(async () => 'aaaa'),
                 contentChangePhase: 'prepare',
@@ -1008,7 +1055,7 @@ describe('runAttachmentTransferLifecycle', () => {
             const computeLocalFileHash = vi.fn(async () => 'aaaa');
             const { didMutate } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 getLocalFileStat: vi.fn(async () => ({ mtimeMs: 1000, size: 10 })),
                 computeLocalFileHash,
                 contentChangePhase: 'prepare',
@@ -1041,7 +1088,7 @@ describe('runAttachmentTransferLifecycle', () => {
             });
             const { didMutate, after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists: vi.fn(async () => true),
+                getLocalFilePresence: vi.fn(async () => 'present' as const),
                 getLocalFileStat: vi.fn(async () => ({ mtimeMs: 1234, size: 12 })),
                 computeLocalFileHash: vi.fn(async () => 'loser-hash'),
                 contentChangePhase: 'post-merge',
@@ -1070,13 +1117,15 @@ describe('runAttachmentTransferLifecycle', () => {
             });
             // Round 1: not on disk yet — the existing "missing -> download" path fires.
             let existsLocally = false;
-            const localFileExists = vi.fn(async () => existsLocally);
+            const getLocalFilePresence = vi.fn(async () => (
+                existsLocally ? 'present' as const : 'confirmed-not-found' as const
+            ));
             // The freshly-written file's real stat, as the caller's getLocalFileStat would report it.
             const getLocalFileStat = vi.fn(async () => ({ mtimeMs: 42_000, size: 42 }));
 
             const firstPass = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
-                localFileExists,
+                getLocalFilePresence,
                 getLocalFileStat,
                 computeLocalFileHash: vi.fn(async () => 'downloaded-hash'),
                 contentChangePhase: 'post-merge',
@@ -1097,7 +1146,7 @@ describe('runAttachmentTransferLifecycle', () => {
             existsLocally = true;
             const secondPass = await runLifecycle({
                 attachmentsById: new Map([[downloaded.id, downloaded]]),
-                localFileExists,
+                getLocalFilePresence,
                 getLocalFileStat,
                 computeLocalFileHash: vi.fn(async () => 'downloaded-hash'),
                 contentChangePhase: 'post-merge',
@@ -1115,10 +1164,10 @@ describe('runAttachmentTransferLifecycle', () => {
 
     it('lets platform adapters resolve local URI paths', async () => {
         const attachment = makeAttachment({ uri: 'file:///tmp/upload.txt' });
-        const localFileExists = vi.fn(async () => true);
+        const getLocalFilePresence = vi.fn(async () => 'present' as const);
         await runLifecycle({
             attachmentsById: new Map([[attachment.id, attachment]]),
-            localFileExists,
+            getLocalFilePresence,
             resolveLocalPath: (uri) => uri.replace('file://', ''),
             onUpload: vi.fn(async () => false),
             onUploadError: vi.fn(),
@@ -1126,7 +1175,7 @@ describe('runAttachmentTransferLifecycle', () => {
             onDownloadError: vi.fn(),
         });
 
-        expect(localFileExists).toHaveBeenCalledWith(
+        expect(getLocalFilePresence).toHaveBeenCalledWith(
             '/tmp/upload.txt',
             expect.objectContaining({ id: 'attachment-1' }),
         );
@@ -1150,7 +1199,7 @@ describe('runAttachmentTransferLifecycle purity (frozen inputs)', () => {
         }));
         return runAttachmentTransferLifecycle({
             attachmentsById: collectAttachmentsById(data),
-            localFileExists: vi.fn(async () => true),
+            getLocalFilePresence: vi.fn(async () => 'present' as const),
             onUpload: vi.fn(async () => true),
             onUploadError: vi.fn(),
             onDownload: vi.fn(async () => true),
@@ -1175,7 +1224,7 @@ describe('runAttachmentTransferLifecycle purity (frozen inputs)', () => {
     it('download path never writes through to the frozen attachment', async () => {
         const attachment = makeAttachment({ cloudKey: 'attachments/attachment-1.txt' });
         const { patches } = await frozenRun([attachment], {
-            localFileExists: vi.fn(async () => false),
+            getLocalFilePresence: vi.fn(async () => 'confirmed-not-found' as const),
             onDownload: async (item) => {
                 item.uri = '/local/downloaded.txt';
                 item.localStatus = 'available';
@@ -1255,7 +1304,7 @@ describe('runAttachmentTransferLifecycle purity (frozen inputs)', () => {
         const data = deepFreeze(makeData({ tasks: [makeTask({ attachments: [attachment] })] }));
         const { patches } = await runAttachmentTransferLifecycle({
             attachmentsById: collectAttachmentsById(data),
-            localFileExists: vi.fn(async () => true),
+            getLocalFilePresence: vi.fn(async () => 'present' as const),
             onUpload: async (item) => {
                 item.cloudKey = 'attachments/attachment-1.txt';
                 return true;
@@ -1392,7 +1441,7 @@ describe('withAttachmentSettingsPatch', () => {
 describe('upload source containment (SEC-07)', () => {
     const hostile = () => makeAttachment({ uri: '/etc/passwd', localStatus: 'missing' });
     const baseOptions = {
-        localFileExists: vi.fn(async () => true),
+        getLocalFilePresence: vi.fn(async () => 'present' as const),
         canUploadFrom: (localPath: string) => localPath.startsWith('/managed/'),
         onUploadError: vi.fn(),
         onDownload: vi.fn(async () => true),
@@ -1450,7 +1499,7 @@ describe('upload source containment (SEC-07)', () => {
         await runLifecycle({
             ...baseOptions,
             attachmentsById: new Map([[attachment.id, attachment]]),
-            localFileExists: vi.fn(async () => false),
+            getLocalFilePresence: vi.fn(async () => 'confirmed-not-found' as const),
             onUpload: vi.fn(async () => true),
             onDownload,
         });
@@ -1479,7 +1528,7 @@ describe('missing fileHash and unhashable files (BUG-16)', () => {
     });
 
     const baseOptions = {
-        localFileExists: vi.fn(async () => true),
+        getLocalFilePresence: vi.fn(async () => 'present' as const),
         onUploadError: vi.fn(),
         onDownloadError: vi.fn(),
     };

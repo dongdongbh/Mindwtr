@@ -3,6 +3,7 @@ import { applyAttachmentPatches, validateAttachmentForUpload, validateAttachment
 import * as FileSystem from '../file-system';
 import {
   buildCloudKey,
+  attachmentNeedsManagedLocalCopy,
   bytesToBase64,
   collectAttachments,
   computeAttachmentFileHash,
@@ -11,9 +12,9 @@ import {
   DEFAULT_CONTENT_TYPE,
   extractExtension,
   FILE_BACKEND_VALIDATION_CONFIG,
-  fileExists,
   getAttachmentByteSize,
   getAttachmentsDir,
+  getLocalAttachmentPresence,
   isContentAttachmentUri,
   isHttpAttachmentUri,
   logAttachmentWarn,
@@ -81,24 +82,39 @@ export const syncFileAttachments = async (
     if (original.kind !== 'file' || original.deletedAt) continue;
     const attachment: Attachment = { ...original };
     let patched = false;
-    const localMigration = await migrateAttachmentLocally(attachment);
-    if (localMigration.migrated) patched = true;
-    if (localMigration.skipped) {
-      attachmentsById.delete(attachment.id);
-      continue;
+    if (attachmentNeedsManagedLocalCopy(attachment)) {
+      const sourcePresence = await getLocalAttachmentPresence(attachment.uri || '');
+      if (sourcePresence === 'unreadable') {
+        attachmentsById.delete(attachment.id);
+        continue;
+      }
+      if (sourcePresence === 'present') {
+        const localMigration = await migrateAttachmentLocally(attachment);
+        if (localMigration.migrated) patched = true;
+        if (localMigration.skipped) {
+          attachmentsById.delete(attachment.id);
+          continue;
+        }
+      }
     }
 
     const uri = attachment.uri || '';
     const isHttp = isHttpAttachmentUri(uri);
     const hasLocal = Boolean(uri) && !isHttp;
-    if (hasLocal && attachment.pendingContentUpload !== true && (await fileExists(uri))) {
+    const localPresence = hasLocal
+      ? await getLocalAttachmentPresence(uri)
+      : 'confirmed-not-found';
+    if (localPresence === 'unreadable') {
+      attachmentsById.delete(attachment.id);
+      continue;
+    }
+    if (localPresence === 'present' && attachment.pendingContentUpload !== true) {
       const cloudKey = attachment.cloudKey || buildCloudKey(attachment);
       const filename = remoteFilenameFor(cloudKey, attachment);
-      const remoteExists =
-        syncDir.type === 'file'
-          ? await fileExists(`${syncDir.attachmentsDirUri}${filename}`)
-          : (await getSafEntriesByName()).has(filename);
-      if (!remoteExists && attachment.cloudKey !== undefined) {
+      const remotePresence = syncDir.type === 'file'
+        ? await getLocalAttachmentPresence(`${syncDir.attachmentsDirUri}${filename}`)
+        : (await getSafEntriesByName()).has(filename) ? 'present' : 'confirmed-not-found';
+      if (remotePresence === 'confirmed-not-found' && attachment.cloudKey !== undefined) {
         attachment.cloudKey = undefined;
         patched = true;
       }
@@ -112,7 +128,7 @@ export const syncFileAttachments = async (
 
   const { patches } = await runMobileAttachmentLifecycle({
     attachmentsById,
-    localFileExists: fileExists,
+    getLocalFilePresence: getLocalAttachmentPresence,
     deferUploads: options.phase === 'prepare',
     getLocalFileStat: (path) => statAttachmentFile(path),
     computeLocalFileHash: (path) => computeAttachmentFileHash(path),
@@ -129,7 +145,15 @@ export const syncFileAttachments = async (
       const remoteUri = syncDir.type === 'file'
         ? `${syncDir.attachmentsDirUri}${filename}`
         : (await getSafEntriesByName()).get(filename) ?? null;
-      const remoteExists = remoteUri ? await fileExists(remoteUri) : false;
+      const remotePresence = syncDir.type === 'saf'
+        ? remoteUri ? 'present' : 'confirmed-not-found'
+        : remoteUri
+          ? await getLocalAttachmentPresence(remoteUri)
+          : 'confirmed-not-found';
+      if (remotePresence === 'unreadable') {
+        throw new Error('Attachment remote presence is unreadable');
+      }
+      const remoteExists = remotePresence === 'present';
       if (attachment.pendingContentUpload === true && remoteUri && remoteExists) {
         const bytes = await readFileAsBytes(remoteUri)
           .then((value) => openAttachmentBytesFromDownload(value, options.material));

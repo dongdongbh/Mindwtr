@@ -14,13 +14,12 @@ import {
   copyFileSafely,
   ensureAttachmentStoredLocally,
   extractExtension,
-  fileExists,
   findSafEntry,
   getAttachmentsDir,
   getBaseSyncUrl,
   getCloudBaseUrl,
   getDropboxClientId,
-  isContentAttachmentUri,
+  getLocalAttachmentPresence,
   isHttpAttachmentUri,
   loadCloudConfig,
   loadWebDavConfig,
@@ -50,8 +49,9 @@ const ensureFileAttachmentAvailable = async (
   if (!attachmentsDir) return null;
   const filename = attachment.cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.title)}`;
   const targetUri = `${attachmentsDir}${filename}`;
-  const existing = await fileExists(targetUri);
-  if (existing) {
+  const targetPresence = await getLocalAttachmentPresence(targetUri);
+  if (targetPresence === 'unreadable') return null;
+  if (targetPresence === 'present') {
     return { ...attachment, uri: targetUri, localStatus: 'available' };
   }
 
@@ -65,8 +65,8 @@ const ensureFileAttachmentAvailable = async (
     const material = await getSyncEncryptionMaterial();
     if (syncDir.type === 'file') {
       const sourceUri = `${syncDir.attachmentsDirUri}${filename}`;
-      const exists = await fileExists(sourceUri);
-      if (!exists) return null;
+      const sourcePresence = await getLocalAttachmentPresence(sourceUri);
+      if (sourcePresence !== 'present') return null;
       if (!material) {
         await copyFileSafely(sourceUri, targetUri);
         return { ...attachment, uri: targetUri, localStatus: 'available' };
@@ -90,18 +90,18 @@ const ensureFileAttachmentAvailable = async (
 const ensureAttachmentAvailableInternal = async (attachment: Attachment): Promise<Attachment | null> => {
   if (attachment.kind !== 'file') return attachment;
   const localAttachment = { ...attachment };
-  if (await ensureAttachmentStoredLocally(localAttachment)) {
-    return localAttachment;
-  }
-
   const uri = localAttachment.uri || '';
-  if (uri && (isHttpAttachmentUri(uri) || isContentAttachmentUri(uri))) {
+  if (uri && isHttpAttachmentUri(uri)) {
     return { ...localAttachment, localStatus: 'available' };
   }
 
   if (uri) {
-    const exists = await fileExists(uri);
-    if (exists) {
+    const sourcePresence = await getLocalAttachmentPresence(uri);
+    if (sourcePresence === 'unreadable') return null;
+    if (sourcePresence === 'present') {
+      if (await ensureAttachmentStoredLocally(localAttachment)) {
+        return localAttachment;
+      }
       return { ...localAttachment, localStatus: 'available' };
     }
   }
@@ -121,8 +121,9 @@ const ensureAttachmentAvailableInternal = async (attachment: Attachment): Promis
     if (!attachmentsDir) return null;
     const filename = localAttachment.cloudKey.split('/').pop() || `${localAttachment.id}${extractExtension(localAttachment.title)}`;
     const targetUri = `${attachmentsDir}${filename}`;
-    const existing = await fileExists(targetUri);
-    if (existing) {
+    const targetPresence = await getLocalAttachmentPresence(targetUri);
+    if (targetPresence === 'unreadable') return null;
+    if (targetPresence === 'present') {
       return { ...localAttachment, uri: targetUri, localStatus: 'available' };
     }
     const cloudProvider = ((await AsyncStorage.getItem(CLOUD_PROVIDER_KEY)) || '').trim();
@@ -196,8 +197,9 @@ const ensureAttachmentAvailableInternal = async (attachment: Attachment): Promis
     if (!attachmentsDir) return null;
     const filename = localAttachment.cloudKey.split('/').pop() || `${localAttachment.id}${extractExtension(localAttachment.title)}`;
     const targetUri = `${attachmentsDir}${filename}`;
-    const existing = await fileExists(targetUri);
-    if (existing) {
+    const targetPresence = await getLocalAttachmentPresence(targetUri);
+    if (targetPresence === 'unreadable') return null;
+    if (targetPresence === 'present') {
       return { ...localAttachment, uri: targetUri, localStatus: 'available' };
     }
     try {

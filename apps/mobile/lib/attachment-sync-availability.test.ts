@@ -136,6 +136,24 @@ describe('ensureAttachmentAvailable', () => {
     fileSystemMock.writeAsStringAsync.mockResolvedValue(undefined);
   });
 
+  it('does not download or mutate storage when a content uri is unreadable', async () => {
+    fileSystemMock.getInfoAsync.mockRejectedValue(new Error('Permission denied'));
+    asyncStorageMock.store.set('@mindwtr_sync_backend', 'cloud');
+    asyncStorageMock.store.set('@mindwtr_cloud_url', 'https://cloud.example/v1/data');
+    asyncStorageMock.store.set('@mindwtr_cloud_token', 'cloud-token');
+    const core = await import('@mindwtr/core');
+
+    const result = await ensureAttachmentAvailable(makeAttachment('unreadable', {
+      uri: 'content://provider/document/unreadable',
+      localStatus: 'available',
+    }));
+
+    expect(result).toBeNull();
+    expect(core.cloudGetFile).not.toHaveBeenCalled();
+    expect(fileSystemMock.copyAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.writeAsStringAsync).not.toHaveBeenCalled();
+  });
+
   it('copies the bytes out of the sync folder on the file backend', async () => {
     asyncStorageMock.store.set('@mindwtr_sync_backend', 'file');
     asyncStorageMock.store.set('@mindwtr_sync_path', 'file://sync/data.json');

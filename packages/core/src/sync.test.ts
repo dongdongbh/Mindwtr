@@ -514,7 +514,7 @@ describe('Sync Logic', () => {
                         attachmentsById: new Map(
                             merged.tasks.flatMap((task) => (task.attachments ?? []).map((a) => [a.id, a] as const)),
                         ),
-                        localFileExists: async () => true,
+                        getLocalFilePresence: async () => 'present' as const,
                         getLocalFileStat: async () => ownStat,
                         computeLocalFileHash: async () => 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
                         contentChangePhase: 'post-merge',

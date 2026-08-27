@@ -1,6 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from './file-system';
-import type { AppData, Attachment } from '@mindwtr/core';
 import {
   ATTACHMENTS_DIR_NAME,
   buildCloudKey,
@@ -16,6 +15,9 @@ import {
   reportProgress,
   sleep,
   validateAttachmentHash,
+  type AppData,
+  type Attachment,
+  type LocalAttachmentPresence,
   type LocalFileStat,
 } from '@mindwtr/core';
 import {
@@ -183,7 +185,7 @@ export const writeBytesSafely = async (targetUri: string, bytes: Uint8Array): Pr
   await FileSystem.writeAsStringAsync(tempUri, base64, { encoding: FileSystem.EncodingType.Base64 });
   try {
     await FileSystem.moveAsync({ from: tempUri, to: targetUri });
-  } catch (error) {
+  } catch {
     await FileSystem.writeAsStringAsync(targetUri, base64, { encoding: FileSystem.EncodingType.Base64 });
     try {
       await FileSystem.deleteAsync(tempUri, { idempotent: true });
@@ -231,8 +233,11 @@ export type ResolvedSyncDir =
 
 export const isHttpAttachmentUri = (uri: string): boolean => /^https?:\/\//i.test(uri);
 export const isContentAttachmentUri = (uri: string): boolean => uri.startsWith('content://');
-export const getAttachmentLocalStatus = (uri: string, existsLocally: boolean): Attachment['localStatus'] => {
-  return (existsLocally || isContentAttachmentUri(uri) || isHttpAttachmentUri(uri)) ? 'available' : 'missing';
+export const getAttachmentLocalStatus = (
+  uri: string,
+  presence: Exclude<LocalAttachmentPresence, 'unreadable'>,
+): Attachment['localStatus'] => {
+  return (presence === 'present' || isHttpAttachmentUri(uri)) ? 'available' : 'missing';
 };
 
 export const getDropboxClientId = async (): Promise<string> => {
@@ -520,14 +525,27 @@ export const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
   return copy.buffer;
 };
 
-export const fileExists = async (uri: string): Promise<boolean> => {
-  if (uri.startsWith('content://')) return true;
+const isExplicitLocalFileNotFoundError = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') return false;
+  const code = 'code' in error && typeof error.code === 'string'
+    ? error.code.trim().toUpperCase()
+    : '';
+  if (code === 'ENOENT' || code === 'ERR_FILE_NOT_FOUND' || code === 'FILE_NOT_FOUND') return true;
+  const message = error instanceof Error ? error.message : '';
+  return /(?:^|\b)ENOENT(?:\b|$)|no such file or directory|file not found/i.test(message);
+};
+
+export const getLocalAttachmentPresence = async (uri: string): Promise<LocalAttachmentPresence> => {
   try {
     const info = await FileSystem.getInfoAsync(uri);
-    return info.exists;
+    if (info.exists === true) return 'present';
+    if (info.exists === false) return 'confirmed-not-found';
+    logAttachmentWarn('Attachment file presence was ambiguous');
+    return 'unreadable';
   } catch (error) {
+    if (isExplicitLocalFileNotFoundError(error)) return 'confirmed-not-found';
     logAttachmentWarn('Failed to check attachment file', error);
-    return false;
+    return 'unreadable';
   }
 };
 
@@ -597,8 +615,11 @@ export const persistAttachmentLocallyDetailed = async (attachment: Attachment): 
       uri: describeAttachmentUriForLog(uri),
       size: Number.isFinite(attachment.size ?? NaN) ? String(attachment.size) : 'unknown',
     });
-    const alreadyExists = await fileExists(targetUri);
-    if (!alreadyExists) {
+    const targetPresence = await getLocalAttachmentPresence(targetUri);
+    if (targetPresence === 'unreadable') {
+      return { attachment, status: 'failed' };
+    }
+    if (targetPresence === 'confirmed-not-found') {
       // copyFileSafely streams through native copyAsync (temp + rename) and
       // only falls back to the JS byte round-trip when the provider refuses
       // the copy — content:// sources included, so share-sheet files avoid a

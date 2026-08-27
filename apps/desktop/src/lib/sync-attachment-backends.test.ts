@@ -696,6 +696,40 @@ describe('desktop sync attachment backends', () => {
         expect(result?.tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
     });
 
+    it('preserves attachment metadata and performs no transfer when local presence is unreadable', async () => {
+        const fetcher = vi.fn();
+        const appData = createCandidateAttachmentData();
+        Object.assign(appData.tasks[0].attachments![0], {
+            fileHash: 'ab'.repeat(32),
+            pendingContentUpload: true,
+            contentMtimeMs: 123,
+            contentSize: 456,
+        });
+        const original = structuredClone(appData);
+        const deps: AttachmentBackendDeps = {
+            getTauriFetch: async () => fetcher as unknown as typeof fetch,
+            isTauriRuntimeEnv: () => true,
+            logSyncInfo: vi.fn(),
+            logSyncWarning: vi.fn(),
+            resolveWebdavPassword: vi.fn(async () => 'secret'),
+        };
+        fsMocks.exists.mockRejectedValue(new Error('Permission denied'));
+
+        await expect(syncWebdavAttachments(
+            appData,
+            { url: 'https://candidate.example/mindwtr', username: 'alice' },
+            'https://candidate.example/mindwtr',
+            deps,
+        )).resolves.toBeNull();
+
+        expect(appData).toEqual(original);
+        expect(coreMocks.webdavFileExists).not.toHaveBeenCalled();
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(fsMocks.readFile).not.toHaveBeenCalled();
+        expect(fsMocks.stat).not.toHaveBeenCalled();
+        expect(fsMocks.writeFile).not.toHaveBeenCalled();
+    });
+
     it.each([false, true])(
         'prevents a WebDAV attachment PUT after lease takeover (activation=%s)',
         async (activationProbe) => {

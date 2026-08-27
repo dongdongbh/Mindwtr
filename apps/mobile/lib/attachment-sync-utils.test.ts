@@ -5,6 +5,7 @@ const fileSystemMock = vi.hoisted(() => ({
   documentDirectory: 'file:///documents/',
   cacheDirectory: 'file:///cache/',
   makeDirectoryAsync: vi.fn(),
+  getInfoAsync: vi.fn(),
   writeAsStringAsync: vi.fn(),
   moveAsync: vi.fn(),
   deleteAsync: vi.fn(),
@@ -27,7 +28,53 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 // module graph, and paying that transform cost inside `it()` (as a dynamic import)
 // counted against the per-test timeout and made this file flaky under a parallel
 // full-suite run even though it passed reliably alone.
-import { deleteManagedAttachmentFile, writeBytesSafely } from './attachment-sync-utils';
+// eslint-disable-next-line import/first
+import {
+  deleteManagedAttachmentFile,
+  getLocalAttachmentPresence,
+  writeBytesSafely,
+} from './attachment-sync-utils';
+
+describe('getLocalAttachmentPresence', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    ['file:///documents/attachment.txt', true, 'present'],
+    ['content://provider/document/attachment', true, 'present'],
+    ['content://provider/document/missing', false, 'confirmed-not-found'],
+  ] as const)('classifies %s from an explicit exists result', async (uri, exists, expected) => {
+    fileSystemMock.getInfoAsync.mockResolvedValueOnce({ exists });
+
+    await expect(getLocalAttachmentPresence(uri)).resolves.toBe(expected);
+  });
+
+  it.each([
+    new Error('Permission denied'),
+    new Error('Provider timed out'),
+    new Error('ambiguous provider failure'),
+  ])('treats provider errors as unreadable (%s)', async (error) => {
+    fileSystemMock.getInfoAsync.mockRejectedValueOnce(error);
+
+    await expect(getLocalAttachmentPresence('content://provider/document/attachment'))
+      .resolves.toBe('unreadable');
+  });
+
+  it('accepts an explicit native not-found error without collapsing other errors', async () => {
+    fileSystemMock.getInfoAsync.mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 'ENOENT' }));
+
+    await expect(getLocalAttachmentPresence('content://provider/document/missing'))
+      .resolves.toBe('confirmed-not-found');
+  });
+
+  it('treats an ambiguous getInfo result as unreadable', async () => {
+    fileSystemMock.getInfoAsync.mockResolvedValueOnce({});
+
+    await expect(getLocalAttachmentPresence('content://provider/document/attachment'))
+      .resolves.toBe('unreadable');
+  });
+});
 
 // #1057: attachment downloads must be write-temp-then-rename so a cut connection
 // can never leave a truncated file at the real target path that a later sync would

@@ -19,10 +19,12 @@ import * as FileSystem from '../file-system';
 import * as LegacyFileSystem from 'expo-file-system/legacy';
 import {
   bytesToBase64,
+  attachmentNeedsManagedLocalCopy,
   canUploadAttachmentFrom,
   computeAttachmentFileHash,
   createAttachmentLocalMigrationLimiter,
   DEFAULT_CONTENT_TYPE,
+  getLocalAttachmentPresence,
   readFileAsBytes,
   statAttachmentFile,
 } from '../attachment-sync-utils';
@@ -286,6 +288,14 @@ export const migrateAttachmentsLocallyBeforeSync = async (
     assertAttachmentSyncNotAborted(signal);
     if (original.kind !== 'file' || original.deletedAt) continue;
     const attachment: Attachment = { ...original };
+    if (attachmentNeedsManagedLocalCopy(attachment)) {
+      const presence = await getLocalAttachmentPresence(attachment.uri || '');
+      if (presence === 'unreadable') {
+        attachmentsById.delete(attachment.id);
+        continue;
+      }
+      if (presence === 'confirmed-not-found') continue;
+    }
     const result = await migrateAttachmentLocally(attachment);
     if (result.migrated) {
       patches.set(attachment.id, attachment);

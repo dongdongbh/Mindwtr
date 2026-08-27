@@ -1,4 +1,3 @@
-import type { AppData } from '@mindwtr/core';
 import {
   applyAttachmentPatches,
   applyAttachmentContentStat,
@@ -9,6 +8,7 @@ import {
   isSyncRemoteMutationFenceError,
   validateAttachmentHash,
   validateAttachmentForUpload,
+  type AppData,
   type Attachment,
   type LocalFileStat,
 } from '@mindwtr/core';
@@ -19,12 +19,10 @@ import {
   canUploadAttachmentFrom,
   collectAttachments,
   DEFAULT_CONTENT_TYPE,
-  fileExists,
-  getAttachmentByteSize,
   getAttachmentLocalStatus,
   getAttachmentsDir,
+  getLocalAttachmentPresence,
   isHttpAttachmentUri,
-  markAttachmentUnrecoverable,
   readAttachmentBytesForUpload,
   reportProgress,
   toArrayBuffer,
@@ -101,8 +99,12 @@ export const syncCloudAttachments = async (
     const uri = attachment.uri || '';
     const isHttp = isHttpAttachmentUri(uri);
     const hasLocalPath = Boolean(uri) && !isHttp;
-    const existsLocally = hasLocalPath ? await fileExists(uri) : false;
-    const nextStatus = getAttachmentLocalStatus(uri, existsLocally);
+    const localPresence = hasLocalPath
+      ? await getLocalAttachmentPresence(uri)
+      : 'confirmed-not-found';
+    if (localPresence === 'unreadable') continue;
+    const existsLocally = localPresence === 'present';
+    const nextStatus = getAttachmentLocalStatus(uri, localPresence);
     if (attachment.localStatus !== nextStatus) {
       attachment.localStatus = nextStatus;
       recordPatch(attachment);

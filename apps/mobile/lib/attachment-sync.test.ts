@@ -274,6 +274,7 @@ describe('attachment sync', () => {
   it('normalizes legacy content-uri attachments when ensuring availability', async () => {
     const contentUri = 'content://com.android.providers.downloads.documents/document/msf%3A1000006031';
     fileSystemMock.getInfoAsync
+      .mockResolvedValueOnce({ exists: true })
       .mockResolvedValueOnce({ exists: false })
       .mockResolvedValueOnce({ exists: true, size: 3 });
     fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
@@ -505,6 +506,7 @@ describe('attachment sync', () => {
     const managedUri = 'file://document/attachments/legacy.txt';
 
     fileSystemMock.getInfoAsync
+      .mockResolvedValueOnce({ exists: true, size: 3 })
       .mockResolvedValueOnce({ exists: false, size: 0 })
       .mockResolvedValue({ exists: true, size: 3 });
     fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
@@ -570,13 +572,20 @@ describe('attachment sync', () => {
     const syncFileUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fdata.json';
     const attachmentsDirUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fattachments/';
 
-    fileSystemMock.getInfoAsync
-      .mockResolvedValueOnce({ exists: false, size: 0 })
-      .mockResolvedValueOnce({ exists: true, size: 3 })
-      .mockResolvedValueOnce({ exists: false, size: 0 })
-      .mockResolvedValueOnce({ exists: true, size: 3 })
-      .mockResolvedValueOnce({ exists: false, size: 0 })
-      .mockResolvedValueOnce({ exists: true, size: 3 });
+    const managedProbeCounts = new Map<string, number>();
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => {
+      if (uri.startsWith('content://com.android.providers.downloads.documents/')) {
+        return { exists: true, size: 3 };
+      }
+      if (uri.startsWith('file://document/attachments/legacy-')) {
+        const count = managedProbeCounts.get(uri) ?? 0;
+        managedProbeCounts.set(uri, count + 1);
+        return count === 0
+          ? { exists: false, size: 0 }
+          : { exists: true, size: 3, modificationTime: 1 };
+      }
+      return { exists: false, size: 0 };
+    });
     fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
     fileSystemMock.StorageAccessFramework.readDirectoryAsync.mockImplementation(async (uri: string) => {
       if (uri === attachmentsDirUri) {
@@ -1347,6 +1356,65 @@ describe('attachment sync', () => {
       localStatus: 'available',
       pendingContentUpload: undefined,
     });
+  });
+
+  it('preserves an unreadable content attachment and performs no transfer across every backend', async () => {
+    const attachment = {
+      id: 'unreadable-local',
+      uri: 'content://provider/document/unreadable-local',
+      cloudKey: 'attachments/unreadable-local.txt',
+      fileHash: 'ab'.repeat(32),
+      pendingContentUpload: true,
+      localStatus: 'available' as const,
+      contentMtimeMs: 123,
+      contentSize: 456,
+    };
+    const appData = singleAttachmentData(attachment);
+    const original = structuredClone(appData);
+    fileSystemMock.getInfoAsync.mockRejectedValue(new Error('Permission denied'));
+
+    const results = await Promise.all([
+      attachmentSync.syncFileAttachments(appData, 'file://sync/data.json', undefined, { phase: 'post-merge' }),
+      attachmentSync.syncWebdavAttachments(
+        appData,
+        { url: 'https://example.com/data.json', username: 'u', password: 'p' },
+        'https://example.com',
+        undefined,
+        { phase: 'post-merge' },
+      ),
+      attachmentSync.syncCloudAttachments(
+        appData,
+        { url: 'https://cloud.example/v1/data', token: 'token' },
+        'https://cloud.example/v1',
+        { phase: 'post-merge' },
+      ),
+      attachmentSync.syncDropboxAttachments(
+        appData,
+        'dropbox-client-id',
+        fetch,
+        { phase: 'post-merge' },
+      ),
+      attachmentSync.syncCloudKitAttachments(appData, undefined, { phase: 'post-merge' }),
+    ]);
+
+    expect(results).toEqual([false, false, false, false, false]);
+    expect(appData).toEqual(original);
+    const core = await import('@mindwtr/core');
+    expect(core.webdavFileExists).not.toHaveBeenCalled();
+    expect(core.webdavGetFile).not.toHaveBeenCalled();
+    expect(core.webdavPutFileVersioned).not.toHaveBeenCalled();
+    expect(core.cloudGetFile).not.toHaveBeenCalled();
+    expect(core.cloudPutFile).not.toHaveBeenCalled();
+    const dropbox = await import('./dropbox-sync');
+    expect(dropbox.getDropboxFileMetadata).not.toHaveBeenCalled();
+    expect(dropbox.downloadDropboxFile).not.toHaveBeenCalled();
+    expect(dropbox.uploadDropboxFileVersioned).not.toHaveBeenCalled();
+    const cloudkit = await import('./cloudkit-sync');
+    expect(cloudkit.fetchCloudKitAttachmentAsset).not.toHaveBeenCalled();
+    expect(cloudkit.saveCloudKitAttachmentAsset).not.toHaveBeenCalled();
+    expect(fileSystemMock.copyAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.writeAsStringAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.StorageAccessFramework.writeAsStringAsync).not.toHaveBeenCalled();
   });
 
   it('does not delete a deterministic cloud target when local data changes after upload', async () => {

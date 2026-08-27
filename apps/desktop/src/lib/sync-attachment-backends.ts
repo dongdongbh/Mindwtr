@@ -323,7 +323,7 @@ export async function syncWebdavAttachments(
         return markWebdavAttachmentRateLimited(error, deps.logSyncWarning);
     };
 
-    const { readLocalFile, localFileExists, statLocalFile } = createLocalAttachmentFs(deps.logSyncWarning, {
+    const { readLocalFile, localFilePresence, statLocalFile } = createLocalAttachmentFs(deps.logSyncWarning, {
         baseDataDir,
         dataBaseDir: BaseDirectory.Data,
         exists,
@@ -350,9 +350,14 @@ export async function syncWebdavAttachments(
         const isHttp = /^https?:\/\//i.test(rawUri);
         const localPath = isHttp ? '' : rawUri;
         const hasLocalPath = Boolean(localPath);
-        const existsLocally = hasLocalPath
-            ? await localFileExists(localPath, attachment)
-            : false;
+        const localPresence = hasLocalPath
+            ? await localFilePresence(localPath, attachment)
+            : 'confirmed-not-found';
+        if (localPresence === 'unreadable') {
+            attachmentsById.delete(attachment.id);
+            continue;
+        }
+        const existsLocally = localPresence === 'present';
         deps.logSyncInfo('WebDAV attachment check', {
             id: attachment.id,
             title: attachment.title || 'attachment',
@@ -435,7 +440,7 @@ export async function syncWebdavAttachments(
         attachmentsById,
         deferUploads: helpers?.phase === 'prepare',
         ensureLocalSnapshotFresh: helpers?.ensureLocalSnapshotFresh,
-        localFileExists,
+        getLocalFilePresence: localFilePresence,
         getLocalFileStat: statLocalFile,
         computeLocalFileHash,
         createUploadSnapshot,
@@ -656,7 +661,7 @@ export async function syncCloudAttachments(
     const managedAttachmentsDir = await getManagedPath(ATTACHMENTS_DIR_NAME);
     const attachmentsById = collectAttachmentsById(appData);
 
-    const { readLocalFile, localFileExists, statLocalFile } = createLocalAttachmentFs(deps.logSyncWarning, {
+    const { readLocalFile, localFilePresence, statLocalFile } = createLocalAttachmentFs(deps.logSyncWarning, {
         baseDataDir,
         dataBaseDir: BaseDirectory.Data,
         exists,
@@ -672,7 +677,7 @@ export async function syncCloudAttachments(
         attachmentsById,
         deferUploads: helpers?.phase === 'prepare',
         ensureLocalSnapshotFresh: helpers?.ensureLocalSnapshotFresh,
-        localFileExists,
+        getLocalFilePresence: localFilePresence,
         getLocalFileStat: statLocalFile,
         computeLocalFileHash,
         createUploadSnapshot,
@@ -834,7 +839,7 @@ export async function syncDropboxAttachments(
         }
     };
 
-    const { readLocalFile, localFileExists, statLocalFile } = createLocalAttachmentFs(deps.logSyncWarning, {
+    const { readLocalFile, localFilePresence, statLocalFile } = createLocalAttachmentFs(deps.logSyncWarning, {
         baseDataDir,
         dataBaseDir: BaseDirectory.Data,
         exists,
@@ -850,7 +855,7 @@ export async function syncDropboxAttachments(
         attachmentsById,
         deferUploads: helpers?.phase === 'prepare',
         ensureLocalSnapshotFresh: helpers?.ensureLocalSnapshotFresh,
-        localFileExists,
+        getLocalFilePresence: localFilePresence,
         getLocalFileStat: statLocalFile,
         computeLocalFileHash,
         createUploadSnapshot,
@@ -1005,7 +1010,7 @@ export async function syncCloudKitAttachments(
     const ownerByAttachmentId = collectCloudKitAttachmentOwners(appData);
     const settingsPatch = await flushPendingCloudKitAttachmentDeletes(appData);
 
-    const { readLocalFile, localFileExists, statLocalFile } = createLocalAttachmentFs(
+    const { readLocalFile, localFilePresence, statLocalFile } = createLocalAttachmentFs(
         deps.logSyncWarning,
         { baseDataDir, dataBaseDir: BaseDirectory.Data, exists, readFile, managedAttachmentsDir, stat },
         'Failed to check CloudKit attachment file',
@@ -1038,7 +1043,7 @@ export async function syncCloudKitAttachments(
         attachmentsById,
         deferUploads: helpers?.phase === 'prepare',
         ensureLocalSnapshotFresh: helpers?.ensureLocalSnapshotFresh,
-        localFileExists,
+        getLocalFilePresence: localFilePresence,
         getLocalFileStat: statLocalFile,
         computeLocalFileHash,
         createUploadSnapshot,
@@ -1160,7 +1165,7 @@ export async function syncFileAttachments(
     const managedAttachmentsDir = await getManagedPath(ATTACHMENTS_DIR_NAME);
     const attachmentsById = collectAttachmentsById(appData);
 
-    const { readLocalFile, localFileExists, statLocalFile } = createLocalAttachmentFs(deps.logSyncWarning, {
+    const { readLocalFile, localFilePresence, statLocalFile } = createLocalAttachmentFs(deps.logSyncWarning, {
         baseDataDir,
         dataBaseDir: BaseDirectory.Data,
         // An absolute attachment uri can point at the slow mount too; only the
@@ -1195,7 +1200,12 @@ export async function syncFileAttachments(
         ) continue;
         const rawUri = attachment.uri ? stripFileScheme(attachment.uri) : '';
         if (!rawUri || /^https?:\/\//i.test(rawUri)) continue;
-        if (!(await localFileExists(rawUri, attachment))) continue;
+        const localPresence = await localFilePresence(rawUri, attachment);
+        if (localPresence === 'unreadable') {
+            attachmentsById.delete(attachment.id);
+            continue;
+        }
+        if (localPresence !== 'present') continue;
         try {
             const remotePath = await resolveFileBackendPath(join, baseSyncDir, attachment.cloudKey);
             if (!(await syncFsExists(remotePath))) {
@@ -1212,7 +1222,7 @@ export async function syncFileAttachments(
         attachmentsById,
         deferUploads: helpers?.phase === 'prepare',
         ensureLocalSnapshotFresh: helpers?.ensureLocalSnapshotFresh,
-        localFileExists,
+        getLocalFilePresence: localFilePresence,
         getLocalFileStat: statLocalFile,
         computeLocalFileHash,
         createUploadSnapshot,

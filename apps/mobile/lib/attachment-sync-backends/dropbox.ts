@@ -1,4 +1,3 @@
-import type { AppData, Attachment, SyncKeyMaterial } from '@mindwtr/core';
 import {
   applyAttachmentPatches,
   applyAttachmentContentStat,
@@ -6,7 +5,10 @@ import {
   isSha256Hex,
   isSyncRemoteMutationFenceError,
   validateAttachmentForUpload,
+  type AppData,
+  type Attachment,
   type LocalFileStat,
+  type SyncKeyMaterial,
 } from '@mindwtr/core';
 import {
   DropboxConflictError,
@@ -22,10 +24,9 @@ import {
   DROPBOX_ATTACHMENT_MAX_DOWNLOADS_PER_SYNC,
   DROPBOX_ATTACHMENT_MAX_UPLOADS_PER_SYNC,
   extractExtension,
-  fileExists,
-  getAttachmentByteSize,
   getAttachmentLocalStatus,
   getAttachmentsDir,
+  getLocalAttachmentPresence,
   isContentAttachmentUri,
   isHttpAttachmentUri,
   logAttachmentInfo,
@@ -123,8 +124,12 @@ export const syncDropboxAttachments = async (
     const isHttp = isHttpAttachmentUri(uri);
     const isContent = isContentAttachmentUri(uri);
     const hasLocalPath = Boolean(uri) && !isHttp;
-    const existsLocally = hasLocalPath ? await fileExists(uri) : false;
-    const nextStatus = getAttachmentLocalStatus(uri, existsLocally);
+    const localPresence = hasLocalPath
+      ? await getLocalAttachmentPresence(uri)
+      : 'confirmed-not-found';
+    if (localPresence === 'unreadable') continue;
+    const existsLocally = localPresence === 'present';
+    const nextStatus = getAttachmentLocalStatus(uri, localPresence);
     if (attachment.localStatus !== nextStatus) {
       attachment.localStatus = nextStatus;
       recordPatch(attachment);

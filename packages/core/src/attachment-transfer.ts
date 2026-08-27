@@ -125,9 +125,14 @@ export type AttachmentUploadSnapshot = {
     dispose: () => Promise<void>;
 };
 
+/** Result of probing attachment bytes on this device. `unreadable` is distinct
+ * from absence because treating a permission/provider failure as missing can
+ * overwrite metadata or start a remote transfer from a false premise. */
+export type LocalAttachmentPresence = 'present' | 'confirmed-not-found' | 'unreadable';
+
 export type AttachmentTransferLifecycleOptions = {
     attachmentsById: Map<string, Attachment>;
-    localFileExists: (path: string, attachment: Attachment) => Promise<boolean>;
+    getLocalFilePresence: (path: string, attachment: Attachment) => Promise<LocalAttachmentPresence>;
     onUpload: (
         attachment: Attachment,
         localPath: string,
@@ -387,9 +392,16 @@ export async function runAttachmentTransferLifecycle(
         const isHttp = /^https?:\/\//i.test(rawUri);
         const localPath = isHttp ? '' : rawUri;
         const hasLocalPath = Boolean(localPath);
-        const existsLocally = hasLocalPath
-            ? await options.localFileExists(localPath, attachment)
-            : false;
+        const localPresence = hasLocalPath
+            ? await options.getLocalFilePresence(localPath, attachment).catch(() => 'unreadable' as const)
+            : 'confirmed-not-found';
+
+        // A probe failure says nothing about whether the bytes exist. Preserve every
+        // attachment field and avoid all transfer/stat/provider callbacks until a later
+        // cycle can classify the path authoritatively.
+        if (localPresence === 'unreadable') continue;
+
+        const existsLocally = localPresence === 'present';
 
         const nextStatus: Attachment['localStatus'] = existsLocally ? 'available' : 'missing';
         if (attachment.localStatus !== nextStatus) {

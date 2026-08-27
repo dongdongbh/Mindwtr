@@ -23,9 +23,9 @@ import {
   computeAttachmentFileHash,
   DEFAULT_CONTENT_TYPE,
   extractExtension,
-  fileExists,
   getAttachmentByteSize,
   getAttachmentsDir,
+  getLocalAttachmentPresence,
   getWebdavDownloadBackoff,
   isHttpAttachmentUri,
   describeAttachmentUriForLog,
@@ -152,7 +152,14 @@ export const syncWebdavAttachments = async (
     const uri = attachment.uri || '';
     const isHttp = isHttpAttachmentUri(uri);
     const hasLocalPath = Boolean(uri) && !isHttp;
-    const existsLocally = hasLocalPath ? await fileExists(uri) : false;
+    const localPresence = hasLocalPath
+      ? await getLocalAttachmentPresence(uri)
+      : 'confirmed-not-found';
+    if (localPresence === 'unreadable') {
+      attachmentsById.delete(attachment.id);
+      continue;
+    }
+    const existsLocally = localPresence === 'present';
     logAttachmentInfo('WebDAV attachment check', {
       id: attachment.id,
       uri: describeAttachmentUriForLog(uri),
@@ -241,7 +248,7 @@ export const syncWebdavAttachments = async (
 
   const { patches } = await runMobileAttachmentLifecycle({
     attachmentsById,
-    localFileExists: fileExists,
+    getLocalFilePresence: getLocalAttachmentPresence,
     deferUploads: options.phase === 'prepare',
     getLocalFileStat: (path) => statAttachmentFile(path),
     computeLocalFileHash: (path) => computeAttachmentFileHash(path),

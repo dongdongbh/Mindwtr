@@ -16,7 +16,7 @@ import {
     collectAttachments,
     computeAttachmentFileHash,
     extractExtension,
-    fileExists,
+    getLocalAttachmentPresence,
     getAttachmentByteSize,
     getAttachmentsDir,
     isContentAttachmentUri,
@@ -167,7 +167,7 @@ export const syncCloudKitAttachments = async (
 
     const { patches } = await runMobileAttachmentLifecycle({
         attachmentsById,
-        localFileExists: fileExists,
+        getLocalFilePresence: getLocalAttachmentPresence,
         deferUploads: options.phase === 'prepare',
         getLocalFileStat: (path) => statAttachmentFile(path),
         computeLocalFileHash: (path) => computeAttachmentFileHash(path),
