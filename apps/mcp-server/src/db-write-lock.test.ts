@@ -123,7 +123,7 @@ describe('MCP cross-process database write lock', () => {
 
       expect(await waitForChildExit(worker, 5_000)).toBe(0);
       expect(readFileSync(outcomePath, 'utf8'))
-        .toContain('SQLITE_BUSY: database changed after the automation snapshot was loaded (settings)');
+        .toContain('SQLITE_BUSY: database changed after the automation snapshot was loaded (external commit)');
 
       const verificationDb = new Database(dbPath, { readonly: true });
       try {
