@@ -239,6 +239,11 @@ const runUploadTask = async <T,>(
   return await new Promise<T>((resolve, reject) => {
     let settled = false;
     let cancellationStarted = false;
+    let cancellationCause: Error | null = null;
+    let cancellationState:
+      | { state: 'pending' }
+      | { state: 'confirmed' }
+      | { state: 'failed'; error: unknown } = { state: 'pending' };
     let onAbort: (() => void) | null = null;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     const uploadOutcome = Promise.resolve().then(() => task.uploadAsync()).then(
@@ -260,22 +265,14 @@ const runUploadTask = async <T,>(
     const beginCancellation = (cause: Error) => {
       if (settled || cancellationStarted) return;
       cancellationStarted = true;
+      cancellationCause = cause;
       cleanupTriggers();
-      const cancellationOutcome = cancelUploadTask(task).then(
-        () => ({ confirmed: true } as const),
-        (error) => ({ confirmed: false, error } as const),
+      void cancelUploadTask(task).then(
+        () => { cancellationState = { state: 'confirmed' }; },
+        (error) => { cancellationState = { state: 'failed', error }; },
       );
       // Do not reject until the native request is terminal. Otherwise the retry/finally
       // path can release the remote mutation fence while the old PUT is still live.
-      // If native cancellation itself never acknowledges, this intentionally remains
-      // pending: compatible clients must not be allowed to mutate behind an unbounded PUT.
-      void Promise.all([cancellationOutcome, uploadOutcome]).then(([cancellation]) => {
-        if (cancellation.confirmed) {
-          finish(() => reject(cause));
-          return;
-        }
-        finish(() => reject(new StreamedUploadCancellationUnconfirmedError(cause, cancellation.error)));
-      });
     };
     onAbort = () => beginCancellation(createUploadAbortError(signal));
 
@@ -286,9 +283,21 @@ const runUploadTask = async <T,>(
       }, timeoutMs);
     }
     void uploadOutcome.then((outcome) => {
-      if (cancellationStarted) return;
-      if (outcome.state === 'fulfilled') finish(() => resolve(outcome.value));
-      else finish(() => reject(outcome.error));
+      if (!cancellationStarted) {
+        if (outcome.state === 'fulfilled') finish(() => resolve(outcome.value));
+        else finish(() => reject(outcome.error));
+        return;
+      }
+
+      const cause = cancellationCause ?? new Error('Streamed upload cancelled');
+      if (cancellationState.state === 'confirmed') {
+        finish(() => reject(cause));
+        return;
+      }
+      const cancellationError = cancellationState.state === 'failed'
+        ? cancellationState.error
+        : new Error('Native upload cancellation did not acknowledge before the upload terminated');
+      finish(() => reject(new StreamedUploadCancellationUnconfirmedError(cause, cancellationError)));
     });
   });
 };
