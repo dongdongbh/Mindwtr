@@ -7,6 +7,36 @@ import {
 } from './speech-to-task';
 
 describe('runRemoteSpeechToTaskCapture', () => {
+    it('times out and cancels a stalled remote speech error body', async () => {
+        vi.useFakeTimers();
+        try {
+            const cancel = vi.fn();
+            const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 500 });
+            const pending = runRemoteSpeechToTaskCapture(
+                {
+                    provider: 'openai',
+                    mode: 'transcribe_only',
+                    apiKey: 'openai-key',
+                    model: 'whisper-1',
+                },
+                {
+                    withOpenAIUpload: async (send) => send({
+                        part: new Blob([new Uint8Array([1])], { type: 'audio/wav' }),
+                        fileName: 'note.wav',
+                    }),
+                },
+                { fetcher: async () => response },
+            );
+            const assertion = expect(pending).rejects.toThrow('Speech request timed out');
+
+            await vi.advanceTimersByTimeAsync(30_000);
+            await assertion;
+            expect(cancel).toHaveBeenCalledOnce();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('transcribes OpenAI audio through the public speech provider seam', async () => {
         const requests: Array<{ url: string; init?: RequestInit }> = [];
         const fetcher: typeof fetch = async (input, init) => {

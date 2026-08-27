@@ -1,4 +1,10 @@
+import {
+    fetchWithTimeoutAndConsume as fetchHttpWithTimeoutAndConsume,
+    readResponseText,
+} from '../http-utils';
+
 const MAX_JSON_REPAIR_BOUNDARIES = 50;
+const MAX_AI_RESPONSE_BYTES = 16 * 1024 * 1024;
 
 /**
  * Repair candidates for a truncated JSON document (e.g. the model hit its output
@@ -186,39 +192,43 @@ export function formatAIErrorAlertBody(genericBody: string, error: unknown): str
     return `${genericBody}\n\n${detail}`;
 }
 
-export async function fetchWithTimeout(
+export type BufferedAIResponse = {
+    ok: boolean;
+    status: number;
+    statusText: string;
+    headers: Headers;
+    bodyText: string;
+};
+
+export async function fetchTextWithTimeout(
     url: string,
     init: RequestInit,
     timeoutMs: number,
     label: string,
     externalSignal?: AbortSignal,
     fetcher: typeof fetch = globalThis.fetch
-): Promise<Response> {
-    const abortController = typeof AbortController === 'function' ? new AbortController() : null;
-    let removeExternalListener: (() => void) | null = null;
-    if (abortController && externalSignal) {
-        const onAbort = () => abortController.abort();
-        if (externalSignal.aborted) {
-            abortController.abort();
-        } else {
-            externalSignal.addEventListener('abort', onAbort);
-            removeExternalListener = () => externalSignal.removeEventListener('abort', onAbort);
-        }
-    }
-    const timeoutId = abortController ? setTimeout(() => abortController.abort(), timeoutMs) : null;
+): Promise<BufferedAIResponse> {
+    const callerSignal = externalSignal ?? init.signal ?? undefined;
     try {
-        return await fetcher(url, { ...init, signal: abortController?.signal ?? init.signal });
+        return await fetchHttpWithTimeoutAndConsume(
+            url,
+            { ...init, signal: callerSignal },
+            timeoutMs,
+            fetcher,
+            `${label} request timed out`,
+            async (response, signal) => ({
+                ok: response.ok,
+                status: response.status,
+                statusText: response.statusText,
+                headers: response.headers,
+                bodyText: await readResponseText(response, MAX_AI_RESPONSE_BYTES, signal),
+            }),
+        );
     } catch (error) {
-        if (abortController?.signal.aborted) {
-            if (externalSignal?.aborted) {
-                throw new Error(`${label} request aborted`);
-            }
-            throw new Error(`${label} request timed out`);
+        if (callerSignal?.aborted) {
+            throw new Error(`${label} request aborted`);
         }
         throw error;
-    } finally {
-        if (timeoutId) clearTimeout(timeoutId);
-        if (removeExternalListener) removeExternalListener();
     }
 }
 

@@ -3,7 +3,7 @@
 // module hits each provider's list-models endpoint instead. Every failure
 // mode (HTTP error, timeout, malformed body, legitimately empty list) is
 // something the caller degrades from — see mergeModelOptions.
-import { fetchWithTimeout } from './utils';
+import { fetchTextWithTimeout } from './utils';
 
 export type ModelListProviderId = 'openai' | 'gemini' | 'anthropic';
 export type ModelListKind = 'chat' | 'transcription';
@@ -39,9 +39,9 @@ function resolveOptions(options: FetchProviderModelsOptions): ResolvedOptions {
     };
 }
 
-async function readJsonBody(response: Response, label: string): Promise<unknown> {
+function readJsonBody(raw: string, label: string): unknown {
     try {
-        return await response.json();
+        return JSON.parse(raw) as unknown;
     } catch {
         throw new Error(`${label} returned a malformed response body.`);
     }
@@ -61,7 +61,7 @@ async function fetchOpenAIModels(options: ResolvedOptions): Promise<string[]> {
     if (!apiKey && root === OPENAI_DEFAULT_ROOT) {
         throw new Error('OpenAI models request needs an API key or a base URL.');
     }
-    const response = await fetchWithTimeout(
+    const response = await fetchTextWithTimeout(
         `${root}/models`,
         {
             // A self-hosted server usually has no key, and an empty "Bearer "
@@ -77,7 +77,7 @@ async function fetchOpenAIModels(options: ResolvedOptions): Promise<string[]> {
     if (!response.ok) {
         throw new Error(`OpenAI models request failed (${response.status}).`);
     }
-    const data = ((await readJsonBody(response, 'OpenAI models')) as { data?: unknown } | null)?.data;
+    const data = (readJsonBody(response.bodyText, 'OpenAI models') as { data?: unknown } | null)?.data;
     if (!Array.isArray(data)) {
         throw new Error('OpenAI models response was missing a data array.');
     }
@@ -113,11 +113,11 @@ async function fetchGeminiModels(options: ResolvedOptions): Promise<string[]> {
         throw new Error('Gemini models request needs an API key.');
     }
     const url = `${GEMINI_MODELS_URL}?key=${encodeURIComponent(apiKey)}&pageSize=1000`;
-    const response = await fetchWithTimeout(url, {}, options.timeoutMs, 'Gemini models', undefined, options.fetchImpl);
+    const response = await fetchTextWithTimeout(url, {}, options.timeoutMs, 'Gemini models', undefined, options.fetchImpl);
     if (!response.ok) {
         throw new Error(`Gemini models request failed (${response.status}).`);
     }
-    const modelEntries = ((await readJsonBody(response, 'Gemini models')) as { models?: unknown } | null)?.models;
+    const modelEntries = (readJsonBody(response.bodyText, 'Gemini models') as { models?: unknown } | null)?.models;
     if (!Array.isArray(modelEntries)) {
         throw new Error('Gemini models response was missing a models array.');
     }
@@ -145,7 +145,7 @@ async function fetchAnthropicModels(options: ResolvedOptions): Promise<string[]>
     if (!apiKey) {
         throw new Error('Anthropic models request needs an API key.');
     }
-    const response = await fetchWithTimeout(
+    const response = await fetchTextWithTimeout(
         ANTHROPIC_MODELS_URL,
         {
             headers: {
@@ -164,7 +164,7 @@ async function fetchAnthropicModels(options: ResolvedOptions): Promise<string[]>
     if (!response.ok) {
         throw new Error(`Anthropic models request failed (${response.status}).`);
     }
-    const data = ((await readJsonBody(response, 'Anthropic models')) as { data?: unknown } | null)?.data;
+    const data = (readJsonBody(response.bodyText, 'Anthropic models') as { data?: unknown } | null)?.data;
     if (!Array.isArray(data)) {
         throw new Error('Anthropic models response was missing a data array.');
     }

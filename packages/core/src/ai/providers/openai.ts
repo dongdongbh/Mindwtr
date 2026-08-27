@@ -1,6 +1,13 @@
 import type { AIProvider, AIProviderConfig, BreakdownInput, BreakdownResponse, ClarifyInput, ClarifyResponse, CopilotInput, CopilotResponse, ReviewAnalysisInput, ReviewAnalysisResponse, AIRequestOptions } from '../types';
 import { buildBreakdownPrompt, buildClarifyPrompt, buildCopilotPrompt, buildReviewAnalysisPrompt } from '../prompts';
-import { fetchWithTimeout, normalizeTags, normalizeTimeEstimate, parseJson, rateLimit } from '../utils';
+import {
+    fetchTextWithTimeout,
+    normalizeTags,
+    normalizeTimeEstimate,
+    parseJson,
+    rateLimit,
+    type BufferedAIResponse,
+} from '../utils';
 import { isBreakdownResponse, isClarifyResponse, isCopilotResponse, isReviewAnalysisResponse } from '../validators';
 import { sleep } from '../../async-utils';
 
@@ -169,20 +176,15 @@ interface OpenAIErrorInfo {
     raw: string;
 }
 
-async function readOpenAIErrorInfo(response: Response): Promise<OpenAIErrorInfo> {
+async function readOpenAIErrorInfo(response: BufferedAIResponse): Promise<OpenAIErrorInfo> {
     const status = response.status;
     let message = '';
     let code = '';
     let type = '';
     let raw = '';
-    // Read the body once as text, then try to parse — calling response.json()
-    // first consumes the stream, so a non-JSON body could not be recovered via
-    // response.text() afterwards (parity with the anthropic/gemini providers).
-    try {
-        raw = await response.text();
-    } catch {
-        raw = '';
-    }
+    // The timeout helper buffers the body once as text. Parse that copy so a
+    // non-JSON provider error remains available for the fallback message.
+    raw = response.bodyText;
     if (raw) {
         try {
             const data = JSON.parse(raw) as {
@@ -311,11 +313,11 @@ async function requestOpenAI(config: AIProviderConfig, prompt: { system: string;
 
     // Runs the transient-retry loop for one body and returns the final Response
     // (ok or a non-retryable error); throws only on network failure after retries.
-    const dispatch = async (requestBody: unknown): Promise<Response> => {
+    const dispatch = async (requestBody: unknown): Promise<BufferedAIResponse> => {
         for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
-            let response: Response;
+            let response: BufferedAIResponse;
             try {
-                response = await fetchWithTimeout(
+                response = await fetchTextWithTimeout(
                     url,
                     {
                         method: 'POST',
@@ -363,7 +365,7 @@ async function requestOpenAI(config: AIProviderConfig, prompt: { system: string;
         throw buildOpenAIError(await readOpenAIErrorInfo(response), usingOfficialOpenAI);
     }
 
-    const result = await response.json() as {
+    const result = JSON.parse(response.bodyText) as {
         choices?: Array<{ message?: unknown }>;
     };
 
