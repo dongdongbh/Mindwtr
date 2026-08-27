@@ -250,7 +250,9 @@ describe('SyncEncryptionCard', () => {
     await press(tree, 'settings.syncEncryptionDisable');
     await press(tree, 'settings.syncEncryptionDisable');
 
-    expect(texts(tree)).toContain('settings.syncEncryptionErrorTransitionIncomplete');
+    const error = findText(tree, 'settings.syncEncryptionErrorTransitionIncomplete');
+    expect(error?.props.accessibilityRole).toBe('alert');
+    expect(error?.props.accessibilityLiveRegion).toBe('assertive');
     expect(texts(tree)).not.toContain('settings.syncEncryptionErrorRotationFirst');
   });
 
@@ -272,7 +274,9 @@ describe('SyncEncryptionCard', () => {
     await typeInto(tree, 'settings.syncEncryptionPassphraseConfirm', 'correct horse battery');
     await press(tree, 'settings.syncEncryptionEnable');
 
-    expect(texts(tree)).toContain('settings.syncEncryptionCleanupDeferred');
+    const warning = findText(tree, 'settings.syncEncryptionCleanupDeferred');
+    expect(warning?.props.accessibilityRole).not.toBe('alert');
+    expect(warning?.props.accessibilityLiveRegion).toBe('polite');
     expect(texts(tree)).not.toContain('settings.syncEncryptionErrorGeneric');
     expect(inputLabels(tree)).not.toContain('settings.syncEncryptionPassphrase');
   });
@@ -312,7 +316,9 @@ describe('SyncEncryptionCard', () => {
     await press(tree, 'settings.syncEncryptionUnlock');
 
     expect(encryptionMocks.provideSyncEncryptionPassphrase).toHaveBeenCalledWith('not the right one');
-    expect(texts(tree)).toContain('settings.syncEncryptionErrorWrongPassphrase');
+    const error = findText(tree, 'settings.syncEncryptionErrorWrongPassphrase');
+    expect(error?.props.accessibilityRole).toBe('alert');
+    expect(error?.props.accessibilityLiveRegion).toBe('assertive');
     // Still open for another attempt, and nothing suggests the data is damaged.
     expect(inputLabels(tree)).toContain('settings.syncEncryptionPassphrase');
   });
@@ -383,7 +389,8 @@ describe('SyncEncryptionCard', () => {
     const error = findText(tree, 'settings.syncEncryptionErrorMismatch');
     expect(flatStyle(error?.props.style).color).toBe(tc.danger);
     // Errors arrive without focus moving, so they have to be announced.
-    expect(error?.props.accessibilityLiveRegion).toBe('polite');
+    expect(error?.props.accessibilityRole).toBe('alert');
+    expect(error?.props.accessibilityLiveRegion).toBe('assertive');
   });
 
   it('announces the passphrase reveal as a switch', async () => {

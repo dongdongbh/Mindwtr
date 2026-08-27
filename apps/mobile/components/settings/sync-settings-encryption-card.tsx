@@ -520,7 +520,13 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
                 )}
                 {errorMessage && (
                     <View style={[styles.settingRowColumn, { borderTopWidth: 1, borderTopColor: tc.border }]}>
-                        <Text accessibilityLiveRegion="polite" style={[styles.settingDescription, { color: tc.danger }]}>{errorMessage}</Text>
+                        <Text
+                            accessibilityLiveRegion="assertive"
+                            accessibilityRole="alert"
+                            style={[styles.settingDescription, { color: tc.danger }]}
+                        >
+                            {errorMessage}
+                        </Text>
                     </View>
                 )}
             </View>
