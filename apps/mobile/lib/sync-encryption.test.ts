@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as nodeCrypto from 'node:crypto';
 import { argon2id } from '@noble/hashes/argon2.js';
-import type { AppData } from '@mindwtr/core';
+import type { AppData, SyncEncryptionRemotePort, SyncRemoteMutationFenceLease } from '@mindwtr/core';
 
 // ---------------------------------------------------------------------------
 // In-memory filesystem shared by the `./file-system` (legacy + SAF) and
@@ -205,6 +205,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { runSerializedSyncDocumentOperation } from '@mindwtr/core';
 import {
+  __syncEncryptionServiceTestUtils,
   changeSyncEncryptionPassphrase,
   disableSyncEncryption,
   enableSyncEncryption,
@@ -599,6 +600,52 @@ describe('local-only transitions with no configured backend (#1001)', () => {
     await expect(getMobileSyncEncryptionStatus()).resolves.toEqual({ state: 'off' });
     await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
   }, 30_000);
+});
+
+describe('remote mutation fence lifecycle', () => {
+  it('holds the lease through the flushed local commit and releases it last', async () => {
+    const events: string[] = [];
+    const lease: SyncRemoteMutationFenceLease = {
+      assertHeld: vi.fn(async () => { events.push('assert'); }),
+      renew: vi.fn(async () => undefined),
+      release: vi.fn(async () => {
+        events.push(`release:${asyncStorage.has(SYNC_ENCRYPTION_STATE_KEY) ? 'persisted' : 'missing'}`);
+      }),
+    };
+    const remote: SyncEncryptionRemotePort & {
+      acquireRemoteMutationFence: () => Promise<SyncRemoteMutationFenceLease>;
+    } = {
+      acquireRemoteMutationFence: async () => {
+        events.push('acquire');
+        return lease;
+      },
+      captureInventory: async () => {
+        events.push('capture');
+        return { entries: [], snapshot: new Map() };
+      },
+      list: async () => {
+        events.push('list');
+        return [];
+      },
+      read: async () => ({ bytes: null, version: null }),
+      write: async () => undefined,
+      remove: async () => undefined,
+    };
+
+    await __syncEncryptionServiceTestUtils.runWithRemoteMutationFence(
+      remote,
+      async (guardedRemote, _keyCache, localState) => {
+        await guardedRemote.captureInventory!();
+        await guardedRemote.list();
+        await localState.write({ state: 'off', incompleteTransition: 'enable' });
+      },
+    );
+
+    expect(events[0]).toBe('acquire');
+    expect(events.indexOf('capture')).toBeGreaterThan(events.indexOf('assert'));
+    expect(events.at(-1)).toBe('release:persisted');
+    expect(vi.mocked(lease.assertHeld).mock.calls.length).toBeGreaterThanOrEqual(5);
+  });
 });
 
 describe('File Sync transitions through core orchestration', () => {

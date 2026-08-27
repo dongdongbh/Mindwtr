@@ -15,6 +15,7 @@ import {
     inspectSyncArtifact,
     SyncEncryptionRemoteVersionUnavailableError,
     SyncEncryptionTerminalError,
+    SyncRemoteMutationFenceBusyError,
 } from '@mindwtr/core';
 
 type NativeState = {
@@ -158,6 +159,8 @@ const APP_DATA_WITH_ATTACHMENT = {
     projects: [],
 };
 
+const SERVER_DATE = 'Tue, 27 Aug 2026 12:00:00 GMT';
+
 const seedRemote = () =>
     createBlobStore({
         'data.json': jsonBytes(APP_DATA_WITH_ATTACHMENT),
@@ -198,18 +201,27 @@ const createDropboxFetch = (store: ReturnType<typeof createBlobStore>) =>
                     path_display: `/${name}`,
                     rev: `rev${store.versions.get(name) ?? 1}`,
                 }));
-            return new Response(JSON.stringify({ entries, cursor: 'done', has_more: false }), { status: 200 });
+            return new Response(JSON.stringify({ entries, cursor: 'done', has_more: false }), {
+                status: 200,
+                headers: { date: SERVER_DATE },
+            });
         }
         if (url.endsWith('/files/download')) {
             const bytes = store.files.get(key);
             if (!bytes) {
                 return new Response(JSON.stringify({
                     error: { '.tag': 'path', path: { '.tag': 'not_found' } },
-                }), { status: 409, headers: { 'content-type': 'application/json' } });
+                }), {
+                    status: 409,
+                    headers: { 'content-type': 'application/json', date: SERVER_DATE },
+                });
             }
             return new Response(bytes.slice() as unknown as BodyInit, {
                 status: 200,
-                headers: { 'Dropbox-API-Result': JSON.stringify({ rev: `rev${store.versions.get(key) ?? 1}` }) },
+                headers: {
+                    date: SERVER_DATE,
+                    'Dropbox-API-Result': JSON.stringify({ rev: `rev${store.versions.get(key) ?? 1}` }),
+                },
             });
         }
         if (url.endsWith('/files/upload')) {
@@ -266,12 +278,16 @@ const createWebdavFetch = (
         }
         if (method === 'GET') {
             const bytes = store.files.get(key);
-            if (!bytes) return new Response(null, { status: 404 });
+            if (!bytes) return new Response(null, { status: 404, headers: { date: SERVER_DATE } });
+            const effectiveEtagMode = key === '.mindwtr-sync-fence-v1.json' ? 'strong' : etagMode;
             return new Response(bytes.slice() as unknown as BodyInit, {
                 status: 200,
-                headers: etagMode === 'missing'
-                    ? undefined
-                    : { etag: `${etagMode === 'weak' ? 'W/' : ''}"v${store.versions.get(key) ?? 1}"` },
+                headers: effectiveEtagMode === 'missing'
+                    ? { date: SERVER_DATE }
+                    : {
+                        date: SERVER_DATE,
+                        etag: `${effectiveEtagMode === 'weak' ? 'W/' : ''}"v${store.versions.get(key) ?? 1}"`,
+                    },
             });
         }
         if (method === 'PUT') {
@@ -369,8 +385,12 @@ describe('WebDAV authoritative attachment inventory', () => {
             createWebdavRemotePort({ baseUrl, options: { fetcher } }),
         )).rejects.toThrow('PROPFIND failed (403)');
 
-        expect(fetcher.mock.calls.every(([, init]) => ['GET', 'PROPFIND'].includes((init?.method ?? 'GET').toUpperCase())))
-            .toBe(true);
+        const artifactWrites = fetcher.mock.calls.filter(([input, init]) => {
+            const method = (init?.method ?? 'GET').toUpperCase();
+            return ['PUT', 'DELETE'].includes(method)
+                && !String(input).endsWith('/.mindwtr-sync-fence-v1.json');
+        });
+        expect(artifactWrites).toEqual([]);
         expect(store.files).toEqual(baseline);
         expect(native.state).toEqual({ state: 'off' });
     });
@@ -424,6 +444,58 @@ describe('Dropbox sync encryption transitions', () => {
 
         await expect(__syncEncryptionServiceTestUtils.listDropboxAttachmentKeys('token', fetcher))
             .rejects.toThrow('file identity is inconsistent');
+    });
+
+    it('holds the provider fence through the durable local commit and then releases it', async () => {
+        const store = seedRemote();
+        const transport = createDropboxFetch(store);
+        const events: string[] = [];
+        const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input);
+            const arg = init?.headers
+                ? JSON.parse((init.headers as Record<string, string>)['Dropbox-API-Arg'] ?? '{}')
+                : {};
+            const body = url.endsWith('/files/delete_v2')
+                ? JSON.parse(String(init?.body ?? '{}'))
+                : {};
+            const path = String(arg.path ?? body.path ?? '');
+            if (path === '/.mindwtr-sync-fence-v1.json' && url.endsWith('/files/upload')) {
+                events.push(`acquired:${native.state.state}`);
+            }
+            if (path === '/.mindwtr-sync-fence-v1.json' && url.endsWith('/files/delete_v2')) {
+                events.push(`released:${native.state.state}`);
+            }
+            return transport(input, init);
+        }) as typeof fetch;
+
+        await runEnableOverRemote(
+            'correct horse battery',
+            createDropboxRemotePort((operation) => operation('token'), fetcher),
+        );
+
+        expect(events).toEqual(['acquired:off', 'released:enabled']);
+        expect(store.files.has('.mindwtr-sync-fence-v1.json')).toBe(false);
+    });
+
+    it('stops before transition capture when a peer holds the provider fence', async () => {
+        const store = seedRemote();
+        store.files.set('.mindwtr-sync-fence-v1.json', jsonBytes({
+            schema: 1,
+            leaseId: 'peer-lease',
+            ownerId: 'peer-device',
+            purpose: 'ordinary-sync',
+            expiresAt: Date.parse(SERVER_DATE) + 60_000,
+        }));
+        store.versions.set('.mindwtr-sync-fence-v1.json', 1);
+        const baseline = new Map(Array.from(store.files, ([name, bytes]) => [name, bytes.slice()]));
+
+        await expect(runEnableOverRemote(
+            'correct horse battery',
+            createDropboxRemotePort((operation) => operation('token'), createDropboxFetch(store)),
+        )).rejects.toBeInstanceOf(SyncRemoteMutationFenceBusyError);
+
+        expect(store.files).toEqual(baseline);
+        expect(native.state).toEqual({ state: 'off' });
     });
 
     it('encrypts every artifact, removes the plaintext documents, and leaves attachment names alone', async () => {

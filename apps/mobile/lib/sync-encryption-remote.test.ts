@@ -34,6 +34,7 @@ import {
   runChangeSyncEncryptionPassphraseOverRemote,
   runDisableSyncEncryptionOverRemote,
   runEnableSyncEncryptionOverRemote,
+  SYNC_REMOTE_MUTATION_FENCE_NAME,
 } from '@mindwtr/core';
 import {
   openAttachmentBytesFromDownload,
@@ -424,7 +425,10 @@ describe('Dropbox remote port + core transition round trip', () => {
   const revisions = new Map<string, number>();
 
   const jsonResponse = (body: unknown, status = 200) =>
-    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json', date: 'Tue, 27 Aug 2026 12:00:00 GMT' },
+    });
 
   beforeEach(() => {
     remote.clear();
@@ -449,7 +453,10 @@ describe('Dropbox remote port + core transition round trip', () => {
         if (!bytes) return jsonResponse({ error_summary: 'path/not_found/..' }, 409);
         return new Response(new Uint8Array(bytes), {
           status: 200,
-          headers: { 'Dropbox-API-Result': JSON.stringify({ rev: `rev${revisions.get(path) ?? 1}` }) },
+          headers: {
+            date: 'Tue, 27 Aug 2026 12:00:00 GMT',
+            'Dropbox-API-Result': JSON.stringify({ rev: `rev${revisions.get(path) ?? 1}` }),
+          },
         });
       }
       if (url.includes('/files/upload')) {
@@ -509,6 +516,18 @@ describe('Dropbox remote port + core transition round trip', () => {
 
     await expect(__syncEncryptionServiceTestUtils.listDropboxAttachmentKeys('token', fetcher))
       .rejects.toThrow('file identity is inconsistent');
+  });
+
+  it('acquires and conditionally releases the shared Dropbox mutation fence', async () => {
+    const port = await __syncEncryptionServiceTestUtils.createDropboxRemotePort(null);
+    const acquire = port.acquireRemoteMutationFence;
+
+    expect(acquire).toBeTypeOf('function');
+    const lease = await acquire!();
+    expect(remote.has(`/${SYNC_REMOTE_MUTATION_FENCE_NAME}`)).toBe(true);
+    await lease.assertHeld();
+    await lease.release();
+    expect(remote.has(`/${SYNC_REMOTE_MUTATION_FENCE_NAME}`)).toBe(false);
   });
 
   it('encrypts and then restores documents and attachments over the wire', async () => {

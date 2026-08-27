@@ -7,6 +7,9 @@
 // Out of scope by design: CloudKit and self-hosted mindwtr-cloud.
 
 import {
+    acquireSyncRemoteMutationFence,
+    createDropboxSyncRemoteMutationFencePort,
+    createWebdavSyncRemoteMutationFencePort,
     DEFAULT_TIMEOUT_MS,
     decryptRemoteArtifactOrThrow,
     deriveSyncKeyMaterial,
@@ -38,6 +41,10 @@ import {
     type SyncEncryptionRemoteRead,
     type SyncEncryptionStatus,
     type SyncEncryptionTransitionProgress,
+    type SyncEncryptionKeyCachePort,
+    type SyncEncryptionLocalStatePort,
+    type SyncRemoteMutationFenceLease,
+    type SyncRemoteMutationFencePort,
     type WebDavOptions,
 } from '@mindwtr/core';
 import { DOMParser } from '@xmldom/xmldom';
@@ -73,6 +80,14 @@ import {
 
 const BACKUP_FILE_NAME = `${SYNC_FILE_NAME}.bak`;
 const DROPBOX_PROVIDER = 'dropbox';
+type TransitionRemotePort = SyncEncryptionRemotePort & {
+  acquireRemoteMutationFence?: () => Promise<SyncRemoteMutationFenceLease>;
+};
+
+const TRANSITION_FENCE_OPTIONS = {
+  ownerId: 'mindwtr-mobile',
+  purpose: 'encryption-transition' as const,
+};
 const REMOTE_DOCUMENT_NAMES = new Set([
     SYNC_FILE_NAME,
     `${SYNC_FILE_NAME}.enc`,
@@ -394,7 +409,89 @@ const listTransitionEntries = async (
         .map((name) => ({ name, kind: 'attachment' as const })),
 ];
 
-const createWebdavRemotePort = async (appData: AppData | null): Promise<SyncEncryptionRemotePort> => {
+const createAuthorizedDropboxFencePort = (
+  authorized: <T>(operation: (token: string) => Promise<T>) => Promise<T>,
+): SyncRemoteMutationFencePort => {
+  const portFor = (token: string) => createDropboxSyncRemoteMutationFencePort(token);
+  const conflictClassifier = portFor('');
+  return {
+    read: () => authorized((token) => portFor(token).read()),
+    write: (bytes, expectedVersion) => authorized((token) =>
+      portFor(token).write(bytes, expectedVersion)),
+    remove: (expectedVersion) => authorized((token) => portFor(token).remove(expectedVersion)),
+    isConflict: conflictClassifier.isConflict,
+  };
+};
+
+const runWithRemoteMutationFence = async <T>(
+  remote: SyncEncryptionRemotePort,
+  operation: (
+    guardedRemote: SyncEncryptionRemotePort,
+    guardedKeyCache: SyncEncryptionKeyCachePort,
+    guardedLocalState: SyncEncryptionLocalStatePort,
+  ) => Promise<T>,
+): Promise<T> => {
+  const acquire = (remote as TransitionRemotePort).acquireRemoteMutationFence;
+  if (!acquire) {
+    const result = await operation(remote, syncEncryptionKeyCache, syncEncryptionLocalState);
+    await flushSyncEncryptionLocalState();
+    return result;
+  }
+
+  const lease = await acquire();
+  const assertHeld = () => lease.assertHeld();
+  const guardedRemote: SyncEncryptionRemotePort = {
+    ...remote,
+    list: async () => {
+      await assertHeld();
+      return remote.list();
+    },
+    captureInventory: remote.captureInventory
+      ? async (recoveryPassphrase) => {
+        await assertHeld();
+        return remote.captureInventory!(recoveryPassphrase);
+      }
+      : undefined,
+    write: async (name, bytes, expectedVersion) => {
+      await assertHeld();
+      await remote.write(name, bytes, expectedVersion);
+    },
+    remove: async (name, expectedVersion) => {
+      await assertHeld();
+      await remote.remove(name, expectedVersion);
+    },
+  };
+  const guardedKeyCache: SyncEncryptionKeyCachePort = {
+    getKey: () => syncEncryptionKeyCache.getKey(),
+    setKey: async (key) => {
+      await assertHeld();
+      await syncEncryptionKeyCache.setKey(key);
+    },
+    clearKey: async () => {
+      await assertHeld();
+      await syncEncryptionKeyCache.clearKey();
+    },
+  };
+  const guardedLocalState: SyncEncryptionLocalStatePort = {
+    read: () => syncEncryptionLocalState.read(),
+    write: async (state) => {
+      await assertHeld();
+      await syncEncryptionLocalState.write(state);
+    },
+  };
+
+  try {
+    const result = await operation(guardedRemote, guardedKeyCache, guardedLocalState);
+    await assertHeld();
+    await flushSyncEncryptionLocalState();
+    await assertHeld();
+    return result;
+  } finally {
+    await lease.release();
+  }
+};
+
+const createWebdavRemotePort = async (appData: AppData | null): Promise<TransitionRemotePort> => {
     void appData;
     const config = await loadWebDavConfig();
     if (!config?.url) throw new Error('WebDAV is not configured');
@@ -412,6 +509,10 @@ const createWebdavRemotePort = async (appData: AppData | null): Promise<SyncEncr
     const listAttachmentKeys = () => listWebdavAttachmentKeys(baseSyncUrl, requestOptions);
     let referencedAttachmentKeys: string[] = [];
     return {
+        acquireRemoteMutationFence: () => acquireSyncRemoteMutationFence(
+          createWebdavSyncRemoteMutationFencePort(urlFor(SYNC_FILE_NAME), requestOptions),
+          TRANSITION_FENCE_OPTIONS,
+        ),
         list: () => listTransitionEntries(listAttachmentKeys, referencedAttachmentKeys),
         captureInventory: async (recoveryPassphrase) => {
             const inventory = await captureTransitionInventory(read, listAttachmentKeys, recoveryPassphrase);
@@ -430,7 +531,7 @@ const createWebdavRemotePort = async (appData: AppData | null): Promise<SyncEncr
     };
 };
 
-const createDropboxRemotePort = async (appData: AppData | null): Promise<SyncEncryptionRemotePort> => {
+const createDropboxRemotePort = async (appData: AppData | null): Promise<TransitionRemotePort> => {
     void appData;
     const clientId = await getDropboxClientId();
     if (!clientId) throw new Error('Dropbox is not configured');
@@ -441,6 +542,10 @@ const createDropboxRemotePort = async (appData: AppData | null): Promise<SyncEnc
     const listAttachmentKeys = () => authorized((token) => listDropboxAttachmentKeys(token));
     let referencedAttachmentKeys: string[] = [];
     return {
+        acquireRemoteMutationFence: () => acquireSyncRemoteMutationFence(
+          createAuthorizedDropboxFencePort(authorized),
+          TRANSITION_FENCE_OPTIONS,
+        ),
         list: () => listTransitionEntries(listAttachmentKeys, referencedAttachmentKeys),
         captureInventory: async (recoveryPassphrase) => {
             const inventory = await captureTransitionInventory(read, listAttachmentKeys, recoveryPassphrase);
@@ -552,17 +657,15 @@ export const enableSyncEncryption = async (
         return;
     }
     const port = await requireTransitionPort(options.appData ?? null);
-    await runEnableSyncEncryptionOverRemote(
+    await runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
+      runEnableSyncEncryptionOverRemote(
         passphrase,
-        port,
-        syncEncryptionKeyCache,
-        syncEncryptionLocalState,
+        guardedRemote,
+        keyCache,
+        localState,
         options.onProgress,
         mobileSyncCryptoPrimitives,
-    );
-    // The port's write is fire-and-forget by shape; the transition is not done until the state
-    // that survives a restart has actually landed.
-    await flushSyncEncryptionLocalState();
+      ));
 });
 
 export const disableSyncEncryption = async (
@@ -576,16 +679,14 @@ export const disableSyncEncryption = async (
         return;
     }
     const port = await requireTransitionPort(options.appData ?? null);
-    await runDisableSyncEncryptionOverRemote(
-        port,
-        syncEncryptionKeyCache,
-        syncEncryptionLocalState,
+    await runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
+      runDisableSyncEncryptionOverRemote(
+        guardedRemote,
+        keyCache,
+        localState,
         options.onProgress,
         mobileSyncCryptoPrimitives,
-    );
-    // The port's write is fire-and-forget by shape; the transition is not done until the state
-    // that survives a restart has actually landed.
-    await flushSyncEncryptionLocalState();
+      ));
 });
 
 export const changeSyncEncryptionPassphrase = async (
@@ -595,18 +696,16 @@ export const changeSyncEncryptionPassphrase = async (
 ): Promise<void> => runSerializedSyncDocumentOperation(async () => {
     await loadSyncEncryptionLocalState();
     const port = await requireTransitionPort(options.appData ?? null);
-    await runChangeSyncEncryptionPassphraseOverRemote(
+    await runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
+      runChangeSyncEncryptionPassphraseOverRemote(
         current,
         next,
-        port,
-        syncEncryptionKeyCache,
-        syncEncryptionLocalState,
+        guardedRemote,
+        keyCache,
+        localState,
         options.onProgress,
         mobileSyncCryptoPrimitives,
-    );
-    // The port's write is fire-and-forget by shape; the transition is not done until the state
-    // that survives a restart has actually landed.
-    await flushSyncEncryptionLocalState();
+      ));
 });
 
 export const provideSyncEncryptionPassphrase = async (
@@ -635,11 +734,12 @@ export const declineSyncEncryptionPassphrase = async (): Promise<void> => {
 };
 
 export const __syncEncryptionServiceTestUtils = {
-    buildTransitionEntries,
+  buildTransitionEntries,
   captureTransitionInventory,
   listDropboxAttachmentKeys,
   listWebdavAttachmentKeys,
   parseWebdavAttachmentKeys,
   createDropboxRemotePort,
-    createWebdavRemotePort,
+  createWebdavRemotePort,
+  runWithRemoteMutationFence,
 };
