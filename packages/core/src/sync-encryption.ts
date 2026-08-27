@@ -1031,11 +1031,31 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
 
     await revalidateRemoteDocuments(remote, snapshot, documentNames);
     await keyCache.setKey(newMaterial.key);
-    await localState.write({
-        state: 'enabled',
-        discoveredSalt: bytesToHex(newMaterial.salt),
-        discoveredParams: newMaterial.params,
-    });
+    try {
+        await localState.write({
+            state: 'enabled',
+            discoveredSalt: bytesToHex(newMaterial.salt),
+            discoveredParams: newMaterial.params,
+        });
+    } catch (stateError) {
+        // The remote is already fully under `newMaterial`, but the durable journal still
+        // describes a retry from `oldKey`. Restore that key so the same current/next inputs
+        // can authenticate the journal and converge the remote generation on retry. Mobile
+        // SecureStore and the desktop keyring are separate from their state stores, so this
+        // compensating write is the atomicity boundary available to the shared port contract.
+        try {
+            await keyCache.setKey(oldKey);
+        } catch (rollbackError) {
+            const stateMessage = stateError instanceof Error ? stateError.message : String(stateError);
+            const rollbackMessage = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+            const combined = new Error(
+                `sync encryption passphrase state commit failed (${stateMessage}); key rollback failed (${rollbackMessage})`,
+            );
+            (combined as Error & { cause?: unknown }).cause = stateError;
+            throw combined;
+        }
+        throw stateError;
+    }
 }
 
 /** Validates a passphrase against the remote's current `.enc` base document (never

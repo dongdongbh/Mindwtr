@@ -890,6 +890,49 @@ describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
         });
         expect(await keyCache.getKey()).toEqual(oldKey);
     });
+
+    it('restores the old key after final state failure and retries the completed rotation', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a.bin': { bytes: utf8('ATTACHMENT'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('old-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const oldKey = new Uint8Array((await keyCache.getKey())!);
+        const oldState = structuredClone(localState.value)!;
+        const writeState = localState.write.bind(localState);
+        let failFinalStateWrite = true;
+        localState.write = async (state) => {
+            const isNewEnabledState = state?.state === 'enabled'
+                && !state.incompleteTransition
+                && state.discoveredSalt !== oldState.discoveredSalt;
+            if (isNewEnabledState && failFinalStateWrite) {
+                throw new Error('simulated final state persistence failure');
+            }
+            await writeState(state);
+        };
+
+        await expect(runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'new-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toThrow('simulated final state persistence failure');
+
+        expect(await keyCache.getKey()).toEqual(oldKey);
+        expect(localState.value).toEqual({ ...oldState, incompleteTransition: 'change-passphrase' });
+
+        failFinalStateWrite = false;
+        await runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'new-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        );
+        const finalKey = (await keyCache.getKey())!;
+        expect(finalKey).not.toEqual(oldKey);
+        expect(localState.value?.state).toBe('enabled');
+        expect(localState.value?.incompleteTransition).toBeUndefined();
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, finalKey)))
+            .toBe('{"tasks":[]}');
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a.bin')!, finalKey)))
+            .toBe('ATTACHMENT');
+    });
 });
 
 describe('remote-encrypted-no-key discovery and passphrase provisioning', () => {
