@@ -173,7 +173,12 @@ import {
   encryptSyncArtifact,
   type SyncKeyMaterial,
 } from '@mindwtr/core';
-import { readSyncFile, writeSyncFile } from './storage-file';
+import {
+  FILE_SYNC_ABSENT_FINGERPRINT,
+  readSyncFile,
+  readSyncFileVersioned,
+  writeSyncFile,
+} from './storage-file';
 import {
   createFileSyncEncryptionRemotePort,
   padBytesForNonTruncatingOverwrite,
@@ -429,6 +434,58 @@ describe('S3: enabled-but-key-missing fails closed, never falls back to "off"', 
       id: 'a1', kind: 'file', title: 'missing.png', cloudKey: 'attachments/missing.png',
     } as never);
     expect(result?.localStatus).not.toBe('available');
+  });
+});
+
+describe('ordinary File Sync document CAS', () => {
+  it('preserves a newer path generation on replacement and first creation', async () => {
+    fs.files.set(SYNC_URI, new TextEncoder().encode(JSON.stringify(appData('baseline'))));
+    const baseline = await readSyncFileVersioned(SYNC_URI);
+    const peer = new TextEncoder().encode(JSON.stringify(appData('peer')));
+    fs.files.set(SYNC_URI, peer);
+
+    await expect(writeSyncFile(SYNC_URI, appData('mine'), {
+      expectedFingerprint: baseline.fingerprint,
+    })).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+    expect(fs.files.get(SYNC_URI)).toEqual(peer);
+
+    fs.files.clear();
+    const absent = await readSyncFileVersioned(SYNC_URI);
+    expect(absent.fingerprint).toBe(FILE_SYNC_ABSENT_FINGERPRINT);
+    fs.files.set(SYNC_URI, peer);
+    await expect(writeSyncFile(SYNC_URI, appData('mine'), {
+      expectedFingerprint: absent.fingerprint,
+    })).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+    expect(fs.files.get(SYNC_URI)).toEqual(peer);
+  });
+
+  it('preserves a newer encrypted path generation', async () => {
+    await seedEncrypted(appData('baseline'));
+    const baseline = await readSyncFileVersioned(SYNC_URI, { material });
+    const peer = await seedEncrypted(appData('peer'));
+
+    await expect(writeSyncFile(SYNC_URI, appData('mine'), {
+      material,
+      expectedFingerprint: baseline.fingerprint,
+    })).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+    expect(fs.files.get(ENC_URI)).toEqual(peer);
+    await expect(readSyncFile(SYNC_URI, { material })).resolves.toMatchObject({
+      tasks: [{ title: 'peer' }],
+    });
+  });
+
+  it('preserves a newer SAF generation', async () => {
+    const configuredUri = 'content://provider/tree/root/document/root%2Fdata.json';
+    const canonicalUri = 'content://provider/tree/root/document/root/data.json';
+    fs.files.set(canonicalUri, new TextEncoder().encode(JSON.stringify(appData('baseline'))));
+    const baseline = await readSyncFileVersioned(configuredUri);
+    const peer = new TextEncoder().encode(JSON.stringify(appData('peer')));
+    fs.files.set(canonicalUri, peer);
+
+    await expect(writeSyncFile(configuredUri, appData('mine'), {
+      expectedFingerprint: baseline.fingerprint,
+    })).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+    expect(fs.files.get(canonicalUri)).toEqual(peer);
   });
 });
 

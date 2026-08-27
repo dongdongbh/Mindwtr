@@ -68,6 +68,7 @@ const dropboxSyncMocks = vi.hoisted(() => ({
 
 const storageFileMocks = vi.hoisted(() => ({
   readSyncFile: vi.fn(),
+  readSyncFileVersioned: vi.fn(),
   resolveSyncFileUri: vi.fn(),
   writeSyncFile: vi.fn(),
 }));
@@ -185,6 +186,7 @@ vi.mock('./dropbox-sync', () => ({
 
 vi.mock('./storage-file', () => ({
   readSyncFile: storageFileMocks.readSyncFile,
+  readSyncFileVersioned: storageFileMocks.readSyncFileVersioned,
   resolveSyncFileUri: storageFileMocks.resolveSyncFileUri,
   writeSyncFile: storageFileMocks.writeSyncFile,
 }));
@@ -256,7 +258,13 @@ describe('mobile Dropbox sync transient retry', () => {
 
     storageMocks.getData.mockResolvedValue(emptyData);
     storageMocks.saveData.mockResolvedValue(undefined);
-    storageFileMocks.readSyncFile.mockResolvedValue(null);
+  storageFileMocks.readSyncFile.mockResolvedValue(null);
+  storageFileMocks.readSyncFileVersioned.mockResolvedValue({
+    data: emptyData,
+    fingerprint: 'file:v1:absent',
+    source: 'empty',
+    needsRepair: true,
+  });
     storageFileMocks.resolveSyncFileUri.mockImplementation(async (uri: string) => uri);
     storageFileMocks.writeSyncFile.mockResolvedValue(undefined);
     syncPathBookmarkMocks.resolveSyncPathBookmark.mockResolvedValue(null);

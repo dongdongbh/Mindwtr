@@ -4,6 +4,7 @@ import {
   computeStableValueFingerprint,
   computeSyncPayloadFingerprint,
   runDataTransferTransaction,
+  SyncEncryptionRemoteConflictError,
   type AppData,
 } from '@mindwtr/core';
 import { __resetSyncEncryptionStateForTests, SyncEncryptionNoKeyError } from './sync-encryption-state';
@@ -83,6 +84,7 @@ const dropboxSyncMocks = vi.hoisted(() => ({
 
 const storageFileMocks = vi.hoisted(() => ({
   readSyncFile: vi.fn(),
+  readSyncFileVersioned: vi.fn(),
   resolveSyncFileUri: vi.fn(),
   writeSyncFile: vi.fn(),
 }));
@@ -203,6 +205,7 @@ vi.mock('./dropbox-sync', () => ({
 
 vi.mock('./storage-file', () => ({
   readSyncFile: storageFileMocks.readSyncFile,
+  readSyncFileVersioned: storageFileMocks.readSyncFileVersioned,
   resolveSyncFileUri: storageFileMocks.resolveSyncFileUri,
   writeSyncFile: storageFileMocks.writeSyncFile,
 }));
@@ -286,6 +289,12 @@ describe('mobile sync-service runtime', () => {
     storageMocks.getData.mockResolvedValue(emptyData);
     storageMocks.saveData.mockResolvedValue(undefined);
     storageFileMocks.readSyncFile.mockResolvedValue(null);
+    storageFileMocks.readSyncFileVersioned.mockResolvedValue({
+      data: emptyData,
+      fingerprint: 'file:v1:absent',
+      source: 'empty',
+      needsRepair: true,
+    });
     storageFileMocks.resolveSyncFileUri.mockImplementation(async (uri: string) => uri);
     storageFileMocks.writeSyncFile.mockResolvedValue(undefined);
     syncPathBookmarkMocks.resolveSyncPathBookmark.mockResolvedValue(null);
@@ -452,7 +461,7 @@ describe('mobile sync-service runtime', () => {
         ? JSON.stringify({ state: 'remote-encrypted-no-key' })
         : null
     ));
-    storageFileMocks.readSyncFile.mockRejectedValue(new SyncEncryptionNoKeyError());
+    storageFileMocks.readSyncFileVersioned.mockRejectedValue(new SyncEncryptionNoKeyError());
 
     const result = await syncServiceModule.performMobileSync('file:///candidate/data.json', {
       activationProbe: true,
@@ -467,7 +476,7 @@ describe('mobile sync-service runtime', () => {
       success: false,
       activationProof: 'remote-encrypted-no-key',
     });
-    expect(storageFileMocks.readSyncFile).toHaveBeenCalled();
+    expect(storageFileMocks.readSyncFileVersioned).toHaveBeenCalled();
     expect(storageFileMocks.writeSyncFile).not.toHaveBeenCalled();
   });
 
@@ -1201,14 +1210,14 @@ describe('mobile sync-service runtime', () => {
     expect(result.success).toBe(true);
     expect(syncPathBookmarkMocks.resolveSyncPathBookmark).toHaveBeenCalledWith('bookmark-token');
     expect(asyncStorageMocks.setItem).toHaveBeenCalledWith('@mindwtr_sync_path', 'file:///resolved/MindWtr/data.json');
-    expect(storageFileMocks.readSyncFile).toHaveBeenCalledWith(
+    expect(storageFileMocks.readSyncFileVersioned).toHaveBeenCalledWith(
       'file:///resolved/MindWtr/data.json',
       { bookmark: 'bookmark-token' }
     );
     expect(storageFileMocks.writeSyncFile).toHaveBeenCalledWith(
       'file:///resolved/MindWtr/data.json',
       expect.any(Object),
-      { bookmark: 'bookmark-token' }
+      { bookmark: 'bookmark-token', expectedFingerprint: 'file:v1:absent' }
     );
   });
 
@@ -1234,8 +1243,37 @@ describe('mobile sync-service runtime', () => {
     expect(storageFileMocks.writeSyncFile).toHaveBeenCalledWith(
       'file:///resolved/MindWtr/data.json',
       expect.any(Object),
-      { bookmark: 'fresh-token' }
+      { bookmark: 'fresh-token', expectedFingerprint: 'file:v1:absent' }
     );
+  });
+
+  it('requeues when an ordinary File Sync generation changes before the atomic write', async () => {
+    asyncStorageMocks.getItem.mockImplementation(async (key: string) => {
+      const values: Record<string, string | null> = {
+        '@mindwtr_sync_backend': 'file',
+        '@mindwtr_sync_path': 'file:///sync/MindWtr/data.json',
+      };
+      return values[key] ?? null;
+    });
+    storageFileMocks.readSyncFileVersioned.mockResolvedValue({
+      data: remoteChangedData,
+      fingerprint: 'file:v1:baseline',
+      source: 'primary',
+      needsRepair: true,
+    });
+    storageFileMocks.writeSyncFile.mockRejectedValue(
+      new SyncEncryptionRemoteConflictError('peer changed the sync document'),
+    );
+
+    const result = await syncServiceModule.performMobileSync();
+
+    expect(result).toEqual({ success: true, skipped: 'requeued' });
+    expect(storageFileMocks.writeSyncFile).toHaveBeenCalledWith(
+      'file:///sync/MindWtr/data.json',
+      expect.any(Object),
+      { bookmark: null, expectedFingerprint: 'file:v1:baseline' },
+    );
+    expect(logMocks.logSyncError).not.toHaveBeenCalled();
   });
 
   it('fails with a re-select prompt when the stored bookmark can no longer be resolved', async () => {
@@ -1255,7 +1293,7 @@ describe('mobile sync-service runtime', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/re-select/i);
-    expect(storageFileMocks.readSyncFile).not.toHaveBeenCalled();
+    expect(storageFileMocks.readSyncFileVersioned).not.toHaveBeenCalled();
   });
 
   it('returns a queued retry result when fresher local edits abort the merge', async () => {

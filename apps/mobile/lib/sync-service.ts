@@ -1,10 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { AppData, MergeStats, assertWebdavStrongEtagSupport, createSyncOrchestrator, runSerializedSyncDocumentOperation, runSharedSyncCycle, useTaskStore, webdavGetSyncDocument, webdavHeadFile, webdavPutSyncDocument, syncEncryptedArtifactName, markRemoteEncryptionDiscovered, markRemotePlaintextDiscovered, SyncEncryptionRemotePlaintextError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, SyncEncryptionTransitionIncompleteError, type SyncKeyMaterial, cloudGetJson, cloudHeadJson, cloudPutJson, flushPendingSave, performSyncCycle, withRetry, isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeStrongWebdavEtag, normalizeWebdavUrl, normalizeCloudUrl, createSyncBackendIO, buildFastSyncScope, hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, getInMemoryAppDataSnapshot, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, isDropboxUnauthorizedError, parseFastSyncState, serializeFastSyncState, summarizeTaskLifecycleCounts, decodeUriSafe, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES, SYNC_FILE_NAME, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type Attachment, type CloudProvider, type FastSyncState, type SyncBackendContext, type SyncBackendIO, type SyncRunDiagnosticEvent, type SyncRunNotifier, type SyncRunPlatformHooks, type SyncRunStorage, type SyncTransport } from '@mindwtr/core';
+import { AppData, MergeStats, assertWebdavStrongEtagSupport, createSyncOrchestrator, runSerializedSyncDocumentOperation, runSharedSyncCycle, useTaskStore, webdavGetSyncDocument, webdavHeadFile, webdavPutSyncDocument, syncEncryptedArtifactName, markRemoteEncryptionDiscovered, markRemotePlaintextDiscovered, SyncEncryptionRemoteConflictError, SyncEncryptionRemotePlaintextError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, SyncEncryptionTransitionIncompleteError, SyncRemoteWriteConflict, type SyncKeyMaterial, cloudGetJson, cloudHeadJson, cloudPutJson, flushPendingSave, performSyncCycle, withRetry, isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeStrongWebdavEtag, normalizeWebdavUrl, normalizeCloudUrl, createSyncBackendIO, buildFastSyncScope, hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, getInMemoryAppDataSnapshot, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, isDropboxUnauthorizedError, parseFastSyncState, serializeFastSyncState, summarizeTaskLifecycleCounts, decodeUriSafe, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES, SYNC_FILE_NAME, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type Attachment, type CloudProvider, type FastSyncState, type SyncBackendContext, type SyncBackendIO, type SyncRunDiagnosticEvent, type SyncRunNotifier, type SyncRunPlatformHooks, type SyncRunStorage, type SyncTransport } from '@mindwtr/core';
 import { mobileStorage } from './storage-adapter';
 import { logInfo, logSyncError, logWarn, sanitizeLogMessage } from './app-log';
-import { readSyncFile, resolveSyncFileUri, writeSyncFile } from './storage-file';
+import { readSyncFileVersioned, resolveSyncFileUri, writeSyncFile } from './storage-file';
 import { isSyncPathBookmarksAvailable, resolveSyncPathBookmark } from './sync-path-bookmarks';
 import { getBaseSyncUrl, getCloudBaseUrl, syncCloudAttachments, syncCloudKitAttachments, syncDropboxAttachments, syncFileAttachments, syncWebdavAttachments, cleanupAttachmentTempFiles, hasPendingAttachmentSyncWork } from './attachment-sync';
 import { runMobileAttachmentCleanup } from './sync-attachment-cleanup';
@@ -595,7 +595,11 @@ class MobileSyncRun {
         hooks: this.createHooks(),
         policy: {
           preSyncAttachmentsBeforeFastCheck: true,
-          enableReadCheckSkip: true,
+          // A versioned File Sync read represents an absent canonical document with
+          // empty data plus `requiresRemoteRepair`. The read-check shortcut compares
+          // only documents and would otherwise return "unchanged" before the CAS
+          // create runs. The full cycle still skips equal existing documents.
+          enableReadCheckSkip: backend !== 'file',
           postMergeAttachmentErrorPolicy: 'fail',
           attachmentPhasesEnabled: true,
         },
@@ -1399,7 +1403,7 @@ class MobileSyncRun {
         // The `material` key is added only when encryption is on, so the off-state call
         // is argument-for-argument what it was before this feature (invariant #1).
         try {
-          return await readSyncFile(fileSyncPath, {
+          return await readSyncFileVersioned(fileSyncPath, {
             bookmark: this.fileSyncBookmark,
             ...(this.encryptionMaterial ? { material: this.encryptionMaterial } : {}),
           });
@@ -1408,13 +1412,24 @@ class MobileSyncRun {
           throw error;
         }
       },
-      fileWrite: async (sanitized) => {
+      fileWrite: async (sanitized, expectedFingerprint) => {
         const fileSyncPath = this.fileSyncPath;
         if (!fileSyncPath) throw new Error('No sync folder configured');
-        await writeSyncFile(fileSyncPath, sanitized, {
-          bookmark: this.fileSyncBookmark,
-          ...(this.encryptionMaterial ? { material: this.encryptionMaterial } : {}),
-        });
+        if (!expectedFingerprint) {
+          throw new Error('File Sync document version is unavailable; refusing an unconditional write');
+        }
+        try {
+          await writeSyncFile(fileSyncPath, sanitized, {
+            bookmark: this.fileSyncBookmark,
+            expectedFingerprint,
+            ...(this.encryptionMaterial ? { material: this.encryptionMaterial } : {}),
+          });
+        } catch (error) {
+          if (error instanceof SyncEncryptionRemoteConflictError) {
+            throw new SyncRemoteWriteConflict();
+          }
+          throw error;
+        }
       },
       cloudKitRead: async () => readRemoteCloudKit({ signal: this.requestAbortController.signal }),
       cloudKitWrite: async (sanitized) => {
