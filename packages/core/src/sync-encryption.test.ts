@@ -106,6 +106,8 @@ function createFakeLocalState(): SyncEncryptionLocalStatePort & { value: SyncEnc
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
 const text = (b: Uint8Array) => new TextDecoder().decode(b);
+const bytesToHexForTest = (bytes: Uint8Array): string =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 const hexToBytesForTest = (hex: string): Uint8Array => Uint8Array.from(
     { length: hex.length / 2 },
     (_, index) => Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16),
@@ -861,6 +863,64 @@ describe('remote-encrypted-no-key discovery and passphrase provisioning', () => 
         expect(result).toBe('wrong-passphrase');
         expect(await keyCache.getKey()).toBeNull();
         expect(remote.store).toEqual(before);
+    });
+
+    it('retries passphrase validation when the encrypted base generation changes', async () => {
+        const remote = createFakeRemote({ 'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' } });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('right-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        await keyCache.clearKey();
+        const peerMaterial = await deriveSyncKeyMaterial('right-pw', new Uint8Array(16).fill(37), FAST_KDF);
+        const originalRead = remote.read.bind(remote);
+        let reads = 0;
+        remote.read = async (name) => {
+            if (name === 'data.json.enc') {
+                reads += 1;
+                if (reads === 2) {
+                    remote.peerWrite(name, await encryptSyncArtifact(utf8('{"tasks":["peer"]}'), peerMaterial));
+                }
+            }
+            return originalRead(name);
+        };
+
+        await expect(runProvideSyncEncryptionPassphraseOverRemote(
+            'right-pw', 'data.json', remote, keyCache, localState,
+        )).resolves.toBe('ok');
+
+        const key = (await keyCache.getKey())!;
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key))).toBe('{"tasks":["peer"]}');
+        expect(localState.value?.discoveredSalt).toBe(bytesToHexForTest(peerMaterial.salt));
+    });
+
+    it('does not cache a key when the encrypted base keeps changing during validation', async () => {
+        const remote = createFakeRemote({ 'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' } });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('right-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        await keyCache.clearKey();
+        const beforeState = localState.value;
+        const originalRead = remote.read.bind(remote);
+        let reads = 0;
+        remote.read = async (name) => {
+            if (name === 'data.json.enc') {
+                reads += 1;
+                if (reads % 2 === 0) {
+                    const material = await deriveSyncKeyMaterial(
+                        'right-pw', new Uint8Array(16).fill(40 + reads), FAST_KDF,
+                    );
+                    remote.peerWrite(name, await encryptSyncArtifact(utf8(`{"tasks":[${reads}]}`), material));
+                }
+            }
+            return originalRead(name);
+        };
+
+        await expect(runProvideSyncEncryptionPassphraseOverRemote(
+            'right-pw', 'data.json', remote, keyCache, localState,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+
+        expect(await keyCache.getKey()).toBeNull();
+        expect(localState.value).toEqual(beforeState);
     });
 
     it('correct passphrase caches the key and clears the no-key state', async () => {

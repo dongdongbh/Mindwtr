@@ -386,6 +386,13 @@ const verifyRemoteBytes = async (
     return written;
 };
 
+const remoteReadsEqual = (left: SyncEncryptionRemoteRead, right: SyncEncryptionRemoteRead): boolean => (
+    left.version === right.version
+    && (left.bytes === null
+        ? right.bytes === null
+        : right.bytes !== null && bytesEqual(left.bytes, right.bytes))
+);
+
 /** Revalidate the document generations the transition is about to make authoritative on
  * this device. Mutating calls update `expected` with their verified post-write state; entries
  * that required no work keep their captured version. A peer replacement after inventory (or
@@ -399,10 +406,7 @@ const revalidateRemoteDocuments = async (
     for (const name of documentNames) {
         const before = snapshotRemoteRead(expected, name);
         const current = await remote.read(name);
-        const sameBytes = before.bytes === null
-            ? current.bytes === null
-            : current.bytes !== null && bytesEqual(before.bytes, current.bytes);
-        if (!sameBytes || before.version !== current.version) {
+        if (!remoteReadsEqual(before, current)) {
             throw new SyncEncryptionRemoteConflictError(`${name} changed before sync encryption state commit`);
         }
     }
@@ -1024,32 +1028,50 @@ export async function runProvideSyncEncryptionPassphraseOverRemote(
 ): Promise<'ok' | 'wrong-passphrase'> {
     assertNoIncompleteSyncEncryptionTransition(localState);
     const encName = syncEncryptedArtifactName(baseDocumentPlainName);
-    const { bytes } = await remote.read(encName);
-    if (!bytes) {
-        throw new Error(`sync encryption: no encrypted remote artifact found at ${encName}`);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        const captured = await remote.read(encName);
+        const bytes = captured.bytes;
+        if (!bytes) {
+            throw new Error(`sync encryption: no encrypted remote artifact found at ${encName}`);
+        }
+        requireExistingRemoteVersion(encName, captured);
+        const inspected = inspectSyncArtifact(bytes);
+        if (inspected.kind !== 'encrypted') {
+            throw new SyncEncryptionTerminalError(
+                inspected.kind === 'unsupported'
+                    ? new SyncCryptoUnsupportedError(inspected.reason)
+                    : new SyncCryptoUnsupportedError(`${encName} is not a valid MWENC1 container`),
+            );
+        }
+        const material = await deriveSyncKeyMaterial(passphrase, inspected.salt, inspected.params, prims);
+        let wrongPassphrase = false;
+        try {
+            await decryptSyncArtifact(bytes, material.key, prims);
+        } catch (err) {
+            if (err instanceof SyncCryptoAuthError) wrongPassphrase = true;
+            else throw err;
+        }
+
+        // Authentication can be expensive enough for a peer to rotate the generation while
+        // it runs. Retry once on a changed snapshot so a passphrase valid for the new current
+        // generation is not rejected because we authenticated the stale one; never persist a
+        // key unless the exact bytes/version remain authoritative.
+        const current = await remote.read(encName);
+        if (!remoteReadsEqual(captured, current)) {
+            if (attempt === 0) continue;
+            throw new SyncEncryptionRemoteConflictError(`${encName} changed during passphrase validation`);
+        }
+        if (wrongPassphrase) return 'wrong-passphrase';
+
+        await keyCache.setKey(material.key);
+        await localState.write({
+            state: 'enabled',
+            discoveredSalt: bytesToHex(material.salt),
+            discoveredParams: material.params,
+        });
+        return 'ok';
     }
-    const inspected = inspectSyncArtifact(bytes);
-    if (inspected.kind !== 'encrypted') {
-        throw new SyncEncryptionTerminalError(
-            inspected.kind === 'unsupported'
-                ? new SyncCryptoUnsupportedError(inspected.reason)
-                : new SyncCryptoUnsupportedError(`${encName} is not a valid MWENC1 container`),
-        );
-    }
-    const material = await deriveSyncKeyMaterial(passphrase, inspected.salt, inspected.params, prims);
-    try {
-        await decryptSyncArtifact(bytes, material.key, prims);
-    } catch (err) {
-        if (err instanceof SyncCryptoAuthError) return 'wrong-passphrase';
-        throw err;
-    }
-    await keyCache.setKey(material.key);
-    await localState.write({
-        state: 'enabled',
-        discoveredSalt: bytesToHex(material.salt),
-        discoveredParams: material.params,
-    });
-    return 'ok';
+    throw new SyncEncryptionRemoteConflictError(`${encName} changed during passphrase validation`);
 }
 
 export const __syncEncryptionTestUtils = { bytesToHex, hexToBytes, bytesEqual };
