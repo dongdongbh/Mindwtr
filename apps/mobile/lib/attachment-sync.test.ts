@@ -1882,6 +1882,137 @@ describe('attachment sync', () => {
       settings: {},
     });
 
+    const makePendingAppData = (id: string): AppData => makeEditedAppData(id, {
+      fileHash: sha256Hex(OLD_BYTES),
+      contentRev: 7,
+      contentMtimeMs: 1000,
+      contentSize: OLD_BYTES.length,
+      pendingContentUpload: true,
+    });
+
+    const primePendingBytes = (id: string, bytes: Uint8Array) => {
+      const localUri = `file://document/attachments/${id}.txt`;
+      fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+        uri === localUri || uri.startsWith('file://cache/mindwtr-upload-')
+          ? { exists: true, size: bytes.length, modificationTime: 1 }
+          : { exists: false }
+      ));
+      fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(bytes));
+    };
+
+    it('retains a mobile WebDAV pending candidate when the blob is absent and local bytes advanced again', async () => {
+      const id = 'pending-webdav-newer';
+      const appData = makePendingAppData(id);
+      const core = await import('@mindwtr/core');
+      primePendingBytes(id, NEW_BYTES);
+      vi.mocked(core.webdavFileExists).mockResolvedValue(false);
+
+      const result = await attachmentSync.syncWebdavAttachments(
+        appData,
+        { url: 'https://example.com/data.json', username: 'u', password: 'p' },
+        'https://example.com',
+        undefined,
+        { phase: 'post-merge' },
+      );
+
+      expect(result).toBe(false);
+      expect(core.webdavFileExists).not.toHaveBeenCalled();
+      expect(core.webdavPutFileVersioned).not.toHaveBeenCalled();
+      expect(fileSystemMock.createUploadTask).not.toHaveBeenCalled();
+      expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+        cloudKey: `attachments/${id}.txt`,
+        fileHash: sha256Hex(OLD_BYTES),
+        contentRev: 7,
+        pendingContentUpload: true,
+      });
+    });
+
+    it('creates an absent mobile WebDAV blob only from the exact pending bytes', async () => {
+      const id = 'pending-webdav-exact';
+      const appData = makePendingAppData(id);
+      const core = await import('@mindwtr/core');
+      primePendingBytes(id, OLD_BYTES);
+      vi.mocked(core.webdavFileExists).mockResolvedValue(false);
+      vi.mocked(core.webdavPutFileVersioned).mockResolvedValue(undefined);
+      fileSystemMock.createUploadTask.mockReturnValue(undefined);
+
+      const result = syncResult(
+        await attachmentSync.syncWebdavAttachments(
+          appData,
+          { url: 'https://example.com/data.json', username: 'u', password: 'p' },
+          'https://example.com',
+          undefined,
+          { phase: 'post-merge' },
+        ),
+        appData,
+      );
+
+      expect(core.webdavFileExists).not.toHaveBeenCalled();
+      expect(core.webdavPutFileVersioned).toHaveBeenCalledWith(
+        `https://example.com/attachments/${id}.txt`,
+        expect.any(ArrayBuffer),
+        'application/octet-stream',
+        null,
+        expect.anything(),
+      );
+      expect(result.data.tasks[0].attachments?.[0]).toMatchObject({
+        cloudKey: `attachments/${id}.txt`,
+        fileHash: sha256Hex(OLD_BYTES),
+        contentRev: 7,
+        pendingContentUpload: undefined,
+      });
+    });
+
+    it('retains a mobile File Sync pending candidate when the blob is absent and local bytes advanced again', async () => {
+      const id = 'pending-file-newer';
+      const appData = makePendingAppData(id);
+      primePendingBytes(id, NEW_BYTES);
+
+      const result = await attachmentSync.syncFileAttachments(
+        appData,
+        'file://sync/data.json',
+        undefined,
+        { phase: 'post-merge' },
+      );
+
+      expect(result).toBe(false);
+      expect(fileSystemMock.copyAsync.mock.calls.some(([options]) => (
+        (options as { to?: string } | undefined)?.to?.startsWith('file://sync/attachments/')
+      ))).toBe(false);
+      expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+        cloudKey: `attachments/${id}.txt`,
+        fileHash: sha256Hex(OLD_BYTES),
+        contentRev: 7,
+        pendingContentUpload: true,
+      });
+    });
+
+    it('creates an absent mobile File Sync blob only from the exact pending bytes', async () => {
+      const id = 'pending-file-exact';
+      const appData = makePendingAppData(id);
+      primePendingBytes(id, OLD_BYTES);
+
+      const result = syncResult(
+        await attachmentSync.syncFileAttachments(
+          appData,
+          'file://sync/data.json',
+          undefined,
+          { phase: 'post-merge' },
+        ),
+        appData,
+      );
+
+      expect(fileSystemMock.moveAsync).toHaveBeenCalledWith(expect.objectContaining({
+        to: `file://sync/attachments/${id}.txt`,
+      }));
+      expect(result.data.tasks[0].attachments?.[0]).toMatchObject({
+        cloudKey: `attachments/${id}.txt`,
+        fileHash: sha256Hex(OLD_BYTES),
+        contentRev: 7,
+        pendingContentUpload: undefined,
+      });
+    });
+
     it('records a changed file-backend attachment without writing it during prepare', async () => {
       const syncPath = 'file://sync/data.json';
       const localUri = 'file://document/attachments/edited.txt';

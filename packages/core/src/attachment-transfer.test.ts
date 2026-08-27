@@ -360,9 +360,10 @@ describe('runAttachmentTransferLifecycle', () => {
         });
 
         it('post-merge uploads only a pending winning candidate and clears its marker', async () => {
+            const expectedHash = 'b'.repeat(64);
             const attachment = makeAttachment({
                 cloudKey: 'attachments/attachment-1.txt',
-                fileHash: 'bbbb',
+                fileHash: expectedHash,
                 contentRev: 3,
                 contentMtimeMs: 2000,
                 contentSize: 20,
@@ -373,7 +374,7 @@ describe('runAttachmentTransferLifecycle', () => {
                 attachmentsById: new Map([[attachment.id, attachment]]),
                 localFileExists: vi.fn(async () => true),
                 getLocalFileStat: vi.fn(async () => ({ mtimeMs: 2000, size: 20 })),
-                computeLocalFileHash: vi.fn(async () => 'bbbb'),
+                computeLocalFileHash: vi.fn(async () => expectedHash),
                 contentChangePhase: 'post-merge',
                 onUpload,
                 onUploadError: vi.fn(),
@@ -387,9 +388,10 @@ describe('runAttachmentTransferLifecycle', () => {
         });
 
         it('post-merge does not upload a pending candidate whose local bytes changed after prepare', async () => {
+            const expectedHash = 'a'.repeat(64);
             const attachment = makeAttachment({
                 cloudKey: 'attachments/attachment-1.txt',
-                fileHash: 'prepared-hash',
+                fileHash: expectedHash,
                 contentRev: 3,
                 contentMtimeMs: 2000,
                 contentSize: 20,
@@ -403,7 +405,7 @@ describe('runAttachmentTransferLifecycle', () => {
                 attachmentsById: new Map([[attachment.id, attachment]]),
                 localFileExists: vi.fn(async () => true),
                 getLocalFileStat: vi.fn(async () => ({ mtimeMs: 3000, size: 30 })),
-                computeLocalFileHash: vi.fn(async () => 'newer-local-hash'),
+                computeLocalFileHash: vi.fn(async () => 'b'.repeat(64)),
                 contentChangePhase: 'post-merge',
                 onUpload,
                 onUploadError: vi.fn(),
@@ -417,7 +419,7 @@ describe('runAttachmentTransferLifecycle', () => {
             expect(onDownload).not.toHaveBeenCalled();
             expect(onLocalEditRace).toHaveBeenCalledWith(after());
             expect(after().pendingContentUpload).toBe(true);
-            expect(after().fileHash).toBe('prepared-hash');
+            expect(after().fileHash).toBe(expectedHash);
             expect(after().contentMtimeMs).toBe(2000);
         });
 
@@ -513,6 +515,42 @@ describe('runAttachmentTransferLifecycle', () => {
 
             expect(onDownload).not.toHaveBeenCalled();
             expect(after().pendingContentUpload).toBe(true);
+        });
+
+        it('does not upload a locally available pending candidate without a valid content hash', async () => {
+            const attachment = makeAttachment({
+                cloudKey: undefined,
+                fileHash: 'not-a-digest',
+                localStatus: 'available',
+                pendingContentUpload: true,
+            });
+            const onUpload = vi.fn(async () => true);
+            const onLocalEditRace = vi.fn();
+            const { after } = await runLifecycle({
+                attachmentsById: new Map([[attachment.id, attachment]]),
+                localFileExists: vi.fn(async () => true),
+                createUploadSnapshot: vi.fn(async () => ({
+                    sourcePath: '/staged/attachment-1',
+                    fileHash: 'a'.repeat(64),
+                    stat: { mtimeMs: 1000, size: 3 },
+                    dispose: vi.fn(async () => undefined),
+                })),
+                requireUploadSnapshot: true,
+                contentChangePhase: 'post-merge',
+                onUpload,
+                onUploadError: vi.fn(),
+                onDownload: vi.fn(),
+                onDownloadError: vi.fn(),
+                onLocalEditRace,
+            });
+
+            expect(onUpload).not.toHaveBeenCalled();
+            expect(onLocalEditRace).toHaveBeenCalledOnce();
+            expect(after()).toMatchObject({
+                cloudKey: undefined,
+                fileHash: 'not-a-digest',
+                pendingContentUpload: true,
+            });
         });
 
         it('defers a first upload with no cloud key until the merged pass', async () => {
@@ -615,6 +653,90 @@ describe('runAttachmentTransferLifecycle', () => {
             expect(onLocalEditRace).toHaveBeenCalledOnce();
             expect(after().pendingContentUpload).toBe(true);
             expect(after().fileHash).toBe(expectedHash);
+            expect(dispose).toHaveBeenCalledOnce();
+        });
+
+        it('retains a pending candidate without a cloud key when its snapshot has newer bytes', async () => {
+            const expectedHash = 'a'.repeat(64);
+            const dispose = vi.fn(async () => undefined);
+            const attachment = makeAttachment({
+                cloudKey: undefined,
+                fileHash: expectedHash,
+                contentRev: 3,
+                contentMtimeMs: 1000,
+                contentSize: 3,
+                pendingContentUpload: true,
+            });
+            const onUpload = vi.fn(async () => true);
+            const onLocalEditRace = vi.fn();
+            const { after } = await runLifecycle({
+                attachmentsById: new Map([[attachment.id, attachment]]),
+                localFileExists: vi.fn(async () => true),
+                createUploadSnapshot: vi.fn(async () => ({
+                    sourcePath: '/staged/attachment-1',
+                    fileHash: 'b'.repeat(64),
+                    stat: { mtimeMs: 2000, size: 3 },
+                    dispose,
+                })),
+                requireUploadSnapshot: true,
+                contentChangePhase: 'post-merge',
+                onUpload,
+                onUploadError: vi.fn(),
+                onDownload: vi.fn(),
+                onDownloadError: vi.fn(),
+                onLocalEditRace,
+            });
+
+            expect(onUpload).not.toHaveBeenCalled();
+            expect(onLocalEditRace).toHaveBeenCalledOnce();
+            expect(after()).toMatchObject({
+                cloudKey: undefined,
+                fileHash: expectedHash,
+                contentRev: 3,
+                pendingContentUpload: true,
+            });
+            expect(dispose).toHaveBeenCalledOnce();
+        });
+
+        it('creates a missing cloud object only from the exact pending snapshot', async () => {
+            const expectedHash = 'a'.repeat(64);
+            const dispose = vi.fn(async () => undefined);
+            const attachment = makeAttachment({
+                cloudKey: undefined,
+                fileHash: expectedHash,
+                contentRev: 3,
+                contentMtimeMs: 1000,
+                contentSize: 3,
+                pendingContentUpload: true,
+            });
+            const onUpload = vi.fn(async (item: Attachment) => {
+                item.cloudKey = 'attachments/attachment-1.txt';
+                return true;
+            });
+            const { after } = await runLifecycle({
+                attachmentsById: new Map([[attachment.id, attachment]]),
+                localFileExists: vi.fn(async () => true),
+                createUploadSnapshot: vi.fn(async () => ({
+                    sourcePath: '/staged/attachment-1',
+                    fileHash: expectedHash,
+                    stat: { mtimeMs: 1000, size: 3 },
+                    dispose,
+                })),
+                requireUploadSnapshot: true,
+                contentChangePhase: 'post-merge',
+                onUpload,
+                onUploadError: vi.fn(),
+                onDownload: vi.fn(),
+                onDownloadError: vi.fn(),
+            });
+
+            expect(onUpload).toHaveBeenCalledOnce();
+            expect(after()).toMatchObject({
+                cloudKey: 'attachments/attachment-1.txt',
+                fileHash: expectedHash,
+                contentRev: 3,
+                pendingContentUpload: undefined,
+            });
             expect(dispose).toHaveBeenCalledOnce();
         });
 

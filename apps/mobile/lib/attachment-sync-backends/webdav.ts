@@ -165,7 +165,13 @@ export const syncWebdavAttachments = async (
       clearWebdavDownloadBackoff(attachment.id);
     }
 
-    if (attachment.cloudKey && hasLocalPath && existsLocally && !isHttp) {
+    if (
+      attachment.cloudKey
+      && attachment.pendingContentUpload !== true
+      && hasLocalPath
+      && existsLocally
+      && !isHttp
+    ) {
       try {
         const remoteExists = await withRetry(async () => {
           await waitForSlot();

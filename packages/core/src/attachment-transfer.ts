@@ -400,15 +400,24 @@ export async function runAttachmentTransferLifecycle(
         // Refused paths still reconcile localStatus above; what they never do is get read.
         const mayReadForSync = existsLocally && (options.canUploadFrom?.(localPath, attachment) ?? true);
 
-        const hasPendingContentUpload = attachment.pendingContentUpload === true && hasCloudCopy(attachment);
+        // The durable marker, not the current remote-presence observation, owns the
+        // candidate identity. A backend may discover that the previous blob is absent,
+        // but that must never demote a prepared replacement into an unconstrained first
+        // upload: the snapshot still has to match the recorded fileHash/contentRev.
+        const hasPendingContentUpload = attachment.pendingContentUpload === true;
         if (hasPendingContentUpload && !options.deferUploads) {
+            const expectedPendingHash = attachment.fileHash?.trim().toLowerCase();
+            if (!isSha256Hex(expectedPendingHash)) {
+                options.onLocalEditRace?.(attachment);
+                if (itemMutated) patches.set(attachment.id, attachment);
+                continue;
+            }
             // The marker describes the exact content identity selected by merge. Recheck
             // the file immediately before upload so an edit landing between prepare and
             // post-merge cannot be published under stale hash/revision metadata. A missing
             // or unhashable file fails closed and remains pending for the next prepare pass.
             if (
                 !existsLocally
-                && isSha256Hex(attachment.fileHash?.trim().toLowerCase())
                 && (!options.policy?.shouldDownload || options.policy.shouldDownload(attachment))
             ) {
                 // A crash can land after the blob upload but before the cleared
@@ -418,7 +427,7 @@ export async function runAttachmentTransferLifecycle(
                 // locally. Old/missing/unreadable remote bytes leave the durable
                 // marker untouched for a later retry or user restoration.
                 const expectedCloudKey = attachment.cloudKey;
-                const expectedFileHash = attachment.fileHash!.trim().toLowerCase();
+                const expectedFileHash = expectedPendingHash;
                 const recovered: Attachment = { ...attachment };
                 try {
                     const downloaded = await options.onDownload(recovered);
@@ -441,7 +450,7 @@ export async function runAttachmentTransferLifecycle(
             } else if (mayReadForSync && options.createUploadSnapshot) {
                 if (!options.policy?.shouldUpload || options.policy.shouldUpload(attachment)) {
                     try {
-                        if (await attemptUpload(attachment, localPath, attachment.fileHash)) {
+                        if (await attemptUpload(attachment, localPath, expectedPendingHash)) {
                             attachment.pendingContentUpload = undefined;
                             itemMutated = true;
                         }
@@ -472,7 +481,7 @@ export async function runAttachmentTransferLifecycle(
                         }
                         if (!options.policy?.shouldUpload || options.policy.shouldUpload(attachment)) {
                             try {
-                                if (await attemptUpload(attachment, localPath, attachment.fileHash)) {
+                                if (await attemptUpload(attachment, localPath, expectedPendingHash)) {
                                     attachment.pendingContentUpload = undefined;
                                     itemMutated = true;
                                     if (!options.createUploadSnapshot) {

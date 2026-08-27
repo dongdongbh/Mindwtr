@@ -91,7 +91,7 @@ export const syncFileAttachments = async (
     const uri = attachment.uri || '';
     const isHttp = isHttpAttachmentUri(uri);
     const hasLocal = Boolean(uri) && !isHttp;
-    if (hasLocal && (await fileExists(uri))) {
+    if (hasLocal && attachment.pendingContentUpload !== true && (await fileExists(uri))) {
       const cloudKey = attachment.cloudKey || buildCloudKey(attachment);
       const filename = remoteFilenameFor(cloudKey, attachment);
       const remoteExists =

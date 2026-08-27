@@ -366,7 +366,7 @@ export async function syncWebdavAttachments(
             webdavDownloadBackoff.deleteEntry(attachment.id);
         }
 
-        if (attachment.cloudKey && existsLocally) {
+        if (attachment.cloudKey && existsLocally && attachment.pendingContentUpload !== true) {
             try {
                 const remoteExists = await withRetry(async () => {
                     await waitForSlot();
@@ -1187,7 +1187,12 @@ export async function syncFileAttachments(
     // re-upload; only cleared when a local copy exists to upload from (#1001).
     const allPatches = new Map<string, Attachment>();
     for (const attachment of attachmentsById.values()) {
-        if (attachment.kind !== 'file' || attachment.deletedAt || !attachment.cloudKey) continue;
+        if (
+            attachment.kind !== 'file'
+            || attachment.deletedAt
+            || !attachment.cloudKey
+            || attachment.pendingContentUpload === true
+        ) continue;
         const rawUri = attachment.uri ? stripFileScheme(attachment.uri) : '';
         if (!rawUri || /^https?:\/\//i.test(rawUri)) continue;
         if (!(await localFileExists(rawUri, attachment))) continue;

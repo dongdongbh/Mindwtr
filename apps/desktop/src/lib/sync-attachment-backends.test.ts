@@ -848,6 +848,140 @@ describe('desktop sync attachment backends', () => {
             phase: 'prepare' as const,
         });
 
+        const postMergeHelpers = () => ({
+            activationProbe: false,
+            ensureLocalSnapshotFresh: vi.fn(),
+            phase: 'post-merge' as const,
+        });
+
+        const makePendingData = (): AppData => {
+            const data = createCandidateAttachmentData();
+            Object.assign(data.tasks[0].attachments![0], {
+                fileHash: BYTES_HASH,
+                contentRev: 7,
+                contentMtimeMs: 1000,
+                contentSize: bytes.length,
+                pendingContentUpload: true,
+            });
+            return data;
+        };
+
+        const depsFor = (fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => (
+            new Response(null, { status: 200 })
+        ))): AttachmentBackendDeps => ({
+            getTauriFetch: async () => fetcher as unknown as typeof fetch,
+            isTauriRuntimeEnv: () => true,
+            logSyncInfo: vi.fn(),
+            logSyncWarning: vi.fn(),
+            resolveWebdavPassword: vi.fn(async () => 'secret'),
+        });
+
+        it('retains a WebDAV pending candidate when the blob is absent and local bytes advanced again', async () => {
+            const newerBytes = new Uint8Array([4, 5, 6]);
+            const appData = makePendingData();
+            const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => (
+                new Response(null, { status: 200 })
+            ));
+            fsMocks.exists.mockResolvedValue(true);
+            fsMocks.readFile.mockResolvedValue(newerBytes);
+            fsMocks.stat.mockResolvedValue({ mtime: new Date(2000), size: newerBytes.length });
+            coreMocks.webdavFileExists.mockResolvedValue(false);
+
+            const result = await syncWebdavAttachments(
+                appData,
+                { url: 'https://dav.example/mindwtr', username: 'alice' },
+                'https://dav.example/mindwtr',
+                depsFor(fetcher),
+                postMergeHelpers(),
+            );
+
+            expect(result).toBeNull();
+            expect(coreMocks.webdavFileExists).not.toHaveBeenCalled();
+            expect(fetcher).not.toHaveBeenCalled();
+            expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+                cloudKey: 'attachments/attachment-1.txt',
+                fileHash: BYTES_HASH,
+                contentRev: 7,
+                pendingContentUpload: true,
+            });
+        });
+
+        it('creates an absent WebDAV blob only from the exact pending bytes', async () => {
+            const appData = makePendingData();
+            const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => (
+                new Response(null, { status: 200 })
+            ));
+            fsMocks.exists.mockResolvedValue(true);
+            fsMocks.readFile.mockResolvedValue(bytes);
+            fsMocks.stat.mockResolvedValue({ mtime: new Date(1000), size: bytes.length });
+            coreMocks.webdavFileExists.mockResolvedValue(false);
+
+            const result = expectFoldedData(await syncWebdavAttachments(
+                appData,
+                { url: 'https://dav.example/mindwtr', username: 'alice' },
+                'https://dav.example/mindwtr',
+                depsFor(fetcher),
+                postMergeHelpers(),
+            ));
+
+            expect(coreMocks.webdavFileExists).not.toHaveBeenCalled();
+            expect(fetcher.mock.calls.filter(([, init]) => (init as RequestInit)?.method === 'PUT')).toHaveLength(1);
+            expect(result.tasks[0].attachments?.[0]).toMatchObject({
+                cloudKey: 'attachments/attachment-1.txt',
+                fileHash: BYTES_HASH,
+                contentRev: 7,
+                pendingContentUpload: undefined,
+            });
+        });
+
+        it('retains a File Sync pending candidate when the blob is absent and local bytes advanced again', async () => {
+            const newerBytes = new Uint8Array([4, 5, 6]);
+            const appData = makePendingData();
+            fsMocks.exists.mockResolvedValue(true);
+            fsMocks.readFile.mockResolvedValue(newerBytes);
+            fsMocks.stat.mockResolvedValue({ mtime: new Date(2000), size: newerBytes.length });
+            syncFsMocks.exists.mockResolvedValue(false);
+
+            const result = await syncFileAttachments(appData, '/candidate-sync', depsFor(), postMergeHelpers());
+
+            expect(result).toBe(false);
+            expect(syncFsMocks.exists).not.toHaveBeenCalled();
+            expect(fsMocks.writeFile).not.toHaveBeenCalled();
+            expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+                cloudKey: 'attachments/attachment-1.txt',
+                fileHash: BYTES_HASH,
+                contentRev: 7,
+                pendingContentUpload: true,
+            });
+        });
+
+        it('creates an absent File Sync blob only from the exact pending bytes', async () => {
+            const appData = makePendingData();
+            fsMocks.exists.mockResolvedValue(true);
+            fsMocks.readFile.mockResolvedValue(bytes);
+            fsMocks.stat.mockResolvedValue({ mtime: new Date(1000), size: bytes.length });
+            syncFsMocks.exists.mockResolvedValue(false);
+
+            const result = expectFoldedData(await syncFileAttachments(
+                appData,
+                '/candidate-sync',
+                depsFor(),
+                postMergeHelpers(),
+            ));
+
+            expect(syncFsMocks.exists).not.toHaveBeenCalled();
+            expect(syncFsMocks.rename).toHaveBeenCalledWith(
+                expect.stringMatching(/^\/candidate-sync\/attachments\/attachment-1\.txt\.tmp-/),
+                '/candidate-sync/attachments/attachment-1.txt',
+            );
+            expect(result.tasks[0].attachments?.[0]).toMatchObject({
+                cloudKey: 'attachments/attachment-1.txt',
+                fileHash: BYTES_HASH,
+                contentRev: 7,
+                pendingContentUpload: undefined,
+            });
+        });
+
         it('leaves an unchanged attachment alone: no PUT, no mutation, on a normal sync with check-on-touch active', async () => {
             const fetcher = vi.fn(async (_url: string, _init?: RequestInit) => new Response(null, { status: 200 }));
             const appData = createCandidateAttachmentData();
