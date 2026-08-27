@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
     getWebdavDocumentVersionFromError,
     webdavGetSyncDocument,
@@ -145,6 +145,51 @@ describe('webdav sync-document encryption', () => {
             state: 'data', data: null, exists: false, strongEtag: null,
         });
     });
+
+    it.each([401, 500])(
+        'propagates a %s fallback error when an enabled device cannot inspect the plaintext generation',
+        async (status) => {
+            const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(5), FAST_KDF);
+            const requests: { method: string; url: string }[] = [];
+            const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const method = init?.method ?? 'GET';
+                const url = String(input);
+                requests.push({ method, url });
+                if (method !== 'GET') throw new Error('fallback failure must not write');
+                if (url === `${URL_}.enc`) return new Response(null, { status: 404 });
+                return new Response('fallback failed', { status });
+            }) as unknown as typeof fetch;
+
+            await expect(webdavGetSyncDocument(URL_, { fetcher, material }))
+                .rejects.toThrow(`WebDAV GET failed (${status})`);
+            expect(requests).toEqual([
+                { method: 'GET', url: `${URL_}.enc` },
+                { method: 'GET', url: URL_ },
+            ]);
+        },
+    );
+
+    it.each([401, 500])(
+        'propagates a %s fallback error when an off device cannot inspect the encrypted generation',
+        async (status) => {
+            const requests: { method: string; url: string }[] = [];
+            const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const method = init?.method ?? 'GET';
+                const url = String(input);
+                requests.push({ method, url });
+                if (method !== 'GET') throw new Error('fallback failure must not write');
+                if (url === URL_) return new Response(null, { status: 404 });
+                return new Response('fallback failed', { status });
+            }) as unknown as typeof fetch;
+
+            await expect(webdavGetSyncDocument(URL_, { fetcher }))
+                .rejects.toThrow(`WebDAV GET failed (${status})`);
+            expect(requests).toEqual([
+                { method: 'GET', url: URL_ },
+                { method: 'GET', url: `${URL_}.enc` },
+            ]);
+        },
+    );
 
     it('uses create-only then exact replacement validators on the plaintext path', async () => {
         const { fetcher, requests } = createFakeWebdavServer();

@@ -651,9 +651,9 @@ export async function webdavGetSyncDocument<T>(
             // Mirror of the off-state probe below, in the other direction, and gated the same
             // way: only the "nothing at my name" shape pays for it, so a healthy encrypted
             // install never reaches it.
-            const plain = await webdavGetVersionedBytesOrNull(url, webdavOptions).catch(() => null);
-            return isPlaintextSyncArtifact(plain?.bytes ?? null)
-                ? { state: 'remote-plaintext', exists: true, strongEtag: plain?.strongEtag ?? null }
+            const plain = await webdavGetVersionedBytesOrNull(url, webdavOptions);
+            return isPlaintextSyncArtifact(plain.bytes)
+                ? { state: 'remote-plaintext', exists: true, strongEtag: plain.strongEtag }
                 : { state: 'data', data: null, exists: false, strongEtag: null };
         }
         // Sealed under another salt = this device's key is for a different encryption
@@ -708,8 +708,8 @@ export async function webdavGetSyncDocument<T>(
         }
     }
 
-    const encrypted = await webdavGetVersionedBytesOrNull(syncEncryptedArtifactName(url), webdavOptions).catch(() => null);
-    if (encrypted?.bytes) {
+    const encrypted = await webdavGetVersionedBytesOrNull(syncEncryptedArtifactName(url), webdavOptions);
+    if (encrypted.bytes) {
         const inspected = inspectSyncArtifact(encrypted.bytes);
         if (inspected.kind === 'encrypted') {
             return {
