@@ -3005,6 +3005,43 @@ describe('SyncService testability hooks', () => {
         expect(operation).toHaveBeenCalledTimes(1);
     });
 
+    it('does not swallow a lifecycle abort during the browser Dropbox read fallback', async () => {
+        const requestAbortController = new AbortController();
+        const nativeFetch = vi.fn(async () => new Response('', {
+            status: 200,
+            headers: { 'dropbox-api-result': '{"rev":"native-rev"}' },
+        })) as typeof fetch;
+        const cancelBody = vi.fn();
+        const browserFetch = vi.fn(async () => new Response(new ReadableStream({
+            pull: () => new Promise<void>(() => undefined),
+            cancel: cancelBody,
+        }), {
+            status: 200,
+            headers: { 'dropbox-api-result': '{"rev":"browser-rev"}' },
+        })) as typeof fetch;
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = browserFetch;
+        __syncServiceTestUtils.setDependenciesForTests({
+            getTauriFetch: async () => nativeFetch,
+        });
+
+        try {
+            const download = (SyncService as any).downloadDropboxWithFallback(
+                { requestAbortController },
+                'dropbox-token',
+            );
+            await waitForAssertion(() => expect(browserFetch).toHaveBeenCalledOnce());
+
+            requestAbortController.abort(new DOMException('Sync cycle cancelled', 'AbortError'));
+
+            await expect(download).rejects.toMatchObject({ name: 'AbortError' });
+            expect(browserFetch).toHaveBeenCalledOnce();
+            expect(cancelBody).toHaveBeenCalledOnce();
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
     it('maps a native file fingerprint mismatch to a shared remote-write conflict', async () => {
         const remote = emptyAppData();
         const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {

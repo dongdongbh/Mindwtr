@@ -2502,7 +2502,12 @@ export class SyncService {
             }
             return nativeRemote;
         } catch (error) {
-            if (isSyncEncryptionFailure(error)) throw error;
+            // A lifecycle abort is terminal for this cycle. Treating it like a browser-only
+            // fallback failure would turn a cancelled read into an empty remote and let the
+            // sync machine continue until a later operation happened to notice cancellation.
+            if (context.requestAbortController.signal.aborted || isSyncEncryptionFailure(error)) {
+                throw error;
+            }
             logSyncWarning('Dropbox browser fetch fallback failed', error);
             return nativeRemote;
         }
