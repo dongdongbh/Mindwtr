@@ -84,6 +84,22 @@ const appData = (cloudKeys: string[]): AppData => ({
   projects: [], sections: [], areas: [], settings: {},
 } as unknown as AppData);
 
+const davResponseXml = (
+  href: string,
+  options: { collection?: boolean; status?: number } = {},
+): string => {
+  const status = options.status ?? 200;
+  return '<d:response>'
+    + `<d:href>${href}</d:href>`
+    + '<d:propstat><d:prop><d:resourcetype>'
+    + (options.collection ? '<d:collection/>' : '')
+    + `</d:resourcetype></d:prop><d:status>HTTP/1.1 ${status} ${status === 200 ? 'OK' : 'Error'}</d:status></d:propstat>`
+    + '</d:response>';
+};
+
+const davMultistatusXml = (...responses: string[]): string =>
+  `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">${responses.join('')}</d:multistatus>`;
+
 beforeEach(() => {
   asyncStorage.clear();
   __resetSyncEncryptionStateForTests();
@@ -185,6 +201,79 @@ describe('WebDAV remote port error boundaries', () => {
     return __syncEncryptionServiceTestUtils.createWebdavRemotePort(null);
   };
 
+  const baseUrl = 'https://dav.example.com/mindwtr';
+  const collectionUrl = `${baseUrl}/attachments/`;
+
+  it('requires the exact collection response and excludes child collections', () => {
+    const xml = davMultistatusXml(
+      davResponseXml(collectionUrl, { collection: true }),
+      davResponseXml(`${collectionUrl}folder/`, { collection: true }),
+      davResponseXml(`${collectionUrl}a.bin`),
+    );
+
+    expect(__syncEncryptionServiceTestUtils.parseWebdavAttachmentKeys(xml, collectionUrl))
+      .toEqual(['attachments/a.bin']);
+  });
+
+  it.each([
+    ['malformed XML', '<d:multistatus xmlns:d="DAV:"><d:response>'],
+    ['missing collection response', davMultistatusXml(davResponseXml(`${collectionUrl}a.bin`))],
+    ['unmatched href', davMultistatusXml(
+      davResponseXml(collectionUrl, { collection: true }),
+      davResponseXml('https://other.example/attachments/a.bin'),
+    )],
+    ['ambiguous href', davMultistatusXml(
+      `<d:response><d:href>${collectionUrl}</d:href><d:href>${collectionUrl}a.bin</d:href>`
+      + '<d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>'
+      + '<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>',
+    )],
+    ['failed propstat', davMultistatusXml(
+      davResponseXml(collectionUrl, { collection: true }),
+      davResponseXml(`${collectionUrl}a.bin`, { status: 403 }),
+    )],
+  ] as const)('fails closed on %s', (_case, xml) => {
+    expect(() => __syncEncryptionServiceTestUtils.parseWebdavAttachmentKeys(xml, collectionUrl))
+      .toThrow(/WebDAV attachment inventory/);
+  });
+
+  it.each([403, 404])('fails closed on an HTTP %s collection response', async (status) => {
+    const fetcher = vi.fn(async () => new Response(null, { status }));
+    await expect(__syncEncryptionServiceTestUtils.listWebdavAttachmentKeys(baseUrl, { fetcher }))
+      .rejects.toThrow(`PROPFIND failed (${status})`);
+  });
+
+  it('does not write any transition artifact when collection validation fails', async () => {
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      if (method === 'PROPFIND') return new Response(null, { status: 403 });
+      if (method !== 'GET') throw new Error('transition attempted a write');
+      if (url.endsWith('/data.json')) {
+        return new Response(new TextEncoder().encode(JSON.stringify(appData([]))), {
+          status: 200,
+          headers: { etag: '"v1"' },
+        });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const port = await createPort();
+
+    await expect(runEnableSyncEncryptionOverRemote(
+      PASSPHRASE,
+      port,
+      syncEncryptionKeyCache,
+      syncEncryptionLocalState,
+      undefined,
+      mobileSyncCryptoPrimitives,
+      FAST_PARAMS,
+    )).rejects.toThrow('PROPFIND failed (403)');
+
+    expect(fetcher.mock.calls.every(([, init]) => ['GET', 'PROPFIND'].includes((init?.method ?? 'GET').toUpperCase())))
+      .toBe(true);
+    expect(syncEncryptionLocalState.read()).toBeNull();
+    await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
+  });
+
   it('propagates a GET 401 instead of treating the artifact as absent', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 401 })));
     const port = await createPort();
@@ -235,16 +324,14 @@ describe('WebDAV remote port error boundaries', () => {
       const method = (init?.method ?? 'GET').toUpperCase();
       const key = url.startsWith(`${baseUrl}/`) ? url.slice(baseUrl.length + 1) : url;
       if (method === 'PROPFIND') {
-        const hrefs = [
-          `${baseUrl}/attachments/`,
+        const responses = [
+          davResponseXml(`${baseUrl}/attachments/`, { collection: true }),
           ...Array.from(remote.keys())
             .filter((name) => name.startsWith('attachments/'))
-            .map((name) => `${baseUrl}/${name}`),
+            .map((name) => davResponseXml(`${baseUrl}/${name}`)),
         ];
         return new Response(
-          `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">${hrefs
-            .map((href) => `<d:response><d:href>${href}</d:href></d:response>`)
-            .join('')}</d:multistatus>`,
+          davMultistatusXml(...responses),
           { status: 207, headers: { 'content-type': 'application/xml' } },
         );
       }
@@ -303,7 +390,7 @@ describe('WebDAV remote port error boundaries', () => {
     const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
       if ((init?.method ?? 'GET') === 'PROPFIND') {
         return new Response(
-          `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"><d:response><d:href>${url}</d:href></d:response></d:multistatus>`,
+          davMultistatusXml(davResponseXml(url, { collection: true })),
           { status: 207, headers: { 'content-type': 'application/xml' } },
         );
       }

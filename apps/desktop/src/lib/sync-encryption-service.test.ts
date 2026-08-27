@@ -165,6 +165,22 @@ const seedRemote = () =>
         'attachments/a1.png': new Uint8Array([1, 2, 3, 4, 5]),
     });
 
+const davResponseXml = (
+    href: string,
+    options: { collection?: boolean; status?: number } = {},
+): string => {
+    const status = options.status ?? 200;
+    return '<d:response>'
+        + `<d:href>${href}</d:href>`
+        + '<d:propstat><d:prop><d:resourcetype>'
+        + (options.collection ? '<d:collection/>' : '')
+        + `</d:resourcetype></d:prop><d:status>HTTP/1.1 ${status} ${status === 200 ? 'OK' : 'Error'}</d:status></d:propstat>`
+        + '</d:response>';
+};
+
+const davMultistatusXml = (...responses: string[]): string =>
+    `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">${responses.join('')}</d:multistatus>`;
+
 const createDropboxFetch = (store: ReturnType<typeof createBlobStore>) =>
     (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
         const url = String(input);
@@ -236,16 +252,14 @@ const createWebdavFetch = (
         const key = url.startsWith(`${baseUrl}/`) ? url.slice(baseUrl.length + 1) : url;
         const method = (init?.method ?? 'GET').toUpperCase();
         if (method === 'PROPFIND') {
-            const hrefs = [
-                `${baseUrl}/attachments/`,
+            const responses = [
+                davResponseXml(`${baseUrl}/attachments/`, { collection: true }),
                 ...Array.from(store.files.keys())
                     .filter((name) => name.startsWith('attachments/'))
-                    .map((name) => `${baseUrl}/${name}`),
+                    .map((name) => davResponseXml(`${baseUrl}/${name}`)),
             ];
             return new Response(
-                `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">${hrefs
-                    .map((href) => `<d:response><d:href>${href}</d:href></d:response>`)
-                    .join('')}</d:multistatus>`,
+                davMultistatusXml(...responses),
                 { status: 207, headers: { 'content-type': 'application/xml' } },
             );
         }
@@ -295,6 +309,70 @@ beforeEach(() => {
     native.failingCommand = null;
     native.failSetAfterKeyWriteOnce = false;
     clearSyncEncryptionMaterialCache();
+});
+
+describe('WebDAV authoritative attachment inventory', () => {
+    const baseUrl = 'https://dav.example/sync';
+    const collectionUrl = `${baseUrl}/attachments/`;
+
+    it('requires the exact collection response and excludes child collections', () => {
+        const xml = davMultistatusXml(
+            davResponseXml(collectionUrl, { collection: true }),
+            davResponseXml(`${collectionUrl}folder/`, { collection: true }),
+            davResponseXml(`${collectionUrl}a.bin`),
+        );
+
+        expect(__syncEncryptionServiceTestUtils.parseWebdavAttachmentKeys(xml, collectionUrl))
+            .toEqual(['attachments/a.bin']);
+    });
+
+    it.each([
+        ['malformed XML', '<d:multistatus xmlns:d="DAV:"><d:response>'],
+        ['missing collection response', davMultistatusXml(davResponseXml(`${collectionUrl}a.bin`))],
+        ['unmatched href', davMultistatusXml(
+            davResponseXml(collectionUrl, { collection: true }),
+            davResponseXml('https://other.example/attachments/a.bin'),
+        )],
+        ['ambiguous href', davMultistatusXml(
+            `<d:response><d:href>${collectionUrl}</d:href><d:href>${collectionUrl}a.bin</d:href>`
+            + '<d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop>'
+            + '<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>',
+        )],
+        ['failed propstat', davMultistatusXml(
+            davResponseXml(collectionUrl, { collection: true }),
+            davResponseXml(`${collectionUrl}a.bin`, { status: 403 }),
+        )],
+    ] as const)('fails closed on %s', (_case, xml) => {
+        expect(() => __syncEncryptionServiceTestUtils.parseWebdavAttachmentKeys(xml, collectionUrl))
+            .toThrow(/WebDAV attachment inventory/);
+    });
+
+    it.each([403, 404])('fails closed on an HTTP %s collection response', async (status) => {
+        const fetcher = vi.fn(async () => new Response(null, { status }));
+        await expect(__syncEncryptionServiceTestUtils.listWebdavAttachmentKeys(baseUrl, { fetcher }))
+            .rejects.toThrow(`PROPFIND failed (${status})`);
+    });
+
+    it('does not write any transition artifact when collection validation fails', async () => {
+        const store = seedRemote();
+        const baseline = new Map(Array.from(store.files, ([name, bytes]) => [name, bytes.slice()]));
+        const transport = createWebdavFetch(store, baseUrl);
+        const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => (
+            (init?.method ?? 'GET').toUpperCase() === 'PROPFIND'
+                ? new Response(null, { status: 403 })
+                : transport(input, init)
+        ));
+
+        await expect(runEnableOverRemote(
+            'passphrase',
+            createWebdavRemotePort({ baseUrl, options: { fetcher } }),
+        )).rejects.toThrow('PROPFIND failed (403)');
+
+        expect(fetcher.mock.calls.every(([, init]) => ['GET', 'PROPFIND'].includes((init?.method ?? 'GET').toUpperCase())))
+            .toBe(true);
+        expect(store.files).toEqual(baseline);
+        expect(native.state).toEqual({ state: 'off' });
+    });
 });
 
 describe('Dropbox sync encryption transitions', () => {
