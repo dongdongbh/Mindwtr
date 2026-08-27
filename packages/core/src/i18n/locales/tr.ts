@@ -245,6 +245,7 @@ export const trOverrides: Record<string, string> = {
         'attachments.download': 'İndirmek',
         'attachments.missing': 'Eksik dosya',
         'attachments.downloadConflict': 'Bu ek indirilirken değişti. Yerel dosyanız korundu. Çakışmayı çözmek için yeniden eşitleyin.',
+        'attachments.unrecoverable': 'Bu ek artık eşzamanlanan depolamada kullanılamıyor. Bozuk başvurusu kaldırıldı.',
         'attachments.remove': 'Kaldırmak',
         'attachments.transferProgress': 'Ek aktarım ilerlemesi',
         'attachments.linkPlaceholder': 'https://örnek.com',

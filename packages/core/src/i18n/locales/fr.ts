@@ -252,6 +252,7 @@ export const frOverrides: Record<string, string> = {
         'attachments.download': 'Télécharger',
         'attachments.missing': 'Fichier manquant',
         'attachments.downloadConflict': 'Cette pièce jointe a changé pendant le téléchargement. Le fichier local a été conservé. Relancez la synchronisation pour résoudre le conflit.',
+        'attachments.unrecoverable': 'Cette pièce jointe n’est plus disponible dans le stockage synchronisé. Sa référence rompue a été supprimée.',
         'attachments.remove': 'Supprimer',
         'attachments.transferProgress': 'Progression du transfert de la pièce jointe',
         'attachments.linkPlaceholder': 'https://exemple.com',

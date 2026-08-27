@@ -283,6 +283,7 @@ export const en: Record<string, string> = {
         'attachments.download': 'Download',
         'attachments.missing': 'Missing file',
         'attachments.downloadConflict': 'This attachment changed during download. Your local file was kept. Sync again to resolve the conflict.',
+        'attachments.unrecoverable': 'This attachment is no longer available in synced storage. Its broken reference was removed.',
         'attachments.remove': 'Remove',
         'attachments.transferProgress': 'Attachment transfer progress',
         'attachments.linkPlaceholder': 'https://example.com',

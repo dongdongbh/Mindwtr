@@ -243,6 +243,7 @@ export const esOverrides: Record<string, string> = {
         'attachments.open': 'Abrir',
         'attachments.download': 'Descargar',
         'attachments.downloadConflict': 'Este archivo adjunto cambió durante la descarga. Se conservó el archivo local. Vuelve a sincronizar para resolver el conflicto.',
+        'attachments.unrecoverable': 'Este archivo adjunto ya no está disponible en el almacenamiento sincronizado. Se eliminó su referencia rota.',
         'attachments.remove': 'Borrar',
         'attachments.transferProgress': 'Progreso de transferencia del adjunto',
         'attachments.linkPlaceholder': 'https://ejemplo.com',

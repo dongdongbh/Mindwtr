@@ -11,6 +11,7 @@ export const nlOverrides: Record<string, string> = {
         'settings.documentationLinkValue': "Documentatie",
         'markdown.copyCode': 'Code kopiëren',
         'attachments.downloadConflict': 'Deze bijlage is tijdens het downloaden gewijzigd. Het lokale bestand is behouden. Synchroniseer opnieuw om het conflict op te lossen.',
+        'attachments.unrecoverable': 'Deze bijlage is niet meer beschikbaar in de gesynchroniseerde opslag. De verbroken verwijzing is verwijderd.',
         'nav.main': 'Start',
         'nav.board': 'Bordweergave',
         'nav.projects': 'Projecten',

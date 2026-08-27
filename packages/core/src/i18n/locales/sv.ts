@@ -273,6 +273,7 @@ export const svOverrides: Record<string, string> = {
         'attachments.download': 'Ladda ned',
         'attachments.missing': 'Saknad fil',
         'attachments.downloadConflict': 'Den här bilagan ändrades under hämtningen. Den lokala filen behölls. Synkronisera igen för att lösa konflikten.',
+        'attachments.unrecoverable': 'Den här bilagan är inte längre tillgänglig i det synkroniserade lagringsutrymmet. Den trasiga referensen togs bort.',
         'attachments.remove': 'Ta bort',
         'attachments.transferProgress': 'Överföringsförlopp för bilaga',
         'attachments.linkPlaceholder': 'https://example.com',

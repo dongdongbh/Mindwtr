@@ -176,6 +176,21 @@ describe('useTaskEditAttachments download settlement', () => {
     act(() => tree.unmount());
   });
 
+  it('keeps retryable unavailability distinct from terminal absence', async () => {
+    const attachment = makeAttachment(1);
+    useTaskStore.setState({ _allTasks: [makeTask(attachment)] });
+    availabilityMock.ensureAttachmentAvailableDetailed.mockResolvedValue({ status: 'unavailable' });
+    const expose = React.createRef<HarnessApi | null>();
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Harness expose={expose} initial={attachment} />); });
+
+    await act(async () => { await expose.current!.downloadAttachment(attachment); });
+
+    expect(expose.current!.attachments[0]).toEqual(attachment);
+    expect(Alert.alert).toHaveBeenCalledWith('attachments.title', 'attachments.missing');
+    act(() => tree.unmount());
+  });
+
   it('persists a current terminal absence without replacing descriptive metadata', async () => {
     const attachment = makeAttachment(1, { title: 'Current title.pdf' });
     const terminalAt = '2026-08-27T00:01:00.000Z';
@@ -208,7 +223,7 @@ describe('useTaskEditAttachments download settlement', () => {
     });
     // Task edit owns a draft until Save; terminal state must not mutate the persisted task eagerly.
     expect(useTaskStore.getState()._allTasks[0]?.attachments?.[0]).toEqual(attachment);
-    expect(Alert.alert).toHaveBeenCalledWith('attachments.title', 'attachments.missing');
+    expect(Alert.alert).toHaveBeenCalledWith('attachments.title', 'attachments.unrecoverable');
     act(() => tree.unmount());
   });
 

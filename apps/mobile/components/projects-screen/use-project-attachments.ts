@@ -140,7 +140,9 @@ export function useProjectAttachments({
     if (resolution.status === 'available' || resolution.status === 'stale') return;
     const message = resolution.status === 'generation-conflict'
       ? t('attachments.downloadConflict')
-      : t('attachments.missing');
+      : resolution.status === 'unrecoverable'
+        ? t('attachments.unrecoverable')
+        : t('attachments.missing');
     Alert.alert(t('attachments.title'), message);
   }, [t]);
 

@@ -159,6 +159,22 @@ describe('useProjectAttachments download settlement', () => {
     act(() => tree.unmount());
   });
 
+  it('keeps retryable unavailability distinct from terminal absence', async () => {
+    const attachment = makeAttachment(1);
+    const project = makeProject(attachment);
+    coreStoreState._allProjects = [project];
+    availabilityMock.ensureAttachmentAvailableDetailed.mockResolvedValue({ status: 'unavailable' });
+    const expose = React.createRef<HarnessApi | null>();
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Harness expose={expose} initial={project} />); });
+
+    await act(async () => { await expose.current!.downloadAttachment(attachment); });
+
+    expect(expose.current!.selectedProject).toEqual(project);
+    expect(Alert.alert).toHaveBeenCalledWith('attachments.title', 'attachments.missing');
+    act(() => tree.unmount());
+  });
+
   it('persists a current terminal absence without replacing project attachment metadata', async () => {
     const attachment = makeAttachment(1, { title: 'Current title.pdf' });
     const project = makeProject(attachment);
@@ -195,7 +211,7 @@ describe('useProjectAttachments download settlement', () => {
       attachments: [expectedAttachment],
     });
     expect(coreStoreState._allProjects[0]).toEqual(expose.current!.selectedProject);
-    expect(Alert.alert).toHaveBeenCalledWith('attachments.title', 'attachments.missing');
+    expect(Alert.alert).toHaveBeenCalledWith('attachments.title', 'attachments.unrecoverable');
     act(() => tree.unmount());
   });
 

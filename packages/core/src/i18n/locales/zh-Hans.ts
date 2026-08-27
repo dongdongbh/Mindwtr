@@ -306,6 +306,7 @@ export const zhHans: Record<string, string> = {
         'attachments.download': '下载',
         'attachments.missing': '文件缺失',
         'attachments.downloadConflict': '此附件在下载期间发生了更改。本地文件已保留。请再次同步以解决冲突。',
+        'attachments.unrecoverable': '此附件已无法从同步存储中获取。已移除失效的引用。',
         'attachments.remove': '移除',
         'attachments.transferProgress': '附件传输进度',
         'attachments.linkPlaceholder': 'https://example.com',
