@@ -942,9 +942,16 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
             persisted.discoveredParams,
             prims,
         );
-        if (!bytesEqual(claimedOldMaterial.key, oldKey)) {
+        if (!bytesEqual(claimedOldMaterial.key, oldKey)
+            && persisted.incompleteTransition !== 'change-passphrase') {
             throw new Error('sync encryption passphrase change: current passphrase does not match');
         }
+        // A failed final state commit can durably install the candidate key and then fail
+        // to restore the predecessor (keyring/SecureStore is a separate persistence domain).
+        // The durable change-passphrase journal proves that the original current passphrase
+        // was accepted before remote mutation began. In that one recovery state, allow the
+        // cached candidate key to enter the full all-generation authentication plan below;
+        // without the journal the same mismatch remains a hard wrong-passphrase failure.
     }
 
     const isBaseEncDocument = (name: string) => !KNOWN_ARTIFACT_SUFFIXES.some((s) => name.endsWith(`.enc${s}`));

@@ -993,6 +993,62 @@ describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
             .toBe('ATTACHMENT');
     });
 
+    it('retries from the persisted candidate key when final state and key rollback both fail', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a.bin': { bytes: utf8('ATTACHMENT'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('old-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const oldKey = new Uint8Array((await keyCache.getKey())!);
+        const oldState = structuredClone(localState.value)!;
+        const writeState = localState.write.bind(localState);
+        let failFinalStateWrite = true;
+        localState.write = async (state) => {
+            const isNewEnabledState = state?.state === 'enabled'
+                && !state.incompleteTransition
+                && state.discoveredSalt !== oldState.discoveredSalt;
+            if (isNewEnabledState && failFinalStateWrite) {
+                throw new Error('simulated final state persistence failure');
+            }
+            await writeState(state);
+        };
+        const setKey = keyCache.setKey.bind(keyCache);
+        let candidateInstalled = false;
+        keyCache.setKey = async (key) => {
+            if (!candidateInstalled) {
+                candidateInstalled = true;
+                await setKey(key);
+                return;
+            }
+            throw new Error('simulated key rollback failure');
+        };
+
+        await expect(runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'new-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toThrow('key rollback failed');
+
+        const persistedCandidateKey = new Uint8Array((await keyCache.getKey())!);
+        expect(persistedCandidateKey).not.toEqual(oldKey);
+        expect(localState.value).toEqual({ ...oldState, incompleteTransition: 'change-passphrase' });
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, persistedCandidateKey)))
+            .toBe('{"tasks":[]}');
+
+        keyCache.setKey = setKey;
+        failFinalStateWrite = false;
+        await runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'new-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        );
+        const finalKey = (await keyCache.getKey())!;
+        expect(localState.value?.state).toBe('enabled');
+        expect(localState.value?.incompleteTransition).toBeUndefined();
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, finalKey)))
+            .toBe('{"tasks":[]}');
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a.bin')!, finalKey)))
+            .toBe('ATTACHMENT');
+    });
+
     it('does not commit a new key when an attachment appears after rotation inventory', async () => {
         const remote = createFakeRemote({
             'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
