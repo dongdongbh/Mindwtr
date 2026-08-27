@@ -5476,6 +5476,107 @@ mod tests {
     }
 
     #[test]
+    fn transition_quarantine_neutralization_never_write_opens_the_existing_generation() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let scratch_directory = dir.path().join(".mindwtr-encryption-quarantine-test");
+        fs::create_dir(&scratch_directory).expect("scratch directory");
+        let scratch = TransitionScratch {
+            path: scratch_directory.join("data.json"),
+            directory: scratch_directory,
+        };
+        fs::write(&scratch.path, b"retained plaintext").expect("retained generation");
+        let replacement = dir.path().join("data.json.enc");
+        fs::write(&replacement, b"safe encrypted generation").expect("safe replacement");
+        let attempted_existing_write = Cell::new(false);
+        let events = std::cell::RefCell::new(Vec::new());
+
+        replace_transition_scratch_with_safe_generation_with(
+            &scratch,
+            Some(&replacement),
+            |path, bytes| {
+                events.borrow_mut().push("create-new");
+                if path.exists() {
+                    attempted_existing_write.set(true);
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "cache-off mount refuses existing-file writes",
+                    ));
+                }
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(path)?;
+                file.write_all(bytes)?;
+                file.sync_all()
+            },
+            |source, destination| {
+                events.borrow_mut().push("replace");
+                replace_transition_path_durably(source, destination)
+            },
+        )
+        .expect("create-new plus write-through replace must work without truncation");
+
+        assert!(!attempted_existing_write.get());
+        assert_eq!(&*events.borrow(), &["create-new", "replace"]);
+        assert_eq!(
+            fs::read(&scratch.path).expect("neutralized recovery generation"),
+            b"safe encrypted generation"
+        );
+        assert_eq!(
+            scratch.directory.read_dir().expect("scratch entries").count(),
+            1,
+            "the create-new sibling must be consumed by the replacement move"
+        );
+    }
+
+    #[test]
+    fn transition_quarantine_neutralization_preserves_both_generations_when_replace_fails() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let scratch_directory = dir.path().join(".mindwtr-encryption-quarantine-test");
+        fs::create_dir(&scratch_directory).expect("scratch directory");
+        let scratch = TransitionScratch {
+            path: scratch_directory.join("data.json"),
+            directory: scratch_directory,
+        };
+        fs::write(&scratch.path, b"retained plaintext").expect("retained generation");
+        let replacement = dir.path().join("data.json.enc");
+        fs::write(&replacement, b"safe encrypted generation").expect("safe replacement");
+
+        let error = replace_transition_scratch_with_safe_generation_with(
+            &scratch,
+            Some(&replacement),
+            |path, bytes| {
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(path)?;
+                file.write_all(bytes)?;
+                file.sync_all()
+            },
+            |_, _| Err(std::io::Error::other("injected write-through move failure")),
+        )
+        .expect_err("failed replacement must retain both recovery generations");
+
+        assert!(error.contains("injected write-through move failure"));
+        assert_eq!(
+            fs::read(&scratch.path).expect("original recovery generation"),
+            b"retained plaintext"
+        );
+        let siblings = scratch
+            .directory
+            .read_dir()
+            .expect("scratch entries")
+            .map(|entry| entry.expect("scratch entry").path())
+            .filter(|path| path != &scratch.path)
+            .collect::<Vec<_>>();
+        assert_eq!(siblings.len(), 1);
+        assert_eq!(
+            fs::read(&siblings[0]).expect("safe recovery generation"),
+            b"safe encrypted generation"
+        );
+    }
+
+    #[test]
     fn transition_cleanup_flushes_file_and_directory_deletions_in_order() {
         let scratch = TransitionScratch {
             directory: PathBuf::from("/sync/.mindwtr-encryption-quarantine-1.cleanup"),
@@ -12302,6 +12403,33 @@ fn move_transition_path_durably(source: &Path, destination: &Path) -> std::io::R
     fs::rename(source, destination)
 }
 
+#[cfg(windows)]
+fn replace_transition_path_durably(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = transition_path_wide(source);
+    let destination = transition_path_wide(destination);
+    // SAFETY: both path buffers are NUL-terminated and remain alive for the call.
+    if unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(all(not(windows), test))]
+fn replace_transition_path_durably(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::rename(source, destination)
+}
+
 fn finish_transition_move_durably_with<Move, SyncParent>(
     source: &Path,
     destination: &Path,
@@ -12451,11 +12579,17 @@ where
     Ok(quarantine)
 }
 
-#[cfg(windows)]
-fn replace_transition_scratch_with_safe_generation(
+#[cfg(any(windows, test))]
+fn replace_transition_scratch_with_safe_generation_with<WriteNew, Replace>(
     scratch: &TransitionScratch,
     replacement: Option<&Path>,
-) -> Result<(), String> {
+    mut write_new: WriteNew,
+    replace: Replace,
+) -> Result<(), String>
+where
+    WriteNew: FnMut(&Path, &[u8]) -> std::io::Result<()>,
+    Replace: FnOnce(&Path, &Path) -> std::io::Result<()>,
+{
     let Some(replacement) = replacement else {
         return Ok(());
     };
@@ -12465,28 +12599,58 @@ fn replace_transition_scratch_with_safe_generation(
             replacement.display()
         )
     })?;
-    let mut file = OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .open(&scratch.path)
-        .map_err(|error| {
-            format!(
-                "Failed to neutralize transition recovery {}: {error}",
-                scratch.path.display()
-            )
-        })?;
-    file.write_all(&bytes).map_err(|error| {
-        format!(
-            "Failed to neutralize transition recovery {}: {error}",
-            scratch.path.display()
-        )
+
+    let mut safe_path = None;
+    for _ in 0..32 {
+        let candidate = scratch.directory.join(format!(
+            ".mindwtr-encryption-safe-{:016x}",
+            rand::thread_rng().next_u64(),
+        ));
+        match write_new(&candidate, &bytes) {
+            Ok(()) => {
+                safe_path = Some(candidate);
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(format!(
+                    "Failed to create safe transition recovery generation: {error}"
+                ))
+            }
+        }
+    }
+    let safe_path = safe_path.ok_or_else(|| {
+        "Failed to allocate a unique safe transition recovery generation".to_string()
     })?;
-    file.sync_all().map_err(|error| {
+    // `scratch.path` is a uniquely owned, fingerprint-verified quarantine. Replacing it is safe;
+    // reopening it with O_TRUNC is not (cache-off rclone/WinFSP refuses existing-file size
+    // changes). If the move fails, retain both the original and the flushed safe sibling.
+    replace(&safe_path, &scratch.path).map_err(|error| {
         format!(
-            "Failed to flush neutralized transition recovery {}: {error}",
+            "Failed to install safe transition recovery generation {}: {error}",
             scratch.path.display()
         )
     })
+}
+
+#[cfg(windows)]
+fn replace_transition_scratch_with_safe_generation(
+    scratch: &TransitionScratch,
+    replacement: Option<&Path>,
+) -> Result<(), String> {
+    replace_transition_scratch_with_safe_generation_with(
+        scratch,
+        replacement,
+        |path, bytes| {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)?;
+            file.write_all(bytes)?;
+            file.sync_all()
+        },
+        replace_transition_path_durably,
+    )
 }
 
 #[cfg(not(windows))]
