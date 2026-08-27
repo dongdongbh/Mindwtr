@@ -4906,6 +4906,26 @@ mod tests {
 
     #[test]
     fn transition_quarantine_cas_preserves_racing_replace_remove_and_create_generations() {
+        fn replace_quarantine_bytes(target: &Path, bytes: &[u8]) -> Result<(), String> {
+            let parent = target.parent().ok_or_else(|| "target has no parent".to_string())?;
+            let leaf = target.file_name().ok_or_else(|| "target has no leaf".to_string())?;
+            for entry in fs::read_dir(parent).map_err(|error| error.to_string())? {
+                let path = entry.map_err(|error| error.to_string())?.path();
+                if !path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(SYNC_ENCRYPTION_QUARANTINE_DIR_PREFIX))
+                {
+                    continue;
+                }
+                let candidate = path.join(leaf);
+                if candidate.exists() {
+                    return fs::write(candidate, bytes).map_err(|error| error.to_string());
+                }
+            }
+            Err("quarantine generation was not found".to_string())
+        }
+
         let dir = tempfile::tempdir().expect("temp dir");
         let target = dir.path().join("artifact.bin");
         fs::write(&target, b"initial").expect("initial");
@@ -5037,6 +5057,50 @@ mod tests {
             fs::read(&install_target).expect("late peer bytes"),
             b"late-peer"
         );
+
+        let changed_quarantine_target = dir.path().join("changed-quarantine.bin");
+        fs::write(&changed_quarantine_target, b"quarantine-current").expect("quarantine current");
+        let changed_quarantine_expected = transition_artifact_fingerprint(b"quarantine-current");
+        let error = write_and_verify_with_hook(
+            &changed_quarantine_target,
+            b"ours",
+            Some(&changed_quarantine_expected),
+            |_| Ok(()),
+            |point, path| {
+                if point == TransitionMutationPoint::BeforeInstall {
+                    replace_quarantine_bytes(path, b"peer-quarantine")?;
+                }
+                Ok(())
+            },
+        )
+        .expect_err("a changed quarantine must not be deleted after install");
+        assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
+        assert_eq!(fs::read(&changed_quarantine_target).expect("installed bytes"), b"ours");
+        assert!(dir.path().read_dir().expect("list").any(|entry| {
+            let path = entry.expect("entry").path().join("changed-quarantine.bin");
+            path.exists() && fs::read(path).expect("changed quarantine") == b"peer-quarantine"
+        }));
+
+        let changed_remove_target = dir.path().join("changed-remove-quarantine.bin");
+        fs::write(&changed_remove_target, b"remove-current").expect("remove current");
+        let changed_remove_expected = transition_artifact_fingerprint(b"remove-current");
+        let error = remove_transition_artifact_if_version_with_hook(
+            &changed_remove_target,
+            &changed_remove_expected,
+            |point, path| {
+                if point == TransitionMutationPoint::BeforeRemoveCommit {
+                    replace_quarantine_bytes(path, b"peer-remove-quarantine")?;
+                }
+                Ok(())
+            },
+        )
+        .expect_err("a changed quarantine must not be deleted after remove");
+        assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
+        assert!(!changed_remove_target.exists());
+        assert!(dir.path().read_dir().expect("list").any(|entry| {
+            let path = entry.expect("entry").path().join("changed-remove-quarantine.bin");
+            path.exists() && fs::read(path).expect("changed quarantine") == b"peer-remove-quarantine"
+        }));
     }
 
     #[test]
@@ -5066,6 +5130,70 @@ mod tests {
             copy_file_create_new(&source, &target).expect_err("must not overwrite"),
             SYNC_FILE_WRITE_CONFLICT,
         );
+    }
+
+    #[test]
+    fn retained_transition_generations_follow_enable_rotation_and_disable_in_place() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        let attachment = dir.path().join("attachments").join("a1.png");
+        let expected = transition_artifact_fingerprint(b"\x89PNG attachment bytes");
+        let mut injected = false;
+
+        let error = write_and_verify_with_hook(
+            &attachment,
+            b"proposed plaintext generation",
+            Some(&expected),
+            |_| Ok(()),
+            |point, path| {
+                if point == TransitionMutationPoint::BeforeQuarantine && !injected {
+                    injected = true;
+                    fs::write(path, b"peer plaintext generation")
+                        .map_err(|error| error.to_string())?;
+                }
+                Ok(())
+            },
+        )
+        .expect_err("injected peer update must retain transition generations");
+        assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
+
+        let retained = collect_transition_recovery_artifacts(dir.path());
+        assert_eq!(retained.len(), 2, "stage and quarantine must both be retained");
+        assert!(retained.iter().all(|path| matches!(
+            inspect_sync_artifact(&fs::read(path).expect("retained plaintext")),
+            SyncArtifactInspection::Plaintext
+        )));
+
+        let first = enable_sync_encryption_in_dir(dir.path(), "first pass").expect("retry enable");
+        assert_eq!(collect_transition_recovery_artifacts(dir.path()), retained);
+        for path in &retained {
+            let sealed = fs::read(path).expect("retained ciphertext");
+            assert!(matches!(
+                inspect_sync_artifact(&sealed),
+                SyncArtifactInspection::Encrypted(_)
+            ));
+            decrypt_sync_artifact(&sealed, &first.key)
+                .unwrap_or_else(|_| panic!("{} must decrypt under enabled key", path.display()));
+        }
+
+        let next = change_sync_encryption_passphrase_in_dir(dir.path(), &first.key, "second pass")
+            .expect("rotate retained generations");
+        assert_eq!(collect_transition_recovery_artifacts(dir.path()), retained);
+        for path in &retained {
+            let rotated = fs::read(path).expect("rotated recovery generation");
+            assert!(decrypt_sync_artifact(&rotated, &first.key).is_err());
+            decrypt_sync_artifact(&rotated, &next.key)
+                .unwrap_or_else(|_| panic!("{} must decrypt under rotated key", path.display()));
+        }
+
+        disable_sync_encryption_in_dir(dir.path(), &next.key).expect("disable retained generations");
+        assert_eq!(collect_transition_recovery_artifacts(dir.path()), retained);
+        for path in &retained {
+            assert!(matches!(
+                inspect_sync_artifact(&fs::read(path).expect("opened recovery generation")),
+                SyncArtifactInspection::Plaintext
+            ));
+        }
     }
 
     #[test]
@@ -10297,16 +10425,26 @@ pub(crate) fn write_sync_file(
 // ---------------------------------------------------------------------------
 
 const SYNC_ENCRYPTION_TRANSITION_TMP_SUFFIX: &str = ".enctransition";
+const SYNC_ENCRYPTION_STAGE_DIR_PREFIX: &str = ".mindwtr-encryption-stage-";
+const SYNC_ENCRYPTION_QUARANTINE_DIR_PREFIX: &str = ".mindwtr-encryption-quarantine-";
 /// Mirrors ATTACHMENTS_DIR_NAME in packages/core/src/attachment-paths.ts.
 const SYNC_ATTACHMENTS_DIR_NAME: &str = "attachments";
 
-/// Every artifact in the folder the transition must convert, in the order it must convert
-/// them: attachments first, then non-base documents, then the base document last. A reader
-/// that finds `data.json.enc` must never find it referencing a `.bak` or attachment that is
-/// not itself already migrated.
+/// Every artifact in the folder the transition must convert. Retained recovery generations
+/// and attachments are converted before non-base documents, then the base document last. A
+/// reader that finds `data.json.enc` must never find it referencing a `.bak` or attachment
+/// that is not itself already migrated.
 struct SyncFolderArtifacts {
     attachments: Vec<PathBuf>,
     documents: Vec<PathBuf>,
+    /// Retained generations from an earlier failed/conflicted transition. They keep their
+    /// exact path and are transformed in place like attachments; never rename or delete them.
+    recovery: Vec<PathBuf>,
+}
+
+fn is_transition_recovery_dir(name: &str) -> bool {
+    name.starts_with(SYNC_ENCRYPTION_STAGE_DIR_PREFIX)
+        || name.starts_with(SYNC_ENCRYPTION_QUARANTINE_DIR_PREFIX)
 }
 
 fn is_transition_scratch(name: &str) -> bool {
@@ -10326,17 +10464,52 @@ fn collect_sync_folder_attachments(sync_dir: &Path) -> Vec<PathBuf> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-                continue;
-            }
             let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
                 continue;
             };
+            if path.is_dir() {
+                // Retained transition directories are snapshotted separately as in-place
+                // recovery generations, so they cannot be duplicated in the attachment set.
+                if is_transition_recovery_dir(name) {
+                    continue;
+                }
+                stack.push(path);
+                continue;
+            }
             if is_transition_scratch(name) {
                 continue;
             }
             found.push(path);
+        }
+    }
+    found.sort();
+    found
+}
+
+/// Snapshots every file retained by a failed transition before the next transition starts.
+/// Nested recovery directories are possible when recovery itself conflicts, so the walk keeps
+/// an explicit `inside_recovery` bit and preserves every divergent generation independently.
+/// Legacy sibling `.enctransition` files are included as well.
+fn collect_transition_recovery_artifacts(sync_dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut stack = vec![(sync_dir.to_path_buf(), false)];
+    while let Some((dir, inside_recovery)) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if path.is_dir() {
+                let child_is_recovery = inside_recovery || is_transition_recovery_dir(name);
+                stack.push((path, child_is_recovery));
+                continue;
+            }
+            if inside_recovery || name.ends_with(SYNC_ENCRYPTION_TRANSITION_TMP_SUFFIX) {
+                found.push(path);
+            }
         }
     }
     found.sort();
@@ -10399,7 +10572,11 @@ fn collect_sync_folder_artifacts(sync_dir: &Path, encrypting: bool) -> SyncFolde
         documents.push(base_path);
     }
 
-    SyncFolderArtifacts { attachments: collect_sync_folder_attachments(sync_dir), documents }
+    SyncFolderArtifacts {
+        attachments: collect_sync_folder_attachments(sync_dir),
+        documents,
+        recovery: collect_transition_recovery_artifacts(sync_dir),
+    }
 }
 
 fn transition_artifact_fingerprint(bytes: &[u8]) -> String {
@@ -10557,6 +10734,23 @@ fn cleanup_transition_scratch(scratch: TransitionScratch) -> Result<(), String> 
     })
 }
 
+fn require_quarantined_generation(
+    quarantine: &TransitionScratch,
+    expected: &str,
+    target: &Path,
+) -> Result<(), String> {
+    let current = fs::read(&quarantine.path).map_err(|error| {
+        format!(
+            "Failed to revalidate quarantined {}: {error}",
+            target.display()
+        )
+    })?;
+    if transition_artifact_fingerprint(&current) != expected {
+        return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
+    }
+    Ok(())
+}
+
 fn remove_transition_artifact_if_version_with_hook<Hook>(
     path: &Path,
     expected: &str,
@@ -10578,6 +10772,7 @@ where
         // exact displaced generation; never call remove_file on either one.
         return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
     }
+    require_quarantined_generation(&quarantine, expected, path)?;
     cleanup_transition_scratch(quarantine)?;
     sync_parent_directory_for_durability(path)
         .map_err(|error| format!("Failed to flush sync directory metadata: {error}"))
@@ -10634,7 +10829,7 @@ where
             restore_quarantined_generation(&quarantine, target);
             return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
         }
-        Some(quarantine)
+        Some((quarantine, expected))
     } else {
         None
     };
@@ -10643,7 +10838,8 @@ where
     let written = fs::read(target)
         .map_err(|error| format!("Failed to read back {}: {error}", target.display()))?;
     verify(&written)?;
-    if let Some(quarantine) = quarantined {
+    if let Some((quarantine, expected)) = quarantined {
+        require_quarantined_generation(&quarantine, expected, target)?;
         cleanup_transition_scratch(quarantine)?;
     }
     cleanup_transition_scratch(staged)
@@ -10758,6 +10954,7 @@ fn existing_folder_header(sync_dir: &Path) -> Option<([u8; SALT_LEN], SyncCrypto
         .iter()
         .rev()
         .chain(artifacts.attachments.iter())
+        .chain(artifacts.recovery.iter())
         .find_map(header_of)
 }
 
@@ -10773,7 +10970,14 @@ fn enable_sync_encryption_in_dir(
 
     let result = (|| -> Result<(), String> {
         let artifacts = collect_sync_folder_artifacts(sync_dir, true);
-        for path in &artifacts.attachments {
+        // The collection is a fixed pre-transition snapshot. Scratch created by the writes
+        // below is therefore never recursively added, while every retained generation from
+        // an earlier attempt must be sealed before enabled state can be committed.
+        for path in artifacts
+            .recovery
+            .iter()
+            .chain(artifacts.attachments.iter())
+        {
             seal_artifact_in_place(path, &material)?;
         }
         for path in &artifacts.documents {
@@ -10825,7 +11029,11 @@ fn disable_sync_encryption_in_dir(sync_dir: &Path, key: &[u8; KEY_LEN]) -> Resul
     let lock = acquire_sync_lock(sync_dir)?;
     let result = (|| -> Result<(), String> {
         let artifacts = collect_sync_folder_artifacts(sync_dir, false);
-        for path in &artifacts.attachments {
+        for path in artifacts
+            .recovery
+            .iter()
+            .chain(artifacts.attachments.iter())
+        {
             open_artifact_in_place(path, key)?;
         }
         for path in &artifacts.documents {
@@ -10878,7 +11086,12 @@ fn change_sync_encryption_passphrase_in_dir(
     let result = (|| -> Result<(), String> {
         let artifacts = collect_sync_folder_artifacts(sync_dir, false);
         let mut recovered_by_salt: HashMap<[u8; SALT_LEN], SyncKeyMaterial> = HashMap::new();
-        for path in artifacts.attachments.iter().chain(artifacts.documents.iter()) {
+        for path in artifacts
+            .recovery
+            .iter()
+            .chain(artifacts.attachments.iter())
+            .chain(artifacts.documents.iter())
+        {
             rewrap_artifact_in_place(path, old_key, &next, next_passphrase, &mut recovered_by_salt)?;
         }
         Ok(())

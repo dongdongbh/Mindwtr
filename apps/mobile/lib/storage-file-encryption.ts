@@ -582,15 +582,19 @@ export const createFileSyncEncryptionRemotePort = async (
 
     return {
         list: async (): Promise<SyncEncryptionRemoteEntry[]> => {
+            // Core snapshots this array once before it starts a transition. Include stale
+            // stage/quarantine generations from earlier failed attempts as attachment-kind
+            // entries so they are transformed in place on enable/disable/rotation. Scratch
+            // created by this run is added to the maps only after this snapshot and cannot
+            // recursively enter the same transition.
             const entries: SyncEncryptionRemoteEntry[] = [];
             for (const name of documents.entries.keys()) {
-                if (!isTransitionScratchName(name) && isSyncDocumentName(name)) entries.push({ name, kind: 'document' });
+                if (isTransitionScratchName(name)) entries.push({ name, kind: 'attachment' });
+                else if (isSyncDocumentName(name)) entries.push({ name, kind: 'document' });
             }
             if (attachments) {
                 for (const name of attachments.entries.keys()) {
-                    if (!isTransitionScratchName(name)) {
-                        entries.push({ name: `${ATTACHMENT_PREFIX}${name}`, kind: 'attachment' });
-                    }
+                    entries.push({ name: `${ATTACHMENT_PREFIX}${name}`, kind: 'attachment' });
                 }
             }
             return entries;
@@ -643,6 +647,12 @@ export const createFileSyncEncryptionRemotePort = async (
             if (!written || await versionFor(written) !== await versionFor(bytes)) {
                 throw new SyncEncryptionRemoteConflictError(`${name} could not be verified after transition write`);
             }
+            if (quarantineUri) {
+                const retained = await readSyncArtifactBytes(quarantineUri);
+                if (!retained || await versionFor(retained) !== expectedVersion) {
+                    throw new SyncEncryptionRemoteConflictError(`${name} quarantine changed during sync encryption transition`);
+                }
+            }
             await deleteSyncArtifact(stageUri);
             location.directory.entries.delete(stageName);
             if (quarantineUri && quarantineName) {
@@ -670,6 +680,10 @@ export const createFileSyncEncryptionRemotePort = async (
             await testHooks.onMutationPoint?.('before-remove-commit', name);
             if ((await location.directory.listExact(location.leaf)).length !== 0) {
                 throw new SyncEncryptionRemoteConflictError(`${name} was recreated by another writer`);
+            }
+            const retained = await readSyncArtifactBytes(quarantineUri);
+            if (!retained || await versionFor(retained) !== expectedVersion) {
+                throw new SyncEncryptionRemoteConflictError(`${name} quarantine changed during sync encryption transition`);
             }
             await deleteSyncArtifact(quarantineUri);
             location.directory.entries.delete(quarantineName);

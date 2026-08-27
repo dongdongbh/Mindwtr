@@ -612,6 +612,44 @@ describe('File Sync transitions through core orchestration', () => {
       .rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
     expect(fs.files.get(attachmentUri)).toEqual(peerRecreated);
     expect([...fs.files.keys()].some((uri) => uri.includes('.mindwtr-et-q-'))).toBe(true);
+
+    fs.files.clear();
+    seedPlaintextFolder();
+    const changedQuarantine = new Uint8Array([8, 8, 8]);
+    const changedPort = await createFileSyncEncryptionRemotePort(SYNC_URI, {
+      onMutationPoint: (point, name) => {
+        if (point === 'before-install' && name === attachmentName) {
+          const quarantineUri = [...fs.files.keys()].find((uri) => uri.includes('.mindwtr-et-q-'));
+          if (quarantineUri) fs.files.set(quarantineUri, changedQuarantine);
+        }
+      },
+    });
+    const changedBaseline = await changedPort!.read(attachmentName);
+
+    await expect(changedPort!.write(attachmentName, new Uint8Array([9, 9]), changedBaseline.version))
+      .rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+    expect(fs.files.get(attachmentUri)).toEqual(new Uint8Array([9, 9]));
+    expect([...fs.files.entries()].find(([uri]) => uri.includes('.mindwtr-et-q-'))?.[1])
+      .toEqual(changedQuarantine);
+
+    fs.files.clear();
+    seedPlaintextFolder();
+    const changedRemoveQuarantine = new Uint8Array([10, 10, 10]);
+    const changedRemovePort = await createFileSyncEncryptionRemotePort(SYNC_URI, {
+      onMutationPoint: (point, name) => {
+        if (point === 'before-remove-commit' && name === attachmentName) {
+          const quarantineUri = [...fs.files.keys()].find((uri) => uri.includes('.mindwtr-et-q-'));
+          if (quarantineUri) fs.files.set(quarantineUri, changedRemoveQuarantine);
+        }
+      },
+    });
+    const changedRemoveBaseline = await changedRemovePort!.read(attachmentName);
+
+    await expect(changedRemovePort!.remove(attachmentName, changedRemoveBaseline.version!))
+      .rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+    expect(fs.files.has(attachmentUri)).toBe(false);
+    expect([...fs.files.entries()].find(([uri]) => uri.includes('.mindwtr-et-q-'))?.[1])
+      .toEqual(changedRemoveQuarantine);
   });
 
   it('uses bounded exclusive create-new install and preserves a peer collision', async () => {
@@ -661,6 +699,42 @@ describe('File Sync transitions through core orchestration', () => {
     expect([...fs.files.entries()].find(([uri]) => uri.includes('.mindwtr-et-q-'))?.[1]).toEqual(peer);
     expect([...fs.files.keys()].some((uri) => uri.includes('.mindwtr-et-s-'))).toBe(true);
   });
+
+  it('seals every retained plaintext transition generation before retry enable commits', async () => {
+    seedPlaintextFolder();
+    const attachmentName = 'attachments/a1.png';
+    const attachmentUri = `${SYNC_DIR}/${attachmentName}`;
+    const peer = new Uint8Array([4, 4, 4]);
+    let injected = false;
+    const port = await createFileSyncEncryptionRemotePort(SYNC_URI, {
+      onMutationPoint: (point, name) => {
+        if (!injected && point === 'before-quarantine' && name === attachmentName) {
+          injected = true;
+          fs.files.set(attachmentUri, peer);
+        }
+      },
+    });
+    const baseline = await port!.read(attachmentName);
+
+    await expect(port!.write(attachmentName, new Uint8Array([2, 2]), baseline.version))
+      .rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+    const retained = [...fs.files.keys()].filter((uri) => uri.includes('.mindwtr-et-')).sort();
+    expect(retained).toHaveLength(2);
+    expect(retained.every((uri) => inspectSyncArtifact(fs.files.get(uri)!).kind === 'plaintext')).toBe(true);
+
+    await enableSyncEncryption(PASSPHRASE);
+
+    const material = await getSyncEncryptionMaterial();
+    expect(material).not.toBeNull();
+    expect([...fs.files.keys()].filter((uri) => uri.includes('.mindwtr-et-')).sort()).toEqual(retained);
+    const { decryptSyncArtifact } = await import('@mindwtr/core');
+    for (const uri of retained) {
+      const sealed = fs.files.get(uri)!;
+      expect(inspectSyncArtifact(sealed).kind).toBe('encrypted');
+      await expect(decryptSyncArtifact(sealed, material!.key, mobileSyncCryptoPrimitives)).resolves.toBeDefined();
+    }
+    await expect(getMobileSyncEncryptionStatus()).resolves.toMatchObject({ state: 'enabled' });
+  }, 30_000);
 
   it('resumes an interrupted enable without re-deriving a second salt', async () => {
     seedPlaintextFolder();
