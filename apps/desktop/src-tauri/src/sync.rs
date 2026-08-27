@@ -4793,6 +4793,56 @@ mod tests {
     }
 
     #[test]
+    fn an_off_state_device_does_not_treat_an_unreadable_encrypted_document_as_empty() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let encrypted = dir.path().join(encrypted_artifact_name(DATA_FILE_NAME));
+        fs::create_dir(&encrypted).expect("unreadable encrypted artifact");
+
+        let error = read_sync_file_versioned_from_dir(dir.path())
+            .expect_err("an unreadable encrypted generation must fail closed");
+
+        assert!(
+            error.contains("Failed to inspect sync artifact"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            encrypted.is_dir(),
+            "the peer generation must remain untouched"
+        );
+        assert!(
+            !dir.path().join(DATA_FILE_NAME).exists(),
+            "the read must not create a plaintext fork"
+        );
+    }
+
+    #[test]
+    fn an_enabled_device_does_not_treat_an_unreadable_plaintext_document_as_empty() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let plaintext = dir.path().join(DATA_FILE_NAME);
+        fs::create_dir(&plaintext).expect("unreadable plaintext artifact");
+        let material = test_material(1);
+
+        let error = read_sync_file_versioned_from_dir_with(
+            dir.path(),
+            SyncFileCrypto::Enabled(&material),
+        )
+        .expect_err("an unreadable plaintext generation must fail closed");
+
+        assert!(
+            error.contains("Failed to inspect sync artifact"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            plaintext.is_dir(),
+            "the peer generation must remain untouched"
+        );
+        assert!(
+            !dir.path().join(encrypted_artifact_name(DATA_FILE_NAME)).exists(),
+            "the read must not create an encrypted fork"
+        );
+    }
+
+    #[test]
     fn an_off_state_device_with_a_populated_plaintext_remote_ignores_the_enc_name_entirely() {
         // Invariant #1: an existing install must not change behavior, and must not start
         // reading (or erroring on) a name it never looked at before.
@@ -10338,10 +10388,10 @@ fn read_sync_file_with_source_from_dir_with(
         // device looks for the plaintext a peer's disable transition restored, because
         // treating that as an empty remote would merge into a fresh generation and fork.
         if !crypto.is_on() {
-            if let Some(discovery) = detect_encrypted_sync_document(sync_dir) {
+            if let Some(discovery) = detect_encrypted_sync_document(sync_dir)? {
                 return Err(discovery);
             }
-        } else if plaintext_sync_document_exists(sync_dir) {
+        } else if plaintext_sync_document_exists(sync_dir)? {
             return Err(SYNC_ENCRYPTION_REMOTE_PLAINTEXT.to_string());
         }
         return Ok(SyncFileRead {
@@ -10362,7 +10412,7 @@ fn read_sync_file_with_source_from_dir_with(
             // A plain-named file whose bytes are MWENC1 is not "invalid JSON to repair"
             // (decision #4) — classify it before the recovery chain can rotate anything.
             if !crypto.is_on() {
-                if let Some(discovery) = classify_encrypted_bytes(&sync_file) {
+                if let Some(discovery) = classify_encrypted_bytes(&sync_file)? {
                     return Err(discovery);
                 }
             }
@@ -10382,27 +10432,38 @@ fn read_sync_file_with_source_from_dir_with(
 /// Encodes an MWENC1 discovery as `SYNC_ENCRYPTION_REMOTE_ENCRYPTED:<saltHex>:<mKib>:<t>:<p>`.
 /// The command layer parses it, persists `remote-encrypted-no-key`, and hands TS the bare
 /// sentinel — keeping the AppHandle-free `*_from_dir` functions directly unit-testable.
-fn classify_encrypted_bytes(path: &Path) -> Option<String> {
-    let bytes = fs::read(path).ok()?;
-    match inspect_sync_artifact(&bytes) {
+fn read_sync_artifact_if_present(path: &Path) -> Result<Option<Vec<u8>>, String> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!(
+            "Failed to inspect sync artifact {}: {error}",
+            path.display()
+        )),
+    }
+}
+
+fn classify_encrypted_bytes(path: &Path) -> Result<Option<String>, String> {
+    let Some(bytes) = read_sync_artifact_if_present(path)? else {
+        return Ok(None);
+    };
+    Ok(match inspect_sync_artifact(&bytes) {
         SyncArtifactInspection::Encrypted(header) => Some(encrypted_discovery_marker(&header)),
         // A header that is present but unreadable is still never "repair me".
         SyncArtifactInspection::Unsupported(reason) => Some(terminal_error(reason)),
         SyncArtifactInspection::Plaintext => None,
-    }
+    })
 }
 
 /// True when a non-empty, non-MWENC1 sync document sits at the plaintext name. Mirrors core's
 /// `isPlaintextSyncArtifact`; an empty or whitespace-only file is evidence of nothing.
-fn plaintext_sync_document_exists(sync_dir: &Path) -> bool {
-    fs::read(sync_dir.join(DATA_FILE_NAME)).is_ok_and(|bytes| is_plaintext_sync_artifact(&bytes))
+fn plaintext_sync_document_exists(sync_dir: &Path) -> Result<bool, String> {
+    Ok(read_sync_artifact_if_present(&sync_dir.join(DATA_FILE_NAME))?
+        .is_some_and(|bytes| is_plaintext_sync_artifact(&bytes)))
 }
 
-fn detect_encrypted_sync_document(sync_dir: &Path) -> Option<String> {
+fn detect_encrypted_sync_document(sync_dir: &Path) -> Result<Option<String>, String> {
     let encrypted = sync_dir.join(encrypted_artifact_name(DATA_FILE_NAME));
-    if !encrypted.exists() {
-        return None;
-    }
     classify_encrypted_bytes(&encrypted)
 }
 
