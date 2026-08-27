@@ -11,6 +11,7 @@ import {
   SyncEncryptionTerminalError,
   WebDavRemoteWriteConflictError,
   type Attachment,
+  type AttachmentDownloadExpectation,
   type AttachmentTransferLifecycleOptions,
   type AttachmentTransferResult,
   type SyncKeyMaterial,
@@ -27,7 +28,10 @@ import {
   getLocalAttachmentPresence,
   readFileAsBytes,
   statAttachmentFile,
+  validateAttachmentHash,
+  writeBytesSafely,
 } from '../attachment-sync-utils';
+import { installAttachmentFileGeneration } from '../attachment-file-installer';
 import { mobileSyncCryptoPrimitives } from '../sync-crypto-native';
 import { assertMobileWebdavConnection } from '../webdav-request-options';
 
@@ -130,6 +134,121 @@ export const isAttachmentSyncAbortError = (error: unknown, signal?: AbortSignal)
 );
 
 let uploadSnapshotSequence = 0;
+let downloadStageSequence = 0;
+
+const buildAttachmentDownloadStagePath = (
+  attachmentsDir: string,
+  attachment: Attachment,
+): string => {
+  const normalizedDir = attachmentsDir.endsWith('/') ? attachmentsDir : `${attachmentsDir}/`;
+  downloadStageSequence += 1;
+  const random = Math.random().toString(16).slice(2, 10);
+  const safeId = attachment.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'attachment';
+  return `${normalizedDir}.mindwtr-download-${Date.now()}-${downloadStageSequence}-${random}-${safeId}.staged`;
+};
+
+export const deleteAttachmentDownloadStageBestEffort = async (stagedPath: string): Promise<void> => {
+  await FileSystem.deleteAsync(stagedPath, { idempotent: true }).catch(() => undefined);
+};
+
+type InstallStagedAttachmentDownloadOptions = {
+  attachment: Attachment;
+  stagedPath: string;
+  targetPath: string;
+  expectation: AttachmentDownloadExpectation;
+  signal?: AbortSignal;
+  expectedStagedHash?: string;
+};
+
+/**
+ * Validate the exact app-private scratch file, then hand publication to the
+ * native generation-bound installer. Once native installation starts, JS must
+ * never delete the scratch path: a conflict or interrupted journal may name it
+ * as the only preserved copy of one generation.
+ */
+export const installStagedAttachmentDownload = async ({
+  attachment,
+  stagedPath,
+  targetPath,
+  expectation,
+  signal,
+  expectedStagedHash,
+}: InstallStagedAttachmentDownloadOptions): Promise<boolean> => {
+  let nativeInstallStarted = false;
+  try {
+    assertAttachmentSyncNotAborted(signal);
+    const stagedBytes = await readFileAsBytes(stagedPath);
+    const actualStagedHash = await computeSha256Hex(stagedBytes);
+    if (!actualStagedHash) throw new Error('Attachment download hash is unavailable');
+    if (expectedStagedHash && actualStagedHash !== expectedStagedHash) {
+      throw new Error('Attachment download scratch file changed before installation');
+    }
+    await validateAttachmentHash(attachment, stagedBytes);
+    assertAttachmentSyncNotAborted(signal);
+    nativeInstallStarted = true;
+    const result = await installAttachmentFileGeneration(
+      stagedPath,
+      targetPath,
+      expectation,
+      actualStagedHash,
+    );
+    if (result.status !== 'installed') return false;
+    attachment.fileHash = actualStagedHash;
+    await deleteAttachmentDownloadStageBestEffort(stagedPath);
+    return true;
+  } catch (error) {
+    if (!nativeInstallStarted) await deleteAttachmentDownloadStageBestEffort(stagedPath);
+    throw error;
+  }
+};
+
+/** Write plaintext download bytes to a unique managed scratch file and install
+ * that exact generation. A false result is a local-generation conflict; the
+ * native result owns every preserved path, so no JS cleanup occurs. */
+export const installAttachmentDownloadBytes = async (
+  attachment: Attachment,
+  attachmentsDir: string,
+  targetPath: string,
+  bytes: Uint8Array,
+  expectation: AttachmentDownloadExpectation,
+  signal?: AbortSignal,
+): Promise<boolean> => {
+  const stagedPath = buildAttachmentDownloadStagePath(attachmentsDir, attachment);
+  const expectedStagedHash = await computeSha256Hex(bytes);
+  if (!expectedStagedHash) {
+    throw new Error('Attachment download hash is unavailable');
+  }
+  try {
+    assertAttachmentSyncNotAborted(signal);
+    await writeBytesSafely(stagedPath, bytes);
+  } catch (error) {
+    await deleteAttachmentDownloadStageBestEffort(stagedPath);
+    throw error;
+  }
+  return installStagedAttachmentDownload({
+    attachment,
+    stagedPath,
+    targetPath,
+    expectation,
+    signal,
+    expectedStagedHash,
+  });
+};
+
+/** CloudKit's native fetch must receive scratch, never the canonical target. */
+export const createAttachmentDownloadStagePath = buildAttachmentDownloadStagePath;
+
+/** A present expectation was hashed from attachment.uri, so publication must
+ * CAS that exact path even when remote metadata now suggests another suffix. */
+export const resolveAttachmentDownloadTargetPath = (
+  attachment: Attachment,
+  fallbackTargetPath: string,
+  expectation: AttachmentDownloadExpectation,
+): string => (
+  expectation.kind === 'present' && attachment.uri
+    ? attachment.uri
+    : fallbackTargetPath
+);
 
 /**
  * Copy the live attachment into an app-private file before hashing or uploading

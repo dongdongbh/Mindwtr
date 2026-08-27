@@ -28,7 +28,9 @@ import {
 import {
   assertAttachmentSyncNotAborted,
   isAttachmentSyncAbortError,
+  installAttachmentDownloadBytes,
   openAttachmentBytesFromDownload,
+  resolveAttachmentDownloadTargetPath,
   runMobileAttachmentLifecycle,
   sealAttachmentBytesForUpload,
 } from './common';
@@ -139,7 +141,7 @@ export const syncFileAttachments = async (
     // referenced object exists before settings commit. Marking the clone
     // available is only the proof signal consumed by the shared probe; neither
     // localStatus nor this clone is persisted.
-    onDownload: async (attachment) => {
+    onDownload: async (attachment, expectation) => {
       if (!attachment.cloudKey) return false;
       const filename = remoteFilenameFor(attachment.cloudKey, attachment);
       const remoteUri = syncDir.type === 'file'
@@ -159,8 +161,20 @@ export const syncFileAttachments = async (
           .then((value) => openAttachmentBytesFromDownload(value, options.material));
         await validateAttachmentHash(attachment, bytes);
         assertAttachmentSyncNotAborted(signal);
-        const targetUri = `${attachmentsDir}${filename}`;
-        await writeBytesSafely(targetUri, bytes);
+        const targetUri = resolveAttachmentDownloadTargetPath(
+          attachment,
+          `${attachmentsDir}${filename}`,
+          expectation,
+        );
+        const installed = await installAttachmentDownloadBytes(
+          attachment,
+          attachmentsDir,
+          targetUri,
+          bytes,
+          expectation,
+          signal,
+        );
+        if (!installed) return false;
         attachment.uri = targetUri;
         attachment.localStatus = 'available';
         if (!Number.isFinite(attachment.size ?? NaN)) attachment.size = bytes.byteLength;

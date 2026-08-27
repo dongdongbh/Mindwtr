@@ -1,6 +1,7 @@
 package tech.dongdongbh.mindwtr.attachmentfileinstaller
 
 import java.io.File
+import java.io.RandomAccessFile
 import java.nio.charset.StandardCharsets
 import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
@@ -102,6 +103,48 @@ private class MoveHookOps(
   }
 }
 
+private class CopyMutationOps(
+  private val delegate: AttachmentInstallerFileOps,
+  private val replacement: String,
+) : AttachmentInstallerFileOps by delegate {
+  override fun copySnapshot(source: File, destination: File) {
+    source.writeText(replacement)
+    delegate.copySnapshot(source, destination)
+  }
+}
+
+private class JournalFaultOps(
+  private val delegate: AttachmentInstallerFileOps,
+) : AttachmentInstallerFileOps by delegate {
+  private var writes = 0
+
+  override fun writeUtf8Durably(file: File, content: String) {
+    delegate.writeUtf8Durably(file, content)
+    writes += 1
+    if (writes == 1) throw IllegalStateException("simulated crash after initial journal")
+  }
+}
+
+private class LinkBeforeUnlinkFaultOps(
+  private val delegate: AttachmentInstallerFileOps,
+  private val failMove: Int,
+) : AttachmentInstallerFileOps by delegate {
+  private var moves = 0
+
+  override fun moveExclusive(source: File, destination: File): Boolean {
+    moves += 1
+    if (moves != failMove) return delegate.moveExclusive(source, destination)
+    Files.createLink(destination.toPath(), source.toPath())
+    throw IllegalStateException("simulated crash after link before unlink")
+  }
+}
+
+private fun AttachmentFileInstallerCore.install(
+  staged: File,
+  target: File,
+  expected: ExpectedAttachmentGeneration,
+): AttachmentInstallOutcome = install(staged, target, expected, sha256(Files.readAllBytes(staged.toPath())))
+
 class AttachmentFileInstallerCoreTest {
   private val ops = TestInstallerFileOps()
 
@@ -112,7 +155,7 @@ class AttachmentFileInstallerCoreTest {
 
     val result = fixture.installer(ops).install(staged, target, ExpectedAttachmentGeneration.Absent)
 
-    assertEquals(AttachmentInstallOutcome.Installed, result)
+    assertEquals(AttachmentInstallOutcome.Installed(), result)
     assertEquals("new bytes", target.readText())
     assertFalse(staged.exists())
   }
@@ -144,10 +187,11 @@ class AttachmentFileInstallerCoreTest {
       ExpectedAttachmentGeneration.Present(expected),
     )
 
-    assertEquals(AttachmentInstallOutcome.Installed, result)
+    val installed = result as AttachmentInstallOutcome.Installed
     assertEquals("new bytes", target.readText())
     assertFalse(staged.exists())
     assertTrue(fixture.internalArtifacts().isEmpty())
+    assertEquals("old bytes", installed.preservedFile?.readText())
   }
 
   @Test
@@ -217,7 +261,7 @@ class AttachmentFileInstallerCoreTest {
       target,
       ExpectedAttachmentGeneration.Present(expected),
     )
-    assertEquals(AttachmentInstallOutcome.Installed, result)
+    assertTrue(result is AttachmentInstallOutcome.Installed)
     assertEquals("candidate", target.readText())
     assertTrue(fixture.internalArtifacts().isEmpty())
   }
@@ -263,6 +307,210 @@ class AttachmentFileInstallerCoreTest {
     }
   }
 
+  @Test
+  fun absentStageReplacementFailsBeforePublishingTarget() = withFixture { fixture ->
+    val staged = fixture.stage("validated download")
+    val expectedDownload = ops.sha256(staged)
+    val target = fixture.target("absent-stage-race.bin")
+
+    assertFailsWithMessage("changed before native snapshot") {
+      fixture.installer(CopyMutationOps(ops, "replacement bytes")).install(
+        staged,
+        target,
+        ExpectedAttachmentGeneration.Absent,
+        expectedDownload,
+      )
+    }
+
+    assertFalse(target.exists())
+    assertTrue(fixture.internalArtifacts().isEmpty())
+  }
+
+  @Test
+  fun presentStageReplacementFailsBeforeQuarantiningTarget() = withFixture { fixture ->
+    val staged = fixture.stage("validated download")
+    val expectedDownload = ops.sha256(staged)
+    val target = fixture.target("present-stage-race.bin").apply { writeText("old generation") }
+
+    assertFailsWithMessage("changed before native snapshot") {
+      fixture.installer(CopyMutationOps(ops, "replacement bytes")).install(
+        staged,
+        target,
+        ExpectedAttachmentGeneration.Present(ops.sha256(target)),
+        expectedDownload,
+      )
+    }
+
+    assertEquals("old generation", target.readText())
+    assertTrue(fixture.internalArtifacts().isEmpty())
+  }
+
+  @Test
+  fun initialJournalCrashRecoversUntouchedTargetAndRetries() = withFixture { fixture ->
+    val staged = fixture.stage("new generation")
+    val target = fixture.target("journal-crash.bin").apply { writeText("old generation") }
+    val expectedLocal = ops.sha256(target)
+
+    try {
+      fixture.installer(JournalFaultOps(ops)).install(
+        staged,
+        target,
+        ExpectedAttachmentGeneration.Present(expectedLocal),
+      )
+      fail("initial journal fault must interrupt the install")
+    } catch (_: IllegalStateException) {
+    }
+    assertEquals("old generation", target.readText())
+
+    val result = fixture.installer(ops).install(
+      staged,
+      target,
+      ExpectedAttachmentGeneration.Present(expectedLocal),
+    ) as AttachmentInstallOutcome.Installed
+    assertEquals("new generation", target.readText())
+    assertEquals("old generation", result.preservedFile?.readText())
+    assertTrue(fixture.internalArtifacts().isEmpty())
+  }
+
+  @Test
+  fun linkBeforeUnlinkCrashRecoversAndRetriesWithoutPermanentConflict() = withFixture { fixture ->
+    val staged = fixture.stage("new generation")
+    val target = fixture.target("link-crash.bin").apply { writeText("old generation") }
+    val expectedLocal = ops.sha256(target)
+
+    try {
+      fixture.installer(LinkBeforeUnlinkFaultOps(ops, failMove = 1)).install(
+        staged,
+        target,
+        ExpectedAttachmentGeneration.Present(expectedLocal),
+      )
+      fail("link-before-unlink fault must interrupt the install")
+    } catch (_: IllegalStateException) {
+    }
+
+    val result = fixture.installer(ops).install(
+      staged,
+      target,
+      ExpectedAttachmentGeneration.Present(expectedLocal),
+    ) as AttachmentInstallOutcome.Installed
+    assertEquals("new generation", target.readText())
+    assertEquals("old generation", result.preservedFile?.readText())
+    assertTrue(fixture.internalArtifacts().isEmpty())
+  }
+
+  @Test
+  fun retainedOldInodeSurvivesLateWriteThroughPreopenedDescriptor() = withFixture { fixture ->
+    val staged = fixture.stage("new generation")
+    val target = fixture.target("late-writer.bin").apply { writeText("old generation") }
+    val expectedLocal = ops.sha256(target)
+
+    RandomAccessFile(target, "rw").use { writer ->
+      val result = fixture.installer(ops).install(
+        staged,
+        target,
+        ExpectedAttachmentGeneration.Present(expectedLocal),
+      ) as AttachmentInstallOutcome.Installed
+      writer.seek(0)
+      writer.write("late old bytes".toByteArray())
+      writer.setLength("late old bytes".length.toLong())
+      writer.fd.sync()
+
+      assertEquals("new generation", target.readText())
+      assertEquals("late old bytes", result.preservedFile?.readText())
+    }
+  }
+
+  @Test
+  fun recoveryPreservesDistinctSameHashQuarantineBeforeRestart() = withFixture { fixture ->
+    val staged = fixture.stage("new generation")
+    val target = fixture.target("distinct-recovery-quarantine.bin").apply { writeText("old generation") }
+    val expectedLocal = ops.sha256(target)
+
+    try {
+      fixture.installer(JournalFaultOps(ops)).install(
+        staged,
+        target,
+        ExpectedAttachmentGeneration.Present(expectedLocal),
+      )
+      fail("initial journal fault must interrupt the install")
+    } catch (_: IllegalStateException) {
+    }
+
+    // Model an uncoordinated writer creating a distinct inode with the same
+    // bytes at the active quarantine name before recovery observes it.
+    val quarantine = fixture.activeArtifact(".quarantine").apply { writeText("old generation") }
+    RandomAccessFile(quarantine, "rw").use { lateWriter ->
+      val result = fixture.installer(ops).install(
+        staged,
+        target,
+        ExpectedAttachmentGeneration.Present(expectedLocal),
+      ) as AttachmentInstallOutcome.Installed
+
+      lateWriter.seek(0)
+      lateWriter.write("late quarantine bytes".toByteArray())
+      lateWriter.setLength("late quarantine bytes".length.toLong())
+      lateWriter.fd.sync()
+
+      assertEquals("new generation", target.readText())
+      assertEquals("old generation", result.preservedFile?.readText())
+      assertTrue(fixture.preservedArtifacts().any { it.readText() == "late quarantine bytes" })
+    }
+  }
+
+  @Test
+  fun completedRecoveryPreservesDistinctSameHashActiveQuarantine() = withFixture { fixture ->
+    val staged = fixture.stage("new generation")
+    val target = fixture.target("distinct-completed-quarantine.bin").apply { writeText("old generation") }
+    val expectedLocal = ops.sha256(target)
+
+    try {
+      fixture.installer(LinkBeforeUnlinkFaultOps(ops, failMove = 3)).install(
+        staged,
+        target,
+        ExpectedAttachmentGeneration.Present(expectedLocal),
+      )
+      fail("preservation link-before-unlink fault must interrupt the install")
+    } catch (_: IllegalStateException) {
+    }
+
+    val quarantine = fixture.activeArtifact(".quarantine")
+    Files.delete(quarantine.toPath())
+    quarantine.writeText("old generation")
+    RandomAccessFile(quarantine, "rw").use { lateWriter ->
+      val result = fixture.installer(ops).install(
+        staged,
+        target,
+        ExpectedAttachmentGeneration.Present(expectedLocal),
+      ) as AttachmentInstallOutcome.Installed
+
+      lateWriter.seek(0)
+      lateWriter.write("late replacement bytes".toByteArray())
+      lateWriter.setLength("late replacement bytes".length.toLong())
+      lateWriter.fd.sync()
+
+      assertEquals("new generation", target.readText())
+      assertEquals("old generation", result.preservedFile?.readText())
+      assertTrue(fixture.preservedArtifacts().any { it.readText() == "late replacement bytes" })
+      assertFalse(quarantine.exists())
+    }
+  }
+
+  @Test
+  fun absentRetryTreatsAlreadyPublishedMatchingBytesAsInstalled() = withFixture { fixture ->
+    val staged = fixture.stage("same generation")
+    val target = fixture.target("absent-retry.bin").apply { writeText("same generation") }
+
+    val result = fixture.installer(ops).install(
+      staged,
+      target,
+      ExpectedAttachmentGeneration.Absent,
+    )
+
+    assertEquals(AttachmentInstallOutcome.Installed(), result)
+    assertFalse(staged.exists())
+    assertEquals("same generation", target.readText())
+  }
+
   private fun assertFailsWithMessage(expected: String, action: () -> Unit) {
     try {
       action()
@@ -302,8 +550,17 @@ class AttachmentFileInstallerCoreTest {
 
     fun target(name: String): File = attachments.resolve(name)
 
+    fun activeArtifact(suffix: String): File {
+      val journal = internalArtifacts().single { it.name.endsWith(".journal") }
+      return attachments.resolve(journal.name.removeSuffix(".journal") + suffix)
+    }
+
     fun internalArtifacts(): List<File> = attachments.listFiles()
       .orEmpty()
       .filter { it.name.startsWith(INSTALLER_ARTIFACT_PREFIX) }
+
+    fun preservedArtifacts(): List<File> = attachments.listFiles()
+      .orEmpty()
+      .filter { it.name.startsWith(INSTALLER_PRESERVED_PREFIX) }
   }
 }

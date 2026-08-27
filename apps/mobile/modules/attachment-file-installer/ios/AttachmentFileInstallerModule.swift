@@ -4,6 +4,7 @@ import ExpoModulesCore
 import Foundation
 
 private let installerArtifactPrefix = ".mindwtr-install-"
+private let installerPreservedPrefix = ".mindwtr-preserved-"
 private let installerLockName = ".mindwtr-attachment-installer.lock"
 private let sha256Pattern = try! NSRegularExpression(pattern: "^[a-f0-9]{64}$")
 
@@ -21,13 +22,13 @@ private enum ExpectedAttachmentGeneration {
 }
 
 private enum AttachmentInstallOutcome {
-  case installed
+  case installed(preservedUrl: URL?)
   case conflict(preservedUrl: URL)
 }
 
 private enum JournalRecovery {
   case proceed
-  case completed(stagedUrl: URL)
+  case completed(stagedUrl: URL, preservedUrl: URL?)
   case conflict(preservedUrl: URL)
 }
 
@@ -35,13 +36,16 @@ private struct InstallArtifacts {
   let journal: URL
   let candidate: URL
   let quarantine: URL
+  let preservationPrefix: String
 }
 
 private struct InstallJournal {
   let targetPath: String
   let stagedPath: String
   let candidateSha256: String
+  let expectedLocalSha256: String?
   let displacedSha256: String?
+  let preservationPath: String?
 }
 
 private func installerError(_ message: String, underlying: Error? = nil) -> NSError {
@@ -72,7 +76,8 @@ private final class AttachmentFileInstallerEngine {
   func install(
     stagedInput: URL,
     targetInput: URL,
-    expected: ExpectedAttachmentGeneration
+    expected: ExpectedAttachmentGeneration,
+    expectedDownloadSha256: String
   ) throws -> AttachmentInstallOutcome {
     try ensureDirectory(targetRoot)
     try requireDirectory(targetRoot, label: "managed attachment root")
@@ -86,6 +91,9 @@ private final class AttachmentFileInstallerEngine {
     guard staged != target else {
       throw installerError("Staged and target attachment paths must differ")
     }
+    guard isSha256(expectedDownloadSha256) else {
+      throw installerError("Expected download SHA-256 is invalid")
+    }
 
     return try withExclusiveLock(targetRoot.appendingPathComponent(installerLockName)) {
       try self.requireDirectory(self.targetRoot, label: "managed attachment root")
@@ -96,8 +104,8 @@ private final class AttachmentFileInstallerEngine {
 
       let artifacts = self.artifacts(for: target)
       switch try self.recoverJournal(target: target, artifacts: artifacts) {
-      case .completed(let previousStaged) where previousStaged == staged:
-        return .installed
+      case .completed(let previousStaged, let preservedUrl) where previousStaged == staged:
+        return .installed(preservedUrl: preservedUrl)
       case .conflict(let preservedUrl):
         return .conflict(preservedUrl: preservedUrl)
       case .completed, .proceed:
@@ -106,9 +114,20 @@ private final class AttachmentFileInstallerEngine {
 
       try self.prepareCleanArtifacts(artifacts)
       try self.requireRegularFile(staged, label: "staged attachment")
+      try self.copySnapshot(from: staged, to: artifacts.candidate)
+      let candidateSha256 = try self.sha256(artifacts.candidate)
+      guard candidateSha256 == expectedDownloadSha256 else {
+        try self.deleteInternalIfRegular(artifacts.candidate)
+        throw installerError("Staged attachment changed before native snapshot")
+      }
       switch expected {
       case .absent:
-        return try self.installWhenAbsent(staged: staged, target: target, artifacts: artifacts)
+        return try self.installWhenAbsent(
+          staged: staged,
+          target: target,
+          candidateSha256: candidateSha256,
+          artifacts: artifacts
+        )
       case .present(let expectedSha256):
         guard isSha256(expectedSha256) else {
           throw installerError("Expected attachment SHA-256 is invalid")
@@ -117,6 +136,7 @@ private final class AttachmentFileInstallerEngine {
           staged: staged,
           target: target,
           expectedSha256: expectedSha256,
+          candidateSha256: candidateSha256,
           artifacts: artifacts
         )
       }
@@ -126,20 +146,39 @@ private final class AttachmentFileInstallerEngine {
   private func installWhenAbsent(
     staged: URL,
     target: URL,
+    candidateSha256: String,
     artifacts: InstallArtifacts
   ) throws -> AttachmentInstallOutcome {
     switch try nodeKind(target) {
     case .missing:
-      try copySnapshot(from: staged, to: artifacts.candidate)
+      try writeJournal(
+        InstallJournal(
+          targetPath: target.path,
+          stagedPath: staged.path,
+          candidateSha256: candidateSha256,
+          expectedLocalSha256: nil,
+          displacedSha256: nil,
+          preservationPath: nil
+        ),
+        to: artifacts.journal
+      )
       guard try moveExclusive(from: artifacts.candidate, to: target) else {
         try deleteInternalIfRegular(artifacts.candidate)
+        try deleteJournal(artifacts.journal)
         return .conflict(preservedUrl: staged)
       }
       try syncDirectory(targetRoot)
-      deleteStagedBestEffort(staged)
-      return .installed
+      deleteStagedBestEffort(staged, expectedSha256: candidateSha256)
+      try deleteJournal(artifacts.journal)
+      return .installed(preservedUrl: nil)
     case .regularFile:
-      return .conflict(preservedUrl: staged)
+      if try sha256(target) != candidateSha256 {
+        try deleteInternalIfRegular(artifacts.candidate)
+        return .conflict(preservedUrl: staged)
+      }
+      try deleteInternalIfRegular(artifacts.candidate)
+      deleteStagedBestEffort(staged, expectedSha256: candidateSha256)
+      return .installed(preservedUrl: nil)
     case .directory:
       throw installerError("Target attachment path is a directory")
     case .symbolicLink:
@@ -153,6 +192,7 @@ private final class AttachmentFileInstallerEngine {
     staged: URL,
     target: URL,
     expectedSha256: String,
+    candidateSha256: String,
     artifacts: InstallArtifacts
   ) throws -> AttachmentInstallOutcome {
     switch try nodeKind(target) {
@@ -168,14 +208,14 @@ private final class AttachmentFileInstallerEngine {
       throw installerError("Target attachment path is not a regular file")
     }
 
-    try copySnapshot(from: staged, to: artifacts.candidate)
-    let candidateSha256 = try sha256(artifacts.candidate)
     try writeJournal(
       InstallJournal(
         targetPath: target.path,
         stagedPath: staged.path,
         candidateSha256: candidateSha256,
-        displacedSha256: nil
+        expectedLocalSha256: expectedSha256,
+        displacedSha256: nil,
+        preservationPath: nil
       ),
       to: artifacts.journal
     )
@@ -191,7 +231,9 @@ private final class AttachmentFileInstallerEngine {
         targetPath: target.path,
         stagedPath: staged.path,
         candidateSha256: candidateSha256,
-        displacedSha256: displacedSha256
+        expectedLocalSha256: expectedSha256,
+        displacedSha256: displacedSha256,
+        preservationPath: nil
       ),
       to: artifacts.journal
     )
@@ -214,10 +256,20 @@ private final class AttachmentFileInstallerEngine {
       return .conflict(preservedUrl: artifacts.quarantine)
     }
 
-    try deleteInternalIfRegular(artifacts.quarantine)
+    let preservedUrl = try preserveQuarantine(
+      artifacts: artifacts,
+      journal: InstallJournal(
+        targetPath: target.path,
+        stagedPath: staged.path,
+        candidateSha256: candidateSha256,
+        expectedLocalSha256: expectedSha256,
+        displacedSha256: displacedSha256,
+        preservationPath: nil
+      )
+    )
     deleteStagedBestEffort(staged, expectedSha256: candidateSha256)
     try deleteJournal(artifacts.journal)
-    return .installed
+    return .installed(preservedUrl: preservedUrl)
   }
 
   private func recoverJournal(target: URL, artifacts: InstallArtifacts) throws -> JournalRecovery {
@@ -251,35 +303,55 @@ private final class AttachmentFileInstallerEngine {
     try validateSourceContainment(previousStaged)
 
     let targetKind = try requireRecoverableNode(target, label: "journal target")
-    let candidateKind = try requireRecoverableNode(artifacts.candidate, label: "journal candidate")
+    _ = try requireRecoverableNode(artifacts.candidate, label: "journal candidate")
     let quarantineKind = try requireRecoverableNode(artifacts.quarantine, label: "journal quarantine")
+    let preservation: URL? = try journal.preservationPath.map { path in
+      let url = Self.canonical(URL(fileURLWithPath: path))
+      try validatePreservationPath(url, artifacts: artifacts)
+      _ = try requireRecoverableNode(url, label: "journal preservation")
+      return url
+    }
 
     if targetKind == .regularFile {
       let targetSha256 = try sha256(target)
       if targetSha256 == journal.candidateSha256 {
-        if quarantineKind == .regularFile {
-          guard
-            let displaced = journal.displacedSha256,
-            try sha256(artifacts.quarantine) == displaced
-          else {
+        let preservedUrl: URL?
+        if journal.expectedLocalSha256 == nil {
+          guard quarantineKind == .missing else {
             return .conflict(preservedUrl: artifacts.quarantine)
           }
-          try deleteInternalIfRegular(artifacts.quarantine)
+          preservedUrl = nil
+        } else {
+          if quarantineKind == .missing && preservation == nil {
+            return .conflict(preservedUrl: firstPreservedUrl(artifacts.candidate, previousStaged))
+          }
+          preservedUrl = try preserveQuarantine(artifacts: artifacts, journal: journal)
         }
         try deleteInternalIfRegular(artifacts.candidate)
         deleteStagedBestEffort(previousStaged, expectedSha256: journal.candidateSha256)
         try deleteJournal(artifacts.journal)
-        return .completed(stagedUrl: previousStaged)
+        return .completed(stagedUrl: previousStaged, preservedUrl: preservedUrl)
       }
 
-      if let displaced = journal.displacedSha256, targetSha256 == displaced {
-        if quarantineKind == .regularFile, try sha256(artifacts.quarantine) != displaced {
-          return .conflict(preservedUrl: artifacts.quarantine)
+      if let expectedLocal = journal.expectedLocalSha256, targetSha256 == expectedLocal {
+        if let preservation { return .conflict(preservedUrl: preservation) }
+        if quarantineKind == .regularFile {
+          guard try sha256(artifacts.quarantine) == expectedLocal else {
+            return .conflict(preservedUrl: artifacts.quarantine)
+          }
+          // Equal bytes do not prove both names reference the same inode.
+          // Preserve the active quarantine independently before retrying.
+          _ = try preserveActiveQuarantine(artifacts)
         }
-        try deleteInternalIfRegular(artifacts.quarantine)
         try deleteInternalIfRegular(artifacts.candidate)
         try deleteJournal(artifacts.journal)
         return .proceed
+      }
+
+      if journal.expectedLocalSha256 == nil {
+        try deleteInternalIfRegular(artifacts.candidate)
+        try deleteJournal(artifacts.journal)
+        return .conflict(preservedUrl: previousStaged)
       }
 
       return .conflict(
@@ -287,9 +359,8 @@ private final class AttachmentFileInstallerEngine {
       )
     }
 
-    if quarantineKind == .regularFile {
-      let actualDisplaced = try sha256(artifacts.quarantine)
-      if let displaced = journal.displacedSha256, displaced != actualDisplaced {
+    if quarantineKind == .regularFile, let expectedLocal = journal.expectedLocalSha256 {
+      if try sha256(artifacts.quarantine) != expectedLocal {
         return .conflict(preservedUrl: artifacts.quarantine)
       }
       guard try moveExclusive(from: artifacts.quarantine, to: target) else {
@@ -301,9 +372,96 @@ private final class AttachmentFileInstallerEngine {
       return .proceed
     }
 
+    if journal.expectedLocalSha256 == nil && quarantineKind == .missing {
+      try deleteInternalIfRegular(artifacts.candidate)
+      try deleteJournal(artifacts.journal)
+      return .proceed
+    }
+
     return .conflict(
-      preservedUrl: firstPreservedUrl(artifacts.candidate, previousStaged, artifacts.journal)
+      preservedUrl: firstPreservedUrl(artifacts.quarantine, artifacts.candidate, previousStaged, artifacts.journal)
     )
+  }
+
+  private func preserveQuarantine(
+    artifacts: InstallArtifacts,
+    journal: InstallJournal
+  ) throws -> URL {
+    var preserved = try journal.preservationPath.map { path -> URL in
+      let url = Self.canonical(URL(fileURLWithPath: path))
+      try validatePreservationPath(url, artifacts: artifacts)
+      return url
+    }
+    if preserved == nil {
+      preserved = try nextPreservationPath(artifacts)
+      try writeJournal(
+        InstallJournal(
+          targetPath: journal.targetPath,
+          stagedPath: journal.stagedPath,
+          candidateSha256: journal.candidateSha256,
+          expectedLocalSha256: journal.expectedLocalSha256,
+          displacedSha256: journal.displacedSha256,
+          preservationPath: preserved!.path
+        ),
+        to: artifacts.journal
+      )
+    }
+    let preservedUrl = preserved!
+
+    switch try nodeKind(preservedUrl) {
+    case .missing:
+      guard try nodeKind(artifacts.quarantine) == .regularFile else {
+        throw installerError("Quarantined attachment generation is unavailable")
+      }
+      guard try moveExclusive(from: artifacts.quarantine, to: preservedUrl) else {
+        throw installerError("Attachment preservation path already exists")
+      }
+      try syncDirectory(targetRoot)
+    case .regularFile:
+      if try nodeKind(artifacts.quarantine) == .regularFile {
+        guard try sha256(artifacts.quarantine) == sha256(preservedUrl) else {
+          throw installerError("Attachment preservation generations diverged")
+        }
+        // Equal bytes are not an inode-identity proof. Retain the active
+        // quarantine under a fresh name before clearing its installer slot.
+        _ = try preserveActiveQuarantine(artifacts)
+      }
+    case .directory:
+      throw installerError("Attachment preservation path is a directory")
+    case .symbolicLink:
+      throw installerError("Attachment preservation path is a symbolic link")
+    case .other:
+      throw installerError("Attachment preservation path is not a regular file")
+    }
+    return preservedUrl
+  }
+
+  private func preserveActiveQuarantine(_ artifacts: InstallArtifacts) throws -> URL {
+    guard try nodeKind(artifacts.quarantine) == .regularFile else {
+      throw installerError("Quarantined attachment generation is unavailable")
+    }
+    let freshPreservation = try nextPreservationPath(artifacts)
+    guard try moveExclusive(from: artifacts.quarantine, to: freshPreservation) else {
+      throw installerError("Attachment preservation path already exists")
+    }
+    try syncDirectory(targetRoot)
+    return freshPreservation
+  }
+
+  private func nextPreservationPath(_ artifacts: InstallArtifacts) throws -> URL {
+    for attempt in 0..<10_000 {
+      let candidate = targetRoot.appendingPathComponent("\(artifacts.preservationPrefix)\(attempt)")
+      if try nodeKind(candidate) == .missing { return candidate }
+    }
+    throw installerError("No attachment preservation path is available")
+  }
+
+  private func validatePreservationPath(_ file: URL, artifacts: InstallArtifacts) throws {
+    guard Self.canonical(file.deletingLastPathComponent()) == targetRoot,
+          file.lastPathComponent.hasPrefix(artifacts.preservationPrefix)
+    else {
+      throw installerError("Attachment preservation path is outside the managed root")
+    }
   }
 
   private func prepareCleanArtifacts(_ artifacts: InstallArtifacts) throws {
@@ -341,13 +499,16 @@ private final class AttachmentFileInstallerEngine {
     return InstallArtifacts(
       journal: targetRoot.appendingPathComponent("\(installerArtifactPrefix)\(digest).journal"),
       candidate: targetRoot.appendingPathComponent("\(installerArtifactPrefix)\(digest).candidate"),
-      quarantine: targetRoot.appendingPathComponent("\(installerArtifactPrefix)\(digest).quarantine")
+      quarantine: targetRoot.appendingPathComponent("\(installerArtifactPrefix)\(digest).quarantine"),
+      preservationPrefix: "\(installerPreservedPrefix)\(digest)-"
     )
   }
 
   private func validateTargetPath(_ target: URL) throws {
     let name = target.lastPathComponent
-    guard !name.hasPrefix(installerArtifactPrefix), name != installerLockName else {
+    guard !name.hasPrefix(installerArtifactPrefix),
+          !name.hasPrefix(installerPreservedPrefix),
+          name != installerLockName else {
       throw installerError("Target attachment name is reserved")
     }
     let parent = Self.canonical(target.deletingLastPathComponent())
@@ -513,11 +674,13 @@ private final class AttachmentFileInstallerEngine {
 
   private func writeJournal(_ journal: InstallJournal, to file: URL) throws {
     let object: [String: Any] = [
-      "version": 1,
+      "version": 2,
       "targetPath": journal.targetPath,
       "stagedPath": journal.stagedPath,
       "candidateSha256": journal.candidateSha256,
+      "expectedLocalSha256": journal.expectedLocalSha256 ?? NSNull(),
       "displacedSha256": journal.displacedSha256 ?? NSNull(),
+      "preservationPath": journal.preservationPath ?? NSNull(),
     ]
     let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     let temporary = file.appendingPathExtension("write-\(UUID().uuidString)")
@@ -542,9 +705,10 @@ private final class AttachmentFileInstallerEngine {
       throw installerError("Attachment install journal is malformed")
     }
     let expectedKeys: Set<String> = [
-      "version", "targetPath", "stagedPath", "candidateSha256", "displacedSha256",
+      "version", "targetPath", "stagedPath", "candidateSha256",
+      "expectedLocalSha256", "displacedSha256", "preservationPath",
     ]
-    guard Set(object.keys) == expectedKeys, object["version"] as? Int == 1,
+    guard Set(object.keys) == expectedKeys, object["version"] as? Int == 2,
           let targetPath = object["targetPath"] as? String,
           let stagedPath = object["stagedPath"] as? String,
           let candidateSha256 = object["candidateSha256"] as? String,
@@ -552,7 +716,12 @@ private final class AttachmentFileInstallerEngine {
     else {
       throw installerError("Attachment install journal fields are invalid")
     }
+    let expectedLocalSha256 = object["expectedLocalSha256"] as? String
     let displacedSha256 = object["displacedSha256"] as? String
+    let preservationPath = object["preservationPath"] as? String
+    if let expectedLocalSha256, !isSha256(expectedLocalSha256) {
+      throw installerError("Attachment install journal expected-local hash is invalid")
+    }
     if let displacedSha256, !isSha256(displacedSha256) {
       throw installerError("Attachment install journal displaced hash is invalid")
     }
@@ -560,7 +729,9 @@ private final class AttachmentFileInstallerEngine {
       targetPath: targetPath,
       stagedPath: stagedPath,
       candidateSha256: candidateSha256,
-      displacedSha256: displacedSha256
+      expectedLocalSha256: expectedLocalSha256,
+      displacedSha256: displacedSha256,
+      preservationPath: preservationPath
     )
   }
 
@@ -637,7 +808,12 @@ public final class AttachmentFileInstallerModule: Module {
     Name("AttachmentFileInstaller")
 
     AsyncFunction("installAsync") {
-        (stagedPath: String, targetPath: String, expected: [String: String]) -> [String: String] in
+        (
+          stagedPath: String,
+          targetPath: String,
+          expected: [String: String],
+          expectedDownloadSha256: String
+        ) -> [String: String] in
       let fileManager = FileManager.default
       guard
         let documentsRoot = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first,
@@ -653,11 +829,14 @@ public final class AttachmentFileInstallerModule: Module {
       let outcome = try engine.install(
         stagedInput: try Self.fileUrl(stagedPath),
         targetInput: try Self.fileUrl(targetPath),
-        expected: try Self.parseExpected(expected)
+        expected: try Self.parseExpected(expected),
+        expectedDownloadSha256: try Self.parseSha256(expectedDownloadSha256, label: "Expected download")
       )
       switch outcome {
-      case .installed:
-        return ["status": "installed"]
+      case .installed(let preservedUrl):
+        var result = ["status": "installed"]
+        if let preservedUrl { result["preservedPath"] = preservedUrl.absoluteString }
+        return result
       case .conflict(let preservedUrl):
         return ["status": "conflict", "preservedPath": preservedUrl.absoluteString]
       }
@@ -681,13 +860,16 @@ public final class AttachmentFileInstallerModule: Module {
     case "absent":
       return .absent
     case "present":
-      let digest = value["sha256"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-      guard isSha256(digest) else {
-        throw installerError("Expected attachment SHA-256 is invalid")
-      }
+      let digest = try parseSha256(value["sha256"] ?? "", label: "Expected attachment")
       return .present(sha256: digest)
     default:
       throw installerError("Expected attachment generation is invalid")
     }
+  }
+
+  private static func parseSha256(_ value: String, label: String) throws -> String {
+    let digest = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard isSha256(digest) else { throw installerError("\(label) SHA-256 is invalid") }
+    return digest
   }
 }

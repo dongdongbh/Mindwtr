@@ -7,6 +7,7 @@ import {
   validateAttachmentForUpload,
   type AppData,
   type Attachment,
+  type AttachmentDownloadExpectation,
   type LocalFileStat,
   type SyncKeyMaterial,
 } from '@mindwtr/core';
@@ -38,11 +39,11 @@ import {
   toArrayBuffer,
   type DropboxAccessTokenResolver,
   validateAttachmentHash,
-  writeBytesSafely,
 } from '../attachment-sync-utils';
 import {
   migrateAttachmentsLocallyBeforeSync,
   createMobileAttachmentUploadSnapshot,
+  installAttachmentDownloadBytes,
   openAttachmentBytesFromDownload,
   prepareBespokeAttachmentContentCandidate,
   sealAttachmentBytesForUpload,
@@ -69,6 +70,7 @@ type PendingDropboxUploadMutation = {
 
 type DropboxDownloadCandidate = {
   attachment: Attachment;
+  expectation: AttachmentDownloadExpectation;
   recoverPendingUpload: boolean;
 };
 
@@ -257,9 +259,9 @@ export const syncDropboxAttachments = async (
       && !isHttp
     ) {
       if (attachment.pendingContentUpload !== true) {
-        downloadQueue.push({ attachment, recoverPendingUpload: false });
+        downloadQueue.push({ attachment, expectation: { kind: 'absent' }, recoverPendingUpload: false });
       } else if (isSha256Hex(attachment.fileHash?.trim().toLowerCase())) {
-        downloadQueue.push({ attachment, recoverPendingUpload: true });
+        downloadQueue.push({ attachment, expectation: { kind: 'absent' }, recoverPendingUpload: true });
       }
     }
   }
@@ -279,7 +281,7 @@ export const syncDropboxAttachments = async (
   if (!attachmentsDir) return foldPatches();
 
   let downloadCount = 0;
-  for (const { attachment, recoverPendingUpload } of downloadQueue) {
+  for (const { attachment, expectation, recoverPendingUpload } of downloadQueue) {
     if (attachment.kind !== 'file') continue;
     if (attachment.deletedAt) continue;
     if (!attachment.cloudKey) continue;
@@ -316,7 +318,15 @@ export const syncDropboxAttachments = async (
       const filename = cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.title)}`;
       const targetUri = `${attachmentsDir}${filename}`;
       assertNotAborted(options.signal);
-      await writeBytesSafely(targetUri, bytes);
+      const installed = await installAttachmentDownloadBytes(
+        attachment,
+        attachmentsDir,
+        targetUri,
+        bytes,
+        expectation,
+        options.signal,
+      );
+      if (!installed) continue;
       let mutated = attachment.uri !== targetUri || attachment.localStatus !== 'available';
       if (recoverPendingUpload && attachment.pendingContentUpload === true) {
         attachment.pendingContentUpload = undefined;

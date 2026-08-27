@@ -5,7 +5,7 @@ export type AttachmentFileExpectedGeneration =
   | { kind: 'present'; sha256: string };
 
 export type AttachmentFileInstallResult =
-  | { status: 'installed' }
+  | { status: 'installed'; preservedPath?: string }
   | { status: 'conflict'; preservedPath: string };
 
 type NativeAttachmentFileInstaller = {
@@ -13,6 +13,7 @@ type NativeAttachmentFileInstaller = {
     stagedPath: string,
     targetPath: string,
     expected: { kind: 'absent' } | { kind: 'present'; sha256: string },
+    expectedDownloadSha256: string,
   ): Promise<unknown>;
 };
 
@@ -29,7 +30,11 @@ const parseNativeResult = (value: unknown): AttachmentFileInstallResult => {
     throw new Error('Attachment file installer returned an invalid result');
   }
   const result = value as Record<string, unknown>;
-  if (result.status === 'installed') return { status: 'installed' };
+  if (result.status === 'installed') {
+    return typeof result.preservedPath === 'string' && result.preservedPath.trim()
+      ? { status: 'installed', preservedPath: result.preservedPath }
+      : { status: 'installed' };
+  }
   if (
     result.status === 'conflict'
     && typeof result.preservedPath === 'string'
@@ -44,6 +49,7 @@ export const installAttachmentFileGeneration = async (
   stagedPath: string,
   targetPath: string,
   expected: AttachmentFileExpectedGeneration,
+  expectedDownloadSha256: string,
 ): Promise<AttachmentFileInstallResult> => {
   const normalizedStagedPath = assertPath(stagedPath, 'Staged attachment path');
   const normalizedTargetPath = assertPath(targetPath, 'Target attachment path');
@@ -53,11 +59,16 @@ export const installAttachmentFileGeneration = async (
   if (normalizedExpected.kind === 'present' && !SHA256_HEX_PATTERN.test(normalizedExpected.sha256)) {
     throw new Error('Expected attachment SHA-256 must be 64 lowercase hexadecimal characters');
   }
+  const normalizedDownloadSha256 = expectedDownloadSha256.trim().toLowerCase();
+  if (!SHA256_HEX_PATTERN.test(normalizedDownloadSha256)) {
+    throw new Error('Expected download SHA-256 must be 64 lowercase hexadecimal characters');
+  }
 
   const result = await (AttachmentFileInstaller as NativeAttachmentFileInstaller).installAsync(
     normalizedStagedPath,
     normalizedTargetPath,
     normalizedExpected,
+    normalizedDownloadSha256,
   );
   return parseNativeResult(result);
 };

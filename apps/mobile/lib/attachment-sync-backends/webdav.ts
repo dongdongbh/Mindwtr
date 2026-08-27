@@ -45,14 +45,15 @@ import {
   WEBDAV_ATTACHMENT_MAX_UPLOADS_PER_SYNC,
   WEBDAV_ATTACHMENT_MIN_INTERVAL_MS,
   WEBDAV_ATTACHMENT_RETRY_OPTIONS,
-  writeBytesSafely,
 } from '../attachment-sync-utils';
 import { assertMobileWebdavConnection, getMobileWebDavRequestOptions } from '../webdav-request-options';
 import {
   assertAttachmentSyncNotAborted,
   isAttachmentSyncAbortError,
+  installAttachmentDownloadBytes,
   migrateAttachmentsLocallyBeforeSync,
   openAttachmentBytesFromDownload,
+  resolveAttachmentDownloadTargetPath,
   runMobileAttachmentLifecycle,
   sealAttachmentBytesForUpload,
   uploadWebdavFileWithFileSystem,
@@ -125,6 +126,7 @@ export const syncWebdavAttachments = async (
   }
 
   const attachmentsDir = await getAttachmentsDir();
+  if (!attachmentsDir) return false;
   const attachmentsById = collectAttachments(appData);
 
   pruneWebdavDownloadBackoff();
@@ -415,7 +417,7 @@ export const syncWebdavAttachments = async (
       // so `didMutate` stays accurate. Fatal (abort) errors are rethrown there and never reach
       // here. This only exists because the shared lifecycle's contract requires the callback.
     },
-    onDownload: async (attachment) => {
+    onDownload: async (attachment, expectation) => {
       if (!attachment.cloudKey) return false;
       const cloudKey = attachment.cloudKey;
       let fileData: ArrayBuffer;
@@ -454,8 +456,20 @@ export const syncWebdavAttachments = async (
       );
       await validateAttachmentHash(attachment, bytes);
       const filename = cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.title)}`;
-      const targetUri = `${attachmentsDir}${filename}`;
-      await writeBytesSafely(targetUri, bytes);
+      const targetUri = resolveAttachmentDownloadTargetPath(
+        attachment,
+        `${attachmentsDir}${filename}`,
+        expectation,
+      );
+      const installed = await installAttachmentDownloadBytes(
+        attachment,
+        attachmentsDir,
+        targetUri,
+        bytes,
+        expectation,
+        signal,
+      );
+      if (!installed) return false;
       attachment.uri = targetUri;
       const statusChanged = attachment.localStatus !== 'available';
       if (statusChanged) {

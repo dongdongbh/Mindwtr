@@ -25,13 +25,16 @@ import {
     readFileAsBytes,
     reportProgress,
     statAttachmentFile,
-    validateAttachmentHash,
     writeBytesSafely,
 } from '../attachment-sync-utils';
 import {
     assertAttachmentSyncNotAborted,
+    createAttachmentDownloadStagePath,
+    deleteAttachmentDownloadStageBestEffort,
+    installStagedAttachmentDownload,
     isAttachmentSyncAbortError,
     migrateAttachmentsLocallyBeforeSync,
+    resolveAttachmentDownloadTargetPath,
     runMobileAttachmentLifecycle,
 } from './common';
 
@@ -115,7 +118,9 @@ const applyFetchedMetadata = (attachment: Attachment, metadata: CloudKitAttachme
     if (metadata.title) attachment.title = metadata.title;
     if (metadata.mimeType) attachment.mimeType = metadata.mimeType;
     if (Number.isFinite(metadata.size ?? NaN)) attachment.size = metadata.size;
-    if (metadata.fileHash) attachment.fileHash = metadata.fileHash;
+    // The generation-bound installer records the SHA-256 of the exact plaintext
+    // it published. Metadata may omit a hash; it must never erase or replace
+    // that post-install identity.
 };
 
 /** The next `settings.attachments` value once the flushed keys are dropped, or `undefined`
@@ -231,21 +236,41 @@ export const syncCloudKitAttachments = async (
             // onUpload's own catch above handles everything except the fatal (abort) case,
             // which it rethrows — that never reaches here. Required by the lifecycle's contract.
         },
-        onDownload: async (attachment) => {
+        onDownload: async (attachment, expectation) => {
             const recordName = parseCloudKitAttachmentKey(attachment.cloudKey);
             if (!recordName) return false;
+            let stagedUri: string | null = null;
+            let installerOwnsStage = false;
             try {
-                const targetUri = buildTargetUri(attachmentsDir, attachment);
+                const targetUri = resolveAttachmentDownloadTargetPath(
+                    attachment,
+                    buildTargetUri(attachmentsDir, attachment),
+                    expectation,
+                );
+                stagedUri = createAttachmentDownloadStagePath(attachmentsDir, attachment);
                 reportProgress(attachment.id, 'download', 0, attachment.size ?? 0, 'active');
-                const metadata = await fetchCloudKitAttachmentAsset(recordName, targetUri, { signal });
+                const metadata = await fetchCloudKitAttachmentAsset(recordName, stagedUri, { signal });
+                // From this point the helper owns cleanup: it removes the stage
+                // only before native installation begins and preserves it after.
+                installerOwnsStage = true;
+                const installed = await installStagedAttachmentDownload({
+                    attachment,
+                    stagedPath: stagedUri,
+                    targetPath: targetUri,
+                    expectation,
+                    signal,
+                });
+                if (!installed) return false;
                 const bytes = await readFileAsBytes(targetUri);
-                await validateAttachmentHash(attachment, bytes);
                 attachment.uri = targetUri;
                 attachment.localStatus = 'available';
                 applyFetchedMetadata(attachment, metadata);
                 reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
                 return true;
             } catch (error) {
+                if (stagedUri && !installerOwnsStage) {
+                    await deleteAttachmentDownloadStageBestEffort(stagedUri);
+                }
                 if (isAttachmentSyncAbortError(error, signal)) throw error;
                 reportProgress(
                     attachment.id,

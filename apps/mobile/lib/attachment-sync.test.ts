@@ -43,7 +43,13 @@ const fileSystemMock = vi.hoisted(() => ({
   createUploadTask: vi.fn(),
 }));
 
+const attachmentFileInstallerMock = vi.hoisted(() => ({
+  installAttachmentFileGeneration: vi.fn(),
+}));
+
 vi.mock('expo-file-system/legacy', () => fileSystemMock);
+
+vi.mock('./attachment-file-installer', () => attachmentFileInstallerMock);
 
 vi.mock('@react-native-async-storage/async-storage', () => ({
   __esModule: true,
@@ -191,6 +197,7 @@ describe('attachment sync', () => {
     fileSystemMock.StorageAccessFramework.makeDirectoryAsync.mockResolvedValue('content://attachments');
     fileSystemMock.StorageAccessFramework.createFileAsync.mockResolvedValue('content://attachments/file');
     fileSystemMock.StorageAccessFramework.writeAsStringAsync.mockResolvedValue(undefined);
+    attachmentFileInstallerMock.installAttachmentFileGeneration.mockResolvedValue({ status: 'installed' });
   });
 
   it('persists generic Android content uris with a native copy into managed storage', async () => {
@@ -1322,6 +1329,7 @@ describe('attachment sync', () => {
     ));
     const dropbox = await import('./dropbox-sync');
     vi.mocked(dropbox.downloadDropboxFile).mockResolvedValue(bytes.slice().buffer as ArrayBuffer);
+    fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(bytes));
 
     const result = await attachmentSync.syncDropboxAttachments(
       appData,
@@ -1335,6 +1343,12 @@ describe('attachment sync', () => {
       localStatus: 'available',
       pendingContentUpload: undefined,
     });
+    expect(attachmentFileInstallerMock.installAttachmentFileGeneration).toHaveBeenCalledWith(
+      expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+      'file://document/attachments/recover-dropbox.txt',
+      { kind: 'absent' },
+      sha256Hex(bytes),
+    );
     expect(dropbox.uploadDropboxFileVersioned).not.toHaveBeenCalled();
   });
 
@@ -1363,6 +1377,171 @@ describe('attachment sync', () => {
       uri: 'file://document/attachments/recover-file.txt',
       localStatus: 'available',
       pendingContentUpload: undefined,
+    });
+    expect(attachmentFileInstallerMock.installAttachmentFileGeneration).toHaveBeenCalledWith(
+      expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+      'file://document/attachments/recover-file.txt',
+      { kind: 'absent' },
+      sha256Hex(bytes),
+    );
+  });
+
+  it('preserves a staged WebDAV generation and document metadata when native install conflicts', async () => {
+    const bytes = new Uint8Array([21, 22, 23]);
+    const appData = singleAttachmentData({
+      id: 'webdav-install-conflict',
+      cloudKey: 'attachments/webdav-install-conflict.txt',
+      fileHash: sha256Hex(bytes),
+    });
+    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+    fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(bytes));
+    attachmentFileInstallerMock.installAttachmentFileGeneration.mockResolvedValue({
+      status: 'conflict',
+      preservedPath: 'file://document/attachments/.mindwtr-download-preserved.staged',
+    });
+    const core = await import('@mindwtr/core');
+    vi.mocked(core.webdavGetFile).mockResolvedValue(bytes.slice().buffer as ArrayBuffer);
+
+    const result = await attachmentSync.syncWebdavAttachments(
+      appData,
+      { url: 'https://example.com/data.json', username: 'u', password: 'p' },
+      'https://example.com',
+      undefined,
+      { phase: 'post-merge' },
+    );
+
+    expect(result).toBe(false);
+    expect(attachmentFileInstallerMock.installAttachmentFileGeneration).toHaveBeenCalledWith(
+      expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+      'file://document/attachments/webdav-install-conflict.txt',
+      { kind: 'absent' },
+      sha256Hex(bytes),
+    );
+    const stagedPath = attachmentFileInstallerMock.installAttachmentFileGeneration.mock.calls[0]?.[0];
+    expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(stagedPath, expect.anything());
+    expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+      localStatus: 'missing',
+      fileHash: sha256Hex(bytes),
+    });
+  });
+
+  it('fetches CloudKit into scratch and rejects a bad hash before native install', async () => {
+    const expectedBytes = new Uint8Array([31, 32, 33]);
+    const badBytes = new Uint8Array([41, 42, 43]);
+    const appData = singleAttachmentData({
+      id: 'cloudkit-bad-hash',
+      cloudKey: 'cloudkit:cloudkit-bad-hash',
+      fileHash: sha256Hex(expectedBytes),
+    });
+    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+    fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(badBytes));
+    const cloudkit = await import('./cloudkit-sync');
+    vi.mocked(cloudkit.fetchCloudKitAttachmentAsset).mockResolvedValue({
+      attachmentId: 'cloudkit-bad-hash',
+      ownerType: 'task',
+      ownerId: 'task-1',
+      title: 'changed-by-bad-response.txt',
+      updatedAt: '2026-08-27T00:00:00.000Z',
+    });
+
+    const result = await attachmentSync.syncCloudKitAttachments(
+      appData,
+      undefined,
+      { phase: 'post-merge' },
+    );
+
+    expect(result).toBe(false);
+    expect(cloudkit.fetchCloudKitAttachmentAsset).toHaveBeenCalledWith(
+      'cloudkit-bad-hash',
+      expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+      { signal: undefined },
+    );
+    expect(cloudkit.fetchCloudKitAttachmentAsset).not.toHaveBeenCalledWith(
+      'cloudkit-bad-hash',
+      'file://document/attachments/cloudkit-bad-hash.txt',
+      expect.anything(),
+    );
+    expect(attachmentFileInstallerMock.installAttachmentFileGeneration).not.toHaveBeenCalled();
+    expect(fileSystemMock.deleteAsync).toHaveBeenCalledWith(
+      expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+      { idempotent: true },
+    );
+    expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+      title: 'cloudkit-bad-hash.txt',
+      localStatus: 'missing',
+      fileHash: sha256Hex(expectedBytes),
+    });
+  });
+
+  it('deletes CloudKit scratch when native fetch fails before installer handoff', async () => {
+    const bytes = new Uint8Array([34, 35, 36]);
+    const appData = singleAttachmentData({
+      id: 'cloudkit-fetch-failure',
+      cloudKey: 'cloudkit:cloudkit-fetch-failure',
+      fileHash: sha256Hex(bytes),
+    });
+    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+    const cloudkit = await import('./cloudkit-sync');
+    vi.mocked(cloudkit.fetchCloudKitAttachmentAsset).mockImplementation(async (_recordName, stagedPath) => {
+      expect(stagedPath).toMatch(/\.mindwtr-download-.*\.staged$/);
+      throw new Error('native fetch failed after writing scratch');
+    });
+
+    const result = await attachmentSync.syncCloudKitAttachments(
+      appData,
+      undefined,
+      { phase: 'post-merge' },
+    );
+
+    expect(result).toBe(false);
+    expect(fileSystemMock.deleteAsync).toHaveBeenCalledWith(
+      expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+      { idempotent: true },
+    );
+    expect(attachmentFileInstallerMock.installAttachmentFileGeneration).not.toHaveBeenCalled();
+    expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+      title: 'cloudkit-fetch-failure.txt',
+      localStatus: 'missing',
+      fileHash: sha256Hex(bytes),
+    });
+  });
+
+  it('preserves CloudKit scratch and metadata when native install reports a conflict', async () => {
+    const bytes = new Uint8Array([51, 52, 53]);
+    const appData = singleAttachmentData({
+      id: 'cloudkit-install-conflict',
+      cloudKey: 'cloudkit:cloudkit-install-conflict',
+      fileHash: sha256Hex(bytes),
+    });
+    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+    fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(bytes));
+    attachmentFileInstallerMock.installAttachmentFileGeneration.mockResolvedValue({
+      status: 'conflict',
+      preservedPath: 'file://document/attachments/.mindwtr-download-cloudkit-preserved.staged',
+    });
+    const cloudkit = await import('./cloudkit-sync');
+    vi.mocked(cloudkit.fetchCloudKitAttachmentAsset).mockResolvedValue({
+      attachmentId: 'cloudkit-install-conflict',
+      ownerType: 'task',
+      ownerId: 'task-1',
+      title: 'remote-title.txt',
+      updatedAt: '2026-08-27T00:00:00.000Z',
+    });
+
+    const result = await attachmentSync.syncCloudKitAttachments(
+      appData,
+      undefined,
+      { phase: 'post-merge' },
+    );
+
+    expect(result).toBe(false);
+    const stagedPath = attachmentFileInstallerMock.installAttachmentFileGeneration.mock.calls[0]?.[0];
+    expect(stagedPath).toMatch(/\.mindwtr-download-.*\.staged$/);
+    expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(stagedPath, expect.anything());
+    expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+      title: 'cloudkit-install-conflict.txt',
+      localStatus: 'missing',
+      fileHash: sha256Hex(bytes),
     });
   });
 
@@ -2440,7 +2619,9 @@ describe('attachment sync', () => {
             ? { exists: true, size: NEW_BYTES.length, modificationTime: 2 }
             : { exists: false }
         ));
-        fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(NEW_BYTES));
+        fileSystemMock.readAsStringAsync.mockImplementation(async (uri: string) => (
+          uri.includes('.mindwtr-download-') ? base64Of(OLD_BYTES) : base64Of(NEW_BYTES)
+        ));
         vi.mocked(core.webdavFileExists).mockResolvedValue(true);
         vi.mocked(core.webdavPutFileVersioned).mockResolvedValue(undefined);
         // Remote still holds the bytes the recorded fileHash describes.
@@ -2478,12 +2659,21 @@ describe('attachment sync', () => {
         'https://example.com/attachments/edited-webdav.txt',
         expect.anything()
       );
-      // The stale local copy is overwritten with the remote bytes (temp-then-rename).
+      // Remote bytes are staged and the exact old local generation is supplied
+      // to the native generation-bound installer.
       expect(fileSystemMock.writeAsStringAsync).toHaveBeenCalledWith(
-        expect.stringMatching(/^file:\/\/document\/attachments\/edited-webdav\.txt\.tmp-/),
+        expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-download-.*\.staged\.tmp-/),
         base64Of(OLD_BYTES),
         { encoding: 'base64' }
       );
+      expect(attachmentFileInstallerMock.installAttachmentFileGeneration).toHaveBeenCalledWith(
+        expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-download-.*\.staged$/),
+        localUri,
+        { kind: 'present', sha256: sha256Hex(NEW_BYTES) },
+        sha256Hex(OLD_BYTES),
+      );
+      const installedStage = attachmentFileInstallerMock.installAttachmentFileGeneration.mock.calls.at(-1)?.[0];
+      expect(fileSystemMock.deleteAsync).toHaveBeenCalledWith(installedStage, { idempotent: true });
     });
 
     // BUG-16: an attachment predating `fileHash` cannot have had newer remote content

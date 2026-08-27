@@ -196,6 +196,7 @@ class AttachmentFileInstallerModule : Module() {
         stagedPath: String,
         targetPath: String,
         expected: Map<String, String>,
+        expectedDownloadSha256: String,
       ->
       try {
         val filesRoot = context.filesDir.canonicalFile
@@ -209,9 +210,13 @@ class AttachmentFileInstallerModule : Module() {
           stagedInput = fileFromPath(stagedPath),
           targetInput = fileFromPath(targetPath),
           expected = parseExpected(expected),
+          expectedDownloadSha256 = parseSha256(expectedDownloadSha256, "Expected download"),
         )
         when (outcome) {
-          AttachmentInstallOutcome.Installed -> mapOf("status" to "installed")
+          is AttachmentInstallOutcome.Installed -> buildMap {
+            put("status", "installed")
+            outcome.preservedFile?.let { put("preservedPath", Uri.fromFile(it).toString()) }
+          }
           is AttachmentInstallOutcome.Conflict -> mapOf(
             "status" to "conflict",
             "preservedPath" to Uri.fromFile(outcome.preservedFile).toString(),
@@ -239,13 +244,18 @@ class AttachmentFileInstallerModule : Module() {
     return when (value["kind"]) {
       "absent" -> ExpectedAttachmentGeneration.Absent
       "present" -> {
-        val digest = value["sha256"]?.trim()?.lowercase().orEmpty()
-        if (!SHA256_HEX_PATTERN.matches(digest)) {
-          throw AttachmentFileInstallerException("Expected attachment SHA-256 is invalid")
-        }
+        val digest = parseSha256(value["sha256"].orEmpty(), "Expected attachment")
         ExpectedAttachmentGeneration.Present(digest)
       }
       else -> throw AttachmentFileInstallerException("Expected attachment generation is invalid")
     }
+  }
+
+  private fun parseSha256(value: String, label: String): String {
+    val digest = value.trim().lowercase()
+    if (!SHA256_HEX_PATTERN.matches(digest)) {
+      throw AttachmentFileInstallerException("$label SHA-256 is invalid")
+    }
+    return digest
   }
 }
