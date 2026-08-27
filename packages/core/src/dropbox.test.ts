@@ -273,6 +273,13 @@ describe('bounded Dropbox folder inventory', () => {
     const hangingResponse = (signal: AbortSignal): Promise<Response> => new Promise((_, reject) => {
         signal.addEventListener('abort', () => reject(signal.reason), { once: true });
     });
+    const hangingBodyResponse = (headers: Record<string, string> = {}) => {
+        const cancel = vi.fn();
+        return {
+            cancel,
+            response: new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 200, headers }),
+        };
+    };
 
     it('paginates through the bounded transport', async () => {
         const fetcher = vi.fn()
@@ -320,6 +327,25 @@ describe('bounded Dropbox folder inventory', () => {
         expect(continuationSignal?.aborted).toBe(true);
     });
 
+    it('times out and cancels a first page whose body stalls after headers', async () => {
+        const { cancel, response } = hangingBodyResponse();
+
+        await expect(listDropboxFolderFiles('token', '/attachments', async () => response, { timeoutMs: 1 }))
+            .rejects.toThrow('Dropbox folder inventory request timed out');
+        expect(cancel).toHaveBeenCalledOnce();
+    }, 100);
+
+    it('times out and cancels a continuation body that stalls after headers', async () => {
+        const { cancel, response } = hangingBodyResponse();
+        const fetcher = vi.fn()
+            .mockResolvedValueOnce(Response.json({ entries: [], cursor: 'next-page', has_more: true }))
+            .mockResolvedValueOnce(response) as typeof fetch;
+
+        await expect(listDropboxFolderFiles('token', '/attachments', fetcher, { timeoutMs: 1 }))
+            .rejects.toThrow('Dropbox folder inventory request timed out');
+        expect(cancel).toHaveBeenCalledOnce();
+    }, 100);
+
     it('classifies authorization failures for a caller refresh retry', async () => {
         await expect(listDropboxFolderFiles('token', '/attachments', async () => (
             new Response(null, { status: 401 })
@@ -359,6 +385,22 @@ describe('versioned Dropbox transition byte operations', () => {
         expect(result).toEqual({ bytes: new Uint8Array([1, 2]), version: 'abc123456' });
     });
 
+    it('times out a versioned download whose body stalls after headers', async () => {
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }), {
+            status: 200,
+            headers: { 'Dropbox-API-Result': JSON.stringify({ rev: 'abc123456' }) },
+        });
+
+        await expect(downloadDropboxFileVersioned(
+            'token',
+            '/attachments/a.bin',
+            async () => response,
+            { timeoutMs: 1 },
+        )).rejects.toThrow('Dropbox versioned file download timed out');
+        expect(cancel).toHaveBeenCalledOnce();
+    }, 100);
+
     it('uses add for create and update(rev) for replacement', async () => {
         const args: unknown[] = [];
         const fetcher = async (_url: string | URL, init?: RequestInit): Promise<Response> => {
@@ -372,6 +414,21 @@ describe('versioned Dropbox transition byte operations', () => {
             expect.objectContaining({ mode: { '.tag': 'update', update: 'old-rev' }, autorename: false, strict_conflict: true }),
         ]);
     });
+
+    it('times out an upload whose revision body stalls after the mutation response headers', async () => {
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 200 });
+
+        await expect(uploadDropboxFileVersioned(
+            'token',
+            '/a.bin',
+            new Uint8Array([1]),
+            null,
+            async () => response,
+            { timeoutMs: 1 },
+        )).rejects.toThrow('Dropbox versioned file upload timed out');
+        expect(cancel).toHaveBeenCalledOnce();
+    }, 100);
 
     it('sends parent_rev on delete and maps stale revisions to conflict', async () => {
         let body: unknown;

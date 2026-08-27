@@ -310,6 +310,7 @@
     "extractObsidianWikiLinks",
     "extractWaitingPerson",
     "fetchWithTimeout",
+    "fetchWithTimeoutAndConsume",
     "filterCaptureAreas",
     "filterCaptureProjects",
     "filterNotDeleted",

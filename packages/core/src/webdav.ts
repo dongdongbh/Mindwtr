@@ -3,6 +3,7 @@ import {
     assertConnectionAllowed,
     createProgressStream,
     fetchWithTimeout,
+    fetchWithTimeoutAndConsume,
     MAX_ERROR_BODY_BYTES,
     MAX_DOWNLOAD_BYTES,
     MAX_SYNC_DOCUMENT_BYTES,
@@ -443,24 +444,25 @@ export async function webdavGetJson<T>(
 ): Promise<T | null> {
     assertWebdavUrl(url, options);
     const fetcher = options.fetcher ?? fetch;
-    const res = await fetchWithTimeout(
+    return await fetchWithTimeoutAndConsume(
         url,
         buildReadRequestInit(options, 'GET'),
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         WEBDAV_TIMEOUT_ERROR,
+        async (res, signal) => {
+            if (res.status === 404) return null;
+            if (!res.ok) {
+                const text = await readResponseText(res, MAX_ERROR_BODY_BYTES, signal).catch(() => '');
+                const error = new Error(`WebDAV GET failed (${res.status}): ${text || res.statusText}`);
+                (error as { status?: number }).status = res.status;
+                throw error;
+            }
+
+            const text = await readResponseText(res, options.maxBytes ?? MAX_SYNC_DOCUMENT_BYTES, signal);
+            return parseOptionalWebdavJson<T>(text);
+        },
     );
-
-    if (res.status === 404) return null;
-    if (!res.ok) {
-        const text = await readResponseText(res, MAX_ERROR_BODY_BYTES).catch(() => '');
-        const error = new Error(`WebDAV GET failed (${res.status}): ${text || res.statusText}`);
-        (error as { status?: number }).status = res.status;
-        throw error;
-    }
-
-    const text = await readResponseText(res, options.maxBytes ?? MAX_SYNC_DOCUMENT_BYTES);
-    return parseOptionalWebdavJson<T>(text);
 }
 
 export async function webdavPutJson(
@@ -522,25 +524,27 @@ async function webdavGetVersionedBytesOrNull(
 ): Promise<WebDavVersionedBytes> {
     assertWebdavUrl(url, options);
     const fetcher = options.fetcher ?? fetch;
-    const res = await fetchWithTimeout(
+    return await fetchWithTimeoutAndConsume(
         url,
         buildReadRequestInit(options, 'GET'),
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         WEBDAV_TIMEOUT_ERROR,
+        async (res, signal) => {
+            if (res.status === 404) return { bytes: null, exists: false, strongEtag: null };
+            if (!res.ok) {
+                const text = await readResponseText(res, MAX_ERROR_BODY_BYTES, signal).catch(() => '');
+                const error = new Error(`WebDAV GET failed (${res.status}): ${text || res.statusText}`);
+                (error as { status?: number }).status = res.status;
+                throw error;
+            }
+            return {
+                bytes: new Uint8Array(await readResponseBody(res, undefined, MAX_SYNC_DOCUMENT_BYTES, signal)),
+                exists: true,
+                strongEtag: normalizeStrongWebdavEtag(res.headers.get('etag')),
+            };
+        },
     );
-    if (res.status === 404) return { bytes: null, exists: false, strongEtag: null };
-    if (!res.ok) {
-        const text = await readResponseText(res, MAX_ERROR_BODY_BYTES).catch(() => '');
-        const error = new Error(`WebDAV GET failed (${res.status}): ${text || res.statusText}`);
-        (error as { status?: number }).status = res.status;
-        throw error;
-    }
-    return {
-        bytes: new Uint8Array(await readResponseBody(res, undefined, MAX_SYNC_DOCUMENT_BYTES)),
-        exists: true,
-        strongEtag: normalizeStrongWebdavEtag(res.headers.get('etag')),
-    };
 }
 
 const withWebdavDocumentWriteCondition = (
@@ -831,26 +835,33 @@ export async function webdavGetFileVersionedWithServerTime(
 ): Promise<{ bytes: Uint8Array | null; version: string | null; serverNowMs: number | null }> {
     assertWebdavUrl(url, options);
     const fetcher = options.fetcher ?? fetch;
-    const res = await fetchWithTimeout(
+    return await fetchWithTimeoutAndConsume(
         url,
         buildReadRequestInit(options, 'GET'),
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         WEBDAV_TIMEOUT_ERROR,
+        async (res, signal) => {
+            const parsedServerNow = Date.parse(res.headers.get('date') ?? '');
+            const serverNowMs = Number.isFinite(parsedServerNow) ? parsedServerNow : null;
+            if (res.status === 404) return { bytes: null, version: null, serverNowMs };
+            if (!res.ok) {
+                const error = new Error(`WebDAV File GET failed (${res.status})`);
+                (error as { status?: number }).status = res.status;
+                throw error;
+            }
+            return {
+                bytes: new Uint8Array(await readResponseBody(
+                    res,
+                    options.onProgress,
+                    options.maxBytes ?? MAX_DOWNLOAD_BYTES,
+                    signal,
+                )),
+                version: normalizeStrongWebdavEtag(res.headers.get('etag')),
+                serverNowMs,
+            };
+        },
     );
-    const parsedServerNow = Date.parse(res.headers.get('date') ?? '');
-    const serverNowMs = Number.isFinite(parsedServerNow) ? parsedServerNow : null;
-    if (res.status === 404) return { bytes: null, version: null, serverNowMs };
-    if (!res.ok) {
-        const error = new Error(`WebDAV File GET failed (${res.status})`);
-        (error as { status?: number }).status = res.status;
-        throw error;
-    }
-    return {
-        bytes: new Uint8Array(await readResponseBody(res, options.onProgress, options.maxBytes ?? MAX_DOWNLOAD_BYTES)),
-        version: normalizeStrongWebdavEtag(res.headers.get('etag')),
-        serverNowMs,
-    };
 }
 
 /** Compatibility shape for transition callers that only need bytes + strong generation. */
@@ -1090,21 +1101,22 @@ export async function webdavGetFile(
 ): Promise<ArrayBuffer> {
     assertWebdavUrl(url, options);
     const fetcher = options.fetcher ?? fetch;
-    const res = await fetchWithTimeout(
+    return await fetchWithTimeoutAndConsume(
         url,
         buildReadRequestInit(options, 'GET'),
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         WEBDAV_TIMEOUT_ERROR,
+        async (res, signal) => {
+            if (!res.ok) {
+                const error = new Error(`WebDAV File GET failed (${res.status})`);
+                (error as { status?: number }).status = res.status;
+                throw error;
+            }
+
+            return await readResponseBody(res, options.onProgress, options.maxBytes ?? MAX_DOWNLOAD_BYTES, signal);
+        },
     );
-
-    if (!res.ok) {
-        const error = new Error(`WebDAV File GET failed (${res.status})`);
-        (error as { status?: number }).status = res.status;
-        throw error;
-    }
-
-    return await readResponseBody(res, options.onProgress, options.maxBytes ?? MAX_DOWNLOAD_BYTES);
 }
 
 export async function webdavDeleteFile(

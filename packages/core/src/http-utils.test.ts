@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
     fetchWithTimeout,
+    fetchWithTimeoutAndConsume,
     isAllowedInsecureUrl,
     isConnectionAllowed,
     MAX_DOWNLOAD_BYTES,
@@ -192,6 +193,49 @@ describe('fetchWithTimeout', () => {
         );
 
         expect(add).toHaveBeenCalledOnce();
+        expect(remove).toHaveBeenCalledWith('abort', add.mock.calls[0]?.[1]);
+    });
+
+    it('keeps timeout and cancellation active until the response body settles', async () => {
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({
+            cancel,
+        }));
+
+        await expect(fetchWithTimeoutAndConsume(
+            'https://example.com/data.json',
+            {},
+            1,
+            async () => response,
+            'Request timed out',
+            (res, signal) => readResponseBody(res, undefined, MAX_DOWNLOAD_BYTES, signal),
+        )).rejects.toThrow('Request timed out');
+
+        expect(cancel).toHaveBeenCalledOnce();
+    });
+
+    it('keeps the caller abort listener until body consumption finishes, then removes it', async () => {
+        const controller = new AbortController();
+        const reason = new DOMException('Sync cancelled during download', 'AbortError');
+        const add = vi.spyOn(controller.signal, 'addEventListener');
+        const remove = vi.spyOn(controller.signal, 'removeEventListener');
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }));
+        const pending = fetchWithTimeoutAndConsume(
+            'https://example.com/data.json',
+            { signal: controller.signal },
+            1_000,
+            async () => response,
+            'Request timed out',
+            (res, signal) => readResponseBody(res, undefined, MAX_DOWNLOAD_BYTES, signal),
+        );
+
+        await vi.waitFor(() => expect(add).toHaveBeenCalledOnce());
+        expect(remove).not.toHaveBeenCalled();
+        controller.abort(reason);
+
+        await expect(pending).rejects.toThrow('Sync cancelled during download');
+        expect(cancel).toHaveBeenCalledOnce();
         expect(remove).toHaveBeenCalledWith('abort', add.mock.calls[0]?.[1]);
     });
 

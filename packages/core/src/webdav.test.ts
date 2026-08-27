@@ -567,6 +567,17 @@ describe('webdavGetFile download cap', () => {
         expect(Array.from(new Uint8Array(buffer))).toEqual([4, 5, 6]);
         expect(onProgress.mock.calls).toEqual([[2, 3], [3, 3]]);
     });
+
+    it('times out and cancels a download body that stalls after headers', async () => {
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 200 });
+
+        await expect(webdavGetFile('https://example.com/dav/a.bin', {
+            fetcher: async () => response,
+            timeoutMs: 1,
+        })).rejects.toThrow('WebDAV request timed out');
+        expect(cancel).toHaveBeenCalledOnce();
+    }, 100);
 });
 
 describe('versioned WebDAV transition byte operations', () => {

@@ -45,6 +45,43 @@ const getAbortSignalReason = (signal: AbortSignal, fallbackMessage: string): Err
     return createAbortError(fallbackMessage);
 };
 
+const waitForAbort = async <T>(
+    operation: PromiseLike<T> | T,
+    signal?: AbortSignal,
+    onAbort?: () => void,
+): Promise<T> => {
+    const promise = Promise.resolve(operation);
+    if (!signal) return promise;
+    if (signal.aborted) {
+        // The operation may already have been invoked by the caller before the
+        // signal check. Observe its eventual rejection even though cancellation
+        // wins this race, otherwise an abort-aware fetcher can surface it as an
+        // unhandled rejection after the bounded call has returned.
+        void promise.catch(() => undefined);
+        onAbort?.();
+        throw getAbortSignalReason(signal, 'Request cancelled');
+    }
+
+    return await new Promise<T>((resolve, reject) => {
+        let settled = false;
+        const finish = (callback: () => void) => {
+            if (settled) return;
+            settled = true;
+            signal.removeEventListener('abort', handleAbort);
+            callback();
+        };
+        const handleAbort = () => finish(() => {
+            onAbort?.();
+            reject(getAbortSignalReason(signal, 'Request cancelled'));
+        });
+        signal.addEventListener('abort', handleAbort, { once: true });
+        promise.then(
+            (value) => finish(() => resolve(value)),
+            (error) => finish(() => reject(error)),
+        );
+    });
+};
+
 const getCause = (value: unknown): unknown => {
     if ((typeof value !== 'object' && typeof value !== 'function') || value === null) {
         return undefined;
@@ -284,6 +321,7 @@ export const readResponseBody = async (
     res: Response,
     onProgress?: (loaded: number, total: number) => void,
     limitBytes: number = MAX_DOWNLOAD_BYTES,
+    signal?: AbortSignal,
 ): Promise<ArrayBuffer> => {
     const declared = Number(res.headers?.get('content-length') || 0);
     const total = Number.isFinite(declared) && declared > 0 ? declared : 0;
@@ -291,17 +329,25 @@ export const readResponseBody = async (
 
     const body = res.body;
     if (!body || typeof body.getReader !== 'function') {
-        const buffer = await res.arrayBuffer();
+        const buffer = await waitForAbort(res.arrayBuffer(), signal);
         if (buffer.byteLength > limitBytes) throw new ResponseTooLargeError(limitBytes);
         return buffer;
     }
 
     const reader = body.getReader();
+    const cancelReader = () => {
+        try {
+            void reader.cancel().catch(() => undefined);
+        } catch {
+            // A transport abort remains authoritative even if a test double or
+            // native stream throws synchronously while acknowledging cancellation.
+        }
+    };
     const chunks: Uint8Array[] = [];
     let received = 0;
     try {
         while (true) {
-            const { done, value } = await reader.read();
+            const { done, value } = await waitForAbort(reader.read(), signal, cancelReader);
             if (done) break;
             if (!value) continue;
             received += value.length;
@@ -310,7 +356,7 @@ export const readResponseBody = async (
             onProgress?.(received, total);
         }
     } catch (error) {
-        await reader.cancel().catch(() => {});
+        cancelReader();
         throw error;
     }
     return toArrayBuffer(concatChunks(chunks, received));
@@ -319,13 +365,17 @@ export const readResponseBody = async (
 /** Text counterpart of {@link readResponseBody}: `res.text()` is unbounded. Streams when
  *  the response exposes a body or arrayBuffer, so a lying content-length still aborts
  *  mid-read; a response offering only `text()` is length-checked after the fact. */
-export const readResponseText = async (res: Response, limitBytes: number): Promise<string> => {
+export const readResponseText = async (
+    res: Response,
+    limitBytes: number,
+    signal?: AbortSignal,
+): Promise<string> => {
     const declared = Number(res.headers?.get('content-length') || 0);
     if (Number.isFinite(declared) && declared > limitBytes) throw new ResponseTooLargeError(limitBytes);
     if (res.body || typeof res.arrayBuffer === 'function') {
-        return new TextDecoder().decode(await readResponseBody(res, undefined, limitBytes));
+        return new TextDecoder().decode(await readResponseBody(res, undefined, limitBytes, signal));
     }
-    const text = await res.text();
+    const text = await waitForAbort(res.text(), signal);
     if (text.length > limitBytes) throw new ResponseTooLargeError(limitBytes);
     return text;
 };
@@ -359,13 +409,14 @@ export const createProgressStream = (bytes: Uint8Array, onProgress: (loaded: num
  */
 const NO_REDIRECT_METHODS = new Set(['PUT', 'POST', 'PATCH', 'DELETE']);
 
-export const fetchWithTimeout = async (
+export const fetchWithTimeoutAndConsume = async <T>(
     url: string,
     init: RequestInit,
     timeoutMs: number,
     fetcher: typeof fetch,
     timeoutMessage: string,
-): Promise<Response> => {
+    consume: (response: Response, signal?: AbortSignal) => PromiseLike<T> | T,
+): Promise<T> => {
     const abortController = typeof AbortController === 'function' ? new AbortController() : null;
     let didTimeout = false;
     const timeoutId = abortController
@@ -375,7 +426,7 @@ export const fetchWithTimeout = async (
         }, timeoutMs)
         : null;
 
-    const signal = abortController ? abortController.signal : init.signal;
+    const signal = abortController?.signal ?? init.signal ?? undefined;
     const externalSignal = init.signal;
     let externalAbortListener: (() => void) | null = null;
     if (abortController && externalSignal) {
@@ -400,7 +451,21 @@ export const fetchWithTimeout = async (
         if (isReadableStreamBody) {
             requestInit.duplex = 'half';
         }
-        return await fetcher(url, requestInit);
+        const response = await waitForAbort(fetcher(url, requestInit), signal);
+        return await waitForAbort(
+            consume(response, signal),
+            signal,
+            () => {
+                const responseBody = response.body;
+                if (!responseBody || responseBody.locked) return;
+                try {
+                    void responseBody.cancel().catch(() => undefined);
+                } catch {
+                    // The request signal is still aborted even if the response body
+                    // cannot acknowledge cancellation synchronously.
+                }
+            },
+        );
     } catch (error) {
         if (isAbortError(error)) {
             if (didTimeout) {
@@ -419,3 +484,21 @@ export const fetchWithTimeout = async (
         }
     }
 };
+
+/** Header-only compatibility helper. Callers that consume a response body must use
+ * `fetchWithTimeoutAndConsume` so the request timeout and external abort listener stay
+ * active until that consumption settles. */
+export const fetchWithTimeout = (
+    url: string,
+    init: RequestInit,
+    timeoutMs: number,
+    fetcher: typeof fetch,
+    timeoutMessage: string,
+): Promise<Response> => fetchWithTimeoutAndConsume(
+    url,
+    init,
+    timeoutMs,
+    fetcher,
+    timeoutMessage,
+    (response) => response,
+);
