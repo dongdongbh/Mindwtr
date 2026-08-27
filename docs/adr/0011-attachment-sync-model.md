@@ -36,6 +36,7 @@ The transfer contract is:
 5. Before a new or changed backend becomes active, its activation probe must account for every live file attachment. The backend must verify the remote object or upload a local copy; an object key from another backend does not prove availability.
 6. Activation probes merge the candidate document first, then run attachment transfer against a clone of that merged snapshot immediately before the candidate write. This accounts for candidate-remote-only attachments as well as local ones, and prevents a newer remote metadata row from replacing a key that the probe just proved. The probe can publish proven attachment metadata to the candidate remote, but it does not persist that metadata into the local store until the candidate configuration passes and a normal sync completes.
 7. The first durable sync after activation treats the live attachment keys in that proven candidate document as authoritative for the new destination while preserving local file URIs and availability.
+8. Downloads publish only through a generation-bound native install: stage in app-private storage, validate the exact plaintext hash, then compare-and-swap against the expected absent or present local generation. The installer journals before displacing a file and preserves every distinct conflicting or interrupted generation.
 
 ## Consequences
 
@@ -45,4 +46,5 @@ The transfer contract is:
 - Backends need attachment-specific validation and cleanup code.
 - Saving, discarding, externally closing, or switching an attachment draft cannot silently leak newly copied files; user-owned paths remain outside the cleanup boundary.
 - A backend switch fails closed when Mindwtr cannot prove one of the live attachments at the candidate destination.
+- A download racing a local create or edit cannot overwrite it; the staged download and displaced local generation remain recoverable until the caller resolves the conflict.
 - Future attachment work should preserve the metadata-vs-bytes split unless a new storage architecture replaces snapshot sync entirely.
