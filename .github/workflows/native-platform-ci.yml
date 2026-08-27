@@ -259,6 +259,10 @@ jobs:
             --no-daemon \
             -PreactNativeArchitectures=arm64-v8a
 
+      - name: Run attachment installer Android recovery tests
+        working-directory: apps/mobile/android
+        run: ./gradlew :attachment-file-installer:testDebugUnitTest --no-daemon
+
   ios-native:
     if: needs.changes.outputs.ios == 'true'
     needs: changes
@@ -336,6 +340,9 @@ jobs:
           fi
 
           echo "Using iPhoneOS SDK ${IOS_SDK_VERSION}"
+
+      - name: Run attachment installer Swift recovery tests
+        run: swift test --package-path apps/mobile/modules/attachment-file-installer/ios
 
       - name: Generate iOS native project
         working-directory: apps/mobile

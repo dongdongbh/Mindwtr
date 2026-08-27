@@ -1,7 +1,9 @@
 import CryptoKit
 import Darwin
-import ExpoModulesCore
 import Foundation
+#if canImport(ExpoModulesCore)
+import ExpoModulesCore
+#endif
 
 private let installerArtifactPrefix = ".mindwtr-install-"
 private let installerPreservedPrefix = ".mindwtr-preserved-"
@@ -16,12 +18,12 @@ private enum InstallerNodeKind {
   case other
 }
 
-private enum ExpectedAttachmentGeneration {
+enum ExpectedAttachmentGeneration {
   case absent
   case present(sha256: String)
 }
 
-private enum AttachmentInstallOutcome {
+enum AttachmentInstallOutcome {
   case installed(preservedUrl: URL?)
   case conflict(preservedUrl: URL)
 }
@@ -61,16 +63,29 @@ private func isSha256(_ value: String) -> Bool {
   return sha256Pattern.firstMatch(in: value, range: range)?.range == range
 }
 
-private final class AttachmentFileInstallerEngine {
+// Deterministic crash boundaries for the native recovery test target. The app
+// always uses the default no-op injector.
+enum AttachmentFileInstallerFaultPoint: Equatable {
+  case afterInitialJournal
+  case afterExclusiveLink
+}
+
+final class AttachmentFileInstallerEngine {
   private let fileManager = FileManager.default
   private let targetRoot: URL
   private let sourceRoots: [URL]
+  private let faultInjector: (AttachmentFileInstallerFaultPoint) throws -> Void
 
-  init(targetRoot: URL, sourceRoots: [URL]) {
+  init(
+    targetRoot: URL,
+    sourceRoots: [URL],
+    faultInjector: @escaping (AttachmentFileInstallerFaultPoint) throws -> Void = { _ in }
+  ) {
     self.targetRoot = Self.canonical(targetRoot)
     self.sourceRoots = Array(Set(sourceRoots.map { Self.canonical($0).path })).map {
       URL(fileURLWithPath: $0, isDirectory: true)
     }
+    self.faultInjector = faultInjector
   }
 
   func install(
@@ -162,6 +177,7 @@ private final class AttachmentFileInstallerEngine {
         ),
         to: artifacts.journal
       )
+      try faultInjector(.afterInitialJournal)
       guard try moveExclusive(from: artifacts.candidate, to: target) else {
         try deleteInternalIfRegular(artifacts.candidate)
         try deleteJournal(artifacts.journal)
@@ -219,6 +235,7 @@ private final class AttachmentFileInstallerEngine {
       ),
       to: artifacts.journal
     )
+    try faultInjector(.afterInitialJournal)
 
     guard try moveExclusive(from: target, to: artifacts.quarantine) else {
       return .conflict(preservedUrl: firstPreservedUrl(artifacts.quarantine, staged))
@@ -660,6 +677,7 @@ private final class AttachmentFileInstallerEngine {
       if errno == EEXIST { return false }
       throw installerError("Could not publish attachment generation")
     }
+    try faultInjector(.afterExclusiveLink)
     guard Darwin.unlink(source.path) == 0 else {
       throw installerError("Published attachment generation could not release its old path")
     }
@@ -803,6 +821,7 @@ private final class AttachmentFileInstallerEngine {
   }
 }
 
+#if canImport(ExpoModulesCore)
 public final class AttachmentFileInstallerModule: Module {
   public func definition() -> ModuleDefinition {
     Name("AttachmentFileInstaller")
@@ -873,3 +892,4 @@ public final class AttachmentFileInstallerModule: Module {
     return digest
   }
 }
+#endif

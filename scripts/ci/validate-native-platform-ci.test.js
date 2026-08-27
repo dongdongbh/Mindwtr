@@ -3,6 +3,12 @@ import { readFileSync } from "node:fs";
 
 test("native CI generates clean projects and compiles Android and iOS sources", () => {
   const workflow = readFileSync(".github/workflows/native-platform-ci.yml", "utf8");
+  const androidJob = workflow.match(
+    /\n  android-native:\n([\s\S]*?)(?=\n  [a-z][a-z-]+:\n|$)/,
+  )?.[1];
+  const iosJob = workflow.match(
+    /\n  ios-native:\n([\s\S]*?)(?=\n  [a-z][a-z-]+:\n|$)/,
+  )?.[1];
 
   expect(workflow).toContain('apps/mobile/modules/**/android/**');
   expect(workflow).toContain('apps/mobile/modules/**/ios/**');
@@ -21,12 +27,41 @@ test("native CI generates clean projects and compiles Android and iOS sources", 
   expect(workflow).toContain("Generate Android native project");
   expect(workflow).toMatch(/prebuild \\\n\s+--clean \\\n\s+--platform android/);
   expect(workflow).toContain(":app:compileDebugKotlin");
+  expect(androidJob).toContain("name: Run attachment installer Android recovery tests");
+  expect(androidJob).toContain(":attachment-file-installer:testDebugUnitTest");
 
   expect(workflow).toContain("name: iOS Swift compile");
   expect(workflow).toContain("gem install cocoapods --version 1.16.2 --no-document");
   expect(workflow).toMatch(/prebuild \\\n\s+--clean \\\n\s+--platform ios/);
   expect(workflow).toContain("-sdk iphonesimulator");
   expect(workflow).toContain("CODE_SIGNING_ALLOWED=NO");
+  expect(iosJob).toContain("name: Run attachment installer Swift recovery tests");
+  expect(iosJob).toContain(
+    "swift test --package-path apps/mobile/modules/attachment-file-installer/ios",
+  );
+});
+
+test("attachment installer native CI collects the recovery suites", () => {
+  const androidTests = readFileSync(
+    "apps/mobile/modules/attachment-file-installer/android/src/test/java/tech/dongdongbh/mindwtr/attachmentfileinstaller/AttachmentFileInstallerCoreTest.kt",
+    "utf8",
+  );
+  const swiftPackage = readFileSync(
+    "apps/mobile/modules/attachment-file-installer/ios/Package.swift",
+    "utf8",
+  );
+  const swiftTests = readFileSync(
+    "apps/mobile/modules/attachment-file-installer/ios/Tests/AttachmentFileInstallerEngineTests.swift",
+    "utf8",
+  );
+
+  expect(androidTests.match(/^\s*@Test$/gm)).toHaveLength(16);
+  expect(swiftPackage).toContain(".testTarget(");
+  expect(swiftTests).toContain("testAbsentGenerationUsesCreateNoReplace");
+  expect(swiftTests).toContain("testPresentGenerationReplacesOnlyMatchingTargetAndPreservesIt");
+  expect(swiftTests).toContain("testInitialJournalCrashRecoversUntouchedTargetAndRetries");
+  expect(swiftTests).toContain("testLinkBeforeUnlinkCrashRecoversBothNamesAndRetries");
+  expect(swiftTests).toContain("testLateWriterMutatesRetainedOldInodeWithoutTouchingInstalledGeneration");
 });
 
 test("desktop Rust pull requests check and test the native library on Windows", () => {
