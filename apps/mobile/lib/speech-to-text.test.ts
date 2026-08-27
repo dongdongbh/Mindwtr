@@ -559,10 +559,10 @@ describe('processAudioCapture openai transcription against a custom base URL', (
   });
 
   const stubFetch = () => {
-    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => ({
-      ok: true,
-      json: async () => ({ text: 'hello from whisperx' }),
-    }));
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response(
+      JSON.stringify({ text: 'hello from whisperx' }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ));
     vi.stubGlobal('fetch', fetchMock);
     return fetchMock;
   };
