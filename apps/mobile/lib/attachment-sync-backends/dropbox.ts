@@ -39,11 +39,14 @@ import {
 import {
   migrateAttachmentsLocallyBeforeSync,
   openAttachmentBytesFromDownload,
+  pendingBespokeAttachmentContentStillMatches,
+  prepareBespokeAttachmentContentCandidate,
   sealAttachmentBytesForUpload,
 } from './common';
 
 export type DropboxAttachmentSyncOptions = {
   activationProbe?: boolean;
+  phase?: 'prepare' | 'post-merge';
   resolveAccessToken?: DropboxAccessTokenResolver;
   signal?: AbortSignal;
   assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
@@ -117,13 +120,28 @@ export const syncDropboxAttachments = async (
       recordPatch(attachment);
     }
 
-    if (options.activationProbe && existsLocally && attachment.cloudKey) {
-      attachment.cloudKey = undefined;
-      recordPatch(attachment);
+    const mayUploadLocalFile = hasLocalPath
+      && existsLocally
+      && !isHttp
+      && canUploadAttachmentFrom(uri);
+    if (options.phase === 'prepare' && attachment.cloudKey && mayUploadLocalFile) {
+      if (await prepareBespokeAttachmentContentCandidate(attachment, uri)) {
+        recordPatch(attachment);
+      }
     }
 
     // SEC-07: same containment the shared lifecycle applies via `canUploadFrom`.
-    if (!attachment.cloudKey && hasLocalPath && existsLocally && !isHttp && canUploadAttachmentFrom(uri)) {
+    if (
+      options.phase !== 'prepare'
+      && (!attachment.cloudKey || attachment.pendingContentUpload === true)
+      && mayUploadLocalFile
+    ) {
+      if (
+        attachment.pendingContentUpload === true
+        && !(await pendingBespokeAttachmentContentStillMatches(attachment, uri))
+      ) {
+        continue;
+      }
       if (!options.activationProbe && uploadCount >= DROPBOX_ATTACHMENT_MAX_UPLOADS_PER_SYNC) {
         if (!uploadLimitLogged) {
           uploadLimitLogged = true;
@@ -228,13 +246,21 @@ export const syncDropboxAttachments = async (
       }
     }
 
-    if (attachment.cloudKey && !existsLocally && !isContent && !isHttp) {
+    if (
+      options.phase !== 'prepare'
+      && attachment.pendingContentUpload !== true
+      && attachment.cloudKey
+      && !existsLocally
+      && !isContent
+      && !isHttp
+    ) {
       downloadQueue.push(attachment);
     }
   }
 
   for (const pending of pendingUploadMutations) {
     pending.attachment.cloudKey = pending.cloudKey;
+    pending.attachment.pendingContentUpload = undefined;
     if (!Number.isFinite(pending.attachment.size ?? NaN) && Number.isFinite(pending.fileSize ?? NaN)) {
       pending.attachment.size = Number(pending.fileSize);
     }

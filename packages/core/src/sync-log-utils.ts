@@ -19,6 +19,7 @@ export const buildPendingAttachmentUploadLogExtra = (
         sample: sample.map((item) => `${item.ownerType}:${item.ownerId}:${item.attachmentId}`).join(', '),
         uriSchemes: sample.map((item) => item.uriScheme || 'unknown').join(', '),
         localStatuses: sample.map((item) => item.localStatus || 'unset').join(', '),
+        reasons: sample.map((item) => item.reason).join(', '),
         titles: sample.map((item) => sanitizeLogValue(item.title || '')).join(' | '),
     };
 };

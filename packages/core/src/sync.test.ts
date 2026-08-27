@@ -328,6 +328,50 @@ describe('Sync Logic', () => {
                 expect(reverseAttachment?.title).toBe(forwardAttachment?.title);
             });
 
+            it('keeps a deferred upload marker only when that local content identity wins', () => {
+                const localAttachment: Attachment = {
+                    id: 'att-pending',
+                    kind: 'file',
+                    title: 'doc.txt',
+                    uri: '/local/doc.txt',
+                    cloudKey: 'attachments/att-pending.txt',
+                    fileHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                    contentRev: 3,
+                    pendingContentUpload: true,
+                    createdAt: '2023-01-01T00:00:00.000Z',
+                    updatedAt: '2023-01-03T00:00:00.000Z',
+                };
+                const incomingAttachment: Attachment = {
+                    ...localAttachment,
+                    uri: '',
+                    fileHash: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                    contentRev: 4,
+                    pendingContentUpload: undefined,
+                    updatedAt: '2023-01-02T00:00:00.000Z',
+                };
+                const localTask: Task = { ...createMockTask('1', '2023-01-03'), attachments: [localAttachment] };
+                const incomingTask: Task = { ...createMockTask('1', '2023-01-02'), attachments: [incomingAttachment] };
+
+                const remoteWins = mergeAppData(mockAppData([localTask]), mockAppData([incomingTask]));
+                expect(remoteWins.tasks[0].attachments?.[0]).toMatchObject({
+                    contentRev: 4,
+                    fileHash: incomingAttachment.fileHash,
+                });
+                expect(remoteWins.tasks[0].attachments?.[0]?.pendingContentUpload).toBeUndefined();
+
+                const winningLocalAttachment = { ...localAttachment, contentRev: 5 };
+                const winningLocalTask: Task = {
+                    ...localTask,
+                    attachments: [winningLocalAttachment],
+                };
+                const localWins = mergeAppData(mockAppData([winningLocalTask]), mockAppData([incomingTask]));
+                expect(localWins.tasks[0].attachments?.[0]).toMatchObject({
+                    contentRev: 5,
+                    fileHash: winningLocalAttachment.fileHash,
+                    pendingContentUpload: true,
+                });
+            });
+
             it('a tied contentRev defers to whatever the attachment-level LWW already picked', () => {
                 const localAttachment: Attachment = {
                     id: 'att-tie',
@@ -1098,6 +1142,7 @@ describe('Sync Logic', () => {
                 createdAt: '2023-01-01T00:00:00.000Z',
                 updatedAt: '2023-01-04T00:00:00.000Z',
                 deletedAt: '2023-01-04T00:00:00.000Z',
+                pendingContentUpload: true,
             };
             const incomingAttachment: Attachment = {
                 id: 'att-1',
@@ -1125,6 +1170,7 @@ describe('Sync Logic', () => {
             expect(attachment?.deletedAt).toBe('2023-01-04T00:00:00.000Z');
             expect(attachment?.cloudKey).toBeUndefined();
             expect(attachment?.fileHash).toBeUndefined();
+            expect(attachment?.pendingContentUpload).toBeUndefined();
         });
 
         it('should merge unique items from both sources', () => {

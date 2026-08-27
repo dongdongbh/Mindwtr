@@ -138,13 +138,11 @@ export type AttachmentTransferLifecycleOptions = {
      */
     hasCloudCopy?: (attachment: Attachment) => boolean;
     /**
-     * Re-upload every locally available file even when it already has a cloud
-     * key. Activation probes use this because a key issued by the previous
-     * transport is not evidence that the candidate transport has the bytes.
-     * The stale key is cleared before upload so a failed attempt cannot be
-     * mistaken for candidate proof by the caller.
+     * Prepare-phase safety: inspect local content and record a durable pending
+     * candidate, but do not mutate remote bytes until after the remote document
+     * has been merged. Missing-cloud-key uploads are deferred as well.
      */
-    forceUploadExistingLocal?: boolean;
+    deferUploads?: boolean;
     /**
      * Optional throttle/backoff/cap gate. Every field is optional, and the whole object may be
      * omitted; omitting it (the default) preserves today's unthrottled behaviour, so the callers
@@ -188,10 +186,10 @@ export type AttachmentTransferLifecycleOptions = {
      * `SyncRunAttachmentPhase`). Meaningless without `getLocalFileStat`. A confirmed
      * content change is only ever this device's own edit during 'prepare' (it runs on
      * local data before this cycle's remote pull/merge, so there is nothing else it
-     * could be) — re-upload. During 'post-merge' the same mismatch means the merge
-     * just adopted another device's newer content and this device's on-disk copy is
-     * stale — re-download instead. Getting this backwards would ping-pong the two
-     * devices' uploads against each other forever.
+     * could be) — record a deferred upload candidate. During 'post-merge', a surviving
+     * candidate uploads; an unmarked mismatch means the merge adopted another device's
+     * newer content and this device's on-disk copy is stale, so it re-downloads instead.
+     * Getting this backwards would ping-pong the two devices' uploads forever.
      */
     contentChangePhase?: 'prepare' | 'post-merge';
     /**
@@ -340,15 +338,60 @@ export async function runAttachmentTransferLifecycle(
         // Refused paths still reconcile localStatus above; what they never do is get read.
         const mayReadForSync = existsLocally && (options.canUploadFrom?.(localPath, attachment) ?? true);
 
-        if (options.forceUploadExistingLocal && mayReadForSync && attachment.cloudKey !== undefined) {
-            attachment.cloudKey = undefined;
-            itemMutated = true;
+        const hasPendingContentUpload = attachment.pendingContentUpload === true && hasCloudCopy(attachment);
+        if (hasPendingContentUpload && !options.deferUploads) {
+            // The marker describes the exact content identity selected by merge. Recheck
+            // the file immediately before upload so an edit landing between prepare and
+            // post-merge cannot be published under stale hash/revision metadata. A missing
+            // or unhashable file fails closed and remains pending for the next prepare pass.
+            if (mayReadForSync && options.getLocalFileStat) {
+                const stat = await options.getLocalFileStat(localPath, attachment).catch(() => null);
+                if (stat) {
+                    const check = await checkAttachmentContentChange(
+                        attachment,
+                        stat,
+                        () => options.computeLocalFileHash
+                            ? options.computeLocalFileHash(localPath, attachment)
+                            : Promise.resolve(null),
+                    );
+                    if (check.changed) {
+                        options.onLocalEditRace?.(attachment);
+                    } else {
+                        if (
+                            check.stat.mtimeMs !== attachment.contentMtimeMs
+                            || check.stat.size !== attachment.contentSize
+                        ) {
+                            applyAttachmentContentStat(attachment, check.stat, check.hash);
+                            itemMutated = true;
+                        }
+                        if (!options.policy?.shouldUpload || options.policy.shouldUpload(attachment)) {
+                            try {
+                                if (await options.onUpload(attachment, localPath)) {
+                                    attachment.pendingContentUpload = undefined;
+                                    itemMutated = true;
+                                    await refreshContentStat(attachment, localPath);
+                                }
+                            } catch (error) {
+                                if (options.isFatalError?.(error)) throw error;
+                                options.onUploadError(attachment, error);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // A pending candidate's cloud key still addresses the previous blob. Never
+            // fall through to the ordinary download/change path until that candidate has
+            // either uploaded successfully or lost a later merge.
+            if (itemMutated) patches.set(attachment.id, attachment);
+            continue;
         }
 
-        if (!hasCloudCopy(attachment) && mayReadForSync) {
+        if (!hasCloudCopy(attachment) && mayReadForSync && !options.deferUploads) {
             if (!options.policy?.shouldUpload || options.policy.shouldUpload(attachment)) {
                 try {
                     if (await options.onUpload(attachment, localPath)) {
+                        attachment.pendingContentUpload = undefined;
                         itemMutated = true;
                         if (!attachment.fileHash && options.computeLocalFileHash) {
                             const hash = await options.computeLocalFileHash(localPath, attachment).catch(() => null);
@@ -363,7 +406,7 @@ export async function runAttachmentTransferLifecycle(
             }
         }
 
-        if (hasCloudCopy(attachment) && !existsLocally) {
+        if (hasCloudCopy(attachment) && !existsLocally && !hasPendingContentUpload) {
             if (!options.policy?.shouldDownload || options.policy.shouldDownload(attachment)) {
                 try {
                     if (await options.onDownload(attachment)) {
@@ -415,19 +458,24 @@ export async function runAttachmentTransferLifecycle(
                     // client that predates `fileHash`, so the merge cannot have adopted newer
                     // remote content either (`fileHash` is synced). Record what is on disk as
                     // the baseline (BUG-16) instead of downloading over the local file on the
-                    // strength of a bare stat move. The prepare pass still treats the same
-                    // state as this device's edit and re-uploads it, which is where the
-                    // missing hash gets published.
+                    // strength of a bare stat move. The prepare pass records the same state
+                    // as a pending local candidate; it is published only if that identity
+                    // survives the remote merge.
                     applyAttachmentContentStat(attachment, check.stat, check.hash);
                     itemMutated = true;
                 } else if (options.contentChangePhase === 'prepare') {
                     // This device's own edit, detected before this cycle's remote pull.
-                    // Review B2: attempt the re-upload FIRST — only a *confirmed success*
-                    // bumps contentRev / records the new hash+stat, exactly like the
-                    // first-upload path above. A failed, capped, or policy-skipped upload
-                    // must leave the record untouched so the next cycle's compare still sees
-                    // the mismatch and retries, instead of silently stranding the change.
-                    if (!options.policy?.shouldUpload || options.policy.shouldUpload(attachment)) {
+                    // Normal sync records the content identity as a durable pending candidate
+                    // without touching the remote blob. Merge either discards the marker when
+                    // newer remote content wins, or carries it into the post-merge upload.
+                    // Direct lifecycle callers that do not opt into deferral keep the legacy
+                    // immediate-upload contract and publish metadata only after success.
+                    if (options.deferUploads) {
+                        applyAttachmentContentStat(attachment, check.stat, check.hash);
+                        attachment.contentRev = bumpAttachmentContentRevision(attachment);
+                        attachment.pendingContentUpload = true;
+                        itemMutated = true;
+                    } else if (!options.policy?.shouldUpload || options.policy.shouldUpload(attachment)) {
                         try {
                             if (await options.onUpload(attachment, localPath)) {
                                 applyAttachmentContentStat(attachment, check.stat, check.hash);

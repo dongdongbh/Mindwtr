@@ -877,13 +877,14 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
             winner: Attachment,
             localAttachment: Attachment,
             incomingAttachment: Attachment,
-        ): Pick<Attachment, 'fileHash' | 'contentRev' | 'contentMtimeMs' | 'contentSize'> => {
+        ): Pick<Attachment, 'fileHash' | 'contentRev' | 'contentMtimeMs' | 'contentSize' | 'pendingContentUpload'> => {
             if (winner.deletedAt) {
                 return {
                     fileHash: winner.fileHash,
                     contentRev: winner.contentRev,
                     contentMtimeMs: winner.contentMtimeMs,
                     contentSize: winner.contentSize,
+                    pendingContentUpload: undefined,
                 };
             }
             const localRev = localAttachment.contentRev ?? 0;
@@ -896,6 +897,7 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
                 contentRev: contentSource.contentRev,
                 contentMtimeMs: contentSource.contentMtimeMs,
                 contentSize: contentSource.contentSize,
+                pendingContentUpload: contentSource.pendingContentUpload === true ? true : undefined,
             };
         };
 

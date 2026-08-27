@@ -1,4 +1,7 @@
 import {
+  applyAttachmentContentStat,
+  bumpAttachmentContentRevision,
+  checkAttachmentContentChange,
   decryptRemoteArtifactOrThrow,
   encryptSyncArtifact,
   inspectSyncArtifact,
@@ -16,8 +19,10 @@ import * as LegacyFileSystem from 'expo-file-system/legacy';
 import {
   bytesToBase64,
   canUploadAttachmentFrom,
+  computeAttachmentFileHash,
   createAttachmentLocalMigrationLimiter,
   DEFAULT_CONTENT_TYPE,
+  statAttachmentFile,
 } from '../attachment-sync-utils';
 import { mobileSyncCryptoPrimitives } from '../sync-crypto-native';
 import { assertMobileWebdavConnection } from '../webdav-request-options';
@@ -140,6 +145,57 @@ export async function runMobileAttachmentLifecycle(
     canUploadFrom: canUploadAttachmentFrom,
   });
 }
+
+/**
+ * Cloud and Dropbox keep bespoke transfer loops for their batch/credential semantics.
+ * Give those loops the same prepare-side content candidate behavior as the shared
+ * lifecycle: a confirmed local edit updates only local metadata and is uploaded only
+ * if that identity survives merge.
+ */
+export const prepareBespokeAttachmentContentCandidate = async (
+  attachment: Attachment,
+  localPath: string,
+): Promise<boolean> => {
+  const stat = await statAttachmentFile(localPath);
+  if (!stat) return false;
+  const check = await checkAttachmentContentChange(
+    attachment,
+    stat,
+    () => computeAttachmentFileHash(localPath),
+  );
+  if (!check.changed) {
+    if (check.stat.mtimeMs === attachment.contentMtimeMs && check.stat.size === attachment.contentSize) {
+      return false;
+    }
+    applyAttachmentContentStat(attachment, check.stat, check.hash);
+    return true;
+  }
+  if (!check.hash) return false;
+  applyAttachmentContentStat(attachment, check.stat, check.hash);
+  attachment.contentRev = bumpAttachmentContentRevision(attachment);
+  attachment.pendingContentUpload = true;
+  return true;
+};
+
+/** Fail closed if a pending winner's on-disk bytes changed after the merge candidate
+ * was recorded. A later prepare pass will record the newer identity and retry. */
+export const pendingBespokeAttachmentContentStillMatches = async (
+  attachment: Attachment,
+  localPath: string,
+): Promise<boolean> => {
+  const stat = await statAttachmentFile(localPath);
+  if (!stat) return false;
+  const check = await checkAttachmentContentChange(
+    attachment,
+    stat,
+    () => computeAttachmentFileHash(localPath),
+  );
+  if (check.changed) return false;
+  if (check.stat.mtimeMs !== attachment.contentMtimeMs || check.stat.size !== attachment.contentSize) {
+    applyAttachmentContentStat(attachment, check.stat, check.hash);
+  }
+  return true;
+};
 
 /**
  * Pre-pass run before the reconciliation loop (or a backend's own bespoke loop): migrates any

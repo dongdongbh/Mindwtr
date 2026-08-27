@@ -1,4 +1,4 @@
-import type { AppData } from './types';
+import type { AppData, Attachment } from './types';
 import type { CloudProvider } from './sync-client-helpers';
 import type { SyncBackend } from './sync-service-utils';
 import { SyncFileLockBusyError, SyncFileLockUnavailableError } from './sync-service-utils';
@@ -22,6 +22,7 @@ import { LocalSyncAbort, ensureFreshLocalSyncSnapshot, getInMemoryAppDataSnapsho
 import { hasFreshAttachmentCleanupWork } from './attachment-cleanup';
 import { flushPendingSave, useTaskStore } from './store';
 import {
+    assertNoPendingAttachmentContentReplacements,
     assertNoPendingAttachmentUploads,
     computeSyncChangeFingerprint,
     findPendingAttachmentUploads,
@@ -154,12 +155,50 @@ const visitLiveFileAttachments = (
     return count;
 };
 
-const prepareActivationAttachmentSnapshot = (data: AppData): { data: AppData; count: number } => {
+const mergedContentMustReplaceCandidateBlob = (
+    merged: Attachment,
+    candidate: Attachment,
+): boolean => {
+    const mergedRev = merged.contentRev ?? 0;
+    const candidateRev = candidate.contentRev ?? 0;
+    if (mergedRev !== candidateRev) return mergedRev > candidateRev;
+    if (!merged.fileHash || !candidate.fileHash) return false;
+    return merged.fileHash.toLowerCase() !== candidate.fileHash.toLowerCase();
+};
+
+const prepareActivationAttachmentSnapshot = (
+    data: AppData,
+    candidateRemoteData: AppData | null,
+): { data: AppData; count: number } => {
+    const candidateAttachments = new Map<string, Attachment>();
+    if (candidateRemoteData) {
+        visitLiveFileAttachments(candidateRemoteData, (attachment) => {
+            candidateAttachments.set(attachment.id, attachment);
+        });
+    }
     const candidate = cloneAppData(data);
     const count = visitLiveFileAttachments(candidate, (attachment) => {
-        // A candidate adapter must actively rediscover local presence. Leaving
-        // the old status intact would let a skipped/capped transfer look like
-        // proof that the candidate backend has the blob.
+        const candidateAttachment = candidateAttachments.get(attachment.id);
+        const mustReplaceCandidateBlob = Boolean(
+            candidateAttachment?.cloudKey
+            && mergedContentMustReplaceCandidateBlob(attachment, candidateAttachment),
+        );
+        // Only a key read from the candidate destination belongs to that
+        // destination. A local/previous-backend key is cleared so the adapter
+        // creates the missing candidate blob; a candidate key is preserved so
+        // stale local bytes can never replace an already-present remote winner.
+        // If the merged content identity instead came from the local snapshot,
+        // retain that destination key but explicitly require the adapter to
+        // replace its older blob before publishing the merged metadata.
+        attachment.cloudKey = candidateAttachment?.cloudKey;
+        attachment.pendingContentUpload = mustReplaceCandidateBlob ? true : undefined;
+        // A candidate-remote winner must be downloaded even when an unrelated
+        // local file exists at the merged uri. Clearing only this temporary clone's
+        // uri makes successful download the proof and prevents localStatus alone
+        // from turning a missing candidate object into a false positive.
+        if (candidateAttachment?.cloudKey && !mustReplaceCandidateBlob) {
+            attachment.uri = '';
+        }
         attachment.localStatus = 'missing';
     });
     return { data: candidate, count };
@@ -168,7 +207,11 @@ const prepareActivationAttachmentSnapshot = (data: AppData): { data: AppData; co
 const assertActivationAttachmentsProven = (data: AppData, expectedCount: number): void => {
     let provenCount = 0;
     visitLiveFileAttachments(data, (attachment) => {
-        if (!attachment.cloudKey || attachment.localStatus !== 'available') {
+        if (
+            !attachment.cloudKey
+            || attachment.localStatus !== 'available'
+            || attachment.pendingContentUpload === true
+        ) {
             throw new Error(`Candidate attachment proof failed for ${attachment.id}`);
         }
         provenCount += 1;
@@ -566,8 +609,11 @@ class SharedSyncRunMachine {
         const pending = findPendingAttachmentUploads(data);
         if (this.backend === 'cloudkit') {
             // CloudKit keeps local-only file attachments; other backends refuse
-            // to publish metadata whose bytes have not been uploaded (P8).
+            // to publish metadata whose bytes have not been uploaded (P8). A
+            // replacement for an existing blob is different: publishing its new
+            // hash/revision before the bytes land would expose stale content.
             this.logPendingAttachmentUploads('CloudKit sync has local-only file attachments', 'cloudkit-write', pending);
+            assertNoPendingAttachmentContentReplacements(data);
         } else {
             this.logPendingAttachmentUploads('Remote write blocked by pending attachment uploads', 'remote-write', pending);
             assertNoPendingAttachmentUploads(data);
@@ -787,7 +833,10 @@ class SharedSyncRunMachine {
      *  immediately before the merged document is written remotely. */
     private async prepareRemoteWriteData(data: AppData): Promise<AppData> {
         if (this.options.activationProbe) {
-            const activationSnapshot = prepareActivationAttachmentSnapshot(data);
+            const activationSnapshot = prepareActivationAttachmentSnapshot(
+                data,
+                this.state.remoteDataForCompare,
+            );
             if (activationSnapshot.count === 0) return data;
             const io = this.requireIo();
             if (!io.syncAttachments) {

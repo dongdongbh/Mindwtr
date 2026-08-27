@@ -431,7 +431,7 @@ export async function syncWebdavAttachments(
 
     const { patches } = await syncBasicRemoteAttachments({
         attachmentsById,
-        forceUploadExistingLocal: helpers?.activationProbe === true,
+        deferUploads: helpers?.phase === 'prepare',
         ensureLocalSnapshotFresh: helpers?.ensureLocalSnapshotFresh,
         localFileExists,
         getLocalFileStat: statLocalFile,
@@ -665,7 +665,7 @@ export async function syncCloudAttachments(
 
     const { patches } = await syncBasicRemoteAttachments({
         attachmentsById,
-        forceUploadExistingLocal: helpers?.activationProbe === true,
+        deferUploads: helpers?.phase === 'prepare',
         ensureLocalSnapshotFresh: helpers?.ensureLocalSnapshotFresh,
         localFileExists,
         getLocalFileStat: statLocalFile,
@@ -837,7 +837,7 @@ export async function syncDropboxAttachments(
 
     const { patches } = await syncBasicRemoteAttachments({
         attachmentsById,
-        forceUploadExistingLocal: helpers?.activationProbe === true,
+        deferUploads: helpers?.phase === 'prepare',
         ensureLocalSnapshotFresh: helpers?.ensureLocalSnapshotFresh,
         localFileExists,
         getLocalFileStat: statLocalFile,
@@ -1006,7 +1006,7 @@ export async function syncCloudKitAttachments(
 
     const { patches } = await syncBasicRemoteAttachments({
         attachmentsById,
-        forceUploadExistingLocal: helpers?.activationProbe === true,
+        deferUploads: helpers?.phase === 'prepare',
         ensureLocalSnapshotFresh: helpers?.ensureLocalSnapshotFresh,
         localFileExists,
         getLocalFileStat: statLocalFile,
@@ -1168,7 +1168,7 @@ export async function syncFileAttachments(
 
     const { patches } = await syncBasicRemoteAttachments({
         attachmentsById,
-        forceUploadExistingLocal: helpers?.activationProbe === true,
+        deferUploads: helpers?.phase === 'prepare',
         ensureLocalSnapshotFresh: helpers?.ensureLocalSnapshotFresh,
         localFileExists,
         getLocalFileStat: statLocalFile,

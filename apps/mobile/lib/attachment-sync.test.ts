@@ -1015,7 +1015,7 @@ describe('attachment sync', () => {
     expect(data.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
   });
 
-  it('re-uploads an existing local attachment when proving a candidate cloud backend', async () => {
+  it('uploads a candidate-cleared local attachment when proving a cloud backend', async () => {
     const localUri = 'file://document/attachments/notes.txt';
     fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
       uri === localUri ? { exists: true, size: 3 } : { exists: false }
@@ -1034,7 +1034,6 @@ describe('attachment sync', () => {
           kind: 'file',
           title: 'notes.txt',
           uri: localUri,
-          cloudKey: 'attachments/from-previous-backend.txt',
           localStatus: 'available',
           createdAt: '2026-08-03T10:00:00.000Z',
           updatedAt: '2026-08-03T10:00:00.000Z',
@@ -1072,7 +1071,61 @@ describe('attachment sync', () => {
     });
   });
 
-  it('cleans up a cloud upload when local data changes before metadata is stamped', async () => {
+  it('proves an existing candidate cloud attachment with a bounded GET and hash check', async () => {
+    const remoteBytes = new Uint8Array([1, 2, 3]);
+    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+    const core = await import('@mindwtr/core');
+    vi.mocked(core.cloudGetFile).mockResolvedValue(remoteBytes.slice().buffer as ArrayBuffer);
+    const appData: AppData = {
+      tasks: [{
+        id: 'task-1',
+        title: 'Task',
+        status: 'inbox',
+        tags: [],
+        contexts: [],
+        attachments: [{
+          id: 'remote-notes',
+          kind: 'file',
+          title: 'notes.txt',
+          uri: '',
+          cloudKey: 'attachments/remote-notes.txt',
+          fileHash: sha256Hex(remoteBytes),
+          localStatus: 'missing',
+          createdAt: '2026-08-03T10:00:00.000Z',
+          updatedAt: '2026-08-03T10:00:00.000Z',
+        }],
+        createdAt: '2026-08-03T10:00:00.000Z',
+        updatedAt: '2026-08-03T10:00:00.000Z',
+      }],
+      projects: [],
+      sections: [],
+      areas: [],
+      settings: {},
+    };
+
+    const { syncCloudAttachments } = attachmentSync;
+    const { didMutate, data } = syncResult(
+      await syncCloudAttachments(
+        appData,
+        { url: 'https://candidate.example/v1/data', token: 'candidate-token' },
+        'https://candidate.example/v1',
+        { activationProbe: true, phase: 'post-merge' },
+      ),
+      appData,
+    );
+
+    expect(core.cloudGetFile).toHaveBeenCalledWith(
+      'https://candidate.example/v1/attachments/remote-notes.txt',
+      { token: 'candidate-token' },
+    );
+    expect(didMutate).toBe(true);
+    expect(data.tasks[0]?.attachments?.[0]).toMatchObject({
+      cloudKey: 'attachments/remote-notes.txt',
+      localStatus: 'available',
+    });
+  });
+
+  it('does not delete a deterministic cloud target when local data changes after upload', async () => {
     fileSystemMock.getInfoAsync.mockResolvedValue({ exists: true, size: 3 });
     fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
     const core = await import('@mindwtr/core');
@@ -1127,10 +1180,7 @@ describe('attachment sync', () => {
       'application/octet-stream',
       { token: 'token' }
     );
-    expect(core.cloudDeleteFile).toHaveBeenCalledWith(
-      'https://cloud.example/v1/attachments/race.txt',
-      { token: 'token' }
-    );
+    expect(core.cloudDeleteFile).not.toHaveBeenCalled();
     expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
   });
 
@@ -1184,10 +1234,7 @@ describe('attachment sync', () => {
       { signal: abortController.signal }
     )).rejects.toBe(uploadError);
 
-    expect(core.cloudDeleteFile).toHaveBeenCalledWith(
-      'https://cloud.example/v1/attachments/mid-upload.txt',
-      { token: 'token' }
-    );
+    expect(core.cloudDeleteFile).not.toHaveBeenCalled();
     expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
   });
 
@@ -1331,7 +1378,6 @@ describe('attachment sync', () => {
           kind: 'file',
           title: 'reconnect.txt',
           uri: localUri,
-          cloudKey: 'attachments/from-old-account.txt',
           localStatus: 'available',
           createdAt: '2026-08-03T10:00:00.000Z',
           updatedAt: '2026-08-03T10:00:00.000Z',
@@ -1423,17 +1469,10 @@ describe('attachment sync', () => {
 
     expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
     expect(appData.tasks[0].attachments?.[1]?.cloudKey).toBeUndefined();
-    expect(core.cloudDeleteFile).toHaveBeenCalledWith(
-      'https://cloud.example/v1/attachments/second.txt',
-      { token: 'token' }
-    );
-    expect(core.cloudDeleteFile).toHaveBeenCalledWith(
-      'https://cloud.example/v1/attachments/first.txt',
-      { token: 'token' }
-    );
+    expect(core.cloudDeleteFile).not.toHaveBeenCalled();
   });
 
-  it('cleans up uncertain cloud uploads after a network failure without dropping earlier successful metadata', async () => {
+  it('keeps uncertain cloud targets after a network failure without dropping earlier successful metadata', async () => {
     fileSystemMock.getInfoAsync.mockResolvedValue({ exists: true, size: 3 });
     fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
     const core = await import('@mindwtr/core');
@@ -1493,14 +1532,7 @@ describe('attachment sync', () => {
     expect(didMutate).toBe(true);
     expect(data.tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/first.txt');
     expect(data.tasks[0].attachments?.[1]?.cloudKey).toBeUndefined();
-    expect(core.cloudDeleteFile).toHaveBeenCalledWith(
-      'https://cloud.example/v1/attachments/second.txt',
-      { token: 'token' }
-    );
-    expect(core.cloudDeleteFile).not.toHaveBeenCalledWith(
-      'https://cloud.example/v1/attachments/first.txt',
-      { token: 'token' }
-    );
+    expect(core.cloudDeleteFile).not.toHaveBeenCalled();
   });
 
   // #1057 check-on-touch content detection, running through the REAL core lifecycle.
@@ -1510,6 +1542,7 @@ describe('attachment sync', () => {
   describe('check-on-touch content changes', () => {
     const OLD_BYTES = new Uint8Array([1, 2, 3]);
     const NEW_BYTES = new Uint8Array([1, 2, 3, 4]);
+    const NEWER_BYTES = new Uint8Array([1, 2, 3, 4, 5]);
 
     const makeEditedAppData = (id: string, overrides: Partial<Attachment> = {}): AppData => ({
       tasks: [
@@ -1545,7 +1578,7 @@ describe('attachment sync', () => {
       settings: {},
     });
 
-    it('re-uploads a file-backend attachment whose local bytes changed, during the prepare phase', async () => {
+    it('records a changed file-backend attachment without writing it during prepare', async () => {
       const syncPath = 'file://sync/data.json';
       const localUri = 'file://document/attachments/edited.txt';
       const remoteUri = 'file://sync/attachments/edited.txt';
@@ -1567,17 +1600,119 @@ describe('attachment sync', () => {
       const attachment = data.tasks[0].attachments?.[0];
 
       expect(didMutate).toBe(true);
-      expect(fileSystemMock.copyAsync).toHaveBeenCalledWith(
-        expect.objectContaining({
-          from: localUri,
-          to: expect.stringMatching(/^file:\/\/sync\/attachments\/edited\.txt\.tmp-/),
-        })
-      );
-      // Only a confirmed upload records the new baseline and bumps the revision.
+      expect(fileSystemMock.copyAsync).not.toHaveBeenCalled();
       expect(attachment?.fileHash).toBe(sha256Hex(NEW_BYTES));
       expect(attachment?.contentMtimeMs).toBe(2000);
       expect(attachment?.contentSize).toBe(NEW_BYTES.length);
       expect(attachment?.contentRev).toBe(1);
+      expect(attachment?.pendingContentUpload).toBe(true);
+    });
+
+    it('defers a cloud edit and refuses to upload different bytes that land after prepare', async () => {
+      const localUri = 'file://document/attachments/edited-cloud.txt';
+      const core = await import('@mindwtr/core');
+      const { syncCloudAttachments } = attachmentSync;
+      let liveBytes = NEW_BYTES;
+      let modificationTime = 2;
+      fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+        uri === localUri
+          ? { exists: true, size: liveBytes.length, modificationTime }
+          : { exists: false }
+      ));
+      fileSystemMock.readAsStringAsync.mockImplementation(async () => base64Of(liveBytes));
+
+      const prepared = makeEditedAppData('edited-cloud');
+      const preparedResult = syncResult(
+        await syncCloudAttachments(
+          prepared,
+          { url: 'https://cloud.example/v1/data', token: 'token' },
+          'https://cloud.example/v1',
+          { phase: 'prepare' },
+        ),
+        prepared,
+      );
+      const preparedAttachment = preparedResult.data.tasks[0].attachments?.[0];
+
+      expect(core.cloudPutFile).not.toHaveBeenCalled();
+      expect(preparedAttachment).toMatchObject({
+        fileHash: sha256Hex(NEW_BYTES),
+        contentRev: 1,
+        pendingContentUpload: true,
+      });
+
+      vi.clearAllMocks();
+      liveBytes = NEWER_BYTES;
+      modificationTime = 3;
+      const postMergeResult = syncResult(
+        await syncCloudAttachments(
+          preparedResult.data,
+          { url: 'https://cloud.example/v1/data', token: 'token' },
+          'https://cloud.example/v1',
+          { phase: 'post-merge' },
+        ),
+        preparedResult.data,
+      );
+
+      expect(core.cloudPutFile).not.toHaveBeenCalled();
+      expect(postMergeResult.data.tasks[0].attachments?.[0]).toMatchObject({
+        fileHash: sha256Hex(NEW_BYTES),
+        contentRev: 1,
+        pendingContentUpload: true,
+      });
+    });
+
+    it('defers a Dropbox edit and refuses to upload different bytes that land after prepare', async () => {
+      const localUri = 'file://document/attachments/edited-dropbox.txt';
+      const dropbox = await import('./dropbox-sync');
+      const { syncDropboxAttachments } = attachmentSync;
+      let liveBytes = NEW_BYTES;
+      let modificationTime = 2;
+      fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+        uri === localUri
+          ? { exists: true, size: liveBytes.length, modificationTime }
+          : { exists: false }
+      ));
+      fileSystemMock.readAsStringAsync.mockImplementation(async () => base64Of(liveBytes));
+
+      const prepared = makeEditedAppData('edited-dropbox');
+      const preparedResult = syncResult(
+        await syncDropboxAttachments(
+          prepared,
+          'dropbox-client-id',
+          fetch,
+          { phase: 'prepare' },
+        ),
+        prepared,
+      );
+      const preparedAttachment = preparedResult.data.tasks[0].attachments?.[0];
+
+      expect(dropbox.uploadDropboxFileVersioned).not.toHaveBeenCalled();
+      expect(preparedAttachment).toMatchObject({
+        fileHash: sha256Hex(NEW_BYTES),
+        contentRev: 1,
+        pendingContentUpload: true,
+      });
+
+      vi.clearAllMocks();
+      liveBytes = NEWER_BYTES;
+      modificationTime = 3;
+      const postMergeResult = syncResult(
+        await syncDropboxAttachments(
+          preparedResult.data,
+          'dropbox-client-id',
+          fetch,
+          { phase: 'post-merge' },
+        ),
+        preparedResult.data,
+      );
+
+      expect(dropbox.getDropboxFileMetadata).not.toHaveBeenCalled();
+      expect(dropbox.uploadDropboxFileVersioned).not.toHaveBeenCalled();
+      expect(postMergeResult.data.tasks[0].attachments?.[0]).toMatchObject({
+        fileHash: sha256Hex(NEW_BYTES),
+        contentRev: 1,
+        pendingContentUpload: true,
+      });
     });
 
     it('never puts an attachment title or file name into a log line (SEC-16, #854)', async () => {
@@ -1782,7 +1917,7 @@ describe('attachment sync', () => {
       await expect(pending).rejects.toBeInstanceOf(StreamedUploadCancellationUnconfirmedError);
     });
 
-    it('re-uploads a WebDAV attachment during prepare but re-downloads the very same mismatch post-merge', async () => {
+    it('defers a WebDAV edit during prepare and downloads when newer remote content wins', async () => {
       const localUri = 'file://document/attachments/edited-webdav.txt';
       const config = { url: 'https://example.com/data.json', username: 'u', password: 'p' };
       const core = await import('@mindwtr/core');
@@ -1810,21 +1945,21 @@ describe('attachment sync', () => {
         prepared,
       );
 
-      expect(core.webdavPutFileVersioned).toHaveBeenCalledWith(
-        'https://example.com/attachments/edited-webdav.txt',
-        expect.any(ArrayBuffer),
-        'application/octet-stream',
-        null,
-        expect.anything()
-      );
+      expect(core.webdavPutFileVersioned).not.toHaveBeenCalled();
       expect(core.webdavGetFile).not.toHaveBeenCalled();
       expect(preparedResult.data.tasks[0].attachments?.[0]?.fileHash).toBe(sha256Hex(NEW_BYTES));
       expect(preparedResult.data.tasks[0].attachments?.[0]?.contentRev).toBe(1);
+      expect(preparedResult.data.tasks[0].attachments?.[0]?.pendingContentUpload).toBe(true);
 
       vi.clearAllMocks();
       (await import('@mindwtr/core')).resetUnhashableAttachmentStatsForTests();
       primeFileSystem();
-      const merged = makeEditedAppData('edited-webdav');
+      const merged = makeEditedAppData('edited-webdav', {
+        contentRev: 2,
+        contentMtimeMs: undefined,
+        contentSize: undefined,
+        pendingContentUpload: undefined,
+      });
       await syncWebdavAttachments(merged, config, 'https://example.com', undefined, { phase: 'post-merge' });
 
       expect(core.webdavPutFileVersioned).not.toHaveBeenCalled();
@@ -1843,8 +1978,8 @@ describe('attachment sync', () => {
     // BUG-16: an attachment predating `fileHash` cannot have had newer remote content
     // adopted by the merge (fileHash is synced), so post-merge records what is on disk
     // as the baseline instead of downloading over it. Prepare still treats the same
-    // state as this device's edit and publishes the missing hash by re-uploading.
-    it('adopts the observed hash post-merge for an attachment with no recorded fileHash, and still uploads it during prepare', async () => {
+    // state as this device's edit candidate, but defers the remote write until merge.
+    it('adopts a missing hash post-merge and defers the prepare-side candidate', async () => {
       const localUri = 'file://document/attachments/nohash.txt';
       const config = { url: 'https://example.com/data.json', username: 'u', password: 'p' };
       const core = await import('@mindwtr/core');
@@ -1879,14 +2014,9 @@ describe('attachment sync', () => {
         prepared,
       );
 
-      expect(core.webdavPutFileVersioned).toHaveBeenCalledWith(
-        'https://example.com/attachments/nohash.txt',
-        expect.any(ArrayBuffer),
-        'application/octet-stream',
-        null,
-        expect.anything()
-      );
+      expect(core.webdavPutFileVersioned).not.toHaveBeenCalled();
       expect(preparedResult.data.tasks[0].attachments?.[0]?.contentRev).toBe(1);
+      expect(preparedResult.data.tasks[0].attachments?.[0]?.pendingContentUpload).toBe(true);
     });
 
     // BUG-16: an unhashable file used to be re-read (up to the 50 MB cap) every single
@@ -1980,7 +2110,7 @@ describe('attachment sync', () => {
     it('file', async () => {
       const appData = frozenData();
       expectUploadedCopy(
-        await attachmentSync.syncFileAttachments(appData, 'file://sync/data.json', undefined, { phase: 'prepare' }),
+        await attachmentSync.syncFileAttachments(appData, 'file://sync/data.json', undefined, { phase: 'post-merge' }),
         appData,
         'attachments/pure.txt',
       );
@@ -1994,7 +2124,7 @@ describe('attachment sync', () => {
           { url: 'https://example.com/data.json', username: 'u', password: 'p' },
           'https://example.com',
           undefined,
-          { phase: 'prepare' },
+          { phase: 'post-merge' },
         ),
         appData,
         'attachments/pure.txt',
@@ -2008,6 +2138,7 @@ describe('attachment sync', () => {
           appData,
           { url: 'https://cloud.example/v1/data', token: 'token' },
           'https://cloud.example/v1',
+          { phase: 'post-merge' },
         ),
         appData,
         'attachments/pure.txt',
@@ -2017,7 +2148,7 @@ describe('attachment sync', () => {
     it('dropbox', async () => {
       const appData = frozenData();
       expectUploadedCopy(
-        await attachmentSync.syncDropboxAttachments(appData, 'dropbox-client-id', fetch),
+        await attachmentSync.syncDropboxAttachments(appData, 'dropbox-client-id', fetch, { phase: 'post-merge' }),
         appData,
         'attachments/pure.txt',
       );
@@ -2030,7 +2161,7 @@ describe('attachment sync', () => {
 
       const appData = frozenData();
       const { didMutate, data } = syncResult(
-        await attachmentSync.syncCloudKitAttachments(appData, undefined, { phase: 'prepare' }),
+        await attachmentSync.syncCloudKitAttachments(appData, undefined, { phase: 'post-merge' }),
         appData,
       );
 

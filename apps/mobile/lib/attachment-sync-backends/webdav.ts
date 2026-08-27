@@ -236,7 +236,7 @@ export const syncWebdavAttachments = async (
   const { patches } = await runMobileAttachmentLifecycle({
     attachmentsById,
     localFileExists: fileExists,
-    forceUploadExistingLocal: options.activationProbe === true,
+    deferUploads: options.phase === 'prepare',
     getLocalFileStat: (path) => statAttachmentFile(path),
     computeLocalFileHash: (path) => computeAttachmentFileHash(path),
     contentChangePhase: options.phase,

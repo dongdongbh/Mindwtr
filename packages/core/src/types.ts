@@ -184,6 +184,14 @@ export interface Attachment {
      *  tracking and is display-only. */
     contentSize?: number;
     /**
+     * Local-only durable retry marker. The prepare pass may discover edited bytes,
+     * but it must not overwrite the remote blob before the remote document is read
+     * and merged. The marker follows the winning content identity through that merge;
+     * the post-merge pass clears it only after the winning bytes upload successfully.
+     * It is stripped from remote sync documents.
+     */
+    pendingContentUpload?: boolean;
+    /**
      * Local availability/transfer status. Persisted locally, but not synced to remote.
      * - available: File exists at `uri`
      * - missing: Metadata exists, file not found at `uri`

@@ -26,6 +26,7 @@ export type PendingAttachmentUpload = {
     title: string;
     uriScheme: string;
     localStatus?: Attachment['localStatus'];
+    reason: 'content-replacement' | 'missing-cloud-key';
 };
 
 export const normalizeWebdavUrl = (rawUrl: string): string => {
@@ -95,6 +96,7 @@ const collectPendingUploads = (
         .filter((attachment) => {
             if (attachment.kind !== 'file') return false;
             if (attachment.deletedAt) return false;
+            if (attachment.pendingContentUpload === true) return true;
             if (attachment.cloudKey) return false;
             if (!isLocalAttachmentUri(attachment.uri)) return false;
             if (attachment.localStatus === 'missing') return false;
@@ -107,6 +109,9 @@ const collectPendingUploads = (
             title: attachment.title,
             uriScheme: getAttachmentUriScheme(attachment.uri),
             localStatus: attachment.localStatus,
+            reason: attachment.pendingContentUpload === true
+                ? 'content-replacement'
+                : 'missing-cloud-key',
         }));
 };
 
@@ -126,8 +131,7 @@ export const findPendingAttachmentUploads = (data: AppData): PendingAttachmentUp
     return pending;
 };
 
-export const assertNoPendingAttachmentUploads = (data: AppData): void => {
-    const pending = findPendingAttachmentUploads(data);
+const assertNoPendingUploadList = (pending: PendingAttachmentUpload[]): void => {
     if (pending.length === 0) return;
 
     const sample = pending
@@ -137,6 +141,16 @@ export const assertNoPendingAttachmentUploads = (data: AppData): void => {
     const extra = pending.length > 3 ? `, +${pending.length - 3} more` : '';
     throw new Error(
         `Attachment upload incomplete: ${pending.length} file attachment(s) are still pending upload (${sample}${extra}).`
+    );
+};
+
+export const assertNoPendingAttachmentUploads = (data: AppData): void => {
+    assertNoPendingUploadList(findPendingAttachmentUploads(data));
+};
+
+export const assertNoPendingAttachmentContentReplacements = (data: AppData): void => {
+    assertNoPendingUploadList(
+        findPendingAttachmentUploads(data).filter((item) => item.reason === 'content-replacement'),
     );
 };
 
@@ -240,6 +254,7 @@ export const sanitizeAppDataForRemote = (data: AppData): AppData => {
                         localStatus: undefined,
                         contentMtimeMs: undefined,
                         contentSize: undefined,
+                        pendingContentUpload: undefined,
                     };
                 }
             }
@@ -255,6 +270,7 @@ export const sanitizeAppDataForRemote = (data: AppData): AppData => {
                 // device re-derives its own stat locally after its own upload/download.
                 contentMtimeMs: undefined,
                 contentSize: undefined,
+                pendingContentUpload: undefined,
             };
         });
     };

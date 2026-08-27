@@ -1582,11 +1582,13 @@ class MobileSyncRun {
         return syncCloudAttachments(data, cloudConfig, baseSyncUrl, {
           activationProbe: helpers.activationProbe,
           assertCurrent: () => helpers.ensureLocalSnapshotFresh(),
+          phase: helpers.phase,
           signal: this.requestAbortController.signal,
         });
       },
       syncDropboxAttachments: async (data, helpers) => syncDropboxAttachments(data, this.dropboxClientId, this.fetchWithAbort, {
         activationProbe: helpers.activationProbe,
+        phase: helpers.phase,
         resolveAccessToken: (forceRefresh) => this.resolveDropboxAccessToken(forceRefresh),
         signal: this.requestAbortController.signal,
         assertRemoteMutationFenceHeld: helpers.assertRemoteMutationFenceHeld,

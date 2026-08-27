@@ -112,6 +112,7 @@ describe('sync-helpers pending attachment uploads', () => {
                 title: 'photo.jpg',
                 uriScheme: 'file',
                 localStatus: undefined,
+                reason: 'missing-cloud-key',
             },
         ]);
     });
@@ -132,6 +133,43 @@ describe('sync-helpers pending attachment uploads', () => {
         ]);
 
         expect(findPendingAttachmentUploads(data)).toHaveLength(0);
+    });
+
+    it('keeps a deferred content replacement pending even when it has a cloud key', () => {
+        const data = createData([
+            fileAttachment({
+                cloudKey: 'attachments/uploaded.jpg',
+                pendingContentUpload: true,
+            }),
+        ]);
+
+        expect(findPendingAttachmentUploads(data)).toEqual([
+            expect.objectContaining({
+                attachmentId: 'att-1',
+                reason: 'content-replacement',
+            }),
+        ]);
+        expect(hasPendingSyncSideEffects(data)).toBe(true);
+        expect(sanitizeAppDataForRemote(data).tasks[0]?.attachments?.[0]?.pendingContentUpload).toBeUndefined();
+    });
+
+    it('keeps a deferred replacement pending when its local bytes become unavailable', () => {
+        const data = createData([
+            fileAttachment({
+                cloudKey: 'attachments/uploaded.jpg',
+                localStatus: 'missing',
+                pendingContentUpload: true,
+                uri: '',
+            }),
+        ]);
+
+        expect(findPendingAttachmentUploads(data)).toEqual([
+            expect.objectContaining({
+                attachmentId: 'att-1',
+                reason: 'content-replacement',
+            }),
+        ]);
+        expect(hasPendingSyncSideEffects(data)).toBe(true);
     });
 
     it('ignores attachments whose parent task is deleted', () => {

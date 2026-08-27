@@ -139,58 +139,6 @@ describe('runAttachmentTransferLifecycle', () => {
         expect(patches.size).toBe(0);
     });
 
-    it('can force a local file to be uploaded to a newly activated backend', async () => {
-        const attachment = makeAttachment({
-            cloudKey: 'attachments/from-previous-backend.txt',
-            localStatus: 'available',
-        });
-        const onUpload = vi.fn(async (item: Attachment) => {
-            // The previous backend key must not survive a failed candidate
-            // upload and masquerade as proof that the candidate has the blob.
-            expect(item.cloudKey).toBeUndefined();
-            item.cloudKey = 'attachments/on-candidate-backend.txt';
-            return true;
-        });
-
-        const { didMutate, after } = await runLifecycle({
-            attachmentsById: new Map([[attachment.id, attachment]]),
-            localFileExists: vi.fn(async () => true),
-            forceUploadExistingLocal: true,
-            onUpload,
-            onUploadError: vi.fn(),
-            onDownload: vi.fn(),
-            onDownloadError: vi.fn(),
-        });
-
-        expect(didMutate).toBe(true);
-        expect(onUpload).toHaveBeenCalledWith(after(), '/local/file.txt');
-        expect(after().cloudKey).toBe('attachments/on-candidate-backend.txt');
-        expect(attachment.cloudKey).toBe('attachments/from-previous-backend.txt');
-    });
-
-    it('does not retain the previous backend key when a forced candidate upload fails', async () => {
-        const attachment = makeAttachment({
-            cloudKey: 'attachments/from-previous-backend.txt',
-            localStatus: 'available',
-        });
-        const uploadError = new Error('candidate upload failed');
-        const onUploadError = vi.fn();
-
-        const { didMutate, after } = await runLifecycle({
-            attachmentsById: new Map([[attachment.id, attachment]]),
-            localFileExists: vi.fn(async () => true),
-            forceUploadExistingLocal: true,
-            onUpload: vi.fn(async () => { throw uploadError; }),
-            onUploadError,
-            onDownload: vi.fn(),
-            onDownloadError: vi.fn(),
-        });
-
-        expect(didMutate).toBe(true);
-        expect(after().cloudKey).toBeUndefined();
-        expect(onUploadError).toHaveBeenCalledWith(after(), uploadError);
-    });
-
     it('routes transfer errors to the operation-specific error callbacks', async () => {
         const uploadAttachment = makeAttachment({ id: 'upload', uri: '/local/upload.txt' });
         const downloadAttachment = makeAttachment({ id: 'download', uri: '/local/missing.txt', cloudKey: 'attachments/download.txt' });
@@ -376,6 +324,147 @@ describe('runAttachmentTransferLifecycle', () => {
             expect(onUpload).toHaveBeenCalledWith(after(), '/local/file.txt');
             expect(attachment.contentRev).toBe(2);
             expect(attachment.fileHash).toBe('aaaa');
+        });
+
+        it('prepare phase defers a confirmed edit until after the remote merge', async () => {
+            const attachment = makeAttachment({
+                cloudKey: 'attachments/attachment-1.txt',
+                fileHash: 'aaaa',
+                contentRev: 2,
+                contentMtimeMs: 1000,
+                contentSize: 10,
+            });
+            const onUpload = vi.fn(async () => true);
+            const { didMutate, after } = await runLifecycle({
+                attachmentsById: new Map([[attachment.id, attachment]]),
+                localFileExists: vi.fn(async () => true),
+                getLocalFileStat: vi.fn(async () => ({ mtimeMs: 2000, size: 20 })),
+                computeLocalFileHash: vi.fn(async () => 'bbbb'),
+                contentChangePhase: 'prepare',
+                deferUploads: true,
+                onUpload,
+                onUploadError: vi.fn(),
+                onDownload: vi.fn(),
+                onDownloadError: vi.fn(),
+            });
+
+            expect(didMutate).toBe(true);
+            expect(onUpload).not.toHaveBeenCalled();
+            expect(after()).toMatchObject({
+                contentRev: 3,
+                fileHash: 'bbbb',
+                contentMtimeMs: 2000,
+                contentSize: 20,
+                pendingContentUpload: true,
+            });
+        });
+
+        it('post-merge uploads only a pending winning candidate and clears its marker', async () => {
+            const attachment = makeAttachment({
+                cloudKey: 'attachments/attachment-1.txt',
+                fileHash: 'bbbb',
+                contentRev: 3,
+                contentMtimeMs: 2000,
+                contentSize: 20,
+                pendingContentUpload: true,
+            });
+            const onUpload = vi.fn(async () => true);
+            const { didMutate, after } = await runLifecycle({
+                attachmentsById: new Map([[attachment.id, attachment]]),
+                localFileExists: vi.fn(async () => true),
+                getLocalFileStat: vi.fn(async () => ({ mtimeMs: 2000, size: 20 })),
+                computeLocalFileHash: vi.fn(async () => 'bbbb'),
+                contentChangePhase: 'post-merge',
+                onUpload,
+                onUploadError: vi.fn(),
+                onDownload: vi.fn(),
+                onDownloadError: vi.fn(),
+            });
+
+            expect(didMutate).toBe(true);
+            expect(onUpload).toHaveBeenCalledOnce();
+            expect(after().pendingContentUpload).toBeUndefined();
+        });
+
+        it('post-merge does not upload a pending candidate whose local bytes changed after prepare', async () => {
+            const attachment = makeAttachment({
+                cloudKey: 'attachments/attachment-1.txt',
+                fileHash: 'prepared-hash',
+                contentRev: 3,
+                contentMtimeMs: 2000,
+                contentSize: 20,
+                localStatus: 'available',
+                pendingContentUpload: true,
+            });
+            const onUpload = vi.fn(async () => true);
+            const onDownload = vi.fn(async () => true);
+            const onLocalEditRace = vi.fn();
+            const { didMutate, after } = await runLifecycle({
+                attachmentsById: new Map([[attachment.id, attachment]]),
+                localFileExists: vi.fn(async () => true),
+                getLocalFileStat: vi.fn(async () => ({ mtimeMs: 3000, size: 30 })),
+                computeLocalFileHash: vi.fn(async () => 'newer-local-hash'),
+                contentChangePhase: 'post-merge',
+                onUpload,
+                onUploadError: vi.fn(),
+                onDownload,
+                onDownloadError: vi.fn(),
+                onLocalEditRace,
+            });
+
+            expect(didMutate).toBe(false);
+            expect(onUpload).not.toHaveBeenCalled();
+            expect(onDownload).not.toHaveBeenCalled();
+            expect(onLocalEditRace).toHaveBeenCalledWith(after());
+            expect(after().pendingContentUpload).toBe(true);
+            expect(after().fileHash).toBe('prepared-hash');
+            expect(after().contentMtimeMs).toBe(2000);
+        });
+
+        it('does not download an older cloud blob when a pending winning candidate is missing locally', async () => {
+            const attachment = makeAttachment({
+                cloudKey: 'attachments/attachment-1.txt',
+                fileHash: 'prepared-hash',
+                contentRev: 3,
+                contentMtimeMs: 2000,
+                contentSize: 20,
+                localStatus: 'available',
+                pendingContentUpload: true,
+            });
+            const onDownload = vi.fn(async () => true);
+            const { after } = await runLifecycle({
+                attachmentsById: new Map([[attachment.id, attachment]]),
+                localFileExists: vi.fn(async () => false),
+                getLocalFileStat: vi.fn(async () => null),
+                computeLocalFileHash: vi.fn(async () => null),
+                contentChangePhase: 'post-merge',
+                onUpload: vi.fn(),
+                onUploadError: vi.fn(),
+                onDownload,
+                onDownloadError: vi.fn(),
+            });
+
+            expect(onDownload).not.toHaveBeenCalled();
+            expect(after().localStatus).toBe('missing');
+            expect(after().pendingContentUpload).toBe(true);
+        });
+
+        it('defers a first upload with no cloud key until the merged pass', async () => {
+            const attachment = makeAttachment({ localStatus: 'available' });
+            const onUpload = vi.fn(async () => true);
+            const { after } = await runLifecycle({
+                attachmentsById: new Map([[attachment.id, attachment]]),
+                localFileExists: vi.fn(async () => true),
+                contentChangePhase: 'prepare',
+                deferUploads: true,
+                onUpload,
+                onUploadError: vi.fn(),
+                onDownload: vi.fn(),
+                onDownloadError: vi.fn(),
+            });
+
+            expect(onUpload).not.toHaveBeenCalled();
+            expect(after().cloudKey).toBeUndefined();
         });
 
         describe('prepare phase: a failed/skipped upload must not publish metadata (review B2)', () => {
@@ -778,19 +867,6 @@ describe('runAttachmentTransferLifecycle purity (frozen inputs)', () => {
         });
         expect(patches.get('attachment-1')?.uri).toBe('/local/downloaded.txt');
         expect(attachment.uri).toBe('/local/file.txt');
-    });
-
-    it('forced candidate re-upload never clears the frozen attachment cloudKey', async () => {
-        const attachment = makeAttachment({ cloudKey: 'attachments/previous.txt', localStatus: 'available' });
-        const { patches } = await frozenRun([attachment], {
-            forceUploadExistingLocal: true,
-            onUpload: async (item) => {
-                item.cloudKey = 'attachments/candidate.txt';
-                return true;
-            },
-        });
-        expect(patches.get('attachment-1')?.cloudKey).toBe('attachments/candidate.txt');
-        expect(attachment.cloudKey).toBe('attachments/previous.txt');
     });
 
     it('prepare-phase content re-upload never writes stat/hash/contentRev through', async () => {

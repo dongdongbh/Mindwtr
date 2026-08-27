@@ -304,10 +304,11 @@ describe('desktop sync attachment backends', () => {
         );
     });
 
-    it('re-uploads a locally available attachment with an old cloud key during a self-hosted activation probe', async () => {
+    it('uploads a candidate-cleared local attachment during a self-hosted activation probe', async () => {
         const bytes = new Uint8Array([1, 2, 3]);
         const fetcher = vi.fn(async () => new Response(null, { status: 200 }));
         const appData = createCandidateAttachmentData();
+        appData.tasks[0].attachments![0].cloudKey = undefined;
         const deps: AttachmentBackendDeps = {
             getTauriFetch: async () => fetcher as unknown as typeof fetch,
             isTauriRuntimeEnv: () => true,
@@ -333,9 +334,10 @@ describe('desktop sync attachment backends', () => {
         expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
     });
 
-    it('clears stale candidate proof when an activation-probe attachment upload fails', async () => {
+    it('does not manufacture candidate proof when an activation upload fails', async () => {
         const fetcher = vi.fn(async () => errorResponse(503, 'Unavailable'));
         const appData = createCandidateAttachmentData();
+        appData.tasks[0].attachments![0].cloudKey = undefined;
         const deps: AttachmentBackendDeps = {
             getTauriFetch: async () => fetcher as unknown as typeof fetch,
             isTauriRuntimeEnv: () => true,
@@ -358,13 +360,14 @@ describe('desktop sync attachment backends', () => {
             'https://candidate.example/v1/attachments/attachment-1.txt',
             expect.objectContaining({ method: 'PUT' }),
         );
-        expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
-        expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
+        expect(result).toBe(false);
+        expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
     });
 
-    it('re-copies a locally available attachment with an old cloud key during a file activation probe', async () => {
+    it('copies a candidate-cleared local attachment during a file activation probe', async () => {
         const bytes = new Uint8Array([1, 2, 3]);
         const appData = createCandidateAttachmentData();
+        appData.tasks[0].attachments![0].cloudKey = undefined;
         const deps: AttachmentBackendDeps = {
             getTauriFetch: vi.fn(),
             isTauriRuntimeEnv: () => true,
@@ -372,7 +375,7 @@ describe('desktop sync attachment backends', () => {
             logSyncWarning: vi.fn(),
             resolveWebdavPassword: vi.fn(),
         };
-        syncFsMocks.exists.mockResolvedValue(true);
+        syncFsMocks.exists.mockResolvedValue(false);
         fsMocks.readFile.mockResolvedValue(bytes);
 
         const result = await syncFileAttachments(
@@ -583,10 +586,11 @@ describe('desktop sync attachment backends', () => {
         );
     });
 
-    it('re-uploads a locally available attachment with an old cloud key during a WebDAV activation probe', async () => {
+    it('uploads a candidate-cleared local attachment during a WebDAV activation probe', async () => {
         const bytes = new Uint8Array([1, 2, 3]);
         const fetcher = vi.fn(async () => new Response(null, { status: 200 }));
         const appData = createCandidateAttachmentData();
+        appData.tasks[0].attachments![0].cloudKey = undefined;
         const deps: AttachmentBackendDeps = {
             getTauriFetch: async () => fetcher as unknown as typeof fetch,
             isTauriRuntimeEnv: () => true,
@@ -750,7 +754,7 @@ describe('desktop sync attachment backends', () => {
 
         expect(ensureLocalSnapshotFresh).toHaveBeenCalledTimes(2);
         const putCalls = fetcher.mock.calls.filter(([, init]) => (init as RequestInit)?.method === 'PUT');
-        expect(putCalls).toHaveLength(1);
+        expect(putCalls).toHaveLength(0);
     });
 
     describe('check-on-touch content change detection (#1057)', () => {
@@ -796,8 +800,10 @@ describe('desktop sync attachment backends', () => {
             expect(result).toBeNull();
         });
 
-        it('re-uploads to the same cloud key when the local file content actually changed (prepare phase)', async () => {
-            const fetcher = vi.fn(async () => new Response(null, { status: 200 }));
+        it('records changed local content without overwriting the cloud key during prepare', async () => {
+            const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+                new Response(null, { status: 200 }),
+            );
             const appData = createCandidateAttachmentData();
             const attachment = appData.tasks[0].attachments![0];
             attachment.fileHash = 'stale-hash-from-a-previous-version';
@@ -825,17 +831,14 @@ describe('desktop sync attachment backends', () => {
                 prepareHelpers(),
             );
 
-            expect(fetcher).toHaveBeenCalledWith(
-                'https://dav.example/mindwtr/attachments/attachment-1.txt',
-                expect.objectContaining({ method: 'PUT' }),
-            );
+            expect(fetcher.mock.calls.some(([, init]) => (init as RequestInit)?.method === 'PUT')).toBe(false);
             const merged = result?.tasks[0].attachments?.[0];
-            // Same cloudKey — re-upload overwrites in place, never renames (identity keying).
             expect(merged?.cloudKey).toBe('attachments/attachment-1.txt');
             expect(merged?.contentRev).toBe(3);
             expect(merged?.fileHash).toBe(BYTES_HASH);
             expect(merged?.contentMtimeMs).toBe(9_999);
             expect(merged?.contentSize).toBe(3);
+            expect(merged?.pendingContentUpload).toBe(true);
         });
     });
 
@@ -968,10 +971,10 @@ describe('desktop sync attachment backends', () => {
             dropboxMocks.uploadDropboxFile.mockResolvedValue(undefined);
         });
 
-        const prepareHelpers = () => ({
+        const postMergeHelpers = () => ({
             activationProbe: false,
             ensureLocalSnapshotFresh: vi.fn(),
-            phase: 'prepare' as const,
+            phase: 'post-merge' as const,
         });
 
         it('webdav', async () => {
@@ -981,7 +984,7 @@ describe('desktop sync attachment backends', () => {
                 { url: 'https://dav.example/mindwtr', username: 'alice' },
                 'https://dav.example/mindwtr',
                 frozenDeps(),
-                prepareHelpers(),
+                postMergeHelpers(),
             );
             expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
             expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
@@ -994,7 +997,7 @@ describe('desktop sync attachment backends', () => {
                 { url: 'https://cloud.example/v1/data', token: 'token' },
                 'https://cloud.example/v1',
                 frozenDeps(),
-                prepareHelpers(),
+                postMergeHelpers(),
             );
             expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
             expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
@@ -1006,7 +1009,7 @@ describe('desktop sync attachment backends', () => {
                 appData,
                 async () => 'dropbox-token',
                 frozenDeps(),
-                prepareHelpers(),
+                postMergeHelpers(),
             );
             expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
             expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
@@ -1014,14 +1017,14 @@ describe('desktop sync attachment backends', () => {
 
         it('file', async () => {
             const appData = frozenData();
-            const result = await syncFileAttachments(appData, '/candidate-sync', frozenDeps(), prepareHelpers());
+            const result = await syncFileAttachments(appData, '/candidate-sync', frozenDeps(), postMergeHelpers());
             expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
             expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
         });
 
         it('cloudkit, including the pending-remote-delete flush', async () => {
             const appData = frozenData();
-            const result = expectFoldedData(await syncCloudKitAttachments(appData, frozenDeps(), prepareHelpers()));
+            const result = expectFoldedData(await syncCloudKitAttachments(appData, frozenDeps(), postMergeHelpers()));
             expect(result.tasks[0].attachments?.[0]?.cloudKey).toBe('cloudkit:attachment-1');
             expect(result.settings.attachments?.pendingRemoteDeletes).toEqual([]);
             expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
