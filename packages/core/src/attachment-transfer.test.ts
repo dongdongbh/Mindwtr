@@ -119,7 +119,7 @@ describe('runAttachmentTransferLifecycle', () => {
         });
 
         expect(didMutate).toBe(true);
-        expect(onDownload).toHaveBeenCalledWith(after());
+        expect(onDownload).toHaveBeenCalledWith(after(), { kind: 'absent' });
         expect(after().uri).toBe('/local/downloaded.txt');
         expect(attachment.uri).toBe('/local/file.txt');
     });
@@ -306,7 +306,7 @@ describe('runAttachmentTransferLifecycle', () => {
 
         expect(didMutate).toBe(true);
         expect(onDownload).toHaveBeenCalledTimes(1);
-        expect(onDownload).toHaveBeenCalledWith(after('ready'));
+        expect(onDownload).toHaveBeenCalledWith(after('ready'), { kind: 'absent' });
     });
 
     it('rethrows a fatal error immediately and discards the whole run, inputs included', async () => {
@@ -499,6 +499,7 @@ describe('runAttachmentTransferLifecycle', () => {
             });
 
             expect(onDownload).toHaveBeenCalledOnce();
+            expect(onDownload).toHaveBeenCalledWith(after(), { kind: 'absent' });
             expect(after()).toMatchObject({
                 uri: '/local/recovered.txt',
                 localStatus: 'available',
@@ -1132,7 +1133,10 @@ describe('runAttachmentTransferLifecycle', () => {
 
             expect(didMutate).toBe(true);
             expect(onUpload).not.toHaveBeenCalled();
-            expect(onDownload).toHaveBeenCalledWith(after());
+            expect(onDownload).toHaveBeenCalledWith(after(), {
+                kind: 'present',
+                sha256: 'loser-hash',
+            });
             // contentRev/fileHash are untouched by the download branch itself — they
             // already carry the winning side's values from the merge.
             expect(after().contentRev).toBe(5);

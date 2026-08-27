@@ -130,6 +130,13 @@ export type AttachmentUploadSnapshot = {
  * overwrite metadata or start a remote transfer from a false premise. */
 export type LocalAttachmentPresence = 'present' | 'confirmed-not-found' | 'unreadable';
 
+/** Exact local generation an attachment download is allowed to replace. The
+ * platform installer must enforce this at publication time, after the remote
+ * bytes have been fetched and validated. */
+export type AttachmentDownloadExpectation =
+    | { kind: 'absent' }
+    | { kind: 'present'; sha256: string };
+
 export type AttachmentTransferLifecycleOptions = {
     attachmentsById: Map<string, Attachment>;
     getLocalFilePresence: (path: string, attachment: Attachment) => Promise<LocalAttachmentPresence>;
@@ -139,7 +146,10 @@ export type AttachmentTransferLifecycleOptions = {
         snapshot?: AttachmentUploadSnapshot,
     ) => Promise<boolean>;
     onUploadError: (attachment: Attachment, error: unknown) => void;
-    onDownload: (attachment: Attachment) => Promise<boolean>;
+    onDownload: (
+        attachment: Attachment,
+        expectation: AttachmentDownloadExpectation,
+    ) => Promise<boolean>;
     onDownloadError: (attachment: Attachment, error: unknown) => void;
     resolveLocalPath?: (uri: string) => string;
     /**
@@ -460,7 +470,7 @@ export async function runAttachmentTransferLifecycle(
                 const expectedFileHash = expectedPendingHash;
                 const recovered: Attachment = { ...attachment };
                 try {
-                    const downloaded = await options.onDownload(recovered);
+                    const downloaded = await options.onDownload(recovered, { kind: 'absent' });
                     if (
                         downloaded
                         && recovered.cloudKey === expectedCloudKey
@@ -568,7 +578,7 @@ export async function runAttachmentTransferLifecycle(
         if (hasCloudCopy(attachment) && !existsLocally && !hasPendingContentUpload) {
             if (!options.policy?.shouldDownload || options.policy.shouldDownload(attachment)) {
                 try {
-                    if (await options.onDownload(attachment)) {
+                    if (await options.onDownload(attachment, { kind: 'absent' })) {
                         itemMutated = true;
                         // Loop safety (#1057): stat the file we just wrote and record it
                         // immediately, using the (possibly just-updated) uri — otherwise
@@ -669,7 +679,10 @@ export async function runAttachmentTransferLifecycle(
                         options.onLocalEditRace?.(attachment);
                     } else if (!options.policy?.shouldDownload || options.policy.shouldDownload(attachment)) {
                         try {
-                            if (await options.onDownload(attachment)) {
+                            if (await options.onDownload(attachment, {
+                                kind: 'present',
+                                sha256: check.hash,
+                            })) {
                                 itemMutated = true;
                                 const freshPath = attachment.uri ? resolveLocalPath(attachment.uri) : localPath;
                                 if (freshPath) await refreshContentStat(attachment, freshPath);
