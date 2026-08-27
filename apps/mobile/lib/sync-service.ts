@@ -7,10 +7,7 @@ import { logInfo, logSyncError, logWarn, sanitizeLogMessage } from './app-log';
 import { readSyncFileVersioned, resolveSyncFileUri, writeSyncFile } from './storage-file';
 import { isSyncPathBookmarksAvailable, resolveSyncPathBookmark } from './sync-path-bookmarks';
 import { getBaseSyncUrl, getCloudBaseUrl, syncCloudAttachments, syncCloudKitAttachments, syncDropboxAttachments, syncFileAttachments, syncWebdavAttachments, cleanupAttachmentTempFiles, hasPendingAttachmentSyncWork } from './attachment-sync';
-import {
-  reconcileMobileFileSyncAttachmentInventory,
-  runMobileAttachmentCleanup,
-} from './sync-attachment-cleanup';
+import { runMobileAttachmentCleanup } from './sync-attachment-cleanup';
 import { getExternalCalendars, saveExternalCalendars } from './external-calendar';
 import {
   forceRefreshDropboxAccessToken,
@@ -1214,45 +1211,6 @@ class MobileSyncRun {
           data: cleanupResult.appData,
           invalidateFastSyncState: cleanupResult.shouldInvalidateFastSyncState,
         };
-      },
-      reconcileActivationFileSyncAttachmentInventory: async (authoritativeData) => {
-        const fileSyncPath = this.fileSyncPath;
-        if (this.backend !== 'file' || !fileSyncPath || !this.fileSyncLease) {
-          throw new Error('File Sync activation cleanup requires the candidate folder lease');
-        }
-        const guards = {
-          // Candidate data is not installed in the active store. The CAS
-          // winner was reread under this destination's held folder lease.
-          ensureLocalSnapshotFresh: () => undefined,
-          assertRemoteMutationFenceHeld: async () => {
-            if (!this.fileSyncLease) {
-              throw new Error('File Sync activation cleanup lost the candidate folder lease');
-            }
-          },
-        };
-        const inventoriedData = await reconcileMobileFileSyncAttachmentInventory(
-          authoritativeData,
-          fileSyncPath,
-          guards,
-        );
-        const cleanupResult = await runMobileAttachmentCleanup({
-          appData: inventoriedData,
-          backend: 'file',
-          webdavConfig: null,
-          cloudConfig: null,
-          cloudProvider: this.cloudProvider,
-          fileSyncPath,
-          fetcher: this.fetchWithAbort,
-          ...guards,
-          skipFileSyncInventory: true,
-          deleteDropboxAttachment: async () => undefined,
-          isRemoteMissingError: () => false,
-          logSyncInfo,
-          logSyncWarning,
-        });
-        if (cleanupResult.appData.settings.attachments?.pendingRemoteDeletes?.length) {
-          throw new Error('File Sync activation cleanup remains incomplete');
-        }
       },
       formatErrorMessage: (error, backend) => formatSyncErrorMessage(error, backend),
       handleRunErrorBeforeRequeue: async (_error, context) => {

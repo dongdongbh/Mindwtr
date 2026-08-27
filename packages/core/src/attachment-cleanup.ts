@@ -1,133 +1,11 @@
 import type { AppData, Attachment, PendingRemoteAttachmentDelete } from './types';
-import {
-    collectAttachmentsById,
-    normalizePendingRemoteDeletes,
-    withAttachmentSettingsPatch,
-} from './attachment-transfer';
+import { normalizePendingRemoteDeletes } from './attachment-transfer';
 import { isFileSyncGenerationCloudKey } from './attachment-paths';
 import { getErrorStatus } from './sync-runtime-utils';
 import { sanitizeAttachmentCloudKeyForSyncMerge } from './sync-normalization';
 
 export const PENDING_REMOTE_ATTACHMENT_DELETE_MAX_ATTEMPTS = 12;
 export const PENDING_REMOTE_ATTACHMENT_DELETE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
-
-export type FileSyncGenerationPublication = {
-    publishedCloudKey: string;
-    previousCloudKey?: string;
-    title?: string;
-};
-
-const normalizeFileSyncGenerationCloudKey = (value: unknown): string | undefined => {
-    const cloudKey = sanitizeAttachmentCloudKeyForSyncMerge(value);
-    return cloudKey && isFileSyncGenerationCloudKey(cloudKey) ? cloudKey : undefined;
-};
-
-const inferFileSyncGenerationPublications = (before: AppData, after: AppData): FileSyncGenerationPublication[] => {
-    const beforeById = collectAttachmentsById(before);
-    const publications: FileSyncGenerationPublication[] = [];
-    for (const attachment of collectAttachmentsById(after).values()) {
-        const publishedCloudKey = normalizeFileSyncGenerationCloudKey(attachment.cloudKey);
-        if (!publishedCloudKey) continue;
-        const previous = beforeById.get(attachment.id);
-        const previousCloudKey = normalizeFileSyncGenerationCloudKey(previous?.cloudKey);
-        if (publishedCloudKey === previousCloudKey) continue;
-        publications.push({
-            publishedCloudKey,
-            previousCloudKey,
-            title: attachment.title || previous?.title,
-        });
-    }
-    return publications;
-};
-
-/**
- * Persist the File Sync publication journal in the existing device-local
- * remote-delete queue. Sync saves this returned document before attempting the
- * authoritative data-document CAS:
- *
- * - the just-published generation remains queued until a live attachment in
- *   the authoritative local document references it;
- * - a superseded digest-qualified generation remains queued until no live
- *   attachment references it, then ordinary bounded cleanup deletes it;
- * - a losing publication remains queued across restart and becomes deletable
- *   after the peer's winning document replaces its metadata.
- *
- * `explicitPublications` covers publications whose before/after cloud keys are
- * equal (for example recreating a missing remote object under the same key).
- */
-export const journalFileSyncGenerationPublications = (
-    before: AppData,
-    after: AppData,
-    explicitPublications: readonly FileSyncGenerationPublication[] = [],
-): AppData => {
-    const publications = [...inferFileSyncGenerationPublications(before, after), ...explicitPublications];
-    if (publications.length === 0) return after;
-
-    const pendingByCloudKey = new Map<string, PendingRemoteAttachmentDelete>();
-    for (const pending of normalizePendingRemoteDeletes(after.settings.attachments?.pendingRemoteDeletes)) {
-        pendingByCloudKey.set(pending.cloudKey, pending);
-    }
-
-    let changed = false;
-    const enqueue = (value: unknown, title?: string) => {
-        const cloudKey = normalizeFileSyncGenerationCloudKey(value);
-        if (!cloudKey) return;
-        const existing = pendingByCloudKey.get(cloudKey);
-        if (existing) {
-            if (!existing.title && title) {
-                pendingByCloudKey.set(cloudKey, { ...existing, title });
-                changed = true;
-            }
-            return;
-        }
-        pendingByCloudKey.set(cloudKey, {
-            cloudKey,
-            title,
-            attempts: 0,
-        });
-        changed = true;
-    };
-
-    for (const publication of publications) {
-        const publishedCloudKey = normalizeFileSyncGenerationCloudKey(publication.publishedCloudKey);
-        // Treat one explicit publication as an atomic claim. A malformed new
-        // key must not make an otherwise-valid previous generation eligible
-        // for deletion.
-        if (!publishedCloudKey) continue;
-        enqueue(publishedCloudKey, publication.title);
-        enqueue(publication.previousCloudKey, publication.title);
-    }
-    if (!changed) return after;
-
-    return withAttachmentSettingsPatch(after, {
-        ...after.settings.attachments,
-        pendingRemoteDeletes: Array.from(pendingByCloudKey.values()),
-    });
-};
-
-/**
- * Rebuild publication-journal coverage from an authoritative File Sync folder
- * inventory. A process can die after an immutable generation is published but
- * before the returned AppData clone is saved; the generation filename is still
- * durable evidence of that publication. Only digest-qualified generations
- * absent from the authoritative document are queued, so stable legacy names
- * and peer-live generations are never made eligible for deletion.
- */
-export const journalUnreferencedFileSyncGenerationInventory = (
-    appData: AppData,
-    inventoryCloudKeys: Iterable<string>,
-): AppData => {
-    const liveCloudKeys = findLiveAttachmentResourceReferences(appData).cloudKeys;
-    const publications: FileSyncGenerationPublication[] = [];
-    const seen = new Set<string>();
-    for (const value of inventoryCloudKeys) {
-        const cloudKey = normalizeFileSyncGenerationCloudKey(value);
-        if (!cloudKey || liveCloudKeys.has(cloudKey) || seen.has(cloudKey)) continue;
-        seen.add(cloudKey);
-        publications.push({ publishedCloudKey: cloudKey });
-    }
-    return journalFileSyncGenerationPublications(appData, appData, publications);
-};
 
 export interface CleanupResult {
     orphanedCount: number;
@@ -258,6 +136,13 @@ export type AttachmentCleanupLifecycleOptions = {
     deleteLocalAttachment: (attachment: Attachment) => Promise<void>;
     deleteRemoteAttachment?: AttachmentCleanupRemoteDelete;
     resolveRemoteDeleteAttachment?: () => Promise<AttachmentCleanupRemoteDelete | undefined>;
+    /**
+     * Treat the remote object as intentionally retained while clearing local
+     * cleanup bookkeeping. File Sync uses this for immutable generations:
+     * without a distributed GC tombstone, a peer can reselect any existing
+     * generation between its existence check and document CAS.
+     */
+    shouldRetainRemoteAttachment?: (target: AttachmentCleanupRemoteTarget) => boolean;
     now?: () => string;
     maxAttachmentTargets?: number;
     beforeEachAttachment?: () => void | Promise<void>;
@@ -473,7 +358,7 @@ export async function runAttachmentCleanupLifecycle(
     const maxAttachmentTargets = typeof requestedLimit === 'number' && Number.isFinite(requestedLimit)
         ? Math.max(0, Math.floor(requestedLimit))
         : Number.POSITIVE_INFINITY;
-    const reachedBatchLimit = cleanupTargets.size > maxAttachmentTargets;
+    let reachedBatchLimit = cleanupTargets.size > maxAttachmentTargets;
     const orphanedIds = new Set(orphanedAttachments.map((attachment) => attachment.id));
     const purgedParentAttachmentIds = findPurgedParentAttachmentIds(options.appData);
     const processedOrphanedIds = new Set<string>();
@@ -514,14 +399,36 @@ export async function runAttachmentCleanupLifecycle(
 
     const lastCleanupAt = (options.now ?? (() => new Date().toISOString()))();
     const nextPendingRemoteDeletesByCloudKey = new Map<string, PendingRemoteAttachmentDelete>();
+    const remoteTargetsInBatch = Array.from(remoteCleanupTargets.values()).slice(0, maxAttachmentTargets);
+    const remoteDeleteTargetCount = remoteTargetsInBatch
+        .filter((target) => !options.shouldRetainRemoteAttachment?.(target))
+        .length;
+    if (remoteCleanupTargets.size > maxAttachmentTargets) reachedBatchLimit = true;
     const deleteRemoteAttachment = options.deleteRemoteAttachment
         ?? (
-            remoteCleanupTargets.size > 0
+            remoteDeleteTargetCount > 0 && maxAttachmentTargets > 0
                 ? await options.resolveRemoteDeleteAttachment?.()
                 : undefined
         );
+    let processedRemoteTargetCount = 0;
     for (const target of remoteCleanupTargets.values()) {
         const previous = previousPendingByCloudKey.get(target.cloudKey);
+        if (processedRemoteTargetCount >= maxAttachmentTargets) {
+            nextPendingRemoteDeletesByCloudKey.set(target.cloudKey, {
+                cloudKey: target.cloudKey,
+                title: target.title,
+                attempts: previous?.attempts ?? 0,
+                lastErrorAt: previous?.lastErrorAt,
+            });
+            continue;
+        }
+        processedRemoteTargetCount += 1;
+        if (options.shouldRetainRemoteAttachment?.(target)) {
+            // Clearing the tombstone's cloudKey and any legacy pending entry is
+            // safe; deleting the immutable File Sync object is not.
+            clearedCloudKeys.add(target.cloudKey);
+            continue;
+        }
         if (!deleteRemoteAttachment) {
             nextPendingRemoteDeletesByCloudKey.set(target.cloudKey, {
                 cloudKey: target.cloudKey,
@@ -559,7 +466,7 @@ export async function runAttachmentCleanupLifecycle(
     if (reachedBatchLimit && Number.isFinite(maxAttachmentTargets)) {
         options.onBatchLimitReached?.({
             limit: maxAttachmentTargets,
-            total: cleanupTargets.size,
+            total: Math.max(cleanupTargets.size, remoteCleanupTargets.size),
         });
     }
 

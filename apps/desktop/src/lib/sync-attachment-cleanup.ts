@@ -6,12 +6,9 @@ import {
     getErrorStatus,
     isSyncRemoteMutationFenceError,
     isWebdavRemoteWriteConflictError,
-    journalUnreferencedFileSyncGenerationInventory,
-    LEGACY_SYNC_FILE_NAME,
     sanitizeAttachmentUriForSyncMerge,
     type CloudProvider,
     runAttachmentCleanupLifecycle,
-    SYNC_FILE_NAME,
     normalizeStrongWebdavEtag,
     webdavDeleteFileVersioned,
     webdavHeadFile,
@@ -30,9 +27,7 @@ import type { CloudConfig, WebDavConfig } from './sync-attachment-backends';
 import {
     ATTACHMENTS_DIR_NAME,
     createCooperativeYield,
-    getFileSyncDir,
     isTempAttachmentFile,
-    resolveFileBackendPath,
     stripFileScheme,
     type SyncBackend,
 } from './sync-service-utils';
@@ -67,9 +62,6 @@ const describeAttachmentCleanupErrorForLog = (error: unknown): Error => {
             : `Attachment cleanup operation failed (${status})`,
     );
 };
-
-const FILE_SYNC_ATTACHMENT_SCRATCH_PREFIX = '.mindwtr-attachment-generation-';
-const FILE_SYNC_ATTACHMENT_SCRATCH_SUFFIX = '.tmp';
 
 const logAttachmentCleanupWarning = (
     deps: Pick<AttachmentCleanupDeps, 'logSyncWarning'>,
@@ -143,7 +135,6 @@ export const cleanupOrphanedAttachments = async (
         let cloudConfig: CloudConfig | null = null;
         let cloudProvider: CloudProvider = 'selfhosted';
         let dropboxAppKey = '';
-        let fileBaseDir: string | null = null;
 
         if (backend === 'webdav') {
             webdavConfig = await deps.getWebDavConfig();
@@ -157,10 +148,6 @@ export const cleanupOrphanedAttachments = async (
                 cloudConfig = await deps.getCloudConfig();
                 if (!cloudConfig.url) return undefined;
             }
-        } else if (backend === 'file') {
-            const syncPath = await deps.getSyncPath();
-            fileBaseDir = getFileSyncDir(syncPath, SYNC_FILE_NAME, LEGACY_SYNC_FILE_NAME) || null;
-            if (!fileBaseDir) return undefined;
         } else {
             return undefined;
         }
@@ -233,14 +220,6 @@ export const cleanupOrphanedAttachments = async (
                 });
             } else if (backend === 'cloud' && cloudProvider === 'dropbox') {
                 await deleteDropboxAttachment(target.cloudKey);
-            } else if (backend === 'file' && fileBaseDir) {
-                // Off the main thread: this delete lands on the sync folder,
-                // which may be a slow mount (#1037).
-                const { remove } = await import('./sync-fs');
-                const { join } = await import('@tauri-apps/api/path');
-                const targetPath = await resolveFileBackendPath(join, fileBaseDir, target.cloudKey);
-                guards.ensureLocalSnapshotFresh();
-                await remove(targetPath);
             }
         };
     };
@@ -256,6 +235,10 @@ export const cleanupOrphanedAttachments = async (
         beforeEachRemoteDelete: yieldThenEnsureFresh,
         deleteLocalAttachment: (attachment) => deleteAttachmentFile(attachment, deps, guards),
         resolveRemoteDeleteAttachment,
+        // File Sync folders have no distributed GC tombstone. A lagging peer
+        // may still reselect any existing generation before its document CAS,
+        // so cleanup clears metadata but intentionally retains remote bytes.
+        shouldRetainRemoteAttachment: backend === 'file' ? () => true : undefined,
         isRemoteMissingError: (error) => (
             error instanceof DropboxFileNotFoundError || getErrorStatus(error) === 404
         ),
@@ -274,63 +257,4 @@ export const cleanupOrphanedAttachments = async (
 
     await cleanupAttachmentTempFiles(deps);
     return result.appData;
-};
-
-/**
- * Reconcile the authoritative File Sync document with the folder while its
- * lease is held. This discovers immutable generations whose process died
- * before the JS publication journal could be persisted, and removes only the
- * reserved scratch files that no live publisher can still own under the lease.
- */
-export const reconcileFileSyncAttachmentInventory = async (
-    appData: AppData,
-    deps: AttachmentCleanupDeps,
-    guards: AttachmentCleanupGuards,
-    strict = false,
-): Promise<AppData> => {
-    let journaledData = appData;
-    try {
-        const syncPath = await deps.getSyncPath();
-        const fileBaseDir = getFileSyncDir(syncPath, SYNC_FILE_NAME, LEGACY_SYNC_FILE_NAME) || null;
-        if (!fileBaseDir) return appData;
-
-        const { readDir } = await import('@tauri-apps/plugin-fs');
-        const { join } = await import('@tauri-apps/api/path');
-        const { exists, remove } = await import('./sync-fs');
-        const attachmentsDir = await join(fileBaseDir, ATTACHMENTS_DIR_NAME);
-        if (!(await exists(attachmentsDir))) return appData;
-
-        const inventoryCloudKeys: string[] = [];
-        for (const entry of await readDir(attachmentsDir)) {
-            if (!entry.isFile || entry.isSymlink) continue;
-            const name = entry.name;
-            if (
-                name.startsWith(FILE_SYNC_ATTACHMENT_SCRATCH_PREFIX)
-                && name.endsWith(FILE_SYNC_ATTACHMENT_SCRATCH_SUFFIX)
-            ) {
-                try {
-                    const scratchPath = await join(attachmentsDir, name);
-                    guards.ensureLocalSnapshotFresh();
-                    await guards.assertRemoteMutationFenceHeld?.();
-                    await remove(scratchPath);
-                } catch (error) {
-                    if (error instanceof Error && error.name === 'LocalSyncAbort') throw error;
-                    if (isSyncRemoteMutationFenceError(error)) throw error;
-                    if (strict) throw error;
-                    logAttachmentCleanupWarning(deps, 'Failed to remove File Sync publication scratch', error);
-                }
-                continue;
-            }
-            inventoryCloudKeys.push(`${ATTACHMENTS_DIR_NAME}/${name}`);
-        }
-        journaledData = journalUnreferencedFileSyncGenerationInventory(appData, inventoryCloudKeys);
-    } catch (error) {
-        if (error instanceof Error && error.name === 'LocalSyncAbort') throw error;
-        if (isSyncRemoteMutationFenceError(error)) throw error;
-        if (strict) throw error;
-        logAttachmentCleanupWarning(deps, 'Failed to reconcile File Sync attachment inventory', error);
-        return appData;
-    }
-
-    return journaledData;
 };

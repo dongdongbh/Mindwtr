@@ -1,7 +1,6 @@
 import type {
   AppData,
   Attachment,
-  FileSyncGenerationPublication,
   SyncKeyMaterial,
 } from '@mindwtr/core';
 import {
@@ -9,7 +8,6 @@ import {
   buildFileSyncGenerationCloudKey,
   computeSha256Hex,
   isSha256Hex,
-  journalFileSyncGenerationPublications,
   validateAttachmentForUpload,
   validateAttachmentHash,
 } from '@mindwtr/core';
@@ -77,10 +75,6 @@ export const syncFileAttachments = async (
   if (!attachmentsDir) return false;
 
   const attachmentsById = collectAttachments(appData);
-  const previousCloudKeyByAttachmentId = new Map(
-    [...attachmentsById].map(([id, attachment]) => [id, attachment.cloudKey]),
-  );
-  const generationPublications: FileSyncGenerationPublication[] = [];
   const computeManagedAttachmentFileHash = async (path: string): Promise<string | null> => {
     try {
       return (await hashAttachmentFileGeneration(path)).sha256;
@@ -267,12 +261,7 @@ export const syncFileAttachments = async (
     onUpload: async (attachment, localPath, snapshot) => {
       if (!snapshot) throw new Error('Immutable attachment upload snapshot is unavailable');
       const cloudKey = buildFileSyncGenerationCloudKey(attachment, snapshot.fileHash);
-      const recordGenerationPublication = (): void => {
-        generationPublications.push({
-          publishedCloudKey: cloudKey,
-          previousCloudKey: previousCloudKeyByAttachmentId.get(attachment.id),
-          title: attachment.title,
-        });
+      const recordPublishedGeneration = (): void => {
         attachment.cloudKey = cloudKey;
       };
       const filename = remoteFilenameFor(cloudKey, attachment);
@@ -352,7 +341,7 @@ export const syncFileAttachments = async (
           try {
             await verifyPublishedGeneration(targetUri);
             await FileSystem.deleteAsync(stagedUri, { idempotent: true }).catch(() => undefined);
-            recordGenerationPublication();
+            recordPublishedGeneration();
             return true;
           } catch (error) {
             if (!(error instanceof FileSyncGenerationIntegrityError)) throw error;
@@ -369,7 +358,7 @@ export const syncFileAttachments = async (
             try {
               await verifyPublishedGeneration(targetUri);
               await FileSystem.deleteAsync(stagedUri, { idempotent: true }).catch(() => undefined);
-              recordGenerationPublication();
+              recordPublishedGeneration();
               return true;
             } catch (error) {
               if (!(error instanceof FileSyncGenerationIntegrityError)) throw error;
@@ -415,7 +404,7 @@ export const syncFileAttachments = async (
             });
             await verifyPublishedGeneration(targetUri);
           }
-          recordGenerationPublication();
+          recordPublishedGeneration();
           return true;
         }
         let invocationOwnedTarget: string | null = null;
@@ -434,7 +423,7 @@ export const syncFileAttachments = async (
             const peerTarget = (await refreshSafEntriesByName()).get(filename) ?? null;
             if (peerTarget) {
               await verifyPublishedGeneration(peerTarget);
-              recordGenerationPublication();
+              recordPublishedGeneration();
               return true;
             }
             throw createError;
@@ -455,7 +444,7 @@ export const syncFileAttachments = async (
                 });
                 await verifyPublishedGeneration(peerTarget);
               }
-              recordGenerationPublication();
+              recordPublishedGeneration();
               return true;
             }
             throw new Error('SAF provider did not create the requested attachment name');
@@ -474,7 +463,7 @@ export const syncFileAttachments = async (
           throw error;
         }
       }
-      recordGenerationPublication();
+      recordPublishedGeneration();
       // localStatus is already 'available' here: onUpload only runs when the lifecycle's own
       // existsLocally check just passed, which is what set it.
       return true;
@@ -485,10 +474,6 @@ export const syncFileAttachments = async (
   });
 
   for (const patch of patches.values()) allPatches.set(patch.id, patch);
-  const nextData = journalFileSyncGenerationPublications(
-    appData,
-    applyAttachmentPatches(appData, allPatches),
-    generationPublications,
-  );
+  const nextData = applyAttachmentPatches(appData, allPatches);
   return nextData !== appData ? nextData : false;
 };

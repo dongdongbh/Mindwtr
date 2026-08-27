@@ -3,26 +3,19 @@ import {
   cloudDeleteFile,
   decodeUriSafe,
   getErrorStatus,
-  isFileSyncGenerationCloudKey,
   isSyncRemoteMutationFenceError,
   isWebdavRemoteWriteConflictError,
-  journalUnreferencedFileSyncGenerationInventory,
   normalizeStrongWebdavEtag,
   runAttachmentCleanupLifecycle,
-  sanitizeAttachmentCloudKeyForSyncMerge,
   sanitizeAttachmentUriForSyncMerge,
   webdavDeleteFileVersioned,
   webdavHeadFile,
   type CloudProvider,
 } from '@mindwtr/core';
 import { getBaseSyncUrl, getCloudBaseUrl } from './attachment-sync';
-import {
-  ATTACHMENTS_DIR_NAME,
-  inspectSafDirectoryEntriesByName,
-  resolveFileSyncDir,
-} from './attachment-sync-utils';
+import { ATTACHMENTS_DIR_NAME } from './attachment-sync-utils';
 import * as FileSystem from './file-system';
-import { getFileSyncBaseDir, type SyncBackend } from './sync-service-utils';
+import { type SyncBackend } from './sync-service-utils';
 import { getMobileCloudRequestOptions, getMobileWebDavRequestOptions } from './webdav-request-options';
 import { DropboxConflictError } from './dropbox-sync';
 
@@ -51,7 +44,6 @@ type MobileAttachmentCleanupOptions = {
   fetcher: typeof fetch;
   ensureLocalSnapshotFresh: () => void;
   assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
-  skipFileSyncInventory?: boolean;
   deleteDropboxAttachment: (
     cloudKey: string,
     ensureBeforeProviderDelete: () => void
@@ -64,51 +56,6 @@ type MobileAttachmentCleanupOptions = {
 type MobileAttachmentCleanupResult = {
   appData: AppData;
   shouldInvalidateFastSyncState: boolean;
-};
-
-const FILE_SYNC_PUBLICATION_STAGE_SUFFIX = '.mindwtr-staged';
-
-const isSafeInventoryLeafName = (name: string): boolean => (
-  Boolean(name)
-  && name !== '.'
-  && name !== '..'
-  && !name.includes('/')
-  && !name.includes('\\')
-);
-
-export const reconcileMobileFileSyncAttachmentInventory = async (
-  appData: AppData,
-  fileSyncPath: string,
-  guards: Pick<MobileAttachmentCleanupOptions,
-    'ensureLocalSnapshotFresh' | 'assertRemoteMutationFenceHeld'>,
-): Promise<AppData> => {
-  const syncDir = await resolveFileSyncDir(fileSyncPath);
-  if (!syncDir) throw new Error('File Sync attachments directory is unavailable');
-
-  const inventoryCloudKeys: string[] = [];
-  if (syncDir.type === 'saf') {
-    const inventory = await inspectSafDirectoryEntriesByName(syncDir.attachmentsDirUri);
-    if (inventory.status !== 'available') {
-      throw new Error('SAF File Sync attachments directory is unreadable');
-    }
-    for (const name of inventory.entries.keys()) {
-      if (isSafeInventoryLeafName(name)) {
-        inventoryCloudKeys.push(`${ATTACHMENTS_DIR_NAME}/${name}`);
-      }
-    }
-  } else {
-    for (const name of await FileSystem.readDirectoryAsync(syncDir.attachmentsDirUri)) {
-      if (!isSafeInventoryLeafName(name)) continue;
-      if (name.endsWith(FILE_SYNC_PUBLICATION_STAGE_SUFFIX)) {
-        guards.ensureLocalSnapshotFresh();
-        await guards.assertRemoteMutationFenceHeld?.();
-        await FileSystem.deleteAsync(`${syncDir.attachmentsDirUri}${name}`, { idempotent: true });
-        continue;
-      }
-      inventoryCloudKeys.push(`${ATTACHMENTS_DIR_NAME}/${name}`);
-    }
-  }
-  return journalUnreferencedFileSyncGenerationInventory(appData, inventoryCloudKeys);
 };
 
 const getManagedAttachmentCleanupPrefixes = (): string[] => {
@@ -145,38 +92,15 @@ const deleteAttachmentFile = async (
 export const runMobileAttachmentCleanup = async (
   options: MobileAttachmentCleanupOptions
 ): Promise<MobileAttachmentCleanupResult> => {
-  let cleanupData = options.appData;
-  if (!options.skipFileSyncInventory && options.backend === 'file' && options.fileSyncPath) {
-    try {
-      cleanupData = await reconcileMobileFileSyncAttachmentInventory(
-        cleanupData,
-        options.fileSyncPath,
-        options,
-      );
-    } catch (error) {
-      if (error instanceof Error && error.name === 'LocalSyncAbort') throw error;
-      if (isSyncRemoteMutationFenceError(error)) throw error;
-      options.logSyncWarning('Failed to reconcile File Sync attachment inventory', error);
-    }
-  }
   const isWebdavBackend = options.backend === 'webdav' && Boolean(options.webdavConfig?.url);
   const isCloudBackend = options.backend === 'cloud'
     && options.cloudProvider === 'selfhosted'
     && Boolean(options.cloudConfig?.url);
   const isDropboxBackend = options.backend === 'cloud' && options.cloudProvider === 'dropbox';
-  const isSafFileBackend = options.backend === 'file'
-    && Boolean(options.fileSyncPath?.startsWith('content://'));
-  const fileBaseDir = options.backend === 'file'
-    && options.fileSyncPath
-    && !options.fileSyncPath.startsWith('content://')
-    ? getFileSyncBaseDir(options.fileSyncPath)
-    : null;
   const canAttemptRemoteDelete = Boolean(
     isWebdavBackend
     || isCloudBackend
     || isDropboxBackend
-    || isSafFileBackend
-    || fileBaseDir
   );
   const deleteRemoteAttachment = canAttemptRemoteDelete
     ? async (target: { cloudKey: string }) => {
@@ -221,36 +145,12 @@ export const runMobileAttachmentCleanup = async (
           target.cloudKey,
           options.ensureLocalSnapshotFresh,
         );
-      } else if (fileBaseDir) {
-        options.ensureLocalSnapshotFresh();
-        await FileSystem.deleteAsync(fileBaseDir + '/' + target.cloudKey, { idempotent: true });
-      } else if (isSafFileBackend && options.fileSyncPath) {
-        const cloudKey = sanitizeAttachmentCloudKeyForSyncMerge(target.cloudKey);
-        if (cloudKey !== target.cloudKey || !isFileSyncGenerationCloudKey(cloudKey)) {
-          throw new Error('SAF File Sync cleanup requires an exact generation key');
-        }
-        const fileName = cloudKey.slice(`${ATTACHMENTS_DIR_NAME}/`.length);
-
-        options.ensureLocalSnapshotFresh();
-        const syncDir = await resolveFileSyncDir(options.fileSyncPath);
-        if (!syncDir || syncDir.type !== 'saf') {
-          throw new Error('SAF File Sync attachments directory is unavailable');
-        }
-        const inventory = await inspectSafDirectoryEntriesByName(syncDir.attachmentsDirUri);
-        if (inventory.status !== 'available') {
-          throw new Error('SAF File Sync attachments directory is unreadable');
-        }
-        const targetUri = inventory.entries.get(fileName);
-        if (!targetUri) return;
-
-        options.ensureLocalSnapshotFresh();
-        await FileSystem.deleteAsync(targetUri, { idempotent: true });
       }
     }
     : undefined;
 
   const result = await runAttachmentCleanupLifecycle({
-    appData: cleanupData,
+    appData: options.appData,
     maxAttachmentTargets: ATTACHMENT_CLEANUP_BATCH_LIMIT,
     beforeEachAttachment: options.ensureLocalSnapshotFresh,
     beforeEachRemoteDelete: options.ensureLocalSnapshotFresh,
@@ -260,6 +160,10 @@ export const runMobileAttachmentCleanup = async (
       options.ensureLocalSnapshotFresh,
     ),
     deleteRemoteAttachment,
+    // File Sync folders are replicated independently. Without a distributed
+    // GC tombstone, another peer can reselect any existing generation before
+    // its document CAS, so cleanup removes metadata only and retains bytes.
+    shouldRetainRemoteAttachment: options.backend === 'file' ? () => true : undefined,
     isRemoteMissingError: (error) => options.isRemoteMissingError(error) || getErrorStatus(error) === 404,
     onRemoteAttachmentMissing: (target) => {
       options.logSyncInfo('Remote attachment already missing during cleanup', {

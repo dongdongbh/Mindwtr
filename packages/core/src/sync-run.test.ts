@@ -496,13 +496,9 @@ describe('runSharedSyncCycle', () => {
         expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
     });
 
-    it('reconciles a losing File Sync activation publication against the CAS winner', async () => {
+    it('does not scan or delete File Sync generations after an activation CAS conflict', async () => {
         const initialRemote = createData([createTask('t-remote', 'Initial remote')]);
-        const winningRemote = createData([createTask('t-winner', 'Peer winner')]);
-        const readRemote = vi.fn()
-            .mockResolvedValueOnce(cloneAppData(initialRemote))
-            .mockResolvedValueOnce(cloneAppData(winningRemote));
-        const reconcileActivationFileSyncAttachmentInventory = vi.fn(async () => undefined);
+        const readRemote = vi.fn().mockResolvedValueOnce(cloneAppData(initialRemote));
         const { storage, run } = createHarness({
             activationProbe: true,
             backend: 'file',
@@ -513,18 +509,12 @@ describe('runSharedSyncCycle', () => {
                     throw new SyncRemoteWriteConflict();
                 }),
             },
-            hooks: { reconcileActivationFileSyncAttachmentInventory },
         });
 
         const result = await run();
 
         expect(result).toEqual({ success: true, skipped: 'requeued' });
-        expect(readRemote).toHaveBeenCalledTimes(2);
-        expect(reconcileActivationFileSyncAttachmentInventory).toHaveBeenCalledWith(
-            expect.objectContaining({
-                tasks: [expect.objectContaining({ id: 't-winner' })],
-            }),
-        );
+        expect(readRemote).toHaveBeenCalledTimes(1);
         expect(storage.persistLocal).not.toHaveBeenCalled();
     });
 
@@ -1905,7 +1895,7 @@ describe('runSharedSyncCycle', () => {
         expect(runAttachmentCleanup).not.toHaveBeenCalled();
     });
 
-    it('reconciles File Sync publication inventory inside the cleanup interval', async () => {
+    it('keeps File Sync cleanup interval-gated when there is no tombstone work', async () => {
         const local = createData([createTask('t-local', 'Local task')], {
             attachments: { lastCleanupAt: new Date().toISOString() },
         });
@@ -1920,7 +1910,7 @@ describe('runSharedSyncCycle', () => {
         const result = await run();
 
         expect(result.success).toBe(true);
-        expect(runAttachmentCleanup).toHaveBeenCalledTimes(1);
+        expect(runAttachmentCleanup).not.toHaveBeenCalled();
     });
 
     it('keeps local purge metadata through merge until attachment cleanup removes it', async () => {

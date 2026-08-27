@@ -5,8 +5,6 @@ import {
     findLiveAttachmentResourceReferences,
     findOrphanedAttachments,
     hasFreshAttachmentCleanupWork,
-    journalFileSyncGenerationPublications,
-    journalUnreferencedFileSyncGenerationInventory,
     isAttachmentCloudResourceReferenced,
     isAttachmentLocalResourceReferenced,
     PENDING_REMOTE_ATTACHMENT_DELETE_MAX_ATTEMPTS,
@@ -449,7 +447,7 @@ describe('hasFreshAttachmentCleanupWork', () => {
     });
 });
 
-describe('File Sync generation publication journal', () => {
+describe('remote attachment retention and batching', () => {
     const now = '2026-07-14T12:00:00.000Z';
     const H1 = `attachments/a1.${'1'.repeat(64)}.pdf`;
     const H2 = `attachments/a1.${'2'.repeat(64)}.pdf`;
@@ -480,207 +478,50 @@ describe('File Sync generation publication journal', () => {
         return data;
     };
 
-    it('keeps the authoritative H2 generation and deletes superseded H1', async () => {
-        const before = withAttachments(makeAttachment(H1));
-        const after = withAttachments(makeAttachment(H2));
-        after.settings.attachments = {
-            pendingRemoteDeletes: [
-                {
-                    cloudKey: H1,
-                    title: 'existing retry',
-                    attempts: 3,
-                    lastErrorAt: '2026-07-13T12:00:00.000Z',
-                },
-            ],
+    it('retains a File Sync generation while clearing its tombstone metadata', async () => {
+        const data = withAttachments(makeAttachment(H1, { deletedAt: now }));
+        data.settings.attachments = {
+            pendingRemoteDeletes: [{ cloudKey: H1, title: 'report.pdf', attempts: 3 }],
         };
-
-        const journaled = journalFileSyncGenerationPublications(before, after);
-
-        expect(journaled.settings.attachments?.pendingRemoteDeletes).toEqual([
-            {
-                cloudKey: H1,
-                title: 'existing retry',
-                attempts: 3,
-                lastErrorAt: '2026-07-13T12:00:00.000Z',
-            },
-            { cloudKey: H2, title: 'report.pdf', attempts: 0 },
-        ]);
-        expect(hasFreshAttachmentCleanupWork(journaled)).toBe(true);
-
-        const deleteRemoteAttachment = vi.fn(async () => undefined);
-        const result = await runAttachmentCleanupLifecycle({
-            appData: journaled,
-            now: () => now,
-            deleteLocalAttachment: vi.fn(async () => undefined),
-            deleteRemoteAttachment,
-        });
-
-        expect(deleteRemoteAttachment).toHaveBeenCalledTimes(1);
-        expect(deleteRemoteAttachment).toHaveBeenCalledWith({
-            cloudKey: H1,
-            title: 'existing retry',
-        });
-        expect(result.appData.tasks[0].attachments?.[0]?.cloudKey).toBe(H2);
-        expect(result.appData.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
-    });
-
-    it('deletes a losing H2 candidate after a restarted merge adopts H3', async () => {
-        const journaled = journalFileSyncGenerationPublications(
-            withAttachments(makeAttachment(H1)),
-            withAttachments(makeAttachment(H2)),
-        );
-        const restarted = JSON.parse(JSON.stringify(journaled)) as AppData;
-        restarted.tasks[0].attachments![0] = makeAttachment(H3);
         const deleteRemoteAttachment = vi.fn(async () => undefined);
 
         const result = await runAttachmentCleanupLifecycle({
-            appData: restarted,
+            appData: data,
             now: () => now,
             deleteLocalAttachment: vi.fn(async () => undefined),
             deleteRemoteAttachment,
-        });
-
-        expect(deleteRemoteAttachment.mock.calls.map(([target]) => target.cloudKey)).toEqual([H2, H1]);
-        expect(deleteRemoteAttachment).not.toHaveBeenCalledWith(expect.objectContaining({ cloudKey: H3 }));
-        expect(result.appData.tasks[0].attachments?.[0]?.cloudKey).toBe(H3);
-        expect(result.appData.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
-    });
-
-    it('clears journal entries without deleting generations shared by live attachments', async () => {
-        const before = withAttachments(
-            makeAttachment(H1),
-            makeAttachment(H1, {
-                id: 'shared-live',
-                uri: '/managed/shared.pdf',
-            }),
-        );
-        const after = withAttachments(
-            makeAttachment(H2),
-            makeAttachment(H1, {
-                id: 'shared-live',
-                uri: '/managed/shared.pdf',
-            }),
-        );
-        const journaled = journalFileSyncGenerationPublications(before, after);
-        const deleteRemoteAttachment = vi.fn(async () => undefined);
-
-        const result = await runAttachmentCleanupLifecycle({
-            appData: journaled,
-            now: () => now,
-            deleteLocalAttachment: vi.fn(async () => undefined),
-            deleteRemoteAttachment,
+            shouldRetainRemoteAttachment: () => true,
         });
 
         expect(deleteRemoteAttachment).not.toHaveBeenCalled();
+        expect(result.appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
         expect(result.appData.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
-        expect(result.appData.tasks[0].attachments?.map((attachment) => attachment.cloudKey)).toEqual([H2, H1]);
     });
 
-    it('retains a failed generation delete across restart and retries with its attempt count', async () => {
-        const journaled = journalFileSyncGenerationPublications(
-            withAttachments(makeAttachment(H1)),
-            withAttachments(makeAttachment(H2)),
-        );
-        const failed = await runAttachmentCleanupLifecycle({
-            appData: journaled,
-            now: () => now,
-            deleteLocalAttachment: vi.fn(async () => undefined),
-            deleteRemoteAttachment: vi.fn(async () => {
-                throw new Error('provider unavailable');
-            }),
-        });
-
-        expect(failed.appData.settings.attachments?.pendingRemoteDeletes).toEqual([
-            {
-                cloudKey: H1,
-                title: 'report.pdf',
-                attempts: 1,
-                lastErrorAt: now,
-            },
-        ]);
-        expect(hasFreshAttachmentCleanupWork(failed.appData)).toBe(false);
-
-        const restarted = JSON.parse(JSON.stringify(failed.appData)) as AppData;
+    it('bounds remote deletes and preserves unprocessed attempt state', async () => {
+        const data = withAttachments(makeAttachment(H3));
+        data.settings.attachments = {
+            pendingRemoteDeletes: [
+                { cloudKey: H1, title: 'one', attempts: 1 },
+                { cloudKey: H2, title: 'two', attempts: 2 },
+                { cloudKey: 'attachments/a1.4.pdf', title: 'three', attempts: 3 },
+            ],
+        };
         const deleteRemoteAttachment = vi.fn(async () => undefined);
-        const retried = await runAttachmentCleanupLifecycle({
-            appData: restarted,
-            now: () => '2026-07-15T12:00:00.000Z',
+
+        const result = await runAttachmentCleanupLifecycle({
+            appData: data,
+            now: () => now,
+            maxAttachmentTargets: 2,
             deleteLocalAttachment: vi.fn(async () => undefined),
             deleteRemoteAttachment,
         });
 
-        expect(deleteRemoteAttachment).toHaveBeenCalledWith({
-            cloudKey: H1,
-            title: 'report.pdf',
-        });
-        expect(retried.appData.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
-    });
-
-    it('journals an explicitly reported same-key publication', () => {
-        const data = withAttachments(makeAttachment(H2));
-        const journaled = journalFileSyncGenerationPublications(data, data, [
-            {
-                publishedCloudKey: H2,
-                previousCloudKey: H2,
-                title: 'report.pdf',
-            },
+        expect(deleteRemoteAttachment.mock.calls.map(([target]) => target.cloudKey)).toEqual([H1, H2]);
+        expect(result.reachedBatchLimit).toBe(true);
+        expect(result.appData.settings.attachments?.pendingRemoteDeletes).toEqual([
+            { cloudKey: 'attachments/a1.4.pdf', title: 'three', attempts: 3 },
         ]);
-
-        expect(journaled.settings.attachments?.pendingRemoteDeletes).toEqual([
-            { cloudKey: H2, title: 'report.pdf', attempts: 0 },
-        ]);
-    });
-
-    it('does not queue an old generation when an explicit publication key is invalid', () => {
-        const data = withAttachments(makeAttachment(H1));
-        const journaled = journalFileSyncGenerationPublications(data, data, [
-            {
-                publishedCloudKey: 'attachments/a1.pdf',
-                previousCloudKey: H1,
-                title: 'report.pdf',
-            },
-        ]);
-
-        expect(journaled).toBe(data);
-        expect(journaled.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
-    });
-
-    it('rebuilds a lost publication journal from the authoritative folder inventory', () => {
-        const data = withAttachments(makeAttachment(H2));
-        const journaled = journalUnreferencedFileSyncGenerationInventory(data, [
-            H1,
-            H2,
-            H1,
-            'attachments/legacy.pdf',
-            '../outside.pdf',
-        ]);
-
-        expect(journaled.settings.attachments?.pendingRemoteDeletes).toEqual([
-            { cloudKey: H1, attempts: 0 },
-        ]);
-        expect(journaled.tasks[0].attachments?.[0]?.cloudKey).toBe(H2);
-    });
-
-    it('preserves retry state while rediscovering an unreferenced generation', () => {
-        const data = withAttachments(makeAttachment(H2));
-        data.settings.attachments = {
-            pendingRemoteDeletes: [{
-                cloudKey: H1,
-                title: 'report.pdf',
-                attempts: 3,
-                lastErrorAt: now,
-            }],
-        };
-
-        const journaled = journalUnreferencedFileSyncGenerationInventory(data, [H1]);
-
-        expect(journaled).toBe(data);
-        expect(journaled.settings.attachments?.pendingRemoteDeletes).toEqual([{
-            cloudKey: H1,
-            title: 'report.pdf',
-            attempts: 3,
-            lastErrorAt: now,
-        }]);
     });
 });
 

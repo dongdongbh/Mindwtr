@@ -2,7 +2,6 @@ import {
     type AppData,
     type Attachment,
     type AttachmentSettings,
-    type FileSyncGenerationPublication,
     type SyncRunAttachmentHelpers,
     MAX_DOWNLOAD_BYTES,
     ResponseTooLargeError,
@@ -18,7 +17,6 @@ import {
     isSyncRemoteMutationFenceError,
     isWebdavRemoteWriteConflictError,
     isWebdavRateLimitedError,
-    journalFileSyncGenerationPublications,
     normalizeStrongWebdavEtag,
     parseCloudKitAttachmentKey,
     validateAttachmentForUpload,
@@ -1428,13 +1426,6 @@ export async function syncFileAttachments(
     const baseDataDir = await dataDir();
     const managedAttachmentsDir = await getManagedPath(ATTACHMENTS_DIR_NAME);
     const attachmentsById = collectAttachmentsById(appData);
-    const authoritativeAttachmentMetadataById = new Map(
-        Array.from(attachmentsById, ([id, attachment]) => [
-            id,
-            { cloudKey: attachment.cloudKey, title: attachment.title },
-        ]),
-    );
-    const generationPublications: FileSyncGenerationPublication[] = [];
 
     const { readLocalFile, localFilePresence, statLocalFile } = createLocalAttachmentFs(
         (message, error) => logAttachmentWarning(deps, message, error),
@@ -1604,12 +1595,6 @@ export async function syncFileAttachments(
                 await resolveFileBackendPath(join, baseSyncDir, cloudKey),
                 wireData,
             );
-            const authoritativeAttachment = authoritativeAttachmentMetadataById.get(attachment.id);
-            generationPublications.push({
-                publishedCloudKey: cloudKey,
-                previousCloudKey: authoritativeAttachment?.cloudKey,
-                title: authoritativeAttachment?.title ?? attachment.title,
-            });
             attachment.cloudKey = cloudKey;
             attachment.localStatus = 'available';
             return true;
@@ -1656,6 +1641,5 @@ export async function syncFileAttachments(
 
     for (const patch of patches.values()) allPatches.set(patch.id, patch);
     const nextData = applyAttachmentPatches(appData, allPatches);
-    const journaledData = journalFileSyncGenerationPublications(appData, nextData, generationPublications);
-    return journaledData !== appData ? journaledData : false;
+    return nextData !== appData ? nextData : false;
 }

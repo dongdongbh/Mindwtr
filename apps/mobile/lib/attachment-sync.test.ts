@@ -1005,9 +1005,7 @@ describe('attachment sync', () => {
       ), appData).data;
 
       expect(candidate.tasks[0].attachments?.[0]?.cloudKey).toBe(h1Key);
-      expect(candidate.settings.attachments?.pendingRemoteDeletes).toEqual([
-        { cloudKey: h1Key, title: `${id}.txt`, attempts: 0 },
-      ]);
+      expect(candidate.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
       expect(remoteFiles.get(h1Uri)).toBe(base64Of(H1_BYTES));
       // Model data.json CAS loss by discarding `candidate`: the already-published
       // winning H2 generation is byte-identical and was never a mutation target.
@@ -1061,9 +1059,7 @@ describe('attachment sync', () => {
       ), appData);
 
       expect(result.data.tasks[0].attachments?.[0]?.cloudKey).toBe(generationKey);
-      expect(result.data.settings.attachments?.pendingRemoteDeletes).toEqual([
-        { cloudKey: generationKey, title: `${id}.txt`, attempts: 0 },
-      ]);
+      expect(result.data.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
       expect(modernFileSystemMock.create).toHaveBeenCalledWith(
         `${targetUri}.mindwtr-staged`,
         { overwrite: false },
@@ -1182,9 +1178,7 @@ describe('attachment sync', () => {
       ), appData).data;
 
       expect(candidate.tasks[0].attachments?.[0]?.cloudKey).toBe(h1Key);
-      expect(candidate.settings.attachments?.pendingRemoteDeletes).toEqual([
-        { cloudKey: h1Key, title: `${id}.txt`, attempts: 0 },
-      ]);
+      expect(candidate.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
       expect(remoteFiles.get(h1Uri)).toBe(base64Of(H1_BYTES));
       expect(remoteFiles.get(h2Uri)).toBe(base64Of(H2_BYTES));
       expect(fileSystemMock.writeAsStringAsync).not.toHaveBeenCalledWith(
@@ -1235,9 +1229,7 @@ describe('attachment sync', () => {
       ), appData);
 
       expect(result.data.tasks[0].attachments?.[0]?.cloudKey).toBe(generationKey);
-      expect(result.data.settings.attachments?.pendingRemoteDeletes).toEqual([
-        { cloudKey: generationKey, title: `${id}.txt`, attempts: 0 },
-      ]);
+      expect(result.data.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
       expect(fileSystemMock.StorageAccessFramework.createFileAsync).toHaveBeenCalledWith(
         attachmentsDirUri,
         generationKey.split('/').pop(),

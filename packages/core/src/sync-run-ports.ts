@@ -318,11 +318,6 @@ export interface SyncRunPlatformHooks {
         data: AppData,
         context: SyncRunAttachmentCleanupContext,
     ): Promise<{ data: AppData; invalidateFastSyncState: boolean } | null>;
-    /** File Sync candidate CAS recovery. The machine rereads the winning
-     *  authoritative document while the candidate lease is still held; the
-     *  platform reconciles immutable generations against that exact snapshot
-     *  before the activation probe reports a benign requeue. */
-    reconcileActivationFileSyncAttachmentInventory?(authoritativeData: AppData): Promise<void>;
     /** Platform error-message shaping (mobile adds iOS file-provider hints). */
     formatErrorMessage(error: unknown, backend: SyncBackend): string;
     /** Consulted before the shared LocalSyncAbort requeue handling.
