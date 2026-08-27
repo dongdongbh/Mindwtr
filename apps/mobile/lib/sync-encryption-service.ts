@@ -63,6 +63,11 @@ import {
     runDropboxAuthorized,
 } from './attachment-sync-utils';
 import { createFileSyncEncryptionRemotePort } from './storage-file-encryption';
+import {
+    acquireMobileFileSyncLease,
+    releaseMobileFileSyncLease,
+    type MobileFileSyncLease,
+} from './sync-file-lock';
 import { getMobileWebDavRequestOptions } from './webdav-request-options';
 import { mobileSyncCryptoPrimitives } from './sync-crypto-native';
 import {
@@ -617,7 +622,7 @@ const createDropboxRemotePort = async (appData: AppData | null): Promise<Transit
 };
 
 type BackendTarget =
-    | { kind: 'remote'; port: SyncEncryptionRemotePort }
+    | { kind: 'remote'; port: SyncEncryptionRemotePort; fileSyncLease?: MobileFileSyncLease }
     | { kind: 'local-only' }
     | { kind: 'unsupported' };
 
@@ -631,9 +636,18 @@ const resolveTransitionTarget = async (appData: AppData | null): Promise<Backend
     if (backend === 'file') {
         const syncPath = await AsyncStorage.getItem(SYNC_PATH_KEY);
         if (!syncPath) throw new Error('No sync folder configured');
-        const port = await createFileSyncEncryptionRemotePort(syncPath);
-        if (!port) throw new Error('Unable to open the sync folder');
-        return { kind: 'remote', port };
+        // Acquire before the port opens the directory and snapshots artifact
+        // generations. A transition must not authenticate or preflight bytes
+        // captured before it owned the same folder lock as ordinary sync.
+        const fileSyncLease = await acquireMobileFileSyncLease(syncPath);
+        try {
+            const port = await createFileSyncEncryptionRemotePort(syncPath);
+            if (!port) throw new Error('Unable to open the sync folder');
+            return { kind: 'remote', port, fileSyncLease };
+        } catch (error) {
+            await releaseMobileFileSyncLease(fileSyncLease);
+            throw error;
+        }
     }
     if (backend === 'webdav') {
         return { kind: 'remote', port: await createWebdavRemotePort(appData) };
@@ -647,7 +661,7 @@ const resolveTransitionTarget = async (appData: AppData | null): Promise<Backend
     return { kind: 'unsupported' };
 };
 
-const requireTransitionPort = async (appData: AppData | null): Promise<SyncEncryptionRemotePort> => {
+const requireTransitionTarget = async (appData: AppData | null): Promise<Extract<BackendTarget, { kind: 'remote' }>> => {
     const target = await resolveTransitionTarget(appData);
     if (target.kind === 'local-only') {
         throw new Error('SYNC_ENCRYPTION_BACKEND_REQUIRED');
@@ -655,7 +669,19 @@ const requireTransitionPort = async (appData: AppData | null): Promise<SyncEncry
     if (target.kind !== 'remote') {
         throw new Error('Sync encryption is only available for File Sync, WebDAV and Dropbox.');
     }
-    return target.port;
+    return target;
+};
+
+const runWithFileTransitionLease = async <T>(
+    target: Extract<BackendTarget, { kind: 'remote' }>,
+    operation: (port: SyncEncryptionRemotePort) => Promise<T>,
+): Promise<T> => {
+    if (!target.fileSyncLease) return operation(target.port);
+    try {
+        return await operation(target.port);
+    } finally {
+        await releaseMobileFileSyncLease(target.fileSyncLease);
+    }
 };
 
 /** Phase-3 API. `appData` is the caller's current local document — it supplies the
@@ -706,16 +732,19 @@ export const enableSyncEncryption = async (
         await flushSyncEncryptionLocalState();
         return;
     }
-    const port = await requireTransitionPort(options.appData ?? null);
-    await runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
-      runEnableSyncEncryptionOverRemote(
-        passphrase,
-        guardedRemote,
-        keyCache,
-        localState,
-        options.onProgress,
-        mobileSyncCryptoPrimitives,
-      ));
+    if (target.kind !== 'remote') {
+        throw new Error('Sync encryption is only available for File Sync, WebDAV and Dropbox.');
+    }
+    await runWithFileTransitionLease(target, (port) =>
+      runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
+        runEnableSyncEncryptionOverRemote(
+          passphrase,
+          guardedRemote,
+          keyCache,
+          localState,
+          options.onProgress,
+          mobileSyncCryptoPrimitives,
+        )));
 });
 
 export const disableSyncEncryption = async (
@@ -728,15 +757,18 @@ export const disableSyncEncryption = async (
         await flushSyncEncryptionLocalState();
         return;
     }
-    const port = await requireTransitionPort(options.appData ?? null);
-    await runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
-      runDisableSyncEncryptionOverRemote(
-        guardedRemote,
-        keyCache,
-        localState,
-        options.onProgress,
-        mobileSyncCryptoPrimitives,
-      ));
+    if (target.kind !== 'remote') {
+        throw new Error('Sync encryption is only available for File Sync, WebDAV and Dropbox.');
+    }
+    await runWithFileTransitionLease(target, (port) =>
+      runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
+        runDisableSyncEncryptionOverRemote(
+          guardedRemote,
+          keyCache,
+          localState,
+          options.onProgress,
+          mobileSyncCryptoPrimitives,
+        )));
 });
 
 export const changeSyncEncryptionPassphrase = async (
@@ -745,17 +777,18 @@ export const changeSyncEncryptionPassphrase = async (
     options: SyncEncryptionTransitionOptions = {},
 ): Promise<void> => runSerializedSyncDocumentOperation(async () => {
     await loadSyncEncryptionLocalState();
-    const port = await requireTransitionPort(options.appData ?? null);
-    await runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
-      runChangeSyncEncryptionPassphraseOverRemote(
-        current,
-        next,
-        guardedRemote,
-        keyCache,
-        localState,
-        options.onProgress,
-        mobileSyncCryptoPrimitives,
-      ));
+    const target = await requireTransitionTarget(options.appData ?? null);
+    await runWithFileTransitionLease(target, (port) =>
+      runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
+        runChangeSyncEncryptionPassphraseOverRemote(
+          current,
+          next,
+          guardedRemote,
+          keyCache,
+          localState,
+          options.onProgress,
+          mobileSyncCryptoPrimitives,
+        )));
 });
 
 const runProvidePassphraseOverRemote = async (
@@ -798,8 +831,8 @@ export const provideSyncEncryptionPassphrase = async (
     passphrase: string,
 ): Promise<'ok' | 'wrong-passphrase'> => runSerializedSyncDocumentOperation(async () => {
     await loadSyncEncryptionLocalState();
-    const port = await requireTransitionPort(null);
-    return runProvidePassphraseOverRemote(passphrase, port);
+    const target = await requireTransitionTarget(null);
+    return runWithFileTransitionLease(target, (port) => runProvidePassphraseOverRemote(passphrase, port));
 });
 
 /** "Not now". Re-affirms the persisted no-key state; automatic and background sync stay

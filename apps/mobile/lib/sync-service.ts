@@ -79,6 +79,7 @@ const isSyncEncryptionError = (error: unknown): boolean =>
   || error instanceof SyncEncryptionTransitionIncompleteError;
 import { getMobileCloudRequestOptions, getMobileWebDavRequestOptions } from './webdav-request-options';
 import { ensureWebdavCapabilityProof } from './webdav-capability-proof';
+import { acquireMobileFileSyncLease, releaseMobileFileSyncLease } from './sync-file-lock';
 
 const DEFAULT_SYNC_TIMEOUT_MS = 30_000;
 const WEBDAV_RETRY_OPTIONS = { maxAttempts: 5, baseDelayMs: 2000, maxDelayMs: 30_000 };
@@ -557,6 +558,7 @@ class MobileSyncRun {
   private dropboxLastRev: string | null = null;
   private fileSyncPath: string | null = null;
   private fileSyncBookmark: string | null = null;
+  private fileSyncLease: Awaited<ReturnType<typeof acquireMobileFileSyncLease>> | null = null;
   private activationProof: MobileSyncResult['activationProof'];
   /** #1056: resolved once per cycle in setupCycle. `null` is the encryption-off path and
    *  every seam below then behaves byte-for-byte as it did before the feature. */
@@ -616,7 +618,7 @@ class MobileSyncRun {
       });
       return this.activationProof ? { ...result, activationProof: this.activationProof } : result;
     } finally {
-      this.releaseResources();
+      await this.releaseResources();
     }
   }
 
@@ -712,6 +714,10 @@ class MobileSyncRun {
     if (!fileSyncPath) {
       return false;
     }
+    // Take the stable folder lock before SAF/path normalization can create the
+    // canonical data document. The lease then remains held through attachment
+    // work, document CAS, and final local persistence in `run()`.
+    this.fileSyncLease = await acquireMobileFileSyncLease(fileSyncPath);
     const normalizedPath = normalizeFileSyncPath(fileSyncPath, Platform.OS);
     if (normalizedPath && normalizedPath !== fileSyncPath) {
       fileSyncPath = normalizedPath;
@@ -1594,7 +1600,16 @@ class MobileSyncRun {
     };
   }
 
-  private releaseResources(): void {
+  private async releaseResources(): Promise<void> {
+    if (this.fileSyncLease) {
+      const lease = this.fileSyncLease;
+      this.fileSyncLease = null;
+      try {
+        await releaseMobileFileSyncLease(lease);
+      } catch (error) {
+        logSyncWarning('Failed to release File Sync lease', error);
+      }
+    }
     if (activeMobileSyncAbortController === this.requestAbortController) {
       activeMobileSyncAbortController = null;
       activeMobileSyncAbortReason = null;

@@ -100,6 +100,11 @@ const logMocks = vi.hoisted(() => ({
   logWarn: vi.fn(),
 }));
 
+const fileSyncLockMocks = vi.hoisted(() => ({
+  acquireMobileFileSyncLease: vi.fn(),
+  releaseMobileFileSyncLease: vi.fn(),
+}));
+
 const storeStateRef = vi.hoisted(() => ({
   current: {
     lastDataChangeAt: 1,
@@ -226,6 +231,11 @@ vi.mock('./app-log', () => ({
   sanitizeLogMessage: (value: string) => value,
 }));
 
+vi.mock('./sync-file-lock', () => ({
+  acquireMobileFileSyncLease: fileSyncLockMocks.acquireMobileFileSyncLease,
+  releaseMobileFileSyncLease: fileSyncLockMocks.releaseMobileFileSyncLease,
+}));
+
 vi.mock('@mindwtr/core', async () => {
   const actual = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
   return {
@@ -314,6 +324,8 @@ describe('mobile sync-service runtime', () => {
     attachmentSyncMocks.syncWebdavAttachments.mockResolvedValue(false);
     attachmentSyncMocks.cleanupAttachmentTempFiles.mockResolvedValue(undefined);
     attachmentSyncMocks.hasPendingAttachmentSyncWork.mockResolvedValue(false);
+    fileSyncLockMocks.acquireMobileFileSyncLease.mockResolvedValue({ token: 'file-cycle-lease', native: true });
+    fileSyncLockMocks.releaseMobileFileSyncLease.mockResolvedValue(undefined);
 
     externalCalendarMocks.getExternalCalendars.mockResolvedValue([]);
     externalCalendarMocks.saveExternalCalendars.mockResolvedValue(undefined);
@@ -498,6 +510,58 @@ describe('mobile sync-service runtime', () => {
     });
     expect(storageFileMocks.readSyncFileVersioned).toHaveBeenCalled();
     expect(storageFileMocks.writeSyncFile).not.toHaveBeenCalled();
+  });
+
+  it('holds the File Sync lease across attachment mutation, document CAS, and final local persistence', async () => {
+    const events: string[] = [];
+    fileSyncLockMocks.acquireMobileFileSyncLease.mockImplementation(async (path: string) => {
+      expect(path).toBe('file:///candidate/data.json');
+      events.push('lease:acquire');
+      return { token: 'file-cycle-lease', native: true };
+    });
+    fileSyncLockMocks.releaseMobileFileSyncLease.mockImplementation(async () => {
+      events.push('lease:release');
+    });
+    attachmentSyncMocks.hasPendingAttachmentSyncWork.mockResolvedValue(true);
+    attachmentSyncMocks.syncFileAttachments.mockImplementation(async () => {
+      events.push('attachment:upload');
+      return false;
+    });
+    storageFileMocks.writeSyncFile.mockImplementation(async () => {
+      events.push('document:write');
+    });
+    storageMocks.saveData.mockImplementation(async () => {
+      events.push('local:persist');
+    });
+
+    const result = await syncServiceModule.performMobileSync(undefined, {
+      manual: true,
+      configOverride: { backend: 'file', syncPath: 'file:///candidate/data.json' },
+    });
+
+    expect(result.success).toBe(true);
+    expect(events[0]).toBe('lease:acquire');
+    expect(events).toContain('attachment:upload');
+    expect(events).toContain('document:write');
+    expect(events).toContain('local:persist');
+    expect(events.at(-1)).toBe('lease:release');
+  });
+
+  it('acquires the same File Sync lease for an activation probe and releases it on proof failure', async () => {
+    storageFileMocks.readSyncFileVersioned.mockRejectedValueOnce(new Error('candidate read failed'));
+
+    const result = await syncServiceModule.performMobileSync(undefined, {
+      activationProbe: true,
+      manual: true,
+      configOverride: { backend: 'file', syncPath: 'file:///candidate/data.json' },
+    });
+
+    expect(result.success).toBe(false);
+    expect(fileSyncLockMocks.acquireMobileFileSyncLease).toHaveBeenCalledWith('file:///candidate/data.json');
+    expect(fileSyncLockMocks.releaseMobileFileSyncLease).toHaveBeenCalledWith({
+      token: 'file-cycle-lease',
+      native: true,
+    });
   });
 
   it.each([
