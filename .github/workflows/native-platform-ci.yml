@@ -10,6 +10,7 @@ on:
       - "scripts/build-macos-widget.sh"
       - "scripts/ci/test-build-macos-widget.sh"
       - "apps/mobile/modules/**/android/**"
+      - "apps/mobile/modules/**/expo-module.config.json"
       - "apps/mobile/ios-app-intents/**"
       - "apps/mobile/widgets-ios/**"
       - "apps/mobile/modules/**/ios/**"
@@ -34,6 +35,7 @@ on:
       - "scripts/build-macos-widget.sh"
       - "scripts/ci/test-build-macos-widget.sh"
       - "apps/mobile/modules/**/android/**"
+      - "apps/mobile/modules/**/expo-module.config.json"
       - "apps/mobile/ios-app-intents/**"
       - "apps/mobile/widgets-ios/**"
       - "apps/mobile/modules/**/ios/**"
@@ -113,12 +115,12 @@ jobs:
                 ;;
             esac
             case "$path" in
-              apps/mobile/modules/*/android/*|apps/mobile/plugins/*|apps/mobile/app.config.ts|apps/mobile/app.json|apps/mobile/package.json|scripts/ci/setup-android-sdk.sh|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
+              apps/mobile/modules/*/android/*|apps/mobile/modules/*/expo-module.config.json|apps/mobile/plugins/*|apps/mobile/app.config.ts|apps/mobile/app.json|apps/mobile/package.json|scripts/ci/setup-android-sdk.sh|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
                 android=true
                 ;;
             esac
             case "$path" in
-              apps/mobile/ios-app-intents/*|apps/mobile/widgets-ios/*|apps/mobile/modules/*/ios/*|apps/mobile/modules/cloudkit-sync/Package.swift|apps/mobile/modules/cloudkit-sync/tests/*|apps/mobile/plugins/*|apps/mobile/app.config.ts|apps/mobile/app.json|apps/mobile/package.json|scripts/ci/setup-ruby.sh|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
+              apps/mobile/ios-app-intents/*|apps/mobile/widgets-ios/*|apps/mobile/modules/*/ios/*|apps/mobile/modules/*/expo-module.config.json|apps/mobile/modules/cloudkit-sync/Package.swift|apps/mobile/modules/cloudkit-sync/tests/*|apps/mobile/plugins/*|apps/mobile/app.config.ts|apps/mobile/app.json|apps/mobile/package.json|scripts/ci/setup-ruby.sh|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
                 ios=true
                 ;;
             esac
@@ -263,9 +265,9 @@ jobs:
             --no-daemon \
             -PreactNativeArchitectures=arm64-v8a
 
-      - name: Run attachment installer Android recovery tests
+      - name: Run Android native recovery tests
         working-directory: apps/mobile/android
-        run: ./gradlew :attachment-file-installer:testDebugUnitTest --no-daemon
+        run: ./gradlew :attachment-file-installer:testDebugUnitTest :sync-file-lock:testDebugUnitTest --no-daemon
 
   ios-native:
     if: needs.changes.outputs.ios == 'true'

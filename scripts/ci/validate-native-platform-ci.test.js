@@ -12,6 +12,9 @@ test("native CI generates clean projects and compiles Android and iOS sources", 
 
   expect(workflow).toContain('apps/mobile/modules/**/android/**');
   expect(workflow).toContain('apps/mobile/modules/**/ios/**');
+  expect(
+    workflow.match(/- "apps\/mobile\/modules\/\*\*\/expo-module\.config\.json"/g),
+  ).toHaveLength(2);
   // The maintained iOS sources live outside the gitignored generated ios/
   // project, so the triggers must name them directly or edits skip CI.
   expect(workflow.match(/- "apps\/mobile\/ios-app-intents\/\*\*"/g)).toHaveLength(2);
@@ -19,6 +22,12 @@ test("native CI generates clean projects and compiles Android and iOS sources", 
   expect(workflow.match(/- "scripts\/ci\/setup-ruby\.sh"/g)).toHaveLength(2);
   expect(workflow).toContain("ios: ${{ steps.filter.outputs.ios }}");
   expect(workflow).toMatch(/apps\/mobile\/ios-app-intents\/\*\|apps\/mobile\/widgets-ios\/\*\|[^\n]*scripts\/ci\/setup-ruby\.sh\|/);
+  expect(workflow).toMatch(
+    /apps\/mobile\/modules\/\*\/android\/\*\|apps\/mobile\/modules\/\*\/expo-module\.config\.json\|/,
+  );
+  expect(workflow).toMatch(
+    /apps\/mobile\/modules\/\*\/ios\/\*\|apps\/mobile\/modules\/\*\/expo-module\.config\.json\|/,
+  );
   // The generated projects are gitignored; filters on them never match a
   // committed diff and only feign coverage.
   expect(workflow).not.toContain("apps/mobile/ios/**");
@@ -27,8 +36,9 @@ test("native CI generates clean projects and compiles Android and iOS sources", 
   expect(workflow).toContain("Generate Android native project");
   expect(workflow).toMatch(/prebuild \\\n\s+--clean \\\n\s+--platform android/);
   expect(workflow).toContain(":app:compileDebugKotlin");
-  expect(androidJob).toContain("name: Run attachment installer Android recovery tests");
+  expect(androidJob).toContain("name: Run Android native recovery tests");
   expect(androidJob).toContain(":attachment-file-installer:testDebugUnitTest");
+  expect(androidJob).toContain(":sync-file-lock:testDebugUnitTest");
 
   expect(workflow).toContain("name: iOS Swift compile");
   expect(workflow).toContain("gem install cocoapods --version 1.16.2 --no-document");
@@ -76,7 +86,7 @@ test("attachment installer native CI collects the recovery suites", () => {
     "utf8",
   );
 
-  expect(androidTests.match(/^\s*@Test$/gm)).toHaveLength(16);
+  expect(androidTests.match(/^\s*@Test$/gm)).toHaveLength(18);
   expect(swiftPackage).toContain(".testTarget(");
   expect(swiftTests).toContain("testAbsentGenerationUsesCreateNoReplace");
   expect(swiftTests).toContain("testPresentGenerationReplacesOnlyMatchingTargetAndPreservesIt");
