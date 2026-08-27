@@ -1,4 +1,4 @@
-import AttachmentFileInstaller from '../modules/attachment-file-installer';
+import { requireNativeModule } from 'expo-modules-core';
 
 export type AttachmentFileExpectedGeneration =
   | { kind: 'absent' }
@@ -15,6 +15,15 @@ type NativeAttachmentFileInstaller = {
     expected: { kind: 'absent' } | { kind: 'present'; sha256: string },
     expectedDownloadSha256: string,
   ): Promise<unknown>;
+};
+
+let resolvedModule: NativeAttachmentFileInstaller | undefined;
+
+const getNativeModule = (): NativeAttachmentFileInstaller => {
+  if (!resolvedModule) {
+    resolvedModule = requireNativeModule<NativeAttachmentFileInstaller>('AttachmentFileInstaller');
+  }
+  return resolvedModule;
 };
 
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
@@ -64,7 +73,7 @@ export const installAttachmentFileGeneration = async (
     throw new Error('Expected download SHA-256 must be 64 lowercase hexadecimal characters');
   }
 
-  const result = await (AttachmentFileInstaller as NativeAttachmentFileInstaller).installAsync(
+  const result = await getNativeModule().installAsync(
     normalizedStagedPath,
     normalizedTargetPath,
     normalizedExpected,

@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { installAttachmentFileGeneration } from './attachment-file-installer';
 
-const { installAsync } = vi.hoisted(() => ({ installAsync: vi.fn() }));
+const { installAsync, requireNativeModule } = vi.hoisted(() => ({
+  installAsync: vi.fn(),
+  requireNativeModule: vi.fn(() => ({ installAsync })),
+}));
 const downloadHash = 'd'.repeat(64);
 
-vi.mock('../modules/attachment-file-installer', () => ({
-  default: { installAsync },
+vi.mock('expo-modules-core', () => ({
+  requireNativeModule,
 }));
 describe('installAttachmentFileGeneration', () => {
   beforeEach(() => {
@@ -13,6 +16,7 @@ describe('installAttachmentFileGeneration', () => {
   });
 
   it('passes the absent generation contract to the native installer', async () => {
+    expect(requireNativeModule).not.toHaveBeenCalled();
     installAsync.mockResolvedValue({ status: 'installed' });
 
     await expect(installAttachmentFileGeneration(
@@ -28,6 +32,7 @@ describe('installAttachmentFileGeneration', () => {
       { kind: 'absent' },
       downloadHash,
     );
+    expect(requireNativeModule).toHaveBeenCalledWith('AttachmentFileInstaller');
   });
 
   it('normalizes the expected present hash and preserves a native conflict path', async () => {
