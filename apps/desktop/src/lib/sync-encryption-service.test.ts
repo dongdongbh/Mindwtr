@@ -115,6 +115,7 @@ vi.mock('./tauri-invoke', () => {
 const {
     classifySyncEncryptionFailure,
     clearSyncEncryptionMaterialCache,
+    __syncEncryptionServiceTestUtils,
     createDropboxRemotePort,
     createWebdavRemotePort,
     desktopSyncCryptoPrimitives,
@@ -369,6 +370,37 @@ describe('Dropbox sync encryption transitions', () => {
 });
 
 describe('WebDAV sync encryption transitions (config-override / web path)', () => {
+    it('rejects unmanaged artifact names before issuing a request', async () => {
+        const fetcher = vi.fn();
+        const port = createWebdavRemotePort({
+            baseUrl: 'https://dav.example/sync',
+            options: { fetcher: fetcher as unknown as typeof fetch, username: 'u', password: 'p' },
+        });
+
+        expect(() => port.read('../victim')).toThrow('Invalid sync encryption remote artifact name');
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+
+    it('derives only managed blob attachment names from untrusted remote metadata', () => {
+        const cloudKeys = [
+            '../victim',
+            'attachments/%2e%2e/victim',
+            '/absolute',
+            'https://evil.example/victim',
+            'data.json',
+            'cloudkit:asset',
+            'attachments/valid.bin',
+        ];
+        const data = {
+            tasks: [{ attachments: cloudKeys.map((cloudKey, index) => ({ id: `a${index}`, kind: 'file', cloudKey })) }],
+            projects: [],
+        } as unknown as Parameters<typeof __syncEncryptionServiceTestUtils.collectRemoteAttachmentKeys>[0];
+
+        expect(__syncEncryptionServiceTestUtils.collectRemoteAttachmentKeys(data)).toEqual([
+            'attachments/valid.bin',
+        ]);
+    });
+
     it('round-trips through the same core orchestration', async () => {
         const baseUrl = 'https://dav.example/sync';
         const store = seedRemote();

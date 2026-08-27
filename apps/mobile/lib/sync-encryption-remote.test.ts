@@ -161,6 +161,22 @@ describe('transition entry derivation', () => {
     expect(entries).toHaveLength(4);
     expect(entries.every((e) => e.kind === 'document')).toBe(true);
   });
+
+  it('accepts only managed blob attachment keys from untrusted remote metadata', () => {
+    const entries = __syncEncryptionServiceTestUtils.buildTransitionEntries(appData([
+      '../victim',
+      'attachments/%2e%2e/victim',
+      '/absolute',
+      'https://evil.example/victim',
+      'data.json',
+      'cloudkit:asset',
+      'attachments/valid.bin',
+    ]));
+
+    expect(entries.filter((entry) => entry.kind === 'attachment').map((entry) => entry.name)).toEqual([
+      'attachments/valid.bin',
+    ]);
+  });
 });
 
 describe('WebDAV remote port error boundaries', () => {
@@ -174,6 +190,15 @@ describe('WebDAV remote port error boundaries', () => {
     const port = await createPort();
 
     await expect(port.read('data.json')).rejects.toThrow('WebDAV File GET failed (401)');
+  });
+
+  it('rejects unmanaged artifact names before issuing a request', async () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    const port = await createPort();
+
+    expect(() => port.read('../victim')).toThrow('Invalid sync encryption remote artifact name');
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it('propagates a GET timeout instead of treating the artifact as absent', async () => {

@@ -26,6 +26,7 @@ import {
     runEnableSyncEncryptionLocalOnly,
     runEnableSyncEncryptionOverRemote,
     runProvideSyncEncryptionPassphraseOverRemote,
+    sanitizeAttachmentCloudKeyForSyncMerge,
     SYNC_ENCRYPTION_KEYED_STATES,
     SyncCryptoUnsupportedError,
     SyncEncryptionRemotePlaintextError,
@@ -56,6 +57,17 @@ import { invokeNative, invokeNativeOr } from './tauri-invoke';
 /** The document names a blob remote can hold. Reads of an absent name resolve to `null` and
  *  the core transition loops skip them, so probing existence up front buys nothing. */
 const REMOTE_DOCUMENT_NAMES = ['data.json', 'data.json.bak', 'data.json.enc', 'data.json.enc.bak'];
+
+const sanitizeBlobAttachmentKey = (value: unknown): string | undefined => {
+    const key = sanitizeAttachmentCloudKeyForSyncMerge(value);
+    return key?.startsWith('attachments/') ? key : undefined;
+};
+
+const assertManagedRemoteArtifactName = (name: string): string => {
+    if (REMOTE_DOCUMENT_NAMES.includes(name)) return name;
+    if (sanitizeBlobAttachmentKey(name) === name) return name;
+    throw new Error('Invalid sync encryption remote artifact name');
+};
 
 const OFF_STATUS: SyncEncryptionStatus = { state: 'off' };
 
@@ -274,7 +286,8 @@ const collectRemoteAttachmentKeys = (data: AppData | null): string[] => {
     const keys = new Set<string>();
     const visit = (attachments: Attachment[] | undefined) => {
         for (const attachment of attachments ?? []) {
-            if (attachment.cloudKey) keys.add(attachment.cloudKey);
+            const key = sanitizeBlobAttachmentKey(attachment.cloudKey);
+            if (key) keys.add(key);
         }
     };
     for (const task of data.tasks ?? []) visit(task.attachments);
@@ -366,7 +379,7 @@ export type WebdavRemotePortConfig = {
 };
 
 export function createWebdavRemotePort(config: WebdavRemotePortConfig): SyncEncryptionRemotePort {
-    const urlFor = (name: string) => `${config.baseUrl}/${name}`;
+    const urlFor = (name: string) => `${config.baseUrl}/${assertManagedRemoteArtifactName(name)}`;
     const read = (name: string): Promise<SyncEncryptionRemoteRead> =>
         webdavGetFileVersioned(urlFor(name), config.options);
     return {
@@ -389,18 +402,22 @@ export function createDropboxRemotePort(
     fetcher: typeof fetch,
 ): SyncEncryptionRemotePort {
     const read = (name: string): Promise<SyncEncryptionRemoteRead> =>
-        withToken((token) => downloadDropboxFileVersioned(token, name, fetcher));
+        withToken((token) => downloadDropboxFileVersioned(token, assertManagedRemoteArtifactName(name), fetcher));
     return {
         list: () => listRemoteEntries(read),
         captureInventory: (recoveryPassphrase) => captureRemoteInventory(read, recoveryPassphrase),
         read,
         write: async (name, bytes, expectedVersion) => {
             await withToken((token) =>
-                uploadDropboxFileVersioned(token, name, bytes, expectedVersion, fetcher),
+                uploadDropboxFileVersioned(
+                    token, assertManagedRemoteArtifactName(name), bytes, expectedVersion, fetcher,
+                ),
             );
         },
         remove: async (name, expectedVersion) => {
-            await withToken((token) => deleteDropboxFileVersioned(token, name, expectedVersion, fetcher));
+            await withToken((token) => deleteDropboxFileVersioned(
+                token, assertManagedRemoteArtifactName(name), expectedVersion, fetcher,
+            ));
         },
     };
 }

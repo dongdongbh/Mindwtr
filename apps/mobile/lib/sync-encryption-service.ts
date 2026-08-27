@@ -19,6 +19,7 @@ import {
     runEnableSyncEncryptionOverRemote,
     runProvideSyncEncryptionPassphraseOverRemote,
     runSerializedSyncDocumentOperation,
+    sanitizeAttachmentCloudKeyForSyncMerge,
     SYNC_FILE_NAME,
     webdavDeleteFileVersioned,
     webdavGetFileVersioned,
@@ -64,6 +65,23 @@ import {
 
 const BACKUP_FILE_NAME = `${SYNC_FILE_NAME}.bak`;
 const DROPBOX_PROVIDER = 'dropbox';
+const REMOTE_DOCUMENT_NAMES = new Set([
+    SYNC_FILE_NAME,
+    `${SYNC_FILE_NAME}.enc`,
+    BACKUP_FILE_NAME,
+    `${SYNC_FILE_NAME}.enc.bak`,
+]);
+
+const sanitizeBlobAttachmentKey = (value: unknown): string | undefined => {
+    const key = sanitizeAttachmentCloudKeyForSyncMerge(value);
+    return key?.startsWith('attachments/') ? key : undefined;
+};
+
+const assertManagedRemoteArtifactName = (name: string): string => {
+    if (REMOTE_DOCUMENT_NAMES.has(name)) return name;
+    if (sanitizeBlobAttachmentKey(name) === name) return name;
+    throw new Error('Invalid sync encryption remote artifact name');
+};
 
 export type SyncEncryptionProgressCallback = (progress: SyncEncryptionTransitionProgress) => void;
 
@@ -96,7 +114,7 @@ const buildTransitionEntries = (appData: AppData | null): SyncEncryptionRemoteEn
     for (const entity of [...(appData.tasks ?? []), ...(appData.projects ?? [])]) {
         if (entity.deletedAt) continue;
         for (const attachment of entity.attachments ?? []) {
-            const cloudKey = attachment.cloudKey;
+            const cloudKey = sanitizeBlobAttachmentKey(attachment.cloudKey);
             if (!cloudKey || seen.has(cloudKey)) continue;
             seen.add(cloudKey);
             entries.push({ name: cloudKey, kind: 'attachment' });
@@ -167,7 +185,7 @@ const createWebdavRemotePort = async (appData: AppData | null): Promise<SyncEncr
     };
     // Documents sit at the sync root; attachment entry names are already the `cloudKey`
     // (`attachments/<id><ext>`), which is root-relative too.
-    const urlFor = (name: string): string => `${baseSyncUrl}/${name}`;
+    const urlFor = (name: string): string => `${baseSyncUrl}/${assertManagedRemoteArtifactName(name)}`;
     const read = (name: string): Promise<SyncEncryptionRemoteRead> =>
         webdavGetFileVersioned(urlFor(name), requestOptions);
     return {
@@ -191,16 +209,20 @@ const createDropboxRemotePort = async (appData: AppData | null): Promise<SyncEnc
     const authorized = <T,>(operation: (accessToken: string) => Promise<T>): Promise<T> =>
         runDropboxAuthorized(clientId, operation);
     const read = (name: string): Promise<SyncEncryptionRemoteRead> =>
-        authorized((token) => downloadDropboxFileVersioned(token, `/${name}`));
+        authorized((token) => downloadDropboxFileVersioned(token, `/${assertManagedRemoteArtifactName(name)}`));
     return {
         list: async () => buildTransitionEntries(appData),
         captureInventory: (recoveryPassphrase) => captureTransitionInventory(read, recoveryPassphrase),
         read,
         write: async (name, bytes, expectedVersion) => {
-            await authorized((token) => uploadDropboxFileVersioned(token, `/${name}`, bytes, expectedVersion));
+            await authorized((token) => uploadDropboxFileVersioned(
+                token, `/${assertManagedRemoteArtifactName(name)}`, bytes, expectedVersion,
+            ));
         },
         remove: async (name, expectedVersion) => {
-            await authorized((token) => deleteDropboxFileVersioned(token, `/${name}`, expectedVersion));
+            await authorized((token) => deleteDropboxFileVersioned(
+                token, `/${assertManagedRemoteArtifactName(name)}`, expectedVersion,
+            ));
         },
     };
 };
