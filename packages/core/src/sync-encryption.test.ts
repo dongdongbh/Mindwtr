@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
     SyncEncryptionTerminalError,
     SyncEncryptionRemoteConflictError,
@@ -203,6 +203,54 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         expect(localState.value).toBeNull();
     });
 
+    it('preflights every listed version before writing an earlier attachment', async () => {
+        const remote = createFakeRemote({
+            'attachments/first.png': { bytes: utf8('FIRST'), kind: 'attachment' },
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+        });
+        const originalRead = remote.read.bind(remote);
+        remote.read = async (name) => {
+            const result = await originalRead(name);
+            return name === 'data.json' && result.bytes ? { ...result, version: null } : result;
+        };
+        const write = vi.spyOn(remote, 'write');
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'correct horse', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(text(remote.store.get('attachments/first.png')!)).toBe('FIRST');
+        expect(keyCache.current).toBeNull();
+        expect(localState.value).toBeNull();
+    });
+
+    it('leaves a post-write missing-version failure resumable instead of committing local state', async () => {
+        const remote = createFakeRemote({
+            'attachments/first.png': { bytes: utf8('FIRST'), kind: 'attachment' },
+        });
+        const originalRead = remote.read.bind(remote);
+        let reads = 0;
+        remote.read = async (name) => {
+            const result = await originalRead(name);
+            reads += 1;
+            return reads > 1 && result.bytes ? { ...result, version: null } : result;
+        };
+        const write = vi.spyOn(remote, 'write');
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'correct horse', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+
+        expect(write).toHaveBeenCalledOnce();
+        expect(keyCache.current).toBeNull();
+        expect(localState.value).toBeNull();
+    });
+
     it('migrates data + bak + snapshot + attachment, verifies, then deletes plaintext', async () => {
         const remote = createFakeRemote({
             'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
@@ -345,6 +393,29 @@ describe('runEnableSyncEncryptionOverRemote', () => {
 });
 
 describe('runDisableSyncEncryptionOverRemote', () => {
+    it('preflights every listed version before decrypting an earlier attachment', async () => {
+        const remote = createFakeRemote({
+            'attachments/first.png': { bytes: utf8('FIRST'), kind: 'attachment' },
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const originalRead = remote.read.bind(remote);
+        remote.read = async (name) => {
+            const result = await originalRead(name);
+            return name === 'data.json.enc' && result.bytes ? { ...result, version: null } : result;
+        };
+        const write = vi.spyOn(remote, 'write');
+
+        await expect(runDisableSyncEncryptionOverRemote(remote, keyCache, localState))
+            .rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(localState.value?.state).toBe('enabled');
+        expect(await keyCache.getKey()).not.toBeNull();
+    });
+
     it('reverts every artifact back to plaintext and clears the cached key', async () => {
         const remote = createFakeRemote({
             'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
@@ -400,6 +471,30 @@ describe('runDisableSyncEncryptionOverRemote', () => {
 });
 
 describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
+    it('preflights every listed version before rewrapping an earlier attachment', async () => {
+        const remote = createFakeRemote({
+            'attachments/first.png': { bytes: utf8('FIRST'), kind: 'attachment' },
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('old-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const originalRead = remote.read.bind(remote);
+        remote.read = async (name) => {
+            const result = await originalRead(name);
+            return name === 'data.json.enc' && result.bytes ? { ...result, version: null } : result;
+        };
+        const write = vi.spyOn(remote, 'write');
+
+        await expect(runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'new-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(localState.value?.state).toBe('enabled');
+        expect(await keyCache.getKey()).not.toBeNull();
+    });
+
     it('re-encrypts every artifact under a fresh salt derived from the new passphrase', async () => {
         const remote = createFakeRemote({
             'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },

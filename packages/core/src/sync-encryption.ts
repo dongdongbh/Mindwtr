@@ -290,6 +290,28 @@ const requireExistingRemoteVersion = (name: string, read: SyncEncryptionRemoteRe
     return read.version;
 };
 
+/** Capture every listed generation before the first transition write. This is both a
+ * compatibility preflight (one late weak/missing WebDAV ETag cannot strand an earlier
+ * artifact mid-transition) and the CAS snapshot used by the mutation pass. */
+const preflightRemoteEntryVersions = async (
+    remote: SyncEncryptionRemotePort,
+    entries: SyncEncryptionRemoteEntry[],
+): Promise<Map<string, SyncEncryptionRemoteRead>> => {
+    const snapshot = new Map<string, SyncEncryptionRemoteRead>();
+    for (const entry of entries) {
+        if (snapshot.has(entry.name)) continue;
+        const current = await remote.read(entry.name);
+        if (current.bytes) requireExistingRemoteVersion(entry.name, current);
+        snapshot.set(entry.name, current);
+    }
+    return snapshot;
+};
+
+const snapshotRemoteRead = (
+    snapshot: Map<string, SyncEncryptionRemoteRead>,
+    name: string,
+): SyncEncryptionRemoteRead => snapshot.get(name) ?? { bytes: null, version: null };
+
 const verifyRemoteBytes = async (
     remote: SyncEncryptionRemotePort,
     name: string,
@@ -456,6 +478,7 @@ export async function runEnableSyncEncryptionOverRemote(
     kdfParams: SyncCryptoKdfParams = SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
 ): Promise<EnableRemoteEncryptionResult> {
     const entries = await remote.list();
+    const snapshot = await preflightRemoteEntryVersions(remote, entries);
 
     // Resume: if a previous partial run already produced an `.enc` document, its header
     // salt/params are authoritative — reuse them so this run doesn't derive a second key
@@ -463,7 +486,7 @@ export async function runEnableSyncEncryptionOverRemote(
     let material: SyncKeyMaterial | null = null;
     for (const entry of entries) {
         if (entry.kind !== 'document' || !entry.name.includes('.enc')) continue;
-        const { bytes } = await remote.read(entry.name);
+        const { bytes } = snapshotRemoteRead(snapshot, entry.name);
         if (!bytes) continue;
         const inspected = inspectSyncArtifact(bytes);
         if (inspected.kind === 'encrypted') {
@@ -508,7 +531,7 @@ export async function runEnableSyncEncryptionOverRemote(
 
     for (const entry of attachments) {
         report('attachments');
-        const current = await remote.read(entry.name);
+        const current = snapshotRemoteRead(snapshot, entry.name);
         if (current.bytes) {
             const version = requireExistingRemoteVersion(entry.name, current);
             const bytes = current.bytes;
@@ -541,7 +564,7 @@ export async function runEnableSyncEncryptionOverRemote(
 
     for (const entry of documents) {
         report('documents');
-        const current = await remote.read(entry.name);
+        const current = snapshotRemoteRead(snapshot, entry.name);
         if (current.bytes) {
             const sourceVersion = requireExistingRemoteVersion(entry.name, current);
             const bytes = current.bytes;
@@ -553,7 +576,7 @@ export async function runEnableSyncEncryptionOverRemote(
             if (inspected.kind === 'plaintext') {
                 const encName = syncEncryptedArtifactName(entry.name);
                 const sealed = await encryptSyncArtifact(bytes, material, prims);
-                const target = await remote.read(encName);
+                const target = snapshotRemoteRead(snapshot, encName);
                 if (target.bytes) {
                     requireExistingRemoteVersion(encName, target);
                     const targetPlain = await decryptRemoteArtifactOrThrow(target.bytes, material.key, prims);
@@ -598,6 +621,7 @@ export async function runDisableSyncEncryptionOverRemote(
     if (!key) throw new Error('sync encryption disable requires a cached key');
 
     const entries = await remote.list();
+    const snapshot = await preflightRemoteEntryVersions(remote, entries);
     const isBaseEncDocument = (name: string) => !KNOWN_ARTIFACT_SUFFIXES.some((s) => name.endsWith(`.enc${s}`));
     const attachments = entries.filter((e) => e.kind === 'attachment');
     const encDocuments = entries
@@ -610,7 +634,7 @@ export async function runDisableSyncEncryptionOverRemote(
 
     for (const entry of attachments) {
         report('attachments');
-        const current = await remote.read(entry.name);
+        const current = snapshotRemoteRead(snapshot, entry.name);
         if (current.bytes) {
             const version = requireExistingRemoteVersion(entry.name, current);
             const bytes = current.bytes;
@@ -638,13 +662,13 @@ export async function runDisableSyncEncryptionOverRemote(
 
     for (const entry of encDocuments) {
         report('documents');
-        const current = await remote.read(entry.name);
+        const current = snapshotRemoteRead(snapshot, entry.name);
         if (current.bytes) {
             const sourceVersion = requireExistingRemoteVersion(entry.name, current);
             const bytes = current.bytes;
             const plain = await decryptRemoteArtifactOrThrow(bytes, key, prims);
             const plainName = syncPlaintextArtifactName(entry.name);
-            const target = await remote.read(plainName);
+            const target = snapshotRemoteRead(snapshot, plainName);
             if (target.bytes) {
                 requireExistingRemoteVersion(plainName, target);
                 if (!bytesMatchWithTrailingPadding(target.bytes, plain)) {
@@ -702,6 +726,7 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
 
     const isBaseEncDocument = (name: string) => !KNOWN_ARTIFACT_SUFFIXES.some((s) => name.endsWith(`.enc${s}`));
     const entries = await remote.list();
+    const snapshot = await preflightRemoteEntryVersions(remote, entries);
     const attachments = entries.filter((e) => e.kind === 'attachment');
     const encDocuments = entries
         .filter((e) => e.kind === 'document' && e.name.includes('.enc'))
@@ -731,7 +756,7 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
     };
 
     const rewrap = async (name: string): Promise<void> => {
-        const current = await remote.read(name);
+        const current = snapshotRemoteRead(snapshot, name);
         if (!current.bytes) return;
         const version = requireExistingRemoteVersion(name, current);
         const bytes = current.bytes;
