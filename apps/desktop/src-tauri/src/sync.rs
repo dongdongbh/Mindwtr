@@ -5046,6 +5046,76 @@ mod tests {
     }
 
     #[test]
+    fn enable_converges_every_authenticated_generation_under_the_selected_key() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        let selected = enable_sync_encryption_in_dir(dir.path(), "shared passphrase")
+            .expect("initial enable");
+        let abandoned = derive_sync_key_material(
+            "shared passphrase",
+            [41; SALT_LEN],
+            SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
+        )
+        .expect("abandoned material");
+        let attachment_path = dir.path().join(SYNC_ATTACHMENTS_DIR_NAME).join("a1.png");
+        fs::write(
+            &attachment_path,
+            encrypt_sync_artifact(b"abandoned attachment generation", &abandoned)
+                .expect("seal abandoned attachment"),
+        )
+        .expect("write abandoned attachment");
+
+        let resumed = enable_sync_encryption_in_dir(dir.path(), "shared passphrase")
+            .expect("resume mixed-salt enable");
+
+        assert_eq!(resumed.salt, selected.salt, "the base document remains authoritative");
+        assert_eq!(
+            decrypt_sync_artifact(
+                &fs::read(&attachment_path).expect("converged attachment"),
+                &resumed.key,
+            )
+            .expect("attachment must converge under the selected key"),
+            b"abandoned attachment generation",
+        );
+    }
+
+    #[test]
+    fn enable_preflights_every_encrypted_generation_before_starting_its_journal() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        enable_sync_encryption_in_dir(dir.path(), "shared passphrase").expect("initial enable");
+        let foreign = derive_sync_key_material(
+            "other passphrase",
+            [43; SALT_LEN],
+            SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
+        )
+        .expect("foreign material");
+        let attachment_path = dir.path().join(SYNC_ATTACHMENTS_DIR_NAME).join("a1.png");
+        let foreign_attachment = encrypt_sync_artifact(b"foreign attachment", &foreign)
+            .expect("seal foreign attachment");
+        fs::write(&attachment_path, &foreign_attachment).expect("write foreign attachment");
+        let document_path = dir.path().join(encrypted_artifact_name(DATA_FILE_NAME));
+        let document_before = fs::read(&document_path).expect("document before");
+        let journal_started = Cell::new(false);
+
+        let error = enable_sync_encryption_in_dir_with(
+            dir.path(),
+            "shared passphrase",
+            || {
+                journal_started.set(true);
+                Ok(())
+            },
+            |_, _| Ok(()),
+        )
+        .expect_err("a foreign generation must fail the read-only preflight");
+
+        assert!(is_terminal_error(&error), "unexpected error: {error}");
+        assert!(!journal_started.get(), "preflight failure must not start the journal");
+        assert_eq!(fs::read(&document_path).expect("document after"), document_before);
+        assert_eq!(fs::read(&attachment_path).expect("attachment after"), foreign_attachment);
+    }
+
+    #[test]
     fn disable_restores_plaintext_and_change_passphrase_rewraps_everything() {
         let dir = tempfile::tempdir().expect("temp dir");
         seed_transition_folder(dir.path());
@@ -5603,6 +5673,76 @@ mod tests {
         assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
         assert!(journal_pending.get(), "the retry journal must remain pending");
         assert!(!persisted.get(), "the stale key state must not be persisted");
+    }
+
+    #[test]
+    fn rotation_preflights_every_generation_before_starting_its_journal() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        let current = enable_sync_encryption_in_dir(dir.path(), "current passphrase")
+            .expect("initial enable");
+        let foreign = derive_sync_key_material(
+            "neither current nor next",
+            [47; SALT_LEN],
+            SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
+        )
+        .expect("foreign material");
+        let attachment_path = dir.path().join(SYNC_ATTACHMENTS_DIR_NAME).join("a1.png");
+        let foreign_attachment = encrypt_sync_artifact(b"foreign attachment", &foreign)
+            .expect("seal foreign attachment");
+        fs::write(&attachment_path, &foreign_attachment).expect("write foreign attachment");
+        let document_path = dir.path().join(encrypted_artifact_name(DATA_FILE_NAME));
+        let document_before = fs::read(&document_path).expect("document before");
+        let journal_started = Cell::new(false);
+
+        let error = change_sync_encryption_passphrase_in_dir_with(
+            dir.path(),
+            &current.key,
+            "next passphrase",
+            || {
+                journal_started.set(true);
+                Ok(())
+            },
+            |_, _| Ok(()),
+        )
+        .expect_err("an unknown generation must fail the read-only preflight");
+
+        assert!(is_terminal_error(&error), "unexpected error: {error}");
+        assert!(!journal_started.get(), "preflight failure must not start the journal");
+        assert_eq!(fs::read(&document_path).expect("document after"), document_before);
+        assert_eq!(fs::read(&attachment_path).expect("attachment after"), foreign_attachment);
+    }
+
+    #[test]
+    fn disable_preflights_every_generation_before_starting_its_journal() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        let current = enable_sync_encryption_in_dir(dir.path(), "current passphrase")
+            .expect("initial enable");
+        let foreign = derive_sync_key_material(
+            "foreign passphrase",
+            [53; SALT_LEN],
+            SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
+        )
+        .expect("foreign material");
+        let attachment_path = dir.path().join(SYNC_ATTACHMENTS_DIR_NAME).join("a1.png");
+        let foreign_attachment = encrypt_sync_artifact(b"foreign attachment", &foreign)
+            .expect("seal foreign attachment");
+        fs::write(&attachment_path, &foreign_attachment).expect("write foreign attachment");
+        let document_path = dir.path().join(encrypted_artifact_name(DATA_FILE_NAME));
+        let document_before = fs::read(&document_path).expect("document before");
+        let journal_started = Cell::new(false);
+
+        let error = disable_sync_encryption_in_dir_with(dir.path(), &current.key, || {
+            journal_started.set(true);
+            Ok(())
+        })
+        .expect_err("a foreign generation must fail the read-only preflight");
+
+        assert!(is_terminal_error(&error), "unexpected error: {error}");
+        assert!(!journal_started.get(), "preflight failure must not start the journal");
+        assert_eq!(fs::read(&document_path).expect("document after"), document_before);
+        assert_eq!(fs::read(&attachment_path).expect("attachment after"), foreign_attachment);
     }
 
     #[test]
@@ -11577,6 +11717,104 @@ fn seal_artifact_in_place(path: &Path, material: &SyncKeyMaterial) -> Result<(),
     })
 }
 
+fn authenticate_artifact_with_passphrase(
+    path: &Path,
+    bytes: &[u8],
+    passphrase: &str,
+    recovered_by_salt: &mut HashMap<[u8; SALT_LEN], SyncKeyMaterial>,
+) -> Result<Option<SyncKeyMaterial>, String> {
+    let header = match inspect_sync_artifact(bytes) {
+        SyncArtifactInspection::Plaintext => return Ok(None),
+        SyncArtifactInspection::Unsupported(reason) => {
+            return Err(unsupported_artifact(path, reason))
+        }
+        SyncArtifactInspection::Encrypted(header) => header,
+    };
+    let material = if let Some(material) = recovered_by_salt.get(&header.salt) {
+        material.clone()
+    } else {
+        let material = derive_sync_key_material(passphrase, header.salt, header.params)
+            .map_err(|error| terminal_error(error))?;
+        recovered_by_salt.insert(header.salt, material.clone());
+        material
+    };
+    decrypt_sync_artifact(bytes, &material.key).map_err(|error| terminal_error(error))?;
+    Ok(Some(material))
+}
+
+fn authenticate_encrypted_named_document(
+    document: &SyncDocumentGeneration,
+    passphrase: &str,
+    recovered_by_salt: &mut HashMap<[u8; SALT_LEN], SyncKeyMaterial>,
+) -> Result<SyncKeyMaterial, String> {
+    authenticate_artifact_with_passphrase(
+        &document.path,
+        &document.bytes,
+        passphrase,
+        recovered_by_salt,
+    )?
+    .ok_or_else(|| {
+        terminal_error(format!(
+            "{} is not a valid MWENC1 container",
+            document.path.display()
+        ))
+    })
+}
+
+fn preflight_artifact_for_rotation(
+    path: &Path,
+    bytes: &[u8],
+    old_key: &[u8; KEY_LEN],
+    next_passphrase: &str,
+    recovered_by_salt: &mut HashMap<[u8; SALT_LEN], SyncKeyMaterial>,
+    encrypted_name: bool,
+) -> Result<(), String> {
+    match inspect_sync_artifact(bytes) {
+        SyncArtifactInspection::Plaintext if !encrypted_name => Ok(()),
+        SyncArtifactInspection::Plaintext => Err(terminal_error(format!(
+            "{} is not a valid MWENC1 container",
+            path.display()
+        ))),
+        SyncArtifactInspection::Unsupported(reason) => Err(unsupported_artifact(path, reason)),
+        SyncArtifactInspection::Encrypted(header) => {
+            if decrypt_sync_artifact(bytes, old_key).is_ok() {
+                return Ok(());
+            }
+            let recovered = if let Some(material) = recovered_by_salt.get(&header.salt) {
+                material.clone()
+            } else {
+                let material =
+                    derive_sync_key_material(next_passphrase, header.salt, header.params)
+                        .map_err(|error| terminal_error(error))?;
+                recovered_by_salt.insert(header.salt, material.clone());
+                material
+            };
+            decrypt_sync_artifact(bytes, &recovered.key)
+                .map(|_| ())
+                .map_err(|error| terminal_error(error))
+        }
+    }
+}
+
+fn preflight_artifact_for_disable(
+    path: &Path,
+    bytes: &[u8],
+    key: &[u8; KEY_LEN],
+    encrypted_name: bool,
+) -> Result<(), String> {
+    match inspect_sync_artifact(bytes) {
+        SyncArtifactInspection::Plaintext if !encrypted_name => Ok(()),
+        SyncArtifactInspection::Plaintext => Err(terminal_error(format!(
+            "{} is not a valid MWENC1 container",
+            path.display()
+        ))),
+        SyncArtifactInspection::Unsupported(reason) => Err(unsupported_artifact(path, reason)),
+        SyncArtifactInspection::Encrypted(_) => decrypt_sync_artifact(bytes, key)
+            .map(|_| ())
+            .map_err(|error| terminal_error(error)),
+    }
+}
+
 fn open_artifact_in_place(path: &Path, key: &[u8; KEY_LEN]) -> Result<(), String> {
     let bytes = fs::read(path).map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
     let version = transition_artifact_fingerprint(&bytes);
@@ -11593,34 +11831,6 @@ fn open_artifact_in_place(path: &Path, key: &[u8; KEY_LEN]) -> Result<(), String
             Err(format!("Failed to verify {} after write", path.display()))
         }
     })
-}
-
-/// Resume self-heal, mirroring core TS's `recoverMaterialForSalt`: an artifact left over from
-/// an earlier, interrupted passphrase-change attempt (same `next_passphrase`, an abandoned
-/// intermediate salt because every attempt draws a fresh random one) decrypts under neither
-/// `old_key` nor `next.key`. Recover it by deriving from its OWN header salt/params with
-/// `next_passphrase` — a rotation attempt only ever re-derives from the new passphrase, never
-/// the old one, so that is the only candidate worth trying. `recovered_by_salt` caches the
-/// Argon2id derivation per salt so a batch of artifacts from the same abandoned attempt only
-/// pays the KDF cost once.
-fn rewrap_artifact_in_place(
-    path: &Path,
-    old_key: &[u8; KEY_LEN],
-    next: &SyncKeyMaterial,
-    next_passphrase: &str,
-    recovered_by_salt: &mut HashMap<[u8; SALT_LEN], SyncKeyMaterial>,
-) -> Result<(), String> {
-    let bytes = fs::read(path).map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
-    let version = transition_artifact_fingerprint(&bytes);
-    rewrap_artifact_generation_in_place(
-        path,
-        &bytes,
-        &version,
-        old_key,
-        next,
-        next_passphrase,
-        recovered_by_salt,
-    )
 }
 
 fn rewrap_artifact_generation_in_place(
@@ -11663,34 +11873,128 @@ fn rewrap_artifact_generation_in_place(
     })
 }
 
-/// The salt/params already committed to this folder, if any — resuming an interrupted enable
-/// must reuse them rather than deriving a second key under a fresh salt and orphaning whatever
-/// the first run already wrote.
-///
-/// Attachments are scanned too, and that is load-bearing rather than thorough-for-its-own-sake:
-/// enable seals every attachment BEFORE it writes the first `.enc` document, so a crash during
-/// the attachment phase leaves sealed attachments and no encrypted document at all. Looking
-/// only at documents there would derive a fresh salt, and the already-sealed attachments —
-/// which the next pass skips as "already encrypted" — would be unopenable under the new key.
-fn existing_folder_header(
+fn converge_enable_artifact_in_place(
+    path: &Path,
+    material: &SyncKeyMaterial,
+    passphrase: &str,
+    recovered_by_salt: &mut HashMap<[u8; SALT_LEN], SyncKeyMaterial>,
+) -> Result<(), String> {
+    let bytes = fs::read(path).map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+    let version = transition_artifact_fingerprint(&bytes);
+    match inspect_sync_artifact(&bytes) {
+        SyncArtifactInspection::Plaintext => seal_artifact_in_place(path, material),
+        SyncArtifactInspection::Unsupported(reason) => Err(unsupported_artifact(path, reason)),
+        SyncArtifactInspection::Encrypted(_) => rewrap_artifact_generation_in_place(
+            path,
+            &bytes,
+            &version,
+            &material.key,
+            material,
+            passphrase,
+            recovered_by_salt,
+        ),
+    }
+}
+
+fn converge_rotation_artifact_in_place(
+    path: &Path,
+    old_key: &[u8; KEY_LEN],
+    next: &SyncKeyMaterial,
+    next_passphrase: &str,
+    recovered_by_salt: &mut HashMap<[u8; SALT_LEN], SyncKeyMaterial>,
+) -> Result<(), String> {
+    let bytes = fs::read(path).map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+    let version = transition_artifact_fingerprint(&bytes);
+    match inspect_sync_artifact(&bytes) {
+        SyncArtifactInspection::Plaintext => seal_artifact_in_place(path, next),
+        SyncArtifactInspection::Unsupported(reason) => Err(unsupported_artifact(path, reason)),
+        SyncArtifactInspection::Encrypted(_) => rewrap_artifact_generation_in_place(
+            path,
+            &bytes,
+            &version,
+            old_key,
+            next,
+            next_passphrase,
+            recovered_by_salt,
+        ),
+    }
+}
+
+struct EnableTransitionPreflight {
+    plaintext_artifacts: SyncFolderArtifacts,
+    encrypted_documents: Vec<SyncDocumentGeneration>,
+    material: SyncKeyMaterial,
+    recovered_by_salt: HashMap<[u8; SALT_LEN], SyncKeyMaterial>,
+}
+
+fn preflight_enable_transition(
     sync_dir: &Path,
-) -> Result<Option<(Vec<u8>, [u8; SALT_LEN], SyncCryptoKdfParams)>, String> {
-    let artifacts = collect_sync_folder_artifacts(sync_dir, false)?;
-    // Base document first (documents are ordered with it last), then the rest, then
-    // attachments — the most authoritative header wins.
-    for document in artifacts.documents.iter().rev() {
-        if let SyncArtifactInspection::Encrypted(header) = inspect_sync_artifact(&document.bytes) {
-            return Ok(Some((document.bytes.clone(), header.salt, header.params)));
+    passphrase: &str,
+) -> Result<EnableTransitionPreflight, String> {
+    let plaintext_artifacts = collect_sync_folder_artifacts(sync_dir, true)?;
+    let encrypted_artifacts = collect_sync_folder_artifacts(sync_dir, false)?;
+    let mut recovered_by_salt = HashMap::new();
+    let mut selected = None;
+
+    // collect_sync_folder_artifacts orders the base document last, so reverse traversal makes
+    // data.json.enc authoritative when it exists. Every remaining generation is still opened
+    // read-only before the journal can start.
+    for document in encrypted_artifacts.documents.iter().rev() {
+        let material = authenticate_encrypted_named_document(
+            document,
+            passphrase,
+            &mut recovered_by_salt,
+        )?;
+        if selected.is_none() {
+            selected = Some(material);
         }
     }
-    for path in artifacts.attachments.iter().chain(artifacts.recovery.iter()) {
+    for document in &plaintext_artifacts.documents {
+        if let Some(material) = authenticate_artifact_with_passphrase(
+            &document.path,
+            &document.bytes,
+            passphrase,
+            &mut recovered_by_salt,
+        )? {
+            if selected.is_none() {
+                selected = Some(material);
+            }
+        }
+    }
+    for path in plaintext_artifacts
+        .attachments
+        .iter()
+        .chain(plaintext_artifacts.recovery.iter())
+    {
         let bytes = fs::read(path)
             .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
-        if let SyncArtifactInspection::Encrypted(header) = inspect_sync_artifact(&bytes) {
-            return Ok(Some((bytes, header.salt, header.params)));
+        if let Some(material) = authenticate_artifact_with_passphrase(
+            path,
+            &bytes,
+            passphrase,
+            &mut recovered_by_salt,
+        )? {
+            if selected.is_none() {
+                selected = Some(material);
+            }
         }
     }
-    Ok(None)
+
+    let material = match selected {
+        Some(material) => material,
+        None => derive_sync_key_material(
+            passphrase,
+            random_salt(),
+            SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
+        )
+        .map_err(|error| terminal_error(error))?,
+    };
+    Ok(EnableTransitionPreflight {
+        plaintext_artifacts,
+        encrypted_documents: encrypted_artifacts.documents,
+        material,
+        recovered_by_salt,
+    })
 }
 
 #[cfg(test)]
@@ -11727,23 +12031,13 @@ where
     ) -> Result<(), String>,
 {
     let lock = acquire_sync_lock(sync_dir)?;
-    let existing = existing_folder_header(sync_dir)?;
-    let (salt, params) = existing
-        .as_ref()
-        .map(|(_, salt, params)| (*salt, *params))
-        .unwrap_or((random_salt(), SYNC_CRYPTO_DEFAULT_KDF_PARAMS));
-    let material =
-        derive_sync_key_material(passphrase, salt, params).map_err(|error| terminal_error(error))?;
-    if let Some((bytes, _, _)) = existing {
-        // A public MWENC1 header selects KDF parameters but does not authenticate the
-        // passphrase. Open the exact generation that supplied those parameters before the
-        // attachment phase can mutate anything. This also covers the attachment-only crash
-        // window, where no encrypted document exists yet.
-        decrypt_sync_artifact(&bytes, &material.key).map_err(|error| terminal_error(error))?;
-    }
-
-    let result = (|| -> Result<(), String> {
-        let artifacts = collect_sync_folder_artifacts(sync_dir, true)?;
+    let result = (|| -> Result<SyncKeyMaterial, String> {
+        let EnableTransitionPreflight {
+            plaintext_artifacts: artifacts,
+            encrypted_documents,
+            material,
+            mut recovered_by_salt,
+        } = preflight_enable_transition(sync_dir, passphrase)?;
         before_mutation()?;
         // The collection is a fixed pre-transition snapshot. Scratch created by the writes
         // below is therefore never recursively added, while every retained generation from
@@ -11753,7 +12047,24 @@ where
             .iter()
             .chain(artifacts.attachments.iter())
         {
-            seal_artifact_in_place(path, &material)?;
+            converge_enable_artifact_in_place(
+                path,
+                &material,
+                passphrase,
+                &mut recovered_by_salt,
+            )?;
+        }
+        for document in &encrypted_documents {
+            require_sync_document_generation(document)?;
+            rewrap_artifact_generation_in_place(
+                &document.path,
+                &document.bytes,
+                &document.version,
+                &material.key,
+                &material,
+                passphrase,
+                &mut recovered_by_salt,
+            )?;
         }
         for document in &artifacts.documents {
             require_sync_document_generation(document)?;
@@ -11799,10 +12110,10 @@ where
         }
         let generation = snapshot_authoritative_encrypted_document(sync_dir, &material, false)?;
         finalize(&material, &generation)?;
-        Ok(())
+        Ok(material)
     })();
     release_sync_lock(&lock);
-    result.map(|()| material)
+    result
 }
 
 #[cfg(test)]
@@ -11821,6 +12132,18 @@ where
     let lock = acquire_sync_lock(sync_dir)?;
     let result = (|| -> Result<(), String> {
         let artifacts = collect_sync_folder_artifacts(sync_dir, false)?;
+        for document in &artifacts.documents {
+            preflight_artifact_for_disable(&document.path, &document.bytes, key, true)?;
+        }
+        for path in artifacts
+            .recovery
+            .iter()
+            .chain(artifacts.attachments.iter())
+        {
+            let bytes = fs::read(path)
+                .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+            preflight_artifact_for_disable(path, &bytes, key, false)?;
+        }
         before_mutation()?;
         for path in artifacts
             .recovery
@@ -11912,14 +12235,46 @@ where
     let lock = acquire_sync_lock(sync_dir)?;
     let result = (|| -> Result<(), String> {
         let artifacts = collect_sync_folder_artifacts(sync_dir, false)?;
-        before_mutation()?;
         let mut recovered_by_salt: HashMap<[u8; SALT_LEN], SyncKeyMaterial> = HashMap::new();
+        for document in &artifacts.documents {
+            preflight_artifact_for_rotation(
+                &document.path,
+                &document.bytes,
+                old_key,
+                next_passphrase,
+                &mut recovered_by_salt,
+                true,
+            )?;
+        }
         for path in artifacts
             .recovery
             .iter()
             .chain(artifacts.attachments.iter())
         {
-            rewrap_artifact_in_place(path, old_key, &next, next_passphrase, &mut recovered_by_salt)?;
+            let bytes = fs::read(path)
+                .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+            preflight_artifact_for_rotation(
+                path,
+                &bytes,
+                old_key,
+                next_passphrase,
+                &mut recovered_by_salt,
+                false,
+            )?;
+        }
+        before_mutation()?;
+        for path in artifacts
+            .recovery
+            .iter()
+            .chain(artifacts.attachments.iter())
+        {
+            converge_rotation_artifact_in_place(
+                path,
+                old_key,
+                &next,
+                next_passphrase,
+                &mut recovered_by_salt,
+            )?;
         }
         for document in &artifacts.documents {
             require_sync_document_generation(document)?;
