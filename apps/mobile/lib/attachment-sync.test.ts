@@ -99,11 +99,16 @@ vi.mock('./dropbox-sync', () => ({
 
 // Only the three functions the CloudKit attachment backend uses; nothing else in this
 // test's module graph imports ./cloudkit-sync.
-vi.mock('./cloudkit-sync', () => ({
-  saveCloudKitAttachmentAsset: vi.fn(),
-  fetchCloudKitAttachmentAsset: vi.fn(),
-  deleteCloudKitAttachmentAssets: vi.fn(),
-}));
+vi.mock('./cloudkit-sync', () => {
+  class CloudKitAttachmentNotFoundError extends Error {}
+  return {
+    CloudKitAttachmentNotFoundError,
+    isCloudKitAttachmentNotFoundError: (error: unknown) => error instanceof CloudKitAttachmentNotFoundError,
+    saveCloudKitAttachmentAsset: vi.fn(),
+    fetchCloudKitAttachmentAsset: vi.fn(),
+    deleteCloudKitAttachmentAssets: vi.fn(),
+  };
+});
 
 vi.mock('./dropbox-auth', () => ({
   forceRefreshDropboxAccessToken: vi.fn().mockResolvedValue('dropbox-token'),
@@ -1649,6 +1654,40 @@ describe('attachment sync', () => {
       localStatus: 'missing',
       fileHash: sha256Hex(bytes),
     });
+  });
+
+  it('marks a confirmed missing CloudKit asset unrecoverable without installing scratch', async () => {
+    const bytes = new Uint8Array([37, 38, 39]);
+    const appData = singleAttachmentData({
+      id: 'cloudkit-terminal-missing',
+      cloudKey: 'cloudkit:cloudkit-terminal-missing',
+      fileHash: sha256Hex(bytes),
+    });
+    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+    const cloudkit = await import('./cloudkit-sync');
+    vi.mocked(cloudkit.fetchCloudKitAttachmentAsset).mockRejectedValue(
+      new cloudkit.CloudKitAttachmentNotFoundError(),
+    );
+
+    const result = await attachmentSync.syncCloudKitAttachments(
+      appData,
+      undefined,
+      { phase: 'post-merge' },
+    );
+
+    const { didMutate, data } = syncResult(result, appData);
+    expect(didMutate).toBe(true);
+    expect(data.tasks[0].attachments?.[0]).toMatchObject({
+      cloudKey: undefined,
+      fileHash: undefined,
+      localStatus: 'missing',
+      deletedAt: expect.any(String),
+    });
+    expect(fileSystemMock.deleteAsync).toHaveBeenCalledWith(
+      expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+      { idempotent: true },
+    );
+    expect(attachmentFileInstallerMock.installAttachmentFileGeneration).not.toHaveBeenCalled();
   });
 
   it('preserves CloudKit scratch and metadata when native install reports a conflict', async () => {

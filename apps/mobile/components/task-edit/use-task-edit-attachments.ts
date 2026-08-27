@@ -31,6 +31,7 @@ import {
     ensureAttachmentAvailableDetailed,
     getAttachmentAvailabilityPatch,
     getAttachmentDownloadIdentity,
+    getAttachmentUnrecoverablePatch,
     hasAttachmentDownloadIdentity,
     type AttachmentAvailabilityOutcome,
 } from '../../lib/attachment-sync-availability';
@@ -560,6 +561,16 @@ export function useTaskEditAttachments({
             );
             return resolved
                 ? { status: 'available', attachment: resolved }
+                : { status: 'stale' };
+        }
+        if (outcome.status === 'unrecoverable') {
+            const resolved = updateAttachmentStateIfCurrent(
+                attachment.id,
+                identity,
+                getAttachmentUnrecoverablePatch(outcome.attachment),
+            );
+            return resolved
+                ? { status: 'unrecoverable', attachment: resolved }
                 : { status: 'stale' };
         }
         if (shouldDownload) {

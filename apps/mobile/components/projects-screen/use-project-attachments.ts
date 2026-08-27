@@ -18,6 +18,7 @@ import {
   ensureAttachmentAvailableDetailed,
   getAttachmentAvailabilityPatch,
   getAttachmentDownloadIdentity,
+  getAttachmentUnrecoverablePatch,
   hasAttachmentDownloadIdentity,
   type AttachmentAvailabilityOutcome,
 } from '../../lib/attachment-sync-availability';
@@ -110,6 +111,17 @@ export function useProjectAttachments({
       );
       return resolved
         ? { status: 'available', attachment: resolved }
+        : { status: 'stale' };
+    }
+    if (outcome.status === 'unrecoverable') {
+      const resolved = updateProjectAttachmentIfCurrent(
+        projectId,
+        attachment.id,
+        identity,
+        getAttachmentUnrecoverablePatch(outcome.attachment),
+      );
+      return resolved
+        ? { status: 'unrecoverable', attachment: resolved }
         : { status: 'stale' };
     }
     if (shouldDownload) {

@@ -2,6 +2,7 @@ import type { AppData, Attachment, AttachmentSettings } from '@mindwtr/core';
 import {
     applyAttachmentPatches,
     buildCloudKitAttachmentKey,
+    markAttachmentUnrecoverable,
     parseCloudKitAttachmentKey,
     validateAttachmentForUpload,
     withAttachmentSettingsPatch,
@@ -9,6 +10,7 @@ import {
 import {
     deleteCloudKitAttachmentAssets,
     fetchCloudKitAttachmentAsset,
+    isCloudKitAttachmentNotFoundError,
     saveCloudKitAttachmentAsset,
     type CloudKitAttachmentMetadata,
 } from '../cloudkit-sync';
@@ -271,6 +273,19 @@ export const syncCloudKitAttachments = async (
                     await deleteAttachmentDownloadStageBestEffort(stagedUri);
                 }
                 if (isAttachmentSyncAbortError(error, signal)) throw error;
+                if (isCloudKitAttachmentNotFoundError(error)) {
+                    reportProgress(
+                        attachment.id,
+                        'download',
+                        0,
+                        attachment.size ?? 0,
+                        'failed',
+                        'Attachment is no longer available',
+                    );
+                    const mutated = markAttachmentUnrecoverable(attachment);
+                    logAttachmentWarn(`CloudKit attachment ${attachment.id} is no longer available`, error);
+                    return mutated;
+                }
                 reportProgress(
                     attachment.id,
                     'download',

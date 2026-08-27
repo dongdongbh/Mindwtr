@@ -4,6 +4,7 @@ import {
   cloudGetFile,
   computeSha256Hex,
   isSha256Hex,
+  markAttachmentUnrecoverable,
   parseCloudKitAttachmentKey,
   validateAttachmentHash,
   webdavGetFile,
@@ -45,16 +46,28 @@ import {
   openAttachmentBytesFromDownload,
   readAttachmentDownloadStageBytes,
 } from './attachment-sync-backends/common';
-import { fetchCloudKitAttachmentAsset } from './cloudkit-sync';
+import {
+  fetchCloudKitAttachmentAsset,
+  isCloudKitAttachmentNotFoundError,
+} from './cloudkit-sync';
 import { getSyncEncryptionMaterial } from './sync-encryption-state';
 
 export type AttachmentAvailabilityOutcome =
   | { status: 'available'; attachment: Attachment }
   | { status: 'generation-conflict' }
+  | { status: 'unrecoverable'; attachment: Attachment }
   | { status: 'unavailable' };
 
 const GENERATION_CONFLICT = Symbol('attachment-generation-conflict');
-type InternalAvailabilityOutcome = Attachment | null | typeof GENERATION_CONFLICT;
+type InternalUnrecoverableOutcome = {
+  availabilityStatus: 'unrecoverable';
+  attachment: Attachment;
+};
+type InternalAvailabilityOutcome =
+  | Attachment
+  | InternalUnrecoverableOutcome
+  | null
+  | typeof GENERATION_CONFLICT;
 
 /** A download may only be shared while it represents the same immutable remote bytes. */
 export const getAttachmentDownloadIdentity = (attachment: Attachment): string => JSON.stringify([
@@ -78,6 +91,18 @@ export const getAttachmentAvailabilityPatch = (
   uri: resolved.uri,
   localStatus: resolved.localStatus,
   ...(!current.fileHash && resolved.fileHash ? { fileHash: resolved.fileHash } : {}),
+});
+
+/** Terminal remote absence may clear only lifecycle fields. Descriptive metadata remains
+ * owned by the latest document selected by the caller's download-identity guard. */
+export const getAttachmentUnrecoverablePatch = (
+  resolved: Attachment,
+): Partial<Attachment> => ({
+  cloudKey: resolved.cloudKey,
+  fileHash: resolved.fileHash,
+  localStatus: resolved.localStatus,
+  deletedAt: resolved.deletedAt,
+  updatedAt: resolved.updatedAt,
 });
 
 const downloadLocks = new Map<string, Promise<AttachmentAvailabilityOutcome>>();
@@ -250,14 +275,22 @@ const ensureCloudKitAttachmentAvailable = async (
     if (!installerOwnsStage) {
       await deleteAttachmentDownloadStageBestEffort(stagedUri);
     }
+    const terminalNotFound = isCloudKitAttachmentNotFoundError(error);
     reportProgress(
       attachment.id,
       'download',
       0,
       attachment.size ?? 0,
       'failed',
-      error instanceof Error ? error.message : String(error),
+      terminalNotFound
+        ? 'Attachment is no longer available'
+        : error instanceof Error ? error.message : String(error),
     );
+    if (terminalNotFound) {
+      markAttachmentUnrecoverable(attachment);
+      logAttachmentWarn(`CloudKit attachment ${attachment.id} is no longer available`, error);
+      return { availabilityStatus: 'unrecoverable', attachment };
+    }
     logAttachmentWarn(`Failed to download CloudKit attachment ${attachment.id}`, error);
     return null;
   }
@@ -446,6 +479,9 @@ export const ensureAttachmentAvailableDetailed = async (
   const downloadPromise = ensureAttachmentAvailableInternal(attachment).then((result): AttachmentAvailabilityOutcome => {
     if (result === GENERATION_CONFLICT) return { status: 'generation-conflict' };
     if (!result) return { status: 'unavailable' };
+    if ('availabilityStatus' in result) {
+      return { status: 'unrecoverable', attachment: result.attachment };
+    }
     return { status: 'available', attachment: result };
   });
   downloadLocks.set(identity, downloadPromise);

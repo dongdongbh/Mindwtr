@@ -36,9 +36,14 @@ const attachmentFileInstallerMock = vi.hoisted(() => ({
   installAttachmentFileGeneration: vi.fn(),
 }));
 
-const cloudKitSyncMock = vi.hoisted(() => ({
-  fetchCloudKitAttachmentAsset: vi.fn(),
-}));
+const cloudKitSyncMock = vi.hoisted(() => {
+  class CloudKitAttachmentNotFoundError extends Error {}
+  return {
+    CloudKitAttachmentNotFoundError,
+    fetchCloudKitAttachmentAsset: vi.fn(),
+    isCloudKitAttachmentNotFoundError: (error: unknown) => error instanceof CloudKitAttachmentNotFoundError,
+  };
+});
 
 vi.mock('expo-file-system/legacy', () => fileSystemMock);
 vi.mock('./attachment-file-installer', () => attachmentFileInstallerMock);
@@ -132,12 +137,14 @@ describe('ensureAttachmentAvailable', () => {
   let ensureAttachmentAvailable: typeof import('./attachment-sync-availability')['ensureAttachmentAvailable'];
   let ensureAttachmentAvailableDetailed: typeof import('./attachment-sync-availability')['ensureAttachmentAvailableDetailed'];
   let getAttachmentAvailabilityPatch: typeof import('./attachment-sync-availability')['getAttachmentAvailabilityPatch'];
+  let getAttachmentUnrecoverablePatch: typeof import('./attachment-sync-availability')['getAttachmentUnrecoverablePatch'];
 
   beforeAll(async () => {
     ({
       ensureAttachmentAvailable,
       ensureAttachmentAvailableDetailed,
       getAttachmentAvailabilityPatch,
+      getAttachmentUnrecoverablePatch,
     } = await import('./attachment-sync-availability'));
   }, 30_000);
 
@@ -690,6 +697,51 @@ describe('ensureAttachmentAvailable', () => {
     expect(core.globalProgressTracker.getProgress(attachment.id)).toMatchObject({
       status: 'failed',
       error: 'Attachment changed locally during download',
+    });
+  });
+
+  it('returns an explicit terminal patch when the CloudKit asset is confirmed missing', async () => {
+    asyncStorageMock.store.set('@mindwtr_sync_backend', 'cloudkit');
+    cloudKitSyncMock.fetchCloudKitAttachmentAsset.mockRejectedValue(
+      new cloudKitSyncMock.CloudKitAttachmentNotFoundError(),
+    );
+    const attachment = makeAttachment('cloudkit-terminal-missing', {
+      cloudKey: 'cloudkit:cloudkit-terminal-missing',
+      fileHash: sha256Hex(REMOTE_BYTES),
+      title: 'Current title.pdf',
+      mimeType: 'application/pdf',
+    });
+
+    const result = await ensureAttachmentAvailableDetailed(attachment);
+
+    expect(result).toMatchObject({
+      status: 'unrecoverable',
+      attachment: {
+        title: 'Current title.pdf',
+        mimeType: 'application/pdf',
+        cloudKey: undefined,
+        fileHash: undefined,
+        localStatus: 'missing',
+        deletedAt: expect.any(String),
+      },
+    });
+    expect(attachment).toMatchObject({
+      cloudKey: 'cloudkit:cloudkit-terminal-missing',
+      fileHash: sha256Hex(REMOTE_BYTES),
+    });
+    expect(attachment).not.toHaveProperty('deletedAt');
+    expect(fileSystemMock.deleteAsync).toHaveBeenCalledWith(
+      expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+      { idempotent: true },
+    );
+    expect(attachmentFileInstallerMock.installAttachmentFileGeneration).not.toHaveBeenCalled();
+    if (result.status !== 'unrecoverable') throw new Error('Expected terminal CloudKit outcome');
+    expect(getAttachmentUnrecoverablePatch(result.attachment)).toEqual({
+      cloudKey: undefined,
+      fileHash: undefined,
+      localStatus: 'missing',
+      deletedAt: result.attachment.deletedAt,
+      updatedAt: result.attachment.updatedAt,
     });
   });
 

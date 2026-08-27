@@ -13,6 +13,8 @@ on:
       - "apps/mobile/ios-app-intents/**"
       - "apps/mobile/widgets-ios/**"
       - "apps/mobile/modules/**/ios/**"
+      - "apps/mobile/modules/cloudkit-sync/Package.swift"
+      - "apps/mobile/modules/cloudkit-sync/tests/**"
       - "apps/mobile/plugins/**"
       - "apps/mobile/app.config.ts"
       - "apps/mobile/app.json"
@@ -35,6 +37,8 @@ on:
       - "apps/mobile/ios-app-intents/**"
       - "apps/mobile/widgets-ios/**"
       - "apps/mobile/modules/**/ios/**"
+      - "apps/mobile/modules/cloudkit-sync/Package.swift"
+      - "apps/mobile/modules/cloudkit-sync/tests/**"
       - "apps/mobile/plugins/**"
       - "apps/mobile/app.config.ts"
       - "apps/mobile/app.json"
@@ -114,7 +118,7 @@ jobs:
                 ;;
             esac
             case "$path" in
-              apps/mobile/ios-app-intents/*|apps/mobile/widgets-ios/*|apps/mobile/modules/*/ios/*|apps/mobile/plugins/*|apps/mobile/app.config.ts|apps/mobile/app.json|apps/mobile/package.json|scripts/ci/setup-ruby.sh|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
+              apps/mobile/ios-app-intents/*|apps/mobile/widgets-ios/*|apps/mobile/modules/*/ios/*|apps/mobile/modules/cloudkit-sync/Package.swift|apps/mobile/modules/cloudkit-sync/tests/*|apps/mobile/plugins/*|apps/mobile/app.config.ts|apps/mobile/app.json|apps/mobile/package.json|scripts/ci/setup-ruby.sh|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
                 ios=true
                 ;;
             esac
@@ -343,6 +347,9 @@ jobs:
 
       - name: Run attachment installer Swift recovery tests
         run: swift test --package-path apps/mobile/modules/attachment-file-installer/ios
+
+      - name: Run CloudKit attachment error classifier tests
+        run: swift test --package-path apps/mobile/modules/cloudkit-sync
 
       - name: Generate iOS native project
         working-directory: apps/mobile

@@ -39,6 +39,19 @@ test("native CI generates clean projects and compiles Android and iOS sources", 
   expect(iosJob).toContain(
     "swift test --package-path apps/mobile/modules/attachment-file-installer/ios",
   );
+  expect(iosJob).toContain("name: Run CloudKit attachment error classifier tests");
+  expect(iosJob).toContain(
+    "swift test --package-path apps/mobile/modules/cloudkit-sync",
+  );
+  expect(
+    workflow.match(/- "apps\/mobile\/modules\/cloudkit-sync\/Package\.swift"/g),
+  ).toHaveLength(2);
+  expect(
+    workflow.match(/- "apps\/mobile\/modules\/cloudkit-sync\/tests\/\*\*"/g),
+  ).toHaveLength(2);
+  expect(workflow).toMatch(
+    /apps\/mobile\/modules\/cloudkit-sync\/Package\.swift\|apps\/mobile\/modules\/cloudkit-sync\/tests\/\*\|/,
+  );
 });
 
 test("attachment installer native CI collects the recovery suites", () => {
@@ -54,6 +67,14 @@ test("attachment installer native CI collects the recovery suites", () => {
     "apps/mobile/modules/attachment-file-installer/ios/Tests/AttachmentFileInstallerEngineTests.swift",
     "utf8",
   );
+  const cloudKitSwiftPackage = readFileSync(
+    "apps/mobile/modules/cloudkit-sync/Package.swift",
+    "utf8",
+  );
+  const cloudKitSwiftTests = readFileSync(
+    "apps/mobile/modules/cloudkit-sync/tests/CloudKitAttachmentErrorClassifierTests.swift",
+    "utf8",
+  );
 
   expect(androidTests.match(/^\s*@Test$/gm)).toHaveLength(16);
   expect(swiftPackage).toContain(".testTarget(");
@@ -62,6 +83,11 @@ test("attachment installer native CI collects the recovery suites", () => {
   expect(swiftTests).toContain("testInitialJournalCrashRecoversUntouchedTargetAndRetries");
   expect(swiftTests).toContain("testLinkBeforeUnlinkCrashRecoversBothNamesAndRetries");
   expect(swiftTests).toContain("testLateWriterMutatesRetainedOldInodeWithoutTouchingInstalledGeneration");
+  expect(cloudKitSwiftPackage).toContain("CloudKitAttachmentErrorClassifierTests");
+  expect(cloudKitSwiftPackage).toContain('.testTarget(');
+  expect(cloudKitSwiftTests).toContain("testClassifiesMindwtrRecordAndAssetAbsenceAsTerminal");
+  expect(cloudKitSwiftTests).toContain("testClassifiesCloudKitUnknownItemAsTerminal");
+  expect(cloudKitSwiftTests).toContain("testPreservesTransientAndUnrelatedErrors");
 });
 
 test("desktop Rust pull requests check and test the native library on Windows", () => {

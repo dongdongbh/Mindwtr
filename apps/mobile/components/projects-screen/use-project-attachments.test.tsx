@@ -38,6 +38,13 @@ vi.mock('../../lib/attachment-sync-availability', () => ({
     localStatus: resolved.localStatus,
     ...(!current.fileHash && resolved.fileHash ? { fileHash: resolved.fileHash } : {}),
   }),
+  getAttachmentUnrecoverablePatch: (resolved: Attachment) => ({
+    cloudKey: resolved.cloudKey,
+    fileHash: resolved.fileHash,
+    localStatus: resolved.localStatus,
+    deletedAt: resolved.deletedAt,
+    updatedAt: resolved.updatedAt,
+  }),
 }));
 
 vi.mock('../../lib/attachment-sync', () => ({
@@ -152,7 +159,47 @@ describe('useProjectAttachments download settlement', () => {
     act(() => tree.unmount());
   });
 
-  it('ignores H1 completion and applies only H2 local availability fields to the latest project', async () => {
+  it('persists a current terminal absence without replacing project attachment metadata', async () => {
+    const attachment = makeAttachment(1, { title: 'Current title.pdf' });
+    const project = makeProject(attachment);
+    const terminalAt = '2026-08-27T00:01:00.000Z';
+    coreStoreState._allProjects = [project];
+    availabilityMock.ensureAttachmentAvailableDetailed.mockResolvedValue({
+      status: 'unrecoverable',
+      attachment: {
+        ...attachment,
+        title: 'Stale captured title.pdf',
+        cloudKey: undefined,
+        fileHash: undefined,
+        localStatus: 'missing',
+        deletedAt: terminalAt,
+        updatedAt: terminalAt,
+      },
+    });
+    const expose = React.createRef<HarnessApi | null>();
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Harness expose={expose} initial={project} />); });
+
+    await act(async () => { await expose.current!.downloadAttachment(attachment); });
+
+    const expectedAttachment = {
+      ...attachment,
+      cloudKey: undefined,
+      fileHash: undefined,
+      localStatus: 'missing' as const,
+      deletedAt: terminalAt,
+      updatedAt: terminalAt,
+    };
+    expect(expose.current!.selectedProject).toEqual({
+      ...project,
+      attachments: [expectedAttachment],
+    });
+    expect(coreStoreState._allProjects[0]).toEqual(expose.current!.selectedProject);
+    expect(Alert.alert).toHaveBeenCalledWith('attachments.title', 'attachments.missing');
+    act(() => tree.unmount());
+  });
+
+  it('ignores a stale H1 terminal outcome and applies only H2 local availability fields to the latest project', async () => {
     const h1 = makeAttachment(1);
     const h2 = makeAttachment(2, { title: 'Current H2 title.pdf', mimeType: 'application/pdf' });
     const p1 = makeProject(h1, { title: 'Original project title' });
@@ -176,12 +223,14 @@ describe('useProjectAttachments download settlement', () => {
 
     await act(async () => {
       first.resolve({
-        status: 'available',
+        status: 'unrecoverable',
         attachment: {
           ...h1,
-          title: 'Captured H1 title.pdf',
-          uri: 'file://attachments/h1.pdf',
-          localStatus: 'available',
+          cloudKey: undefined,
+          fileHash: undefined,
+          localStatus: 'missing',
+          deletedAt: '2026-08-27T00:01:00.000Z',
+          updatedAt: '2026-08-27T00:01:00.000Z',
         },
       });
       await firstRun;

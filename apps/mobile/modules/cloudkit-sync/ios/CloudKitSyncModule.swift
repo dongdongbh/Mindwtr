@@ -2,6 +2,16 @@ import Foundation
 import ExpoModulesCore
 import CloudKit
 
+private final class CloudKitAttachmentNotFoundException: Exception {
+    override var reason: String {
+        "CloudKit attachment is no longer available"
+    }
+
+    override var code: String {
+        "ERR_CLOUDKIT_ATTACHMENT_NOT_FOUND"
+    }
+}
+
 public class CloudKitSyncModule: Module {
 
     private static let remoteChangeNotification = Notification.Name("tech.dongdongbh.mindwtr.cloudkit.remoteChange")
@@ -127,10 +137,17 @@ public class CloudKitSyncModule: Module {
 
         AsyncFunction("fetchAttachmentAsset") { (recordName: String, targetPath: String) -> [String: Any] in
             return try await self.reportingRetryAfter {
-                try await self.manager.fetchAttachmentAsset(
-                    recordName: recordName,
-                    targetPath: targetPath
-                )
+                do {
+                    return try await self.manager.fetchAttachmentAsset(
+                        recordName: recordName,
+                        targetPath: targetPath
+                    )
+                } catch {
+                    if CloudKitAttachmentErrorClassifier.isTerminalNotFound(error) {
+                        throw CloudKitAttachmentNotFoundException().causedBy(error)
+                    }
+                    throw error
+                }
             }
         }
 
