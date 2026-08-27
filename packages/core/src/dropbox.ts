@@ -23,6 +23,11 @@ export class DropboxConflictError extends Error {
     }
 }
 
+export const isDropboxConflictError = (error: unknown): boolean => (
+    error instanceof DropboxConflictError
+    || (error instanceof Error && error.name === 'DropboxConflictError')
+);
+
 export class DropboxUnauthorizedError extends Error {
     constructor(message = 'Dropbox authorization failed (HTTP 401)') {
         super(message);
@@ -311,11 +316,11 @@ export async function downloadDropboxFile(
 
 /** Versioned byte read for encryption transitions. Dropbox returns the file rev in the
  * same download response's Dropbox-API-Result header, so bytes and generation cannot drift. */
-export async function downloadDropboxFileVersioned(
+export async function downloadDropboxFileVersionedWithServerTime(
     accessToken: string,
     path: string,
     fetcher: typeof fetch = fetch,
-): Promise<{ bytes: Uint8Array | null; version: string | null }> {
+): Promise<{ bytes: Uint8Array | null; version: string | null; serverNowMs: number | null }> {
     const response = await fetcher(DOWNLOAD_ENDPOINT, {
         method: 'POST',
         headers: {
@@ -323,10 +328,12 @@ export async function downloadDropboxFileVersioned(
             'Dropbox-API-Arg': JSON.stringify({ path: resolveDropboxPath(path) }),
         },
     });
+    const parsedServerNow = Date.parse(response.headers.get('date') ?? '');
+    const serverNowMs = Number.isFinite(parsedServerNow) ? parsedServerNow : null;
     if (response.status === 401) throw new DropboxUnauthorizedError('Dropbox file download failed: HTTP 401');
     if (response.status === 409) {
         if (isDropboxPathNotFoundTag(await parseDropboxApiErrorTag(response))) {
-            return { bytes: null, version: null };
+            return { bytes: null, version: null, serverNowMs };
         }
         throw new Error('Dropbox file download failed: HTTP 409');
     }
@@ -335,7 +342,18 @@ export async function downloadDropboxFileVersioned(
     return {
         bytes: new Uint8Array(await readResponseBody(response, undefined, MAX_DOWNLOAD_BYTES)),
         version: metadata.rev,
+        serverNowMs,
     };
+}
+
+/** Compatibility shape for transition callers that only need bytes + Dropbox rev. */
+export async function downloadDropboxFileVersioned(
+    accessToken: string,
+    path: string,
+    fetcher: typeof fetch = fetch,
+): Promise<{ bytes: Uint8Array | null; version: string | null }> {
+    const { bytes, version } = await downloadDropboxFileVersionedWithServerTime(accessToken, path, fetcher);
+    return { bytes, version };
 }
 
 export async function uploadDropboxFile(

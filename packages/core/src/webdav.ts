@@ -825,10 +825,10 @@ export async function webdavPutFile(
 /** Versioned byte read for encryption transitions. The strong ETag comes from the same
  * GET response as the bytes; an existing response without one is returned explicitly so
  * the transition can refuse an unsafe mutation. */
-export async function webdavGetFileVersioned(
+export async function webdavGetFileVersionedWithServerTime(
     url: string,
     options: WebDavOptions = {},
-): Promise<{ bytes: Uint8Array | null; version: string | null }> {
+): Promise<{ bytes: Uint8Array | null; version: string | null; serverNowMs: number | null }> {
     assertWebdavUrl(url, options);
     const fetcher = options.fetcher ?? fetch;
     const res = await fetchWithTimeout(
@@ -838,7 +838,9 @@ export async function webdavGetFileVersioned(
         fetcher,
         WEBDAV_TIMEOUT_ERROR,
     );
-    if (res.status === 404) return { bytes: null, version: null };
+    const parsedServerNow = Date.parse(res.headers.get('date') ?? '');
+    const serverNowMs = Number.isFinite(parsedServerNow) ? parsedServerNow : null;
+    if (res.status === 404) return { bytes: null, version: null, serverNowMs };
     if (!res.ok) {
         const error = new Error(`WebDAV File GET failed (${res.status})`);
         (error as { status?: number }).status = res.status;
@@ -847,7 +849,17 @@ export async function webdavGetFileVersioned(
     return {
         bytes: new Uint8Array(await readResponseBody(res, options.onProgress, options.maxBytes ?? MAX_DOWNLOAD_BYTES)),
         version: normalizeStrongWebdavEtag(res.headers.get('etag')),
+        serverNowMs,
     };
+}
+
+/** Compatibility shape for transition callers that only need bytes + strong generation. */
+export async function webdavGetFileVersioned(
+    url: string,
+    options: WebDavOptions = {},
+): Promise<{ bytes: Uint8Array | null; version: string | null }> {
+    const { bytes, version } = await webdavGetFileVersionedWithServerTime(url, options);
+    return { bytes, version };
 }
 
 const webdavStrongEtagProbeUrl = (documentUrl: string): string => {
