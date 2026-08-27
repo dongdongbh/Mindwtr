@@ -29,7 +29,7 @@ export const classifyFailure = (error: unknown, terminal: SyncEncryptionErrorKin
     const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
     if (message.includes('SYNC_ENCRYPTION_WRONG_PASSPHRASE')) return 'wrong-passphrase';
     if (message.includes('SYNC_ENCRYPTION_BACKEND_REQUIRED')) return 'backend-required';
-    if (isSyncEncryptionRemoteVersionUnavailableError(error)) return 'backend-incompatible';
+    if (isSyncEncryptionRemoteVersionUnavailableError(error)) return 'transition-incomplete';
     return isSyncEncryptionFailure(error) ? terminal : 'generic';
 };
 

@@ -34,7 +34,7 @@ type ErrorKind =
     | 'wrong-passphrase'
     | 'rotation-first'
     | 'backend-required'
-    | 'backend-incompatible'
+    | 'transition-incomplete'
     | 'generic';
 
 type Flow = 'none' | 'enable' | 'change' | 'disable' | 'unlock';
@@ -49,7 +49,7 @@ export type SyncEncryptionCardProps = {
 const classifyFailure = (error: unknown, terminal: ErrorKind): ErrorKind => {
     const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
     if (message.includes('SYNC_ENCRYPTION_BACKEND_REQUIRED')) return 'backend-required';
-    if (isSyncEncryptionRemoteVersionUnavailableError(error)) return 'backend-incompatible';
+    if (isSyncEncryptionRemoteVersionUnavailableError(error)) return 'transition-incomplete';
     if (/MWENC1|SYNC_ENCRYPTION|passphrase/i.test(message)) return terminal;
     return 'generic';
 };
@@ -258,8 +258,8 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
                 ? t('settings.syncEncryptionErrorRotationFirst')
                 : error === 'backend-required'
                     ? t('settings.syncEncryptionErrorBackendRequired')
-                    : error === 'backend-incompatible'
-                        ? t('settings.syncEncryptionErrorBackendIncompatible')
+                    : error === 'transition-incomplete'
+                        ? t('settings.syncEncryptionErrorTransitionIncomplete')
                         : error === 'generic'
                             ? t('settings.syncEncryptionErrorGeneric')
                             : null;

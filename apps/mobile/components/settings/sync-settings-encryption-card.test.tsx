@@ -237,7 +237,7 @@ describe('SyncEncryptionCard', () => {
     expect(texts(tree)).toContain('settings.syncEncryptionErrorRotationFirst');
   });
 
-  it('explains that a WebDAV server without strong ETags cannot safely transition', async () => {
+  it('explains how to resume a transition whose remote version could not be verified', async () => {
     encryptionMocks.getSyncEncryptionStatus.mockResolvedValue({ state: 'enabled' });
     encryptionMocks.disableSyncEncryption.mockRejectedValueOnce(
       new SyncEncryptionRemoteVersionUnavailableError('data.json has no strong ETag'),
@@ -247,7 +247,7 @@ describe('SyncEncryptionCard', () => {
     await press(tree, 'settings.syncEncryptionDisable');
     await press(tree, 'settings.syncEncryptionDisable');
 
-    expect(texts(tree)).toContain('settings.syncEncryptionErrorBackendIncompatible');
+    expect(texts(tree)).toContain('settings.syncEncryptionErrorTransitionIncomplete');
     expect(texts(tree)).not.toContain('settings.syncEncryptionErrorRotationFirst');
   });
 

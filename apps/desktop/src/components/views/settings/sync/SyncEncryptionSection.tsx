@@ -109,8 +109,8 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
                 ? t.syncEncryptionErrorRotationFirst
                 : error === 'backend-required'
                     ? t.syncEncryptionErrorBackendRequired
-                    : error === 'backend-incompatible'
-                        ? t.syncEncryptionErrorBackendIncompatible
+                    : error === 'transition-incomplete'
+                        ? t.syncEncryptionErrorTransitionIncomplete
                         : error === 'generic'
                             ? t.syncEncryptionErrorGeneric
                             : null;

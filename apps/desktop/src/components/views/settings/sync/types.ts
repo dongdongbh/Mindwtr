@@ -182,6 +182,7 @@ export type SettingsSyncLabels = {
     syncEncryptionErrorRotationFirst: string;
     syncEncryptionErrorBackendRequired: string;
     syncEncryptionErrorBackendIncompatible: string;
+    syncEncryptionErrorTransitionIncomplete: string;
     syncEncryptionStateUnavailable: string;
     syncEncryptionRetry: string;
     syncEncryptionEnableBeforeFirstSyncHint: string;
@@ -210,7 +211,7 @@ export type SyncEncryptionErrorKind =
     | 'wrong-passphrase'
     | 'rotation-first'
     | 'backend-required'
-    | 'backend-incompatible'
+    | 'transition-incomplete'
     | 'generic';
 
 /**

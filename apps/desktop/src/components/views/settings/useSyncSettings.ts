@@ -694,7 +694,7 @@ export const useSyncSettings = ({
             const message = isSyncEncryptionRemoteVersionUnavailableError(error)
                 ? resolveText(
                     'settings.syncEncryptionErrorBackendIncompatible',
-                    'This WebDAV server does not provide strong ETags, so Mindwtr cannot safely sync or change encryption. No sync data was changed. Use a WebDAV provider with strong ETags, File Sync, or Dropbox.',
+                    'This WebDAV server does not provide or enforce safe version checks (strong ETags and conditional writes), so Mindwtr cannot safely sync or change encryption. Use a compatible WebDAV provider, File Sync, or Dropbox.',
                 )
                 : resolveText('settings.syncMobile.connectionFailed', 'Connection failed');
             void logError(error, { scope: 'sync', step: 'testWebDavConnection' });

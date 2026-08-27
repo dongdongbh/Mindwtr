@@ -195,9 +195,9 @@ describe('SyncEncryptionSection', () => {
         expect(screen.getByText(t.syncEncryptionErrorRotationFirst)).toBeTruthy();
     });
 
-    it('explains that a WebDAV server without strong ETags cannot safely transition', () => {
-        render(<SyncEncryptionSection t={t} encryption={controller({ state: 'enabled', error: 'backend-incompatible' })} />);
-        expect(screen.getByText(t.syncEncryptionErrorBackendIncompatible)).toBeTruthy();
+    it('explains how to resume a transition whose remote version could not be verified', () => {
+        render(<SyncEncryptionSection t={t} encryption={controller({ state: 'enabled', error: 'transition-incomplete' })} />);
+        expect(screen.getByText(t.syncEncryptionErrorTransitionIncomplete)).toBeTruthy();
     });
 
     it('shows transition progress while a transition runs', () => {
@@ -276,7 +276,7 @@ describe('classifyFailure', () => {
         expect(classifyFailure(
             new SyncEncryptionRemoteVersionUnavailableError('data.json has no strong ETag'),
             'generic',
-        )).toBe('backend-incompatible');
+        )).toBe('transition-incomplete');
         expect(
             classifyFailure(new SyncEncryptionTerminalError(new SyncCryptoAuthError()), 'generic'),
         ).toBe('generic');
