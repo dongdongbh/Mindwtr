@@ -722,6 +722,43 @@ describe('File Sync transitions through core orchestration', () => {
     });
   }, 30_000);
 
+  it('round-trips native seed backups through enable, passphrase change, and disable', async () => {
+    seedPlaintextFolder();
+    const seedNames = [
+      'mindwtr-backup-2026-08-27.json',
+      'data-backup-2026-08-26.json',
+    ];
+    const seedBytes = new Map(seedNames.map((name, index) => [
+      name,
+      new TextEncoder().encode(JSON.stringify(appData(`seed-${index}`), null, 2)),
+    ]));
+    for (const [name, bytes] of seedBytes) fs.files.set(`${SYNC_DIR}/${name}`, bytes);
+
+    await enableSyncEncryption(PASSPHRASE);
+    for (const name of seedNames) {
+      expect(fs.files.has(`${SYNC_DIR}/${name}`)).toBe(false);
+      expect(inspectSyncArtifact(fs.files.get(`${SYNC_DIR}/${name}.enc`)!).kind).toBe('encrypted');
+    }
+
+    const nextPassphrase = 'another correct horse battery';
+    await changeSyncEncryptionPassphrase(PASSPHRASE, nextPassphrase);
+    const rotated = await getSyncEncryptionMaterial();
+    const { decryptSyncArtifact } = await import('@mindwtr/core');
+    for (const name of seedNames) {
+      await expect(decryptSyncArtifact(
+        fs.files.get(`${SYNC_DIR}/${name}.enc`)!,
+        rotated!.key,
+        mobileSyncCryptoPrimitives,
+      )).resolves.toEqual(seedBytes.get(name));
+    }
+
+    await disableSyncEncryption();
+    for (const name of seedNames) {
+      expect(fs.files.get(`${SYNC_DIR}/${name}`)).toEqual(seedBytes.get(name));
+      expect(fs.files.has(`${SYNC_DIR}/${name}.enc`)).toBe(false);
+    }
+  }, 30_000);
+
   it('uses byte fingerprints for replacement and create-new semantics for missing artifacts', async () => {
     seedPlaintextFolder();
     const port = await createFileSyncEncryptionRemotePort(SYNC_URI);

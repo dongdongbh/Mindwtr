@@ -401,13 +401,23 @@ const openPathDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
 const openDirectory = (dirUri: string): Promise<DirectoryHandle> =>
     isSaf(dirUri) ? openSafDirectory(dirUri) : openPathDirectory(dirUri);
 
+/** Native File Sync recovery also retains dated seed backups at the sync root. They are
+ *  authoritative document generations, not attachments: transitions rename them between the
+ *  `.json` and `.json.enc` names just like Rust does. Match Rust's case-insensitive contract
+ *  while preserving the provider's exact leaf for IO. */
+const isSeedBackupDocumentName = (name: string): boolean => {
+    const lower = name.toLowerCase();
+    return (lower.startsWith('mindwtr-backup-') || lower.startsWith('data-backup-'))
+        && (lower.endsWith('.json') || lower.endsWith('.json.enc'));
+};
+
 /** Document artifacts a mobile File Sync folder can hold. Mobile writes `data.json` and
- *  `data.json.bak`; the legacy name and desktop's `.enc` counterparts are included so a
- *  transition migrates (and a disable restores) everything a mixed desktop/mobile folder
- *  actually contains. */
+ *  `data.json.bak`; the legacy name, native seed backups, and desktop's `.enc` counterparts
+ *  are included so a transition migrates (and a disable restores) everything a mixed
+ *  desktop/mobile folder actually contains. */
 const isSyncDocumentName = (name: string): boolean => {
     const base = name.replace(/\.enc(\.bak|\.tmp|\.previous)?$/, '').replace(/\.(bak|tmp|previous)$/, '');
-    return base === SYNC_FILE_NAME || base === LEGACY_SYNC_FILE_NAME;
+    return base === SYNC_FILE_NAME || base === LEGACY_SYNC_FILE_NAME || isSeedBackupDocumentName(name);
 };
 
 const FIXED_SYNC_DOCUMENT_NAMES = [
@@ -805,4 +815,8 @@ export const createFileSyncEncryptionRemotePort = async (
     };
 };
 
-export const __storageFileEncryptionTestUtils = { getLeafName, isSyncDocumentName };
+export const __storageFileEncryptionTestUtils = {
+    getLeafName,
+    isSeedBackupDocumentName,
+    isSyncDocumentName,
+};
