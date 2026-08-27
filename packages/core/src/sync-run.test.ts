@@ -861,12 +861,14 @@ describe('runSharedSyncCycle', () => {
     });
 
     it('defers a busy File Sync lock with a bounded follow-up and no persisted error', async () => {
+        const requestFileSyncLockBusyFollowUpAfter = vi.fn();
         const { io, storage, hooks, run } = createHarness({
             backend: 'file',
             hooks: {
                 setupCycle: vi.fn(async () => {
                     throw new SyncFileLockBusyError(5_000);
                 }),
+                requestFileSyncLockBusyFollowUpAfter,
             },
         });
 
@@ -878,10 +880,29 @@ describe('runSharedSyncCycle', () => {
             fileSyncLockDeferred: 'busy',
             retryAfterMs: 5_000,
         });
-        expect(hooks.requestFollowUpAfter).toHaveBeenCalledWith(5_000);
+        expect(requestFileSyncLockBusyFollowUpAfter).toHaveBeenCalledWith(5_000, 1);
+        expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
         expect(io.readRemote).not.toHaveBeenCalled();
         expect(storage.persistLocal).not.toHaveBeenCalled();
         expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
+    });
+
+    it('does not auto-retry File Sync contention when the platform omits the bounded-retry hook', async () => {
+        const { hooks, run } = createHarness({
+            backend: 'file',
+            hooks: {
+                setupCycle: vi.fn(async () => {
+                    throw new SyncFileLockBusyError(5_000);
+                }),
+            },
+        });
+
+        await expect(run()).resolves.toMatchObject({
+            success: true,
+            skipped: 'fileSyncLockBusy',
+            fileSyncLockDeferred: 'busy',
+        });
+        expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
     });
 
     it('does not retain a transient activation candidate when its File Sync lock is busy', async () => {

@@ -4,6 +4,7 @@ import {
     runDataTransferTransactionWithoutSnapshot,
     runSerializedSyncDocumentOperation,
     SyncEncryptionRemoteVersionUnavailableError,
+    SyncFileLockBusyError,
     SyncRemoteWriteConflict,
     type AppData,
     type Attachment,
@@ -3201,6 +3202,65 @@ describe('SyncService orchestration', () => {
             const result = await SyncService.performSync({ manual: true });
 
             expect(result).toMatchObject({ success: true, fileSyncLockDeferred: 'cleanup' });
+        } finally {
+            setupSpy.mockRestore();
+        }
+    });
+
+    it('restores the File Sync contention retry budget after an ordinary follow-up', async () => {
+        let setupAttempt = 0;
+        const setupSpy = vi.spyOn(SyncService as any, 'setupDesktopCycle').mockImplementation(async () => {
+            setupAttempt += 1;
+            if (setupAttempt === 1 || setupAttempt === 3) {
+                throw new SyncFileLockBusyError(5);
+            }
+            return {
+                kind: 'ready',
+                backend: 'file',
+                cloudProvider: 'selfhosted',
+                fastSyncScope: null,
+                io: {
+                    readRemote: vi.fn(async () => null),
+                    writeRemote: vi.fn(async () => ({
+                        serverMergedRemoteData: setupAttempt === 2,
+                    })),
+                },
+            };
+        });
+        try {
+            __syncServiceTestUtils.setDependenciesForTests({
+                flushPendingSave: vi.fn(async () => undefined),
+                getStoreState: () => ({
+                    fetchData: vi.fn(async () => undefined),
+                    lastDataChangeAt: 0,
+                    settings: {},
+                    setError: vi.fn(),
+                    updateSettings: vi.fn(async () => undefined),
+                }) as any,
+                getInMemoryAppDataSnapshot: () => emptyAppData(),
+                applySyncedDataToStore: vi.fn(),
+                performSyncCycle: vi.fn(async (io: any) => {
+                    const local = await io.readLocal();
+                    await io.writeRemote(local);
+                    return {
+                        data: local,
+                        status: 'success',
+                        stats: { tasks: {}, projects: {}, sections: {}, areas: {} },
+                    };
+                }) as any,
+                isTauriRuntime: () => false,
+            });
+
+            await expect(SyncService.performSync({ manual: true })).resolves.toMatchObject({
+                success: true,
+                fileSyncLockDeferred: 'busy',
+            });
+
+            await waitForAssertion(() => expect(setupSpy).toHaveBeenCalledTimes(4));
+            await waitForAssertion(() => expect(SyncService.getSyncStatus()).toMatchObject({
+                inFlight: false,
+                queued: false,
+            }));
         } finally {
             setupSpy.mockRestore();
         }

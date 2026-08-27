@@ -585,6 +585,49 @@ describe('mobile sync-service runtime', () => {
     expect(fileSyncLockMocks.releaseMobileFileSyncLease).not.toHaveBeenCalled();
   });
 
+  it('restores the File Sync contention retry budget after an ordinary follow-up', async () => {
+    asyncStorageMocks.getItem.mockImplementation(async (key: string) => {
+      const values: Record<string, string | null> = {
+        '@mindwtr_sync_backend': 'file',
+        '@mindwtr_sync_path': 'file:///sync/MindWtr/data.json',
+      };
+      return values[key] ?? null;
+    });
+    fileSyncLockMocks.acquireMobileFileSyncLease
+      .mockRejectedValueOnce(new SyncFileLockBusyError(5))
+      .mockResolvedValueOnce({ token: 'first-retry', native: true })
+      .mockRejectedValueOnce(new SyncFileLockBusyError(5))
+      .mockResolvedValueOnce({ token: 'fresh-retry', native: true });
+    let completedCycles = 0;
+    coreMocks.performSyncCycle.mockImplementation(async (io: any) => {
+      completedCycles += 1;
+      const local = await io.readLocal();
+      if (completedCycles === 1) {
+        storeStateRef.current = {
+          ...storeStateRef.current,
+          lastDataChangeAt: 2,
+        };
+      }
+      await io.writeLocal(local);
+      return { status: 'success', stats: emptyStats, data: local };
+    });
+
+    await expect(syncServiceModule.performMobileSync()).resolves.toMatchObject({
+      success: true,
+      fileSyncLockDeferred: 'busy',
+    });
+
+    await vi.waitFor(
+      () => expect(fileSyncLockMocks.acquireMobileFileSyncLease).toHaveBeenCalledTimes(4),
+      { timeout: 5_000 },
+    );
+    await vi.waitFor(
+      () => expect(fileSyncLockMocks.releaseMobileFileSyncLease).toHaveBeenCalledTimes(2),
+      { timeout: 5_000 },
+    );
+    syncServiceModule.__mobileSyncTestUtils.reset();
+  });
+
   it('fails closed when safe File Sync locking is unavailable', async () => {
     fileSyncLockMocks.acquireMobileFileSyncLease.mockRejectedValueOnce(new SyncFileLockUnavailableError());
 

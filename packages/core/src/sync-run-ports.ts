@@ -283,7 +283,7 @@ export interface SyncRunPlatformHooks {
     /** Queue no earlier than a provider-time-derived delay (remote lease
      *  contention/cleanup). Implementations may let an explicit user run win. */
     requestFollowUpAfter?(delayMs: number): void;
-    /** Queue the one bounded retry allowed after local File Sync contention. */
+    /** Queue the one bounded retry allowed after local File Sync contention. Omission disables automatic retry. */
     requestFileSyncLockBusyFollowUpAfter?(delayMs: number, nextAttempt: number): void;
     /** Throw when the platform knows the network is gone (remote backends
      *  only; implementations self-gate on their backend). The machine calls

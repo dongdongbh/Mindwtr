@@ -635,7 +635,7 @@ class MobileSyncRun {
       syncPathOverride: this.syncPathOverride,
       manual: this.manual,
       activationProbe: this.activationProbe,
-      fileSyncLockBusyRetryAttempt: this.fileSyncLockBusyRetryAttempt,
+      fileSyncLockBusyRetryAttempt: 0,
       ignorePendingRemoteWriteBackoff: this.ignorePendingRemoteWriteBackoff,
       configOverride: this.configOverride,
     });
@@ -643,7 +643,7 @@ class MobileSyncRun {
 
   private queueFollowUpAfter(
     delayMs: number,
-    fileSyncLockBusyRetryAttempt = this.fileSyncLockBusyRetryAttempt,
+    fileSyncLockBusyRetryAttempt = 0,
   ): void {
     this.requestFollowUpAfter(delayMs, {
       syncPathOverride: this.syncPathOverride,

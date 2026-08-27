@@ -2899,8 +2899,14 @@ export class SyncService {
                 },
                 hooks: {
                     setupCycle: (setupContext) => SyncService.setupDesktopCycle(context, options, setupContext.setStep),
-                    requestFollowUp: () => SyncService.requestQueuedSyncRun(options, false),
-                    requestFollowUpAfter: (delayMs) => SyncService.requestQueuedSyncRunAfter(delayMs, options),
+                    requestFollowUp: () => SyncService.requestQueuedSyncRun({
+                        ...options,
+                        fileSyncLockBusyRetryAttempt: 0,
+                    }, false),
+                    requestFollowUpAfter: (delayMs) => SyncService.requestQueuedSyncRunAfter(delayMs, {
+                        ...options,
+                        fileSyncLockBusyRetryAttempt: 0,
+                    }),
                     requestFileSyncLockBusyFollowUpAfter: (delayMs, nextAttempt) => (
                         SyncService.requestQueuedSyncRunAfter(delayMs, {
                             ...options,

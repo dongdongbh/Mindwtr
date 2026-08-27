@@ -1093,8 +1093,6 @@ class SharedSyncRunMachine {
             if (!this.options.activationProbe && retryAttempt < 1) {
                 if (this.hooks.requestFileSyncLockBusyFollowUpAfter) {
                     this.hooks.requestFileSyncLockBusyFollowUpAfter(error.retryAfterMs, retryAttempt + 1);
-                } else {
-                    this.requestFollowUpAfter(error.retryAfterMs);
                 }
             }
             return {
