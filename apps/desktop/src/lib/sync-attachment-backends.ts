@@ -3,6 +3,8 @@ import {
     type Attachment,
     type AttachmentSettings,
     type SyncRunAttachmentHelpers,
+    MAX_DOWNLOAD_BYTES,
+    ResponseTooLargeError,
     applyAttachmentPatches,
     withAttachmentSettingsPatch,
     createWebdavDownloadBackoff,
@@ -103,6 +105,7 @@ const FILE_BACKEND_VALIDATION_CONFIG = {
     maxFileSizeBytes: Number.POSITIVE_INFINITY,
     blockedMimeTypes: [],
 };
+const FILE_DOWNLOAD_READ_CHUNK_BYTES = 64 * 1024;
 const UPLOAD_TIMEOUT_MS = 120_000;
 const WEBDAV_ATTACHMENT_RETRY_OPTIONS = {
     maxAttempts: 5,
@@ -1384,7 +1387,7 @@ export async function syncFileAttachments(
     // #1037: every fs call below can land on the sync folder, which may be a
     // slow mount, so the ones the plugin runs on the main thread come from
     // ./sync-fs instead. The plugin's own readFile/writeFile are already async.
-    const { BaseDirectory, exists, readFile, stat, writeFile, remove } = await import('@tauri-apps/plugin-fs');
+    const { BaseDirectory, exists, open, readFile, stat, writeFile, remove } = await import('@tauri-apps/plugin-fs');
     const { dataDir, join } = await import('@tauri-apps/api/path');
 
     const attachmentsDir = await join(baseSyncDir, ATTACHMENTS_DIR_NAME);
@@ -1506,7 +1509,37 @@ export async function syncFileAttachments(
             if (!attachment.cloudKey) return false;
             const sourcePath = await resolveFileBackendPath(join, baseSyncDir, attachment.cloudKey);
             if (!(await syncFsExists(sourcePath))) return false;
-            const fileData = await openAttachmentBytes(await readFile(sourcePath));
+            const sourceStat = await syncFsStat(sourcePath);
+            if (sourceStat.size > MAX_DOWNLOAD_BYTES) {
+                throw new ResponseTooLargeError(MAX_DOWNLOAD_BYTES);
+            }
+            const source = await open(sourcePath, { read: true });
+            const chunks: Uint8Array[] = [];
+            let totalBytes = 0;
+            try {
+                const buffer = new Uint8Array(FILE_DOWNLOAD_READ_CHUNK_BYTES);
+                while (true) {
+                    const bytesRead = await source.read(buffer);
+                    if (bytesRead === null) break;
+                    if (!Number.isInteger(bytesRead) || bytesRead <= 0 || bytesRead > buffer.byteLength) {
+                        throw new Error('File Sync attachment read returned an invalid byte count');
+                    }
+                    totalBytes += bytesRead;
+                    if (totalBytes > MAX_DOWNLOAD_BYTES) {
+                        throw new ResponseTooLargeError(MAX_DOWNLOAD_BYTES);
+                    }
+                    chunks.push(buffer.slice(0, bytesRead));
+                }
+            } finally {
+                await source.close();
+            }
+            const wireData = new Uint8Array(totalBytes);
+            let wireOffset = 0;
+            for (const chunk of chunks) {
+                wireData.set(chunk, wireOffset);
+                wireOffset += chunk.byteLength;
+            }
+            const fileData = await openAttachmentBytes(wireData);
             const expectedDownloadSha256 = await validateAndHashAttachmentDownload(attachment, fileData);
             const filename =
                 attachment.cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.uri)}`;

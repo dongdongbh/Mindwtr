@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SyncRemoteMutationFenceLostError, type AppData } from '@mindwtr/core';
+import { MAX_DOWNLOAD_BYTES, SyncRemoteMutationFenceLostError, type AppData } from '@mindwtr/core';
 
 import {
     clearAttachmentSyncState,
@@ -22,6 +22,7 @@ const fsMocks = vi.hoisted(() => ({
     BaseDirectory: { Data: 'Data' },
     exists: vi.fn(),
     mkdir: vi.fn(),
+    open: vi.fn(),
     readFile: vi.fn(),
     remove: vi.fn(),
     rename: vi.fn(),
@@ -40,6 +41,7 @@ const syncFsMocks = vi.hoisted(() => ({
     mkdir: vi.fn(),
     remove: vi.fn(),
     rename: vi.fn(),
+    stat: vi.fn(),
 }));
 
 const pathMocks = vi.hoisted(() => ({
@@ -161,11 +163,26 @@ describe('desktop sync attachment backends', () => {
         clearAttachmentSyncState();
         pathMocks.dataDir.mockResolvedValue('/app-data');
         pathMocks.join.mockImplementation(async (...parts: string[]) => parts.join('/'));
+        fsMocks.open.mockImplementation(async (path: string) => {
+            const bytes = await fsMocks.readFile(path) as Uint8Array;
+            let offset = 0;
+            return {
+                read: vi.fn(async (buffer: Uint8Array) => {
+                    if (offset >= bytes.byteLength) return null;
+                    const bytesRead = Math.min(buffer.byteLength, bytes.byteLength - offset);
+                    buffer.set(bytes.subarray(offset, offset + bytesRead));
+                    offset += bytesRead;
+                    return bytesRead;
+                }),
+                close: vi.fn().mockResolvedValue(undefined),
+            };
+        });
         fsMocks.mkdir.mockResolvedValue(undefined);
         fsMocks.stat.mockResolvedValue({ mtime: new Date(1000), size: 3 });
         syncFsMocks.mkdir.mockResolvedValue(undefined);
         syncFsMocks.rename.mockResolvedValue(undefined);
         syncFsMocks.remove.mockResolvedValue(undefined);
+        syncFsMocks.stat.mockResolvedValue({ mtimeMs: 1000, size: DOWNLOAD_BYTES.length });
         coreMocks.webdavHeadFile.mockResolvedValue({
             exists: false,
             fingerprint: null,
@@ -298,6 +315,31 @@ describe('desktop sync attachment backends', () => {
             });
         },
     );
+
+    it('rejects an oversized File Sync download before reading or installing it', async () => {
+        const appData = createDownloadData('file');
+        const deps: AttachmentBackendDeps = {
+            getTauriFetch: vi.fn(),
+            isTauriRuntimeEnv: () => true,
+            logSyncInfo: vi.fn(),
+            logSyncWarning: vi.fn(),
+            resolveWebdavPassword: vi.fn(),
+        };
+        syncFsMocks.exists.mockResolvedValue(true);
+        syncFsMocks.stat.mockResolvedValue({
+            mtimeMs: 1000,
+            size: MAX_DOWNLOAD_BYTES + 1,
+        });
+
+        const result = await syncFileAttachments(appData, '/sync-root', deps);
+
+        expect(result).toBe(false);
+        expect(syncFsMocks.stat).toHaveBeenCalledWith('/sync-root/attachments/attachment-1.txt');
+        expect(fsMocks.open).not.toHaveBeenCalled();
+        expect(fsMocks.readFile).not.toHaveBeenCalled();
+        expect(fsMocks.writeFile).not.toHaveBeenCalled();
+        expect(installerMocks.installAttachmentDownload).not.toHaveBeenCalled();
+    });
 
     it('preserves a staged download and attachment metadata when the installer detects a local-edit race', async () => {
         const localBytes = new Uint8Array([4, 5, 6]);
