@@ -59,6 +59,10 @@ const dropboxMocks = vi.hoisted(() => ({
     uploadDropboxFile: vi.fn(),
 }));
 
+const installerMocks = vi.hoisted(() => ({
+    installAttachmentDownload: vi.fn(),
+}));
+
 vi.mock('@mindwtr/core', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@mindwtr/core')>();
     return {
@@ -80,6 +84,9 @@ vi.mock('./dropbox-sync', () => ({
     DropboxConflictError: class DropboxConflictError extends Error {},
     DropboxFileNotFoundError: class DropboxFileNotFoundError extends Error {},
     DropboxUnauthorizedError: class DropboxUnauthorizedError extends Error {},
+}));
+vi.mock('./attachment-installer', () => ({
+    installAttachmentDownload: installerMocks.installAttachmentDownload,
 }));
 
 /** Backends now return the folded document instead of mutating the one they were given. */
@@ -141,9 +148,16 @@ const activationHelpers = () => ({
     ensureLocalSnapshotFresh: vi.fn(),
 });
 
+const DOWNLOAD_BYTES = new Uint8Array([1, 2, 3]);
+const DOWNLOAD_BYTES_HASH = '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81';
+
+type DownloadBackend = 'webdav' | 'cloud' | 'dropbox' | 'cloudkit' | 'file';
+
 describe('desktop sync attachment backends', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        installerMocks.installAttachmentDownload.mockReset();
+        installerMocks.installAttachmentDownload.mockResolvedValue({ kind: 'installed' });
         clearAttachmentSyncState();
         pathMocks.dataDir.mockResolvedValue('/app-data');
         pathMocks.join.mockImplementation(async (...parts: string[]) => parts.join('/'));
@@ -164,6 +178,231 @@ describe('desktop sync attachment backends', () => {
 
     afterEach(() => {
         vi.useRealTimers();
+    });
+
+    const createDownloadData = (backend: DownloadBackend): AppData => ({
+        tasks: [
+            {
+                id: 'task-1',
+                title: 'Task',
+                status: 'next',
+                tags: [],
+                contexts: [],
+                attachments: [
+                    {
+                        id: 'attachment-1',
+                        kind: 'file',
+                        title: 'download.txt',
+                        uri: '',
+                        cloudKey: backend === 'cloudkit'
+                            ? 'cloudkit:attachment-1'
+                            : 'attachments/attachment-1.txt',
+                        localStatus: 'missing',
+                        createdAt: '2026-08-27T00:00:00.000Z',
+                        updatedAt: '2026-08-27T00:00:00.000Z',
+                    },
+                ],
+                createdAt: '2026-08-27T00:00:00.000Z',
+                updatedAt: '2026-08-27T00:00:00.000Z',
+            },
+        ],
+        projects: [],
+        sections: [],
+        areas: [],
+        settings: {},
+    });
+
+    const runDownload = async (
+        backend: DownloadBackend,
+        appData: AppData,
+        deps: AttachmentBackendDeps,
+    ): Promise<AppData | false | null> => {
+        switch (backend) {
+            case 'webdav':
+                return syncWebdavAttachments(
+                    appData,
+                    { url: 'https://dav.example/mindwtr', username: 'alice' },
+                    'https://dav.example/mindwtr',
+                    deps,
+                );
+            case 'cloud':
+                return syncCloudAttachments(
+                    appData,
+                    { url: 'https://cloud.example/v1/data', token: 'token' },
+                    'https://cloud.example/v1',
+                    deps,
+                );
+            case 'dropbox':
+                return syncDropboxAttachments(appData, async () => 'dropbox-token', deps);
+            case 'cloudkit':
+                return syncCloudKitAttachments(appData, deps);
+            case 'file':
+                return syncFileAttachments(appData, '/sync-root', deps);
+        }
+    };
+
+    it.each<DownloadBackend>(['webdav', 'cloud', 'dropbox', 'cloudkit', 'file'])(
+        'stages and generation-binds an absent %s attachment download before publishing metadata',
+        async (backend) => {
+            const fetcher = vi.fn(async () => new Response(DOWNLOAD_BYTES.slice().buffer, { status: 200 }));
+            const deps: AttachmentBackendDeps = {
+                getTauriFetch: async () => fetcher as unknown as typeof fetch,
+                isTauriRuntimeEnv: () => true,
+                logSyncInfo: vi.fn(),
+                logSyncWarning: vi.fn(),
+                resolveWebdavPassword: vi.fn(async () => 'secret'),
+            };
+            const appData = createDownloadData(backend);
+            fsMocks.readFile.mockResolvedValue(DOWNLOAD_BYTES);
+            syncFsMocks.exists.mockResolvedValue(true);
+            dropboxMocks.downloadDropboxFile.mockResolvedValue(DOWNLOAD_BYTES.slice().buffer);
+            cloudKitMocks.fetchCloudKitAttachmentAsset.mockResolvedValue({
+                recordName: 'attachment-1',
+                attachmentId: 'attachment-1',
+                ownerType: 'task',
+                ownerId: 'task-1',
+                title: 'download.txt',
+                size: DOWNLOAD_BYTES.length,
+                updatedAt: '2026-08-27T00:00:00.000Z',
+            });
+
+            const result = expectFoldedData(await runDownload(backend, appData, deps));
+            const installCall = installerMocks.installAttachmentDownload.mock.calls[0];
+            expect(installCall).toBeDefined();
+            const [stagedPath, targetPath, expectation, expectedDownloadSha256] = installCall;
+            expect(stagedPath).toMatch(/^\/app-data\/mindwtr\/attachments\/\.download-/);
+            expect(targetPath).toBe('/app-data/mindwtr/attachments/attachment-1.txt');
+            expect(expectation).toEqual({ kind: 'absent' });
+            expect(expectedDownloadSha256).toBe(DOWNLOAD_BYTES_HASH);
+            if (backend === 'cloudkit') {
+                expect(cloudKitMocks.fetchCloudKitAttachmentAsset).toHaveBeenCalledWith(
+                    'attachment-1',
+                    stagedPath,
+                );
+                expect(cloudKitMocks.fetchCloudKitAttachmentAsset).not.toHaveBeenCalledWith(
+                    'attachment-1',
+                    targetPath,
+                );
+            } else {
+                expect(fsMocks.writeFile).toHaveBeenCalledWith(stagedPath, DOWNLOAD_BYTES);
+            }
+            expect(fsMocks.remove).toHaveBeenCalledWith(stagedPath);
+            expect(result.tasks[0].attachments?.[0]).toMatchObject({
+                uri: targetPath,
+                localStatus: 'available',
+                fileHash: DOWNLOAD_BYTES_HASH,
+            });
+            expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+                uri: '',
+                localStatus: 'missing',
+            });
+        },
+    );
+
+    it('preserves a staged download and attachment metadata when the installer detects a local-edit race', async () => {
+        const localBytes = new Uint8Array([4, 5, 6]);
+        const localBytesHash = '787c798e39a5bc1910355bae6d0cd87a36b2e10fd0202a83e3bb6b005da83472';
+        const canonicalPath = '/app-data/mindwtr/attachments/local-edit.txt';
+        const appData = createDownloadData('cloud');
+        Object.assign(appData.tasks[0].attachments![0], {
+            uri: canonicalPath,
+            localStatus: 'available',
+            fileHash: DOWNLOAD_BYTES_HASH,
+            contentMtimeMs: 1000,
+            contentSize: localBytes.length,
+        });
+        const fetcher = vi.fn(async () => new Response(DOWNLOAD_BYTES.slice().buffer, { status: 200 }));
+        const deps: AttachmentBackendDeps = {
+            getTauriFetch: async () => fetcher as unknown as typeof fetch,
+            isTauriRuntimeEnv: () => true,
+            logSyncInfo: vi.fn(),
+            logSyncWarning: vi.fn(),
+            resolveWebdavPassword: vi.fn(),
+        };
+        fsMocks.exists.mockResolvedValue(true);
+        fsMocks.readFile.mockResolvedValue(localBytes);
+        fsMocks.stat.mockResolvedValue({ mtime: new Date(2000), size: localBytes.length });
+        installerMocks.installAttachmentDownload.mockResolvedValue({
+            kind: 'conflict',
+            reason: 'generation-mismatch',
+            preservedPath: canonicalPath,
+        });
+
+        const result = await syncCloudAttachments(
+            appData,
+            { url: 'https://cloud.example/v1/data', token: 'token' },
+            'https://cloud.example/v1',
+            deps,
+            { activationProbe: false, ensureLocalSnapshotFresh: vi.fn(), phase: 'post-merge' },
+        );
+
+        expect(result).toBe(false);
+        const [stagedPath, targetPath, expectation, expectedDownloadSha256] =
+            installerMocks.installAttachmentDownload.mock.calls[0];
+        expect(stagedPath).toMatch(/^\/app-data\/mindwtr\/attachments\/\.download-/);
+        expect(targetPath).toBe(canonicalPath);
+        expect(expectation).toEqual({ kind: 'present', sha256: localBytesHash });
+        expect(expectedDownloadSha256).toBe(DOWNLOAD_BYTES_HASH);
+        expect(fsMocks.remove).not.toHaveBeenCalledWith(stagedPath);
+        expect(deps.logSyncInfo).toHaveBeenCalledWith(
+            'Attachment download deferred after local-edit race',
+            {
+                id: 'attachment-1',
+                backend: 'cloud',
+                reason: 'generation-mismatch',
+            },
+        );
+        const conflictDetails = (deps.logSyncInfo as ReturnType<typeof vi.fn>).mock.calls
+            .find(([message]) => message === 'Attachment download deferred after local-edit race')?.[1];
+        expect(conflictDetails).not.toHaveProperty('stagedPath');
+        expect(conflictDetails).not.toHaveProperty('preservedPath');
+        expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+            uri: canonicalPath,
+            localStatus: 'available',
+            fileHash: DOWNLOAD_BYTES_HASH,
+            contentMtimeMs: 1000,
+            contentSize: localBytes.length,
+        });
+    });
+
+    it('keeps canonical CloudKit bytes and metadata untouched when staged plaintext fails hash validation', async () => {
+        const canonicalPath = '/app-data/mindwtr/attachments/attachment-1.txt';
+        const appData = createDownloadData('cloudkit');
+        appData.tasks[0].attachments![0].fileHash = 'a'.repeat(64);
+        const deps: AttachmentBackendDeps = {
+            getTauriFetch: vi.fn(),
+            isTauriRuntimeEnv: () => true,
+            logSyncInfo: vi.fn(),
+            logSyncWarning: vi.fn(),
+            resolveWebdavPassword: vi.fn(),
+        };
+        fsMocks.readFile.mockResolvedValue(DOWNLOAD_BYTES);
+        cloudKitMocks.fetchCloudKitAttachmentAsset.mockResolvedValue({
+            recordName: 'attachment-1',
+            attachmentId: 'attachment-1',
+            ownerType: 'task',
+            ownerId: 'task-1',
+            title: 'remote-title.txt',
+            fileHash: DOWNLOAD_BYTES_HASH,
+            size: 999,
+            updatedAt: '2026-08-27T01:00:00.000Z',
+        });
+
+        const result = await syncCloudKitAttachments(appData, deps);
+
+        expect(result).toBe(false);
+        const [recordName, stagedPath] = cloudKitMocks.fetchCloudKitAttachmentAsset.mock.calls[0];
+        expect(recordName).toBe('attachment-1');
+        expect(stagedPath).toMatch(/^\/app-data\/mindwtr\/attachments\/\.download-/);
+        expect(stagedPath).not.toBe(canonicalPath);
+        expect(installerMocks.installAttachmentDownload).not.toHaveBeenCalled();
+        expect(fsMocks.remove).toHaveBeenCalledWith(stagedPath);
+        expect(fsMocks.writeFile).not.toHaveBeenCalledWith(canonicalPath, expect.anything());
+        expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+            uri: '',
+            localStatus: 'missing',
+            fileHash: 'a'.repeat(64),
+        });
     });
 
     it('marks cloud attachments unrecoverable when the remote file is missing', async () => {

@@ -72,6 +72,10 @@ import {
     saveCloudKitAttachmentAsset,
     type CloudKitAttachmentMetadata,
 } from './cloudkit-sync';
+import {
+    installAttachmentDownload,
+    type AttachmentInstallExpectation,
+} from './attachment-installer';
 
 export type WebDavConfig = {
     url: string;
@@ -117,6 +121,124 @@ const WEBDAV_ATTACHMENT_MAX_DOWNLOADS_PER_SYNC = 10;
 const WEBDAV_ATTACHMENT_MAX_UPLOADS_PER_SYNC = 10;
 const WEBDAV_ATTACHMENT_MISSING_BACKOFF_MS = 15 * 60_000;
 const WEBDAV_ATTACHMENT_ERROR_BACKOFF_MS = 2 * 60_000;
+
+type AttachmentDownloadStageOps = {
+    join: (...paths: string[]) => Promise<string>;
+    writeFile: (path: string, bytes: Uint8Array) => Promise<void>;
+    remove: (path: string) => Promise<void>;
+};
+
+const createAttachmentDownloadStagePath = async (
+    managedAttachmentsDir: string,
+    join: AttachmentDownloadStageOps['join'],
+): Promise<string> => join(
+    managedAttachmentsDir,
+    `.download-${Date.now()}-${Math.random().toString(16).slice(2, 14)}`,
+);
+
+const resolveAttachmentDownloadTarget = async (
+    attachment: Attachment,
+    expectation: AttachmentInstallExpectation,
+    managedAttachmentsDir: string,
+    filename: string,
+    join: AttachmentDownloadStageOps['join'],
+): Promise<string> => expectation.kind === 'present'
+    ? stripFileScheme(attachment.uri)
+    : join(managedAttachmentsDir, filename);
+
+const cleanOwnedAttachmentDownloadStage = async (
+    stagedPath: string,
+    remove: AttachmentDownloadStageOps['remove'],
+    deps: AttachmentBackendDeps,
+): Promise<void> => {
+    try {
+        await remove(stagedPath);
+    } catch (error) {
+        deps.logSyncWarning('Failed to clean incomplete attachment download stage', error);
+    }
+};
+
+const validateAndHashAttachmentDownload = async (
+    attachment: Attachment,
+    bytes: Uint8Array,
+): Promise<string> => {
+    await validateAttachmentHash(attachment, bytes);
+    const sha256 = await computeSha256Hex(bytes);
+    if (!sha256) {
+        throw new Error('Integrity validation unavailable: no SHA-256 implementation');
+    }
+    return sha256;
+};
+
+const installStagedAttachmentDownload = async (
+    attachment: Attachment,
+    backend: 'webdav' | 'cloud' | 'dropbox' | 'cloudkit' | 'file',
+    stagedPath: string,
+    targetPath: string,
+    expectation: AttachmentInstallExpectation,
+    expectedDownloadSha256: string,
+    remove: AttachmentDownloadStageOps['remove'],
+    deps: AttachmentBackendDeps,
+): Promise<boolean> => {
+    // From this call onward the native crash journal owns the staged path. Do not
+    // remove it on errors or conflicts: it is either required for recovery or is
+    // the preserved remote generation a diagnostic/retry can inspect.
+    const outcome = await installAttachmentDownload(
+        stagedPath,
+        targetPath,
+        expectation,
+        expectedDownloadSha256,
+    );
+    if (outcome.kind === 'installed') {
+        await cleanOwnedAttachmentDownloadStage(stagedPath, remove, deps);
+        return true;
+    }
+
+    deps.logSyncInfo('Attachment download deferred after local-edit race', {
+        id: attachment.id,
+        backend,
+        reason: outcome.reason,
+    });
+    reportProgress(
+        attachment.id,
+        'download',
+        0,
+        attachment.size ?? 0,
+        'failed',
+        'Local file changed during sync; download deferred',
+    );
+    return false;
+};
+
+const stageAndInstallAttachmentDownload = async (
+    attachment: Attachment,
+    backend: 'webdav' | 'cloud' | 'dropbox' | 'file',
+    bytes: Uint8Array,
+    targetPath: string,
+    expectation: AttachmentInstallExpectation,
+    expectedDownloadSha256: string,
+    managedAttachmentsDir: string,
+    ops: AttachmentDownloadStageOps,
+    deps: AttachmentBackendDeps,
+): Promise<boolean> => {
+    const stagedPath = await createAttachmentDownloadStagePath(managedAttachmentsDir, ops.join);
+    try {
+        await ops.writeFile(stagedPath, bytes);
+    } catch (error) {
+        await cleanOwnedAttachmentDownloadStage(stagedPath, ops.remove, deps);
+        throw error;
+    }
+    return installStagedAttachmentDownload(
+        attachment,
+        backend,
+        stagedPath,
+        targetPath,
+        expectation,
+        expectedDownloadSha256,
+        ops.remove,
+        deps,
+    );
+};
 
 const webdavDownloadBackoff = createWebdavDownloadBackoff({
     missingBackoffMs: WEBDAV_ATTACHMENT_MISSING_BACKOFF_MS,
@@ -261,7 +383,7 @@ export async function syncWebdavAttachments(
     }
 
     const fetcher = await deps.getTauriFetch();
-    const { BaseDirectory, exists, mkdir, readFile, stat, writeFile, rename, remove } = await import('@tauri-apps/plugin-fs');
+    const { BaseDirectory, exists, mkdir, readFile, stat, writeFile, remove } = await import('@tauri-apps/plugin-fs');
     const { dataDir, join } = await import('@tauri-apps/api/path');
     const password = await deps.resolveWebdavPassword(webDavConfig);
 
@@ -557,7 +679,7 @@ export async function syncWebdavAttachments(
             );
             deps.logSyncWarning(`Failed to upload attachment ${attachment.title}`, error);
         },
-        onDownload: async (attachment) => {
+        onDownload: async (attachment, expectation) => {
             if (!attachment.cloudKey) return false;
             const cloudKey = attachment.cloudKey;
             let fileData: ArrayBuffer;
@@ -591,22 +713,37 @@ export async function syncWebdavAttachments(
             const bytes = await openAttachmentBytes(
                 fileData instanceof ArrayBuffer ? new Uint8Array(fileData) : new Uint8Array(fileData as ArrayBuffer),
             );
-            await validateAttachmentHash(attachment, bytes);
+            const expectedDownloadSha256 = await validateAndHashAttachmentDownload(attachment, bytes);
             const filename = cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.uri)}`;
-            const targetPath = await join(managedAttachmentsDir, filename);
-            await writeFileSafelyAbsolute(targetPath, bytes, {
-                writeFile,
-                rename,
-                remove,
-            });
+            const targetPath = await resolveAttachmentDownloadTarget(
+                attachment,
+                expectation,
+                managedAttachmentsDir,
+                filename,
+                join,
+            );
+            const installed = await stageAndInstallAttachmentDownload(
+                attachment,
+                'webdav',
+                bytes,
+                targetPath,
+                expectation,
+                expectedDownloadSha256,
+                managedAttachmentsDir,
+                {
+                    join,
+                    writeFile,
+                    remove,
+                },
+                deps,
+            );
+            if (!installed) return false;
             attachment.uri = targetPath;
-            const statusChanged = attachment.localStatus !== 'available';
-            if (statusChanged) {
-                attachment.localStatus = 'available';
-            }
+            attachment.localStatus = 'available';
+            attachment.fileHash = expectedDownloadSha256;
             webdavDownloadBackoff.deleteEntry(attachment.id);
             reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
-            return statusChanged;
+            return true;
         },
         onDownloadError: (attachment, error) => {
             // Rate-limit and 404 are handled inside onDownload's own try/catch above, since only
@@ -648,7 +785,7 @@ export async function syncCloudAttachments(
     if (!deps.isTauriRuntimeEnv() || !cloudConfig.url) return false;
 
     const fetcher = await deps.getTauriFetch();
-    const { BaseDirectory, exists, mkdir, readFile, stat, writeFile, rename, remove } = await import('@tauri-apps/plugin-fs');
+    const { BaseDirectory, exists, mkdir, readFile, stat, writeFile, remove } = await import('@tauri-apps/plugin-fs');
     const { dataDir, join } = await import('@tauri-apps/api/path');
 
     try {
@@ -751,7 +888,7 @@ export async function syncCloudAttachments(
             );
             deps.logSyncWarning(`Failed to upload attachment ${attachment.title}`, error);
         },
-        onDownload: async (attachment) => {
+        onDownload: async (attachment, expectation) => {
             if (!attachment.cloudKey) return false;
             let fileData: ArrayBuffer;
             try {
@@ -772,22 +909,33 @@ export async function syncCloudAttachments(
             }
             const bytes =
                 fileData instanceof ArrayBuffer ? new Uint8Array(fileData) : new Uint8Array(fileData as ArrayBuffer);
-            await validateAttachmentHash(attachment, bytes);
+            const expectedDownloadSha256 = await validateAndHashAttachmentDownload(attachment, bytes);
             const filename =
                 attachment.cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.uri)}`;
-            const targetPath = await join(managedAttachmentsDir, filename);
-            await writeFileSafelyAbsolute(targetPath, bytes, {
-                writeFile,
-                rename,
-                remove,
-            });
+            const targetPath = await resolveAttachmentDownloadTarget(
+                attachment,
+                expectation,
+                managedAttachmentsDir,
+                filename,
+                join,
+            );
+            const installed = await stageAndInstallAttachmentDownload(
+                attachment,
+                'cloud',
+                bytes,
+                targetPath,
+                expectation,
+                expectedDownloadSha256,
+                managedAttachmentsDir,
+                { join, writeFile, remove },
+                deps,
+            );
+            if (!installed) return false;
             attachment.uri = targetPath;
-            const statusChanged = attachment.localStatus !== 'available';
-            if (statusChanged) {
-                attachment.localStatus = 'available';
-            }
+            attachment.localStatus = 'available';
+            attachment.fileHash = expectedDownloadSha256;
             reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
-            return statusChanged;
+            return true;
         },
         onDownloadError: (attachment, error) => {
             reportProgress(
@@ -816,7 +964,7 @@ export async function syncDropboxAttachments(
 
     const fetcher = await deps.getTauriFetch();
     const dropboxFetcher = fetcher ?? fetch;
-    const { BaseDirectory, exists, mkdir, readFile, stat, writeFile, rename, remove } = await import('@tauri-apps/plugin-fs');
+    const { BaseDirectory, exists, mkdir, readFile, stat, writeFile, remove } = await import('@tauri-apps/plugin-fs');
     const { dataDir, join } = await import('@tauri-apps/api/path');
 
     try {
@@ -938,7 +1086,7 @@ export async function syncDropboxAttachments(
             );
             deps.logSyncWarning(`Failed to upload attachment ${attachment.title}`, error);
         },
-        onDownload: async (attachment) => {
+        onDownload: async (attachment, expectation) => {
             if (!attachment.cloudKey) return false;
             reportProgress(attachment.id, 'download', 0, attachment.size ?? 0, 'active');
             let fileData: ArrayBuffer;
@@ -955,22 +1103,33 @@ export async function syncDropboxAttachments(
             const bytes = await openAttachmentBytes(
                 fileData instanceof ArrayBuffer ? new Uint8Array(fileData) : new Uint8Array(fileData as ArrayBuffer),
             );
-            await validateAttachmentHash(attachment, bytes);
+            const expectedDownloadSha256 = await validateAndHashAttachmentDownload(attachment, bytes);
             const filename =
                 attachment.cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.uri)}`;
-            const targetPath = await join(managedAttachmentsDir, filename);
-            await writeFileSafelyAbsolute(targetPath, bytes, {
-                writeFile,
-                rename,
-                remove,
-            });
+            const targetPath = await resolveAttachmentDownloadTarget(
+                attachment,
+                expectation,
+                managedAttachmentsDir,
+                filename,
+                join,
+            );
+            const installed = await stageAndInstallAttachmentDownload(
+                attachment,
+                'dropbox',
+                bytes,
+                targetPath,
+                expectation,
+                expectedDownloadSha256,
+                managedAttachmentsDir,
+                { join, writeFile, remove },
+                deps,
+            );
+            if (!installed) return false;
             attachment.uri = targetPath;
-            const statusChanged = attachment.localStatus !== 'available';
-            if (statusChanged) {
-                attachment.localStatus = 'available';
-            }
+            attachment.localStatus = 'available';
+            attachment.fileHash = expectedDownloadSha256;
             reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
-            return statusChanged;
+            return true;
         },
         onDownloadError: (attachment, error) => {
             reportProgress(
@@ -1098,19 +1257,46 @@ export async function syncCloudKitAttachments(
             );
             deps.logSyncWarning(`Failed to upload CloudKit attachment ${attachment.title}`, error);
         },
-        onDownload: async (attachment) => {
+        onDownload: async (attachment, expectation) => {
             const recordName = parseCloudKitAttachmentKey(attachment.cloudKey);
             if (!recordName) return false;
             const extension = extractExtension(attachment.title) || extractExtension(attachment.uri);
             const filename = `${attachment.id}${extension}`;
-            const targetPath = await join(managedAttachmentsDir, filename);
+            const targetPath = await resolveAttachmentDownloadTarget(
+                attachment,
+                expectation,
+                managedAttachmentsDir,
+                filename,
+                join,
+            );
+            const stagedPath = await createAttachmentDownloadStagePath(managedAttachmentsDir, join);
             reportProgress(attachment.id, 'download', 0, attachment.size ?? 0, 'active');
-            const metadata = await fetchCloudKitAttachmentAsset(recordName, targetPath);
-            const bytes = await readFile(targetPath);
-            await validateAttachmentHash(attachment, bytes);
+            let metadata: CloudKitAttachmentMetadata;
+            let bytes: Uint8Array;
+            let expectedDownloadSha256: string;
+            try {
+                metadata = await fetchCloudKitAttachmentAsset(recordName, stagedPath);
+                bytes = await readFile(stagedPath);
+                expectedDownloadSha256 = await validateAndHashAttachmentDownload(attachment, bytes);
+            } catch (error) {
+                await cleanOwnedAttachmentDownloadStage(stagedPath, remove, deps);
+                throw error;
+            }
+            const installed = await installStagedAttachmentDownload(
+                attachment,
+                'cloudkit',
+                stagedPath,
+                targetPath,
+                expectation,
+                expectedDownloadSha256,
+                remove,
+                deps,
+            );
+            if (!installed) return false;
             attachment.uri = targetPath;
             attachment.localStatus = 'available';
             applyCloudKitAttachmentMetadata(attachment, metadata, bytes.length);
+            attachment.fileHash = expectedDownloadSha256;
             reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
             return true;
         },
@@ -1147,7 +1333,7 @@ export async function syncFileAttachments(
     // #1037: every fs call below can land on the sync folder, which may be a
     // slow mount, so the ones the plugin runs on the main thread come from
     // ./sync-fs instead. The plugin's own readFile/writeFile are already async.
-    const { BaseDirectory, exists, readFile, stat, writeFile } = await import('@tauri-apps/plugin-fs');
+    const { BaseDirectory, exists, readFile, stat, writeFile, remove } = await import('@tauri-apps/plugin-fs');
     const { dataDir, join } = await import('@tauri-apps/api/path');
 
     const attachmentsDir = await join(baseSyncDir, ATTACHMENTS_DIR_NAME);
@@ -1262,26 +1448,37 @@ export async function syncFileAttachments(
         onUploadError: (attachment, error) => {
             deps.logSyncWarning(`Failed to copy attachment ${attachment.title} to sync folder`, error);
         },
-        onDownload: async (attachment) => {
+        onDownload: async (attachment, expectation) => {
             if (!attachment.cloudKey) return false;
             const sourcePath = await resolveFileBackendPath(join, baseSyncDir, attachment.cloudKey);
             if (!(await syncFsExists(sourcePath))) return false;
             const fileData = await openAttachmentBytes(await readFile(sourcePath));
-            await validateAttachmentHash(attachment, fileData);
+            const expectedDownloadSha256 = await validateAndHashAttachmentDownload(attachment, fileData);
             const filename =
                 attachment.cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.uri)}`;
-            const targetPath = await join(managedAttachmentsDir, filename);
-            await writeFileSafelyAbsolute(targetPath, fileData, {
-                writeFile,
-                rename: syncFsRename,
-                remove: syncFsRemove,
-            });
+            const targetPath = await resolveAttachmentDownloadTarget(
+                attachment,
+                expectation,
+                managedAttachmentsDir,
+                filename,
+                join,
+            );
+            const installed = await stageAndInstallAttachmentDownload(
+                attachment,
+                'file',
+                fileData,
+                targetPath,
+                expectation,
+                expectedDownloadSha256,
+                managedAttachmentsDir,
+                { join, writeFile, remove },
+                deps,
+            );
+            if (!installed) return false;
             attachment.uri = targetPath;
-            const statusChanged = attachment.localStatus !== 'available';
-            if (statusChanged) {
-                attachment.localStatus = 'available';
-            }
-            return statusChanged;
+            attachment.localStatus = 'available';
+            attachment.fileHash = expectedDownloadSha256;
+            return true;
         },
         onDownloadError: (attachment, error) => {
             deps.logSyncWarning(`Failed to copy attachment ${attachment.title} from sync folder`, error);

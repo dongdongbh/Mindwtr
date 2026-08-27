@@ -25,6 +25,7 @@ describe('attachment download installer native boundary', () => {
             '/managed/attachments/.download-a',
             '/managed/attachments/a.pdf',
             { kind: 'absent' },
+            'b'.repeat(64),
         )).resolves.toEqual({ kind: 'installed' });
 
         expect(invoked).toEqual([[
@@ -33,6 +34,7 @@ describe('attachment download installer native boundary', () => {
                 stagedPath: '/managed/attachments/.download-a',
                 targetPath: '/managed/attachments/a.pdf',
                 expected: { kind: 'absent' },
+                expectedDownloadSha256: 'b'.repeat(64),
             },
         ]]);
     });
@@ -52,6 +54,7 @@ describe('attachment download installer native boundary', () => {
             '/managed/attachments/.download-a',
             '/managed/attachments/a.pdf',
             { kind: 'present', sha256: expectedHash },
+            'b'.repeat(64),
         )).resolves.toEqual({
             kind: 'conflict',
             reason: 'generation-mismatch',
@@ -64,6 +67,7 @@ describe('attachment download installer native boundary', () => {
                 stagedPath: '/managed/attachments/.download-a',
                 targetPath: '/managed/attachments/a.pdf',
                 expected: { kind: 'present', sha256: expectedHash },
+                expectedDownloadSha256: 'b'.repeat(64),
             },
         ]);
     });

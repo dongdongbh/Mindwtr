@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 #[cfg(unix)]
 use std::ffi::CString;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 const INSTALL_JOURNAL_VERSION: u8 = 1;
@@ -29,7 +29,10 @@ pub(crate) enum AttachmentInstallConflictReason {
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub(crate) enum AttachmentInstallOutcome {
-    Installed,
+    Installed {
+        #[serde(rename = "preservedPath", skip_serializing_if = "Option::is_none")]
+        preserved_path: Option<String>,
+    },
     Conflict {
         reason: AttachmentInstallConflictReason,
         #[serde(rename = "preservedPath", skip_serializing_if = "Option::is_none")]
@@ -49,8 +52,26 @@ struct AttachmentInstallJournal {
 
 enum RecoveryOutcome {
     None,
-    Installed { sha256: String },
-    Conflict { preserved_path: PathBuf },
+    Installed {
+        sha256: String,
+        preserved_path: Option<PathBuf>,
+    },
+    Conflict {
+        preserved_path: PathBuf,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InstallHook {
+    AfterStageValidation,
+    AfterQuarantine,
+    AfterFinalQuarantineCheck,
+}
+
+fn installed(preserved_path: Option<&Path>) -> AttachmentInstallOutcome {
+    AttachmentInstallOutcome::Installed {
+        preserved_path: preserved_path.map(|path| path.to_string_lossy().into_owned()),
+    }
 }
 
 fn conflict(
@@ -84,11 +105,10 @@ fn random_suffix() -> String {
     output
 }
 
-fn sha256_file(path: &Path) -> Result<String, String> {
-    validate_regular_file(path, "hash source")?;
-    let mut file = File::open(path).map_err(|error| {
+fn sha256_reader(file: &mut File, path: &Path) -> Result<String, String> {
+    file.seek(SeekFrom::Start(0)).map_err(|error| {
         format!(
-            "failed to open attachment install file {}: {error}",
+            "failed to seek attachment install file {}: {error}",
             path.display()
         )
     })?;
@@ -107,6 +127,53 @@ fn sha256_file(path: &Path) -> Result<String, String> {
         hasher.update(&buffer[..count]);
     }
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn open_regular_file_no_follow(path: &Path, label: &str) -> Result<File, String> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let file = options.open(path).map_err(|error| {
+        format!(
+            "failed to open attachment install {label} {} without following links: {error}",
+            path.display()
+        )
+    })?;
+    let metadata = file.metadata().map_err(|error| {
+        format!(
+            "failed to inspect attachment install {label} {}: {error}",
+            path.display()
+        )
+    })?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(format!(
+                "attachment install {label} must not be a reparse point"
+            ));
+        }
+    }
+    if !metadata.is_file() {
+        return Err(format!("attachment install {label} must be a regular file"));
+    }
+    Ok(file)
+}
+
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let mut file = open_regular_file_no_follow(path, "hash source")?;
+    sha256_reader(&mut file, path)
 }
 
 fn path_is_lexically_normal(path: &Path) -> bool {
@@ -214,6 +281,57 @@ fn next_quarantine_path(root: &Path) -> Result<PathBuf, String> {
     Err("failed to allocate a unique attachment quarantine path".to_string())
 }
 
+fn create_verified_download_snapshot(
+    root: &Path,
+    staged_path: &Path,
+    expected_download_sha256: &str,
+) -> Result<(PathBuf, String), String> {
+    let mut source = open_regular_file_no_follow(staged_path, "stage")?;
+    let (snapshot_path, mut snapshot) = (0..16)
+        .find_map(|_| {
+            let candidate = root.join(format!(".mindwtr-attachment-remote-{}", random_suffix()));
+            match OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&candidate)
+            {
+                Ok(file) => Some(Ok((candidate, file))),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => None,
+                Err(error) => Some(Err(format!(
+                    "failed to create owned attachment download snapshot: {error}"
+                ))),
+            }
+        })
+        .transpose()?
+        .ok_or_else(|| "failed to allocate an owned attachment download snapshot".to_string())?;
+
+    let snapshot_result = (|| {
+        io::copy(&mut source, &mut snapshot).map_err(|error| {
+            format!("failed to copy attachment download into owned snapshot: {error}")
+        })?;
+        snapshot.sync_all().map_err(|error| {
+            format!("failed to flush owned attachment download snapshot: {error}")
+        })?;
+        let snapshot_sha256 = sha256_reader(&mut snapshot, &snapshot_path)?;
+        if snapshot_sha256 != expected_download_sha256 {
+            return Err("attachment download stage changed after plaintext validation".to_string());
+        }
+        sync_directory(root)?;
+        Ok(snapshot_sha256)
+    })();
+
+    match snapshot_result {
+        Ok(snapshot_sha256) => Ok((snapshot_path, snapshot_sha256)),
+        Err(error) => {
+            drop(snapshot);
+            let _ = remove_file_if_present(&snapshot_path);
+            let _ = sync_directory(root);
+            Err(error)
+        }
+    }
+}
+
 #[cfg(unix)]
 fn path_to_c_string(path: &Path) -> io::Result<CString> {
     use std::os::unix::ffi::OsStrExt;
@@ -313,17 +431,6 @@ fn sync_directory(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn sync_file(path: &Path) -> Result<(), String> {
-    File::open(path)
-        .and_then(|file| file.sync_all())
-        .map_err(|error| {
-            format!(
-                "failed to flush attachment install stage {}: {error}",
-                path.display()
-            )
-        })
-}
-
 fn remove_file_if_present(path: &Path) -> Result<(), String> {
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
@@ -401,25 +508,7 @@ fn path_exists_as_regular_file(path: &Path) -> Result<bool, String> {
     }
 }
 
-fn cleanup_recovery_stage(
-    path: &Path,
-    keep_stage: &Path,
-    expected_hash: &str,
-) -> Result<(), String> {
-    if path == keep_stage || !path_exists_as_regular_file(path)? {
-        return Ok(());
-    }
-    if sha256_file(path)? == expected_hash {
-        remove_file_if_present(path)?;
-    }
-    Ok(())
-}
-
-fn recover_existing_install(
-    root: &Path,
-    target_path: &Path,
-    keep_stage: &Path,
-) -> Result<RecoveryOutcome, String> {
+fn recover_existing_install(root: &Path, target_path: &Path) -> Result<RecoveryOutcome, String> {
     let journal_path = target_journal_path(root, target_path);
     if !journal_path
         .try_exists()
@@ -443,16 +532,14 @@ fn recover_existing_install(
         if path_exists_as_regular_file(quarantine_path)? {
             if path_exists_as_regular_file(target_path)? {
                 if sha256_file(target_path)? == staged_sha256 {
-                    if journal.staged_path != target_path
-                        && journal.staged_path.try_exists().unwrap_or(false)
-                    {
-                        return Err("attachment install recovery stage is unexpectedly occupied"
-                            .to_string());
-                    }
-                    move_no_replace(target_path, &journal.staged_path).map_err(|error| {
-                        format!("failed to quarantine incomplete remote attachment during recovery: {error}")
-                    })?;
-                    sync_directory(root)?;
+                    // Publication completed before the crash. The displaced local inode
+                    // remains at its unique preservation path indefinitely: a writer may
+                    // still hold it open and mutate it after any hash check we make here.
+                    remove_journal(root, &journal_path)?;
+                    return Ok(RecoveryOutcome::Installed {
+                        sha256: staged_sha256,
+                        preserved_path: Some(quarantine_path.to_path_buf()),
+                    });
                 } else {
                     remove_journal(root, &journal_path)?;
                     return Ok(RecoveryOutcome::Conflict {
@@ -463,7 +550,6 @@ fn recover_existing_install(
             match move_no_replace(quarantine_path, target_path) {
                 Ok(()) => {
                     sync_directory(root)?;
-                    cleanup_recovery_stage(&journal.staged_path, keep_stage, &staged_sha256)?;
                     remove_journal(root, &journal_path)?;
                     return Ok(RecoveryOutcome::None);
                 }
@@ -487,11 +573,11 @@ fn recover_existing_install(
     } else {
         None
     };
-    cleanup_recovery_stage(&journal.staged_path, keep_stage, &staged_sha256)?;
     remove_journal(root, &journal_path)?;
     if target_hash.as_deref() == Some(staged_sha256.as_str()) {
         Ok(RecoveryOutcome::Installed {
             sha256: staged_sha256,
+            preserved_path: None,
         })
     } else {
         Ok(RecoveryOutcome::None)
@@ -503,20 +589,26 @@ fn install_attachment_download_in_root_with_hook<F>(
     staged_path: &Path,
     target_path: &Path,
     expected: AttachmentInstallExpectation,
-    mut after_quarantine: F,
+    expected_download_sha256: &str,
+    mut hook: F,
 ) -> Result<AttachmentInstallOutcome, String>
 where
-    F: FnMut(&Path) -> Result<(), String>,
+    F: FnMut(InstallHook, &Path) -> Result<(), String>,
 {
     validate_install_paths(root, staged_path, target_path)?;
-    sync_file(staged_path)?;
-    let staged_sha256 = sha256_file(staged_path)?;
+    let expected_download_sha256 = normalize_sha256(expected_download_sha256)?;
+    hook(InstallHook::AfterStageValidation, staged_path)?;
+    let (owned_stage_path, staged_sha256) =
+        create_verified_download_snapshot(root, staged_path, &expected_download_sha256)?;
 
-    match recover_existing_install(root, target_path, staged_path)? {
-        RecoveryOutcome::Installed { sha256 } if sha256 == staged_sha256 => {
-            remove_file_if_present(staged_path)?;
+    match recover_existing_install(root, target_path)? {
+        RecoveryOutcome::Installed {
+            sha256,
+            preserved_path,
+        } if sha256 == staged_sha256 => {
+            remove_file_if_present(&owned_stage_path)?;
             sync_directory(root)?;
-            return Ok(AttachmentInstallOutcome::Installed);
+            return Ok(installed(preserved_path.as_deref()));
         }
         RecoveryOutcome::Installed { .. } => {
             return Ok(conflict(
@@ -533,8 +625,7 @@ where
         RecoveryOutcome::None => {}
     }
 
-    // Recovery may have consumed an old stage that happened to use the same path.
-    validate_regular_file(staged_path, "stage")?;
+    validate_regular_file(&owned_stage_path, "owned stage")?;
     validate_optional_target(target_path)?;
 
     let expected = match expected {
@@ -550,7 +641,7 @@ where
     let journal_path = target_journal_path(root, target_path);
     let journal = AttachmentInstallJournal {
         version: INSTALL_JOURNAL_VERSION,
-        staged_path: staged_path.to_path_buf(),
+        staged_path: owned_stage_path.clone(),
         target_path: target_path.to_path_buf(),
         quarantine_path: quarantine_path.clone(),
         staged_sha256: staged_sha256.clone(),
@@ -559,29 +650,31 @@ where
     write_journal(root, &journal_path, &journal)?;
 
     match expected {
-        AttachmentInstallExpectation::Absent => match move_no_replace(staged_path, target_path) {
-            Ok(()) => {
-                sync_directory(root)?;
-                remove_journal(root, &journal_path)?;
-                Ok(AttachmentInstallOutcome::Installed)
-            }
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                remove_journal(root, &journal_path)?;
-                if sha256_file(target_path)? == staged_sha256 {
-                    remove_file_if_present(staged_path)?;
+        AttachmentInstallExpectation::Absent => {
+            match move_no_replace(&owned_stage_path, target_path) {
+                Ok(()) => {
                     sync_directory(root)?;
-                    Ok(AttachmentInstallOutcome::Installed)
-                } else {
-                    Ok(conflict(
-                        AttachmentInstallConflictReason::TargetExists,
-                        Some(target_path),
-                    ))
+                    remove_journal(root, &journal_path)?;
+                    Ok(installed(None))
                 }
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    remove_journal(root, &journal_path)?;
+                    if sha256_file(target_path)? == expected_download_sha256 {
+                        remove_file_if_present(&owned_stage_path)?;
+                        sync_directory(root)?;
+                        Ok(installed(None))
+                    } else {
+                        Ok(conflict(
+                            AttachmentInstallConflictReason::TargetExists,
+                            Some(target_path),
+                        ))
+                    }
+                }
+                Err(error) => Err(format!(
+                    "failed to install absent attachment without replacement: {error}"
+                )),
             }
-            Err(error) => Err(format!(
-                "failed to install absent attachment without replacement: {error}"
-            )),
-        },
+        }
         AttachmentInstallExpectation::Present {
             sha256: expected_sha256,
         } => {
@@ -603,7 +696,7 @@ where
                 }
             }
 
-            after_quarantine(target_path)?;
+            hook(InstallHook::AfterQuarantine, target_path)?;
 
             if sha256_file(&quarantine_path)? != expected_sha256 {
                 let preserved_path = match move_no_replace(&quarantine_path, target_path) {
@@ -625,7 +718,7 @@ where
                 ));
             }
 
-            match move_no_replace(staged_path, target_path) {
+            match move_no_replace(&owned_stage_path, target_path) {
                 Ok(()) => sync_directory(root)?,
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                     remove_journal(root, &journal_path)?;
@@ -640,10 +733,11 @@ where
             }
 
             // A writer that already held the displaced inode can continue writing it
-            // after the rename. Re-hash before deleting quarantine; if it changed, put
-            // those local bytes back and keep the downloaded bytes staged for retry.
+            // after the rename. Re-hash once to catch an edit that already landed; even
+            // after that check, retain the inode forever because another write can land
+            // before or after this function returns.
             if sha256_file(&quarantine_path)? != expected_sha256 {
-                move_no_replace(target_path, staged_path).map_err(|error| {
+                move_no_replace(target_path, &owned_stage_path).map_err(|error| {
                     format!("failed to preserve downloaded bytes during rollback: {error}")
                 })?;
                 sync_directory(root)?;
@@ -666,10 +760,9 @@ where
                 ));
             }
 
-            remove_file_if_present(&quarantine_path)?;
-            sync_directory(root)?;
+            hook(InstallHook::AfterFinalQuarantineCheck, &quarantine_path)?;
             remove_journal(root, &journal_path)?;
-            Ok(AttachmentInstallOutcome::Installed)
+            Ok(installed(Some(&quarantine_path)))
         }
     }
 }
@@ -679,10 +772,16 @@ fn install_attachment_download_in_root(
     staged_path: &Path,
     target_path: &Path,
     expected: AttachmentInstallExpectation,
+    expected_download_sha256: &str,
 ) -> Result<AttachmentInstallOutcome, String> {
-    install_attachment_download_in_root_with_hook(root, staged_path, target_path, expected, |_| {
-        Ok(())
-    })
+    install_attachment_download_in_root_with_hook(
+        root,
+        staged_path,
+        target_path,
+        expected,
+        expected_download_sha256,
+        |_, _| Ok(()),
+    )
 }
 
 #[tauri::command(async)]
@@ -691,6 +790,7 @@ pub(crate) fn install_attachment_download(
     staged_path: String,
     target_path: String,
     expected: AttachmentInstallExpectation,
+    expected_download_sha256: String,
 ) -> Result<AttachmentInstallOutcome, String> {
     use fs2::FileExt as _;
 
@@ -722,6 +822,7 @@ pub(crate) fn install_attachment_download(
         Path::new(&staged_path),
         Path::new(&target_path),
         expected,
+        &expected_download_sha256,
     );
     let unlock_result = lock
         .unlock()
@@ -778,6 +879,7 @@ mod tests {
             &stage,
             &target,
             AttachmentInstallExpectation::Absent,
+            &hash(b"remote"),
         )
         .expect("install outcome");
 
@@ -790,7 +892,7 @@ mod tests {
         ));
         assert_eq!(fs::read(&target).expect("target bytes"), b"late-local");
         assert_eq!(fs::read(&stage).expect("stage bytes"), b"remote");
-        assert!(artifacts(&root).is_empty());
+        assert_eq!(artifacts(&root).len(), 1);
     }
 
     #[test]
@@ -803,12 +905,137 @@ mod tests {
             &stage,
             &target,
             AttachmentInstallExpectation::Absent,
+            &hash(b"remote"),
         )
         .expect("install outcome");
 
-        assert_eq!(outcome, AttachmentInstallOutcome::Installed);
+        assert_eq!(outcome, installed(None));
         assert_eq!(fs::read(&target).expect("target bytes"), b"remote");
-        assert!(!stage.exists());
+        assert_eq!(fs::read(&stage).expect("caller stage bytes"), b"remote");
+        assert!(artifacts(&root).is_empty());
+    }
+
+    #[test]
+    fn absent_retry_accepts_an_identical_already_published_target_without_overwrite() {
+        let (_temp, root, stage, target) = fixture();
+        fs::write(&stage, b"remote").expect("stage");
+        fs::write(&target, b"remote").expect("target");
+
+        let outcome = install_attachment_download_in_root(
+            &root,
+            &stage,
+            &target,
+            AttachmentInstallExpectation::Absent,
+            &hash(b"remote"),
+        )
+        .expect("idempotent retry outcome");
+
+        assert_eq!(outcome, installed(None));
+        assert_eq!(fs::read(&target).expect("target bytes"), b"remote");
+        assert_eq!(fs::read(&stage).expect("caller stage bytes"), b"remote");
+        assert!(artifacts(&root).is_empty());
+    }
+
+    #[test]
+    fn absent_stage_replacement_after_validation_is_rejected_before_target_mutation() {
+        let (_temp, root, stage, target) = fixture();
+        fs::write(&stage, b"validated-remote").expect("stage");
+        let displaced = root.join("displaced-stage");
+
+        let error = install_attachment_download_in_root_with_hook(
+            &root,
+            &stage,
+            &target,
+            AttachmentInstallExpectation::Absent,
+            &hash(b"validated-remote"),
+            |point, stage_path| {
+                if point == InstallHook::AfterStageValidation {
+                    fs::rename(stage_path, &displaced)
+                        .map_err(|error| format!("displace stage fixture failed: {error}"))?;
+                    fs::write(stage_path, b"swapped-remote")
+                        .map_err(|error| format!("replace stage fixture failed: {error}"))?;
+                }
+                Ok(())
+            },
+        )
+        .expect_err("swapped stage must fail its bound remote hash");
+
+        assert!(error.contains("changed after plaintext validation"));
+        assert!(!target.exists());
+        assert_eq!(
+            fs::read(&displaced).expect("validated bytes"),
+            b"validated-remote"
+        );
+        assert_eq!(fs::read(&stage).expect("swapped bytes"), b"swapped-remote");
+        assert!(artifacts(&root).is_empty());
+    }
+
+    #[test]
+    fn present_stage_replacement_after_validation_leaves_the_local_target_untouched() {
+        let (_temp, root, stage, target) = fixture();
+        fs::write(&stage, b"validated-remote").expect("stage");
+        fs::write(&target, b"expected-local").expect("target");
+
+        let error = install_attachment_download_in_root_with_hook(
+            &root,
+            &stage,
+            &target,
+            AttachmentInstallExpectation::Present {
+                sha256: hash(b"expected-local"),
+            },
+            &hash(b"validated-remote"),
+            |point, stage_path| {
+                if point == InstallHook::AfterStageValidation {
+                    fs::write(stage_path, b"swapped-remote")
+                        .map_err(|error| format!("replace stage fixture failed: {error}"))?;
+                }
+                Ok(())
+            },
+        )
+        .expect_err("swapped stage must fail its bound remote hash");
+
+        assert!(error.contains("changed after plaintext validation"));
+        assert_eq!(fs::read(&target).expect("target bytes"), b"expected-local");
+        assert!(artifacts(&root).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_swapped_stage_after_validation_is_rejected_without_following_it() {
+        use std::os::unix::fs::symlink;
+
+        let (temp, root, stage, target) = fixture();
+        fs::write(&stage, b"validated-remote").expect("stage");
+        fs::write(&target, b"expected-local").expect("target");
+        let outside = temp.path().join("outside.txt");
+        fs::write(&outside, b"validated-remote").expect("outside");
+
+        let error = install_attachment_download_in_root_with_hook(
+            &root,
+            &stage,
+            &target,
+            AttachmentInstallExpectation::Present {
+                sha256: hash(b"expected-local"),
+            },
+            &hash(b"validated-remote"),
+            |point, stage_path| {
+                if point == InstallHook::AfterStageValidation {
+                    fs::remove_file(stage_path)
+                        .map_err(|error| format!("remove stage fixture failed: {error}"))?;
+                    symlink(&outside, stage_path)
+                        .map_err(|error| format!("symlink stage fixture failed: {error}"))?;
+                }
+                Ok(())
+            },
+        )
+        .expect_err("symlink-swapped stage must fail closed");
+
+        assert!(error.contains("without following links"));
+        assert_eq!(fs::read(&target).expect("target bytes"), b"expected-local");
+        assert_eq!(
+            fs::read(&outside).expect("outside bytes"),
+            b"validated-remote"
+        );
         assert!(artifacts(&root).is_empty());
     }
 
@@ -825,13 +1052,92 @@ mod tests {
             AttachmentInstallExpectation::Present {
                 sha256: hash(b"expected-local"),
             },
+            &hash(b"remote-winner"),
         )
         .expect("install outcome");
 
-        assert_eq!(outcome, AttachmentInstallOutcome::Installed);
         assert_eq!(fs::read(&target).expect("target bytes"), b"remote-winner");
-        assert!(!stage.exists());
-        assert!(artifacts(&root).is_empty());
+        assert_eq!(
+            fs::read(&stage).expect("caller stage bytes"),
+            b"remote-winner"
+        );
+        let preserved = match outcome {
+            AttachmentInstallOutcome::Installed {
+                preserved_path: Some(path),
+            } => PathBuf::from(path),
+            other => {
+                panic!("expected installed result with preserved local generation, got {other:?}")
+            }
+        };
+        assert_eq!(
+            fs::read(&preserved).expect("preserved local bytes"),
+            b"expected-local"
+        );
+        assert_eq!(
+            artifacts(&root),
+            vec![preserved
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_writer_after_the_final_check_cannot_destroy_either_generation() {
+        let (_temp, root, stage, target) = fixture();
+        fs::write(&stage, b"remote-winner").expect("stage");
+        fs::write(&target, b"expected-local").expect("target");
+        let mut preopened_writer = OpenOptions::new()
+            .write(true)
+            .open(&target)
+            .expect("pre-open local generation");
+
+        let outcome = install_attachment_download_in_root_with_hook(
+            &root,
+            &stage,
+            &target,
+            AttachmentInstallExpectation::Present {
+                sha256: hash(b"expected-local"),
+            },
+            &hash(b"remote-winner"),
+            |point, _| {
+                if point == InstallHook::AfterFinalQuarantineCheck {
+                    preopened_writer
+                        .set_len(0)
+                        .map_err(|error| format!("truncate preserved inode failed: {error}"))?;
+                    preopened_writer
+                        .seek(SeekFrom::Start(0))
+                        .map_err(|error| format!("seek preserved inode failed: {error}"))?;
+                    preopened_writer
+                        .write_all(b"late-local-edit")
+                        .map_err(|error| format!("write preserved inode failed: {error}"))?;
+                    preopened_writer
+                        .sync_all()
+                        .map_err(|error| format!("flush preserved inode failed: {error}"))?;
+                }
+                Ok(())
+            },
+        )
+        .expect("install outcome");
+
+        let preserved = match outcome {
+            AttachmentInstallOutcome::Installed {
+                preserved_path: Some(path),
+            } => PathBuf::from(path),
+            other => panic!("expected installed result with preservation path, got {other:?}"),
+        };
+        assert_eq!(
+            fs::read(&target).expect("remote target bytes"),
+            b"remote-winner"
+        );
+        assert_eq!(
+            fs::read(&preserved).expect("late local bytes"),
+            b"late-local-edit"
+        );
+        assert_ne!(preserved, target);
+        assert_eq!(artifacts(&root).len(), 1);
     }
 
     #[test]
@@ -847,6 +1153,7 @@ mod tests {
             AttachmentInstallExpectation::Present {
                 sha256: hash(b"expected-local"),
             },
+            &hash(b"remote-winner"),
         )
         .expect("install outcome");
 
@@ -859,7 +1166,7 @@ mod tests {
         ));
         assert_eq!(fs::read(&target).expect("target bytes"), b"late-local");
         assert_eq!(fs::read(&stage).expect("stage bytes"), b"remote-winner");
-        assert!(artifacts(&root).is_empty());
+        assert_eq!(artifacts(&root).len(), 1);
     }
 
     #[test]
@@ -875,9 +1182,13 @@ mod tests {
             AttachmentInstallExpectation::Present {
                 sha256: hash(b"expected-local"),
             },
-            |target_path| {
-                fs::write(target_path, b"late-local")
-                    .map_err(|error| format!("late target fixture failed: {error}"))
+            &hash(b"remote-winner"),
+            |point, target_path| {
+                if point == InstallHook::AfterQuarantine {
+                    fs::write(target_path, b"late-local")
+                        .map_err(|error| format!("late target fixture failed: {error}"))?;
+                }
+                Ok(())
             },
         )
         .expect("install outcome");
@@ -902,7 +1213,7 @@ mod tests {
             fs::read(preserved).expect("quarantine bytes"),
             b"expected-local"
         );
-        assert_eq!(artifacts(&root).len(), 1);
+        assert_eq!(artifacts(&root).len(), 2);
     }
 
     #[test]
@@ -925,7 +1236,7 @@ mod tests {
         write_journal(&root, &journal_path, &journal).expect("journal");
         move_no_replace(&target, &quarantine).expect("quarantine target");
 
-        let recovered = recover_existing_install(&root, &target, &stage).expect("recover");
+        let recovered = recover_existing_install(&root, &target).expect("recover");
 
         assert!(matches!(recovered, RecoveryOutcome::None));
         assert_eq!(fs::read(&target).expect("target bytes"), b"expected-local");
@@ -934,7 +1245,7 @@ mod tests {
     }
 
     #[test]
-    fn recovery_rolls_back_an_unacknowledged_published_replacement() {
+    fn recovery_finalizes_a_published_replacement_and_preserves_the_old_generation() {
         let (_temp, root, stage, target) = fixture();
         fs::write(&stage, b"remote-winner").expect("stage");
         fs::write(&target, b"expected-local").expect("target");
@@ -954,15 +1265,22 @@ mod tests {
         move_no_replace(&target, &quarantine).expect("quarantine target");
         move_no_replace(&stage, &target).expect("publish stage");
 
-        let keep = root.join("new-download-stage");
-        fs::write(&keep, b"new-remote").expect("new stage");
-        let recovered = recover_existing_install(&root, &target, &keep).expect("recover");
+        let recovered = recover_existing_install(&root, &target).expect("recover");
 
-        assert!(matches!(recovered, RecoveryOutcome::None));
-        assert_eq!(fs::read(&target).expect("target bytes"), b"expected-local");
+        assert!(matches!(
+            recovered,
+            RecoveryOutcome::Installed {
+                preserved_path: Some(ref path),
+                ..
+            } if path == &quarantine
+        ));
+        assert_eq!(fs::read(&target).expect("target bytes"), b"remote-winner");
         assert!(!stage.exists());
-        assert_eq!(fs::read(&keep).expect("new stage bytes"), b"new-remote");
-        assert!(artifacts(&root).is_empty());
+        assert_eq!(
+            fs::read(&quarantine).expect("preserved local bytes"),
+            b"expected-local"
+        );
+        assert_eq!(artifacts(&root).len(), 1);
     }
 
     #[test]
@@ -974,6 +1292,7 @@ mod tests {
             &stage,
             &target,
             AttachmentInstallExpectation::Absent,
+            &hash(b"remote"),
         )
         .expect_err("directory stage must fail");
         assert!(directory_error.contains("regular file"));
@@ -986,6 +1305,7 @@ mod tests {
             &stage,
             &outside,
             AttachmentInstallExpectation::Absent,
+            &hash(b"remote"),
         )
         .expect_err("outside target must fail");
         assert!(outside_error.contains("direct child"));
@@ -996,6 +1316,7 @@ mod tests {
             &stage,
             &target,
             AttachmentInstallExpectation::Absent,
+            &hash(b"remote"),
         )
         .expect_err("directory target must fail");
         assert!(target_error.contains("absent or a regular file"));
@@ -1015,6 +1336,7 @@ mod tests {
             &stage,
             &target,
             AttachmentInstallExpectation::Absent,
+            &hash(b"outside"),
         )
         .expect_err("stage symlink must fail");
         assert!(stage_error.contains("regular file"));
@@ -1027,6 +1349,7 @@ mod tests {
             &stage,
             &target,
             AttachmentInstallExpectation::Absent,
+            &hash(b"remote"),
         )
         .expect_err("target symlink must fail");
         assert!(target_error.contains("absent or a regular file"));
@@ -1038,6 +1361,7 @@ mod tests {
             &stage,
             &target,
             AttachmentInstallExpectation::Absent,
+            &hash(b"remote"),
         )
         .expect_err("root symlink must fail");
         assert!(root_error.contains("real directory"));
