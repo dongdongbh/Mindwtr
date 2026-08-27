@@ -290,7 +290,12 @@ export const syncDropboxAttachments = async (
       reportProgress(attachment.id, 'download', 0, attachment.size ?? 0, 'active');
       const data = await runDropboxAuthorized(
         dropboxClientId,
-        (accessToken) => downloadDropboxFile(accessToken, cloudKey, fetcher),
+        (accessToken) => downloadDropboxFile(
+          accessToken,
+          cloudKey,
+          fetcher,
+          { signal: options.signal },
+        ),
         fetcher,
         options.resolveAccessToken,
       );
@@ -303,6 +308,7 @@ export const syncDropboxAttachments = async (
       await validateAttachmentHash(attachment, bytes);
       const filename = cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.title)}`;
       const targetUri = `${attachmentsDir}${filename}`;
+      assertNotAborted(options.signal);
       await writeBytesSafely(targetUri, bytes);
       if (attachment.uri !== targetUri || attachment.localStatus !== 'available') {
         attachment.uri = targetUri;

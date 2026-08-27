@@ -2221,6 +2221,7 @@ export class SyncService {
                         username: webdavConfig.username,
                         password,
                         fetcher,
+                        signal: context.requestAbortController.signal,
                         material,
                         cryptoPrims: desktopSyncCryptoPrimitives,
                     }),
@@ -2270,6 +2271,7 @@ export class SyncService {
                     username: config.username,
                     password,
                     fetcher,
+                    signal: context.requestAbortController.signal,
                     material,
                     cryptoPrims: desktopSyncCryptoPrimitives,
                     expectedEtag,
@@ -2290,6 +2292,7 @@ export class SyncService {
                     username: webdavConfig.username,
                     password,
                     fetcher,
+                    signal: context.requestAbortController.signal,
                 });
             },
             cloudGet: async () => {
@@ -2301,6 +2304,7 @@ export class SyncService {
                     allowInsecureHttp: context.cloudConfig!.allowInsecureHttp,
                     token: context.cloudConfig!.token,
                     fetcher,
+                    signal: context.requestAbortController.signal,
                 });
             },
             cloudPut: async (sanitized) => {
@@ -2315,6 +2319,7 @@ export class SyncService {
                     allowInsecureHttp: config.allowInsecureHttp,
                     token: config.token,
                     fetcher,
+                    signal: context.requestAbortController.signal,
                 });
             },
             cloudHead: async () => {
@@ -2323,6 +2328,7 @@ export class SyncService {
                     allowInsecureHttp: context.cloudConfig!.allowInsecureHttp,
                     token: context.cloudConfig!.token,
                     fetcher,
+                    signal: context.requestAbortController.signal,
                 });
             },
             fileRead: async () => {
@@ -2367,7 +2373,7 @@ export class SyncService {
                         return uploadDropboxAppData(token, sanitized, expectedRev, fetcher, {
                             material,
                             cryptoPrims: desktopSyncCryptoPrimitives,
-                        });
+                        }, { signal: context.requestAbortController.signal });
                     }
                 );
             },
@@ -2375,7 +2381,12 @@ export class SyncService {
                 const fetcher = await createFetchWithAbortForContext(context);
                 const material = (await getSyncEncryptionMaterial()) ?? undefined;
                 return SyncService.runDropboxTransientRetry(
-                    () => getDropboxAppDataMetadata(token, fetcher, { material })
+                    () => getDropboxAppDataMetadata(
+                        token,
+                        fetcher,
+                        { material },
+                        { signal: context.requestAbortController.signal },
+                    )
                 );
             },
             syncWebdavAttachments: async (data, helpers) => {
@@ -2450,14 +2461,24 @@ export class SyncService {
         if (!nativeFetch) {
             return settle(
                 await SyncService.runDropboxTransientRetry(() =>
-                    downloadDropboxAppData(token, browserFetcher, crypto)
+                    downloadDropboxAppData(
+                        token,
+                        browserFetcher,
+                        crypto,
+                        { signal: context.requestAbortController.signal },
+                    )
                 )
             );
         }
 
         const nativeFetcher = createAbortableFetch(nativeFetch, { baseSignal: context.requestAbortController.signal });
         const nativeRemote = await settle(
-            await SyncService.runDropboxTransientRetry(() => downloadDropboxAppData(token, nativeFetcher, crypto))
+            await SyncService.runDropboxTransientRetry(() => downloadDropboxAppData(
+                token,
+                nativeFetcher,
+                crypto,
+                { signal: context.requestAbortController.signal },
+            ))
         );
         if (nativeRemote.data !== null) {
             return nativeRemote;
@@ -2467,7 +2488,12 @@ export class SyncService {
         try {
             const browserRemote = await settle(
                 await SyncService.runDropboxTransientRetry(() =>
-                    downloadDropboxAppData(token, browserFetcher, crypto)
+                    downloadDropboxAppData(
+                        token,
+                        browserFetcher,
+                        crypto,
+                        { signal: context.requestAbortController.signal },
+                    )
                 )
             );
             if (browserRemote.data !== null) {

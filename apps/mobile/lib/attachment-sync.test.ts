@@ -1370,6 +1370,86 @@ describe('attachment sync', () => {
     expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
   });
 
+  it('cancels a stalled Dropbox attachment body after headers without retrying or writing', async () => {
+    const core = await import('@mindwtr/core');
+    const dropbox = await import('./dropbox-sync');
+    const abortController = new AbortController();
+    const resolveAccessToken = vi.fn().mockResolvedValue('dropbox-token');
+    const cancelBody = vi.fn();
+    const networkFetch = vi.fn(async () => new Response(new ReadableStream({
+      pull: () => new Promise<void>(() => undefined),
+      cancel: cancelBody,
+    }), { status: 200 })) as typeof fetch;
+    const anyDescriptor = Object.getOwnPropertyDescriptor(AbortSignal, 'any');
+    Object.defineProperty(AbortSignal, 'any', {
+      configurable: true,
+      value: undefined,
+    });
+
+    try {
+      const fetcher = core.createAbortableFetch(networkFetch, {
+        baseSignal: abortController.signal,
+      });
+      vi.mocked(dropbox.downloadDropboxFile).mockImplementationOnce(
+        (accessToken, path, requestFetcher, requestOptions) => core.downloadDropboxFile(
+          accessToken,
+          path,
+          requestFetcher,
+          requestOptions,
+        ),
+      );
+      fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+      const appData: AppData = {
+        tasks: [{
+          id: 'task-stalled-download',
+          title: 'Task',
+          status: 'inbox',
+          tags: [],
+          contexts: [],
+          attachments: [{
+            id: 'stalled-download',
+            kind: 'file',
+            title: 'stalled.txt',
+            uri: 'file://document/attachments/stalled.txt',
+            cloudKey: 'attachments/stalled.txt',
+            localStatus: 'missing',
+            createdAt: '2026-08-27T00:00:00.000Z',
+            updatedAt: '2026-08-27T00:00:00.000Z',
+          }],
+          createdAt: '2026-08-27T00:00:00.000Z',
+          updatedAt: '2026-08-27T00:00:00.000Z',
+        }],
+        projects: [],
+        sections: [],
+        areas: [],
+        settings: {},
+      };
+
+      const syncPromise = attachmentSync.syncDropboxAttachments(
+        appData,
+        'dropbox-client-id',
+        fetcher,
+        { signal: abortController.signal, resolveAccessToken },
+      );
+      await vi.waitFor(() => expect(networkFetch).toHaveBeenCalledOnce());
+
+      abortController.abort(new DOMException('Sync cycle cancelled', 'AbortError'));
+
+      await expect(syncPromise).rejects.toMatchObject({ name: 'AbortError' });
+      expect(cancelBody).toHaveBeenCalledOnce();
+      expect(dropbox.downloadDropboxFile).toHaveBeenCalledOnce();
+      expect(resolveAccessToken).toHaveBeenCalledOnce();
+      expect(fileSystemMock.writeAsStringAsync).not.toHaveBeenCalled();
+      expect(fileSystemMock.StorageAccessFramework.writeAsStringAsync).not.toHaveBeenCalled();
+    } finally {
+      if (anyDescriptor) {
+        Object.defineProperty(AbortSignal, 'any', anyDescriptor);
+      } else {
+        Reflect.deleteProperty(AbortSignal, 'any');
+      }
+    }
+  });
+
   it('uses a candidate Dropbox token resolver when no durable credentials exist', async () => {
     const localUri = 'file://document/attachments/first-connect.txt';
     fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (

@@ -1356,6 +1356,7 @@ class MobileSyncRun {
           password: webdavConfig.password,
           timeoutMs: DEFAULT_SYNC_TIMEOUT_MS,
           fetcher: this.fetchWithAbort,
+          signal: this.requestAbortController.signal,
           allowWeakFingerprint: webdavConfig.allowWeakFingerprint,
         };
         this.ensureWebdavSyncNotRateLimited();
@@ -1410,6 +1411,7 @@ class MobileSyncRun {
           password: webdavConfig.password,
           timeoutMs: DEFAULT_SYNC_TIMEOUT_MS,
           fetcher: this.fetchWithAbort,
+          signal: this.requestAbortController.signal,
           allowWeakFingerprint: webdavConfig.allowWeakFingerprint,
         };
         this.ensureWebdavSyncNotRateLimited();
@@ -1446,6 +1448,7 @@ class MobileSyncRun {
                 password: webdavConfig.password,
                 timeoutMs: DEFAULT_SYNC_TIMEOUT_MS,
                 fetcher: this.fetchWithAbort,
+                signal: this.requestAbortController.signal,
                 allowWeakFingerprint: webdavConfig.allowWeakFingerprint,
               }),
             WEBDAV_READ_RETRY_OPTIONS
@@ -1463,6 +1466,7 @@ class MobileSyncRun {
           token: cloudConfig.token,
           timeoutMs: DEFAULT_SYNC_TIMEOUT_MS,
           fetcher: this.fetchWithAbort,
+          signal: this.requestAbortController.signal,
         });
       },
       cloudPut: async (sanitized) => {
@@ -1473,6 +1477,7 @@ class MobileSyncRun {
           token: cloudConfig.token,
           timeoutMs: DEFAULT_SYNC_TIMEOUT_MS,
           fetcher: this.fetchWithAbort,
+          signal: this.requestAbortController.signal,
         });
       },
       cloudHead: async () => {
@@ -1482,6 +1487,7 @@ class MobileSyncRun {
           token: cloudConfig.token,
           timeoutMs: DEFAULT_SYNC_TIMEOUT_MS,
           fetcher: this.fetchWithAbort,
+          signal: this.requestAbortController.signal,
         });
       },
       fileRead: async () => {
@@ -1526,12 +1532,14 @@ class MobileSyncRun {
         () => this.resolveDropboxAccessToken(forceRefresh),
       ),
       dropboxDownload: async (token) => {
-        // Off state calls the pre-feature 2-argument form verbatim (invariant #1).
         const material = this.encryptionMaterial;
         const result = await this.runDropboxTransientRetry(
-          () => (material
-            ? downloadDropboxAppData(token, this.fetchWithAbort, { material, cryptoPrims: mobileSyncCryptoPrimitives })
-            : downloadDropboxAppData(token, this.fetchWithAbort))
+          () => downloadDropboxAppData(
+            token,
+            this.fetchWithAbort,
+            material ? { material, cryptoPrims: mobileSyncCryptoPrimitives } : {},
+            { signal: this.requestAbortController.signal },
+          )
         );
         if (result.encryptedNoKey) {
           markRemoteEncryptionDiscovered(syncEncryptionLocalState, result.encryptedNoKey);
@@ -1552,15 +1560,25 @@ class MobileSyncRun {
         const result = await this.runDropboxTransientRetry(
           async () => {
             await assertRemoteMutationFenceHeld?.(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
-            return material
-              ? uploadDropboxAppData(token, sanitized, expectedRev, this.fetchWithAbort, { material, cryptoPrims: mobileSyncCryptoPrimitives })
-              : uploadDropboxAppData(token, sanitized, expectedRev, this.fetchWithAbort);
+            return uploadDropboxAppData(
+              token,
+              sanitized,
+              expectedRev,
+              this.fetchWithAbort,
+              material ? { material, cryptoPrims: mobileSyncCryptoPrimitives } : {},
+              { signal: this.requestAbortController.signal },
+            );
           }
         );
         await this.persistDropboxRev(result.rev);
         return result;
       },
-      dropboxMetadata: (token) => this.runDropboxTransientRetry(() => getDropboxAppDataMetadata(token, this.fetchWithAbort)),
+      dropboxMetadata: (token) => this.runDropboxTransientRetry(() => getDropboxAppDataMetadata(
+        token,
+        this.fetchWithAbort,
+        {},
+        { signal: this.requestAbortController.signal },
+      )),
       syncWebdavAttachments: async (data, helpers) => {
         const webdavConfig = this.webdavConfig!;
         const baseSyncUrl = getBaseSyncUrl(webdavConfig.url);

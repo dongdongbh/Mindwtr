@@ -106,16 +106,40 @@ export const createAbortableFetch = (
         }
 
         const mergedController = new AbortController();
-        const abortMerged = () => mergedController.abort();
+        let listening = false;
+        const removeAbortListeners = () => {
+            if (!listening) return;
+            listening = false;
+            baseSignal.removeEventListener('abort', abortFromBase);
+            existingSignal.removeEventListener('abort', abortFromExisting);
+        };
+        const abortFrom = (signal: AbortSignal) => {
+            if (!mergedController.signal.aborted) {
+                mergedController.abort(signal.reason);
+            }
+            removeAbortListeners();
+        };
+        const abortFromBase = () => abortFrom(baseSignal);
+        const abortFromExisting = () => abortFrom(existingSignal);
         if (baseSignal.aborted || existingSignal.aborted) {
-            mergedController.abort();
+            abortFrom(baseSignal.aborted ? baseSignal : existingSignal);
         } else {
-            baseSignal.addEventListener('abort', abortMerged, { once: true });
-            existingSignal.addEventListener('abort', abortMerged, { once: true });
+            listening = true;
+            baseSignal.addEventListener('abort', abortFromBase, { once: true });
+            existingSignal.addEventListener('abort', abortFromExisting, { once: true });
         }
-        return baseFetch(input, { ...(init || {}), signal: mergedController.signal }).finally(() => {
-            baseSignal.removeEventListener('abort', abortMerged);
-            existingSignal.removeEventListener('abort', abortMerged);
-        });
+        return baseFetch(input, { ...(init || {}), signal: mergedController.signal }).then(
+            (response) => {
+                // Fetch resolves when response headers arrive, before its body is consumed.
+                // Keep the bridge alive for body-owning callers; a cycle controller is
+                // short-lived and aborts on teardown. Header-only responses can detach now.
+                if (!response.body) removeAbortListeners();
+                return response;
+            },
+            (error) => {
+                removeAbortListeners();
+                throw error;
+            },
+        );
     };
 };

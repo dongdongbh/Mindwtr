@@ -472,11 +472,15 @@ describe('mobile Dropbox sync transient retry', () => {
       1,
       'candidate-access-token',
       expect.any(Function),
+      {},
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(dropboxSyncMocks.downloadDropboxAppData).toHaveBeenNthCalledWith(
       2,
       'candidate-refreshed-token',
       expect.any(Function),
+      {},
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(dropboxAuthMocks.getValidDropboxAccessTokenForTokens).toHaveBeenCalledWith(
       'test-app-key',
