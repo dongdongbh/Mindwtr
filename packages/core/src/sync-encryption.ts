@@ -393,19 +393,48 @@ const remoteReadsEqual = (left: SyncEncryptionRemoteRead, right: SyncEncryptionR
         : right.bytes !== null && bytesEqual(left.bytes, right.bytes))
 );
 
-/** Revalidate the document generations the transition is about to make authoritative on
+/** Revalidate the complete managed inventory the transition is about to make authoritative on
  * this device. Mutating calls update `expected` with their verified post-write state; entries
- * that required no work keep their captured version. A peer replacement after inventory (or
- * after our own read-back) must abort before the device caches/clears a key and commits local
- * state for a generation that is no longer current. */
-const revalidateRemoteDocuments = async (
+ * that required no work keep their captured version. The final authoritative list also catches
+ * a peer-created attachment or document name that did not exist in the captured inventory. */
+const revalidateRemoteInventory = async (
     remote: SyncEncryptionRemotePort,
     expected: Map<string, SyncEncryptionRemoteRead>,
-    documentNames: ReadonlySet<string>,
+    expectedKinds: Map<string, SyncEncryptionRemoteEntryKind>,
+    documentPosture: 'encrypted' | 'plaintext',
 ): Promise<void> => {
-    for (const name of documentNames) {
+    for (const [name, kind] of expectedKinds) {
+        const expectedRead = snapshotRemoteRead(expected, name);
+        if (kind !== 'document' || !expectedRead.bytes) continue;
+        const encryptedName = name.includes('.enc');
+        if ((documentPosture === 'encrypted') !== encryptedName) {
+            throw new SyncEncryptionRemoteConflictError(
+                `${name} violates the ${documentPosture} sync encryption document posture`,
+            );
+        }
+    }
+
+    const currentEntries = await remote.list();
+    const currentReads = new Map<string, SyncEncryptionRemoteRead>();
+    for (const entry of currentEntries) {
+        const current = await remote.read(entry.name);
+        currentReads.set(entry.name, current);
+        if (!expected.has(entry.name) && current.bytes) {
+            throw new SyncEncryptionRemoteConflictError(
+                `${entry.name} appeared during sync encryption transition`,
+            );
+        }
+        const expectedKind = expectedKinds.get(entry.name);
+        if (current.bytes && expectedKind && expectedKind !== entry.kind) {
+            throw new SyncEncryptionRemoteConflictError(
+                `${entry.name} changed kind during sync encryption transition`,
+            );
+        }
+    }
+
+    for (const name of expected.keys()) {
         const before = snapshotRemoteRead(expected, name);
-        const current = await remote.read(name);
+        const current = currentReads.get(name) ?? await remote.read(name);
         if (!remoteReadsEqual(before, current)) {
             throw new SyncEncryptionRemoteConflictError(`${name} changed before sync encryption state commit`);
         }
@@ -630,7 +659,7 @@ export async function runEnableSyncEncryptionOverRemote(
     const documents = entries
         .filter((e) => e.kind === 'document' && !e.name.includes('.enc'))
         .sort((a, b) => Number(isBaseDocument(a.name)) - Number(isBaseDocument(b.name)));
-    const documentNames = new Set(entries.filter((entry) => entry.kind === 'document').map((entry) => entry.name));
+    const expectedKinds = new Map(entries.map((entry) => [entry.name, entry.kind] as const));
 
     const total = attachments.length + encryptedDocuments.length + documents.length;
     let completed = 0;
@@ -744,7 +773,7 @@ export async function runEnableSyncEncryptionOverRemote(
                         }
                     });
                     snapshot.set(encName, verified);
-                    documentNames.add(encName);
+                    expectedKinds.set(encName, 'document');
                 }
                 await ensureTransitionJournal();
                 await remote.remove(entry.name, sourceVersion);
@@ -754,7 +783,7 @@ export async function runEnableSyncEncryptionOverRemote(
         completed += 1;
     }
 
-    await revalidateRemoteDocuments(remote, snapshot, documentNames);
+    await revalidateRemoteInventory(remote, snapshot, expectedKinds, 'encrypted');
     await keyCache.setKey(material.key);
     await localState.write({
         state: 'enabled',
@@ -783,7 +812,7 @@ export async function runDisableSyncEncryptionOverRemote(
     const encDocuments = entries
         .filter((e) => e.kind === 'document' && e.name.includes('.enc'))
         .sort((a, b) => Number(isBaseEncDocument(a.name)) - Number(isBaseEncDocument(b.name)));
-    const documentNames = new Set(entries.filter((entry) => entry.kind === 'document').map((entry) => entry.name));
+    const expectedKinds = new Map(entries.map((entry) => [entry.name, entry.kind] as const));
 
     // Build the complete decrypt plan before starting the journal or writing an early
     // artifact. A folder containing a later foreign/abandoned generation must fail with every
@@ -871,7 +900,7 @@ export async function runDisableSyncEncryptionOverRemote(
                     }
                 });
                 snapshot.set(plainName, verified);
-                documentNames.add(plainName);
+                expectedKinds.set(plainName, 'document');
             }
             await ensureTransitionJournal();
             await remote.remove(entry.name, sourceVersion);
@@ -880,7 +909,7 @@ export async function runDisableSyncEncryptionOverRemote(
         completed += 1;
     }
 
-    await revalidateRemoteDocuments(remote, snapshot, documentNames);
+    await revalidateRemoteInventory(remote, snapshot, expectedKinds, 'plaintext');
     await localState.write(null);
     await keyCache.clearKey();
 }
@@ -924,7 +953,7 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
     const encDocuments = entries
         .filter((e) => e.kind === 'document' && e.name.includes('.enc'))
         .sort((a, b) => Number(isBaseEncDocument(a.name)) - Number(isBaseEncDocument(b.name)));
-    const documentNames = new Set(entries.filter((entry) => entry.kind === 'document').map((entry) => entry.name));
+    const expectedKinds = new Map(entries.map((entry) => [entry.name, entry.kind] as const));
 
     // A plaintext-named document means another device left an interrupted disable (or is
     // actively disabling). Rotation must not report success while that exposed generation
@@ -1029,7 +1058,7 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
         completed += 1;
     }
 
-    await revalidateRemoteDocuments(remote, snapshot, documentNames);
+    await revalidateRemoteInventory(remote, snapshot, expectedKinds, 'encrypted');
     await keyCache.setKey(newMaterial.key);
     try {
         await localState.write({

@@ -579,6 +579,32 @@ describe('runEnableSyncEncryptionOverRemote', () => {
             remote.store.get('attachments/a1.png')!, (await keyCache.getKey())!,
         ))).toBe('PEER');
     });
+
+    it('does not commit enable when a new attachment appears after inventory', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a-first.bin': { bytes: utf8('FIRST'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        const originalWrite = remote.write.bind(remote);
+        let injected = false;
+        remote.write = async (name, bytes, expectedVersion) => {
+            await originalWrite(name, bytes, expectedVersion);
+            if (!injected) {
+                injected = true;
+                remote.peerWrite('attachments/late.bin', utf8('LATE SECRET'));
+            }
+        };
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+
+        expect(text(remote.store.get('attachments/late.bin')!)).toBe('LATE SECRET');
+        expect(await keyCache.getKey()).toBeNull();
+        expect(localState.value?.incompleteTransition).toBe('enable');
+    });
 });
 
 describe('runDisableSyncEncryptionOverRemote', () => {
@@ -731,6 +757,39 @@ describe('runDisableSyncEncryptionOverRemote', () => {
         expect(remote.store.get('attachments/a1.png')).toEqual(peerBytes);
         expect(localState.value?.state).toBe('enabled');
         expect(await keyCache.getKey()).not.toBeNull();
+    });
+
+    it('does not clear the key when a new attachment appears after disable inventory', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a-first.bin': { bytes: utf8('FIRST'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const key = new Uint8Array((await keyCache.getKey())!);
+        const material = {
+            key,
+            salt: hexToBytesForTest(localState.value!.discoveredSalt!),
+            params: FAST_KDF,
+        };
+        const lateCiphertext = await encryptSyncArtifact(utf8('LATE SECRET'), material);
+        const originalWrite = remote.write.bind(remote);
+        let injected = false;
+        remote.write = async (name, bytes, expectedVersion) => {
+            await originalWrite(name, bytes, expectedVersion);
+            if (!injected) {
+                injected = true;
+                remote.peerWrite('attachments/late.bin', lateCiphertext);
+            }
+        };
+
+        await expect(runDisableSyncEncryptionOverRemote(remote, keyCache, localState))
+            .rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+
+        expect(remote.store.get('attachments/late.bin')).toEqual(lateCiphertext);
+        expect(await keyCache.getKey()).toEqual(key);
+        expect(localState.value?.incompleteTransition).toBe('disable');
     });
 });
 
@@ -932,6 +991,40 @@ describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
             .toBe('{"tasks":[]}');
         expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a.bin')!, finalKey)))
             .toBe('ATTACHMENT');
+    });
+
+    it('does not commit a new key when an attachment appears after rotation inventory', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a-first.bin': { bytes: utf8('FIRST'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('old-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const oldKey = new Uint8Array((await keyCache.getKey())!);
+        const oldMaterial = {
+            key: oldKey,
+            salt: hexToBytesForTest(localState.value!.discoveredSalt!),
+            params: FAST_KDF,
+        };
+        const lateCiphertext = await encryptSyncArtifact(utf8('LATE SECRET'), oldMaterial);
+        const originalWrite = remote.write.bind(remote);
+        let injected = false;
+        remote.write = async (name, bytes, expectedVersion) => {
+            await originalWrite(name, bytes, expectedVersion);
+            if (!injected) {
+                injected = true;
+                remote.peerWrite('attachments/late.bin', lateCiphertext);
+            }
+        };
+
+        await expect(runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'new-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+
+        expect(remote.store.get('attachments/late.bin')).toEqual(lateCiphertext);
+        expect(await keyCache.getKey()).toEqual(oldKey);
+        expect(localState.value?.incompleteTransition).toBe('change-passphrase');
     });
 });
 
