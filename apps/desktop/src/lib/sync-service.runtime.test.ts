@@ -240,6 +240,7 @@ const fsMocks = vi.hoisted(() => ({
     BaseDirectory: { Data: 'data' },
     exists: vi.fn(),
     mkdir: vi.fn(),
+    open: vi.fn(),
     readFile: vi.fn(),
     writeFile: vi.fn(),
     writeTextFile: vi.fn(),
@@ -258,6 +259,7 @@ const syncFsMocks = vi.hoisted(() => ({
     mkdir: vi.fn(),
     remove: vi.fn(),
     rename: vi.fn(),
+    stat: vi.fn(),
 }));
 const pathMocks = vi.hoisted(() => ({
     dataDir: vi.fn(),
@@ -345,6 +347,18 @@ describe('desktop sync-service runtime', () => {
 
         fsMocks.exists.mockImplementation(async (path: string) => path === 'mindwtr/attachments/doc.txt');
         fsMocks.mkdir.mockResolvedValue(undefined);
+        fsMocks.open.mockImplementation(async () => {
+            let finished = false;
+            return {
+                read: vi.fn(async (buffer: Uint8Array) => {
+                    if (finished) return null;
+                    buffer.set([1, 2, 3]);
+                    finished = true;
+                    return 3;
+                }),
+                close: vi.fn().mockResolvedValue(undefined),
+            };
+        });
         fsMocks.readFile.mockResolvedValue(new Uint8Array([1, 2, 3]));
         fsMocks.writeFile.mockResolvedValue(undefined);
         fsMocks.writeTextFile.mockResolvedValue(undefined);
@@ -355,6 +369,10 @@ describe('desktop sync-service runtime', () => {
         syncFsMocks.mkdir.mockResolvedValue(undefined);
         syncFsMocks.rename.mockResolvedValue(undefined);
         syncFsMocks.remove.mockResolvedValue(undefined);
+        syncFsMocks.stat.mockResolvedValue({
+            mtimeMs: new Date('2026-01-01T00:00:00.000Z').getTime(),
+            size: 3,
+        });
         pathMocks.dataDir.mockResolvedValue('/data');
         pathMocks.join.mockImplementation(async (...parts: string[]) => parts.join('/'));
 
