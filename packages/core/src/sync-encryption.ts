@@ -602,6 +602,11 @@ export async function runEnableSyncEncryptionOverRemote(
         if (!bytes) continue;
         const inspected = inspectSyncArtifact(bytes);
         if (inspected.kind === 'unsupported') throw unsupportedArtifact(entry.name, inspected.reason);
+        if (entry.kind === 'document' && entry.name.includes('.enc') && inspected.kind !== 'encrypted') {
+            throw new SyncEncryptionTerminalError(
+                new SyncCryptoUnsupportedError(`${entry.name} is not a valid MWENC1 container`),
+            );
+        }
         if (inspected.kind !== 'encrypted') continue;
         const candidate = await recoverMaterialForSalt(inspected.salt, inspected.params);
         await decryptRemoteArtifactOrThrow(bytes, candidate.key, prims);
@@ -790,6 +795,11 @@ export async function runDisableSyncEncryptionOverRemote(
         if (!current.bytes) continue;
         const inspected = inspectSyncArtifact(current.bytes);
         if (inspected.kind === 'unsupported') throw unsupportedArtifact(entry.name, inspected.reason);
+        if (entry.kind === 'document' && entry.name.includes('.enc') && inspected.kind !== 'encrypted') {
+            throw new SyncEncryptionTerminalError(
+                new SyncCryptoUnsupportedError(`${entry.name} is not a valid MWENC1 container`),
+            );
+        }
         if (inspected.kind === 'encrypted') {
             plaintextByName.set(
                 entry.name,

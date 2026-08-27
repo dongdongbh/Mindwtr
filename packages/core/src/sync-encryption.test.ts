@@ -506,6 +506,25 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         expect(localState.value).toEqual({ state: 'off', incompleteTransition: 'enable' });
     });
 
+    it('rejects plaintext stored under an encrypted document name before any enable write', async () => {
+        const remote = createFakeRemote({
+            'attachments/a-first.bin': { bytes: utf8('ATTACHMENT'), kind: 'attachment' },
+            'data.json.enc': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        const write = vi.spyOn(remote, 'write');
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(text(remote.store.get('attachments/a-first.bin')!)).toBe('ATTACHMENT');
+        expect(localState.value).toBeNull();
+        expect(await keyCache.getKey()).toBeNull();
+    });
+
     it('aborts on a peer attachment update, preserves peer bytes, and converges on retry', async () => {
         const remote = createFakeRemote({
             'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
@@ -602,6 +621,28 @@ describe('runDisableSyncEncryptionOverRemote', () => {
         expect(write).not.toHaveBeenCalled();
         expect(localState.value).toEqual(expect.objectContaining({ state: 'enabled' }));
         expect(localState.value?.incompleteTransition).toBeUndefined();
+        expect(await keyCache.getKey()).not.toBeNull();
+    });
+
+    it('rejects plaintext stored under an encrypted document name before any disable write', async () => {
+        const remote = createFakeRemote({
+            'attachments/a-first.bin': { bytes: utf8('ATTACHMENT'), kind: 'attachment' },
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        remote.peerWrite('data.json.enc', utf8('{"tasks":[]}'));
+        const enabledState = structuredClone(localState.value);
+        const encryptedAttachment = new Uint8Array(remote.store.get('attachments/a-first.bin')!);
+        const write = vi.spyOn(remote, 'write');
+
+        await expect(runDisableSyncEncryptionOverRemote(remote, keyCache, localState))
+            .rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(remote.store.get('attachments/a-first.bin')).toEqual(encryptedAttachment);
+        expect(localState.value).toEqual(enabledState);
         expect(await keyCache.getKey()).not.toBeNull();
     });
 
