@@ -1206,6 +1206,16 @@ export const useSyncSettings = ({
                 showFileSyncLockFeedback('unavailable');
             } else if (result.success && result.remoteFenceDeferred) {
                 showRemoteFenceFeedback(activationCleanupDeferred === 'remote' ? 'cleanup' : result.remoteFenceDeferred);
+            } else if (result.success && result.attachmentWriteDeferred) {
+                if (activationCleanupDeferred) {
+                    if (activationCleanupDeferred === 'file') showFileSyncLockFeedback('cleanup');
+                    else showRemoteFenceFeedback('cleanup');
+                    return;
+                }
+                showToast(resolveText(
+                    'settings.syncAttachmentWriteDeferred',
+                    'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
+                ), 'info', 6000);
             } else if (
                 result.success
                 && !result.remoteWriteDeferred

@@ -901,6 +901,33 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.setSecureConfigValue).not.toHaveBeenCalled();
     });
 
+    it('shows attachment recovery guidance instead of success for an already proven backend', async () => {
+        seedStorage([
+            [SYNC_BACKEND_KEY, 'webdav'],
+            [WEBDAV_URL_KEY, 'https://dav.example.com/mindwtr/'],
+            [WEBDAV_USERNAME_KEY, 'alice'],
+            [WEBDAV_ALLOW_INSECURE_HTTP_KEY, 'false'],
+        ]);
+        seedSecrets([[WEBDAV_PASSWORD_KEY, 'persisted-secret']]);
+        await renderHarness();
+        mocked.performMobileSync.mockClear();
+        mocked.performMobileSync.mockResolvedValueOnce({
+            success: true,
+            attachmentWriteDeferred: true,
+        });
+
+        await act(async () => {
+            await latestHookResult?.handleSync();
+        });
+
+        expect(mocked.showSettingsWarning).toHaveBeenCalledWith(
+            'common.notice',
+            'settings.syncAttachmentWriteDeferred',
+            6000,
+        );
+        expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+    });
+
     it.each([
         ['offline', { success: true, skipped: 'offline', offlineCause: 'network' }],
         ['transport error', { success: false, error: 'request failed' }],

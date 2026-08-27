@@ -1253,6 +1253,36 @@ describe('useSyncSettings cloud token validation', () => {
         expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
     });
 
+    it('shows attachment recovery guidance instead of success for an already proven backend', async () => {
+        vi.mocked(SyncService.getSyncBackend).mockResolvedValue('cloud');
+        vi.mocked(SyncService.getCloudProvider).mockResolvedValue('selfhosted');
+        vi.mocked(SyncService.getCloudConfig).mockResolvedValue({
+            url: 'https://example.com',
+            token: 'a'.repeat(24),
+            rememberToken: false,
+            allowInsecureHttp: false,
+        });
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: true,
+            attachmentWriteDeferred: true,
+        });
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        const { result } = setup();
+        await waitFor(() => expect(result.current.syncPageProps.syncBackend).toBe('cloud'));
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(showToast).toHaveBeenCalledWith(
+            'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
+            'info',
+            6000,
+        );
+        expect(showToast).not.toHaveBeenCalledWith('Sync completed', 'success');
+    });
+
     it('promotes a same-provider Dropbox reconnect only after the staged proof succeeds', async () => {
         vi.mocked(SyncService.getSyncBackend).mockResolvedValue('cloud');
         vi.mocked(SyncService.getCloudProvider).mockResolvedValue('dropbox');

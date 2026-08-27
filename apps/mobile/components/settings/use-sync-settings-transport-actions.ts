@@ -922,6 +922,19 @@ export function useSyncSettingsTransportActions({
                 showRemoteFenceFeedback(activationCleanupDeferred === 'remote' ? 'cleanup' : result.remoteFenceDeferred);
                 return;
             }
+            if (result.success && result.attachmentWriteDeferred) {
+                if (activationCleanupDeferred) {
+                    if (activationCleanupDeferred === 'file') showFileSyncLockFeedback('cleanup');
+                    else showRemoteFenceFeedback('cleanup');
+                    return;
+                }
+                showSettingsWarning(
+                    tr('common.notice'),
+                    tr('settings.syncAttachmentWriteDeferred'),
+                    6000,
+                );
+                return;
+            }
             if (
                 result.success
                 && !result.remoteWriteDeferred
