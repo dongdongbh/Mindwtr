@@ -7,6 +7,15 @@ import { SyncRemoteMutationFenceLostError, type AppData, type Attachment } from 
  *  the tests expect. */
 const sha256Hex = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 const base64Of = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64');
+const deferred = <T = void>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+};
 
 const fileSystemMock = vi.hoisted(() => ({
   __esModule: true,
@@ -1610,13 +1619,16 @@ describe('attachment sync', () => {
       expect(core.webdavPutFileVersioned).not.toHaveBeenCalled();
     });
 
-    it('cancels a hanging streamed WebDAV upload at the request timeout', async () => {
-      const cancelAsync = vi.fn(async () => undefined);
-      const uploadAsync = vi.fn(() => new Promise<never>(() => undefined));
+    it('does not finish a timed-out streamed upload until cancellation and the upload both settle', async () => {
+      const cancellation = deferred();
+      const upload = deferred<{ status: number }>();
+      const cancelAsync = vi.fn(() => cancellation.promise);
+      const uploadAsync = vi.fn(() => upload.promise);
       fileSystemMock.createUploadTask.mockReturnValue({ uploadAsync, cancelAsync });
       const { uploadWebdavFileWithFileSystem } = await import('./attachment-sync-backends/common');
 
-      await expect(uploadWebdavFileWithFileSystem(
+      let settled = false;
+      const pending = uploadWebdavFileWithFileSystem(
         'https://example.com/attachments/a.bin',
         'file://document/attachments/a.bin',
         'application/octet-stream',
@@ -1628,10 +1640,104 @@ describe('attachment sync', () => {
         undefined,
         null,
         1,
-      )).rejects.toThrow('WebDAV streamed upload timed out');
+      ).finally(() => { settled = true; });
 
+      await vi.waitFor(() => expect(cancelAsync).toHaveBeenCalledOnce());
+      expect(settled).toBe(false);
+      cancellation.resolve();
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      upload.reject(new Error('native upload cancelled'));
+      await expect(pending).rejects.toThrow('WebDAV streamed upload timed out');
       expect(uploadAsync).toHaveBeenCalledTimes(1);
-      expect(cancelAsync).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not finish after cancellation acknowledgement while the native upload is still live', async () => {
+      const upload = deferred<{ status: number }>();
+      const cancelAsync = vi.fn(async () => undefined);
+      fileSystemMock.createUploadTask.mockReturnValue({ uploadAsync: () => upload.promise, cancelAsync });
+      const { uploadWebdavFileWithFileSystem } = await import('./attachment-sync-backends/common');
+
+      let settled = false;
+      const pending = uploadWebdavFileWithFileSystem(
+        'https://example.com/attachments/a.bin',
+        'file://document/attachments/a.bin',
+        'application/octet-stream',
+        'u',
+        'p',
+        false,
+        undefined,
+        3,
+        undefined,
+        null,
+        1,
+      ).finally(() => { settled = true; });
+
+      await vi.waitFor(() => expect(cancelAsync).toHaveBeenCalledOnce());
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      upload.reject(new Error('native upload cancelled'));
+      await expect(pending).rejects.toThrow('WebDAV streamed upload timed out');
+    });
+
+    it('does not return to retry or fence release when cancellation never acknowledges', async () => {
+      const cancellation = deferred();
+      const upload = deferred<{ status: number }>();
+      const cancelAsync = vi.fn(() => cancellation.promise);
+      fileSystemMock.createUploadTask.mockReturnValue({ uploadAsync: () => upload.promise, cancelAsync });
+      const { uploadWebdavFileWithFileSystem } = await import('./attachment-sync-backends/common');
+
+      let settled = false;
+      void uploadWebdavFileWithFileSystem(
+        'https://example.com/attachments/a.bin',
+        'file://document/attachments/a.bin',
+        'application/octet-stream',
+        'u',
+        'p',
+        false,
+        undefined,
+        3,
+        undefined,
+        null,
+        1,
+      ).finally(() => { settled = true; });
+
+      await vi.waitFor(() => expect(cancelAsync).toHaveBeenCalledOnce());
+      upload.reject(new Error('native upload terminated'));
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(settled).toBe(false);
+    });
+
+    it.each([
+      ['rejects cancellation', vi.fn(async () => { throw new Error('cancel failed'); })],
+      ['has no cancellation API', undefined],
+    ])('waits for terminal upload settlement when the native task %s', async (_case, cancelAsync) => {
+      const upload = deferred<{ status: number }>();
+      fileSystemMock.createUploadTask.mockReturnValue({ uploadAsync: () => upload.promise, cancelAsync });
+      const {
+        StreamedUploadCancellationUnconfirmedError,
+        uploadWebdavFileWithFileSystem,
+      } = await import('./attachment-sync-backends/common');
+
+      let settled = false;
+      const pending = uploadWebdavFileWithFileSystem(
+        'https://example.com/attachments/a.bin',
+        'file://document/attachments/a.bin',
+        'application/octet-stream',
+        'u',
+        'p',
+        false,
+        undefined,
+        3,
+        undefined,
+        null,
+        1,
+      ).finally(() => { settled = true; });
+
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(settled).toBe(false);
+      upload.reject(new Error('native upload terminated'));
+      await expect(pending).rejects.toBeInstanceOf(StreamedUploadCancellationUnconfirmedError);
     });
 
     it('re-uploads a WebDAV attachment during prepare but re-downloads the very same mismatch post-merge', async () => {

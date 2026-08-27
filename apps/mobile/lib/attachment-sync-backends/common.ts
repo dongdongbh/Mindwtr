@@ -1,4 +1,3 @@
-import type { Attachment, SyncKeyMaterial } from '@mindwtr/core';
 import {
   decryptRemoteArtifactOrThrow,
   encryptSyncArtifact,
@@ -7,8 +6,10 @@ import {
   SyncCryptoUnsupportedError,
   SyncEncryptionTerminalError,
   WebDavRemoteWriteConflictError,
+  type Attachment,
   type AttachmentTransferLifecycleOptions,
   type AttachmentTransferResult,
+  type SyncKeyMaterial,
 } from '@mindwtr/core';
 import * as FileSystem from '../file-system';
 import * as LegacyFileSystem from 'expo-file-system/legacy';
@@ -204,9 +205,22 @@ const assertUploadNotAborted = (signal?: AbortSignal): void => {
   throw createUploadAbortError(signal);
 };
 
+export class StreamedUploadCancellationUnconfirmedError extends Error {
+  readonly cancellationError: unknown;
+
+  constructor(cause: Error, cancellationError: unknown) {
+    super('Streamed upload cancellation could not be confirmed after the native upload terminated');
+    this.name = 'StreamedUploadCancellationUnconfirmedError';
+    this.cancellationError = cancellationError;
+    (this as Error & { cause?: unknown }).cause = cause;
+  }
+}
+
 const cancelUploadTask = async (task: unknown): Promise<void> => {
   const cancelAsync = (task as { cancelAsync?: unknown } | null)?.cancelAsync;
-  if (typeof cancelAsync !== 'function') return;
+  if (typeof cancelAsync !== 'function') {
+    throw new Error('Native upload task has no cancellation API');
+  }
   await cancelAsync.call(task);
 };
 
@@ -224,31 +238,58 @@ const runUploadTask = async <T,>(
 
   return await new Promise<T>((resolve, reject) => {
     let settled = false;
+    let cancellationStarted = false;
     let onAbort: (() => void) | null = null;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const uploadOutcome = Promise.resolve().then(() => task.uploadAsync()).then(
+      (value) => ({ state: 'fulfilled', value } as const),
+      (error) => ({ state: 'rejected', error } as const),
+    );
+    const cleanupTriggers = () => {
+      if (timeoutId !== null) clearTimeout(timeoutId);
+      timeoutId = null;
+      if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+      onAbort = null;
+    };
     const finish = (fn: () => void) => {
       if (settled) return;
       settled = true;
-      if (timeoutId !== null) clearTimeout(timeoutId);
-      if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+      cleanupTriggers();
       fn();
     };
-    onAbort = () => {
-      void cancelUploadTask(task).catch(() => undefined);
-      finish(() => reject(createUploadAbortError(signal)));
+    const beginCancellation = (cause: Error) => {
+      if (settled || cancellationStarted) return;
+      cancellationStarted = true;
+      cleanupTriggers();
+      const cancellationOutcome = cancelUploadTask(task).then(
+        () => ({ confirmed: true } as const),
+        (error) => ({ confirmed: false, error } as const),
+      );
+      // Do not reject until the native request is terminal. Otherwise the retry/finally
+      // path can release the remote mutation fence while the old PUT is still live.
+      // If native cancellation itself never acknowledges, this intentionally remains
+      // pending: compatible clients must not be allowed to mutate behind an unbounded PUT.
+      void Promise.all([cancellationOutcome, uploadOutcome]).then(([cancellation]) => {
+        if (cancellation.confirmed) {
+          finish(() => reject(cause));
+          return;
+        }
+        finish(() => reject(new StreamedUploadCancellationUnconfirmedError(cause, cancellation.error)));
+      });
     };
+    onAbort = () => beginCancellation(createUploadAbortError(signal));
 
     signal?.addEventListener('abort', onAbort, { once: true });
     if (timeoutMs !== undefined) {
       timeoutId = setTimeout(() => {
-        void cancelUploadTask(task).catch(() => undefined);
-        finish(() => reject(new Error('WebDAV streamed upload timed out')));
+        beginCancellation(new Error('WebDAV streamed upload timed out'));
       }, timeoutMs);
     }
-    Promise.resolve().then(() => task.uploadAsync()).then(
-      (result) => finish(() => resolve(result)),
-      (error) => finish(() => reject(error))
-    );
+    void uploadOutcome.then((outcome) => {
+      if (cancellationStarted) return;
+      if (outcome.state === 'fulfilled') finish(() => resolve(outcome.value));
+      else finish(() => reject(outcome.error));
+    });
   });
 };
 
