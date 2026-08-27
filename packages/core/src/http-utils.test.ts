@@ -214,6 +214,23 @@ describe('fetchWithTimeout', () => {
         expect(cancel).toHaveBeenCalledOnce();
     });
 
+    it('cancels an unlocked response body when the consumer rejects before reading it', async () => {
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }));
+
+        await expect(fetchWithTimeoutAndConsume(
+            'https://example.com/data.json',
+            {},
+            1_000,
+            async () => response,
+            'Request timed out',
+            async () => { throw new Error('HTTP 401'); },
+        )).rejects.toThrow('HTTP 401');
+
+        expect(cancel).toHaveBeenCalledOnce();
+        expect(response.bodyUsed).toBe(true);
+    });
+
     it('keeps the caller abort listener until body consumption finishes, then removes it', async () => {
         const controller = new AbortController();
         const reason = new DOMException('Sync cancelled during download', 'AbortError');
@@ -398,7 +415,7 @@ describe('readResponseBody', () => {
         const arrayBuffer = vi.fn(async () => new ArrayBuffer(0));
         const res = {
             headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
-            body: { getReader: () => ({ read, cancel }) },
+            body: { locked: false, cancel, getReader: () => ({ read, cancel }) },
             arrayBuffer,
         } as unknown as Response;
         return { res, read, cancel, arrayBuffer };
@@ -409,13 +426,14 @@ describe('readResponseBody', () => {
     });
 
     it('rejects a huge content-length before reading a single byte', async () => {
-        const { res, read, arrayBuffer } = streamingResponse([new Uint8Array([1, 2, 3])], {
+        const { res, read, cancel, arrayBuffer } = streamingResponse([new Uint8Array([1, 2, 3])], {
             'content-length': String(MAX_DOWNLOAD_BYTES + 1),
         });
         await expect(readResponseBody(res)).rejects.toBeInstanceOf(ResponseTooLargeError);
         await expect(readResponseBody(res)).rejects.toThrow(String(MAX_DOWNLOAD_BYTES));
         expect(read).not.toHaveBeenCalled();
         expect(arrayBuffer).not.toHaveBeenCalled();
+        expect(cancel).toHaveBeenCalled();
     });
 
     it('aborts a body that streams past the cap despite an honest-looking header', async () => {

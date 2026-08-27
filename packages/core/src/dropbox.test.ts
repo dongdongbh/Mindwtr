@@ -8,6 +8,7 @@ import {
     DropboxUnauthorizedError,
     getDropboxFileMetadata,
     listDropboxFolderFiles,
+    testDropboxAccess,
     uploadDropboxAppData,
     uploadDropboxFileVersioned,
 } from './dropbox';
@@ -447,5 +448,30 @@ describe('versioned Dropbox transition byte operations', () => {
         await expect(deleteDropboxFileVersioned('token', '/a.bin', 'old-rev', fetcher))
             .rejects.toBeInstanceOf(DropboxConflictError);
         expect(body).toEqual({ path: '/a.bin', parent_rev: 'old-rev' });
+    });
+
+    it.each([
+        ['successful delete', (fetcher: typeof fetch) => deleteDropboxFileVersioned(
+            'token', '/a.bin', 'old-rev', fetcher, { timeoutMs: 1 },
+        ), 200],
+        ['missing connection probe', (fetcher: typeof fetch) => testDropboxAccess(
+            'token', fetcher, { timeoutMs: 1 },
+        ), 409],
+    ])('times out and cancels a stalled %s response body', async (_kind, request, status) => {
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status });
+
+        await expect(request(async () => response)).rejects.toThrow(/timed out/i);
+        expect(cancel).toHaveBeenCalledOnce();
+    }, 100);
+
+    it('cancels an unread 401 body before surfacing the Dropbox error', async () => {
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 401 });
+
+        await expect(deleteDropboxFileVersioned(
+            'token', '/a.bin', 'old-rev', async () => response,
+        )).rejects.toBeInstanceOf(DropboxUnauthorizedError);
+        expect(cancel).toHaveBeenCalledOnce();
     });
 });

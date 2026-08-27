@@ -2,6 +2,7 @@ import {
     DEFAULT_TIMEOUT_MS,
     assertConnectionAllowed,
     createProgressStream,
+    discardResponseBody,
     fetchWithTimeout,
     fetchWithTimeoutAndConsume,
     MAX_ERROR_BODY_BYTES,
@@ -311,12 +312,16 @@ const createWebdavCollection = async (
     options: WebDavOptions,
 ): Promise<Response> => {
     const fetcher = options.fetcher ?? fetch;
-    return fetchWithTimeout(
+    return fetchWithTimeoutAndConsume(
         normalizeWebdavCollectionUrl(url),
         { method: 'MKCOL', headers: buildHeaders(options) },
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         WEBDAV_TIMEOUT_ERROR,
+        async (response, signal) => {
+            await discardResponseBody(response, signal);
+            return response;
+        },
     );
 };
 
@@ -325,7 +330,7 @@ const webdavCollectionExists = async (
     options: WebDavOptions,
 ): Promise<boolean> => {
     const fetcher = options.fetcher ?? fetch;
-    const res = await fetchWithTimeout(
+    return await fetchWithTimeoutAndConsume(
         normalizeWebdavCollectionUrl(url),
         {
             method: 'PROPFIND',
@@ -337,13 +342,20 @@ const webdavCollectionExists = async (
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         WEBDAV_TIMEOUT_ERROR,
+        async (res, signal) => {
+            if (res.status === 404) {
+                await discardResponseBody(res, signal);
+                return false;
+            }
+            if (res.ok || res.status === 405) {
+                await discardResponseBody(res, signal);
+                return true;
+            }
+            const error = new Error(`WebDAV PROPFIND failed (${res.status})`);
+            (error as { status?: number }).status = res.status;
+            throw error;
+        },
     );
-
-    if (res.status === 404) return false;
-    if (res.ok || res.status === 405) return true;
-    const error = new Error(`WebDAV PROPFIND failed (${res.status})`);
-    (error as { status?: number }).status = res.status;
-    throw error;
 };
 
 const probeWebdavCollectionExists = async (
@@ -534,18 +546,21 @@ const fetchWebdavPutAndConsumeError = async (
     timeoutMs,
     fetcher,
     WEBDAV_TIMEOUT_ERROR,
-    async (response, signal) => ({
-        ok: response.ok,
-        status: response.status,
-        statusText: response.statusText,
-        headers: response.headers,
-        errorText: response.ok
-            ? ''
+    async (response, signal) => {
+        const errorText = response.ok
+            ? (await discardResponseBody(response, signal), '')
             : await readResponseText(response, MAX_ERROR_BODY_BYTES, signal).catch((error) => {
                 if (signal?.aborted) throw error;
                 return '';
-            }),
-    }),
+            });
+        return {
+            ok: response.ok,
+            status: response.status,
+            statusText: response.statusText,
+            headers: response.headers,
+            errorText,
+        };
+    },
 );
 
 /** One GET supplies both document bytes and the strong validator governing the later PUT. */
@@ -833,12 +848,16 @@ export async function webdavPutFile(
     };
     const sendPut = async (): Promise<Response> => {
         const { headers, body } = buildRequest();
-        return fetchWithTimeout(
+        return fetchWithTimeoutAndConsume(
             url,
             { method: 'PUT', headers, body, signal: options.signal },
             options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
             fetcher,
             WEBDAV_TIMEOUT_ERROR,
+            async (response, signal) => {
+                await discardResponseBody(response, signal);
+                return response;
+            },
         );
     };
 
@@ -1154,17 +1173,17 @@ export async function webdavDeleteFile(
 ): Promise<void> {
     assertWebdavUrl(url, options);
     const fetcher = options.fetcher ?? fetch;
-    const res = await fetchWithTimeout(
+    await fetchWithTimeoutAndConsume(
         url,
         { method: 'DELETE', headers: buildHeaders(options) },
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         WEBDAV_TIMEOUT_ERROR,
+        async (res, signal) => {
+            if (!res.ok && res.status !== 404) throw new Error(`WebDAV DELETE failed (${res.status})`);
+            await discardResponseBody(res, signal);
+        },
     );
-
-    if (!res.ok && res.status !== 404) {
-        throw new Error(`WebDAV DELETE failed (${res.status})`);
-    }
 }
 
 /** Conditional delete for an artifact whose strong ETag was captured by the transition
@@ -1180,15 +1199,18 @@ export async function webdavDeleteFileVersioned(
     const fetcher = options.fetcher ?? fetch;
     const headers = buildHeaders(options);
     headers['If-Match'] = strongEtag;
-    const res = await fetchWithTimeout(
+    await fetchWithTimeoutAndConsume(
         url,
         { method: 'DELETE', headers },
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         WEBDAV_TIMEOUT_ERROR,
+        async (res, signal) => {
+            if (res.status === 404 || res.status === 409 || res.status === 412) {
+                throw new WebDavRemoteWriteConflictError(res.status);
+            }
+            if (!res.ok) throw new Error(`WebDAV DELETE failed (${res.status})`);
+            await discardResponseBody(res, signal);
+        },
     );
-    if (res.status === 404 || res.status === 409 || res.status === 412) {
-        throw new WebDavRemoteWriteConflictError(res.status);
-    }
-    if (!res.ok) throw new Error(`WebDAV DELETE failed (${res.status})`);
 }

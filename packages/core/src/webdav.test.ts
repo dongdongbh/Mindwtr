@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
     __webdavTestUtils,
     assertWebdavStrongEtagSupport,
+    webdavDeleteFile,
     webdavDeleteFileVersioned,
     webdavGetFile,
     webdavGetFileVersioned,
@@ -650,6 +651,22 @@ describe('versioned WebDAV transition byte operations', () => {
             'https://example.com/dav/a.bin', '"v1"', { fetcher },
         )).rejects.toThrow('WEBDAV_REMOTE_WRITE_CONFLICT');
     });
+
+    it.each([
+        ['PUT', (fetcher: typeof fetch) => webdavPutFile(
+            'https://example.com/dav/a.bin', new Uint8Array([1]), 'application/octet-stream',
+            { fetcher, timeoutMs: 1 },
+        )],
+        ['DELETE', (fetcher: typeof fetch) => webdavDeleteFile(
+            'https://example.com/dav/a.bin', { fetcher, timeoutMs: 1 },
+        )],
+    ])('times out and cancels a stalled successful %s response body', async (_kind, request) => {
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 200 });
+
+        await expect(request(async () => response)).rejects.toThrow('WebDAV request timed out');
+        expect(cancel).toHaveBeenCalledOnce();
+    }, 100);
 
     it('preflights an empty remote with enforced create-only and stale replacement conditions', async () => {
         const documentUrl = 'https://example.com/dav/data.json';

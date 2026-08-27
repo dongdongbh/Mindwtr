@@ -8,7 +8,7 @@ import {
 } from './dropbox-sync-utils';
 import {
     DEFAULT_TIMEOUT_MS,
-    fetchWithTimeout,
+    discardResponseBody,
     fetchWithTimeoutAndConsume,
     MAX_ERROR_BODY_BYTES,
     MAX_DOWNLOAD_BYTES,
@@ -38,20 +38,6 @@ export type DropboxFolderFileEntry = {
     name: string;
     pathLower: string;
 };
-
-const fetchDropbox = (
-    fetcher: typeof fetch,
-    url: string,
-    init: RequestInit,
-    options: DropboxRequestOptions,
-    timeoutMessage: string,
-): Promise<Response> => fetchWithTimeout(
-    url,
-    { ...init, signal: options.signal },
-    options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    fetcher,
-    timeoutMessage,
-);
 
 const fetchDropboxAndConsume = <T>(
     fetcher: typeof fetch,
@@ -671,6 +657,7 @@ export async function deleteDropboxFile(
         if (!response.ok) {
             throw new Error(`Dropbox file delete failed: HTTP ${response.status}`);
         }
+        await discardResponseBody(response, signal);
     });
 }
 
@@ -684,17 +671,19 @@ export async function deleteDropboxFileVersioned(
     requestOptions: DropboxRequestOptions = {},
 ): Promise<void> {
     if (!expectedRev.trim()) throw new Error('Dropbox conditional delete requires a revision');
-    const response = await fetchDropbox(fetcher, FILE_DELETE_ENDPOINT, {
+    await fetchDropboxAndConsume(fetcher, FILE_DELETE_ENDPOINT, {
         method: 'POST',
         headers: {
             Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({ path: resolveDropboxPath(path), parent_rev: expectedRev }),
-    }, requestOptions, 'Dropbox versioned file delete timed out');
-    if (response.status === 401) throw new DropboxUnauthorizedError('Dropbox file delete failed: HTTP 401');
-    if (response.status === 409) throw new DropboxConflictError('Dropbox artifact changed during encryption transition');
-    if (!response.ok) throw new Error(`Dropbox file delete failed: HTTP ${response.status}`);
+    }, requestOptions, 'Dropbox versioned file delete timed out', async (response, signal) => {
+        if (response.status === 401) throw new DropboxUnauthorizedError('Dropbox file delete failed: HTTP 401');
+        if (response.status === 409) throw new DropboxConflictError('Dropbox artifact changed during encryption transition');
+        if (!response.ok) throw new Error(`Dropbox file delete failed: HTTP ${response.status}`);
+        await discardResponseBody(response, signal);
+    });
 }
 
 export async function testDropboxAccess(
@@ -702,7 +691,7 @@ export async function testDropboxAccess(
     fetcher: typeof fetch = fetch,
     requestOptions: DropboxRequestOptions = {},
 ): Promise<void> {
-    const response = await fetchDropbox(fetcher, FILE_METADATA_ENDPOINT, {
+    await fetchDropboxAndConsume(fetcher, FILE_METADATA_ENDPOINT, {
         method: 'POST',
         headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -713,14 +702,13 @@ export async function testDropboxAccess(
             include_media_info: false,
             include_deleted: false,
         }),
-    }, requestOptions, 'Dropbox connection test timed out');
-    if (response.status === 409) {
-        return;
-    }
-    if (response.status === 401) {
-        throw new DropboxUnauthorizedError('Dropbox connection failed: HTTP 401');
-    }
-    if (!response.ok) {
-        throw new Error(`Dropbox connection failed: HTTP ${response.status}`);
-    }
+    }, requestOptions, 'Dropbox connection test timed out', async (response, signal) => {
+        if (response.status === 401) {
+            throw new DropboxUnauthorizedError('Dropbox connection failed: HTTP 401');
+        }
+        if (!response.ok && response.status !== 409) {
+            throw new Error(`Dropbox connection failed: HTTP ${response.status}`);
+        }
+        await discardResponseBody(response, signal);
+    });
 }

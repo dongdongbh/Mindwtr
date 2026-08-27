@@ -6,6 +6,7 @@ import {
     cloudGetFile,
     cloudGetJson,
     cloudHeadJson,
+    cloudPutFile,
     cloudPutJson,
     cloudRequestJson,
     buildCloudCalendarFeedUrl,
@@ -292,6 +293,23 @@ describe('cloud sync http helpers', () => {
         const fetcher = vi.fn(async () => errorResponse(404, 'Not Found'));
         await expect(cloudDeleteFile('https://example.com/v1/file', { fetcher })).resolves.toBeUndefined();
     });
+
+    it.each([
+        ['PUT', (fetcher: typeof fetch) => cloudPutFile(
+            'https://example.com/v1/file', new Uint8Array([1]), 'application/octet-stream',
+            { fetcher, timeoutMs: 1 },
+        )],
+        ['DELETE 404', (fetcher: typeof fetch) => cloudDeleteFile(
+            'https://example.com/v1/file', { fetcher, timeoutMs: 1 },
+        )],
+    ])('times out and cancels a stalled successful %s response body', async (kind, request) => {
+        const cancel = vi.fn();
+        const status = kind === 'DELETE 404' ? 404 : 200;
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status });
+
+        await expect(request(async () => response)).rejects.toThrow('Cloud request timed out');
+        expect(cancel).toHaveBeenCalledOnce();
+    }, 100);
 
     it('exposes status on file get failures', async () => {
         const fetcher = vi.fn(async () => errorResponse(404, 'Not Found'));

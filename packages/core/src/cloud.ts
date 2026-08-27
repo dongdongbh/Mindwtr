@@ -2,6 +2,7 @@ import {
     DEFAULT_TIMEOUT_MS,
     assertConnectionAllowed,
     createProgressStream,
+    discardResponseBody,
     fetchWithTimeout,
     fetchWithTimeoutAndConsume,
     MAX_ERROR_BODY_BYTES,
@@ -333,7 +334,7 @@ export async function cloudPutFile(
         }
     }
 
-    const res = await fetchWithTimeout(
+    await fetchWithTimeoutAndConsume(
         url,
         {
             method: 'PUT',
@@ -344,11 +345,11 @@ export async function cloudPutFile(
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         CLOUD_TIMEOUT_ERROR,
+        async (res, signal) => {
+            if (!res.ok) throw cloudHttpError('Cloud File PUT', res);
+            await discardResponseBody(res, signal);
+        },
     );
-
-    if (!res.ok) {
-        throw cloudHttpError('Cloud File PUT', res);
-    }
 }
 
 export async function cloudGetFile(
@@ -380,7 +381,7 @@ export async function cloudDeleteFile(
 ): Promise<void> {
     assertCloudUrl(url, options);
     const fetcher = options.fetcher ?? fetch;
-    const res = await fetchWithTimeout(
+    await fetchWithTimeoutAndConsume(
         url,
         {
             method: 'DELETE',
@@ -390,9 +391,9 @@ export async function cloudDeleteFile(
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         CLOUD_TIMEOUT_ERROR,
+        async (res, signal) => {
+            if (!res.ok && res.status !== 404) throw cloudHttpError('Cloud DELETE', res);
+            await discardResponseBody(res, signal);
+        },
     );
-
-    if (!res.ok && res.status !== 404) {
-        throw cloudHttpError('Cloud DELETE', res);
-    }
 }

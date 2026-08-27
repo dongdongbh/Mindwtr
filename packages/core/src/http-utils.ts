@@ -312,6 +312,22 @@ export class ResponseTooLargeError extends Error {
     }
 }
 
+const cancelUnlockedResponseBody = (res: Response): void => {
+    const body = res.body;
+    if (!body || body.locked) return;
+    try {
+        if (typeof body.cancel === 'function') {
+            void body.cancel().catch(() => undefined);
+            return;
+        }
+        const reader = body.getReader?.();
+        void reader?.cancel().catch(() => undefined);
+    } catch {
+        // Cancellation is best-effort; the original protocol/consumer failure
+        // remains authoritative.
+    }
+};
+
 /**
  * Reads a response body with a hard byte ceiling. A server-declared Content-Length is
  * only ever used to reject early and to report progress -- never to size an allocation,
@@ -325,7 +341,10 @@ export const readResponseBody = async (
 ): Promise<ArrayBuffer> => {
     const declared = Number(res.headers?.get('content-length') || 0);
     const total = Number.isFinite(declared) && declared > 0 ? declared : 0;
-    if (total > limitBytes) throw new ResponseTooLargeError(limitBytes);
+    if (total > limitBytes) {
+        cancelUnlockedResponseBody(res);
+        throw new ResponseTooLargeError(limitBytes);
+    }
 
     const body = res.body;
     if (!body || typeof body.getReader !== 'function') {
@@ -371,13 +390,29 @@ export const readResponseText = async (
     signal?: AbortSignal,
 ): Promise<string> => {
     const declared = Number(res.headers?.get('content-length') || 0);
-    if (Number.isFinite(declared) && declared > limitBytes) throw new ResponseTooLargeError(limitBytes);
+    if (Number.isFinite(declared) && declared > limitBytes) {
+        cancelUnlockedResponseBody(res);
+        throw new ResponseTooLargeError(limitBytes);
+    }
     if (res.body || typeof res.arrayBuffer === 'function') {
         return new TextDecoder().decode(await readResponseBody(res, undefined, limitBytes, signal));
     }
     const text = await waitForAbort(res.text(), signal);
     if (text.length > limitBytes) throw new ResponseTooLargeError(limitBytes);
     return text;
+};
+
+/** Consume and discard a response while retaining the caller's timeout/abort lifetime. */
+export const discardResponseBody = async (
+    res: Response,
+    signal?: AbortSignal,
+    limitBytes: number = MAX_ERROR_BODY_BYTES,
+): Promise<void> => {
+    if (res.body || typeof res.arrayBuffer === 'function') {
+        await readResponseBody(res, undefined, limitBytes, signal);
+        return;
+    }
+    await readResponseText(res, limitBytes, signal);
 };
 
 export const createProgressStream = (bytes: Uint8Array, onProgress: (loaded: number, total: number) => void) => {
@@ -452,20 +487,18 @@ export const fetchWithTimeoutAndConsume = async <T>(
             requestInit.duplex = 'half';
         }
         const response = await waitForAbort(fetcher(url, requestInit), signal);
-        return await waitForAbort(
-            consume(response, signal),
-            signal,
-            () => {
-                const responseBody = response.body;
-                if (!responseBody || responseBody.locked) return;
-                try {
-                    void responseBody.cancel().catch(() => undefined);
-                } catch {
-                    // The request signal is still aborted even if the response body
-                    // cannot acknowledge cancellation synchronously.
-                }
-            },
-        );
+        try {
+            return await waitForAbort(
+                consume(response, signal),
+                signal,
+                () => cancelUnlockedResponseBody(response),
+            );
+        } catch (error) {
+            // A consumer can reject from status/size validation before it locks the
+            // stream. Do not leave that body and its connection alive across retries.
+            cancelUnlockedResponseBody(response);
+            throw error;
+        }
     } catch (error) {
         if (isAbortError(error)) {
             if (didTimeout) {
