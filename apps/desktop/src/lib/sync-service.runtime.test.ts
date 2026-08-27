@@ -414,7 +414,7 @@ describe('desktop sync-service runtime', () => {
         });
     }, 30_000);
 
-    it('persists pre-synced attachment metadata when local changes abort the sync', async () => {
+    it('does not publish deferred attachment metadata when local changes abort before post-merge', async () => {
         const syncServiceModule = await syncServiceModulePromise;
 
         const result = await syncServiceModule.SyncService.performSync();
@@ -444,14 +444,17 @@ describe('desktop sync-service runtime', () => {
                         attachments: [
                             expect.objectContaining({
                                 id: 'att-1',
-                                cloudKey: 'attachments/att-1.txt',
+                                cloudKey: undefined,
                                 localStatus: 'available',
+                                pendingContentUpload: undefined,
                             }),
                         ],
                     }),
                 ],
             }),
         });
+        expect(fsMocks.writeFile).not.toHaveBeenCalled();
+        expect(syncFsMocks.rename).not.toHaveBeenCalled();
     });
 
     it('treats pending remote write backoff as a skipped sync', async () => {
@@ -981,7 +984,7 @@ describe('desktop sync-service runtime', () => {
         expect(hasPayloadTraceLog()).toBe(true);
     });
 
-    it('preserves attachment pre-sync mutations when local edits land during file attachment sync', async () => {
+    it('preserves local edits that land before a deferred file attachment upload', async () => {
         const syncServiceModule = await syncServiceModulePromise;
 
         performSyncCycleMock.mockResolvedValue({
@@ -1007,36 +1010,56 @@ describe('desktop sync-service runtime', () => {
         const result = await syncServiceModule.SyncService.performSync();
 
         expect(result).toEqual({ success: true, skipped: 'requeued' });
-        expect(performSyncCycleMock).not.toHaveBeenCalled();
+        expect(performSyncCycleMock).toHaveBeenCalledOnce();
+        expect(fsMocks.readFile).toHaveBeenCalledWith('mindwtr/attachments/doc.txt', { baseDir: 'data' });
+        expect(fsMocks.writeFile).toHaveBeenCalledWith(
+            expect.stringMatching(/^\/sync\/attachments\/att-1\.txt\.tmp-/),
+            expect.any(Uint8Array),
+        );
+        expect(syncFsMocks.rename).toHaveBeenCalledWith(
+            expect.stringMatching(/^\/sync\/attachments\/att-1\.txt\.tmp-/),
+            '/sync/attachments/att-1.txt',
+        );
         expect(invokeMock).toHaveBeenCalledWith('save_data', {
             baselineEntities: {
                 settings: {},
                 tasks: [expect.objectContaining({
                     id: 'task-1',
+                    title: 'Task',
                     attachments: [expect.objectContaining({ id: 'att-1' })],
                 })],
                 observedEntityIds: entityIds(['task-1']),
             },
             data: expect.objectContaining({
-                tasks: [
-                    expect.objectContaining({
-                        id: 'task-1',
-                        title: 'Edited during attachment sync',
-                        attachments: [
-                            expect.objectContaining({
-                                id: 'att-1',
-                                cloudKey: 'attachments/att-1.txt',
-                                localStatus: 'available',
-                            }),
-                        ],
-                    }),
-                ],
+                tasks: [expect.objectContaining({
+                    id: 'task-1',
+                    title: 'Edited during attachment sync',
+                    attachments: [expect.objectContaining({
+                        id: 'att-1',
+                        cloudKey: undefined,
+                        localStatus: 'available',
+                    })],
+                })],
             }),
+        });
+        expect(storeStateRef.current._allTasks[0]).toMatchObject({
+            id: 'task-1',
+            title: 'Edited during attachment sync',
+            attachments: [expect.objectContaining({
+                id: 'att-1',
+                cloudKey: undefined,
+            })],
         });
     });
 
     it('splits file backend cloud keys into native path segments for Windows sync folders', async () => {
         const syncServiceModule = await syncServiceModulePromise;
+
+        performSyncCycleMock.mockResolvedValue({
+            status: 'success',
+            stats: emptyStats,
+            data: structuredClone(localData),
+        });
 
         invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
             if (command === 'get_sync_backend') return 'file';
@@ -1055,7 +1078,9 @@ describe('desktop sync-service runtime', () => {
 
         const result = await syncServiceModule.SyncService.performSync();
 
-        expect(result).toEqual({ success: true, skipped: 'requeued' });
+        expect(result).toMatchObject({ success: true });
+        expect(result).not.toHaveProperty('skipped');
+        expect(performSyncCycleMock).toHaveBeenCalledOnce();
         expect(fsMocks.writeFile).toHaveBeenCalledWith(
             expect.stringMatching(/^\\\\\?\\C:\\Users\\Pjuter\\Documents\\Mindwtr_sync\\attachments\\att-1\.txt\.tmp-/),
             expect.any(Uint8Array),
