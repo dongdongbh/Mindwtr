@@ -28,6 +28,7 @@ import {
   DEFAULT_CONTENT_TYPE,
   getLocalAttachmentPresence,
   readFileAsBytes,
+  reportProgress,
   statAttachmentFile,
   validateAttachmentHash,
   writeBytesSafely,
@@ -193,7 +194,17 @@ export const installStagedAttachmentDownload = async ({
       expectation,
       actualStagedHash,
     );
-    if (result.status !== 'installed') return false;
+    if (result.status !== 'installed') {
+      reportProgress(
+        attachment.id,
+        'download',
+        0,
+        attachment.size ?? 0,
+        'failed',
+        'Attachment changed locally during download',
+      );
+      return false;
+    }
     attachment.fileHash = actualStagedHash;
     await deleteAttachmentDownloadStageBestEffort(stagedPath);
     return true;

@@ -198,14 +198,6 @@ export const syncCloudAttachments = async (
           options.signal,
         );
         if (!installed) {
-          reportProgress(
-            attachment.id,
-            'download',
-            0,
-            attachment.size ?? 0,
-            'failed',
-            'Attachment changed locally during download',
-          );
           logAttachmentWarn(`Skipped remote attachment replacement after a native conflict (${attachment.id})`);
           continue;
         }

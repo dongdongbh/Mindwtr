@@ -1386,6 +1386,56 @@ describe('attachment sync', () => {
     );
   });
 
+  it('preserves File Sync scratch and terminates progress when native install conflicts', async () => {
+    const bytes = new Uint8Array([13, 14, 15]);
+    const id = 'file-install-conflict';
+    const targetUri = `file://document/attachments/${id}.txt`;
+    const appData = singleAttachmentData({
+      id,
+      cloudKey: `attachments/${id}.txt`,
+      fileHash: sha256Hex(bytes),
+      pendingContentUpload: true,
+    });
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+      uri === targetUri
+        ? { exists: false }
+        : { exists: true, size: bytes.byteLength, modificationTime: 1 }
+    ));
+    fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(bytes));
+    attachmentFileInstallerMock.installAttachmentFileGeneration.mockResolvedValue({
+      status: 'conflict',
+      preservedPath: 'file://document/attachments/.mindwtr-download-file-preserved.staged',
+    });
+    const core = await import('@mindwtr/core');
+
+    const result = await attachmentSync.syncFileAttachments(
+      appData,
+      'file://sync/data.json',
+      undefined,
+      { phase: 'post-merge' },
+    );
+
+    expect(result).toBe(false);
+    expect(attachmentFileInstallerMock.installAttachmentFileGeneration).toHaveBeenCalledWith(
+      expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+      targetUri,
+      { kind: 'absent' },
+      sha256Hex(bytes),
+    );
+    const stagedPath = attachmentFileInstallerMock.installAttachmentFileGeneration.mock.calls[0]?.[0];
+    expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(stagedPath, expect.anything());
+    expect(core.globalProgressTracker.getProgress(id)).toMatchObject({
+      status: 'failed',
+      error: 'Attachment changed locally during download',
+    });
+    expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+      uri: targetUri,
+      localStatus: 'missing',
+      fileHash: sha256Hex(bytes),
+      pendingContentUpload: true,
+    });
+  });
+
   it('preserves a staged WebDAV generation and document metadata when native install conflicts', async () => {
     const bytes = new Uint8Array([21, 22, 23]);
     const appData = singleAttachmentData({
@@ -1419,6 +1469,10 @@ describe('attachment sync', () => {
     );
     const stagedPath = attachmentFileInstallerMock.installAttachmentFileGeneration.mock.calls[0]?.[0];
     expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(stagedPath, expect.anything());
+    expect(core.globalProgressTracker.getProgress('webdav-install-conflict')).toMatchObject({
+      status: 'failed',
+      error: 'Attachment changed locally during download',
+    });
     expect(appData.tasks[0].attachments?.[0]).toMatchObject({
       localStatus: 'missing',
       fileHash: sha256Hex(bytes),
@@ -1520,6 +1574,7 @@ describe('attachment sync', () => {
       preservedPath: 'file://document/attachments/.mindwtr-download-cloudkit-preserved.staged',
     });
     const cloudkit = await import('./cloudkit-sync');
+    const core = await import('@mindwtr/core');
     vi.mocked(cloudkit.fetchCloudKitAttachmentAsset).mockResolvedValue({
       attachmentId: 'cloudkit-install-conflict',
       ownerType: 'task',
@@ -1538,6 +1593,10 @@ describe('attachment sync', () => {
     const stagedPath = attachmentFileInstallerMock.installAttachmentFileGeneration.mock.calls[0]?.[0];
     expect(stagedPath).toMatch(/\.mindwtr-download-.*\.staged$/);
     expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(stagedPath, expect.anything());
+    expect(core.globalProgressTracker.getProgress('cloudkit-install-conflict')).toMatchObject({
+      status: 'failed',
+      error: 'Attachment changed locally during download',
+    });
     expect(appData.tasks[0].attachments?.[0]).toMatchObject({
       title: 'cloudkit-install-conflict.txt',
       localStatus: 'missing',
