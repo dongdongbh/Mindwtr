@@ -12,6 +12,7 @@ import {
     MAX_DOWNLOAD_BYTES,
     MAX_SYNC_DOCUMENT_BYTES,
     readResponseBody,
+    readResponseText,
 } from './http-utils';
 import { decryptRemoteArtifactOrThrow, detectForeignSaltArtifact, isPlaintextSyncArtifact, syncEncryptedArtifactName } from './sync-encryption';
 import { encryptSyncArtifact, inspectSyncArtifact, type SyncCryptoKdfParams, type SyncCryptoPrimitives, type SyncKeyMaterial } from './sync-crypto';
@@ -21,10 +22,19 @@ const DOWNLOAD_ENDPOINT = 'https://content.dropboxapi.com/2/files/download';
 const UPLOAD_ENDPOINT = 'https://content.dropboxapi.com/2/files/upload';
 const FILE_METADATA_ENDPOINT = 'https://api.dropboxapi.com/2/files/get_metadata';
 const FILE_DELETE_ENDPOINT = 'https://api.dropboxapi.com/2/files/delete_v2';
+const LIST_FOLDER_ENDPOINT = 'https://api.dropboxapi.com/2/files/list_folder';
+const LIST_FOLDER_CONTINUE_ENDPOINT = 'https://api.dropboxapi.com/2/files/list_folder/continue';
+const MAX_LIST_FOLDER_RESPONSE_BYTES = 4 * 1024 * 1024;
+const MAX_LIST_FOLDER_PAGES = 1_000;
 
 export type DropboxRequestOptions = {
     signal?: AbortSignal;
     timeoutMs?: number;
+};
+
+export type DropboxFolderFileEntry = {
+    name: string;
+    pathLower: string;
 };
 
 const fetchDropbox = (
@@ -185,6 +195,81 @@ export async function getDropboxFileMetadata(
     const rev = typeof payload?.rev === 'string' ? payload.rev.trim() : '';
     if (!rev) throw new Error('Dropbox file metadata response is missing a revision');
     return { rev };
+}
+
+/** Bounded, auth-aware list_folder pagination shared by transition adapters.
+ * Every page gets the same timeout/abort contract as Dropbox artifact IO. */
+export async function listDropboxFolderFiles(
+    accessToken: string,
+    path: string,
+    fetcher: typeof fetch = fetch,
+    requestOptions: DropboxRequestOptions = {},
+): Promise<DropboxFolderFileEntry[]> {
+    const files: DropboxFolderFileEntry[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < MAX_LIST_FOLDER_PAGES; page += 1) {
+        const response = await fetchDropbox(fetcher, cursor ? LIST_FOLDER_CONTINUE_ENDPOINT : LIST_FOLDER_ENDPOINT, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(cursor
+                ? { cursor }
+                : {
+                    path: resolveDropboxPath(path),
+                    recursive: false,
+                    include_deleted: false,
+                    include_non_downloadable_files: false,
+                    limit: 2_000,
+                }),
+        }, requestOptions, 'Dropbox folder inventory request timed out');
+        if (response.status === 401) {
+            throw new DropboxUnauthorizedError('Dropbox folder inventory failed: HTTP 401');
+        }
+        if (!cursor && response.status === 409) {
+            const tag = await parseDropboxApiErrorTag(response);
+            if (isDropboxPathNotFoundTag(tag)) return [];
+            throw new Error(`Dropbox folder inventory failed: HTTP 409${tag ? ` (${tag})` : ''}`);
+        }
+        if (!response.ok) {
+            throw new Error(`Dropbox folder inventory failed: HTTP ${response.status}`);
+        }
+
+        let payload: unknown;
+        try {
+            payload = JSON.parse(await readResponseText(response, MAX_LIST_FOLDER_RESPONSE_BYTES));
+        } catch (error) {
+            if (error instanceof Error && error.message.includes('exceeds')) throw error;
+            throw new Error('Dropbox folder inventory response is malformed');
+        }
+        const pagePayload = payload as {
+            entries?: unknown;
+            cursor?: unknown;
+            has_more?: unknown;
+        };
+        if (!Array.isArray(pagePayload.entries) || typeof pagePayload.has_more !== 'boolean') {
+            throw new Error('Dropbox folder inventory response is malformed');
+        }
+        for (const entry of pagePayload.entries) {
+            if (!entry || typeof entry !== 'object') {
+                throw new Error('Dropbox folder inventory entry is malformed');
+            }
+            const candidate = entry as { '.tag'?: unknown; name?: unknown; path_lower?: unknown };
+            if (candidate['.tag'] !== 'file') continue;
+            if (typeof candidate.name !== 'string' || typeof candidate.path_lower !== 'string') {
+                throw new Error('Dropbox folder inventory file identity is malformed');
+            }
+            files.push({ name: candidate.name, pathLower: candidate.path_lower });
+        }
+        if (!pagePayload.has_more) return files;
+        const nextCursor = typeof pagePayload.cursor === 'string' ? pagePayload.cursor.trim() : '';
+        if (!nextCursor || nextCursor === cursor) {
+            throw new Error('Dropbox folder inventory continuation cursor is malformed');
+        }
+        cursor = nextCursor;
+    }
+    throw new Error('Dropbox folder inventory exceeded the pagination limit');
 }
 
 export async function downloadDropboxAppData(

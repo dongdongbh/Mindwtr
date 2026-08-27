@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { AppData, MergeStats, acquireSyncRemoteMutationFence, assertWebdavStrongEtagSupport, createDropboxSyncRemoteMutationFencePort, createSyncOrchestrator, createWebdavSyncRemoteMutationFencePort, runSerializedSyncDocumentOperation, runSharedSyncCycle, useTaskStore, webdavGetSyncDocument, webdavHeadFile, webdavPutSyncDocument, syncEncryptedArtifactName, markRemoteEncryptionDiscovered, markRemotePlaintextDiscovered, SyncEncryptionRemoteConflictError, SyncEncryptionRemotePlaintextError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, SyncEncryptionTransitionIncompleteError, SyncRemoteWriteConflict, type SyncKeyMaterial, cloudGetJson, cloudHeadJson, cloudPutJson, flushPendingSave, performSyncCycle, withRetry, isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeStrongWebdavEtag, normalizeWebdavUrl, normalizeCloudUrl, createSyncBackendIO, buildFastSyncScope, hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, getInMemoryAppDataSnapshot, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, isDropboxUnauthorizedError, parseFastSyncState, serializeFastSyncState, summarizeTaskLifecycleCounts, decodeUriSafe, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES, SYNC_FILE_NAME, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type Attachment, type CloudProvider, type FastSyncState, type SyncBackendContext, type SyncBackendIO, type SyncRunDiagnosticEvent, type SyncRunNotifier, type SyncRunPlatformHooks, type SyncRunStorage, type SyncTransport } from '@mindwtr/core';
+import { AppData, MergeStats, acquireSyncRemoteMutationFence, assertWebdavStrongEtagSupport, createDropboxSyncRemoteMutationFencePort, createSyncOrchestrator, createWebdavSyncRemoteMutationFencePort, runSerializedSyncDocumentOperation, runSharedSyncCycle, useTaskStore, webdavGetSyncDocument, webdavHeadFile, webdavPutSyncDocument, syncEncryptedArtifactName, markRemoteEncryptionDiscovered, markRemotePlaintextDiscovered, SyncEncryptionRemoteConflictError, SyncEncryptionRemotePlaintextError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, SyncEncryptionTransitionIncompleteError, SyncRemoteWriteConflict, type SyncKeyMaterial, cloudGetJson, cloudHeadJson, cloudPutJson, flushPendingSave, performSyncCycle, withRetry, isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeStrongWebdavEtag, normalizeWebdavUrl, normalizeCloudUrl, createSyncBackendIO, buildFastSyncScope, hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, getInMemoryAppDataSnapshot, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, isDropboxUnauthorizedError, parseFastSyncState, serializeFastSyncState, summarizeTaskLifecycleCounts, decodeUriSafe, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES, SYNC_FILE_NAME, SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type Attachment, type CloudProvider, type FastSyncState, type SyncBackendContext, type SyncBackendIO, type SyncRunDiagnosticEvent, type SyncRunNotifier, type SyncRunPlatformHooks, type SyncRunStorage, type SyncTransport } from '@mindwtr/core';
 import { mobileStorage } from './storage-adapter';
 import { logInfo, logSyncError, logWarn, sanitizeLogMessage } from './app-log';
 import { readSyncFileVersioned, resolveSyncFileUri, writeSyncFile } from './storage-file';
@@ -1385,7 +1385,7 @@ class MobileSyncRun {
           throw error;
         }
       },
-      webdavPut: async (sanitized, expectedEtag) => {
+      webdavPut: async (sanitized, expectedEtag, assertRemoteMutationFenceHeld) => {
         const webdavConfig = this.webdavConfig;
         if (!webdavConfig?.url) throw new Error('WebDAV URL not configured');
         const requestOptions = {
@@ -1400,12 +1400,15 @@ class MobileSyncRun {
         try {
           const material = this.encryptionMaterial;
           return await withRetry(
-            () => webdavPutSyncDocument(webdavConfig.url, sanitized, {
-              ...requestOptions,
-              material: material ?? undefined,
-              cryptoPrims: mobileSyncCryptoPrimitives,
-              expectedEtag,
-            }),
+            async () => {
+              await assertRemoteMutationFenceHeld?.(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
+              return webdavPutSyncDocument(webdavConfig.url, sanitized, {
+                ...requestOptions,
+                material: material ?? undefined,
+                cryptoPrims: mobileSyncCryptoPrimitives,
+                expectedEtag,
+              });
+            },
             WEBDAV_RETRY_OPTIONS
           );
         } catch (error) {
@@ -1528,12 +1531,15 @@ class MobileSyncRun {
         await this.persistDropboxRev(result.rev);
         return result;
       },
-      dropboxUpload: async (token, sanitized, expectedRev) => {
+      dropboxUpload: async (token, sanitized, expectedRev, assertRemoteMutationFenceHeld) => {
         const material = this.encryptionMaterial;
         const result = await this.runDropboxTransientRetry(
-          () => (material
-            ? uploadDropboxAppData(token, sanitized, expectedRev, this.fetchWithAbort, { material, cryptoPrims: mobileSyncCryptoPrimitives })
-            : uploadDropboxAppData(token, sanitized, expectedRev, this.fetchWithAbort))
+          async () => {
+            await assertRemoteMutationFenceHeld?.(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
+            return material
+              ? uploadDropboxAppData(token, sanitized, expectedRev, this.fetchWithAbort, { material, cryptoPrims: mobileSyncCryptoPrimitives })
+              : uploadDropboxAppData(token, sanitized, expectedRev, this.fetchWithAbort);
+          }
         );
         await this.persistDropboxRev(result.rev);
         return result;

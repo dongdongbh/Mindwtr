@@ -25,9 +25,8 @@ import {
     encryptSyncArtifact,
     fetchWithTimeout,
     inspectSyncArtifact,
-    isDropboxPathNotFoundTag,
     isSyncRemoteMutationFenceError,
-    parseDropboxApiErrorTag,
+    listDropboxFolderFiles,
     readResponseText,
     runChangeSyncEncryptionPassphraseOverRemote,
     runDisableSyncEncryptionLocalOnly,
@@ -37,6 +36,7 @@ import {
     runProvideSyncEncryptionPassphraseOverRemote,
     sanitizeAttachmentCloudKeyForSyncMerge,
     SYNC_ENCRYPTION_KEYED_STATES,
+    SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS,
     SyncCryptoUnsupportedError,
     SyncEncryptionRemotePlaintextError,
     SyncEncryptionTerminalError,
@@ -61,6 +61,7 @@ import {
     type SyncKeyMaterial,
     type SyncRemoteMutationFenceLease,
     type SyncRemoteMutationFencePort,
+    SyncRemoteMutationFenceUnavailableError,
     type WebDavOptions,
 } from '@mindwtr/core';
 import { DOMParser } from '@xmldom/xmldom';
@@ -378,6 +379,20 @@ const createTransitionPorts = (initial: SyncEncryptionLocalState | null) => {
     return {
         keyCache,
         localState,
+        restore: async (
+            state: SyncEncryptionLocalState | null,
+            key: Uint8Array | null,
+            attemptedState: SyncEncryptionLocalState | null,
+        ) => {
+            pendingKey = key;
+            current = state;
+            await restoreNativeTransitionSnapshot(
+                state,
+                persistedMaterial ?? null,
+                attemptedState ?? state ?? { state: 'off' },
+            );
+            clearSyncEncryptionMaterialCache();
+        },
         flush: async () => {
             await Promise.all(queued);
         },
@@ -428,7 +443,29 @@ const runWithRemoteMutationFence = async <T>(
     }
 
     const lease = await acquire();
-    const assertHeld = () => lease.assertHeld();
+    const runLeaseOperation = async (message: string, action: () => Promise<void>): Promise<void> => {
+        try {
+            await action();
+        } catch (error) {
+            if (isSyncRemoteMutationFenceError(error)) throw error;
+            const detail = error instanceof Error ? error.message : String(error);
+            throw new SyncRemoteMutationFenceUnavailableError(`${message}: ${detail}`);
+        }
+    };
+    const assertHeld = (minRemainingMs = 0) => runLeaseOperation(
+        'Remote sync mutation fence validation failed',
+        () => lease.assertHeld(minRemainingMs),
+    );
+    const renewHeld = () => runLeaseOperation(
+        'Remote sync mutation fence renewal failed',
+        () => lease.renew(),
+    );
+    const previousState = ports.localState.read();
+    const previousKey = await ports.keyCache.getKey();
+    let localMaterialTouched = false;
+    let finalStateWriteAttempted = false;
+    let stateBeforeFinalCommit = previousState;
+    let attemptedFinalState: SyncEncryptionLocalState | null = null;
     const guardedRemote: SyncEncryptionRemotePort = {
         ...remote,
         list: async () => {
@@ -446,29 +483,38 @@ const runWithRemoteMutationFence = async <T>(
             return remote.read(name);
         },
         write: async (name, bytes, expectedVersion) => {
-            await assertHeld();
+            await assertHeld(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
             await remote.write(name, bytes, expectedVersion);
         },
         remove: async (name, expectedVersion) => {
-            await assertHeld();
+            await assertHeld(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
             await remote.remove(name, expectedVersion);
         },
     };
     const guardedKeyCache: SyncEncryptionKeyCachePort = {
         getKey: () => ports.keyCache.getKey(),
         setKey: async (key) => {
-            await assertHeld();
+            await assertHeld(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
+            localMaterialTouched = true;
             await ports.keyCache.setKey(key);
         },
         clearKey: async () => {
-            await assertHeld();
+            await assertHeld(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
+            localMaterialTouched = true;
             await ports.keyCache.clearKey();
         },
     };
     const guardedLocalState: SyncEncryptionLocalStatePort = {
         read: () => ports.localState.read(),
         write: async (state) => {
-            await assertHeld();
+            if (state?.incompleteTransition) {
+                await assertHeld(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
+            } else {
+                stateBeforeFinalCommit = ports.localState.read();
+                attemptedFinalState = state;
+                finalStateWriteAttempted = true;
+                await renewHeld();
+            }
             await ports.localState.write(state);
         },
     };
@@ -476,18 +522,36 @@ const runWithRemoteMutationFence = async <T>(
     let result: T;
     try {
         result = await operation(guardedRemote, guardedKeyCache, guardedLocalState);
-        await assertHeld();
+        await assertHeld(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
         await ports.flush();
-        await assertHeld();
+        await assertHeld(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
     } catch (primaryError) {
+        let failureToThrow = primaryError;
+        if (isSyncRemoteMutationFenceError(primaryError) && (localMaterialTouched || finalStateWriteAttempted)) {
+            try {
+                if (finalStateWriteAttempted) {
+                    await ports.restore(stateBeforeFinalCommit, previousKey, attemptedFinalState);
+                } else if (previousKey) {
+                    await ports.keyCache.setKey(previousKey);
+                } else {
+                    await ports.keyCache.clearKey();
+                }
+                await ports.flush();
+            } catch (rollbackError) {
+                const failure = new Error('Failed to roll back sync encryption material after remote fence loss');
+                (failure as Error & { cause?: unknown; rollbackError?: unknown }).cause = primaryError;
+                (failure as Error & { rollbackError?: unknown }).rollbackError = rollbackError;
+                failureToThrow = failure;
+            }
+        }
         try {
             await lease.release();
         } catch (cleanupError) {
-            if (primaryError instanceof Error) {
-                (primaryError as Error & { cleanupError?: unknown }).cleanupError = cleanupError;
+            if (failureToThrow instanceof Error) {
+                (failureToThrow as Error & { cleanupError?: unknown }).cleanupError = cleanupError;
             }
         }
-        throw primaryError;
+        throw failureToThrow;
     }
 
     try {
@@ -524,9 +588,6 @@ const collectRemoteAttachmentKeys = (data: AppData | null): string[] => {
 };
 
 const PROVIDER_INVENTORY_MAX_BYTES = 4 * 1024 * 1024;
-const DROPBOX_LIST_FOLDER_ENDPOINT = 'https://api.dropboxapi.com/2/files/list_folder';
-const DROPBOX_LIST_FOLDER_CONTINUE_ENDPOINT = 'https://api.dropboxapi.com/2/files/list_folder/continue';
-const MAX_DROPBOX_INVENTORY_PAGES = 1_000;
 const DAV_NAMESPACE = 'DAV:';
 const DAV_PROPFIND_BODY = '<?xml version="1.0" encoding="utf-8"?>'
     + '<d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>';
@@ -665,60 +726,15 @@ const listWebdavAttachmentKeys = async (
     return parseWebdavAttachmentKeys(xml, collectionUrl);
 };
 
-type DropboxListFolderPayload = {
-    entries?: Array<{ '.tag'?: unknown; name?: unknown; path_lower?: unknown; path_display?: unknown }>;
-    cursor?: unknown;
-    has_more?: unknown;
-};
-
 const listDropboxAttachmentKeys = async (
     accessToken: string,
     fetcher: typeof fetch,
 ): Promise<string[]> => {
     const keys = new Set<string>();
-    let cursor: string | null = null;
-    for (let page = 0; page < MAX_DROPBOX_INVENTORY_PAGES; page += 1) {
-        const response = await fetcher(
-            cursor ? DROPBOX_LIST_FOLDER_CONTINUE_ENDPOINT : DROPBOX_LIST_FOLDER_ENDPOINT,
-            {
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${accessToken}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(cursor
-                    ? { cursor }
-                    : {
-                        path: '/attachments',
-                        recursive: false,
-                        include_deleted: false,
-                        include_non_downloadable_files: false,
-                        limit: 2_000,
-                    }),
-            },
-        );
-        if (!cursor && response.status === 409) {
-            const tag = await parseDropboxApiErrorTag(response);
-            if (isDropboxPathNotFoundTag(tag)) return [];
-            throw new Error(`Dropbox attachment inventory failed: HTTP 409${tag ? ` (${tag})` : ''}`);
-        }
-        if (response.status === 401) throw new Error('Dropbox attachment inventory failed: HTTP 401');
-        if (!response.ok) throw new Error(`Dropbox attachment inventory failed: HTTP ${response.status}`);
-
-        const payload = JSON.parse(
-            await readResponseText(response, PROVIDER_INVENTORY_MAX_BYTES),
-        ) as DropboxListFolderPayload;
-        if (!Array.isArray(payload.entries) || typeof payload.has_more !== 'boolean') {
-            throw new Error('Dropbox attachment inventory response is malformed');
-        }
-        for (const entry of payload.entries) {
-            if (entry?.['.tag'] !== 'file') continue;
-            if (typeof entry.path_lower !== 'string' || typeof entry.name !== 'string') {
-                throw new Error('Dropbox attachment inventory file identity is malformed');
-            }
+    for (const entry of await listDropboxFolderFiles(accessToken, '/attachments', fetcher)) {
             const name = entry.name;
             const expectedLowerPath = `/attachments/${name.toLowerCase()}`;
-            if (entry.path_lower !== expectedLowerPath) {
+            if (entry.pathLower !== expectedLowerPath) {
                 throw new Error('Dropbox attachment inventory file identity is inconsistent');
             }
             const candidate = `attachments/${name}`;
@@ -727,14 +743,8 @@ const listDropboxAttachmentKeys = async (
                 throw new Error('Dropbox attachment inventory returned an invalid attachment name');
             }
             keys.add(key);
-        }
-        if (!payload.has_more) return Array.from(keys).sort();
-        if (typeof payload.cursor !== 'string' || !payload.cursor || payload.cursor === cursor) {
-            throw new Error('Dropbox attachment inventory cursor is malformed');
-        }
-        cursor = payload.cursor;
     }
-    throw new Error('Dropbox attachment inventory exceeded the pagination limit');
+    return Array.from(keys).sort();
 };
 
 /** Remote documents remain a second attachment index so a referenced-but-currently-missing
@@ -975,36 +985,15 @@ export async function runProvidePassphraseOverRemote(
     remote: SyncEncryptionRemotePort,
 ): Promise<'ok' | 'wrong-passphrase'> {
     const ports = await openTransitionPorts();
-    const previousState = ports.localState.read();
-    const previousKey = await ports.keyCache.getKey();
-    let operationStarted = false;
-    try {
-        return await runWithRemoteMutationFence(remote, ports, (guardedRemote, keyCache, localState) => {
-            operationStarted = true;
-            return runProvideSyncEncryptionPassphraseOverRemote(
-                passphrase,
-                'data.json',
-                guardedRemote,
-                keyCache,
-                localState,
-                desktopSyncCryptoPrimitives,
-            );
-        });
-    } catch (error) {
-        if (!operationStarted || !isSyncRemoteMutationFenceError(error)) throw error;
-        try {
-            if (previousKey) await ports.keyCache.setKey(previousKey);
-            else await ports.keyCache.clearKey();
-            await ports.localState.write(previousState);
-            await ports.flush();
-        } catch (rollbackError) {
-            const failure = new Error('Failed to roll back sync encryption passphrase provisioning after fence loss');
-            (failure as Error & { cause?: unknown; rollbackError?: unknown }).cause = error;
-            (failure as Error & { rollbackError?: unknown }).rollbackError = rollbackError;
-            throw failure;
-        }
-        throw error;
-    }
+    return runWithRemoteMutationFence(remote, ports, (guardedRemote, keyCache, localState) =>
+        runProvideSyncEncryptionPassphraseOverRemote(
+            passphrase,
+            'data.json',
+            guardedRemote,
+            keyCache,
+            localState,
+            desktopSyncCryptoPrimitives,
+        ));
 }
 
 // ---------------------------------------------------------------------------

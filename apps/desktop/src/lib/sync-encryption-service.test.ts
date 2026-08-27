@@ -475,7 +475,7 @@ describe('Dropbox sync encryption transitions', () => {
             createDropboxRemotePort((operation) => operation('token'), fetcher),
         );
 
-        expect(events).toEqual(['acquired:off', 'released:enabled']);
+        expect(events).toEqual(['acquired:off', 'acquired:off', 'released:enabled']);
         expect(store.files.has('.mindwtr-sync-fence-v1.json')).toBe(false);
     });
 
@@ -522,6 +522,7 @@ describe('Dropbox sync encryption transitions', () => {
                 clearKey: async () => undefined,
             },
             localState: { read: () => null, write: async () => undefined },
+            restore: async () => undefined,
             flush: async () => undefined,
         };
 
@@ -555,6 +556,7 @@ describe('Dropbox sync encryption transitions', () => {
                 clearKey: async () => undefined,
             },
             localState: { read: () => null, write: async () => undefined },
+            restore: async () => undefined,
             flush: async () => { events.push('flush'); },
         };
 
@@ -567,6 +569,69 @@ describe('Dropbox sync encryption transitions', () => {
         expect(error).toBeInstanceOf(SyncEncryptionCleanupDeferredError);
         expect(error).toMatchObject({ outcome: 'done', cleanupCause: cleanupError, retryAfterMs: 12_000 });
         expect(events).toEqual(['committed', 'assert', 'flush', 'assert', 'release']);
+    });
+
+    it('revalidates the full request horizon before each transition mutation', async () => {
+        const horizons: number[] = [];
+        const write = vi.fn(async () => undefined);
+        const remote = {
+            acquireRemoteMutationFence: async () => ({
+                assertHeld: async (minRemainingMs = 0) => {
+                    horizons.push(minRemainingMs);
+                    if (write.mock.calls.length === 1) throw new SyncRemoteMutationFenceLostError();
+                },
+                renew: async () => undefined,
+                retryAfterMs: () => 0,
+                release: async () => undefined,
+            }),
+            list: async () => [],
+            read: async () => ({ bytes: null, version: null }),
+            write,
+            remove: async () => undefined,
+        };
+        const ports = {
+            keyCache: {
+                getKey: async () => null,
+                setKey: async () => undefined,
+                clearKey: async () => undefined,
+            },
+            localState: { read: () => null, write: async () => undefined },
+            restore: async () => undefined,
+            flush: async () => undefined,
+        };
+
+        await expect(__syncEncryptionServiceTestUtils.runWithRemoteMutationFence(
+            remote,
+            ports,
+            async (guardedRemote) => {
+                await guardedRemote.write('data.json', new Uint8Array([1]), null);
+                await guardedRemote.write('data.json', new Uint8Array([2]), 'v1');
+            },
+        )).rejects.toBeInstanceOf(SyncRemoteMutationFenceLostError);
+
+        expect(write).toHaveBeenCalledTimes(1);
+        expect(horizons).toEqual([35_000, 35_000]);
+    });
+
+    it('restores the prior material and journal when the lease is lost after final persistence', async () => {
+        const store = seedRemote();
+        const remote = createDropboxRemotePort((operation) => operation('token'), createDropboxFetch(store));
+        const renew = vi.fn(async () => undefined);
+        remote.acquireRemoteMutationFence = async () => ({
+            assertHeld: async () => {
+                if (native.state.state === 'enabled') throw new SyncRemoteMutationFenceLostError();
+            },
+            renew,
+            retryAfterMs: () => 0,
+            release: async () => undefined,
+        });
+
+        await expect(runEnableOverRemote('correct horse battery', remote))
+            .rejects.toBeInstanceOf(SyncRemoteMutationFenceLostError);
+
+        expect(renew).toHaveBeenCalledTimes(1);
+        expect(native.state).toEqual({ state: 'off', incompleteTransition: 'enable' });
+        await expect(getSyncEncryptionMaterial()).resolves.toBeNull();
     });
 
     it('encrypts every artifact, removes the plaintext documents, and leaves attachment names alone', async () => {
@@ -669,14 +734,20 @@ describe('Dropbox sync encryption transitions', () => {
             createDropboxRemotePort((o) => o('token'), fetcher),
         )).resolves.toBe('ok');
 
-        expect(events).toEqual(['acquired:remote-encrypted-no-key', 'released:enabled']);
+        expect(events).toEqual([
+            'acquired:remote-encrypted-no-key',
+            'acquired:remote-encrypted-no-key',
+            'released:enabled',
+        ]);
     });
 
     it('does not provision a key while a peer provider transition holds the fence', async () => {
         const store = seedRemote();
         const fetcher = createDropboxFetch(store);
         await runEnableOverRemote('correct horse battery', createDropboxRemotePort((o) => o('token'), fetcher));
-        native.state = { state: 'remote-encrypted-no-key' };
+        const enabledState = native.state;
+        native.state = { ...enabledState, state: 'remote-encrypted-no-key', key: undefined };
+        const previousState = structuredClone(native.state);
         clearSyncEncryptionMaterialCache();
         store.files.set('.mindwtr-sync-fence-v1.json', jsonBytes({
             schema: 1,
@@ -692,7 +763,7 @@ describe('Dropbox sync encryption transitions', () => {
             createDropboxRemotePort((o) => o('token'), fetcher),
         )).rejects.toBeInstanceOf(SyncRemoteMutationFenceBusyError);
 
-        expect(native.state).toEqual({ state: 'remote-encrypted-no-key' });
+        expect(native.state).toEqual(previousState);
         await expect(getSyncEncryptionMaterial()).resolves.toBeNull();
     });
 
@@ -700,7 +771,9 @@ describe('Dropbox sync encryption transitions', () => {
         const store = seedRemote();
         const fetcher = createDropboxFetch(store);
         await runEnableOverRemote('correct horse battery', createDropboxRemotePort((o) => o('token'), fetcher));
-        native.state = { state: 'remote-encrypted-no-key' };
+        const enabledState = native.state;
+        native.state = { ...enabledState, state: 'remote-encrypted-no-key', key: undefined };
+        const previousState = structuredClone(native.state);
         clearSyncEncryptionMaterialCache();
         const remote = createDropboxRemotePort((o) => o('token'), fetcher);
         let assertions = 0;
@@ -717,7 +790,7 @@ describe('Dropbox sync encryption transitions', () => {
         await expect(runProvidePassphraseOverRemote('correct horse battery', remote))
             .rejects.toBeInstanceOf(SyncRemoteMutationFenceLostError);
 
-        expect(native.state).toEqual({ state: 'remote-encrypted-no-key' });
+        expect(native.state).toEqual(previousState);
         await expect(getSyncEncryptionMaterial()).resolves.toBeNull();
     });
 

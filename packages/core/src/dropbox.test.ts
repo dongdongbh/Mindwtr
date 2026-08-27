@@ -1,11 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
     deleteDropboxFileVersioned,
     downloadDropboxAppData,
     downloadDropboxFile,
     downloadDropboxFileVersioned,
     DropboxConflictError,
+    DropboxUnauthorizedError,
     getDropboxFileMetadata,
+    listDropboxFolderFiles,
     uploadDropboxAppData,
     uploadDropboxFileVersioned,
 } from './dropbox';
@@ -264,6 +266,64 @@ describe('dropbox sync-document encryption', () => {
         await uploadDropboxAppData('token', { tasks: [] } as unknown as AppData, null, fetcher, { material });
         const wrongMaterial = await deriveSyncKeyMaterial('other-pw', material.salt, FAST_KDF);
         await expect(downloadDropboxAppData('token', fetcher, { material: wrongMaterial })).rejects.toThrow();
+    });
+});
+
+describe('bounded Dropbox folder inventory', () => {
+    const hangingResponse = (signal: AbortSignal): Promise<Response> => new Promise((_, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    });
+
+    it('paginates through the bounded transport', async () => {
+        const fetcher = vi.fn()
+            .mockResolvedValueOnce(Response.json({
+                entries: [{ '.tag': 'file', name: 'A.bin', path_lower: '/attachments/a.bin' }],
+                cursor: 'next-page',
+                has_more: true,
+            }))
+            .mockResolvedValueOnce(Response.json({
+                entries: [{ '.tag': 'file', name: 'B.bin', path_lower: '/attachments/b.bin' }],
+                cursor: 'done',
+                has_more: false,
+            }));
+
+        await expect(listDropboxFolderFiles('token', '/attachments', fetcher)).resolves.toEqual([
+            { name: 'A.bin', pathLower: '/attachments/a.bin' },
+            { name: 'B.bin', pathLower: '/attachments/b.bin' },
+        ]);
+        expect(JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body))).toEqual({ cursor: 'next-page' });
+    });
+
+    it('times out and aborts a hanging first page', async () => {
+        let requestSignal: AbortSignal | undefined;
+        const fetcher = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+            requestSignal = init?.signal ?? undefined;
+            return hangingResponse(requestSignal!);
+        }) as typeof fetch;
+
+        await expect(listDropboxFolderFiles('token', '/attachments', fetcher, { timeoutMs: 1 }))
+            .rejects.toThrow('Dropbox folder inventory request timed out');
+        expect(requestSignal?.aborted).toBe(true);
+    });
+
+    it('times out and aborts a hanging continuation page', async () => {
+        let continuationSignal: AbortSignal | undefined;
+        const fetcher = vi.fn()
+            .mockResolvedValueOnce(Response.json({ entries: [], cursor: 'next-page', has_more: true }))
+            .mockImplementationOnce((_input: RequestInfo | URL, init?: RequestInit) => {
+                continuationSignal = init?.signal ?? undefined;
+                return hangingResponse(continuationSignal!);
+            }) as typeof fetch;
+
+        await expect(listDropboxFolderFiles('token', '/attachments', fetcher, { timeoutMs: 1 }))
+            .rejects.toThrow('Dropbox folder inventory request timed out');
+        expect(continuationSignal?.aborted).toBe(true);
+    });
+
+    it('classifies authorization failures for a caller refresh retry', async () => {
+        await expect(listDropboxFolderFiles('token', '/attachments', async () => (
+            new Response(null, { status: 401 })
+        ))).rejects.toBeInstanceOf(DropboxUnauthorizedError);
     });
 });
 

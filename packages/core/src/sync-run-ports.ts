@@ -74,8 +74,12 @@ export interface SyncBackendIO {
      *  WebDAV implementations should let invalid-JSON errors propagate — the
      *  machine maps them to the treat-as-missing repair-write path. */
     readRemote(): Promise<AppData | null | undefined>;
-    /** Transport write of the already-sanitized payload. */
-    writeRemote(sanitized: AppData): Promise<SyncRemoteWriteOutcome>;
+    /** Transport write of the already-sanitized payload. The optional guard
+     * must run immediately before every provider retry that can mutate. */
+    writeRemote(
+        sanitized: AppData,
+        assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>,
+    ): Promise<SyncRemoteWriteOutcome>;
     /** True when a transport read recovered from a fallback representation and
      *  the canonical remote must be rewritten even if its content is aligned. */
     requiresRemoteRepair?(): boolean;

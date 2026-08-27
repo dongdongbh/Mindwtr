@@ -107,6 +107,21 @@ describe('createSyncBackendIO', () => {
             expect(transport.syncWebdavAttachments).toHaveBeenCalledWith(APP_DATA, helpers);
         });
 
+        it('threads the mutation guard into the actual WebDAV write attempt', async () => {
+            const ctx: SyncBackendContext = {
+                backend: 'webdav', cloudProvider: 'selfhosted',
+                webdav: { url: 'https://dav.example.com/data.json' }, dropboxRev: null,
+            };
+            const transport = makeTransport();
+            const io = createSyncBackendIO(ctx, transport);
+            const guard = vi.fn().mockResolvedValue(undefined);
+            await io.readRemote();
+
+            await io.writeRemote(APP_DATA, guard);
+
+            expect(transport.webdavPut).toHaveBeenCalledWith(APP_DATA, '"webdav-read-v1"', guard);
+        });
+
         it('skips attachment sync when webdav is unconfigured', async () => {
             const ctx: SyncBackendContext = { backend: 'webdav', cloudProvider: 'selfhosted', webdav: null, dropboxRev: null };
             const transport = makeTransport();
@@ -255,6 +270,24 @@ describe('createSyncBackendIO', () => {
 
             await io.syncAttachments!(APP_DATA, helpers);
             expect(transport.syncDropboxAttachments).toHaveBeenCalledWith(APP_DATA, helpers);
+        });
+
+        it('threads the mutation guard through a Dropbox auth refresh retry', async () => {
+            const ctx = baseCtx();
+            ctx.dropboxRev = 'rev-1';
+            const guard = vi.fn().mockResolvedValue(undefined);
+            const resolveDropboxToken = vi.fn()
+                .mockResolvedValueOnce('stale-token')
+                .mockResolvedValueOnce('fresh-token');
+            const dropboxUpload = vi.fn()
+                .mockRejectedValueOnce(new DropboxUnauthorizedError())
+                .mockResolvedValueOnce({ rev: 'rev-2' });
+            const io = createSyncBackendIO(ctx, makeTransport({ resolveDropboxToken, dropboxUpload }));
+
+            await io.writeRemote(APP_DATA, guard);
+
+            expect(dropboxUpload).toHaveBeenNthCalledWith(1, 'stale-token', APP_DATA, 'rev-1', guard);
+            expect(dropboxUpload).toHaveBeenNthCalledWith(2, 'fresh-token', APP_DATA, 'rev-1', guard);
         });
 
         it('has no cached fingerprint when no rev is known yet', () => {

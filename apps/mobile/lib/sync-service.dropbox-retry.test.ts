@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Platform } from 'react-native';
+import { SyncRemoteMutationFenceLostError } from '@mindwtr/core';
 
 import * as syncServiceModule from './sync-service';
 
@@ -371,6 +372,40 @@ describe('mobile Dropbox sync transient retry', () => {
       expect.stringContaining('Dropbox request failed (attempt 1)'),
       expect.objectContaining({ scope: 'sync' }),
     );
+  });
+
+  it('stops a Dropbox activation document retry when the lease is replaced', async () => {
+      const assertHeld = vi.fn(async () => {
+        if (dropboxSyncMocks.uploadDropboxAppData.mock.calls.length >= 1) {
+          throw new SyncRemoteMutationFenceLostError();
+        }
+      });
+      coreMocks.acquireSyncRemoteMutationFence.mockResolvedValue({
+        assertHeld,
+        renew: vi.fn().mockResolvedValue(undefined),
+        retryAfterMs: () => 0,
+        release: vi.fn().mockResolvedValue(undefined),
+      });
+      dropboxSyncMocks.uploadDropboxAppData
+        .mockRejectedValueOnce(new TypeError('Network request failed'))
+        .mockResolvedValue({ rev: 'must-not-write' });
+      attachmentSyncMocks.hasPendingAttachmentSyncWork.mockResolvedValue(true);
+      const changedData = { ...emptyData, settings: { theme: 'dark' } };
+      coreMocks.performSyncCycle.mockImplementationOnce(async (io: any) => {
+        await io.readLocal();
+        await io.readRemote();
+        await io.writeRemote(changedData);
+        return { status: 'success', stats: emptyStats, data: changedData };
+      });
+
+      const result = await syncServiceModule.performMobileSync(undefined, {
+        activationProbe: true,
+        manual: true,
+      });
+
+      expect(dropboxSyncMocks.uploadDropboxAppData).toHaveBeenCalledTimes(1);
+      expect(assertHeld).toHaveBeenCalledWith(35_000);
+      expect(result).not.toEqual({ success: true, stats: emptyStats });
   });
 
   it('stops after bounded retries and records the underlying error in the offline skip log', async () => {

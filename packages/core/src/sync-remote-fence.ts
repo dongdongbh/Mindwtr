@@ -1,5 +1,9 @@
 export const SYNC_REMOTE_MUTATION_FENCE_NAME = '.mindwtr-sync-fence-v1.json';
 
+/** Minimum verified lease lifetime immediately before a provider mutation.
+ * It covers the bounded 30-second request plus a small scheduling margin. */
+export const SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS = 35_000;
+
 export type SyncRemoteMutationFencePurpose = 'ordinary-sync' | 'encryption-transition';
 
 export type SyncRemoteMutationFenceSnapshot = {

@@ -335,7 +335,7 @@ describe('runSharedSyncCycle', () => {
                 expect.objectContaining({ id: 't-local' }),
                 expect.objectContaining({ id: 't-remote' }),
             ]),
-        }));
+        }), expect.any(Function));
         expect(harness.persisted.tasks.map((task) => task.id)).toEqual(['t-local']);
         expect(storage.persistLocal).not.toHaveBeenCalled();
         expect(injectExternalCalendars).not.toHaveBeenCalled();
@@ -468,7 +468,7 @@ describe('runSharedSyncCycle', () => {
                     ]),
                 }),
             ]),
-        }));
+        }), expect.any(Function));
         expect(harness.persisted.tasks[0]?.attachments?.[0]?.cloudKey).toBe('cloudkit:a');
         expect(storage.persistLocal).not.toHaveBeenCalled();
     });

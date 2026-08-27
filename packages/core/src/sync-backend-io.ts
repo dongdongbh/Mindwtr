@@ -73,7 +73,11 @@ export type SyncTransport = {
     acquireDropboxRemoteMutationFence?(token: string): Promise<SyncRemoteMutationFenceLease>;
     webdavGet(): Promise<WebdavSyncReadResult>;
     /** null means create-only (If-None-Match:*); a value is the strong GET ETag (If-Match). */
-    webdavPut(sanitized: AppData, expectedEtag: string | null): Promise<RemoteWriteResult>;
+    webdavPut(
+        sanitized: AppData,
+        expectedEtag: string | null,
+        assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>,
+    ): Promise<RemoteWriteResult>;
     webdavHead(): Promise<RemoteHeadResult>;
     cloudGet(): Promise<AppData | null | undefined>;
     cloudPut(sanitized: AppData): Promise<RemoteWriteResult>;
@@ -85,7 +89,12 @@ export type SyncTransport = {
     /** Resolve a Dropbox access token; `forceRefresh` on the auth-retry pass. */
     resolveDropboxToken(forceRefresh: boolean): Promise<string>;
     dropboxDownload(token: string): Promise<DropboxDownloadResult>;
-    dropboxUpload(token: string, sanitized: AppData, expectedRev: string | null): Promise<DropboxRevResult>;
+    dropboxUpload(
+        token: string,
+        sanitized: AppData,
+        expectedRev: string | null,
+        assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>,
+    ): Promise<DropboxRevResult>;
     dropboxMetadata(token: string): Promise<DropboxRevResult>;
     syncWebdavAttachments(data: AppData, helpers: SyncRunAttachmentHelpers): AttachmentSyncResult;
     syncCloudAttachments(data: AppData, helpers: SyncRunAttachmentHelpers): AttachmentSyncResult;
@@ -194,7 +203,7 @@ export function createSyncBackendIO(ctx: SyncBackendContext, transport: SyncTran
             fileRemoteNeedsRepair = false;
             return remote;
         },
-        writeRemote: async (sanitized) => {
+        writeRemote: async (sanitized, assertRemoteMutationFenceHeld) => {
             if (ctx.backend === 'cloudkit') {
                 await transport.cloudKitWrite(sanitized);
                 return;
@@ -210,10 +219,10 @@ export function createSyncBackendIO(ctx: SyncBackendContext, transport: SyncTran
                     throw new Error('WebDAV server did not provide a safe strong ETag for the existing sync document; refusing to overwrite it');
                 }
                 try {
-                    const result = await transport.webdavPut(
-                        sanitized,
-                        webdavDocumentVersion.exists ? webdavDocumentVersion.strongEtag : null,
-                    );
+                    const expectedEtag = webdavDocumentVersion.exists ? webdavDocumentVersion.strongEtag : null;
+                    const result = assertRemoteMutationFenceHeld
+                        ? await transport.webdavPut(sanitized, expectedEtag, assertRemoteMutationFenceHeld)
+                        : await transport.webdavPut(sanitized, expectedEtag);
                     return normalizeRemoteWriteResult('webdav', result);
                 } catch (error) {
                     if (isWebdavRemoteWriteConflictError(error)) {
@@ -234,9 +243,11 @@ export function createSyncBackendIO(ctx: SyncBackendContext, transport: SyncTran
                     throw new Error('Dropbox app key is not configured');
                 }
                 try {
-                    const uploaded = await runDropboxWithAuthRetry((token) =>
-                        transport.dropboxUpload(token, sanitized, ctx.dropboxRev)
-                    );
+                    const uploaded = await runDropboxWithAuthRetry((token) => (
+                        assertRemoteMutationFenceHeld
+                            ? transport.dropboxUpload(token, sanitized, ctx.dropboxRev, assertRemoteMutationFenceHeld)
+                            : transport.dropboxUpload(token, sanitized, ctx.dropboxRev)
+                    ));
                     ctx.dropboxRev = uploaded.rev;
                     return;
                 } catch (error) {

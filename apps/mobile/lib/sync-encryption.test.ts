@@ -684,6 +684,7 @@ describe('remote mutation fence lifecycle', () => {
     await syncEncryptionLocalState.write({ state: 'remote-encrypted-no-key' });
     await flushSyncEncryptionLocalState();
     let assertions = 0;
+    let renewals = 0;
     const remote: SyncEncryptionRemotePort & {
       acquireRemoteMutationFence: () => Promise<SyncRemoteMutationFenceLease>;
     } = {
@@ -692,7 +693,7 @@ describe('remote mutation fence lifecycle', () => {
           assertions += 1;
           if (assertions === 4) throw new SyncRemoteMutationFenceLostError();
         },
-        renew: async () => undefined,
+        renew: async () => { renewals += 1; },
         retryAfterMs: () => 0,
         release: async () => undefined,
       }),
@@ -707,6 +708,7 @@ describe('remote mutation fence lifecycle', () => {
     await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
     expect(syncEncryptionLocalState.read()).toEqual({ state: 'remote-encrypted-no-key' });
     expect(JSON.parse(asyncStorage.get(SYNC_ENCRYPTION_STATE_KEY)!)).toEqual({ state: 'remote-encrypted-no-key' });
+    expect(renewals).toBe(1);
   });
 
   it('preserves the primary transition error when conditional fence cleanup also fails', async () => {
@@ -760,6 +762,80 @@ describe('remote mutation fence lifecycle', () => {
     expect(error).toBeInstanceOf(SyncEncryptionCleanupDeferredError);
     expect(error).toMatchObject({ outcome: 'done', cleanupCause: cleanupError, retryAfterMs: 12_000 });
     expect(events).toEqual(['committed', 'assert', 'assert', 'release']);
+  });
+
+  it('revalidates the full request horizon before each provider transition mutation', async () => {
+    const horizons: number[] = [];
+    const write = vi.fn(async () => undefined);
+    const remote: SyncEncryptionRemotePort & {
+      acquireRemoteMutationFence: () => Promise<SyncRemoteMutationFenceLease>;
+    } = {
+      acquireRemoteMutationFence: async () => ({
+        assertHeld: async (minRemainingMs = 0) => {
+          horizons.push(minRemainingMs);
+          if (write.mock.calls.length === 1) throw new SyncRemoteMutationFenceLostError();
+        },
+        renew: async () => undefined,
+        retryAfterMs: () => 0,
+        release: async () => undefined,
+      }),
+      list: async () => [],
+      read: async () => ({ bytes: null, version: null }),
+      write,
+      remove: async () => undefined,
+    };
+
+    await expect(__syncEncryptionServiceTestUtils.runWithRemoteMutationFence(
+      remote,
+      async (guardedRemote) => {
+        await guardedRemote.write('data.json', new Uint8Array([1]), null);
+        await guardedRemote.write('data.json', new Uint8Array([2]), 'v1');
+      },
+    )).rejects.toBeInstanceOf(SyncRemoteMutationFenceLostError);
+
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(horizons).toEqual([35_000, 35_000]);
+  });
+
+  it('restores the prior key and transition journal when the lease is lost after final persistence', async () => {
+    const renew = vi.fn(async () => undefined);
+    const remote: SyncEncryptionRemotePort & {
+      acquireRemoteMutationFence: () => Promise<SyncRemoteMutationFenceLease>;
+    } = {
+      acquireRemoteMutationFence: async () => ({
+        assertHeld: async () => {
+          if (syncEncryptionLocalState.read()?.state === 'enabled') {
+            throw new SyncRemoteMutationFenceLostError();
+          }
+        },
+        renew,
+        retryAfterMs: () => 0,
+        release: async () => undefined,
+      }),
+      list: async () => [],
+      read: async () => ({ bytes: null, version: null }),
+      write: async () => undefined,
+      remove: async () => undefined,
+    };
+
+    await expect(__syncEncryptionServiceTestUtils.runWithRemoteMutationFence(
+      remote,
+      async (_guardedRemote, keyCache, localState) => {
+        await localState.write({ state: 'off', incompleteTransition: 'enable' });
+        await keyCache.setKey(material.key);
+        await localState.write({
+          state: 'enabled',
+          discoveredSalt: '07'.repeat(16),
+          discoveredParams: FAST_PARAMS,
+        });
+      },
+    )).rejects.toBeInstanceOf(SyncRemoteMutationFenceLostError);
+
+    const expectedJournal = { state: 'off', incompleteTransition: 'enable' };
+    expect(renew).toHaveBeenCalledTimes(1);
+    expect(syncEncryptionLocalState.read()).toEqual(expectedJournal);
+    expect(JSON.parse(asyncStorage.get(SYNC_ENCRYPTION_STATE_KEY)!)).toEqual(expectedJournal);
+    await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
   });
 });
 

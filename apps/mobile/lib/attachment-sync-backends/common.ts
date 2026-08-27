@@ -11,6 +11,7 @@ import {
   type AttachmentTransferResult,
 } from '@mindwtr/core';
 import * as FileSystem from '../file-system';
+import * as LegacyFileSystem from 'expo-file-system/legacy';
 import {
   bytesToBase64,
   canUploadAttachmentFrom,
@@ -209,19 +210,27 @@ const cancelUploadTask = async (task: unknown): Promise<void> => {
   await cancelAsync.call(task);
 };
 
-const runUploadTask = async <T,>(task: { uploadAsync: () => Promise<T> }, signal?: AbortSignal): Promise<T> => {
+const WEBDAV_STREAM_UPLOAD_TIMEOUT_MS = 30_000;
+
+const runUploadTask = async <T,>(
+  task: { uploadAsync: () => Promise<T> },
+  signal?: AbortSignal,
+  timeoutMs?: number,
+): Promise<T> => {
   assertUploadNotAborted(signal);
-  if (!signal) {
+  if (!signal && timeoutMs === undefined) {
     return task.uploadAsync();
   }
 
   return await new Promise<T>((resolve, reject) => {
     let settled = false;
-    let onAbort: () => void;
+    let onAbort: (() => void) | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
     const finish = (fn: () => void) => {
       if (settled) return;
       settled = true;
-      signal.removeEventListener('abort', onAbort);
+      if (timeoutId !== null) clearTimeout(timeoutId);
+      if (signal && onAbort) signal.removeEventListener('abort', onAbort);
       fn();
     };
     onAbort = () => {
@@ -229,8 +238,14 @@ const runUploadTask = async <T,>(task: { uploadAsync: () => Promise<T> }, signal
       finish(() => reject(createUploadAbortError(signal)));
     };
 
-    signal.addEventListener('abort', onAbort, { once: true });
-    task.uploadAsync().then(
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (timeoutMs !== undefined) {
+      timeoutId = setTimeout(() => {
+        void cancelUploadTask(task).catch(() => undefined);
+        finish(() => reject(new Error('WebDAV streamed upload timed out')));
+      }, timeoutMs);
+    }
+    Promise.resolve().then(() => task.uploadAsync()).then(
       (result) => finish(() => resolve(result)),
       (error) => finish(() => reject(error))
     );
@@ -248,12 +263,13 @@ export const uploadWebdavFileWithFileSystem = async (
   totalBytes?: number,
   signal?: AbortSignal,
   expectedEtag: string | null | undefined = undefined,
+  timeoutMs = WEBDAV_STREAM_UPLOAD_TIMEOUT_MS,
 ): Promise<boolean> => {
   // Before anything is read or sent: this uploader bypasses core's transports, so it is
   // the only place the cleartext guard can run for it (SEC-10a).
   assertMobileWebdavConnection(url, allowInsecureHttp);
   assertUploadNotAborted(signal);
-  const uploadAsync = (FileSystem as any).uploadAsync;
+  const uploadAsync = LegacyFileSystem.uploadAsync;
   if (typeof uploadAsync !== 'function') return false;
   if (!fileUri.startsWith('file://')) return false;
 
@@ -266,8 +282,8 @@ export const uploadWebdavFileWithFileSystem = async (
   else if (expectedEtag !== undefined) headers['If-Match'] = expectedEtag;
 
   const uploadType = resolveUploadType();
-  const createUploadTask = (FileSystem as any).createUploadTask;
-  if (typeof createUploadTask === 'function' && (onProgress || signal)) {
+  const createUploadTask = LegacyFileSystem.createUploadTask;
+  if (typeof createUploadTask === 'function') {
     const task = createUploadTask(
       url,
       fileUri,
@@ -285,7 +301,8 @@ export const uploadWebdavFileWithFileSystem = async (
         }
       }
     );
-    const result = await runUploadTask(task, signal);
+    if (!task || typeof task.uploadAsync !== 'function') return false;
+    const result = await runUploadTask(task, signal, timeoutMs);
     const status = Number((result as { status?: number } | null)?.status ?? 0);
     if (status && (status < 200 || status >= 300)) {
       if (status === 409 || status === 412) throw new WebDavRemoteWriteConflictError(status);
@@ -296,20 +313,9 @@ export const uploadWebdavFileWithFileSystem = async (
     return true;
   }
 
-  if (signal) return false;
-
-  const result = await uploadAsync(url, fileUri, { httpMethod: 'PUT', headers, uploadType });
-  const status = Number((result as { status?: number } | null)?.status ?? 0);
-  if (status && (status < 200 || status >= 300)) {
-    if (status === 409 || status === 412) throw new WebDavRemoteWriteConflictError(status);
-    const error = new Error(`WebDAV File PUT failed (${status})`);
-    (error as { status?: number }).status = status;
-    throw error;
-  }
-  if (onProgress && Number.isFinite(totalBytes ?? NaN) && (totalBytes ?? 0) > 0) {
-    onProgress(totalBytes ?? 0, totalBytes ?? 0);
-  }
-  return true;
+  // uploadAsync has no cancellation handle. Fall back to the bounded byte PUT
+  // path rather than start an upload that can outlive the remote mutation lease.
+  return false;
 };
 
 export const uploadCloudFileWithFileSystem = async (

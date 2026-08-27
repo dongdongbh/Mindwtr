@@ -45,12 +45,11 @@ import { appendSyncHistory, mergeAppData, performSyncCycle } from './sync';
 import { hasUncompactedPurgedTombstones } from './tombstone-compaction';
 import {
     isSyncRemoteMutationFenceError,
+    SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS,
     SyncRemoteMutationFenceBusyError,
     SyncRemoteMutationFenceUnavailableError,
     type SyncRemoteMutationFenceLease,
 } from './sync-remote-fence';
-
-const REMOTE_MUTATION_REQUEST_SAFETY_MS = 35_000;
 
 /**
  * ADR 0014 — the platform-independent sync cycle state machine.
@@ -314,7 +313,7 @@ class SharedSyncRunMachine {
         if (this.remoteMutationFence) {
             await this.runRemoteMutationFenceOperation(
                 'Remote sync mutation fence validation failed',
-                () => this.remoteMutationFence!.assertHeld(REMOTE_MUTATION_REQUEST_SAFETY_MS),
+                () => this.remoteMutationFence!.assertHeld(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS),
             );
             return;
         }
@@ -331,7 +330,7 @@ class SharedSyncRunMachine {
     }
 
     private async assertRemoteMutationFenceHeld(
-        minRemainingMs = REMOTE_MUTATION_REQUEST_SAFETY_MS,
+        minRemainingMs = SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS,
     ): Promise<void> {
         if (!this.remoteMutationFence) return;
         await this.runRemoteMutationFenceOperation(
@@ -594,8 +593,11 @@ class SharedSyncRunMachine {
         }
         let outcome: SyncRemoteWriteOutcome;
         try {
-            await this.assertRemoteMutationFenceHeld(REMOTE_MUTATION_REQUEST_SAFETY_MS);
-            outcome = await this.requireIo().writeRemote(remoteDocument);
+            await this.assertRemoteMutationFenceHeld(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
+            outcome = await this.requireIo().writeRemote(
+                remoteDocument,
+                (minRemainingMs) => this.assertRemoteMutationFenceHeld(minRemainingMs),
+            );
         } catch (error) {
             if (error instanceof SyncRemoteWriteConflict) {
                 // Another device wrote between readRemote and writeRemote; retry next cycle.

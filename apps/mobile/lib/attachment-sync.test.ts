@@ -30,6 +30,8 @@ const fileSystemMock = vi.hoisted(() => ({
   deleteAsync: vi.fn().mockResolvedValue(undefined),
   copyAsync: vi.fn().mockResolvedValue(undefined),
   moveAsync: vi.fn().mockResolvedValue(undefined),
+  uploadAsync: vi.fn(),
+  createUploadTask: vi.fn(),
 }));
 
 vi.mock('expo-file-system/legacy', () => fileSystemMock);
@@ -128,6 +130,8 @@ beforeAll(async () => {
 describe('attachment sync', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    fileSystemMock.uploadAsync.mockReset();
+    fileSystemMock.createUploadTask.mockReset();
     // The real lifecycle keeps a module-scoped "stat we already failed to hash" map
     // (BUG-16); leaking it between tests would silently skip a re-read a later test
     // is asserting on.
@@ -1604,6 +1608,30 @@ describe('attachment sync', () => {
 
       expect(core.webdavMakeDirectory).not.toHaveBeenCalled();
       expect(core.webdavPutFileVersioned).not.toHaveBeenCalled();
+    });
+
+    it('cancels a hanging streamed WebDAV upload at the request timeout', async () => {
+      const cancelAsync = vi.fn(async () => undefined);
+      const uploadAsync = vi.fn(() => new Promise<never>(() => undefined));
+      fileSystemMock.createUploadTask.mockReturnValue({ uploadAsync, cancelAsync });
+      const { uploadWebdavFileWithFileSystem } = await import('./attachment-sync-backends/common');
+
+      await expect(uploadWebdavFileWithFileSystem(
+        'https://example.com/attachments/a.bin',
+        'file://document/attachments/a.bin',
+        'application/octet-stream',
+        'u',
+        'p',
+        false,
+        undefined,
+        3,
+        undefined,
+        null,
+        1,
+      )).rejects.toThrow('WebDAV streamed upload timed out');
+
+      expect(uploadAsync).toHaveBeenCalledTimes(1);
+      expect(cancelAsync).toHaveBeenCalledTimes(1);
     });
 
     it('re-uploads a WebDAV attachment during prepare but re-downloads the very same mismatch post-merge', async () => {

@@ -68,6 +68,7 @@ import {
     resolveI18nText,
     LEGACY_SYNC_FILE_NAME,
     SYNC_FILE_NAME,
+    SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS,
     type CloudCalendarFeed,
     type CloudJsonWriteResult,
     type CloudProvider,
@@ -2235,8 +2236,9 @@ export class SyncService {
                     strongEtag: result.strongEtag,
                 });
             },
-            webdavPut: async (sanitized, expectedEtag) => {
+            webdavPut: async (sanitized, expectedEtag, assertRemoteMutationFenceHeld) => {
                 if (isTauriRuntimeEnv() && !context.usesConfigOverride) {
+                    await assertRemoteMutationFenceHeld?.(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
                     return invokeSyncNative<RemoteJsonWriteResult | boolean>('webdav_put_json', {
                         data: sanitized,
                         expectedEtag,
@@ -2248,6 +2250,7 @@ export class SyncService {
                 const password = await resolveWebdavPassword(config);
                 const fetcher = await createFetchWithAbortForContext(context);
                 const material = (await getSyncEncryptionMaterial()) ?? undefined;
+                await assertRemoteMutationFenceHeld?.(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
                 return webdavPutSyncDocument(normalizedUrl, sanitized, {
                     allowInsecureHttp: config.allowInsecureHttp,
                     username: config.username,
@@ -2341,14 +2344,17 @@ export class SyncService {
                 () => resolveDropboxAccessTokenForContext(context, forceRefresh)
             ),
             dropboxDownload: (token) => SyncService.downloadDropboxWithFallback(context, token),
-            dropboxUpload: async (token, sanitized, expectedRev) => {
+            dropboxUpload: async (token, sanitized, expectedRev, assertRemoteMutationFenceHeld) => {
                 const fetcher = await createFetchWithAbortForContext(context);
                 const material = (await getSyncEncryptionMaterial()) ?? undefined;
                 return SyncService.runDropboxTransientRetry(
-                    () => uploadDropboxAppData(token, sanitized, expectedRev, fetcher, {
-                        material,
-                        cryptoPrims: desktopSyncCryptoPrimitives,
-                    })
+                    async () => {
+                        await assertRemoteMutationFenceHeld?.(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
+                        return uploadDropboxAppData(token, sanitized, expectedRev, fetcher, {
+                            material,
+                            cryptoPrims: desktopSyncCryptoPrimitives,
+                        });
+                    }
                 );
             },
             dropboxMetadata: async (token) => {

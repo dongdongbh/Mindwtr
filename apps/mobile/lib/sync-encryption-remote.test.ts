@@ -54,6 +54,7 @@ import { __syncEncryptionServiceTestUtils } from './sync-encryption-service';
 import { __resetSecureSecretStoreForTests } from './secure-secret-store';
 import { classifySyncFailure } from './sync-service-utils';
 import { SyncEncryptionNoKeyError, SyncEncryptionStateUnavailableError } from './sync-encryption-state';
+import { forceRefreshDropboxAccessToken, getValidDropboxAccessToken } from './dropbox-auth';
 
 const nodeQuickCrypto: SyncCryptoNativeModule = {
   argon2: (_algorithm, params, callback) => {
@@ -484,6 +485,26 @@ describe('Dropbox remote port + core transition round trip', () => {
       }
       throw new Error(`unexpected fetch ${url}`);
     }));
+  });
+
+  it('refreshes authorization when attachment inventory returns HTTP 401', async () => {
+    vi.mocked(getValidDropboxAccessToken).mockResolvedValueOnce('expired-token');
+    vi.mocked(forceRefreshDropboxAccessToken).mockResolvedValueOnce('fresh-token');
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      if (!url.includes('/files/list_folder')) throw new Error(`unexpected fetch ${url}`);
+      const authorization = new Headers(init?.headers).get('authorization');
+      if (authorization === 'Bearer expired-token') return new Response(null, { status: 401 });
+      expect(authorization).toBe('Bearer fresh-token');
+      return jsonResponse({ entries: [], cursor: 'done', has_more: false });
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    const port = await __syncEncryptionServiceTestUtils.createDropboxRemotePort(null);
+    await expect(port.list()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'data.json', kind: 'document' }),
+    ]));
+    expect(forceRefreshDropboxAccessToken).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
   it('validates path_lower while preserving the Dropbox file name casing', async () => {
