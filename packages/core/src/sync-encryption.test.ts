@@ -179,6 +179,30 @@ describe('local-only transitions (no configured backend, #1001)', () => {
         expect(keyCache.current).toBeNull();
         expect(localState.value).toBeNull();
     });
+
+    it('local-only disable retains the key when disabled-state persistence fails', async () => {
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionLocalOnly('pw', keyCache, localState, undefined, FAST_KDF);
+        const enabledState = structuredClone(localState.value);
+        const writeState = localState.write.bind(localState);
+        let failDisabledStateWrite = true;
+        localState.write = async (state) => {
+            if (state === null && failDisabledStateWrite) throw new Error('simulated state persistence failure');
+            await writeState(state);
+        };
+
+        await expect(runDisableSyncEncryptionLocalOnly(keyCache, localState))
+            .rejects.toThrow('simulated state persistence failure');
+
+        expect(localState.value).toEqual(enabledState);
+        expect(await keyCache.getKey()).not.toBeNull();
+
+        failDisabledStateWrite = false;
+        await runDisableSyncEncryptionLocalOnly(keyCache, localState);
+        expect(localState.value).toBeNull();
+        expect(await keyCache.getKey()).toBeNull();
+    });
 });
 
 describe('runEnableSyncEncryptionOverRemote', () => {

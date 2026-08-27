@@ -541,8 +541,8 @@ export async function runDisableSyncEncryptionLocalOnly(
     localState: SyncEncryptionLocalStatePort,
 ): Promise<void> {
     assertNoIncompleteSyncEncryptionTransition(localState);
-    await keyCache.clearKey();
     await localState.write(null);
+    await keyCache.clearKey();
 }
 
 /**
