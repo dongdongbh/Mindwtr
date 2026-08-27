@@ -1014,16 +1014,6 @@ class MobileSyncRun {
         }
         if (backend === 'webdav') {
           await this.resolveWebdavBackendConfig();
-          const webdavConfig = this.webdavConfig!;
-          await ensureWebdavCapabilityProof(webdavConfig, () => (
-            assertWebdavStrongEtagSupport(webdavConfig.url, {
-              ...getMobileWebDavRequestOptions(webdavConfig.allowInsecureHttp),
-              username: webdavConfig.username,
-              password: webdavConfig.password,
-              timeoutMs: 10_000,
-              fetcher: this.fetchWithAbort,
-            })
-          ));
         }
         if (backend === 'cloud') {
           await this.resolveCloudBackendConfig();
@@ -1044,6 +1034,18 @@ class MobileSyncRun {
             throw new SyncEncryptionNoKeyError();
           }
           this.encryptionMaterial = await getSyncEncryptionMaterial();
+        }
+        if (backend === 'webdav') {
+          const webdavConfig = this.webdavConfig!;
+          await ensureWebdavCapabilityProof(webdavConfig, () => (
+            assertWebdavStrongEtagSupport(webdavConfig.url, {
+              ...getMobileWebDavRequestOptions(webdavConfig.allowInsecureHttp),
+              username: webdavConfig.username,
+              password: webdavConfig.password,
+              timeoutMs: 10_000,
+              fetcher: this.fetchWithAbort,
+            })
+          ));
         }
         // CloudKit setup — ensure zone and subscription exist before sync cycle.
         if (backend === 'cloudkit') {
