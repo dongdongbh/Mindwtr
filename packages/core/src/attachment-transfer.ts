@@ -165,6 +165,15 @@ export type AttachmentTransferLifecycleOptions = {
      */
     deferUploads?: boolean;
     /**
+     * Whether a post-merge pending candidate whose local source is confirmed
+     * missing may be recovered from the current remote blob. Providers without
+     * generation-bound fetch/publish APIs must set this to false: otherwise the
+     * recovery could validate one generation and overwrite a newer one. When
+     * disabled, the lifecycle preserves every attachment field and performs no
+     * download callback for that candidate.
+     */
+    allowPendingRemoteRecovery?: boolean;
+    /**
      * Optional throttle/backoff/cap gate. Every field is optional, and the whole object may be
      * omitted; omitting it (the default) preserves today's unthrottled behaviour, so the callers
      * that don't need it are unaffected. A backend that needs rate-limit protection (e.g. WebDAV)
@@ -403,6 +412,16 @@ export async function runAttachmentTransferLifecycle(
 
         const existsLocally = localPresence === 'present';
 
+        const hasPendingContentUpload = attachment.pendingContentUpload === true;
+        if (
+            hasPendingContentUpload
+            && !options.deferUploads
+            && !existsLocally
+            && options.allowPendingRemoteRecovery === false
+        ) {
+            continue;
+        }
+
         const nextStatus: Attachment['localStatus'] = existsLocally ? 'available' : 'missing';
         if (attachment.localStatus !== nextStatus) {
             attachment.localStatus = nextStatus;
@@ -416,7 +435,6 @@ export async function runAttachmentTransferLifecycle(
         // candidate identity. A backend may discover that the previous blob is absent,
         // but that must never demote a prepared replacement into an unconstrained first
         // upload: the snapshot still has to match the recorded fileHash/contentRev.
-        const hasPendingContentUpload = attachment.pendingContentUpload === true;
         if (hasPendingContentUpload && !options.deferUploads) {
             const expectedPendingHash = attachment.fileHash?.trim().toLowerCase();
             if (!isSha256Hex(expectedPendingHash)) {

@@ -169,6 +169,7 @@ export const syncCloudKitAttachments = async (
         attachmentsById,
         getLocalFilePresence: getLocalAttachmentPresence,
         deferUploads: options.phase === 'prepare',
+        allowPendingRemoteRecovery: false,
         getLocalFileStat: (path) => statAttachmentFile(path),
         computeLocalFileHash: (path) => computeAttachmentFileHash(path),
         contentChangePhase: options.phase,

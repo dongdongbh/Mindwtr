@@ -1248,17 +1248,17 @@ describe('attachment sync', () => {
     });
   });
 
-  it('clears a missing cloud pending marker only when the remote bytes match its hash', async () => {
+  it('defers missing pending Cloud bytes without reading or replacing the remote generation', async () => {
     const bytes = new Uint8Array([4, 5, 6]);
     const appData = singleAttachmentData({
       id: 'recover-cloud',
       cloudKey: 'attachments/recover-cloud.txt',
       fileHash: sha256Hex(bytes),
+      localStatus: 'available',
       pendingContentUpload: true,
     });
     fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
     const core = await import('@mindwtr/core');
-    vi.mocked(core.cloudGetFile).mockResolvedValue(bytes.slice().buffer as ArrayBuffer);
 
     const result = await attachmentSync.syncCloudAttachments(
       appData,
@@ -1267,36 +1267,44 @@ describe('attachment sync', () => {
       { phase: 'post-merge' },
     );
 
-    const recovered = syncResult(result, appData).data.tasks[0].attachments?.[0];
-    expect(recovered).toMatchObject({
+    expect(result).toBe(false);
+    expect(appData.tasks[0].attachments?.[0]).toMatchObject({
       cloudKey: 'attachments/recover-cloud.txt',
       fileHash: sha256Hex(bytes),
-      localStatus: 'missing',
-      pendingContentUpload: undefined,
-    });
-    expect(core.cloudPutFile).toHaveBeenCalledWith(
-      'https://cloud.example/v1/attachments/recover-cloud.txt',
-      expect.any(ArrayBuffer),
-      'application/octet-stream',
-      { token: 'token' },
-    );
-
-    vi.mocked(core.cloudGetFile).mockResolvedValue(new Uint8Array([9, 9, 9]).buffer as ArrayBuffer);
-    const mismatchInput = singleAttachmentData({
-      id: 'recover-cloud-mismatch',
-      cloudKey: 'attachments/recover-cloud-mismatch.txt',
-      fileHash: sha256Hex(bytes),
+      localStatus: 'available',
       pendingContentUpload: true,
     });
-    const mismatch = await attachmentSync.syncCloudAttachments(
-      mismatchInput,
-      { url: 'https://cloud.example/v1/data', token: 'token' },
-      'https://cloud.example/v1',
+    expect(core.cloudGetFile).not.toHaveBeenCalled();
+    expect(core.cloudPutFile).not.toHaveBeenCalled();
+  });
+
+  it('defers missing pending CloudKit bytes without fetching or saving an asset', async () => {
+    const bytes = new Uint8Array([4, 5, 6]);
+    const appData = singleAttachmentData({
+      id: 'recover-cloudkit',
+      cloudKey: 'cloudkit:recover-cloudkit',
+      fileHash: sha256Hex(bytes),
+      localStatus: 'available',
+      pendingContentUpload: true,
+    });
+    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+    const cloudkit = await import('./cloudkit-sync');
+
+    const result = await attachmentSync.syncCloudKitAttachments(
+      appData,
+      undefined,
       { phase: 'post-merge' },
     );
-    expect(mismatch).toBe(false);
-    expect(mismatchInput.tasks[0].attachments?.[0]?.pendingContentUpload).toBe(true);
-    expect(core.cloudPutFile).toHaveBeenCalledTimes(1);
+
+    expect(result).toBe(false);
+    expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+      cloudKey: 'cloudkit:recover-cloudkit',
+      fileHash: sha256Hex(bytes),
+      localStatus: 'available',
+      pendingContentUpload: true,
+    });
+    expect(cloudkit.fetchCloudKitAttachmentAsset).not.toHaveBeenCalled();
+    expect(cloudkit.saveCloudKitAttachmentAsset).not.toHaveBeenCalled();
   });
 
   it('restores matching pending bytes from Dropbox before clearing the marker', async () => {

@@ -507,6 +507,38 @@ describe('runAttachmentTransferLifecycle', () => {
             });
         });
 
+        it('preserves a missing pending candidate when its provider cannot bind remote recovery to a generation', async () => {
+            const expectedHash = 'a'.repeat(64);
+            const attachment = makeAttachment({
+                cloudKey: 'attachments/attachment-1.txt',
+                fileHash: expectedHash,
+                contentRev: 3,
+                localStatus: 'available',
+                pendingContentUpload: true,
+            });
+            const onDownload = vi.fn(async () => true);
+            const { didMutate, after } = await runLifecycle({
+                attachmentsById: new Map([[attachment.id, attachment]]),
+                getLocalFilePresence: vi.fn(async () => 'confirmed-not-found' as const),
+                contentChangePhase: 'post-merge',
+                allowPendingRemoteRecovery: false,
+                onUpload: vi.fn(),
+                onUploadError: vi.fn(),
+                onDownload,
+                onDownloadError: vi.fn(),
+            });
+
+            expect(didMutate).toBe(false);
+            expect(onDownload).not.toHaveBeenCalled();
+            expect(after()).toMatchObject({
+                cloudKey: 'attachments/attachment-1.txt',
+                fileHash: expectedHash,
+                contentRev: 3,
+                localStatus: 'available',
+                pendingContentUpload: true,
+            });
+        });
+
         it('retains a missing pending candidate when remote recovery changes its identity', async () => {
             const expectedHash = 'a'.repeat(64);
             const attachment = makeAttachment({

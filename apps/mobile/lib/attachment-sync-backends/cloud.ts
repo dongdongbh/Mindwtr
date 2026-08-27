@@ -4,8 +4,6 @@ import {
   cloudGetFile,
   cloudPutFile,
   isAbortError,
-  isSha256Hex,
-  isSyncRemoteMutationFenceError,
   validateAttachmentHash,
   validateAttachmentForUpload,
   type AppData,
@@ -104,6 +102,14 @@ export const syncCloudAttachments = async (
       : 'confirmed-not-found';
     if (localPresence === 'unreadable') continue;
     const existsLocally = localPresence === 'present';
+    // This provider cannot bind its recovery GET and replacement PUT to one
+    // remote generation. Preserve the pending identity until local bytes return
+    // (or a later merge supersedes it) instead of risking a stale overwrite.
+    if (
+      options.phase !== 'prepare'
+      && attachment.pendingContentUpload === true
+      && !existsLocally
+    ) continue;
     const nextStatus = getAttachmentLocalStatus(uri, localPresence);
     if (attachment.localStatus !== nextStatus) {
       attachment.localStatus = nextStatus;
@@ -118,47 +124,6 @@ export const syncCloudAttachments = async (
       if (await prepareBespokeAttachmentContentCandidate(attachment, uri)) {
         recordPatch(attachment);
       }
-    }
-
-    if (
-      options.phase !== 'prepare'
-      && attachment.pendingContentUpload === true
-      && attachment.cloudKey
-      && !existsLocally
-      && !isHttp
-      && isSha256Hex(attachment.fileHash?.trim().toLowerCase())
-    ) {
-      assertNotAborted(options.signal);
-      options.assertCurrent?.();
-      let recovered = false;
-      try {
-        const data = await cloudGetFile(
-          `${baseSyncUrl}/${attachment.cloudKey}`,
-          options.signal
-            ? { ...cloudRequestOptions, token: cloudConfig.token, signal: options.signal }
-            : { ...cloudRequestOptions, token: cloudConfig.token },
-        );
-        await validateAttachmentHash(attachment, new Uint8Array(data));
-        await options.assertRemoteMutationFenceHeld?.(CLOUD_REMOTE_MUTATION_REQUEST_HORIZON_MS);
-        await cloudPutFile(
-          `${baseSyncUrl}/${attachment.cloudKey}`,
-          data,
-          attachment.mimeType || DEFAULT_CONTENT_TYPE,
-          options.signal
-            ? { ...cloudRequestOptions, token: cloudConfig.token, signal: options.signal }
-            : { ...cloudRequestOptions, token: cloudConfig.token },
-        );
-        recovered = true;
-      } catch (error) {
-        if (isAbortLikeError(error, options.signal) || isSyncRemoteMutationFenceError(error)) throw error;
-        logAttachmentWarn(`Failed to recover pending attachment ${attachment.id}`, error);
-      }
-      if (recovered) {
-        options.assertCurrent?.();
-        attachment.pendingContentUpload = undefined;
-        recordPatch(attachment);
-      }
-      continue;
     }
 
     if (

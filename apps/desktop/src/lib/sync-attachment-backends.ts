@@ -676,6 +676,7 @@ export async function syncCloudAttachments(
     const { patches } = await syncBasicRemoteAttachments({
         attachmentsById,
         deferUploads: helpers?.phase === 'prepare',
+        allowPendingRemoteRecovery: false,
         ensureLocalSnapshotFresh: helpers?.ensureLocalSnapshotFresh,
         getLocalFilePresence: localFilePresence,
         getLocalFileStat: statLocalFile,
@@ -1042,6 +1043,7 @@ export async function syncCloudKitAttachments(
     const { patches } = await syncBasicRemoteAttachments({
         attachmentsById,
         deferUploads: helpers?.phase === 'prepare',
+        allowPendingRemoteRecovery: false,
         ensureLocalSnapshotFresh: helpers?.ensureLocalSnapshotFresh,
         getLocalFilePresence: localFilePresence,
         getLocalFileStat: statLocalFile,
