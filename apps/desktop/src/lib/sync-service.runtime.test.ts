@@ -220,6 +220,7 @@ const createRuntimeWebdavCapabilityFetch = (documentBody: string) => {
 };
 
 const invokeMock = vi.hoisted(() => vi.fn());
+const invokeWithFileSyncLeaseMock = vi.hoisted(() => vi.fn());
 const markLocalWriteMock = vi.hoisted(() => vi.fn());
 const markLocalSqliteWriteMock = vi.hoisted(() => vi.fn());
 const flushPendingSaveMock = vi.hoisted(() => vi.fn());
@@ -365,6 +366,13 @@ describe('desktop sync-service runtime', () => {
             if (command === 'save_data') return undefined;
             throw new Error(`Unexpected command: ${command} ${JSON.stringify(args)}`);
         });
+        invokeWithFileSyncLeaseMock.mockImplementation(
+            async (command: string, args?: Record<string, unknown>) => {
+                if (command === 'acquire_file_sync_lease') return 'runtime-file-sync-lease';
+                if (command === 'release_file_sync_lease') return undefined;
+                return invokeMock(command, args);
+            },
+        );
 
         performSyncCycleMock.mockImplementation(async (io: {
             readLocal: () => Promise<AppData>;
@@ -382,7 +390,10 @@ describe('desktop sync-service runtime', () => {
         syncServiceModule.__syncServiceTestUtils.resetDependenciesForTests();
         syncServiceModule.__syncServiceTestUtils.setDependenciesForTests({
             isTauriRuntime: () => true,
-            invoke: invokeMock as unknown as <T>(command: string, args?: Record<string, unknown>) => Promise<T>,
+            invoke: invokeWithFileSyncLeaseMock as unknown as <T>(
+                command: string,
+                args?: Record<string, unknown>,
+            ) => Promise<T>,
             getStoreState: useTaskStoreGetStateMock as typeof useTaskStoreGetStateMock,
             flushPendingSave: flushPendingSaveMock as typeof flushPendingSaveMock,
             performSyncCycle: performSyncCycleMock as typeof performSyncCycleMock,
@@ -409,6 +420,12 @@ describe('desktop sync-service runtime', () => {
         const result = await syncServiceModule.SyncService.performSync();
 
         expect(result).toEqual({ success: true, skipped: 'requeued' });
+        expect(invokeWithFileSyncLeaseMock).toHaveBeenCalledWith('acquire_file_sync_lease', {
+            path: '/sync/data.json',
+        });
+        expect(invokeWithFileSyncLeaseMock).toHaveBeenCalledWith('release_file_sync_lease', {
+            token: 'runtime-file-sync-lease',
+        });
         expect(markLocalWriteMock).toHaveBeenCalledTimes(1);
         expect(markLocalSqliteWriteMock).toHaveBeenCalledTimes(2);
         expect(invokeMock).toHaveBeenCalledWith('save_data', {
