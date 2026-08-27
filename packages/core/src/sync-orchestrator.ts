@@ -73,7 +73,10 @@ export const createSyncOrchestrator = <Arg, Result>(
 
         cancelFollowUpTimer();
         setQueued(false);
-        const cycleArg = queuedArg ?? arg;
+        // A direct call is a newer user/system intent than the delayed request
+        // waiting in queuedArg. The timer callback resolves queuedArg before it
+        // calls run(), so only that callback consumes the delayed request.
+        const cycleArg = arg;
         queuedArg = undefined;
         const cycleStartedAt = Date.now();
 
