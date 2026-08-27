@@ -58,6 +58,7 @@ const localData: AppData = {
     people: [],
     settings: {},
 };
+const LOCAL_ATTACHMENT_HASH = '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81';
 
 const buildResponse = (
     status: number,
@@ -257,12 +258,14 @@ const fsMocks = vi.hoisted(() => ({
 const syncFsMocks = vi.hoisted(() => ({
     exists: vi.fn(),
     mkdir: vi.fn(),
+    publishAttachmentGeneration: vi.fn(),
     remove: vi.fn(),
     rename: vi.fn(),
     stat: vi.fn(),
 }));
 const pathMocks = vi.hoisted(() => ({
     dataDir: vi.fn(),
+    dirname: vi.fn(),
     join: vi.fn(),
 }));
 const storeStateRef = vi.hoisted(() => ({
@@ -347,7 +350,13 @@ describe('desktop sync-service runtime', () => {
 
         fsMocks.exists.mockImplementation(async (path: string) => path === 'mindwtr/attachments/doc.txt');
         fsMocks.mkdir.mockResolvedValue(undefined);
-        fsMocks.open.mockImplementation(async () => {
+        fsMocks.open.mockImplementation(async (_path: string, options?: { write?: boolean }) => {
+            if (options?.write) {
+                return {
+                    write: vi.fn(async (bytes: Uint8Array) => bytes.byteLength),
+                    close: vi.fn().mockResolvedValue(undefined),
+                };
+            }
             let finished = false;
             return {
                 read: vi.fn(async (buffer: Uint8Array) => {
@@ -367,6 +376,7 @@ describe('desktop sync-service runtime', () => {
         fsMocks.readDir.mockResolvedValue([]);
         syncFsMocks.exists.mockImplementation(async (path: string) => path === 'mindwtr/attachments/doc.txt');
         syncFsMocks.mkdir.mockResolvedValue(undefined);
+        syncFsMocks.publishAttachmentGeneration.mockResolvedValue(undefined);
         syncFsMocks.rename.mockResolvedValue(undefined);
         syncFsMocks.remove.mockResolvedValue(undefined);
         syncFsMocks.stat.mockResolvedValue({
@@ -374,6 +384,7 @@ describe('desktop sync-service runtime', () => {
             size: 3,
         });
         pathMocks.dataDir.mockResolvedValue('/data');
+        pathMocks.dirname.mockImplementation(async (path: string) => path.replace(/[\\/][^\\/]+$/, ''));
         pathMocks.join.mockImplementation(async (...parts: string[]) => parts.join('/'));
 
         invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
@@ -1031,13 +1042,15 @@ describe('desktop sync-service runtime', () => {
         expect(result).toEqual({ success: true, skipped: 'requeued' });
         expect(performSyncCycleMock).toHaveBeenCalledOnce();
         expect(fsMocks.readFile).toHaveBeenCalledWith('mindwtr/attachments/doc.txt', { baseDir: 'data' });
-        expect(fsMocks.writeFile).toHaveBeenCalledWith(
-            expect.stringMatching(/^\/sync\/attachments\/att-1\.txt\.tmp-/),
-            expect.any(Uint8Array),
+        expect(fsMocks.open).toHaveBeenCalledWith(
+            expect.stringMatching(/^\/sync\/attachments\/\.mindwtr-attachment-generation-.*\.tmp$/),
+            { write: true, createNew: true },
         );
-        expect(syncFsMocks.rename).toHaveBeenCalledWith(
-            expect.stringMatching(/^\/sync\/attachments\/att-1\.txt\.tmp-/),
-            '/sync/attachments/att-1.txt',
+        expect(syncFsMocks.publishAttachmentGeneration).toHaveBeenCalledWith(
+            expect.stringMatching(/^\/sync\/attachments\/\.mindwtr-attachment-generation-.*\.tmp$/),
+            `/sync/attachments/att-1.${LOCAL_ATTACHMENT_HASH}.txt`,
+            3,
+            LOCAL_ATTACHMENT_HASH,
         );
         expect(invokeMock).toHaveBeenCalledWith('save_data', {
             baselineEntities: {
@@ -1093,7 +1106,8 @@ describe('desktop sync-service runtime', () => {
             if (parts.slice(1).some((part) => part.includes('/'))) {
                 throw new Error(`Invalid Windows path segment: ${parts.join(' | ')}`);
             }
-            return `\\\\?\\${parts.join('\\')}`;
+            const joined = parts.join('\\');
+            return joined.startsWith('\\\\?\\') ? joined : `\\\\?\\${joined}`;
         });
 
         const result = await syncServiceModule.SyncService.performSync();
@@ -1101,13 +1115,19 @@ describe('desktop sync-service runtime', () => {
         expect(result).toMatchObject({ success: true });
         expect(result).not.toHaveProperty('skipped');
         expect(performSyncCycleMock).toHaveBeenCalledOnce();
-        expect(fsMocks.writeFile).toHaveBeenCalledWith(
-            expect.stringMatching(/^\\\\\?\\C:\\Users\\Pjuter\\Documents\\Mindwtr_sync\\attachments\\att-1\.txt\.tmp-/),
-            expect.any(Uint8Array),
+        expect(fsMocks.open).toHaveBeenCalledWith(
+            expect.stringMatching(
+                /^\\\\\?\\C:\\Users\\Pjuter\\Documents\\Mindwtr_sync\\attachments\\\.mindwtr-attachment-generation-.*\.tmp$/,
+            ),
+            { write: true, createNew: true },
         );
-        expect(syncFsMocks.rename).toHaveBeenCalledWith(
-            expect.stringMatching(/^\\\\\?\\C:\\Users\\Pjuter\\Documents\\Mindwtr_sync\\attachments\\att-1\.txt\.tmp-/),
-            '\\\\?\\C:\\Users\\Pjuter\\Documents\\Mindwtr_sync\\attachments\\att-1.txt',
+        expect(syncFsMocks.publishAttachmentGeneration).toHaveBeenCalledWith(
+            expect.stringMatching(
+                /^\\\\\?\\C:\\Users\\Pjuter\\Documents\\Mindwtr_sync\\attachments\\\.mindwtr-attachment-generation-.*\.tmp$/,
+            ),
+            `\\\\?\\C:\\Users\\Pjuter\\Documents\\Mindwtr_sync\\attachments\\att-1.${LOCAL_ATTACHMENT_HASH}.txt`,
+            3,
+            LOCAL_ATTACHMENT_HASH,
         );
     });
 

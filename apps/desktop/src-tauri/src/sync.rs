@@ -6931,6 +6931,7 @@ mod tests {
             "sync_fs_remove_file",
             "sync_fs_rename",
             "sync_fs_stat",
+            "sync_fs_publish_attachment_generation",
         ] {
             assert!(
                 handler.contains(&format!("{name},")),
@@ -6980,6 +6981,72 @@ mod tests {
             &managed,
             true
         ));
+    }
+
+    #[test]
+    fn attachment_generation_publication_replaces_only_the_corrupt_same_hash_target() {
+        let dir = tempfile::tempdir().expect("generation test dir");
+        let expected_bytes = b"verified generation";
+        let expected_sha256 = bytes_to_hex(&Sha256::digest(expected_bytes));
+        let scratch = dir
+            .path()
+            .join(".mindwtr-attachment-generation-restart.tmp");
+        let target = dir
+            .path()
+            .join(format!("attachment-1.{expected_sha256}.txt"));
+        let winning_hash = bytes_to_hex(&Sha256::digest(b"peer winner"));
+        let peer_winner = dir.path().join(format!("attachment-1.{winning_hash}.txt"));
+        fs::write(&scratch, expected_bytes).expect("seed verified scratch");
+        fs::write(&target, b"crash-truncated").expect("seed corrupt prior attempt");
+        fs::write(&peer_winner, b"peer winner").expect("seed peer winner");
+
+        publish_file_sync_attachment_generation_with(
+            &scratch,
+            &target,
+            expected_bytes.len() as u64,
+            &expected_sha256,
+            replace_file_sync_attachment_generation_durably,
+            sync_parent_directory_for_durability,
+        )
+        .expect("restart should replace the exact poisoned generation");
+
+        assert_eq!(fs::read(&target).expect("published target"), expected_bytes);
+        assert_eq!(
+            fs::read(&peer_winner).expect("peer winner remains"),
+            b"peer winner"
+        );
+        assert!(!scratch.exists(), "atomic publication consumes the scratch");
+    }
+
+    #[test]
+    fn attachment_generation_verification_failure_preserves_target_and_scratch() {
+        let dir = tempfile::tempdir().expect("generation test dir");
+        let expected_sha256 = bytes_to_hex(&Sha256::digest(b"expected"));
+        let scratch = dir
+            .path()
+            .join(".mindwtr-attachment-generation-mismatch.tmp");
+        let target = dir
+            .path()
+            .join(format!("attachment-1.{expected_sha256}.txt"));
+        fs::write(&scratch, b"different").expect("seed mismatched scratch");
+        fs::write(&target, b"existing generation").expect("seed existing target");
+
+        let error = publish_file_sync_attachment_generation_with(
+            &scratch,
+            &target,
+            b"different".len() as u64,
+            &expected_sha256,
+            |_source, _destination| panic!("mismatched scratch must not be installed"),
+            |_path| panic!("mismatched scratch must not flush target metadata"),
+        )
+        .expect_err("mismatched scratch must fail closed");
+
+        assert!(error.contains("integrity verification"));
+        assert_eq!(
+            fs::read(&target).expect("existing target"),
+            b"existing generation"
+        );
+        assert_eq!(fs::read(&scratch).expect("owned scratch"), b"different");
     }
 
     // The managed dir itself may legitimately sit behind a symlink (portable
@@ -14066,6 +14133,131 @@ fn sync_fs_path(app: &tauri::AppHandle, path: String) -> Result<PathBuf, String>
     }
 }
 
+const FILE_SYNC_ATTACHMENT_SCRATCH_PREFIX: &str = ".mindwtr-attachment-generation-";
+const FILE_SYNC_ATTACHMENT_SCRATCH_SUFFIX: &str = ".tmp";
+
+fn is_sha256_hex(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn is_file_sync_attachment_generation_target(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.split('.').any(is_sha256_hex))
+}
+
+fn verify_and_flush_file_sync_generation_scratch(
+    scratch_path: &Path,
+    expected_size: u64,
+    expected_sha256: &str,
+) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(scratch_path)
+        .map_err(|error| format!("Failed to inspect attachment generation scratch: {error}"))?;
+    if !metadata.file_type().is_file() {
+        return Err("Attachment generation scratch must be a regular file".to_string());
+    }
+    if metadata.len() != expected_size {
+        return Err("Attachment generation scratch size changed before publication".to_string());
+    }
+
+    let mut file = OpenOptions::new()
+        .read(true)
+        .open(scratch_path)
+        .map_err(|error| format!("Failed to open attachment generation scratch: {error}"))?;
+    let mut hasher = Sha256::new();
+    let mut total = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| format!("Failed to read attachment generation scratch: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        total = total
+            .checked_add(read as u64)
+            .ok_or_else(|| "Attachment generation scratch size overflow".to_string())?;
+        if total > expected_size {
+            return Err(
+                "Attachment generation scratch size changed before publication".to_string(),
+            );
+        }
+        hasher.update(&buffer[..read]);
+    }
+    if total != expected_size
+        || file
+            .metadata()
+            .map_err(|error| format!("Failed to restat attachment generation scratch: {error}"))?
+            .len()
+            != expected_size
+    {
+        return Err("Attachment generation scratch size changed before publication".to_string());
+    }
+    let actual_sha256 = bytes_to_hex(&hasher.finalize());
+    if actual_sha256 != expected_sha256.to_ascii_lowercase() {
+        return Err("Attachment generation scratch failed integrity verification".to_string());
+    }
+    file.sync_all()
+        .map_err(|error| format!("Failed to flush attachment generation scratch: {error}"))?;
+    drop(file);
+    Ok(())
+}
+
+#[cfg(windows)]
+fn replace_file_sync_attachment_generation_durably(
+    source: &Path,
+    destination: &Path,
+) -> std::io::Result<()> {
+    // MoveFileExW uses REPLACE_EXISTING | WRITE_THROUGH in this existing helper.
+    replace_transition_path_durably(source, destination)
+}
+
+#[cfg(not(windows))]
+fn replace_file_sync_attachment_generation_durably(
+    source: &Path,
+    destination: &Path,
+) -> std::io::Result<()> {
+    fs::rename(source, destination)
+}
+
+fn publish_file_sync_attachment_generation_with<Replace, SyncParent>(
+    scratch_path: &Path,
+    target_path: &Path,
+    expected_size: u64,
+    expected_sha256: &str,
+    replace: Replace,
+    mut sync_parent: SyncParent,
+) -> Result<(), String>
+where
+    Replace: FnOnce(&Path, &Path) -> std::io::Result<()>,
+    SyncParent: FnMut(&Path) -> std::io::Result<()>,
+{
+    if scratch_path.parent() != target_path.parent() {
+        return Err("Attachment generation publication must stay within one directory".to_string());
+    }
+    let scratch_name = scratch_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Attachment generation scratch has no valid file name".to_string())?;
+    if !scratch_name.starts_with(FILE_SYNC_ATTACHMENT_SCRATCH_PREFIX)
+        || !scratch_name.ends_with(FILE_SYNC_ATTACHMENT_SCRATCH_SUFFIX)
+    {
+        return Err("Attachment generation scratch name is invalid".to_string());
+    }
+    if !is_file_sync_attachment_generation_target(target_path) {
+        return Err("Attachment generation target is not hash-qualified".to_string());
+    }
+    if !is_sha256_hex(expected_sha256) {
+        return Err("Attachment generation expected SHA-256 is invalid".to_string());
+    }
+
+    verify_and_flush_file_sync_generation_scratch(scratch_path, expected_size, expected_sha256)?;
+    replace(scratch_path, target_path)
+        .map_err(|error| format!("Failed to publish attachment generation: {error}"))?;
+    sync_parent(target_path)
+        .map_err(|error| format!("Failed to flush attachment generation directory: {error}"))
+}
+
 #[tauri::command(async)]
 pub(crate) fn sync_fs_exists(app: tauri::AppHandle, path: String) -> Result<bool, String> {
     sync_fs_path(&app, path)?
@@ -14138,4 +14330,24 @@ pub(crate) fn sync_fs_rename(
         ));
     }
     fs::rename(from, to).map_err(|error| error.to_string())
+}
+
+#[tauri::command(async)]
+pub(crate) fn sync_fs_publish_attachment_generation(
+    app: tauri::AppHandle,
+    scratch_path: String,
+    target_path: String,
+    expected_size: u64,
+    expected_sha256: String,
+) -> Result<(), String> {
+    let scratch_path = sync_fs_path(&app, scratch_path)?;
+    let target_path = sync_fs_path(&app, target_path)?;
+    publish_file_sync_attachment_generation_with(
+        &scratch_path,
+        &target_path,
+        expected_size,
+        &expected_sha256,
+        replace_file_sync_attachment_generation_durably,
+        sync_parent_directory_for_durability,
+    )
 }

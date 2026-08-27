@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { setNativeInvokeTransport } from './tauri-invoke';
-import { exists, mkdir, remove, rename } from './sync-fs';
+import { exists, mkdir, publishAttachmentGeneration, remove, rename } from './sync-fs';
 
 vi.mock('./runtime', () => ({ isTauriRuntime: () => true }));
 
@@ -28,12 +28,24 @@ describe('sync folder file-system primitives', () => {
         await mkdir('/mnt/rclone/sync/attachments');
         await remove('/mnt/rclone/sync/attachments/a.txt');
         await rename('/mnt/rclone/sync/a.tmp', '/mnt/rclone/sync/a.txt');
+        await publishAttachmentGeneration(
+            '/mnt/rclone/sync/attachments/.mindwtr-attachment-generation-1.tmp',
+            '/mnt/rclone/sync/attachments/a.abc.txt',
+            3,
+            'a'.repeat(64),
+        );
 
         expect(invoked).toEqual([
             ['sync_fs_exists', { path: '/mnt/rclone/sync/attachments/a.txt' }],
             ['sync_fs_create_dir', { path: '/mnt/rclone/sync/attachments' }],
             ['sync_fs_remove_file', { path: '/mnt/rclone/sync/attachments/a.txt' }],
             ['sync_fs_rename', { from: '/mnt/rclone/sync/a.tmp', to: '/mnt/rclone/sync/a.txt' }],
+            ['sync_fs_publish_attachment_generation', {
+                scratchPath: '/mnt/rclone/sync/attachments/.mindwtr-attachment-generation-1.tmp',
+                targetPath: '/mnt/rclone/sync/attachments/a.abc.txt',
+                expectedSize: 3,
+                expectedSha256: 'a'.repeat(64),
+            }],
         ]);
     });
 });

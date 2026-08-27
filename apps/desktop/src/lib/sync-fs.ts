@@ -24,6 +24,23 @@ export const remove = (path: string): Promise<void> => invokeNative('sync_fs_rem
 export const rename = (from: string, to: string): Promise<void> =>
     invokeNative('sync_fs_rename', { from, to });
 
+/**
+ * Atomically publishes one already-written immutable attachment generation.
+ * Native code streams and verifies the exact scratch bytes, flushes them, then
+ * replaces only the hash-qualified final path and persists the directory entry.
+ */
+export const publishAttachmentGeneration = (
+    scratchPath: string,
+    targetPath: string,
+    expectedSize: number,
+    expectedSha256: string,
+): Promise<void> => invokeNative('sync_fs_publish_attachment_generation', {
+    scratchPath,
+    targetPath,
+    expectedSize,
+    expectedSha256,
+});
+
 /** #1057: same main-thread-freeze risk as `exists` above — the fs plugin's `stat`
  *  is a plain (non-async) command too. */
 export const stat = (path: string): Promise<{ mtimeMs: number; size: number }> =>

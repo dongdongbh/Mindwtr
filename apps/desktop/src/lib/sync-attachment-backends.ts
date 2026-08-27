@@ -50,6 +50,7 @@ import { getManagedPath } from './managed-paths';
 import {
     exists as syncFsExists,
     mkdir as syncFsMkdir,
+    publishAttachmentGeneration as syncFsPublishAttachmentGeneration,
     remove as syncFsRemove,
     stat as syncFsStat,
 } from './sync-fs';
@@ -107,6 +108,7 @@ const FILE_BACKEND_VALIDATION_CONFIG = {
     blockedMimeTypes: [],
 };
 const FILE_DOWNLOAD_READ_CHUNK_BYTES = 64 * 1024;
+let fileSyncUploadScratchSequence = 0;
 const UPLOAD_TIMEOUT_MS = 120_000;
 const WEBDAV_ATTACHMENT_RETRY_OPTIONS = {
     maxAttempts: 5,
@@ -1406,7 +1408,7 @@ export async function syncFileAttachments(
     // slow mount, so the ones the plugin runs on the main thread come from
     // ./sync-fs instead. The plugin's own readFile/writeFile are already async.
     const { BaseDirectory, exists, open, readFile, stat, writeFile, remove } = await import('@tauri-apps/plugin-fs');
-    const { dataDir, join } = await import('@tauri-apps/api/path');
+    const { dataDir, dirname, join } = await import('@tauri-apps/api/path');
 
     const attachmentsDir = await join(baseSyncDir, ATTACHMENTS_DIR_NAME);
     try {
@@ -1487,40 +1489,21 @@ export async function syncFileAttachments(
         return wireData;
     };
 
-    const verifyFileSyncGeneration = async (
-        targetPath: string,
-        expectedPlaintextHash: string,
-    ): Promise<void> => {
-        const plaintext = await openAttachmentBytes(await readFileSyncWireData(targetPath));
-        const actualHash = await computeSha256Hex(plaintext);
-        if (actualHash?.toLowerCase() !== expectedPlaintextHash.toLowerCase()) {
-            throw new Error('File Sync attachment generation failed integrity verification');
-        }
-    };
-
     const publishFileSyncGeneration = async (
         targetPath: string,
         wireData: Uint8Array,
-        expectedPlaintextHash: string,
     ): Promise<void> => {
-        if (await syncFsExists(targetPath)) {
-            await verifyFileSyncGeneration(targetPath, expectedPlaintextHash);
-            return;
+        const expectedWireSha256 = await computeSha256Hex(wireData);
+        if (!expectedWireSha256) {
+            throw new Error('File Sync attachment generation hash is unavailable');
         }
-
-        let target: Awaited<ReturnType<typeof open>>;
-        try {
-            target = await open(targetPath, { write: true, createNew: true });
-        } catch (error) {
-            // Another device may have published the same content-addressed key
-            // between the presence check and create-new. Reuse it only after
-            // proving that it opens to the expected plaintext generation.
-            if (await syncFsExists(targetPath).catch(() => false)) {
-                await verifyFileSyncGeneration(targetPath, expectedPlaintextHash);
-                return;
-            }
-            throw error;
-        }
+        fileSyncUploadScratchSequence += 1;
+        const random = Math.random().toString(16).slice(2, 10);
+        const scratchPath = await join(
+            await dirname(targetPath),
+            `.mindwtr-attachment-generation-${Date.now()}-${fileSyncUploadScratchSequence}-${random}.tmp`,
+        );
+        const target = await open(scratchPath, { write: true, createNew: true });
 
         let closed = false;
         try {
@@ -1530,13 +1513,18 @@ export async function syncFileAttachments(
             }
             await target.close();
             closed = true;
-            await verifyFileSyncGeneration(targetPath, expectedPlaintextHash);
+            await syncFsPublishAttachmentGeneration(
+                scratchPath,
+                targetPath,
+                wireData.byteLength,
+                expectedWireSha256,
+            );
         } catch (error) {
             if (!closed) await target.close().catch(() => undefined);
-            // createNew proves this invocation owns the path. It is not yet
-            // referenced by data.json, so cleaning a failed publication cannot
-            // remove another generation or the current document winner.
-            await syncFsRemove(targetPath).catch(() => undefined);
+            // createNew proves this invocation owns only the scratch. Native
+            // publication either atomically consumed it or left the final
+            // generation untouched, so cleanup can never remove a peer target.
+            await syncFsRemove(scratchPath).catch(() => undefined);
             throw error;
         }
     };
@@ -1606,7 +1594,6 @@ export async function syncFileAttachments(
             await publishFileSyncGeneration(
                 await resolveFileBackendPath(join, baseSyncDir, cloudKey),
                 wireData,
-                snapshot.fileHash,
             );
             attachment.cloudKey = cloudKey;
             attachment.localStatus = 'available';
