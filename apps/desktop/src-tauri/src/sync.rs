@@ -5748,6 +5748,41 @@ mod tests {
     }
 
     #[test]
+    fn no_op_enable_rejects_an_opposite_generation_created_after_inventory() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        enable_sync_encryption_in_dir(dir.path(), "first pass").expect("enable");
+        let peer_path = dir.path().join(DATA_FILE_NAME);
+        let peer = br#"{"tasks":[{"id":"peer-plaintext"}]}"#;
+        let persisted = Cell::new(false);
+
+        let error = enable_sync_encryption_in_dir_with(
+            dir.path(),
+            "first pass",
+            || {
+                fs::write(&peer_path, peer).map_err(|error| error.to_string())?;
+                Ok(())
+            },
+            |next, generation| {
+                finalize_enabled_file_generation_with(
+                    generation,
+                    next,
+                    || Ok(()),
+                    |_| {
+                        persisted.set(true);
+                        Ok(())
+                    },
+                )
+            },
+        )
+        .expect_err("a peer generation created after inventory must abort key persistence");
+
+        assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
+        assert!(!persisted.get(), "the stale key must not be persisted");
+        assert_eq!(fs::read(&peer_path).expect("peer generation retained"), peer);
+    }
+
+    #[test]
     fn rotation_preflights_every_generation_before_starting_its_journal() {
         let dir = tempfile::tempdir().expect("temp dir");
         seed_transition_folder(dir.path());
@@ -11565,6 +11600,43 @@ fn require_managed_sync_document_generations(
     Ok(())
 }
 
+fn set_expected_managed_sync_document_generation(
+    generation: &mut ManagedSyncDocumentGenerations,
+    path: &Path,
+    version: Option<String>,
+) -> Result<(), String> {
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| format!("Sync transition path is not valid UTF-8: {}", path.display()))?;
+    generation.versions.insert(name.to_string(), version);
+    Ok(())
+}
+
+fn validate_expected_encrypted_base(
+    generation: &ManagedSyncDocumentGenerations,
+    material: &SyncKeyMaterial,
+) -> Result<(), String> {
+    let name = encrypted_artifact_name(DATA_FILE_NAME);
+    let Some(Some(expected)) = generation.versions.get(&name) else {
+        return Ok(());
+    };
+    let path = generation.sync_dir.join(name);
+    let bytes = fs::read(&path)
+        .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+    if transition_artifact_fingerprint(&bytes) != *expected {
+        return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
+    }
+    let plaintext =
+        decrypt_sync_artifact(&bytes, &material.key).map_err(|error| terminal_error(error))?;
+    serde_json::from_slice::<Value>(&plaintext).map_err(|error| {
+        terminal_error(format!(
+            "Encrypted sync document is not valid JSON: {error}"
+        ))
+    })?;
+    Ok(())
+}
+
 fn finalize_enabled_file_generation_with<BeforeRevalidate, Persist>(
     generation: &ManagedSyncDocumentGenerations,
     material: &SyncKeyMaterial,
@@ -11577,6 +11649,7 @@ where
 {
     before_revalidate()?;
     require_managed_sync_document_generations(generation)?;
+    validate_expected_encrypted_base(generation, material)?;
     persist(material)
 }
 
@@ -11985,9 +12058,9 @@ fn rewrap_artifact_generation_in_place(
     next: &SyncKeyMaterial,
     next_passphrase: &str,
     recovered_by_salt: &mut HashMap<[u8; SALT_LEN], SyncKeyMaterial>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     if decrypt_sync_artifact(&bytes, &next.key).is_ok() {
-        return Ok(()); // already migrated under the new key (resume)
+        return Ok(version.to_string()); // already migrated under the new key (resume)
     }
     let plain = if let Ok(plain) = decrypt_sync_artifact(&bytes, old_key) {
         plain
@@ -12014,7 +12087,8 @@ fn rewrap_artifact_generation_in_place(
         } else {
             Err(SYNC_FILE_WRITE_CONFLICT.to_string())
         }
-    })
+    })?;
+    Ok(transition_artifact_fingerprint(&sealed))
 }
 
 fn converge_enable_artifact_in_place(
@@ -12036,7 +12110,8 @@ fn converge_enable_artifact_in_place(
             material,
             passphrase,
             recovered_by_salt,
-        ),
+        )
+        .map(|_| ()),
     }
 }
 
@@ -12060,7 +12135,8 @@ fn converge_rotation_artifact_in_place(
             next,
             next_passphrase,
             recovered_by_salt,
-        ),
+        )
+        .map(|_| ()),
     }
 }
 
@@ -12182,6 +12258,8 @@ where
             material,
             mut recovered_by_salt,
         } = preflight_enable_transition(sync_dir, passphrase)?;
+        let mut generation =
+            snapshot_managed_sync_document_generations(sync_dir, None, false)?;
         before_mutation()?;
         // The collection is a fixed pre-transition snapshot. Scratch created by the writes
         // below is therefore never recursively added, while every retained generation from
@@ -12200,7 +12278,7 @@ where
         }
         for document in &encrypted_documents {
             require_sync_document_generation(document)?;
-            rewrap_artifact_generation_in_place(
+            let version = rewrap_artifact_generation_in_place(
                 &document.path,
                 &document.bytes,
                 &document.version,
@@ -12208,6 +12286,11 @@ where
                 &material,
                 passphrase,
                 &mut recovered_by_salt,
+            )?;
+            set_expected_managed_sync_document_generation(
+                &mut generation,
+                &document.path,
+                Some(version),
             )?;
         }
         for document in &artifacts.documents {
@@ -12230,7 +12313,7 @@ where
             let target = sync_dir.join(encrypted_artifact_name(name));
             let sealed =
                 encrypt_sync_artifact(&bytes, &material).map_err(|error| terminal_error(error))?;
-            if transition_regular_file_exists(&target)? {
+            let target_version = if transition_regular_file_exists(&target)? {
                 let existing = fs::read(&target)
                     .map_err(|error| format!("Failed to read {}: {error}", target.display()))?;
                 let plain = decrypt_sync_artifact(&existing, &material.key)
@@ -12238,6 +12321,7 @@ where
                 if plain != *bytes {
                     return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
                 }
+                transition_artifact_fingerprint(&existing)
             } else {
                 write_and_verify(&target, &sealed, None, |written| {
                     let plain = decrypt_sync_artifact(written, &material.key)
@@ -12248,12 +12332,17 @@ where
                         Err(SYNC_FILE_WRITE_CONFLICT.to_string())
                     }
                 })?;
-            }
+                transition_artifact_fingerprint(&sealed)
+            };
             // Only now, with the ciphertext on disk and proven readable, does the plaintext go.
             remove_transition_artifact_if_version(path, &document.version)?;
+            set_expected_managed_sync_document_generation(
+                &mut generation,
+                &target,
+                Some(target_version),
+            )?;
+            set_expected_managed_sync_document_generation(&mut generation, path, None)?;
         }
-        let generation =
-            snapshot_managed_sync_document_generations(sync_dir, Some(&material), false)?;
         finalize(&material, &generation)?;
         Ok(material)
     })();
@@ -12296,6 +12385,8 @@ where
                 .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
             preflight_artifact_for_disable(path, &bytes, key, false)?;
         }
+        let mut generation =
+            snapshot_managed_sync_document_generations(sync_dir, None, false)?;
         before_mutation()?;
         for path in artifacts
             .recovery
@@ -12323,12 +12414,13 @@ where
                 continue;
             };
             let target = sync_dir.join(plaintext_artifact_name(name));
-            if transition_regular_file_exists(&target)? {
+            let target_version = if transition_regular_file_exists(&target)? {
                 let existing = fs::read(&target)
                     .map_err(|error| format!("Failed to read {}: {error}", target.display()))?;
                 if existing != plain {
                     return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
                 }
+                transition_artifact_fingerprint(&existing)
             } else {
                 write_and_verify(&target, &plain, None, |written| {
                     if written == plain {
@@ -12337,10 +12429,16 @@ where
                         Err(format!("Failed to verify {} after write", target.display()))
                     }
                 })?;
-            }
+                transition_artifact_fingerprint(&plain)
+            };
             remove_transition_artifact_if_version(path, &document.version)?;
+            set_expected_managed_sync_document_generation(
+                &mut generation,
+                &target,
+                Some(target_version),
+            )?;
+            set_expected_managed_sync_document_generation(&mut generation, path, None)?;
         }
-        let generation = snapshot_managed_sync_document_generations(sync_dir, None, false)?;
         finalize(&generation)?;
         Ok(())
     })();
@@ -12416,6 +12514,8 @@ where
                 false,
             )?;
         }
+        let mut generation =
+            snapshot_managed_sync_document_generations(sync_dir, None, false)?;
         before_mutation()?;
         for path in artifacts
             .recovery
@@ -12432,7 +12532,7 @@ where
         }
         for document in &artifacts.documents {
             require_sync_document_generation(document)?;
-            rewrap_artifact_generation_in_place(
+            let version = rewrap_artifact_generation_in_place(
                 &document.path,
                 &document.bytes,
                 &document.version,
@@ -12441,8 +12541,12 @@ where
                 next_passphrase,
                 &mut recovered_by_salt,
             )?;
+            set_expected_managed_sync_document_generation(
+                &mut generation,
+                &document.path,
+                Some(version),
+            )?;
         }
-        let generation = snapshot_managed_sync_document_generations(sync_dir, Some(&next), false)?;
         finalize(&next, &generation)?;
         Ok(())
     })();
