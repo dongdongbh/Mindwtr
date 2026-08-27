@@ -67,6 +67,7 @@ describe('ReviewView', () => {
 
     beforeEach(() => {
         window.localStorage.removeItem('mindwtr:view:review:v1');
+        window.localStorage.removeItem('mindwtr:weeklyReview:currentStep');
         useTaskStore.setState(initialTaskState, true);
         useUiStore.setState(initialUiState, true);
         vi.mocked(fetchExternalCalendarEvents).mockClear();
