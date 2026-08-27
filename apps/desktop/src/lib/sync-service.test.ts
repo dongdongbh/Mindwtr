@@ -462,6 +462,53 @@ describe('sync-service test utils', () => {
 });
 
 describe('SyncService testability hooks', () => {
+    const createTestWebdavCapabilityFetch = (documentBody: string | null = '{}') => {
+        let probeBytes: Uint8Array | null = null;
+        let probeVersion = 0;
+        const methods: string[] = [];
+        const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input);
+            const method = init?.method ?? 'GET';
+            const headers = new Headers(init?.headers);
+            methods.push(method);
+            if (!url.includes('.mindwtr-etag-probe-')) {
+                if (method !== 'GET') throw new Error(`unexpected document ${method}`);
+                if (documentBody === null) return new Response(null, { status: 404 });
+                return new Response(documentBody, { status: 200, headers: { etag: '"document-v1"' } });
+            }
+            if (method === 'GET') {
+                if (!probeBytes) return new Response(null, { status: 404 });
+                return new Response(probeBytes, {
+                    status: 200,
+                    headers: { etag: `"probe-v${probeVersion}"` },
+                });
+            }
+            if (method === 'PUT') {
+                const body = init?.body;
+                if (!(body instanceof Uint8Array)) throw new Error('expected byte-array probe body');
+                const currentEtag = probeBytes ? `"probe-v${probeVersion}"` : null;
+                if (probeBytes && headers.get('if-none-match') === '*') {
+                    return new Response(null, { status: 412 });
+                }
+                if (probeBytes && headers.has('if-match') && headers.get('if-match') !== currentEtag) {
+                    return new Response(null, { status: 412 });
+                }
+                probeBytes = new Uint8Array(body);
+                probeVersion += 1;
+                return new Response(null, { status: currentEtag ? 204 : 201 });
+            }
+            if (method === 'DELETE') {
+                if (!probeBytes || headers.get('if-match') !== `"probe-v${probeVersion}"`) {
+                    return new Response(null, { status: 412 });
+                }
+                probeBytes = null;
+                return new Response(null, { status: 204 });
+            }
+            throw new Error(`unexpected ${method}`);
+        });
+        return { fetchSpy, methods };
+    };
+
     it('retains one opaque Dropbox credential handle until its matching recovery completes', () => {
         const listener = vi.fn();
         const unsubscribe = SyncService.subscribePendingDropboxCredentialHandleForSession(listener);
@@ -2650,10 +2697,7 @@ describe('SyncService testability hooks', () => {
     });
 
     it('tests WebDAV connectivity against the normalized data.json URL', async () => {
-        const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response('{}', {
-            status: 200,
-            headers: { 'Content-Type': 'application/json', etag: '"v1"' },
-        }));
+        const { fetchSpy } = createTestWebdavCapabilityFetch();
         __syncServiceTestUtils.setDependenciesForTests({
             getTauriFetch: async () => fetchSpy as unknown as typeof fetch,
         });
@@ -2664,7 +2708,7 @@ describe('SyncService testability hooks', () => {
             password: 'secret',
         });
 
-        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(fetchSpy).toHaveBeenCalledTimes(9);
         const firstCall = fetchSpy.mock.calls[0];
         expect(firstCall).toBeDefined();
         if (!firstCall) {
@@ -2675,18 +2719,7 @@ describe('SyncService testability hooks', () => {
     });
 
     it('preflights an empty WebDAV location by rereading a create-only probe', async () => {
-        const methods: string[] = [];
-        const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-            const method = init?.method ?? 'GET';
-            methods.push(method);
-            if (String(input).endsWith('/data.json')) return new Response(null, { status: 404 });
-            if (method === 'PUT') return new Response(null, { status: 201 });
-            if (method === 'GET') {
-                return new Response('probe', { status: 200, headers: { etag: '"probe-v1"' } });
-            }
-            if (method === 'DELETE') return new Response(null, { status: 204 });
-            throw new Error(`unexpected ${method}`);
-        });
+        const { fetchSpy, methods } = createTestWebdavCapabilityFetch(null);
         __syncServiceTestUtils.setDependenciesForTests({
             getTauriFetch: async () => fetchSpy as unknown as typeof fetch,
         });
@@ -2697,9 +2730,11 @@ describe('SyncService testability hooks', () => {
             password: 'secret',
         });
 
-        expect(methods).toEqual(['GET', 'PUT', 'GET', 'DELETE']);
+        expect(methods).toEqual(['GET', 'PUT', 'GET', 'PUT', 'PUT', 'GET', 'PUT', 'GET', 'DELETE']);
         expect(new Headers(fetchSpy.mock.calls[1]?.[1]?.headers).get('if-none-match')).toBe('*');
-        expect(new Headers(fetchSpy.mock.calls[3]?.[1]?.headers).get('if-match')).toBe('"probe-v1"');
+        expect(new Headers(fetchSpy.mock.calls[3]?.[1]?.headers).get('if-none-match')).toBe('*');
+        expect(new Headers(fetchSpy.mock.calls[6]?.[1]?.headers).get('if-match')).toBe('"probe-v1"');
+        expect(new Headers(fetchSpy.mock.calls[8]?.[1]?.headers).get('if-match')).toBe('"probe-v2"');
     });
 
     it.each([
@@ -2740,10 +2775,7 @@ describe('SyncService testability hooks', () => {
     });
 
     it('reuses the stored WebDAV password when settings only expose hasPassword', async () => {
-        const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response('{}', {
-            status: 200,
-            headers: { 'Content-Type': 'application/json', etag: '"v1"' },
-        }));
+        const { fetchSpy } = createTestWebdavCapabilityFetch();
         const invoke = vi.fn(async (command: string) => {
             if (command === 'get_webdav_password') return 'stored-secret';
             throw new Error(`unexpected command: ${command}`);
@@ -2773,10 +2805,7 @@ describe('SyncService testability hooks', () => {
     });
 
     it('falls back to the stored WebDAV password when the form field is empty after a restart (#899)', async () => {
-        const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response('{}', {
-            status: 200,
-            headers: { 'Content-Type': 'application/json', etag: '"v1"' },
-        }));
+        const { fetchSpy } = createTestWebdavCapabilityFetch();
         const invoke = vi.fn(async (command: string) => {
             if (command === 'get_webdav_password') return 'stored-secret';
             throw new Error(`unexpected command: ${command}`);

@@ -835,11 +835,106 @@ const webdavStrongEtagProbeUrl = (documentUrl: string): string => {
     return parsed.toString();
 };
 
+const requireWebdavConditionalConflict = async (
+    operation: () => Promise<void>,
+    capability: string,
+): Promise<void> => {
+    try {
+        await operation();
+    } catch (error) {
+        if (isWebdavRemoteWriteConflictError(error)) return;
+        throw error;
+    }
+    throw new SyncEncryptionRemoteVersionUnavailableError(capability);
+};
+
+const webdavProbeBytesEqual = (left: Uint8Array | null, right: Uint8Array): boolean => {
+    if (!left || left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index += 1) {
+        if (left[index] !== right[index]) return false;
+    }
+    return true;
+};
+
+const assertWebdavConditionalWriteSupport = async (
+    documentUrl: string,
+    options: WebDavOptions,
+): Promise<void> => {
+    const probeUrl = webdavStrongEtagProbeUrl(documentUrl);
+    const initialBytes = new TextEncoder().encode('mindwtr strong-etag capability probe v1');
+    const replacementBytes = new TextEncoder().encode('mindwtr strong-etag capability probe v2');
+    const staleBytes = new TextEncoder().encode('mindwtr stale conditional-write probe');
+    let created = false;
+    let hasSafeProbeVersion = false;
+
+    try {
+        await webdavPutFileVersioned(
+            probeUrl,
+            initialBytes,
+            'application/octet-stream',
+            null,
+            options,
+        );
+        created = true;
+        const initial = await webdavGetFileVersioned(probeUrl, options);
+        if (!webdavProbeBytesEqual(initial.bytes, initialBytes) || !initial.version) {
+            throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV capability probe');
+        }
+        hasSafeProbeVersion = true;
+
+        await requireWebdavConditionalConflict(
+            () => webdavPutFileVersioned(
+                probeUrl,
+                replacementBytes,
+                'application/octet-stream',
+                null,
+                options,
+            ),
+            'WebDAV If-None-Match enforcement',
+        );
+
+        await webdavPutFileVersioned(
+            probeUrl,
+            replacementBytes,
+            'application/octet-stream',
+            initial.version,
+            options,
+        );
+        const replacement = await webdavGetFileVersioned(probeUrl, options);
+        if (
+            !webdavProbeBytesEqual(replacement.bytes, replacementBytes)
+            || !replacement.version
+            || replacement.version === initial.version
+        ) {
+            throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV If-Match replacement');
+        }
+
+        await requireWebdavConditionalConflict(
+            () => webdavPutFileVersioned(
+                probeUrl,
+                staleBytes,
+                'application/octet-stream',
+                initial.version,
+                options,
+            ),
+            'WebDAV stale If-Match enforcement',
+        );
+    } finally {
+        if (created && hasSafeProbeVersion) {
+            // Cleanup is never unconditional. Reread because a server that ignored one of
+            // the deliberate conflicts may have advanced the unique probe generation.
+            const latest = await webdavGetFileVersioned(probeUrl, options).catch(() => null);
+            if (latest?.bytes && latest.version) {
+                await webdavDeleteFileVersioned(probeUrl, latest.version, options).catch(() => undefined);
+            }
+        }
+    }
+};
+
 /** Preflights the generation contract required by ordinary WebDAV sync and encryption
- * transitions. An existing document must carry a strong ETag. For an empty remote, a unique
- * create-only probe is reread before it is conditionally removed, because a successful PUT
- * alone does not prove later GETs expose a usable validator. A server that omits the ETag
- * leaves the harmless probe in place rather than deleting it without a generation guard. */
+ * transitions. An existing document must carry a strong ETag. A unique probe then proves
+ * create-only and stale-replacement conditions are enforced, not merely accepted as headers.
+ * Cleanup rereads and conditionally deletes the probe; it never issues an unguarded delete. */
 export async function assertWebdavStrongEtagSupport(
     documentUrl: string,
     options: WebDavOptions = {},
@@ -855,23 +950,8 @@ export async function assertWebdavStrongEtagSupport(
         // strong generation must also prove that every non-empty data.json body is JSON.
         // Empty/whitespace-only bodies remain accepted, including after a UTF-8 BOM.
         parseOptionalWebdavJson(new TextDecoder().decode(current.bytes));
-        return;
     }
-
-    const probeUrl = webdavStrongEtagProbeUrl(documentUrl);
-    const probeBytes = new TextEncoder().encode('mindwtr strong-etag capability probe');
-    await webdavPutFileVersioned(
-        probeUrl,
-        probeBytes,
-        'application/octet-stream',
-        null,
-        documentOptions,
-    );
-    const reread = await webdavGetFileVersioned(probeUrl, documentOptions);
-    if (!reread.bytes || !reread.version) {
-        throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV capability probe');
-    }
-    await webdavDeleteFileVersioned(probeUrl, reread.version, documentOptions);
+    await assertWebdavConditionalWriteSupport(documentUrl, documentOptions);
 }
 
 /** CAS byte write used only by encryption transitions. `null` is create-only. */
