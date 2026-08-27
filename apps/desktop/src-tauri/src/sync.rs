@@ -5199,7 +5199,7 @@ mod tests {
         .expect_err("injected peer update must retain transition generations");
         assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
 
-        let retained = collect_transition_recovery_artifacts(dir.path());
+        let retained = collect_transition_recovery_artifacts(dir.path()).expect("collect retained");
         assert_eq!(retained.len(), 2, "stage and quarantine must both be retained");
         assert!(retained.iter().all(|path| matches!(
             inspect_sync_artifact(&fs::read(path).expect("retained plaintext")),
@@ -5207,7 +5207,10 @@ mod tests {
         )));
 
         let first = enable_sync_encryption_in_dir(dir.path(), "first pass").expect("retry enable");
-        assert_eq!(collect_transition_recovery_artifacts(dir.path()), retained);
+        assert_eq!(
+            collect_transition_recovery_artifacts(dir.path()).expect("collect enabled retained"),
+            retained
+        );
         for path in &retained {
             let sealed = fs::read(path).expect("retained ciphertext");
             assert!(matches!(
@@ -5220,7 +5223,10 @@ mod tests {
 
         let next = change_sync_encryption_passphrase_in_dir(dir.path(), &first.key, "second pass")
             .expect("rotate retained generations");
-        assert_eq!(collect_transition_recovery_artifacts(dir.path()), retained);
+        assert_eq!(
+            collect_transition_recovery_artifacts(dir.path()).expect("collect rotated retained"),
+            retained
+        );
         for path in &retained {
             let rotated = fs::read(path).expect("rotated recovery generation");
             assert!(decrypt_sync_artifact(&rotated, &first.key).is_err());
@@ -5229,7 +5235,10 @@ mod tests {
         }
 
         disable_sync_encryption_in_dir(dir.path(), &next.key).expect("disable retained generations");
-        assert_eq!(collect_transition_recovery_artifacts(dir.path()), retained);
+        assert_eq!(
+            collect_transition_recovery_artifacts(dir.path()).expect("collect opened retained"),
+            retained
+        );
         for path in &retained {
             assert!(matches!(
                 inspect_sync_artifact(&fs::read(path).expect("opened recovery generation")),
@@ -5279,6 +5288,58 @@ mod tests {
             fs::read(&retained[1]).expect("opened attachment recovery"),
             b"mobile retained attachment generation"
         );
+    }
+
+    #[test]
+    fn transition_recovery_walk_propagates_directory_read_failure() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        let blocked = dir.path().join(".mindwtr-encryption-stage-blocked");
+        fs::create_dir(&blocked).expect("blocked recovery directory");
+        fs::write(blocked.join(DATA_FILE_NAME), b"retained plaintext").expect("recovery bytes");
+
+        let error = collect_transition_recovery_artifacts_with(dir.path(), |path| {
+            if path == blocked {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "injected traversal failure",
+                ))
+            } else {
+                fs::read_dir(path)
+            }
+        })
+        .expect_err("a recovery enumeration failure must abort the transition");
+
+        assert!(error.contains("injected traversal failure"), "unexpected error: {error}");
+        assert!(error.contains(&blocked.display().to_string()), "unexpected error: {error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn transition_recovery_walk_rejects_symlinks_without_touching_outside_bytes() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let outside = tempfile::tempdir().expect("outside temp dir");
+        seed_transition_folder(dir.path());
+        let outside_artifact = outside.path().join(DATA_FILE_NAME);
+        fs::write(&outside_artifact, b"outside plaintext generation").expect("outside bytes");
+        symlink(
+            outside.path(),
+            dir.path().join(".mindwtr-encryption-stage-linked"),
+        )
+        .expect("recovery symlink");
+
+        let error = enable_sync_encryption_in_dir(dir.path(), "correct horse battery")
+            .expect_err("a recovery symlink must fail closed");
+
+        assert!(error.contains("symbolic link"), "unexpected error: {error}");
+        assert_eq!(
+            fs::read(&outside_artifact).expect("outside bytes retained"),
+            b"outside plaintext generation"
+        );
+        assert!(dir.path().join(DATA_FILE_NAME).exists());
+        assert!(!dir.path().join("data.json.enc").exists());
     }
 
     #[test]
@@ -10602,19 +10663,83 @@ fn is_transition_scratch(name: &str) -> bool {
         || name.starts_with('.')
 }
 
-fn collect_sync_folder_attachments(sync_dir: &Path) -> Vec<PathBuf> {
+fn transition_directory_entries(dir: &Path) -> Result<fs::ReadDir, String> {
+    fs::read_dir(dir).map_err(|error| {
+        format!(
+            "Failed to enumerate sync encryption transition directory {}: {error}",
+            dir.display()
+        )
+    })
+}
+
+fn transition_regular_file_exists(path: &Path) -> Result<bool, String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(format!(
+            "Refusing to follow symbolic link during sync encryption transition: {}",
+            path.display()
+        )),
+        Ok(metadata) if metadata.is_file() => Ok(true),
+        Ok(_) => Err(format!(
+            "Sync encryption transition expected a regular file at {}",
+            path.display()
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!(
+            "Failed to inspect sync encryption transition artifact {}: {error}",
+            path.display()
+        )),
+    }
+}
+
+fn collect_sync_folder_attachments(sync_dir: &Path) -> Result<Vec<PathBuf>, String> {
     let mut found = Vec::new();
-    let mut stack = vec![sync_dir.join(SYNC_ATTACHMENTS_DIR_NAME)];
+    let attachments_dir = sync_dir.join(SYNC_ATTACHMENTS_DIR_NAME);
+    match fs::symlink_metadata(&attachments_dir) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(found),
+        Err(error) => {
+            return Err(format!(
+                "Failed to inspect sync attachments directory {}: {error}",
+                attachments_dir.display()
+            ))
+        }
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(format!(
+                "Refusing to follow symbolic link during sync encryption transition: {}",
+                attachments_dir.display()
+            ))
+        }
+        Ok(metadata) if !metadata.is_dir() => {
+            return Err(format!(
+                "Sync encryption transition expected an attachments directory at {}",
+                attachments_dir.display()
+            ))
+        }
+        Ok(_) => {}
+    }
+    let mut stack = vec![attachments_dir];
     while let Some(dir) = stack.pop() {
-        let Ok(entries) = fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
+        for entry in transition_directory_entries(&dir)? {
+            let entry = entry.map_err(|error| {
+                format!(
+                    "Failed to enumerate an entry in sync transition directory {}: {error}",
+                    dir.display()
+                )
+            })?;
             let path = entry.path();
-            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-                continue;
-            };
-            if path.is_dir() {
+            let name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .ok_or_else(|| format!("Sync transition path is not valid UTF-8: {}", path.display()))?;
+            let file_type = entry.file_type().map_err(|error| {
+                format!("Failed to inspect sync transition artifact {}: {error}", path.display())
+            })?;
+            if file_type.is_symlink() {
+                return Err(format!(
+                    "Refusing to follow symbolic link during sync encryption transition: {}",
+                    path.display()
+                ));
+            }
+            if file_type.is_dir() {
                 // Retained transition directories are snapshotted separately as in-place
                 // recovery generations, so they cannot be duplicated in the attachment set.
                 if is_transition_recovery_dir(name) {
@@ -10623,6 +10748,12 @@ fn collect_sync_folder_attachments(sync_dir: &Path) -> Vec<PathBuf> {
                 stack.push(path);
                 continue;
             }
+            if !file_type.is_file() {
+                return Err(format!(
+                    "Sync encryption transition expected a regular file at {}",
+                    path.display()
+                ));
+            }
             if is_transition_scratch(name) {
                 continue;
             }
@@ -10630,29 +10761,60 @@ fn collect_sync_folder_attachments(sync_dir: &Path) -> Vec<PathBuf> {
         }
     }
     found.sort();
-    found
+    Ok(found)
 }
 
 /// Snapshots every file retained by a failed transition before the next transition starts.
 /// Nested recovery directories are possible when recovery itself conflicts, so the walk keeps
 /// an explicit `inside_recovery` bit and preserves every divergent generation independently.
 /// Legacy sibling `.enctransition` files are included as well.
-fn collect_transition_recovery_artifacts(sync_dir: &Path) -> Vec<PathBuf> {
+fn collect_transition_recovery_artifacts_with<ReadDir>(
+    sync_dir: &Path,
+    mut read_dir: ReadDir,
+) -> Result<Vec<PathBuf>, String>
+where
+    ReadDir: FnMut(&Path) -> std::io::Result<fs::ReadDir>,
+{
     let mut found = Vec::new();
     let mut stack = vec![(sync_dir.to_path_buf(), false)];
     while let Some((dir, inside_recovery)) = stack.pop() {
-        let Ok(entries) = fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
+        let entries = read_dir(&dir).map_err(|error| {
+            format!(
+                "Failed to enumerate sync encryption recovery directory {}: {error}",
+                dir.display()
+            )
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                format!(
+                    "Failed to enumerate an entry in sync recovery directory {}: {error}",
+                    dir.display()
+                )
+            })?;
             let path = entry.path();
-            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-                continue;
-            };
-            if path.is_dir() {
+            let name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .ok_or_else(|| format!("Sync recovery path is not valid UTF-8: {}", path.display()))?;
+            let file_type = entry.file_type().map_err(|error| {
+                format!("Failed to inspect sync recovery artifact {}: {error}", path.display())
+            })?;
+            if file_type.is_symlink() {
+                return Err(format!(
+                    "Refusing to follow symbolic link during sync encryption transition: {}",
+                    path.display()
+                ));
+            }
+            if file_type.is_dir() {
                 let child_is_recovery = inside_recovery || is_transition_recovery_dir(name);
                 stack.push((path, child_is_recovery));
                 continue;
+            }
+            if !file_type.is_file() {
+                return Err(format!(
+                    "Sync encryption transition expected a regular file at {}",
+                    path.display()
+                ));
             }
             if inside_recovery
                 || name.ends_with(SYNC_ENCRYPTION_TRANSITION_TMP_SUFFIX)
@@ -10663,12 +10825,19 @@ fn collect_transition_recovery_artifacts(sync_dir: &Path) -> Vec<PathBuf> {
         }
     }
     found.sort();
-    found
+    Ok(found)
+}
+
+fn collect_transition_recovery_artifacts(sync_dir: &Path) -> Result<Vec<PathBuf>, String> {
+    collect_transition_recovery_artifacts_with(sync_dir, |path| fs::read_dir(path))
 }
 
 /// `encrypting` selects which generation to look for: the plaintext names when enabling, the
 /// `.enc` names when disabling. Passphrase rotation reuses the `.enc` side.
-fn collect_sync_folder_artifacts(sync_dir: &Path, encrypting: bool) -> SyncFolderArtifacts {
+fn collect_sync_folder_artifacts(
+    sync_dir: &Path,
+    encrypting: bool,
+) -> Result<SyncFolderArtifacts, String> {
     let base = if encrypting {
         DATA_FILE_NAME.to_string()
     } else {
@@ -10686,7 +10855,7 @@ fn collect_sync_folder_artifacts(sync_dir: &Path, encrypting: bool) -> SyncFolde
         legacy,
     ] {
         let path = sync_dir.join(&name);
-        if path.is_file() {
+        if transition_regular_file_exists(&path)? {
             documents.push(path);
         }
     }
@@ -10694,39 +10863,55 @@ fn collect_sync_folder_artifacts(sync_dir: &Path, encrypting: bool) -> SyncFolde
     // Seed backups (`mindwtr-backup-*.json` / `data-backup-*.json`), the same set the recovery
     // chain reads. Encrypted ones carry the `.json.enc` tail.
     let seed_suffix = if encrypting { ".json" } else { ".json.enc" };
-    if let Ok(entries) = fs::read_dir(sync_dir) {
-        let mut seeds: Vec<PathBuf> = Vec::new();
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_file() {
-                continue;
-            }
-            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-                continue;
-            };
-            let lower = name.to_ascii_lowercase();
-            if !(lower.starts_with("mindwtr-backup-") || lower.starts_with("data-backup-")) {
-                continue;
-            }
-            if !lower.ends_with(seed_suffix) {
-                continue;
-            }
-            seeds.push(path);
+    let mut seeds: Vec<PathBuf> = Vec::new();
+    for entry in transition_directory_entries(sync_dir)? {
+        let entry = entry.map_err(|error| {
+            format!(
+                "Failed to enumerate an entry in sync transition directory {}: {error}",
+                sync_dir.display()
+            )
+        })?;
+        let path = entry.path();
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| format!("Sync transition path is not valid UTF-8: {}", path.display()))?;
+        let lower = name.to_ascii_lowercase();
+        if !(lower.starts_with("mindwtr-backup-") || lower.starts_with("data-backup-"))
+            || !lower.ends_with(seed_suffix)
+        {
+            continue;
         }
-        seeds.sort();
-        documents.append(&mut seeds);
+        let file_type = entry.file_type().map_err(|error| {
+            format!("Failed to inspect sync transition artifact {}: {error}", path.display())
+        })?;
+        if file_type.is_symlink() {
+            return Err(format!(
+                "Refusing to follow symbolic link during sync encryption transition: {}",
+                path.display()
+            ));
+        }
+        if !file_type.is_file() {
+            return Err(format!(
+                "Sync encryption transition expected a regular file at {}",
+                path.display()
+            ));
+        }
+        seeds.push(path);
     }
+    seeds.sort();
+    documents.append(&mut seeds);
 
     let base_path = sync_dir.join(&base);
-    if base_path.is_file() {
+    if transition_regular_file_exists(&base_path)? {
         documents.push(base_path);
     }
 
-    SyncFolderArtifacts {
-        attachments: collect_sync_folder_attachments(sync_dir),
+    Ok(SyncFolderArtifacts {
+        attachments: collect_sync_folder_attachments(sync_dir)?,
         documents,
-        recovery: collect_transition_recovery_artifacts(sync_dir),
-    }
+        recovery: collect_transition_recovery_artifacts(sync_dir)?,
+    })
 }
 
 fn transition_artifact_fingerprint(bytes: &[u8]) -> String {
@@ -11089,23 +11274,26 @@ fn rewrap_artifact_in_place(
 /// the attachment phase leaves sealed attachments and no encrypted document at all. Looking
 /// only at documents there would derive a fresh salt, and the already-sealed attachments —
 /// which the next pass skips as "already encrypted" — would be unopenable under the new key.
-fn existing_folder_header(sync_dir: &Path) -> Option<([u8; SALT_LEN], SyncCryptoKdfParams)> {
-    let artifacts = collect_sync_folder_artifacts(sync_dir, false);
-    let header_of = |path: &PathBuf| -> Option<([u8; SALT_LEN], SyncCryptoKdfParams)> {
-        match inspect_sync_artifact(&fs::read(path).ok()?) {
-            SyncArtifactInspection::Encrypted(header) => Some((header.salt, header.params)),
-            _ => None,
-        }
-    };
+fn existing_folder_header(
+    sync_dir: &Path,
+) -> Result<Option<([u8; SALT_LEN], SyncCryptoKdfParams)>, String> {
+    let artifacts = collect_sync_folder_artifacts(sync_dir, false)?;
     // Base document first (documents are ordered with it last), then the rest, then
     // attachments — the most authoritative header wins.
-    artifacts
+    for path in artifacts
         .documents
         .iter()
         .rev()
         .chain(artifacts.attachments.iter())
         .chain(artifacts.recovery.iter())
-        .find_map(header_of)
+    {
+        let bytes = fs::read(path)
+            .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+        if let SyncArtifactInspection::Encrypted(header) = inspect_sync_artifact(&bytes) {
+            return Ok(Some((header.salt, header.params)));
+        }
+    }
+    Ok(None)
 }
 
 fn enable_sync_encryption_in_dir(
@@ -11113,13 +11301,13 @@ fn enable_sync_encryption_in_dir(
     passphrase: &str,
 ) -> Result<SyncKeyMaterial, String> {
     let lock = acquire_sync_lock(sync_dir)?;
-    let (salt, params) =
-        existing_folder_header(sync_dir).unwrap_or((random_salt(), SYNC_CRYPTO_DEFAULT_KDF_PARAMS));
+    let (salt, params) = existing_folder_header(sync_dir)?
+        .unwrap_or((random_salt(), SYNC_CRYPTO_DEFAULT_KDF_PARAMS));
     let material =
         derive_sync_key_material(passphrase, salt, params).map_err(|error| terminal_error(error))?;
 
     let result = (|| -> Result<(), String> {
-        let artifacts = collect_sync_folder_artifacts(sync_dir, true);
+        let artifacts = collect_sync_folder_artifacts(sync_dir, true)?;
         // The collection is a fixed pre-transition snapshot. Scratch created by the writes
         // below is therefore never recursively added, while every retained generation from
         // an earlier attempt must be sealed before enabled state can be committed.
@@ -11146,7 +11334,7 @@ fn enable_sync_encryption_in_dir(
             let target = sync_dir.join(encrypted_artifact_name(name));
             let sealed =
                 encrypt_sync_artifact(&bytes, &material).map_err(|error| terminal_error(error))?;
-            if target.is_file() {
+            if transition_regular_file_exists(&target)? {
                 let existing = fs::read(&target)
                     .map_err(|error| format!("Failed to read {}: {error}", target.display()))?;
                 let plain = decrypt_sync_artifact(&existing, &material.key)
@@ -11178,7 +11366,7 @@ fn enable_sync_encryption_in_dir(
 fn disable_sync_encryption_in_dir(sync_dir: &Path, key: &[u8; KEY_LEN]) -> Result<(), String> {
     let lock = acquire_sync_lock(sync_dir)?;
     let result = (|| -> Result<(), String> {
-        let artifacts = collect_sync_folder_artifacts(sync_dir, false);
+        let artifacts = collect_sync_folder_artifacts(sync_dir, false)?;
         for path in artifacts
             .recovery
             .iter()
@@ -11201,7 +11389,7 @@ fn disable_sync_encryption_in_dir(sync_dir: &Path, key: &[u8; KEY_LEN]) -> Resul
                 continue;
             };
             let target = sync_dir.join(plaintext_artifact_name(name));
-            if target.is_file() {
+            if transition_regular_file_exists(&target)? {
                 let existing = fs::read(&target)
                     .map_err(|error| format!("Failed to read {}: {error}", target.display()))?;
                 if existing != plain {
@@ -11234,7 +11422,7 @@ fn change_sync_encryption_passphrase_in_dir(
         .map_err(|error| terminal_error(error))?;
     let lock = acquire_sync_lock(sync_dir)?;
     let result = (|| -> Result<(), String> {
-        let artifacts = collect_sync_folder_artifacts(sync_dir, false);
+        let artifacts = collect_sync_folder_artifacts(sync_dir, false)?;
         let mut recovered_by_salt: HashMap<[u8; SALT_LEN], SyncKeyMaterial> = HashMap::new();
         for path in artifacts
             .recovery
