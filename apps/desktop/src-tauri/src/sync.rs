@@ -4915,6 +4915,47 @@ mod tests {
     }
 
     #[test]
+    fn enable_binds_the_attachment_inventory_to_the_snapshotted_document_generation() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        let peer_document = br#"{"tasks":[{"id":"peer","attachments":[{"cloudKey":"attachments/a2.png"}]}]}"#;
+        let peer_attachment = b"peer attachment generation";
+
+        let error = enable_sync_encryption_in_dir_with(
+            dir.path(),
+            "correct horse battery",
+            || {
+                fs::write(dir.path().join(DATA_FILE_NAME), peer_document)
+                    .map_err(|error| error.to_string())?;
+                fs::write(dir.path().join("attachments").join("a2.png"), peer_attachment)
+                    .map_err(|error| error.to_string())?;
+                Ok(())
+            },
+        )
+        .expect_err("a peer document generation must fail its fixed-generation CAS");
+
+        assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
+        assert_eq!(
+            fs::read(dir.path().join(DATA_FILE_NAME)).expect("peer document"),
+            peer_document
+        );
+        assert_eq!(
+            fs::read(dir.path().join("attachments").join("a2.png")).expect("peer attachment"),
+            peer_attachment
+        );
+        assert!(!dir.path().join("data.json.enc").exists());
+
+        let resumed = enable_sync_encryption_in_dir(dir.path(), "correct horse battery")
+            .expect("retry includes the peer attachment generation");
+        let migrated = fs::read(dir.path().join("attachments").join("a2.png"))
+            .expect("migrated peer attachment");
+        assert_eq!(
+            decrypt_sync_artifact(&migrated, &resumed.key).expect("peer attachment decrypts"),
+            peer_attachment
+        );
+    }
+
+    #[test]
     fn an_enable_interrupted_during_the_attachment_phase_resumes_under_the_same_key() {
         // Enable seals attachments before it writes any `.enc` document, so this crash window
         // leaves sealed attachments and no encrypted document to recover the salt from. If the
@@ -10717,10 +10758,16 @@ const SYNC_ATTACHMENTS_DIR_NAME: &str = "attachments";
 /// that is not itself already migrated.
 struct SyncFolderArtifacts {
     attachments: Vec<PathBuf>,
-    documents: Vec<PathBuf>,
+    documents: Vec<SyncDocumentGeneration>,
     /// Retained generations from an earlier failed/conflicted transition. They keep their
     /// exact path and are transformed in place like attachments; never rename or delete them.
     recovery: Vec<PathBuf>,
+}
+
+struct SyncDocumentGeneration {
+    path: PathBuf,
+    bytes: Vec<u8>,
+    version: String,
 }
 
 fn is_transition_recovery_dir(name: &str) -> bool {
@@ -10980,15 +11027,51 @@ fn collect_sync_folder_artifacts(
         documents.push(base_path);
     }
 
+    // Bind the attachment worklist to this exact document generation. A peer generation
+    // visible before these reads is followed by the fresh attachment enumeration below;
+    // one that lands during enumeration invalidates the snapshot before mutation starts.
+    let documents = documents
+        .into_iter()
+        .map(snapshot_sync_document)
+        .collect::<Result<Vec<_>, _>>()?;
+    let attachments = collect_sync_folder_attachments(sync_dir)?;
+    let recovery = collect_transition_recovery_artifacts(sync_dir)?;
+    for document in &documents {
+        require_sync_document_generation(document)?;
+    }
+
     Ok(SyncFolderArtifacts {
-        attachments: collect_sync_folder_attachments(sync_dir)?,
+        attachments,
         documents,
-        recovery: collect_transition_recovery_artifacts(sync_dir)?,
+        recovery,
     })
 }
 
 fn transition_artifact_fingerprint(bytes: &[u8]) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(bytes))
+}
+
+fn snapshot_sync_document(path: PathBuf) -> Result<SyncDocumentGeneration, String> {
+    let bytes = fs::read(&path)
+        .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+    let version = transition_artifact_fingerprint(&bytes);
+    Ok(SyncDocumentGeneration {
+        path,
+        bytes,
+        version,
+    })
+}
+
+fn require_sync_document_generation(document: &SyncDocumentGeneration) -> Result<(), String> {
+    if !transition_regular_file_exists(&document.path)? {
+        return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
+    }
+    let current = fs::read(&document.path)
+        .map_err(|error| format!("Failed to read {}: {error}", document.path.display()))?;
+    if transition_artifact_fingerprint(&current) != document.version {
+        return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -11307,6 +11390,26 @@ fn rewrap_artifact_in_place(
 ) -> Result<(), String> {
     let bytes = fs::read(path).map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
     let version = transition_artifact_fingerprint(&bytes);
+    rewrap_artifact_generation_in_place(
+        path,
+        &bytes,
+        &version,
+        old_key,
+        next,
+        next_passphrase,
+        recovered_by_salt,
+    )
+}
+
+fn rewrap_artifact_generation_in_place(
+    path: &Path,
+    bytes: &[u8],
+    version: &str,
+    old_key: &[u8; KEY_LEN],
+    next: &SyncKeyMaterial,
+    next_passphrase: &str,
+    recovered_by_salt: &mut HashMap<[u8; SALT_LEN], SyncKeyMaterial>,
+) -> Result<(), String> {
     if decrypt_sync_artifact(&bytes, &next.key).is_ok() {
         return Ok(()); // already migrated under the new key (resume)
     }
@@ -11328,7 +11431,7 @@ fn rewrap_artifact_in_place(
         decrypt_sync_artifact(&bytes, &recovered.key).map_err(|error| terminal_error(error))?
     };
     let sealed = encrypt_sync_artifact(&plain, next).map_err(|error| terminal_error(error))?;
-    write_and_verify(path, &sealed, Some(&version), |written| {
+    write_and_verify(path, &sealed, Some(version), |written| {
         let verified = decrypt_sync_artifact(written, &next.key).map_err(|error| terminal_error(error))?;
         if verified == plain {
             Ok(())
@@ -11353,13 +11456,12 @@ fn existing_folder_header(
     let artifacts = collect_sync_folder_artifacts(sync_dir, false)?;
     // Base document first (documents are ordered with it last), then the rest, then
     // attachments — the most authoritative header wins.
-    for path in artifacts
-        .documents
-        .iter()
-        .rev()
-        .chain(artifacts.attachments.iter())
-        .chain(artifacts.recovery.iter())
-    {
+    for document in artifacts.documents.iter().rev() {
+        if let SyncArtifactInspection::Encrypted(header) = inspect_sync_artifact(&document.bytes) {
+            return Ok(Some((document.bytes.clone(), header.salt, header.params)));
+        }
+    }
+    for path in artifacts.attachments.iter().chain(artifacts.recovery.iter()) {
         let bytes = fs::read(path)
             .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
         if let SyncArtifactInspection::Encrypted(header) = inspect_sync_artifact(&bytes) {
@@ -11414,11 +11516,15 @@ where
         {
             seal_artifact_in_place(path, &material)?;
         }
-        for path in &artifacts.documents {
-            let bytes = fs::read(path)
-                .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+        for document in &artifacts.documents {
+            require_sync_document_generation(document)?;
+            let path = &document.path;
+            let bytes = &document.bytes;
             match inspect_sync_artifact(&bytes) {
-                SyncArtifactInspection::Encrypted(_) => continue,
+                SyncArtifactInspection::Encrypted(_) => {
+                    require_sync_document_generation(document)?;
+                    continue;
+                }
                 SyncArtifactInspection::Unsupported(reason) => {
                     return Err(unsupported_artifact(path, reason))
                 }
@@ -11435,14 +11541,14 @@ where
                     .map_err(|error| format!("Failed to read {}: {error}", target.display()))?;
                 let plain = decrypt_sync_artifact(&existing, &material.key)
                     .map_err(|error| terminal_error(error))?;
-                if plain != bytes {
+                if plain != *bytes {
                     return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
                 }
             } else {
                 write_and_verify(&target, &sealed, None, |written| {
                     let plain = decrypt_sync_artifact(written, &material.key)
                         .map_err(|error| terminal_error(error))?;
-                    if plain == bytes {
+                    if plain == *bytes {
                         Ok(())
                     } else {
                         Err(SYNC_FILE_WRITE_CONFLICT.to_string())
@@ -11450,8 +11556,7 @@ where
                 })?;
             }
             // Only now, with the ciphertext on disk and proven readable, does the plaintext go.
-            let source_version = transition_artifact_fingerprint(&bytes);
-            remove_transition_artifact_if_version(path, &source_version)?;
+            remove_transition_artifact_if_version(path, &document.version)?;
         }
         Ok(())
     })();
@@ -11483,11 +11588,15 @@ where
         {
             open_artifact_in_place(path, key)?;
         }
-        for path in &artifacts.documents {
-            let bytes = fs::read(path)
-                .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+        for document in &artifacts.documents {
+            require_sync_document_generation(document)?;
+            let path = &document.path;
+            let bytes = &document.bytes;
             match inspect_sync_artifact(&bytes) {
-                SyncArtifactInspection::Plaintext => continue,
+                SyncArtifactInspection::Plaintext => {
+                    require_sync_document_generation(document)?;
+                    continue;
+                }
                 SyncArtifactInspection::Unsupported(reason) => {
                     return Err(unsupported_artifact(path, reason))
                 }
@@ -11513,8 +11622,7 @@ where
                     }
                 })?;
             }
-            let source_version = transition_artifact_fingerprint(&bytes);
-            remove_transition_artifact_if_version(path, &source_version)?;
+            remove_transition_artifact_if_version(path, &document.version)?;
         }
         Ok(())
     })();
@@ -11551,9 +11659,20 @@ where
             .recovery
             .iter()
             .chain(artifacts.attachments.iter())
-            .chain(artifacts.documents.iter())
         {
             rewrap_artifact_in_place(path, old_key, &next, next_passphrase, &mut recovered_by_salt)?;
+        }
+        for document in &artifacts.documents {
+            require_sync_document_generation(document)?;
+            rewrap_artifact_generation_in_place(
+                &document.path,
+                &document.bytes,
+                &document.version,
+                old_key,
+                &next,
+                next_passphrase,
+                &mut recovered_by_salt,
+            )?;
         }
         Ok(())
     })();

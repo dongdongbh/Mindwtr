@@ -577,6 +577,55 @@ describe('File Sync transitions through core orchestration', () => {
     fs.files.set(`${SYNC_DIR}/attachments/a1.png`, new Uint8Array([9, 8, 7, 6]));
   };
 
+  it('fails closed when the SAF provider cannot enumerate the transition folder', async () => {
+    const configuredUri = 'content://provider/tree/root/document/root%2Fdata.json';
+    const { StorageAccessFramework } = await import('./file-system');
+    vi.mocked(StorageAccessFramework!.readDirectoryAsync!)
+      .mockRejectedValueOnce(new Error('provider listing denied'));
+
+    await expect(createFileSyncEncryptionRemotePort(configuredUri))
+      .rejects.toThrow('provider listing denied');
+    expect([...fs.files.keys()].some((uri) => uri.includes('.mindwtr-et-'))).toBe(false);
+  });
+
+  it('binds attachment enumeration to one document generation and includes the peer generation on retry', async () => {
+    seedPlaintextFolder();
+    const peerAttachment = new Uint8Array([1, 3, 3, 7]);
+    const peerData = {
+      ...appData('peer'),
+      tasks: [{
+        id: 'peer-task',
+        title: 'peer',
+        attachments: [{ cloudKey: 'attachments/a2.png' }],
+      } as never],
+    };
+    let injected = false;
+    const port = await createFileSyncEncryptionRemotePort(SYNC_URI, {
+      onInventoryPoint: (point) => {
+        if (injected || point !== 'after-document-snapshot') return;
+        injected = true;
+        fs.files.set(SYNC_URI, new TextEncoder().encode(JSON.stringify(peerData, null, 2)));
+        fs.files.set(`${SYNC_DIR}/attachments/a2.png`, peerAttachment);
+      },
+    });
+
+    await expect(port!.captureInventory!())
+      .rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+    expect(fs.files.has(SYNC_URI)).toBe(true);
+    expect(fs.files.get(`${SYNC_DIR}/attachments/a2.png`)).toEqual(peerAttachment);
+    expect([...fs.files.keys()].some((uri) => uri.includes('.mindwtr-et-'))).toBe(false);
+
+    await enableSyncEncryption(PASSPHRASE);
+
+    const resolved = await getSyncEncryptionMaterial();
+    const { decryptSyncArtifact } = await import('@mindwtr/core');
+    const migrated = fs.files.get(`${SYNC_DIR}/attachments/a2.png`)!;
+    await expect(decryptSyncArtifact(migrated, resolved!.key, mobileSyncCryptoPrimitives))
+      .resolves.toEqual(peerAttachment);
+    expect(fs.files.has(SYNC_URI)).toBe(false);
+    expect(inspectSyncArtifact(fs.files.get(ENC_URI)!).kind).toBe('encrypted');
+  }, 30_000);
+
   it('enable encrypts documents and attachments, then removes only the plaintext documents', async () => {
     seedPlaintextFolder();
     await enableSyncEncryption(PASSPHRASE);

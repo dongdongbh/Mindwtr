@@ -16,7 +16,7 @@
 // Everything here is byte-level. The MWENC1 container is binary, so the text APIs the
 // plaintext path uses (`readAsStringAsync` UTF-8, `ExpoFile.text()`) would mangle it.
 
-import { Directory as ExpoDirectory, File as ExpoFile } from 'expo-file-system';
+import { File as ExpoFile } from 'expo-file-system';
 import {
     ATTACHMENTS_DIR_NAME,
     computeSha256Hex,
@@ -26,7 +26,9 @@ import {
     sleep,
     SyncEncryptionRemoteConflictError,
     type SyncEncryptionRemoteEntry,
+    type SyncEncryptionRemoteInventory,
     type SyncEncryptionRemotePort,
+    type SyncEncryptionRemoteRead,
 } from '@mindwtr/core';
 
 import { logWarn } from './app-log';
@@ -214,6 +216,8 @@ export const deleteSyncArtifact = async (uri: string): Promise<void> => {
 type DirectoryHandle = {
     /** leaf name -> uri, for entries that already exist. */
     entries: Map<string, string>;
+    /** Re-enumerates the provider and replaces `entries`; listing failures are terminal. */
+    refresh(): Promise<void>;
     resolve(name: string, options: { createIfMissing: boolean; mimeType?: string }): Promise<string | null>;
     listExact(name: string): Promise<string[]>;
     createNew(name: string, mimeType?: string): Promise<string>;
@@ -222,19 +226,19 @@ type DirectoryHandle = {
 
 const openSafDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
     const entries = new Map<string, string>();
-    if (StorageAccessFramework?.readDirectoryAsync) {
-        try {
-            for (const entry of await StorageAccessFramework.readDirectoryAsync(dirUri)) {
-                const name = getLeafName(entry);
-                if (name && !entries.has(name)) entries.set(name, entry);
-            }
-        } catch (error) {
-            void logWarn('Failed to list SAF sync directory', {
-                scope: 'sync',
-                extra: { error: error instanceof Error ? error.message : String(error) },
-            });
+    const refresh = async (): Promise<void> => {
+        if (!StorageAccessFramework?.readDirectoryAsync) {
+            throw new Error('This Android build cannot enumerate SAF transition files.');
         }
-    }
+        const next = new Map<string, string>();
+        for (const entry of await StorageAccessFramework.readDirectoryAsync(dirUri)) {
+            const name = getLeafName(entry);
+            if (name && !next.has(name)) next.set(name, entry);
+        }
+        entries.clear();
+        for (const [name, uri] of next) entries.set(name, uri);
+    };
+    await refresh();
     const listExact = async (name: string): Promise<string[]> => {
         if (!StorageAccessFramework?.readDirectoryAsync) return [];
         const matches = (await StorageAccessFramework.readDirectoryAsync(dirUri))
@@ -245,6 +249,7 @@ const openSafDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
     };
     return {
         entries,
+        refresh,
         resolve: async (name, options) => {
             let existing = entries.get(name);
             if (!existing && StorageAccessFramework?.readDirectoryAsync) {
@@ -318,14 +323,15 @@ const openSafDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
 const openPathDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
     const normalized = dirUri.endsWith('/') ? dirUri : `${dirUri}/`;
     const entries = new Map<string, string>();
-    try {
+    const refresh = async (): Promise<void> => {
+        const next = new Map<string, string>();
         for (const name of await FileSystem.readDirectoryAsync(normalized)) {
-            entries.set(name, `${normalized}${name}`);
+            next.set(name, `${normalized}${name}`);
         }
-    } catch {
-        // A missing attachments/ directory is normal; an unreadable sync dir surfaces on
-        // the first read/write instead.
-    }
+        entries.clear();
+        for (const [name, uri] of next) entries.set(name, uri);
+    };
+    await refresh();
     const listExact = async (name: string): Promise<string[]> => {
         const candidate = `${normalized}${name}`;
         const info = await FileSystem.getInfoAsync(candidate).catch(() => ({ exists: false }));
@@ -338,6 +344,7 @@ const openPathDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
     };
     return {
         entries,
+        refresh,
         resolve: async (name, options) => {
             let existing = entries.get(name);
             if (!existing) {
@@ -441,12 +448,7 @@ export const resolveFileSyncEncryptionTarget = async (syncFileUri: string): Prom
         : normalized;
     if (!dirUri) return null;
     const attachmentsDirUri = `${dirUri}/${ATTACHMENTS_DIR_NAME}`;
-    let hasAttachments = false;
-    try {
-        hasAttachments = new ExpoDirectory(attachmentsDirUri).exists;
-    } catch {
-        hasAttachments = false;
-    }
+    const hasAttachments = (await openPathDirectory(dirUri)).entries.has(ATTACHMENTS_DIR_NAME);
     return { dirUri, attachmentsDirUri: hasAttachments ? attachmentsDirUri : null };
 };
 
@@ -482,8 +484,10 @@ const TRANSITION_SCRATCH_MARKER = '.mindwtr-et-';
 let transitionScratchCounter = 0;
 
 export type FileSyncTransitionMutationPoint = 'before-quarantine' | 'before-install' | 'before-remove-commit';
+export type FileSyncTransitionInventoryPoint = 'after-document-snapshot';
 export type FileSyncTransitionTestHooks = {
     onMutationPoint?: (point: FileSyncTransitionMutationPoint, name: string) => void | Promise<void>;
+    onInventoryPoint?: (point: FileSyncTransitionInventoryPoint) => void | Promise<void>;
 };
 
 const transitionScratchName = (kind: 'stage' | 'quarantine'): string => {
@@ -582,6 +586,83 @@ export const createFileSyncEncryptionRemotePort = async (
         return { bytes, version: await versionFor(bytes) };
     };
 
+    const documentEntries = (): SyncEncryptionRemoteEntry[] => {
+        const entries: SyncEncryptionRemoteEntry[] = [];
+        for (const name of documents.entries.keys()) {
+            if (isSyncDocumentName(name)) entries.push({ name, kind: 'document' });
+        }
+        return entries.sort((left, right) => left.name.localeCompare(right.name));
+    };
+
+    const nonDocumentEntries = async (): Promise<SyncEncryptionRemoteEntry[]> => {
+        const entries: SyncEncryptionRemoteEntry[] = [];
+        desktopRecoveryLocations.clear();
+        for (const [name, uri] of documents.entries) {
+            if (isDesktopTransitionRecoveryDir(name)) {
+                await collectDesktopRecoveryDirectory(uri);
+            } else if (isTransitionScratchName(name)) {
+                entries.push({ name, kind: 'attachment' });
+            }
+        }
+        if (attachments) {
+            await attachments.refresh();
+            for (const [name, uri] of attachments.entries) {
+                if (isDesktopTransitionRecoveryDir(name)) {
+                    await collectDesktopRecoveryDirectory(uri);
+                    continue;
+                }
+                entries.push({ name: `${ATTACHMENT_PREFIX}${name}`, kind: 'attachment' });
+            }
+        }
+        for (const name of desktopRecoveryLocations.keys()) {
+            entries.push({ name, kind: 'attachment' });
+        }
+        return entries.sort((left, right) => left.name.localeCompare(right.name));
+    };
+
+    const readListedEntry = async (name: string): Promise<SyncEncryptionRemoteRead> => {
+        const current = await read(name);
+        if (!current.bytes || !current.version) {
+            throw new SyncEncryptionRemoteConflictError(`${name} disappeared during sync encryption inventory`);
+        }
+        return current;
+    };
+
+    const captureInventory = async (): Promise<SyncEncryptionRemoteInventory> => {
+        // Read/fingerprint the document generation first, then enumerate attachments. A peer
+        // generation that arrives before this read has its attachment included by the fresh
+        // listing below; one that arrives after it changes the final document fingerprint and
+        // aborts before core can mutate anything.
+        await documents.refresh();
+        const initialDocuments = documentEntries();
+        const snapshot = new Map<string, SyncEncryptionRemoteRead>();
+        for (const entry of initialDocuments) {
+            snapshot.set(entry.name, await readListedEntry(entry.name));
+        }
+        await testHooks.onInventoryPoint?.('after-document-snapshot');
+
+        const remaining = await nonDocumentEntries();
+        for (const entry of remaining) {
+            snapshot.set(entry.name, await readListedEntry(entry.name));
+        }
+
+        await documents.refresh();
+        const confirmedDocuments = documentEntries();
+        if (
+            confirmedDocuments.length !== initialDocuments.length
+            || confirmedDocuments.some((entry, index) => entry.name !== initialDocuments[index]?.name)
+        ) {
+            throw new SyncEncryptionRemoteConflictError('sync document inventory changed during encryption transition');
+        }
+        for (const entry of initialDocuments) {
+            const current = await readListedEntry(entry.name);
+            if (current.version !== snapshot.get(entry.name)?.version) {
+                throw new SyncEncryptionRemoteConflictError(`${entry.name} changed during sync encryption inventory`);
+            }
+        }
+        return { entries: [...initialDocuments, ...remaining], snapshot };
+    };
+
     const restoreDisplacedGeneration = async (
         location: { directory: DirectoryHandle; leaf: string; mimeType: string },
         displaced: Uint8Array,
@@ -610,36 +691,8 @@ export const createFileSyncEncryptionRemotePort = async (
     };
 
     return {
-        list: async (): Promise<SyncEncryptionRemoteEntry[]> => {
-            // Core snapshots this array once before it starts a transition. Include stale
-            // stage/quarantine generations from earlier failed attempts as attachment-kind
-            // entries so they are transformed in place on enable/disable/rotation. Scratch
-            // created by this run is added to the maps only after this snapshot and cannot
-            // recursively enter the same transition.
-            const entries: SyncEncryptionRemoteEntry[] = [];
-            desktopRecoveryLocations.clear();
-            for (const [name, uri] of documents.entries) {
-                if (isDesktopTransitionRecoveryDir(name)) {
-                    await collectDesktopRecoveryDirectory(uri);
-                    continue;
-                }
-                if (isTransitionScratchName(name)) entries.push({ name, kind: 'attachment' });
-                else if (isSyncDocumentName(name)) entries.push({ name, kind: 'document' });
-            }
-            if (attachments) {
-                for (const [name, uri] of attachments.entries) {
-                    if (isDesktopTransitionRecoveryDir(name)) {
-                        await collectDesktopRecoveryDirectory(uri);
-                        continue;
-                    }
-                    entries.push({ name: `${ATTACHMENT_PREFIX}${name}`, kind: 'attachment' });
-                }
-            }
-            for (const name of desktopRecoveryLocations.keys()) {
-                entries.push({ name, kind: 'attachment' });
-            }
-            return entries;
-        },
+        list: async (): Promise<SyncEncryptionRemoteEntry[]> => (await captureInventory()).entries,
+        captureInventory,
         read,
         write: async (name, bytes, expectedVersion) => {
             const current = await read(name);
