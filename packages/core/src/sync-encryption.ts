@@ -926,6 +926,20 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
         .sort((a, b) => Number(isBaseEncDocument(a.name)) - Number(isBaseEncDocument(b.name)));
     const documentNames = new Set(entries.filter((entry) => entry.kind === 'document').map((entry) => entry.name));
 
+    // A plaintext-named document means another device left an interrupted disable (or is
+    // actively disabling). Rotation must not report success while that exposed generation
+    // remains beside the ciphertext: the user must finish/retry the disable or enable
+    // transition that owns the rename first. Fixed-name inventories include confirmed-missing
+    // plaintext counterparts, so only a generation with bytes is rejected here.
+    for (const entry of entries) {
+        if (entry.kind !== 'document' || entry.name.includes('.enc')) continue;
+        if (snapshotRemoteRead(snapshot, entry.name).bytes) {
+            throw new SyncEncryptionRemoteConflictError(
+                `${entry.name} is a plaintext generation; finish its encryption transition before changing the passphrase`,
+            );
+        }
+    }
+
     const newSalt = prims.randomBytes(16);
     const newMaterial = await deriveSyncKeyMaterial(nextPassphrase, newSalt, kdfParams, prims);
 

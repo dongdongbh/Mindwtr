@@ -791,6 +791,31 @@ describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
         expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/z-abandoned.bin')!, finalKey))).toBe('ABANDONED');
     });
 
+    it('refuses rotation while an interrupted disable left a plaintext document generation', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a.bin': { bytes: utf8('ATTACHMENT'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('old-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        remote.peerWrite('data.json', utf8('{"tasks":[{"id":"exposed"}]}'));
+        const oldKey = new Uint8Array((await keyCache.getKey())!);
+        const enabledState = structuredClone(localState.value);
+        const encryptedDocument = new Uint8Array(remote.store.get('data.json.enc')!);
+        const write = vi.spyOn(remote, 'write');
+
+        await expect(runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'new-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(remote.store.get('data.json.enc')).toEqual(encryptedDocument);
+        expect(text(remote.store.get('data.json')!)).toContain('exposed');
+        expect(await keyCache.getKey()).toEqual(oldKey);
+        expect(localState.value).toEqual(enabledState);
+    });
+
     it('re-encrypts every artifact under a fresh salt derived from the new passphrase', async () => {
         const remote = createFakeRemote({
             'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
