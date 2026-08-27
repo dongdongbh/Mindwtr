@@ -5679,6 +5679,130 @@ mod tests {
     }
 
     #[test]
+    fn passphrase_rotation_rejects_an_interrupted_disable_plaintext_generation() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        let first = enable_sync_encryption_in_dir(dir.path(), "first pass").expect("enable");
+        let encrypted_path = dir.path().join(encrypted_artifact_name(DATA_FILE_NAME));
+        let encrypted_before = fs::read(&encrypted_path).expect("encrypted before");
+        let plaintext = decrypt_sync_artifact(&encrypted_before, &first.key).expect("open base");
+        let plaintext_path = dir.path().join(DATA_FILE_NAME);
+        fs::write(&plaintext_path, &plaintext).expect("interrupted disable plaintext");
+        let journal_started = Cell::new(false);
+        let persisted = Cell::new(false);
+
+        let error = change_sync_encryption_passphrase_in_dir_with(
+            dir.path(),
+            &first.key,
+            "second pass",
+            || {
+                journal_started.set(true);
+                Ok(())
+            },
+            |_, _| {
+                persisted.set(true);
+                Ok(())
+            },
+        )
+        .expect_err("rotation must not commit while plaintext documents remain");
+
+        assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
+        assert!(!journal_started.get(), "posture preflight must run before the journal");
+        assert!(!persisted.get(), "the new key must not be persisted");
+        assert_eq!(fs::read(&encrypted_path).expect("encrypted retained"), encrypted_before);
+        assert_eq!(fs::read(&plaintext_path).expect("plaintext retained"), plaintext);
+    }
+
+    #[test]
+    fn enable_revalidates_late_attachment_creation_before_persisting_the_key() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        let late = dir.path().join(SYNC_ATTACHMENTS_DIR_NAME).join("late.bin");
+        let persisted = Cell::new(false);
+
+        let error = enable_sync_encryption_in_dir_with(
+            dir.path(),
+            "first pass",
+            || Ok(()),
+            |material, generation| {
+                finalize_enabled_file_generation_with(
+                    generation,
+                    material,
+                    || fs::write(&late, b"late plaintext").map_err(|error| error.to_string()),
+                    |_| {
+                        persisted.set(true);
+                        Ok(())
+                    },
+                )
+            },
+        )
+        .expect_err("late attachment creation must invalidate finalization");
+
+        assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
+        assert!(!persisted.get(), "the key must not be persisted");
+        assert_eq!(fs::read(&late).expect("late bytes retained"), b"late plaintext");
+    }
+
+    #[test]
+    fn passphrase_rotation_revalidates_late_attachment_change_before_persisting_the_key() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        let first = enable_sync_encryption_in_dir(dir.path(), "first pass").expect("enable");
+        let attachment = dir.path().join(SYNC_ATTACHMENTS_DIR_NAME).join("a1.png");
+        let peer = b"peer attachment generation";
+        let persisted = Cell::new(false);
+
+        let error = change_sync_encryption_passphrase_in_dir_with(
+            dir.path(),
+            &first.key,
+            "second pass",
+            || Ok(()),
+            |material, generation| {
+                finalize_enabled_file_generation_with(
+                    generation,
+                    material,
+                    || fs::write(&attachment, peer).map_err(|error| error.to_string()),
+                    |_| {
+                        persisted.set(true);
+                        Ok(())
+                    },
+                )
+            },
+        )
+        .expect_err("late attachment replacement must invalidate finalization");
+
+        assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
+        assert!(!persisted.get(), "the new key must not be persisted");
+        assert_eq!(fs::read(&attachment).expect("peer bytes retained"), peer);
+    }
+
+    #[test]
+    fn disable_revalidates_late_attachment_removal_before_clearing_the_key() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        let material = enable_sync_encryption_in_dir(dir.path(), "first pass").expect("enable");
+        let attachment = dir.path().join(SYNC_ATTACHMENTS_DIR_NAME).join("a1.png");
+        let persisted = Cell::new(false);
+
+        let error = disable_sync_encryption_in_dir_with(
+            dir.path(),
+            &material.key,
+            || Ok(()),
+            |generation| {
+                fs::remove_file(&attachment).map_err(|error| error.to_string())?;
+                require_managed_sync_document_generations(generation)?;
+                persisted.set(true);
+                Ok(())
+            },
+        )
+        .expect_err("late attachment removal must invalidate finalization");
+
+        assert_eq!(error, SYNC_FILE_WRITE_CONFLICT);
+        assert!(!persisted.get(), "disabled state must not be persisted");
+        assert!(!attachment.exists(), "the peer removal remains authoritative");
+    }
+
+    #[test]
     fn disable_revalidates_every_managed_document_before_persisting_disabled_state() {
         let dir = tempfile::tempdir().expect("temp dir");
         seed_transition_folder(dir.path());
@@ -11169,7 +11293,7 @@ const SYNC_ATTACHMENTS_DIR_NAME: &str = "attachments";
 /// reader that finds `data.json.enc` must never find it referencing a `.bak` or attachment
 /// that is not itself already migrated.
 struct SyncFolderArtifacts {
-    attachments: Vec<PathBuf>,
+    attachments: Vec<SyncDocumentGeneration>,
     documents: Vec<SyncDocumentGeneration>,
     /// Retained generations from an earlier failed/conflicted transition. They keep their
     /// exact path and are transformed in place like attachments; never rename or delete them.
@@ -11185,6 +11309,7 @@ struct SyncDocumentGeneration {
 struct ManagedSyncDocumentGenerations {
     sync_dir: PathBuf,
     versions: BTreeMap<String, Option<String>>,
+    attachment_versions: BTreeMap<PathBuf, String>,
 }
 
 fn is_transition_recovery_dir(name: &str) -> bool {
@@ -11451,7 +11576,10 @@ fn collect_sync_folder_artifacts(
         .into_iter()
         .map(snapshot_sync_document)
         .collect::<Result<Vec<_>, _>>()?;
-    let attachments = collect_sync_folder_attachments(sync_dir)?;
+    let attachments = collect_sync_folder_attachments(sync_dir)?
+        .into_iter()
+        .map(snapshot_sync_document)
+        .collect::<Result<Vec<_>, _>>()?;
     let recovery = collect_transition_recovery_artifacts(sync_dir)?;
     for document in &documents {
         require_sync_document_generation(document)?;
@@ -11553,6 +11681,40 @@ fn managed_sync_document_names(sync_dir: &Path) -> Result<BTreeSet<String>, Stri
     Ok(names)
 }
 
+fn sync_attachment_relative_path(sync_dir: &Path, path: &Path) -> Result<PathBuf, String> {
+    path.strip_prefix(sync_dir)
+        .map(Path::to_path_buf)
+        .map_err(|_| format!("Sync attachment escaped its root: {}", path.display()))
+}
+
+fn snapshot_managed_sync_attachment_generations(
+    sync_dir: &Path,
+) -> Result<BTreeMap<PathBuf, String>, String> {
+    let mut versions = BTreeMap::new();
+    for path in collect_sync_folder_attachments(sync_dir)? {
+        let relative = sync_attachment_relative_path(sync_dir, &path)?;
+        let bytes = fs::read(&path)
+            .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+        versions.insert(relative, transition_artifact_fingerprint(&bytes));
+    }
+    Ok(versions)
+}
+
+fn captured_sync_attachment_generations(
+    sync_dir: &Path,
+    attachments: &[SyncDocumentGeneration],
+) -> Result<BTreeMap<PathBuf, String>, String> {
+    attachments
+        .iter()
+        .map(|attachment| {
+            Ok((
+                sync_attachment_relative_path(sync_dir, &attachment.path)?,
+                attachment.version.clone(),
+            ))
+        })
+        .collect()
+}
+
 fn snapshot_managed_sync_document_generations(
     sync_dir: &Path,
     material: Option<&SyncKeyMaterial>,
@@ -11587,14 +11749,29 @@ fn snapshot_managed_sync_document_generations(
     Ok(ManagedSyncDocumentGenerations {
         sync_dir: sync_dir.to_path_buf(),
         versions,
+        attachment_versions: snapshot_managed_sync_attachment_generations(sync_dir)?,
     })
+}
+
+fn require_captured_sync_attachment_generations(
+    generation: &ManagedSyncDocumentGenerations,
+    attachments: &[SyncDocumentGeneration],
+) -> Result<(), String> {
+    if generation.attachment_versions
+        != captured_sync_attachment_generations(&generation.sync_dir, attachments)?
+    {
+        return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
+    }
+    Ok(())
 }
 
 fn require_managed_sync_document_generations(
     generation: &ManagedSyncDocumentGenerations,
 ) -> Result<(), String> {
     let current = snapshot_managed_sync_document_generations(&generation.sync_dir, None, false)?;
-    if current.versions != generation.versions {
+    if current.versions != generation.versions
+        || current.attachment_versions != generation.attachment_versions
+    {
         return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
     }
     Ok(())
@@ -11610,6 +11787,27 @@ fn set_expected_managed_sync_document_generation(
         .and_then(|value| value.to_str())
         .ok_or_else(|| format!("Sync transition path is not valid UTF-8: {}", path.display()))?;
     generation.versions.insert(name.to_string(), version);
+    Ok(())
+}
+
+fn set_expected_managed_sync_attachment_generation(
+    generation: &mut ManagedSyncDocumentGenerations,
+    path: &Path,
+    version: String,
+) -> Result<(), String> {
+    let relative = sync_attachment_relative_path(&generation.sync_dir, path)?;
+    generation.attachment_versions.insert(relative, version);
+    Ok(())
+}
+
+fn require_no_managed_plaintext_document_generations(
+    generation: &ManagedSyncDocumentGenerations,
+) -> Result<(), String> {
+    if generation.versions.iter().any(|(name, version)| {
+        version.is_some() && plaintext_artifact_name(name) == *name
+    }) {
+        return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
+    }
     Ok(())
 }
 
@@ -11915,23 +12113,29 @@ where
     cleanup_transition_scratch(staged)
 }
 
-fn seal_artifact_in_place(path: &Path, material: &SyncKeyMaterial) -> Result<(), String> {
-    let bytes = fs::read(path).map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
-    let version = transition_artifact_fingerprint(&bytes);
-    match inspect_sync_artifact(&bytes) {
-        SyncArtifactInspection::Encrypted(_) => return Ok(()), // already migrated (resume)
-        SyncArtifactInspection::Unsupported(reason) => return Err(unsupported_artifact(path, reason)),
+fn seal_artifact_generation_in_place(
+    artifact: &SyncDocumentGeneration,
+    material: &SyncKeyMaterial,
+) -> Result<String, String> {
+    require_sync_document_generation(artifact)?;
+    match inspect_sync_artifact(&artifact.bytes) {
+        SyncArtifactInspection::Encrypted(_) => return Ok(artifact.version.clone()),
+        SyncArtifactInspection::Unsupported(reason) => {
+            return Err(unsupported_artifact(&artifact.path, reason))
+        }
         SyncArtifactInspection::Plaintext => {}
     }
-    let sealed = encrypt_sync_artifact(&bytes, material).map_err(|error| terminal_error(error))?;
-    write_and_verify(path, &sealed, Some(&version), |written| {
+    let sealed = encrypt_sync_artifact(&artifact.bytes, material)
+        .map_err(|error| terminal_error(error))?;
+    write_and_verify(&artifact.path, &sealed, Some(&artifact.version), |written| {
         let plain = decrypt_sync_artifact(written, &material.key).map_err(|error| terminal_error(error))?;
-        if plain == bytes {
+        if plain == artifact.bytes {
             Ok(())
         } else {
             Err(SYNC_FILE_WRITE_CONFLICT.to_string())
         }
-    })
+    })?;
+    Ok(transition_artifact_fingerprint(&sealed))
 }
 
 fn authenticate_artifact_with_passphrase(
@@ -12032,22 +12236,32 @@ fn preflight_artifact_for_disable(
     }
 }
 
-fn open_artifact_in_place(path: &Path, key: &[u8; KEY_LEN]) -> Result<(), String> {
-    let bytes = fs::read(path).map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
-    let version = transition_artifact_fingerprint(&bytes);
-    match inspect_sync_artifact(&bytes) {
-        SyncArtifactInspection::Plaintext => return Ok(()), // already plaintext (resume)
-        SyncArtifactInspection::Unsupported(reason) => return Err(unsupported_artifact(path, reason)),
+fn open_artifact_generation_in_place(
+    artifact: &SyncDocumentGeneration,
+    key: &[u8; KEY_LEN],
+) -> Result<String, String> {
+    require_sync_document_generation(artifact)?;
+    match inspect_sync_artifact(&artifact.bytes) {
+        SyncArtifactInspection::Plaintext => return Ok(artifact.version.clone()),
+        SyncArtifactInspection::Unsupported(reason) => {
+            return Err(unsupported_artifact(&artifact.path, reason))
+        }
         SyncArtifactInspection::Encrypted(_) => {}
     }
-    let plain = decrypt_sync_artifact(&bytes, key).map_err(|error| terminal_error(error))?;
-    write_and_verify(path, &plain, Some(&version), |written| {
+    let plain = decrypt_sync_artifact(&artifact.bytes, key).map_err(|error| terminal_error(error))?;
+    write_and_verify(&artifact.path, &plain, Some(&artifact.version), |written| {
         if written == plain {
             Ok(())
         } else {
-            Err(format!("Failed to verify {} after write", path.display()))
+            Err(format!("Failed to verify {} after write", artifact.path.display()))
         }
-    })
+    })?;
+    Ok(transition_artifact_fingerprint(&plain))
+}
+
+fn open_artifact_in_place(path: &Path, key: &[u8; KEY_LEN]) -> Result<(), String> {
+    open_artifact_generation_in_place(&snapshot_sync_document(path.to_path_buf())?, key)
+        .map(|_| ())
 }
 
 fn rewrap_artifact_generation_in_place(
@@ -12091,27 +12305,67 @@ fn rewrap_artifact_generation_in_place(
     Ok(transition_artifact_fingerprint(&sealed))
 }
 
+fn converge_enable_artifact_generation_in_place(
+    artifact: &SyncDocumentGeneration,
+    material: &SyncKeyMaterial,
+    passphrase: &str,
+    recovered_by_salt: &mut HashMap<[u8; SALT_LEN], SyncKeyMaterial>,
+) -> Result<String, String> {
+    require_sync_document_generation(artifact)?;
+    match inspect_sync_artifact(&artifact.bytes) {
+        SyncArtifactInspection::Plaintext => seal_artifact_generation_in_place(artifact, material),
+        SyncArtifactInspection::Unsupported(reason) => {
+            Err(unsupported_artifact(&artifact.path, reason))
+        }
+        SyncArtifactInspection::Encrypted(_) => rewrap_artifact_generation_in_place(
+            &artifact.path,
+            &artifact.bytes,
+            &artifact.version,
+            &material.key,
+            material,
+            passphrase,
+            recovered_by_salt,
+        ),
+    }
+}
+
 fn converge_enable_artifact_in_place(
     path: &Path,
     material: &SyncKeyMaterial,
     passphrase: &str,
     recovered_by_salt: &mut HashMap<[u8; SALT_LEN], SyncKeyMaterial>,
 ) -> Result<(), String> {
-    let bytes = fs::read(path).map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
-    let version = transition_artifact_fingerprint(&bytes);
-    match inspect_sync_artifact(&bytes) {
-        SyncArtifactInspection::Plaintext => seal_artifact_in_place(path, material),
-        SyncArtifactInspection::Unsupported(reason) => Err(unsupported_artifact(path, reason)),
+    converge_enable_artifact_generation_in_place(
+        &snapshot_sync_document(path.to_path_buf())?,
+        material,
+        passphrase,
+        recovered_by_salt,
+    )
+    .map(|_| ())
+}
+
+fn converge_rotation_artifact_generation_in_place(
+    artifact: &SyncDocumentGeneration,
+    old_key: &[u8; KEY_LEN],
+    next: &SyncKeyMaterial,
+    next_passphrase: &str,
+    recovered_by_salt: &mut HashMap<[u8; SALT_LEN], SyncKeyMaterial>,
+) -> Result<String, String> {
+    require_sync_document_generation(artifact)?;
+    match inspect_sync_artifact(&artifact.bytes) {
+        SyncArtifactInspection::Plaintext => seal_artifact_generation_in_place(artifact, next),
+        SyncArtifactInspection::Unsupported(reason) => {
+            Err(unsupported_artifact(&artifact.path, reason))
+        }
         SyncArtifactInspection::Encrypted(_) => rewrap_artifact_generation_in_place(
-            path,
-            &bytes,
-            &version,
-            &material.key,
-            material,
-            passphrase,
+            &artifact.path,
+            &artifact.bytes,
+            &artifact.version,
+            old_key,
+            next,
+            next_passphrase,
             recovered_by_salt,
-        )
-        .map(|_| ()),
+        ),
     }
 }
 
@@ -12122,22 +12376,14 @@ fn converge_rotation_artifact_in_place(
     next_passphrase: &str,
     recovered_by_salt: &mut HashMap<[u8; SALT_LEN], SyncKeyMaterial>,
 ) -> Result<(), String> {
-    let bytes = fs::read(path).map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
-    let version = transition_artifact_fingerprint(&bytes);
-    match inspect_sync_artifact(&bytes) {
-        SyncArtifactInspection::Plaintext => seal_artifact_in_place(path, next),
-        SyncArtifactInspection::Unsupported(reason) => Err(unsupported_artifact(path, reason)),
-        SyncArtifactInspection::Encrypted(_) => rewrap_artifact_generation_in_place(
-            path,
-            &bytes,
-            &version,
-            old_key,
-            next,
-            next_passphrase,
-            recovered_by_salt,
-        )
-        .map(|_| ()),
-    }
+    converge_rotation_artifact_generation_in_place(
+        &snapshot_sync_document(path.to_path_buf())?,
+        old_key,
+        next,
+        next_passphrase,
+        recovered_by_salt,
+    )
+    .map(|_| ())
 }
 
 struct EnableTransitionPreflight {
@@ -12181,11 +12427,19 @@ fn preflight_enable_transition(
             }
         }
     }
-    for path in plaintext_artifacts
-        .attachments
-        .iter()
-        .chain(plaintext_artifacts.recovery.iter())
-    {
+    for artifact in &plaintext_artifacts.attachments {
+        if let Some(material) = authenticate_artifact_with_passphrase(
+            &artifact.path,
+            &artifact.bytes,
+            passphrase,
+            &mut recovered_by_salt,
+        )? {
+            if selected.is_none() {
+                selected = Some(material);
+            }
+        }
+    }
+    for path in &plaintext_artifacts.recovery {
         let bytes = fs::read(path)
             .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
         if let Some(material) = authenticate_artifact_with_passphrase(
@@ -12260,20 +12514,30 @@ where
         } = preflight_enable_transition(sync_dir, passphrase)?;
         let mut generation =
             snapshot_managed_sync_document_generations(sync_dir, None, false)?;
+        require_captured_sync_attachment_generations(&generation, &artifacts.attachments)?;
         before_mutation()?;
         // The collection is a fixed pre-transition snapshot. Scratch created by the writes
         // below is therefore never recursively added, while every retained generation from
         // an earlier attempt must be sealed before enabled state can be committed.
-        for path in artifacts
-            .recovery
-            .iter()
-            .chain(artifacts.attachments.iter())
-        {
+        for path in &artifacts.recovery {
             converge_enable_artifact_in_place(
                 path,
                 &material,
                 passphrase,
                 &mut recovered_by_salt,
+            )?;
+        }
+        for attachment in &artifacts.attachments {
+            let version = converge_enable_artifact_generation_in_place(
+                attachment,
+                &material,
+                passphrase,
+                &mut recovered_by_salt,
+            )?;
+            set_expected_managed_sync_attachment_generation(
+                &mut generation,
+                &attachment.path,
+                version,
             )?;
         }
         for document in &encrypted_documents {
@@ -12343,6 +12607,7 @@ where
             )?;
             set_expected_managed_sync_document_generation(&mut generation, path, None)?;
         }
+        require_no_managed_plaintext_document_generations(&generation)?;
         finalize(&material, &generation)?;
         Ok(material)
     })();
@@ -12376,24 +12641,33 @@ where
         for document in &artifacts.documents {
             preflight_artifact_for_disable(&document.path, &document.bytes, key, true)?;
         }
-        for path in artifacts
-            .recovery
-            .iter()
-            .chain(artifacts.attachments.iter())
-        {
+        for attachment in &artifacts.attachments {
+            preflight_artifact_for_disable(
+                &attachment.path,
+                &attachment.bytes,
+                key,
+                false,
+            )?;
+        }
+        for path in &artifacts.recovery {
             let bytes = fs::read(path)
                 .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
             preflight_artifact_for_disable(path, &bytes, key, false)?;
         }
         let mut generation =
             snapshot_managed_sync_document_generations(sync_dir, None, false)?;
+        require_captured_sync_attachment_generations(&generation, &artifacts.attachments)?;
         before_mutation()?;
-        for path in artifacts
-            .recovery
-            .iter()
-            .chain(artifacts.attachments.iter())
-        {
+        for path in &artifacts.recovery {
             open_artifact_in_place(path, key)?;
+        }
+        for attachment in &artifacts.attachments {
+            let version = open_artifact_generation_in_place(attachment, key)?;
+            set_expected_managed_sync_attachment_generation(
+                &mut generation,
+                &attachment.path,
+                version,
+            )?;
         }
         for document in &artifacts.documents {
             require_sync_document_generation(document)?;
@@ -12498,11 +12772,17 @@ where
                 true,
             )?;
         }
-        for path in artifacts
-            .recovery
-            .iter()
-            .chain(artifacts.attachments.iter())
-        {
+        for attachment in &artifacts.attachments {
+            preflight_artifact_for_rotation(
+                &attachment.path,
+                &attachment.bytes,
+                old_key,
+                next_passphrase,
+                &mut recovered_by_salt,
+                false,
+            )?;
+        }
+        for path in &artifacts.recovery {
             let bytes = fs::read(path)
                 .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
             preflight_artifact_for_rotation(
@@ -12516,18 +12796,30 @@ where
         }
         let mut generation =
             snapshot_managed_sync_document_generations(sync_dir, None, false)?;
+        require_captured_sync_attachment_generations(&generation, &artifacts.attachments)?;
+        require_no_managed_plaintext_document_generations(&generation)?;
         before_mutation()?;
-        for path in artifacts
-            .recovery
-            .iter()
-            .chain(artifacts.attachments.iter())
-        {
+        for path in &artifacts.recovery {
             converge_rotation_artifact_in_place(
                 path,
                 old_key,
                 &next,
                 next_passphrase,
                 &mut recovered_by_salt,
+            )?;
+        }
+        for attachment in &artifacts.attachments {
+            let version = converge_rotation_artifact_generation_in_place(
+                attachment,
+                old_key,
+                &next,
+                next_passphrase,
+                &mut recovered_by_salt,
+            )?;
+            set_expected_managed_sync_attachment_generation(
+                &mut generation,
+                &attachment.path,
+                version,
             )?;
         }
         for document in &artifacts.documents {
@@ -12547,6 +12839,7 @@ where
                 Some(version),
             )?;
         }
+        require_no_managed_plaintext_document_generations(&generation)?;
         finalize(&next, &generation)?;
         Ok(())
     })();
