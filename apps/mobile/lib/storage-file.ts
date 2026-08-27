@@ -614,14 +614,13 @@ const discoverEncryptedSyncFolder = async (
     plainBytes: Uint8Array | null,
 ): Promise<boolean> => {
     const candidates: (Uint8Array | null)[] = [plainBytes];
-    try {
-        const encUri = await resolveSyncArtifactSiblingUri(resolvedUri, encryptedLeafNameFor(resolvedUri), {
-            createIfMissing: false,
-        });
-        if (encUri) candidates.push(await readSyncArtifactBytes(encUri));
-    } catch {
-        // A folder we cannot list is simply a folder with no discoverable `.enc` sibling.
-    }
+    // Discovery is a safety check, not a best-effort enhancement. If the folder cannot
+    // be enumerated or the sibling cannot be read, propagate the provider error: treating
+    // "unreadable" as "absent" would license a fresh plaintext repair beside ciphertext.
+    const encUri = await resolveSyncArtifactSiblingUri(resolvedUri, encryptedLeafNameFor(resolvedUri), {
+        createIfMissing: false,
+    });
+    if (encUri) candidates.push(await readSyncArtifactBytes(encUri));
     for (const bytes of candidates) {
         if (!bytes || bytes.length === 0) continue;
         const inspected = inspectSyncArtifact(bytes);
