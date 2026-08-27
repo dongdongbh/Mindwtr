@@ -2329,4 +2329,5 @@ export const viOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': 'Một thiết bị Mindwtr tương thích khác đang cập nhật vị trí đồng bộ này. Hãy đợi thiết bị đó hoàn tất rồi đồng bộ lại.',
         'settings.syncRemoteCleanupDeferred': 'Thao tác đồng bộ đã hoàn tất. Mindwtr không thể xóa khóa đồng bộ tạm thời, nhưng khóa sẽ tự động hết hạn. Bạn không cần thử lại.',
         'settings.syncEncryptionCleanupDeferred': 'Mã hóa đã được cập nhật. Mindwtr không thể xóa khóa đồng bộ tạm thời, nhưng khóa sẽ tự động hết hạn. Bạn không cần thử lại.',
+        'settings.syncEncryptionFileCleanupDeferred': 'Mã hóa đã được cập nhật, nhưng Mindwtr không thể giải phóng khóa Đồng bộ tệp. Hãy khởi động lại Mindwtr trước khi đồng bộ lại. Đừng lặp lại thay đổi mã hóa.',
 };

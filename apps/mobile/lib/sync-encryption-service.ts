@@ -103,6 +103,7 @@ export class SyncEncryptionCleanupDeferredError<T = void> extends Error {
     public readonly outcome: T,
     public readonly cleanupCause: unknown,
     retryAfterMs: number,
+    public readonly cleanupKind: 'remote-fence' | 'file-lock' = 'remote-fence',
   ) {
     super('SYNC_ENCRYPTION_COMMITTED_CLEANUP_DEFERRED');
     this.name = 'SyncEncryptionCleanupDeferredError';
@@ -734,11 +735,25 @@ const runWithFileTransitionLease = async <T>(
     operation: (port: SyncEncryptionRemotePort) => Promise<T>,
 ): Promise<T> => {
     if (!target.fileSyncLease) return operation(target.port);
+    let result: T;
     try {
-        return await operation(target.port);
-    } finally {
-        await releaseMobileFileSyncLease(target.fileSyncLease);
+        result = await operation(target.port);
+    } catch (primaryError) {
+        try {
+            await releaseMobileFileSyncLease(target.fileSyncLease);
+        } catch (cleanupError) {
+            if (primaryError instanceof Error) {
+                (primaryError as Error & { cleanupError?: unknown }).cleanupError = cleanupError;
+            }
+        }
+        throw primaryError;
     }
+    try {
+        await releaseMobileFileSyncLease(target.fileSyncLease);
+    } catch (cleanupError) {
+        throw new SyncEncryptionCleanupDeferredError(result, cleanupError, 0, 'file-lock');
+    }
+    return result;
 };
 
 /** Phase-3 API. `appData` is the caller's current local document — it supplies the

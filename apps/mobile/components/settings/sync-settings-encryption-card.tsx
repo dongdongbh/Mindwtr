@@ -39,7 +39,7 @@ type ErrorKind =
     | 'generic';
 
 type Flow = 'none' | 'enable' | 'change' | 'disable' | 'unlock';
-type WarningKind = 'cleanup-deferred';
+type WarningKind = 'cleanup-deferred' | 'file-cleanup-deferred';
 
 export type SyncEncryptionCardProps = {
     /** Supplies the attachment worklist; phase 2 leaves attachments plaintext without it. */
@@ -147,7 +147,7 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
         setError(null);
         setProgress(null);
         let succeeded = false;
-        let cleanupDeferred = false;
+        let cleanupDeferred: WarningKind | null = null;
         try {
             await operation();
             succeeded = true;
@@ -155,8 +155,10 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
             logSettingsError(failure);
             if (isSyncEncryptionCleanupDeferredError(failure)) {
                 succeeded = true;
-                cleanupDeferred = true;
-                setWarning('cleanup-deferred');
+                cleanupDeferred = failure.cleanupKind === 'file-lock'
+                    ? 'file-cleanup-deferred'
+                    : 'cleanup-deferred';
+                setWarning(cleanupDeferred);
             } else {
                 setError(classifyFailure(failure, terminal));
             }
@@ -171,7 +173,7 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
         setBusy(false);
         if (succeeded) {
             closeFlow();
-            if (cleanupDeferred) setWarning('cleanup-deferred');
+            if (cleanupDeferred) setWarning(cleanupDeferred);
         }
     };
 
@@ -207,7 +209,7 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
             setError(null);
             setWarning(null);
             let accepted = false;
-            let cleanupDeferred = false;
+            let cleanupDeferred: WarningKind | null = null;
             try {
                 accepted = (await provideSyncEncryptionPassphrase(currentPassphrase)) === 'ok';
                 if (!accepted) setError('wrong-passphrase');
@@ -216,8 +218,10 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
                 if (isSyncEncryptionCleanupDeferredError(failure)) {
                     accepted = failure.outcome === 'ok';
                     if (accepted) {
-                        cleanupDeferred = true;
-                        setWarning('cleanup-deferred');
+                        cleanupDeferred = failure.cleanupKind === 'file-lock'
+                            ? 'file-cleanup-deferred'
+                            : 'cleanup-deferred';
+                        setWarning(cleanupDeferred);
                     } else {
                         setError('wrong-passphrase');
                     }
@@ -231,7 +235,7 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
             setBusy(false);
             if (accepted) {
                 closeFlow();
-                if (cleanupDeferred) setWarning('cleanup-deferred');
+                if (cleanupDeferred) setWarning(cleanupDeferred);
             }
         })();
     };
@@ -310,7 +314,9 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
         : null;
     const warningMessage = warning === 'cleanup-deferred'
         ? t('settings.syncEncryptionCleanupDeferred')
-        : null;
+        : warning === 'file-cleanup-deferred'
+            ? t('settings.syncEncryptionFileCleanupDeferred')
+            : null;
 
     const renderPassphraseInput = (label: string, value: string, onChange: (value: string) => void) => (
         <View style={[styles.inputGroup, { borderTopWidth: 1, borderTopColor: tc.border }]}>

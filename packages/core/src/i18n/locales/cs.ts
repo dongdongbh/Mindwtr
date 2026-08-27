@@ -2282,4 +2282,5 @@ export const csOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': 'Jiné kompatibilní zařízení s Mindwtr právě aktualizuje toto umístění synchronizace. Počkejte na dokončení a poté synchronizaci spusťte znovu.',
         'settings.syncRemoteCleanupDeferred': 'Operace synchronizace byla dokončena. Mindwtr nemohl odebrat dočasný zámek synchronizace, ale jeho platnost automaticky vyprší. Není třeba akci opakovat.',
         'settings.syncEncryptionCleanupDeferred': 'Šifrování bylo aktualizováno. Mindwtr nemohl odebrat dočasný zámek synchronizace, ale jeho platnost automaticky vyprší. Není třeba akci opakovat.',
+        'settings.syncEncryptionFileCleanupDeferred': 'Šifrování bylo aktualizováno, ale Mindwtr nemohl uvolnit zámek Synchronizace souborů. Před další synchronizací Mindwtr restartujte. Změnu šifrování neopakujte.',
 };

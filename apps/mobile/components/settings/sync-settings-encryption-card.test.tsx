@@ -277,6 +277,30 @@ describe('SyncEncryptionCard', () => {
     expect(inputLabels(tree)).not.toContain('settings.syncEncryptionPassphrase');
   });
 
+  it('closes committed File Sync encryption and tells the user to restart instead of retrying it', async () => {
+    encryptionMocks.getSyncEncryptionStatus
+      .mockResolvedValueOnce({ state: 'off' })
+      .mockResolvedValue({ state: 'enabled' });
+    const cleanupError = Object.assign(new Error('SYNC_ENCRYPTION_COMMITTED_CLEANUP_DEFERRED'), {
+      name: 'SyncEncryptionCleanupDeferredError',
+      outcome: undefined,
+      cleanupCause: new Error('File Sync release failed'),
+      cleanupKind: 'file-lock',
+      retryAfterMs: 0,
+    });
+    encryptionMocks.enableSyncEncryption.mockRejectedValueOnce(cleanupError);
+    const tree = await renderCard();
+
+    await press(tree, 'settings.syncEncryptionEnable');
+    await typeInto(tree, 'settings.syncEncryptionPassphrase', 'correct horse battery');
+    await typeInto(tree, 'settings.syncEncryptionPassphraseConfirm', 'correct horse battery');
+    await press(tree, 'settings.syncEncryptionEnable');
+
+    expect(texts(tree)).toContain('settings.syncEncryptionFileCleanupDeferred');
+    expect(texts(tree)).not.toContain('settings.syncEncryptionErrorGeneric');
+    expect(inputLabels(tree)).not.toContain('settings.syncEncryptionPassphrase');
+  });
+
   it('re-prompts inline when the entered passphrase is wrong', async () => {
     encryptionMocks.getSyncEncryptionStatus.mockResolvedValue({ state: 'remote-encrypted-no-key' });
     encryptionMocks.provideSyncEncryptionPassphrase.mockResolvedValue('wrong-passphrase');

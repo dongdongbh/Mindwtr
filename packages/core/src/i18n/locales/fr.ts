@@ -2090,4 +2090,5 @@ export const frOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': 'Un autre appareil Mindwtr compatible met à jour cet emplacement de synchronisation. Attendez qu’il ait terminé, puis relancez la synchronisation.',
         'settings.syncRemoteCleanupDeferred': 'L’opération de synchronisation est terminée. Mindwtr n’a pas pu supprimer le verrou de synchronisation temporaire, mais il expirera automatiquement. Aucune nouvelle tentative n’est nécessaire.',
         'settings.syncEncryptionCleanupDeferred': 'Le chiffrement a été mis à jour. Mindwtr n’a pas pu supprimer le verrou de synchronisation temporaire, mais il expirera automatiquement. Aucune nouvelle tentative n’est nécessaire.',
+        'settings.syncEncryptionFileCleanupDeferred': 'Le chiffrement a été mis à jour, mais Mindwtr n’a pas pu libérer le verrou de synchronisation de fichiers. Redémarrez Mindwtr avant de synchroniser à nouveau. Ne répétez pas la modification du chiffrement.',
 };

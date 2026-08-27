@@ -2354,4 +2354,5 @@ export const koOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': '호환되는 다른 Mindwtr 기기가 이 동기화 위치를 업데이트하고 있습니다. 완료될 때까지 기다린 후 다시 동기화하세요.',
         'settings.syncRemoteCleanupDeferred': '동기화 작업이 완료되었습니다. Mindwtr가 임시 동기화 잠금을 제거하지 못했지만 잠금은 자동으로 만료됩니다. 다시 시도할 필요가 없습니다.',
         'settings.syncEncryptionCleanupDeferred': '암호화가 업데이트되었습니다. Mindwtr가 임시 동기화 잠금을 제거하지 못했지만 잠금은 자동으로 만료됩니다. 다시 시도할 필요가 없습니다.',
+        'settings.syncEncryptionFileCleanupDeferred': '암호화가 업데이트되었지만 Mindwtr가 파일 동기화 잠금을 해제하지 못했습니다. 다시 동기화하기 전에 Mindwtr를 재시작하세요. 암호화 변경을 반복하지 마세요.',
 };

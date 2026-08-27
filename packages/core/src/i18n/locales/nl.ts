@@ -621,4 +621,5 @@ export const nlOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': 'Een ander compatibel Mindwtr-apparaat werkt deze synchronisatielocatie bij. Wacht tot het klaar is en synchroniseer daarna opnieuw.',
         'settings.syncRemoteCleanupDeferred': 'De synchronisatie is voltooid. Mindwtr kon de tijdelijke synchronisatievergrendeling niet verwijderen, maar deze verloopt automatisch. Opnieuw proberen is niet nodig.',
         'settings.syncEncryptionCleanupDeferred': 'De versleuteling is bijgewerkt. Mindwtr kon de tijdelijke synchronisatievergrendeling niet verwijderen, maar deze verloopt automatisch. Opnieuw proberen is niet nodig.',
+        'settings.syncEncryptionFileCleanupDeferred': 'De versleuteling is bijgewerkt, maar Mindwtr kon de vergrendeling voor Bestandssynchronisatie niet vrijgeven. Start Mindwtr opnieuw voordat u weer synchroniseert. Herhaal de versleutelingswijziging niet.',
 };

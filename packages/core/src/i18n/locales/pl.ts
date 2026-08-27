@@ -1499,4 +1499,5 @@ export const plOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': 'Inne zgodne urządzenie z Mindwtr aktualizuje tę lokalizację synchronizacji. Poczekaj, aż skończy, a następnie zsynchronizuj ponownie.',
         'settings.syncRemoteCleanupDeferred': 'Operacja synchronizacji została zakończona. Mindwtr nie mógł usunąć tymczasowej blokady synchronizacji, ale wygaśnie ona automatycznie. Ponawianie próby nie jest potrzebne.',
         'settings.syncEncryptionCleanupDeferred': 'Szyfrowanie zostało zaktualizowane. Mindwtr nie mógł usunąć tymczasowej blokady synchronizacji, ale wygaśnie ona automatycznie. Ponawianie próby nie jest potrzebne.',
+        'settings.syncEncryptionFileCleanupDeferred': 'Szyfrowanie zostało zaktualizowane, ale Mindwtr nie mógł zwolnić blokady Synchronizacji plików. Uruchom ponownie Mindwtr przed kolejną synchronizacją. Nie powtarzaj zmiany szyfrowania.',
 };

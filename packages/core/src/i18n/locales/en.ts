@@ -2490,4 +2490,5 @@ export const en: Record<string, string> = {
         'settings.syncRemoteBusy': 'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
         'settings.syncRemoteCleanupDeferred': 'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
         'settings.syncEncryptionCleanupDeferred': 'Encryption was updated. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
+        'settings.syncEncryptionFileCleanupDeferred': 'Encryption was updated, but Mindwtr could not release the File Sync lock. Restart Mindwtr before syncing again. Do not repeat the encryption change.',
 };

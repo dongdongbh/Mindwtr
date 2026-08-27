@@ -2422,4 +2422,5 @@ export const zhHant: Record<string, string> = {
         'settings.syncRemoteBusy': '另一台相容的 Mindwtr 裝置正在更新此同步位置。請等待其完成，然後再次同步。',
         'settings.syncRemoteCleanupDeferred': '同步作業已完成。Mindwtr 無法移除暫時同步鎖，但該鎖會自動失效。無需重試。',
         'settings.syncEncryptionCleanupDeferred': '加密已更新。Mindwtr 無法移除暫時同步鎖，但該鎖會自動失效。無需重試。',
+        'settings.syncEncryptionFileCleanupDeferred': '加密已更新，但 Mindwtr 無法釋放檔案同步鎖。請先重新啟動 Mindwtr，再次同步。請勿重複變更加密設定。',
 };

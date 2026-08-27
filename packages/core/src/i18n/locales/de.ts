@@ -1567,4 +1567,5 @@ export const deOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': 'Ein anderes kompatibles Mindwtr-Gerät aktualisiert gerade diesen Synchronisierungsort. Warten Sie, bis es fertig ist, und synchronisieren Sie dann erneut.',
         'settings.syncRemoteCleanupDeferred': 'Der Synchronisierungsvorgang wurde abgeschlossen. Mindwtr konnte die temporäre Synchronisierungssperre nicht entfernen, sie läuft jedoch automatisch ab. Es ist kein erneuter Versuch erforderlich.',
         'settings.syncEncryptionCleanupDeferred': 'Die Verschlüsselung wurde aktualisiert. Mindwtr konnte die temporäre Synchronisierungssperre nicht entfernen, sie läuft jedoch automatisch ab. Es ist kein erneuter Versuch erforderlich.',
+        'settings.syncEncryptionFileCleanupDeferred': 'Die Verschlüsselung wurde aktualisiert, aber Mindwtr konnte die Dateisynchronisierungssperre nicht freigeben. Starten Sie Mindwtr vor der nächsten Synchronisierung neu. Wiederholen Sie die Verschlüsselungsänderung nicht.',
 };

@@ -1504,4 +1504,5 @@ export const arOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': 'يقوم جهاز Mindwtr متوافق آخر بتحديث موقع المزامنة هذا. انتظر حتى ينتهي، ثم قم بالمزامنة مرة أخرى.',
         'settings.syncRemoteCleanupDeferred': 'اكتملت عملية المزامنة. تعذّر على Mindwtr إزالة قفل المزامنة المؤقت، لكنه سينتهي تلقائيًا. لا حاجة إلى إعادة المحاولة.',
         'settings.syncEncryptionCleanupDeferred': 'تم تحديث التشفير. تعذّر على Mindwtr إزالة قفل المزامنة المؤقت، لكنه سينتهي تلقائيًا. لا حاجة إلى إعادة المحاولة.',
+        'settings.syncEncryptionFileCleanupDeferred': 'تم تحديث التشفير، لكن تعذّر على Mindwtr تحرير قفل مزامنة الملفات. أعد تشغيل Mindwtr قبل المزامنة مرة أخرى. لا تكرر تغيير التشفير.',
 };

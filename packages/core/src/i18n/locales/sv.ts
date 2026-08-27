@@ -2450,4 +2450,5 @@ export const svOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': 'En annan kompatibel Mindwtr-enhet uppdaterar den här synkroniseringsplatsen. Vänta tills den är klar och synkronisera sedan igen.',
         'settings.syncRemoteCleanupDeferred': 'Synkroniseringen slutfördes. Mindwtr kunde inte ta bort det tillfälliga synkroniseringslåset, men det upphör automatiskt. Du behöver inte försöka igen.',
         'settings.syncEncryptionCleanupDeferred': 'Krypteringen uppdaterades. Mindwtr kunde inte ta bort det tillfälliga synkroniseringslåset, men det upphör automatiskt. Du behöver inte försöka igen.',
+        'settings.syncEncryptionFileCleanupDeferred': 'Krypteringen uppdaterades, men Mindwtr kunde inte frigöra låset för Filsynkronisering. Starta om Mindwtr innan du synkroniserar igen. Upprepa inte krypteringsändringen.',
 };

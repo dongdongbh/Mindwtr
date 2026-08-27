@@ -2494,4 +2494,5 @@ export const jaOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': '別の互換性のある Mindwtr デバイスがこの同期先を更新しています。完了するまで待ってから、もう一度同期してください。',
         'settings.syncRemoteCleanupDeferred': '同期処理は完了しました。Mindwtr は一時的な同期ロックを削除できませんでしたが、ロックは自動的に期限切れになります。再試行は不要です。',
         'settings.syncEncryptionCleanupDeferred': '暗号化は更新されました。Mindwtr は一時的な同期ロックを削除できませんでしたが、ロックは自動的に期限切れになります。再試行は不要です。',
+        'settings.syncEncryptionFileCleanupDeferred': '暗号化は更新されましたが、Mindwtr はファイル同期ロックを解除できませんでした。もう一度同期する前に Mindwtr を再起動してください。暗号化の変更は繰り返さないでください。',
 };

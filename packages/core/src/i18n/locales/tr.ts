@@ -1522,4 +1522,5 @@ export const trOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': 'Başka bir uyumlu Mindwtr cihazı bu eşitleme konumunu güncelliyor. Bitmesini bekleyin, ardından yeniden eşitleyin.',
         'settings.syncRemoteCleanupDeferred': 'Eşitleme işlemi tamamlandı. Mindwtr geçici eşitleme kilidini kaldıramadı, ancak kilit otomatik olarak sona erecek. Yeniden denemeniz gerekmez.',
         'settings.syncEncryptionCleanupDeferred': 'Şifreleme güncellendi. Mindwtr geçici eşitleme kilidini kaldıramadı, ancak kilit otomatik olarak sona erecek. Yeniden denemeniz gerekmez.',
+        'settings.syncEncryptionFileCleanupDeferred': 'Şifreleme güncellendi, ancak Mindwtr Dosya Eşitleme kilidini serbest bırakamadı. Yeniden eşitlemeden önce Mindwtr’ı yeniden başlatın. Şifreleme değişikliğini tekrarlamayın.',
 };

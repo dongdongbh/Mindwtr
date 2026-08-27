@@ -1565,4 +1565,5 @@ export const ptOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': 'Outro dispositivo compatível com o Mindwtr está atualizando este local de sincronização. Aguarde até terminar e sincronize novamente.',
         'settings.syncRemoteCleanupDeferred': 'A operação de sincronização foi concluída. O Mindwtr não conseguiu remover o bloqueio temporário de sincronização, mas ele expirará automaticamente. Não é necessário tentar novamente.',
         'settings.syncEncryptionCleanupDeferred': 'A criptografia foi atualizada. O Mindwtr não conseguiu remover o bloqueio temporário de sincronização, mas ele expirará automaticamente. Não é necessário tentar novamente.',
+        'settings.syncEncryptionFileCleanupDeferred': 'A criptografia foi atualizada, mas o Mindwtr não conseguiu liberar o bloqueio da Sincronização de arquivos. Reinicie o Mindwtr antes de sincronizar novamente. Não repita a alteração da criptografia.',
 };

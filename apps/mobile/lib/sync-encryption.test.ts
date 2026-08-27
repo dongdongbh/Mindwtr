@@ -216,6 +216,7 @@ import {
   SyncEncryptionCleanupDeferredError,
 } from './sync-encryption-service';
 import { __resetSecureSecretStoreForTests } from './secure-secret-store';
+import { setSyncFileLockNativeModuleForTests } from './sync-file-lock';
 import { SYNC_BACKEND_KEY, SYNC_ENCRYPTION_STATE_KEY, SYNC_PATH_KEY } from './sync-constants';
 
 // Same node-backed stand-in for react-native-quick-crypto as sync-crypto-native.test.ts
@@ -275,7 +276,10 @@ beforeEach(async () => {
   vi.mocked(fileSystem.readAsStringAsync).mockImplementation(readStored);
 });
 
-afterEach(() => { vi.clearAllMocks(); });
+afterEach(() => {
+  setSyncFileLockNativeModuleForTests(undefined);
+  vi.clearAllMocks();
+});
 
 const seedEncrypted = async (data: AppData, key: SyncKeyMaterial = material, uri = ENC_URI) => {
   const sealed = await encryptSyncArtifact(
@@ -919,6 +923,48 @@ describe('File Sync transitions through core orchestration', () => {
     fs.files.set(`${SYNC_DIR}/data.json.bak`, new TextEncoder().encode(JSON.stringify(appData('backup'), null, 2)));
     fs.files.set(`${SYNC_DIR}/attachments/a1.png`, new Uint8Array([9, 8, 7, 6]));
   };
+
+  it('preserves a primary transition failure when releasing the File Sync lease also fails', async () => {
+    const cleanupError = new Error('native lock release failed');
+    setSyncFileLockNativeModuleForTests({
+      acquireAsync: vi.fn(async () => 'lease-token'),
+      releaseAsync: vi.fn(async () => { throw cleanupError; }),
+    }, 'android');
+    seedPlaintextFolder();
+    fs.files.set(ENC_URI, new Uint8Array([1, 2, 3]));
+
+    const failure = await enableSyncEncryption(PASSPHRASE).then(
+      () => null,
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(SyncEncryptionTerminalError);
+    expect((failure as Error & { cleanupError?: unknown }).cleanupError).toBe(cleanupError);
+  }, 30_000);
+
+  it('reports committed File Sync encryption with cleanup deferred when lease release fails', async () => {
+    const cleanupError = new Error('native lock release failed');
+    setSyncFileLockNativeModuleForTests({
+      acquireAsync: vi.fn(async () => 'lease-token'),
+      releaseAsync: vi.fn(async () => { throw cleanupError; }),
+    }, 'android');
+    seedPlaintextFolder();
+
+    const failure = await enableSyncEncryption(PASSPHRASE).then(
+      () => null,
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(SyncEncryptionCleanupDeferredError);
+    expect(failure).toMatchObject({
+      cleanupCause: cleanupError,
+      cleanupKind: 'file-lock',
+      retryAfterMs: 0,
+    });
+    await expect(getMobileSyncEncryptionStatus()).resolves.toMatchObject({ state: 'enabled' });
+    expect(fs.files.has(ENC_URI)).toBe(true);
+    expect(fs.files.has(SYNC_URI)).toBe(false);
+  }, 30_000);
 
   it('fails closed when the SAF provider cannot enumerate the transition folder', async () => {
     const configuredUri = 'content://provider/tree/root/document/root%2Fdata.json';

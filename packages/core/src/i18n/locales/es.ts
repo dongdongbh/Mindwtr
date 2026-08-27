@@ -1420,4 +1420,5 @@ export const esOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': 'Otro dispositivo compatible con Mindwtr está actualizando esta ubicación de sincronización. Espera a que termine y vuelve a sincronizar.',
         'settings.syncRemoteCleanupDeferred': 'La operación de sincronización se completó. Mindwtr no pudo eliminar el bloqueo temporal de sincronización, pero caducará automáticamente. No es necesario volver a intentarlo.',
         'settings.syncEncryptionCleanupDeferred': 'El cifrado se actualizó. Mindwtr no pudo eliminar el bloqueo temporal de sincronización, pero caducará automáticamente. No es necesario volver a intentarlo.',
+        'settings.syncEncryptionFileCleanupDeferred': 'El cifrado se actualizó, pero Mindwtr no pudo liberar el bloqueo de Sincronización de archivos. Reinicia Mindwtr antes de volver a sincronizar. No repitas el cambio de cifrado.',
 };
