@@ -14,6 +14,7 @@ import { SyncRemoteWriteConflict } from './sync-run-ports';
 import { normalizeRemoteWriteResult, runSharedSyncCycle } from './sync-run';
 import { normalizeAppData } from './sync-normalization';
 import { cloneAppData } from './sync-runtime-utils';
+import { toRemoteSyncDocument } from './sync-document';
 import type { FastSyncState } from './sync-fast-sync';
 import {
     SyncFileLockBusyError,
@@ -390,7 +391,7 @@ describe('runSharedSyncCycle', () => {
         const local = createData([localTask]);
         const { io, run } = createHarness({
             local,
-            remote: cloneAppData(local),
+            remote: toRemoteSyncDocument(cloneAppData(local)),
             backend: 'cloudkit',
             io: { syncAttachments: vi.fn(async () => false) },
         });

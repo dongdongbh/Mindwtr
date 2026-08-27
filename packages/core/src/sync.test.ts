@@ -370,6 +370,23 @@ describe('Sync Logic', () => {
                     fileHash: winningLocalAttachment.fileHash,
                     pendingContentUpload: true,
                 });
+
+                const sameIdentityRemoteWinner = {
+                    ...localAttachment,
+                    uri: '',
+                    fileHash: localAttachment.fileHash?.toUpperCase(),
+                    pendingContentUpload: undefined,
+                    updatedAt: '2023-01-04T00:00:00.000Z',
+                };
+                const tiedIdentity = mergeAppData(
+                    mockAppData([localTask]),
+                    mockAppData([{ ...incomingTask, attachments: [sameIdentityRemoteWinner] }]),
+                );
+                expect(tiedIdentity.tasks[0].attachments?.[0]).toMatchObject({
+                    contentRev: localAttachment.contentRev,
+                    fileHash: sameIdentityRemoteWinner.fileHash,
+                    pendingContentUpload: true,
+                });
             });
 
             it('a tied contentRev defers to whatever the attachment-level LWW already picked', () => {
