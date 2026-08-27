@@ -29,7 +29,9 @@ const createWebdavCapabilityFetcher = (
     options: {
         documentBody?: string;
         ignoreCreateOnly?: boolean;
+        ignoreStaleDelete?: boolean;
         ignoreStaleMatch?: boolean;
+        rejectCurrentDelete?: boolean;
     } = {},
 ) => {
     const requests: { method: string; url: string; headers: Headers }[] = [];
@@ -78,8 +80,13 @@ const createWebdavCapabilityFetcher = (
             return new Response(null, { status: currentEtag ? 204 : 201 });
         }
         if (method === 'DELETE') {
-            if (!probeBytes || headers.get('if-match') !== `"probe-v${probeVersion}"`) {
+            const currentEtag = probeBytes ? `"probe-v${probeVersion}"` : null;
+            const ifMatch = headers.get('if-match');
+            if (!probeBytes || (ifMatch !== currentEtag && !options.ignoreStaleDelete)) {
                 return new Response(null, { status: 412 });
+            }
+            if (ifMatch === currentEtag && options.rejectCurrentDelete) {
+                return new Response(null, { status: 405 });
             }
             probeBytes = null;
             return new Response(null, { status: 204 });
@@ -628,13 +635,14 @@ describe('versioned WebDAV transition byte operations', () => {
         await assertWebdavStrongEtagSupport(documentUrl, { fetcher });
 
         expect(requests.map(({ method }) => method)).toEqual([
-            'GET', 'PUT', 'GET', 'PUT', 'PUT', 'GET', 'PUT', 'GET', 'DELETE',
+            'GET', 'PUT', 'GET', 'PUT', 'PUT', 'GET', 'PUT', 'DELETE', 'GET', 'DELETE',
         ]);
         expect(requests[1]?.headers.get('if-none-match')).toBe('*');
         expect(requests[3]?.headers.get('if-none-match')).toBe('*');
         expect(requests[4]?.headers.get('if-match')).toBe('"probe-v1"');
         expect(requests[6]?.headers.get('if-match')).toBe('"probe-v1"');
-        expect(requests[8]?.headers.get('if-match')).toBe('"probe-v2"');
+        expect(requests[7]?.headers.get('if-match')).toBe('"probe-v1"');
+        expect(requests[9]?.headers.get('if-match')).toBe('"probe-v2"');
         expect(getProbeUrl()).toContain('data.json.mindwtr-etag-probe-');
     });
 
@@ -663,6 +671,22 @@ describe('versioned WebDAV transition byte operations', () => {
         await expect(assertWebdavStrongEtagSupport(documentUrl, { fetcher }))
             .rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
         expect(requests.some(({ method }) => method === 'DELETE')).toBe(true);
+    });
+
+    it('rejects a server that ignores stale conditional deletes', async () => {
+        const documentUrl = 'https://example.com/dav/data.json';
+        const { fetcher } = createWebdavCapabilityFetcher(documentUrl, { ignoreStaleDelete: true });
+
+        await expect(assertWebdavStrongEtagSupport(documentUrl, { fetcher }))
+            .rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+    });
+
+    it('rejects a server that cannot conditionally delete the current probe generation', async () => {
+        const documentUrl = 'https://example.com/dav/data.json';
+        const { fetcher } = createWebdavCapabilityFetcher(documentUrl, { rejectCurrentDelete: true });
+
+        await expect(assertWebdavStrongEtagSupport(documentUrl, { fetcher }))
+            .rejects.toThrow('WebDAV DELETE failed (405)');
     });
 
     it('rejects a 200 HTML/login body even when that response has a strong ETag', async () => {

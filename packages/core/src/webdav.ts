@@ -941,6 +941,20 @@ const assertWebdavConditionalWriteSupport = async (
             ),
             'WebDAV stale If-Match enforcement',
         );
+
+        await requireWebdavConditionalConflict(
+            () => webdavDeleteFileVersioned(probeUrl, initial.version, options),
+            'WebDAV stale If-Match delete enforcement',
+        );
+        const retained = await webdavGetFileVersioned(probeUrl, options);
+        if (
+            !webdavProbeBytesEqual(retained.bytes, replacementBytes)
+            || retained.version !== replacement.version
+        ) {
+            throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV conditional delete retention');
+        }
+        await webdavDeleteFileVersioned(probeUrl, retained.version, options);
+        created = false;
     } finally {
         if (created && hasSafeProbeVersion) {
             // Cleanup is never unconditional. Reread because a server that ignored one of
@@ -955,7 +969,7 @@ const assertWebdavConditionalWriteSupport = async (
 
 /** Preflights the generation contract required by ordinary WebDAV sync and encryption
  * transitions. An existing document must carry a strong ETag. A unique probe then proves
- * create-only and stale-replacement conditions are enforced, not merely accepted as headers.
+ * create-only, stale-replacement, and stale-delete conditions are enforced, not merely accepted as headers.
  * Cleanup rereads and conditionally deletes the probe; it never issues an unguarded delete. */
 export async function assertWebdavStrongEtagSupport(
     documentUrl: string,
