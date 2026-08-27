@@ -1,9 +1,16 @@
 import React from 'react';
 import renderer from 'react-test-renderer';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Task } from '@mindwtr/core';
 
 import { useTaskEditState } from './use-task-edit-state';
+
+const flushPendingSaveMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+
+vi.mock('@mindwtr/core', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@mindwtr/core')>();
+    return { ...actual, flushPendingSave: flushPendingSaveMock };
+});
 
 const task: Task = {
     id: 'task-1',
@@ -16,6 +23,11 @@ const task: Task = {
 };
 
 describe('useTaskEditState', () => {
+    beforeEach(() => {
+        flushPendingSaveMock.mockReset();
+        flushPendingSaveMock.mockResolvedValue(undefined);
+    });
+
     it('can synchronize a persisted field without marking the draft dirty', () => {
         let state!: ReturnType<typeof useTaskEditState>;
         const resetCopilotStateRef = { current: vi.fn() };
@@ -193,6 +205,105 @@ describe('useTaskEditState', () => {
             draftAttachments: [added],
             committedAttachments: [added],
         });
+    });
+
+    it('settles attachment files only after the optimistic task write is durable', async () => {
+        let state!: ReturnType<typeof useTaskEditState>;
+        const settleAttachmentDraft = vi.fn();
+        const onClose = vi.fn();
+        let resolveDurability!: () => void;
+        flushPendingSaveMock.mockImplementationOnce(() => new Promise<void>((resolve) => {
+            resolveDurability = resolve;
+        }));
+        const added = {
+            id: 'draft-file',
+            kind: 'file' as const,
+            title: 'draft.txt',
+            uri: 'file:///documents/attachments/draft-file.txt',
+            createdAt: '2026-08-27T00:00:00.000Z',
+            updatedAt: '2026-08-27T00:00:00.000Z',
+        };
+
+        function Probe() {
+            state = useTaskEditState({
+                onClose,
+                onSave: vi.fn().mockResolvedValue({ success: true }),
+                onSaveError: vi.fn(),
+                resetCopilotStateRef: { current: vi.fn() },
+                settleAttachmentDraft,
+                sections: [],
+                task,
+                tasks: [task],
+                visible: true,
+            });
+            return null;
+        }
+
+        renderer.act(() => {
+            renderer.create(React.createElement(Probe));
+        });
+        renderer.act(() => state.setAttachments([added]));
+
+        let save!: Promise<boolean>;
+        await renderer.act(async () => {
+            save = state.draftLifecycle.save();
+            await Promise.resolve();
+        });
+        expect(settleAttachmentDraft).not.toHaveBeenCalled();
+        expect(onClose).not.toHaveBeenCalled();
+
+        resolveDurability();
+        await renderer.act(async () => {
+            expect(await save).toBe(true);
+        });
+        expect(settleAttachmentDraft).toHaveBeenCalledOnce();
+        expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it('preserves all attachment files when the durability barrier fails', async () => {
+        let state!: ReturnType<typeof useTaskEditState>;
+        const settleAttachmentDraft = vi.fn();
+        const onClose = vi.fn();
+        const onSaveError = vi.fn();
+        flushPendingSaveMock.mockRejectedValueOnce(new Error('sqlite unavailable'));
+
+        function Probe() {
+            state = useTaskEditState({
+                onClose,
+                onSave: vi.fn().mockResolvedValue({ success: true }),
+                onSaveError,
+                resetCopilotStateRef: { current: vi.fn() },
+                settleAttachmentDraft,
+                sections: [],
+                task,
+                tasks: [task],
+                visible: true,
+            });
+            return null;
+        }
+
+        renderer.act(() => {
+            renderer.create(React.createElement(Probe));
+        });
+        renderer.act(() => state.setAttachments([{
+            id: 'draft-file',
+            kind: 'file',
+            title: 'draft.txt',
+            uri: 'file:///documents/attachments/draft-file.txt',
+            createdAt: '2026-08-27T00:00:00.000Z',
+            updatedAt: '2026-08-27T00:00:00.000Z',
+        }]));
+
+        await renderer.act(async () => {
+            expect(await state.draftLifecycle.save()).toBe(false);
+        });
+        expect(onSaveError).toHaveBeenCalledWith('sqlite unavailable');
+        expect(settleAttachmentDraft).not.toHaveBeenCalled();
+        expect(onClose).not.toHaveBeenCalled();
+
+        renderer.act(() => state.draftLifecycle.discard());
+        expect(settleAttachmentDraft).not.toHaveBeenCalled();
+        expect(onClose).toHaveBeenCalledOnce();
     });
 
     it('settles a copied attachment against the baseline when the editor unmounts', () => {

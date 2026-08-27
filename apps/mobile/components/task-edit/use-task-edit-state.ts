@@ -1,5 +1,7 @@
 import React from 'react';
 import {
+    areDraftAttachmentsDirty,
+    flushPendingSave,
     type Attachment,
     type AttachmentDraftSettlementInput,
     type RecurrenceWeekday,
@@ -87,6 +89,7 @@ export function useTaskEditState({
     const isDirtyRef = React.useRef(false);
     const baseTaskRef = React.useRef<Task | null>(null);
     const attachmentDraftSettledRef = React.useRef(true);
+    const attachmentSaveAwaitingDurabilityRef = React.useRef(false);
     const setDraftField = React.useCallback<SetTaskEditDraftField>((field, value, markDirty = true) => {
         if (markDirty) isDirtyRef.current = true;
         setTaskEditDraftState((current) => {
@@ -147,6 +150,10 @@ export function useTaskEditState({
 
     const settleCurrentAttachmentDraft = React.useCallback((committedAttachments?: readonly Attachment[]) => {
         if (attachmentDraftSettledRef.current) return;
+        // A successful store action is still optimistic: its immediate SQLite
+        // write may be in flight. On a durability failure preserve every file
+        // that either the old snapshot or the retrying new snapshot can own.
+        if (attachmentSaveAwaitingDurabilityRef.current) return;
         const baselineTask = baseTaskRef.current ?? liveTask;
         const currentDraft = taskEditDraftRef.current;
         if (baselineTask && currentDraft) {
@@ -188,7 +195,7 @@ export function useTaskEditState({
         return false;
     }, [onSave, onSaveError]);
 
-    const saveDraft = React.useCallback((): Promise<boolean> => {
+    const saveDraft = React.useCallback(async (): Promise<boolean> => {
         const currentTask = baseTaskRef.current ?? liveTask;
         if (!currentTask || !taskEditDraft) return Promise.resolve(false);
         clearPendingTextChanges();
@@ -213,24 +220,37 @@ export function useTaskEditState({
             description: descriptionDraftRef.current,
         });
         if (updates && Object.keys(updates).length > 0) {
-            const saved = writePatch(currentTask.id, updates);
-            if (saved instanceof Promise) {
-                return saved.then((succeeded) => {
-                    if (!succeeded) return false;
-                    settleCurrentAttachmentDraft(saveDraftState.attachments ?? currentTask.attachments);
-                    onClose();
-                    return true;
-                });
+            const attachmentSaveRequiresDurability = areDraftAttachmentsDirty(
+                saveDraftState.attachments,
+                currentTask,
+            );
+            attachmentSaveAwaitingDurabilityRef.current = attachmentSaveRequiresDurability;
+            const saved = await Promise.resolve(writePatch(currentTask.id, updates));
+            if (!saved) {
+                attachmentSaveAwaitingDurabilityRef.current = false;
+                return false;
             }
-            if (!saved) return Promise.resolve(false);
+            if (attachmentSaveRequiresDurability) {
+                try {
+                    await flushPendingSave();
+                } catch (error) {
+                    onSaveError(getUnknownErrorMessage(error));
+                    // Keep the guard raised. The store retains a retry snapshot, so
+                    // neither the baseline bytes nor newly submitted bytes are yet
+                    // safe to classify as orphaned.
+                    return false;
+                }
+            }
         }
+        attachmentSaveAwaitingDurabilityRef.current = false;
         settleCurrentAttachmentDraft(saveDraftState.attachments ?? currentTask.attachments);
         onClose();
-        return Promise.resolve(true);
+        return true;
     }, [
         clearPendingTextChanges,
         liveTask,
         onClose,
+        onSaveError,
         sections,
         settleCurrentAttachmentDraft,
         taskEditDraft,

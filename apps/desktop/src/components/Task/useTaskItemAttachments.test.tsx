@@ -321,6 +321,58 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
         expect(deleted.deletedAt).toBeTruthy();
     });
 
+    it('waits for durable persistence before deleting a baseline-owned file', async () => {
+        const existingAttachment = {
+            id: 'existing-1',
+            kind: 'file' as const,
+            title: 'existing.txt',
+            uri: '/data/mindwtr/attachments/existing-1.txt',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        };
+        const taskWithAttachment = { ...task, attachments: [existingAttachment] };
+        const { result } = renderHook(() => useTaskItemAttachments({ task: taskWithAttachment, t }));
+
+        act(() => result.current.removeAttachment(existingAttachment.id));
+        const committedDelete = result.current.editAttachments[0];
+        act(() => result.current.beginAttachmentSave());
+        await act(async () => {
+            result.current.resetAttachmentState([committedDelete]);
+            await Promise.resolve();
+        });
+        expect(removeMock).not.toHaveBeenCalled();
+
+        await act(async () => {
+            result.current.settlePersistedAttachmentSave([committedDelete]);
+            await Promise.resolve();
+        });
+        expect(removeMock).toHaveBeenCalledWith(existingAttachment.uri);
+    });
+
+    it('preserves draft and baseline files when a submitted save never becomes durable', async () => {
+        const existingAttachment = {
+            id: 'existing-1',
+            kind: 'file' as const,
+            title: 'existing.txt',
+            uri: '/data/mindwtr/attachments/existing-1.txt',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        };
+        const taskWithAttachment = { ...task, attachments: [existingAttachment] };
+        const { result, unmount } = renderHook(() => useTaskItemAttachments({ task: taskWithAttachment, t }));
+
+        act(() => result.current.removeAttachment(existingAttachment.id));
+        const optimisticDelete = result.current.editAttachments[0];
+        act(() => result.current.beginAttachmentSave());
+        act(() => result.current.resetAttachmentState([optimisticDelete]));
+        await act(async () => {
+            unmount();
+            await Promise.resolve();
+        });
+
+        expect(removeMock).not.toHaveBeenCalled();
+    });
+
     it('never removes an orphaned file in a sibling directory that merely shares the managed dir prefix', async () => {
         // e.g. `/data/mindwtr/attachments-old/x.pdf` — `startsWith('/data/mindwtr/attachments')`
         // would wrongly match this without a path-separator boundary.

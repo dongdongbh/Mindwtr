@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Attachment, DEFAULT_PROJECT_COLOR, buildTaskUpdatesFromSpeechResult, findSelectableProjectByTitleAndArea, generateUUID, normalizeLinkAttachmentInput, planAttachmentDraftSettlement, translateWithFallback, useTaskStore, type Task } from '@mindwtr/core';
+import { Attachment, DEFAULT_PROJECT_COLOR, areDraftAttachmentsDirty, buildTaskUpdatesFromSpeechResult, findSelectableProjectByTitleAndArea, generateUUID, normalizeLinkAttachmentInput, planAttachmentDraftSettlement, translateWithFallback, useTaskStore, type Task } from '@mindwtr/core';
 import { dataDir } from '@tauri-apps/api/path';
 import { BaseDirectory, readFile, readTextFile } from '@tauri-apps/plugin-fs';
 import { importDroppedFileAttachment, importPickedFileAttachment } from '../../lib/attachment-import';
@@ -77,6 +77,12 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
     const editAttachmentsRef = useRef(editAttachments);
     editAttachmentsRef.current = editAttachments;
     const baselineAttachmentsRef = useRef<Attachment[]>(task.attachments || []);
+    // Once an attachment-bearing task update reaches the optimistic store, both
+    // the old persisted file and the new draft file may still be needed until
+    // SQLite confirms the write. A failed durability barrier deliberately keeps
+    // this guard raised: leaking a managed copy is recoverable; deleting the only
+    // bytes referenced by either snapshot is not.
+    const attachmentSaveAwaitingDurabilityRef = useRef(false);
     const [attachmentError, setAttachmentError] = useState<string | null>(null);
     const [audioAttachment, setAudioAttachment] = useState<Attachment | null>(null);
     const [audioSource, setAudioSource] = useState<string | null>(null);
@@ -537,13 +543,34 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         baselineAttachmentsRef.current = committedAttachments;
     }, []);
 
+    const beginAttachmentSave = useCallback(() => {
+        const attachmentsChanged = areDraftAttachmentsDirty(
+            editAttachmentsRef.current,
+            { ...task, attachments: baselineAttachmentsRef.current },
+        );
+        attachmentSaveAwaitingDurabilityRef.current = attachmentsChanged;
+        return attachmentsChanged;
+    }, [task]);
+
+    const cancelAttachmentSaveBeforeStoreUpdate = useCallback(() => {
+        attachmentSaveAwaitingDurabilityRef.current = false;
+    }, []);
+
+    const settlePersistedAttachmentSave = useCallback((committedAttachments: Attachment[]) => {
+        settleAttachmentFiles(committedAttachments);
+        attachmentSaveAwaitingDurabilityRef.current = false;
+    }, [settleAttachmentFiles]);
+
     useEffect(() => () => {
+        if (attachmentSaveAwaitingDurabilityRef.current) return;
         settleAttachmentFiles(baselineAttachmentsRef.current);
     }, [settleAttachmentFiles]);
 
     const resetAttachmentState = useCallback((attachments: Attachment[] | undefined) => {
         const nextList = attachments || [];
-        settleAttachmentFiles(nextList);
+        if (!attachmentSaveAwaitingDurabilityRef.current) {
+            settleAttachmentFiles(nextList);
+        }
         setEditAttachments(nextList);
         setAttachmentError(null);
         closeLinkPrompt();
@@ -571,7 +598,10 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         handleAddLinkAttachment,
         removeAttachment,
         openAttachment,
+        beginAttachmentSave,
+        cancelAttachmentSaveBeforeStoreUpdate,
         resetAttachmentState,
+        settlePersistedAttachmentSave,
         audioAttachment,
         audioSource,
         audioError,
