@@ -228,6 +228,41 @@ describe('desktop sync attachment backends', () => {
         );
     });
 
+    it('recovers a missing pending attachment only from matching remote bytes', async () => {
+        const bytes = new Uint8Array([1, 2, 3]);
+        const fetcher = vi.fn(async () => new Response(bytes, { status: 200 }));
+        const appData = createCandidateAttachmentData();
+        const original = appData.tasks[0].attachments![0];
+        original.localStatus = 'missing';
+        original.pendingContentUpload = true;
+        original.fileHash = '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81';
+        fsMocks.exists.mockResolvedValue(false);
+        const deps: AttachmentBackendDeps = {
+            getTauriFetch: async () => fetcher as unknown as typeof fetch,
+            isTauriRuntimeEnv: () => true,
+            logSyncInfo: vi.fn(),
+            logSyncWarning: vi.fn(),
+            resolveWebdavPassword: vi.fn(),
+        };
+
+        const result = expectFoldedData(await syncCloudAttachments(
+            appData,
+            { url: 'https://cloud.example/v1/data', token: 'token' },
+            'https://cloud.example/v1',
+            deps,
+            { phase: 'post-merge', activationProbe: false, ensureLocalSnapshotFresh: vi.fn() },
+        ));
+
+        expect(result.tasks[0].attachments?.[0]).toMatchObject({
+            cloudKey: 'attachments/attachment-1.txt',
+            fileHash: original.fileHash,
+            localStatus: 'available',
+            pendingContentUpload: undefined,
+        });
+        expect(fsMocks.writeFile).toHaveBeenCalled();
+        expect(appData.tasks[0].attachments?.[0]?.pendingContentUpload).toBe(true);
+    });
+
     it('uploads self-hosted cloud attachments selected from Windows paths', async () => {
         const bytes = new Uint8Array([1, 2, 3]);
         const fetcher = vi.fn(async () => new Response(null, { status: 200 }));

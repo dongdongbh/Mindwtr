@@ -421,17 +421,22 @@ describe('runAttachmentTransferLifecycle', () => {
             expect(after().contentMtimeMs).toBe(2000);
         });
 
-        it('does not download an older cloud blob when a pending winning candidate is missing locally', async () => {
+        it('recovers a missing pending candidate only after the remote bytes validate its identity', async () => {
+            const expectedHash = 'a'.repeat(64);
             const attachment = makeAttachment({
                 cloudKey: 'attachments/attachment-1.txt',
-                fileHash: 'prepared-hash',
+                fileHash: expectedHash,
                 contentRev: 3,
                 contentMtimeMs: 2000,
                 contentSize: 20,
                 localStatus: 'available',
                 pendingContentUpload: true,
             });
-            const onDownload = vi.fn(async () => true);
+            const onDownload = vi.fn(async (item: Attachment) => {
+                item.uri = '/local/recovered.txt';
+                item.localStatus = 'available';
+                return true;
+            });
             const { after } = await runLifecycle({
                 attachmentsById: new Map([[attachment.id, attachment]]),
                 localFileExists: vi.fn(async () => false),
@@ -444,8 +449,69 @@ describe('runAttachmentTransferLifecycle', () => {
                 onDownloadError: vi.fn(),
             });
 
+            expect(onDownload).toHaveBeenCalledOnce();
+            expect(after()).toMatchObject({
+                uri: '/local/recovered.txt',
+                localStatus: 'available',
+                fileHash: expectedHash,
+                pendingContentUpload: undefined,
+            });
+        });
+
+        it('retains a missing pending candidate when remote recovery changes its identity', async () => {
+            const expectedHash = 'a'.repeat(64);
+            const attachment = makeAttachment({
+                cloudKey: 'attachments/attachment-1.txt',
+                fileHash: expectedHash,
+                contentRev: 3,
+                localStatus: 'missing',
+                pendingContentUpload: true,
+            });
+            const onDownload = vi.fn(async (item: Attachment) => {
+                item.cloudKey = undefined;
+                item.fileHash = undefined;
+                item.localStatus = 'available';
+                return true;
+            });
+            const { didMutate, after } = await runLifecycle({
+                attachmentsById: new Map([[attachment.id, attachment]]),
+                localFileExists: vi.fn(async () => false),
+                contentChangePhase: 'post-merge',
+                onUpload: vi.fn(),
+                onUploadError: vi.fn(),
+                onDownload,
+                onDownloadError: vi.fn(),
+            });
+
+            expect(didMutate).toBe(false);
+            expect(onDownload).toHaveBeenCalledOnce();
+            expect(after()).toMatchObject({
+                cloudKey: 'attachments/attachment-1.txt',
+                fileHash: expectedHash,
+                localStatus: 'missing',
+                pendingContentUpload: true,
+            });
+        });
+
+        it('does not attempt missing pending recovery without a valid content hash', async () => {
+            const attachment = makeAttachment({
+                cloudKey: 'attachments/attachment-1.txt',
+                fileHash: 'not-a-digest',
+                localStatus: 'missing',
+                pendingContentUpload: true,
+            });
+            const onDownload = vi.fn(async () => true);
+            const { after } = await runLifecycle({
+                attachmentsById: new Map([[attachment.id, attachment]]),
+                localFileExists: vi.fn(async () => false),
+                contentChangePhase: 'post-merge',
+                onUpload: vi.fn(),
+                onUploadError: vi.fn(),
+                onDownload,
+                onDownloadError: vi.fn(),
+            });
+
             expect(onDownload).not.toHaveBeenCalled();
-            expect(after().localStatus).toBe('missing');
             expect(after().pendingContentUpload).toBe(true);
         });
 

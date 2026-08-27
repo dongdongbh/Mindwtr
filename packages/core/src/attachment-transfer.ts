@@ -406,7 +406,39 @@ export async function runAttachmentTransferLifecycle(
             // the file immediately before upload so an edit landing between prepare and
             // post-merge cannot be published under stale hash/revision metadata. A missing
             // or unhashable file fails closed and remains pending for the next prepare pass.
-            if (mayReadForSync && options.createUploadSnapshot) {
+            if (
+                !existsLocally
+                && isSha256Hex(attachment.fileHash?.trim().toLowerCase())
+                && (!options.policy?.shouldDownload || options.policy.shouldDownload(attachment))
+            ) {
+                // A crash can land after the blob upload but before the cleared
+                // marker is durably saved. Let the adapter fetch and validate the
+                // remote bytes against the pending hash, but isolate its metadata
+                // mutations until it proves the same cloud identity is available
+                // locally. Old/missing/unreadable remote bytes leave the durable
+                // marker untouched for a later retry or user restoration.
+                const expectedCloudKey = attachment.cloudKey;
+                const expectedFileHash = attachment.fileHash!.trim().toLowerCase();
+                const recovered: Attachment = { ...attachment };
+                try {
+                    const downloaded = await options.onDownload(recovered);
+                    if (
+                        downloaded
+                        && recovered.cloudKey === expectedCloudKey
+                        && recovered.fileHash?.trim().toLowerCase() === expectedFileHash
+                        && recovered.localStatus === 'available'
+                    ) {
+                        recovered.pendingContentUpload = undefined;
+                        const freshPath = recovered.uri ? resolveLocalPath(recovered.uri) : '';
+                        if (freshPath) await refreshContentStat(recovered, freshPath);
+                        Object.assign(attachment, recovered);
+                        itemMutated = true;
+                    }
+                } catch (error) {
+                    if (options.isFatalError?.(error)) throw error;
+                    options.onDownloadError(attachment, error);
+                }
+            } else if (mayReadForSync && options.createUploadSnapshot) {
                 if (!options.policy?.shouldUpload || options.policy.shouldUpload(attachment)) {
                     try {
                         if (await attemptUpload(attachment, localPath, attachment.fileHash)) {

@@ -1,5 +1,5 @@
 import type { AppData, Attachment, SyncKeyMaterial } from '@mindwtr/core';
-import { applyAttachmentPatches, validateAttachmentForUpload } from '@mindwtr/core';
+import { applyAttachmentPatches, validateAttachmentForUpload, validateAttachmentHash } from '@mindwtr/core';
 import * as FileSystem from '../file-system';
 import {
   buildCloudKey,
@@ -27,6 +27,7 @@ import {
 import {
   assertAttachmentSyncNotAborted,
   isAttachmentSyncAbortError,
+  openAttachmentBytesFromDownload,
   runMobileAttachmentLifecycle,
   sealAttachmentBytesForUpload,
 } from './common';
@@ -123,11 +124,25 @@ export const syncFileAttachments = async (
     // available is only the proof signal consumed by the shared probe; neither
     // localStatus nor this clone is persisted.
     onDownload: async (attachment) => {
-      if (!options.activationProbe || !attachment.cloudKey) return false;
+      if (!attachment.cloudKey) return false;
       const filename = remoteFilenameFor(attachment.cloudKey, attachment);
-      const remoteExists = syncDir.type === 'file'
-        ? await fileExists(`${syncDir.attachmentsDirUri}${filename}`)
-        : (await getSafEntriesByName()).has(filename);
+      const remoteUri = syncDir.type === 'file'
+        ? `${syncDir.attachmentsDirUri}${filename}`
+        : (await getSafEntriesByName()).get(filename) ?? null;
+      const remoteExists = remoteUri ? await fileExists(remoteUri) : false;
+      if (attachment.pendingContentUpload === true && remoteUri && remoteExists) {
+        const bytes = await readFileAsBytes(remoteUri)
+          .then((value) => openAttachmentBytesFromDownload(value, options.material));
+        await validateAttachmentHash(attachment, bytes);
+        assertAttachmentSyncNotAborted(signal);
+        const targetUri = `${attachmentsDir}${filename}`;
+        await writeBytesSafely(targetUri, bytes);
+        attachment.uri = targetUri;
+        attachment.localStatus = 'available';
+        if (!Number.isFinite(attachment.size ?? NaN)) attachment.size = bytes.byteLength;
+        return true;
+      }
+      if (!options.activationProbe) return false;
       if (!remoteExists) {
         attachment.cloudKey = undefined;
         return true;

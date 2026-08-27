@@ -3,6 +3,7 @@ import {
   applyAttachmentPatches,
   applyAttachmentContentStat,
   isAbortError,
+  isSha256Hex,
   isSyncRemoteMutationFenceError,
   validateAttachmentForUpload,
   type LocalFileStat,
@@ -65,6 +66,11 @@ type PendingDropboxUploadMutation = {
   totalBytes: number;
 };
 
+type DropboxDownloadCandidate = {
+  attachment: Attachment;
+  recoverPendingUpload: boolean;
+};
+
 const createAbortError = (): Error => {
   const error = new Error('Dropbox attachment sync aborted');
   error.name = 'AbortError';
@@ -102,7 +108,7 @@ export const syncDropboxAttachments = async (
     return nextData !== appData ? nextData : false;
   };
 
-  const downloadQueue: Attachment[] = [];
+  const downloadQueue: DropboxDownloadCandidate[] = [];
   const pendingUploadMutations: PendingDropboxUploadMutation[] = [];
   let uploadCount = 0;
   let uploadLimitLogged = false;
@@ -240,13 +246,16 @@ export const syncDropboxAttachments = async (
 
     if (
       options.phase !== 'prepare'
-      && attachment.pendingContentUpload !== true
       && attachment.cloudKey
       && !existsLocally
       && !isContent
       && !isHttp
     ) {
-      downloadQueue.push(attachment);
+      if (attachment.pendingContentUpload !== true) {
+        downloadQueue.push({ attachment, recoverPendingUpload: false });
+      } else if (isSha256Hex(attachment.fileHash?.trim().toLowerCase())) {
+        downloadQueue.push({ attachment, recoverPendingUpload: true });
+      }
     }
   }
 
@@ -265,7 +274,7 @@ export const syncDropboxAttachments = async (
   if (!attachmentsDir) return foldPatches();
 
   let downloadCount = 0;
-  for (const attachment of downloadQueue) {
+  for (const { attachment, recoverPendingUpload } of downloadQueue) {
     if (attachment.kind !== 'file') continue;
     if (attachment.deletedAt) continue;
     if (!attachment.cloudKey) continue;
@@ -303,7 +312,12 @@ export const syncDropboxAttachments = async (
       const targetUri = `${attachmentsDir}${filename}`;
       assertNotAborted(options.signal);
       await writeBytesSafely(targetUri, bytes);
-      if (attachment.uri !== targetUri || attachment.localStatus !== 'available') {
+      let mutated = attachment.uri !== targetUri || attachment.localStatus !== 'available';
+      if (recoverPendingUpload && attachment.pendingContentUpload === true) {
+        attachment.pendingContentUpload = undefined;
+        mutated = true;
+      }
+      if (mutated) {
         attachment.uri = targetUri;
         attachment.localStatus = 'available';
         recordPatch(attachment);
@@ -313,7 +327,7 @@ export const syncDropboxAttachments = async (
       if (isAbortLikeError(error, options.signal)) {
         throw error;
       }
-      if (error instanceof DropboxFileNotFoundError && attachment.cloudKey) {
+      if (!recoverPendingUpload && error instanceof DropboxFileNotFoundError && attachment.cloudKey) {
         if (markAttachmentUnrecoverable(attachment)) {
           recordPatch(attachment);
         }
