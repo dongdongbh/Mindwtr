@@ -517,6 +517,57 @@ describe('useSyncSettings cloud token validation', () => {
         );
     });
 
+    it('shows backend compatibility recovery for an unchanged legacy WebDAV target', async () => {
+        const backendIncompatibleMessage = 'Use a compatible provider, File Sync, or Dropbox.';
+        languageMocks.t.mockImplementation((key: string) => (
+            key === 'settings.syncEncryptionErrorBackendIncompatible'
+                ? backendIncompatibleMessage
+                : key
+        ));
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.spyOn(SyncService, 'getPersistedSyncConfigurationSnapshot').mockResolvedValue({
+            backend: 'webdav',
+            syncPath: '',
+            webdav: {
+                url: 'https://dav.example.com/mindwtr/',
+                username: 'alice',
+                password: 'secret',
+                passwordAuthority: 'known',
+                hasPassword: true,
+                allowInsecureHttp: false,
+                allowWeakFingerprint: false,
+            },
+            cloudProvider: 'selfhosted',
+            cloud: {
+                url: '',
+                token: '',
+                tokenAuthority: 'known',
+                rememberToken: false,
+                allowInsecureHttp: false,
+            },
+        });
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: false,
+            error: 'SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE: conditional writes are not enforced',
+        });
+
+        const { result } = setup();
+        await waitFor(() => expect(result.current.syncPageProps.syncBackend).toBe('webdav'));
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.testWebDavConnection).not.toHaveBeenCalled();
+        expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
+        expect(SyncService.performSync).toHaveBeenCalledWith({
+            manual: true,
+            ignorePendingRemoteWriteBackoff: false,
+        });
+        expect(showToast).toHaveBeenCalledWith(backendIncompatibleMessage, 'error');
+    });
+
     it('activates the configuration when the probe finds an encrypted remote it has no key for (#1001)', async () => {
         // The probe DID reach the sync location — refusing to activate would
         // deadlock joining an encrypted remote: unlock requires a durable

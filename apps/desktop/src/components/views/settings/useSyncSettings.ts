@@ -1163,10 +1163,16 @@ export const useSyncSettings = ({
                 if (result.error) {
                     void logError(new Error(result.error), { scope: 'sync', step: 'performResult' });
                 }
-                showToast(resolveText(
-                    'settings.sync.incomplete',
-                    'Sync did not complete. Your previous sync settings are still active.',
-                ), 'error');
+                const message = isSyncEncryptionRemoteVersionUnavailableError(result.error)
+                    ? resolveText(
+                        'settings.syncEncryptionErrorBackendIncompatible',
+                        'This WebDAV server does not provide or enforce safe version checks (strong ETags and conditional writes), so Mindwtr cannot safely sync or change encryption. Use a compatible WebDAV provider, File Sync, or Dropbox.',
+                    )
+                    : resolveText(
+                        'settings.sync.incomplete',
+                        'Sync did not complete. Your previous sync settings are still active.',
+                    );
+                showToast(message, 'error');
             }
         } catch (error) {
             if (activationCredentialHandle) {
