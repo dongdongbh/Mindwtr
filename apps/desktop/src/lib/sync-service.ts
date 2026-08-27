@@ -439,6 +439,12 @@ async function invokeSyncNative<T>(command: string, args?: Record<string, unknow
     return syncServiceDependencies.invoke<T>(command, args);
 }
 
+const acquireFileSyncLease = (path?: string): Promise<string> =>
+    invokeSyncNative('acquire_file_sync_lease', path ? { path } : undefined);
+
+const releaseFileSyncLease = (token: string): Promise<void> =>
+    invokeSyncNative('release_file_sync_lease', { token });
+
 type LocalDataSaveOptions = {
     baseline?: AppData;
     mode?: 'exact';
@@ -707,6 +713,7 @@ type DesktopSyncCycleContext = {
     cachedDropboxAccessToken: string | null;
     syncPath: string;
     fileBaseDir: string;
+    fileSyncLeaseToken: string | null;
 };
 
 const createDesktopSyncCycleContext = (): DesktopSyncCycleContext => ({
@@ -723,6 +730,7 @@ const createDesktopSyncCycleContext = (): DesktopSyncCycleContext => ({
     cachedDropboxAccessToken: null,
     syncPath: '',
     fileBaseDir: '',
+    fileSyncLeaseToken: null,
 });
 
 const createFetchWithAbortForContext = async (context: DesktopSyncCycleContext): Promise<typeof fetch> => {
@@ -2092,6 +2100,12 @@ export class SyncService {
         context.fileBaseDir = context.backend === 'file'
             ? getFileSyncDir(context.syncPath, SYNC_FILE_NAME, LEGACY_SYNC_FILE_NAME)
             : '';
+        if (context.backend === 'file') {
+            // This is the same persistent `.mindwtr.lock` OS lease used by
+            // native enable/change/disable transitions. It covers attachment
+            // mutations, document CAS, and final local persistence as one unit.
+            context.fileSyncLeaseToken = await acquireFileSyncLease(context.syncPath);
+        }
 
         // CloudKit setup: ensure zone and subscription exist before syncing.
         if (context.backend === 'cloudkit') {
@@ -2309,6 +2323,7 @@ export class SyncService {
                         data: sanitized,
                         ...(expectedFingerprint ? { expectedFingerprint } : {}),
                         ...(context.usesConfigOverride ? { path: context.syncPath } : {}),
+                        ...(context.fileSyncLeaseToken ? { leaseToken: context.fileSyncLeaseToken } : {}),
                     });
                 } catch (error) {
                     const message = error instanceof Error ? error.message : String(error);
@@ -2477,15 +2492,20 @@ export class SyncService {
 
             if (resolution === 'keep-local') {
                 await runSyncDocumentExclusive(async () => {
-                    await syncServiceDependencies.flushPendingSave();
-                    const localData = await injectExternalCalendars(await readLocalDataForSync());
-                    const sanitized = sanitizeAppDataForRemote(localData);
-                    await SyncService.markSyncWrite(sanitized);
+                    const leaseToken = await acquireFileSyncLease();
                     try {
-                        await invokeSyncNative('write_sync_file', { data: sanitized });
-                    } catch (error) {
-                        SyncService.finalizeSyncWriteIgnoreWindow();
-                        throw error;
+                        await syncServiceDependencies.flushPendingSave();
+                        const localData = await injectExternalCalendars(await readLocalDataForSync());
+                        const sanitized = sanitizeAppDataForRemote(localData);
+                        await SyncService.markSyncWrite(sanitized);
+                        try {
+                            await invokeSyncNative('write_sync_file', { data: sanitized, leaseToken });
+                        } catch (error) {
+                            SyncService.finalizeSyncWriteIgnoreWindow();
+                            throw error;
+                        }
+                    } finally {
+                        await releaseFileSyncLease(leaseToken);
                     }
                 });
                 return await SyncService.performSync();
@@ -2673,26 +2693,31 @@ export class SyncService {
             return;
         }
         await runSyncDocumentExclusive(async () => {
-            await syncServiceDependencies.flushPendingSave();
-            const localSnapshotChangeAt = getStoreState().lastDataChangeAt;
-            const ensureLocalSnapshotFresh = () => {
-                ensureFreshLocalSyncSnapshot({
-                    localSnapshotChangeAt,
-                    getCurrentChangeAt: () => getStoreState().lastDataChangeAt,
-                    requestFollowUp: () => SyncService.requestQueuedSyncRun(),
-                });
-            };
-            const data = await invokeSyncNative<AppData>('get_data');
-            ensureLocalSnapshotFresh();
-            const cleaned = await cleanupOrphanedAttachments(
-                data,
-                backend,
-                getAttachmentCleanupDeps(),
-                { ensureLocalSnapshotFresh },
-            );
-            ensureLocalSnapshotFresh();
-            await persistLocalDataForSync(cleaned, { baseline: data });
-            await getStoreState().fetchData({ silent: true });
+            const leaseToken = backend === 'file' ? await acquireFileSyncLease() : null;
+            try {
+                await syncServiceDependencies.flushPendingSave();
+                const localSnapshotChangeAt = getStoreState().lastDataChangeAt;
+                const ensureLocalSnapshotFresh = () => {
+                    ensureFreshLocalSyncSnapshot({
+                        localSnapshotChangeAt,
+                        getCurrentChangeAt: () => getStoreState().lastDataChangeAt,
+                        requestFollowUp: () => SyncService.requestQueuedSyncRun(),
+                    });
+                };
+                const data = await invokeSyncNative<AppData>('get_data');
+                ensureLocalSnapshotFresh();
+                const cleaned = await cleanupOrphanedAttachments(
+                    data,
+                    backend,
+                    getAttachmentCleanupDeps(),
+                    { ensureLocalSnapshotFresh },
+                );
+                ensureLocalSnapshotFresh();
+                await persistLocalDataForSync(cleaned, { baseline: data });
+                await getStoreState().fetchData({ silent: true });
+            } finally {
+                if (leaseToken) await releaseFileSyncLease(leaseToken);
+            }
         });
     }
 
@@ -2932,6 +2957,18 @@ export class SyncService {
             });
         } finally {
             context.requestAbortController.abort();
+            if (context.fileSyncLeaseToken) {
+                const token = context.fileSyncLeaseToken;
+                context.fileSyncLeaseToken = null;
+                try {
+                    await releaseFileSyncLease(token);
+                } catch (error) {
+                    // The native process still owns the handle if release
+                    // failed; surface this loudly rather than pretending the
+                    // folder is available for another mutation cycle.
+                    logSyncWarning('Failed to release File Sync lease', error);
+                }
+            }
             try {
                 const releaseNetworkListener = context.removeNetworkListener as (() => void) | null;
                 if (typeof releaseNetworkListener === 'function') {

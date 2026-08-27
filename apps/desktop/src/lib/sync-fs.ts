@@ -28,3 +28,14 @@ export const rename = (from: string, to: string): Promise<void> =>
  *  is a plain (non-async) command too. */
 export const stat = (path: string): Promise<{ mtimeMs: number; size: number }> =>
     invokeNative('sync_fs_stat', { path });
+
+/**
+ * Holds the native OS lock on the sync folder's stable `.mindwtr.lock` inode.
+ * The opaque token is process-local and path-bound; callers must retain it for
+ * the complete mutation cycle and release it in `finally`.
+ */
+export const acquireFileSyncLease = (path?: string): Promise<string> =>
+    invokeNative('acquire_file_sync_lease', path ? { path } : undefined);
+
+export const releaseFileSyncLease = (token: string): Promise<void> =>
+    invokeNative('release_file_sync_lease', { token });

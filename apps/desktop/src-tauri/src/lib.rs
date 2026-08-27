@@ -112,15 +112,15 @@ use storage::{
     save_data, save_task, search_fts, upsert_calendar_sync_entry,
 };
 use sync::{
-    clear_sync_path, cloud_get_json, cloud_put_json, connect_dropbox,
+    acquire_file_sync_lease, clear_sync_path, cloud_get_json, cloud_put_json, connect_dropbox,
     discard_staged_dropbox_credentials, disconnect_dropbox, finalize_staged_dropbox_credentials,
     get_dropbox_access_token, get_dropbox_redirect_uri, get_sync_path, is_dropbox_connected,
     promote_staged_dropbox_credentials, read_sync_file, read_sync_file_versioned,
     recover_dropbox_credentials_before_sync_configuration, recover_dropbox_credentials_on_startup,
-    rollback_staged_dropbox_credentials, set_sync_path, sync_fs_create_dir, sync_fs_exists,
+    release_file_sync_lease, rollback_staged_dropbox_credentials, set_sync_path, sync_fs_create_dir, sync_fs_exists,
     sync_fs_remove_file, sync_fs_rename, sync_fs_stat, webdav_get_json, webdav_put_json,
     write_sync_file,
-    DropboxStagedCredentialState, DropboxStartupRecoveryOutcome,
+    DropboxStagedCredentialState, DropboxStartupRecoveryOutcome, FileSyncLeaseState,
 };
 use sync::{
     change_sync_encryption_passphrase, disable_sync_encryption, enable_sync_encryption,
@@ -1175,6 +1175,7 @@ pub fn run() {
         .manage(MainWindowReveal::default())
         .manage(LocalApiServerState::default())
         .manage(DropboxStagedCredentialState::default())
+        .manage(FileSyncLeaseState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
@@ -1713,6 +1714,8 @@ pub fn run() {
             read_sync_file,
             read_sync_file_versioned,
             write_sync_file,
+            acquire_file_sync_lease,
+            release_file_sync_lease,
             sync_fs_exists,
             sync_fs_create_dir,
             sync_fs_remove_file,

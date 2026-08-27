@@ -348,13 +348,23 @@ describe('sync-service test utils', () => {
         const resolutionFlushStarted = new Promise<void>((resolve) => {
             markResolutionFlushStarted = resolve;
         });
-        const invoke = vi.fn(async (command: string) => {
+        const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
             if (command === 'get_sync_backend') return 'file';
+            if (command === 'acquire_file_sync_lease') {
+                events.push('resolution:lease:acquire');
+                return 'lease-token';
+            }
+            if (command === 'release_file_sync_lease') {
+                expect(args?.token).toBe('lease-token');
+                events.push('resolution:lease:release');
+                return undefined;
+            }
             if (command === 'get_data') {
                 events.push('resolution:read-local');
                 return currentData;
             }
             if (command === 'write_sync_file') {
+                expect(args?.leaseToken).toBe('lease-token');
                 events.push('resolution:write-sync-file');
                 return true;
             }
@@ -396,9 +406,11 @@ describe('sync-service test utils', () => {
                 'transfer:persist:start',
                 'transfer:persist:end',
                 'transfer:refresh',
+                'resolution:lease:acquire',
                 'resolution:flush',
                 'resolution:read-local',
                 'resolution:write-sync-file',
+                'resolution:lease:release',
                 'follow-up:sync',
             ]);
         } finally {
@@ -2906,10 +2918,16 @@ describe('SyncService testability hooks', () => {
     it('finalizes the sync file ignore window when external keep-local writes fail', async () => {
         const getMonotonicNowSpy = vi.spyOn(SyncService as any, 'getMonotonicNow');
         getMonotonicNowSpy.mockReturnValue(9_000);
-        const invoke = vi.fn(async (command: string) => {
+        const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
             if (command === 'get_sync_backend') return 'file';
             if (command === 'save_data') return undefined;
+            if (command === 'acquire_file_sync_lease') return 'lease-token';
+            if (command === 'release_file_sync_lease') {
+                expect(args?.token).toBe('lease-token');
+                return undefined;
+            }
             if (command === 'write_sync_file') {
+                expect(args?.leaseToken).toBe('lease-token');
                 throw new Error('disk full');
             }
             throw new Error(`unexpected command: ${command}`);
@@ -2994,6 +3012,7 @@ describe('SyncService testability hooks', () => {
             }
             if (command === 'write_sync_file') {
                 expect(args?.expectedFingerprint).toBe('file:v1:sha256=initial');
+                expect(args?.leaseToken).toBe('cycle-lease');
                 throw new Error('SYNC_FILE_WRITE_CONFLICT');
             }
             throw new Error(`unexpected command: ${command}`);
@@ -3016,6 +3035,7 @@ describe('SyncService testability hooks', () => {
             cachedDropboxAccessToken: null,
             syncPath: '/tmp/mindwtr-sync',
             fileBaseDir: '/tmp/mindwtr-sync',
+            fileSyncLeaseToken: 'cycle-lease',
         });
 
         await expect(io.readRemote()).resolves.toBe(remote);
@@ -3416,20 +3436,32 @@ describe('SyncService orchestration', () => {
             }),
             setError: vi.fn(),
         };
-        const setupSpy = vi.spyOn(SyncService as any, 'setupDesktopCycle').mockImplementation(async () => ({
-            kind: 'ready',
-            backend: 'file',
-            cloudProvider: 'selfhosted',
-            fastSyncScope: null,
-            io: {
-                readRemote: vi.fn(async () => null),
-                writeRemote: vi.fn(async () => undefined),
-            },
-        }));
+        const setupSpy = vi.spyOn(SyncService as any, 'setupDesktopCycle').mockImplementation(async (context: any) => {
+            context.backend = 'file';
+            context.fileSyncLeaseToken = 'cycle-lease';
+            return {
+                kind: 'ready',
+                backend: 'file',
+                cloudProvider: 'selfhosted',
+                fastSyncScope: null,
+                io: {
+                    readRemote: vi.fn(async () => null),
+                    writeRemote: vi.fn(async () => undefined),
+                },
+            };
+        });
 
         try {
             __syncServiceTestUtils.setDependenciesForTests({
                 flushPendingSave: vi.fn(async () => undefined),
+                invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+                    if (command === 'release_file_sync_lease') {
+                        expect(args?.token).toBe('cycle-lease');
+                        callOrder.push('releaseFileSyncLease');
+                        return undefined;
+                    }
+                    throw new Error(`unexpected command: ${command}`);
+                }) as any,
                 getStoreState: () => storeState as any,
                 applySyncedDataToStore: vi.fn(() => {
                     callOrder.push('applySyncedDataToStore');
@@ -3455,7 +3487,7 @@ describe('SyncService orchestration', () => {
             const result = await SyncService.performSync();
 
             expect(result.success).toBe(true);
-            expect(callOrder).toEqual(['applySyncedDataToStore']);
+            expect(callOrder).toEqual(['applySyncedDataToStore', 'releaseFileSyncLease']);
             expect(storeState.fetchData).not.toHaveBeenCalled();
             expect(storeState.updateSettings).not.toHaveBeenCalled();
         } finally {

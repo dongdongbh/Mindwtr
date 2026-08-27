@@ -4466,33 +4466,64 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_flock_degrades_to_lockless_instead_of_failing_sync() {
-        // ENOSYS/EOPNOTSUPP from flock (FUSE/network mounts, #1036 follow-up)
-        // must classify as unsupported, not as a fatal lock error.
+    fn unsupported_flock_is_not_treated_as_contention_or_a_safe_lock() {
+        // ENOSYS/EOPNOTSUPP from flock is an unavailable safety capability,
+        // not contention and never permission to continue lockless.
         #[cfg(target_os = "linux")]
         {
             let enosys = std::io::Error::from_raw_os_error(38);
-            assert!(is_sync_lock_unsupported(&enosys));
             assert!(!is_sync_lock_contention(&enosys));
+            assert!(sync_lock_error_message(&enosys)
+                .contains("Failed to acquire an exclusive sync lock"));
         }
-        assert!(is_sync_lock_unsupported(&std::io::Error::from(
-            std::io::ErrorKind::Unsupported
-        )));
-        assert!(!is_sync_lock_unsupported(&std::io::Error::from(
-            std::io::ErrorKind::WouldBlock
-        )));
+        let unsupported = std::io::Error::from(std::io::ErrorKind::Unsupported);
+        assert!(!is_sync_lock_contention(&unsupported));
+        assert!(sync_lock_error_message(&unsupported)
+            .contains("Failed to acquire an exclusive sync lock"));
+    }
 
-        // Releasing a lockless holder must not try to unlock the OS lock.
+    #[test]
+    fn renderer_cycle_lease_blocks_native_transitions_until_release() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let real = acquire_sync_lock(dir.path()).expect("locked holder");
-        let lockless = SyncFileLock {
-            file: File::open(dir.path().join(".mindwtr.lock")).expect("open lock file"),
-            locked: false,
-        };
-        release_sync_lock(&lockless);
-        // The real lock is still held after the lockless release.
-        acquire_sync_lock(dir.path()).expect_err("OS lock must still be held");
-        release_sync_lock(&real);
+        let state = FileSyncLeaseState::default();
+        let token = acquire_file_sync_lease_for_dir(&state, dir.path()).expect("cycle lease");
+
+        // Enable, passphrase change and disable all enter through
+        // `acquire_sync_lock`; none may cross the ordinary cycle's final
+        // revalidation/persistence boundary while its opaque handle is held.
+        for transition in ["enable", "change-passphrase", "disable"] {
+            assert_eq!(
+                acquire_sync_lock(dir.path())
+                    .expect_err(&format!("{transition} must wait for the cycle lease")),
+                "Sync lock held by another process"
+            );
+        }
+
+        release_file_sync_lease_token(&state, &token).expect("release cycle lease");
+        let transition = acquire_sync_lock(dir.path()).expect("transition after release");
+        release_sync_lock(&transition);
+    }
+
+    #[test]
+    fn renderer_cycle_lease_allows_its_own_document_write_without_relocking() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let state = FileSyncLeaseState::default();
+        let token = acquire_file_sync_lease_for_dir(&state, dir.path()).expect("cycle lease");
+        let leases = state.leases.lock().expect("lease state");
+        let held = leases.get(&token).expect("held token");
+        assert_eq!(held.sync_dir, normalize_lease_sync_dir(dir.path()));
+
+        write_sync_file_to_dir_with_lease(
+            dir.path(),
+            serde_json::json!({"tasks": [], "projects": [], "sections": [], "areas": [], "people": [], "settings": {}}),
+            None,
+            SyncFileCrypto::Off,
+            true,
+        )
+        .expect("write under existing lease");
+        drop(leases);
+
+        release_file_sync_lease_token(&state, &token).expect("release cycle lease");
     }
 
     #[test]
@@ -10729,17 +10760,20 @@ const SYNC_FILE_WRITE_CONFLICT: &str = "SYNC_FILE_WRITE_CONFLICT";
 #[derive(Debug)]
 struct SyncFileLock {
     file: File,
-    /// false when the filesystem cannot take an OS lock at all (`flock` is
-    /// ENOSYS on some FUSE/network mounts, #1036 follow-up). Sync then runs
-    /// lockless — the pre-1.2 behavior — instead of failing outright: the OS
-    /// lock only ever serialized same-machine writers, cross-machine safety
-    /// comes from the merge.
-    locked: bool,
 }
 
-fn is_sync_lock_unsupported(error: &std::io::Error) -> bool {
-    // std maps ENOSYS and EOPNOTSUPP to Unsupported on every unix target.
-    error.kind() == std::io::ErrorKind::Unsupported
+#[derive(Debug)]
+struct HeldFileSyncLease {
+    sync_dir: PathBuf,
+    _sync_lock: SyncFileLock,
+}
+
+/// Opaque, process-bounded File Sync leases held for a complete renderer sync
+/// cycle. The stable `.mindwtr.lock` inode is shared with native encryption
+/// transitions; a renderer cannot forge a token for a different folder.
+#[derive(Debug, Default)]
+pub(crate) struct FileSyncLeaseState {
+    leases: Mutex<HashMap<String, HeldFileSyncLease>>,
 }
 
 fn is_sync_lock_contention(error: &std::io::Error) -> bool {
@@ -10792,7 +10826,7 @@ fn acquire_sync_lock(sync_dir: &Path) -> Result<SyncFileLock, String> {
         .or_else(|_| open_sync_lock_file(&lock_path, true))
         .map_err(|error| format!("Failed to open sync lock: {error}"))?;
     let read_only_error = match file.try_lock_exclusive() {
-        Ok(()) => return Ok(SyncFileLock { file, locked: true }),
+        Ok(()) => return Ok(SyncFileLock { file }),
         Err(error) if is_sync_lock_contention(&error) => {
             return Err(sync_lock_error_message(&error))
         }
@@ -10808,27 +10842,85 @@ fn acquire_sync_lock(sync_dir: &Path) -> Result<SyncFileLock, String> {
     let file = open_sync_lock_file(&lock_path, true)
         .map_err(|error| format!("Failed to open sync lock: {error}"))?;
     match file.try_lock_exclusive() {
-        Ok(()) => Ok(SyncFileLock { file, locked: true }),
-        Err(error) if is_sync_lock_unsupported(&error) => {
-            log::warn!(
-                "This filesystem does not support OS file locks ({error}); syncing without an exclusive lock"
-            );
-            Ok(SyncFileLock {
-                file,
-                locked: false,
-            })
-        }
+        Ok(()) => Ok(SyncFileLock { file }),
         Err(error) => Err(sync_lock_error_message(&error)),
     }
 }
 
 fn release_sync_lock(sync_lock: &SyncFileLock) {
-    if !sync_lock.locked {
-        return;
-    }
     if let Err(error) = FileExt::unlock(&sync_lock.file) {
         log::warn!("Failed to release sync file lock: {error}");
     }
+}
+
+fn normalize_lease_sync_dir(sync_dir: &Path) -> PathBuf {
+    fs::canonicalize(sync_dir).unwrap_or_else(|_| sync_dir.to_path_buf())
+}
+
+fn acquire_file_sync_lease_for_dir(
+    state: &FileSyncLeaseState,
+    sync_dir: &Path,
+) -> Result<String, String> {
+    let sync_dir = normalize_lease_sync_dir(sync_dir);
+    let sync_lock = acquire_sync_lock(&sync_dir)?;
+    let mut leases = state
+        .leases
+        .lock()
+        .map_err(|_| "File Sync lease state is unavailable".to_string())?;
+    let token = loop {
+        let candidate = format!(
+            "{:016x}{:016x}",
+            rand::thread_rng().next_u64(),
+            rand::thread_rng().next_u64()
+        );
+        if !leases.contains_key(&candidate) {
+            break candidate;
+        }
+    };
+    leases.insert(
+        token.clone(),
+        HeldFileSyncLease {
+            sync_dir,
+            _sync_lock: sync_lock,
+        },
+    );
+    Ok(token)
+}
+
+fn release_file_sync_lease_token(
+    state: &FileSyncLeaseState,
+    token: &str,
+) -> Result<(), String> {
+    let lease = state
+        .leases
+        .lock()
+        .map_err(|_| "File Sync lease state is unavailable".to_string())?
+        .remove(token)
+        .ok_or_else(|| "Unknown or already released File Sync lease".to_string())?;
+    release_sync_lock(&lease._sync_lock);
+    Ok(())
+}
+
+#[tauri::command(async)]
+pub(crate) fn acquire_file_sync_lease(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, FileSyncLeaseState>,
+    path: Option<String>,
+) -> Result<String, String> {
+    let sync_dir = match path {
+        Some(path) => resolve_sync_dir_granting_scope(&app, path)?,
+        None => configured_sync_dir(&app)?
+            .ok_or_else(|| "Sync path is not configured".to_string())?,
+    };
+    acquire_file_sync_lease_for_dir(&state, &sync_dir)
+}
+
+#[tauri::command(async)]
+pub(crate) fn release_file_sync_lease(
+    state: tauri::State<'_, FileSyncLeaseState>,
+    token: String,
+) -> Result<(), String> {
+    release_file_sync_lease_token(&state, &token)
 }
 
 /// The "no remote yet" payload for a fresh sync folder. Must include every
@@ -11541,6 +11633,16 @@ fn write_sync_file_to_dir_with(
     expected_fingerprint: Option<&str>,
     crypto: SyncFileCrypto<'_>,
 ) -> Result<bool, String> {
+    write_sync_file_to_dir_with_lease(sync_dir, data, expected_fingerprint, crypto, false)
+}
+
+fn write_sync_file_to_dir_with_lease(
+    sync_dir: &Path,
+    data: Value,
+    expected_fingerprint: Option<&str>,
+    crypto: SyncFileCrypto<'_>,
+    lease_already_held: bool,
+) -> Result<bool, String> {
     let data_base = crypto.data_base();
     let sync_file = sync_dir.join(&data_base);
     let backup_file = sync_dir.join(format!("{data_base}.bak"));
@@ -11558,7 +11660,11 @@ fn write_sync_file_to_dir_with(
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    let sync_lock = acquire_sync_lock(sync_dir)?;
+    let sync_lock = if lease_already_held {
+        None
+    } else {
+        Some(acquire_sync_lock(sync_dir)?)
+    };
 
     let result = (|| -> Result<bool, String> {
         if let Some(expected_fingerprint) = expected_fingerprint {
@@ -11683,7 +11789,9 @@ fn write_sync_file_to_dir_with(
         }
     })();
 
-    release_sync_lock(&sync_lock);
+    if let Some(sync_lock) = &sync_lock {
+        release_sync_lock(sync_lock);
+    }
 
     result
 }
@@ -11694,9 +11802,11 @@ fn write_sync_file_to_dir_with(
 #[tauri::command(async)]
 pub(crate) fn write_sync_file(
     app: tauri::AppHandle,
+    lease_state: tauri::State<'_, FileSyncLeaseState>,
     data: Value,
     path: Option<String>,
     expected_fingerprint: Option<String>,
+    lease_token: Option<String>,
 ) -> Result<bool, String> {
     let sync_dir = match path {
         Some(path) => resolve_sync_dir_granting_scope(&app, path)?,
@@ -11705,6 +11815,27 @@ pub(crate) fn write_sync_file(
         }
     };
     let material = resolve_sync_encryption_material(&app)?;
+    if let Some(token) = lease_token {
+        // Keep the map guard for the whole write so a concurrent release cannot
+        // drop the OS lock between token validation and the final durable rename.
+        let leases = lease_state
+            .leases
+            .lock()
+            .map_err(|_| "File Sync lease state is unavailable".to_string())?;
+        let lease = leases
+            .get(&token)
+            .ok_or_else(|| "Unknown or already released File Sync lease".to_string())?;
+        if lease.sync_dir != normalize_lease_sync_dir(&sync_dir) {
+            return Err("File Sync lease does not belong to this sync folder".to_string());
+        }
+        return write_sync_file_to_dir_with_lease(
+            &sync_dir,
+            data,
+            expected_fingerprint.as_deref(),
+            crypto_for(&material),
+            true,
+        );
+    }
     write_sync_file_to_dir_with(
         &sync_dir,
         data,
