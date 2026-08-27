@@ -23,7 +23,7 @@ The metadata contract is:
 
 1. `cloudKey`, `mimeType`, `size`, and `fileHash` can sync because they describe the remote object.
 2. `uri` is local-device state and is excluded from remote comparison.
-3. `localStatus` tracks local availability and transfer state; it is persisted locally but excluded from remote comparison.
+3. `localStatus` tracks local availability and transfer state. `pendingContentUpload` is the durable local retry marker for a byte replacement that has not reached its remote object yet. Both are persisted locally but excluded from remote comparison.
 4. Attachment deletes use soft-delete metadata first, then background cleanup removes orphaned local and remote files.
 5. Task editors may copy bytes into app-managed storage before Save, but draft settlement is planned in core from the baseline, draft, and actually committed records. Platform adapters may delete a candidate only after proving that its URI is the attachment-id-named file inside their managed attachments directory.
 
