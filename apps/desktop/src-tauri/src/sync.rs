@@ -3241,6 +3241,35 @@ fn foreign_salt_discovery(bytes: &[u8], material: &SyncKeyMaterial) -> Option<St
     }
 }
 
+fn webdav_fetch_optional_bytes(
+    client: &reqwest::blocking::Client,
+    target: &str,
+    username: &str,
+    password: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    let response = client
+        .get(target)
+        .basic_auth(username, Some(password))
+        .send()
+        .map_err(|error| format_reqwest_send_error("WebDAV request failed", &error))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!(
+            "WebDAV GET failed ({status}) at {}{}",
+            redact_url_userinfo(target),
+            webdav_error_body_snippet(&body)
+        ));
+    }
+    let bytes = response
+        .bytes()
+        .map_err(|error| format!("Invalid WebDAV response: error reading response body: {error}"))?;
+    Ok(Some(bytes.to_vec()))
+}
+
 fn webdav_get_json_blocking(
     app: &tauri::AppHandle,
     material: Option<&SyncKeyMaterial>,
@@ -3263,15 +3292,8 @@ fn webdav_get_json_blocking(
             .send()
             .map_err(|e| format_reqwest_send_error("WebDAV request failed", &e))
     };
-    let fetch = |target: &str| -> Result<Option<Vec<u8>>, String> {
-        let response = get(target)?;
-        if !response.status().is_success() {
-            return Ok(None);
-        }
-        let bytes = response
-            .bytes()
-            .map_err(|e| format!("Invalid WebDAV response: error reading response body: {e}"))?;
-        Ok(Some(bytes.to_vec()))
+    let fetch = |target: &str| {
+        webdav_fetch_optional_bytes(&client, target, &username, &password)
     };
     let response = get(&url)?;
 
@@ -3363,15 +3385,35 @@ where
 {
     match material {
         // Off-state: ciphertext a peer wrote, which this device needs the passphrase for.
-        None => Ok(fetch(&encrypted_webdav_url(plain_url))?
-            .as_deref()
-            .and_then(webdav_encrypted_discovery)),
+        None => {
+            let Some(bytes) = fetch(&encrypted_webdav_url(plain_url))? else {
+                return Ok(None);
+            };
+            if bytes.iter().all(|byte| *byte <= 0x20) {
+                return Ok(None);
+            }
+            Ok(Some(webdav_encrypted_discovery(&bytes).unwrap_or_else(|| {
+                terminal_error("Plaintext was found at the encrypted WebDAV artifact name".to_string())
+            })))
+        }
         // Keyed: the plaintext a peer's disable transition restored. Reporting an empty remote
         // here would merge this device's whole store into a fresh plaintext generation and fork
         // the folder — and this device never follows the remote down to plaintext on its own.
-        Some(_) => Ok(fetch(plain_url)?
-            .filter(|bytes| is_plaintext_sync_artifact(bytes))
-            .map(|_| SYNC_ENCRYPTION_REMOTE_PLAINTEXT.to_string())),
+        Some(_) => {
+            let Some(bytes) = fetch(plain_url)? else {
+                return Ok(None);
+            };
+            if is_plaintext_sync_artifact(&bytes) {
+                return Ok(Some(SYNC_ENCRYPTION_REMOTE_PLAINTEXT.to_string()));
+            }
+            if bytes.iter().all(|byte| *byte <= 0x20) {
+                return Ok(None);
+            }
+            Ok(Some(terminal_error(
+                "Ciphertext or an unsupported artifact was found at the plaintext WebDAV artifact name"
+                    .to_string(),
+            )))
+        }
     }
 }
 
@@ -5435,6 +5477,67 @@ mod tests {
             .expect("probe")
             .expect("an off-state device must discover the encrypted remote");
         assert!(parse_encrypted_discovery(&off_state).is_some(), "unexpected error: {off_state}");
+
+        let wrong_encrypted_name = serving(
+            "https://host/dav/data.json.enc",
+            br#"{"tasks":[]}"#.to_vec(),
+        );
+        let error = webdav_absent_document_discovery(&wrong_encrypted_name, PLAIN, None)
+            .expect("probe")
+            .expect("plaintext under the encrypted name must be terminal");
+        assert!(is_terminal_error(&error), "unexpected error: {error}");
+
+        let wrong_plain_name = serving(PLAIN, seal(br#"{"tasks":[]}"#, &material));
+        let error = webdav_absent_document_discovery(&wrong_plain_name, PLAIN, Some(&material))
+            .expect("probe")
+            .expect("ciphertext under the plaintext name must be terminal");
+        assert!(is_terminal_error(&error), "unexpected error: {error}");
+
+        let unavailable = |_: &str| -> Result<Option<Vec<u8>>, String> {
+            Err("WebDAV GET failed (500 Internal Server Error)".to_string())
+        };
+        assert!(webdav_absent_document_discovery(&unavailable, PLAIN, None)
+            .expect_err("fallback errors must propagate")
+            .contains("500"));
+        assert!(webdav_absent_document_discovery(&unavailable, PLAIN, Some(&material))
+            .expect_err("fallback errors must propagate")
+            .contains("500"));
+    }
+
+    #[test]
+    fn webdav_optional_fetch_suppresses_only_an_actual_http_404() {
+        use std::io::{Read, Write};
+
+        fn serve(status: &'static str, body: &'static str) -> (String, std::thread::JoinHandle<()>) {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind WebDAV test server");
+            let address = listener.local_addr().expect("server address");
+            let handle = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().expect("accept WebDAV request");
+                let mut request = [0u8; 2048];
+                let _ = stream.read(&mut request);
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len(),
+                );
+                stream.write_all(response.as_bytes()).expect("write WebDAV response");
+            });
+            (format!("http://{address}/data.json.enc"), handle)
+        }
+
+        let client = blocking_http_client(None).expect("client");
+        let (missing_url, missing_server) = serve("404 Not Found", "missing");
+        assert_eq!(
+            webdav_fetch_optional_bytes(&client, &missing_url, "user", "pass").expect("404"),
+            None,
+        );
+        missing_server.join().expect("404 server");
+
+        let (failed_url, failed_server) = serve("500 Internal Server Error", "backend unavailable");
+        let error = webdav_fetch_optional_bytes(&client, &failed_url, "user", "pass")
+            .expect_err("500 must not mean missing");
+        assert!(error.contains("500 Internal Server Error"), "unexpected error: {error}");
+        assert!(error.contains("backend unavailable"), "unexpected error: {error}");
+        failed_server.join().expect("500 server");
     }
 
     #[test]
