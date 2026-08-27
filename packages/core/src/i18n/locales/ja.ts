@@ -1157,6 +1157,7 @@ export const jaOverrides: Record<string, string> = {
         'settings.syncSkippedOffline': 'インターネットに接続していません。同期を見送りました。',
         'settings.syncServerUnreachable': '同期サーバーに接続できませんでした。Mindwtr がネットワークを使えるか（モバイル通信、VPN、ファイアウォール）を確認してください。',
         'settings.syncQueuedBody': '同期中に新しい変更がありました。再試行を自動で予約しました。',
+        'settings.syncActivationRequeuedBody': 'この同期設定のテスト中に新しい変更が見つかりました。もう一度「今すぐ同期」を実行してください。',
         'settings.syncCompleted': '同期が完了しました。',
         'settings.syncCompletedWithConflicts': '同期が完了しました（{count}件の競合を自動で解決）。',
         'settings.syncClockSkewWarning': '端末間の時計のずれが大きいようです（{skew}）。それぞれの端末の時刻設定を確認してください。',

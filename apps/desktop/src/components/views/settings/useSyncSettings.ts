@@ -1083,8 +1083,8 @@ export const useSyncSettings = ({
                         await resolveCapturedCredential();
                     }
                     showToast(resolveText(
-                        'settings.syncQueuedBody',
-                        'Local changes arrived during sync. A retry was queued automatically.',
+                        'settings.syncActivationRequeuedBody',
+                        'Mindwtr found new changes while testing this sync setup. Run Sync Now again.',
                     ), 'info');
                     return;
                 }

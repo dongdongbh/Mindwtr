@@ -1063,6 +1063,7 @@ export const csOverrides: Record<string, string> = {
         'settings.syncSkippedOffline': 'Žádné připojení k internetu. Synchronizace přeskočena.',
         'settings.syncServerUnreachable': 'Synchronizační server je nedostupný. Zkontrolujte, zda má Mindwtr přístup k síti (mobilní data, VPN nebo firewall).',
         'settings.syncQueuedBody': 'Během synchronizace dorazily lokální změny. Opakování bylo zařazeno automaticky.',
+        'settings.syncActivationRequeuedBody': 'Mindwtr při testování tohoto nastavení synchronizace našel nové změny. Spusťte znovu Synchronizovat nyní.',
         'settings.syncCompleted': 'Synchronizace dokončena!',
         'settings.syncCompletedWithConflicts': 'Synchronizace dokončena s {count} konflikty (vyřešeny automaticky).',
         'settings.syncClockSkewWarning': 'Zjištěn velký rozdíl hodin zařízení ({skew}). Zkontrolujte nastavení času na všech zařízeních.',

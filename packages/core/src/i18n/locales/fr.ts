@@ -1003,6 +1003,7 @@ export const frOverrides: Record<string, string> = {
         'settings.syncSkippedOffline': 'Pas de connexion Internet, synchronisation ignorée.',
         'settings.syncServerUnreachable': 'Impossible de joindre le serveur de synchronisation. Vérifiez que Mindwtr est autorisé à accéder au réseau (données cellulaires, VPN ou pare-feu).',
         'settings.syncQueuedBody': 'Des changements locaux se sont produits pendant la synchronisation. Une nouvelle tentative a été automatiquement planifiée.',
+        'settings.syncActivationRequeuedBody': 'Mindwtr a détecté de nouvelles modifications pendant le test de cette configuration de synchronisation. Relancez « Synchroniser maintenant ».',
         'settings.syncCompleted': 'Synchronisation terminée.',
         'settings.syncCompletedWithConflicts': 'Synchronisation terminée avec des {count} conflits (résolus automatiquement).',
         'settings.syncClockSkewWarning': 'Avertissement : décalage horaire détecté ({skew}). Vérifiez l’horloge de vos appareils et assurez-vous qu’elle est correcte pour éviter les problèmes de synchronisation.',

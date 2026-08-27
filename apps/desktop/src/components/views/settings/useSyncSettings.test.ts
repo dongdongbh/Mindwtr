@@ -452,6 +452,8 @@ describe('useSyncSettings cloud token validation', () => {
         ['requeue', { success: true, skipped: 'requeued' as const }],
     ])('preserves the proven backend on %s', async (_label, syncResult) => {
         vi.mocked(SyncService.performSync).mockResolvedValueOnce(syncResult);
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
         const showSaved = vi.fn();
         const { result } = setup(showSaved);
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
@@ -480,6 +482,16 @@ describe('useSyncSettings cloud token validation', () => {
         expect(SyncService.setSyncBackend).not.toHaveBeenCalled();
         expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
         expect(showSaved).not.toHaveBeenCalled();
+        if (_label === 'requeue') {
+            expect(showToast).toHaveBeenCalledWith(
+                'Mindwtr found new changes while testing this sync setup. Run Sync Now again.',
+                'info',
+            );
+            expect(showToast).not.toHaveBeenCalledWith(
+                'Local changes arrived during sync. A retry was queued automatically.',
+                expect.anything(),
+            );
+        }
     });
 
     it('waits without activating when a compatible peer owns the candidate sync location', async () => {

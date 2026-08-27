@@ -1126,6 +1126,7 @@ export const faOverrides: Record<string, string> = {
         'settings.syncSkippedOffline': 'اتصال اینترنت نیست. همگام‌سازی رد شد.',
         'settings.syncServerUnreachable': 'اتصال به سرور همگام‌سازی برقرار نشد. بررسی کنید Mindwtr اجازه استفاده از شبکه را دارد (داده تلفن همراه، VPN یا فایروال).',
         'settings.syncQueuedBody': 'تغییرات محلی هنگام همگام‌سازی رسیدند. یک تلاش مجدد به‌طور خودکار در صف قرار گرفت.',
+        'settings.syncActivationRequeuedBody': 'Mindwtr هنگام آزمایش این تنظیم همگام‌سازی، تغییرات جدیدی پیدا کرد. «همگام‌سازی اکنون» را دوباره اجرا کنید.',
         'settings.syncCompleted': 'همگام‌سازی کامل شد!',
         'settings.syncCompletedWithConflicts': 'همگام‌سازی با {count} تعارض کامل شد (به‌طور خودکار حل شد).',
         'settings.syncClockSkewWarning': 'اختلاف زیاد ساعت دستگاه شناسایی شد ({skew}). تنظیمات زمان هر دستگاه را بررسی کنید.',

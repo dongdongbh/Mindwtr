@@ -1092,6 +1092,7 @@ export const viOverrides: Record<string, string> = {
         'settings.syncSkippedOffline': 'Không có kết nối internet. Đã bỏ qua đồng bộ.',
         'settings.syncServerUnreachable': 'Không thể kết nối máy chủ đồng bộ. Hãy kiểm tra xem Mindwtr có được phép truy cập mạng không (dữ liệu di động, VPN hoặc tường lửa).',
         'settings.syncQueuedBody': 'Các thay đổi cục bộ đã đến trong khi đồng bộ. Lần thử lại đã được xếp hàng tự động.',
+        'settings.syncActivationRequeuedBody': 'Mindwtr phát hiện thay đổi mới khi kiểm tra thiết lập đồng bộ này. Hãy chạy lại Đồng bộ ngay.',
         'settings.syncCompleted': 'Đồng bộ hoàn thành!',
         'settings.syncCompletedWithConflicts': 'Đồng bộ hoàn thành với {count} xung đột (đã giải quyết tự động).',
         'settings.syncClockSkewWarning': 'Phát hiện độ lệch đồng hồ thiết bị lớn ({skew}). Kiểm tra cài đặt thời gian trên mỗi thiết bị.',

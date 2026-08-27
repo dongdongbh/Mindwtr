@@ -1126,6 +1126,7 @@ export const svOverrides: Record<string, string> = {
         'settings.syncSkippedOffline': 'Ingen internetanslutning. Synkronisering hoppades över.',
         'settings.syncServerUnreachable': 'Kunde inte nå synkservern. Kontrollera att Mindwtr har tillåtelse att använda nätverket (mobildata, VPN eller brandvägg).',
         'settings.syncQueuedBody': 'Lokala ändringar kom in under synkroniseringen. Ett nytt försök köades automatiskt.',
+        'settings.syncActivationRequeuedBody': 'Mindwtr hittade nya ändringar när den här synkroniseringsinställningen testades. Kör Synkronisera nu igen.',
         'settings.syncCompleted': 'Synkronisering slutförd!',
         'settings.syncCompletedWithConflicts': 'Synkronisering slutförd med {count} konflikter (lösta automatiskt).',
         'settings.syncClockSkewWarning': 'Stor tidsförskjutning mellan enheter upptäckt ({skew}). Kontrollera tidsinställningarna på varje enhet.',

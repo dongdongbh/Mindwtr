@@ -1151,6 +1151,7 @@ export const en: Record<string, string> = {
         'settings.syncSkippedOffline': 'No internet connection. Sync skipped.',
         'settings.syncServerUnreachable': "Couldn't reach the sync server. Check that Mindwtr is allowed to use the network (cellular data, VPN, or firewall).",
         'settings.syncQueuedBody': 'Local changes arrived during sync. A retry was queued automatically.',
+        'settings.syncActivationRequeuedBody': 'Mindwtr found new changes while testing this sync setup. Run Sync Now again.',
         'settings.syncCompleted': 'Sync completed!',
         'settings.syncCompletedWithConflicts': 'Sync completed with {count} conflicts (resolved automatically).',
         'settings.syncClockSkewWarning': 'Large device clock skew detected ({skew}). Check time settings on each device.',

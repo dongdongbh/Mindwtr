@@ -992,8 +992,13 @@ describe('useSyncSettingsTransportActions', () => {
         if (_label === 'requeue') {
             expect(mocked.showSettingsWarning).toHaveBeenCalledWith(
                 'settings.syncQueued',
-                'settings.syncQueuedBody',
+                'settings.syncActivationRequeuedBody',
                 4200,
+            );
+            expect(mocked.showSettingsWarning).not.toHaveBeenCalledWith(
+                'settings.syncQueued',
+                'settings.syncQueuedBody',
+                expect.anything(),
             );
         }
     });

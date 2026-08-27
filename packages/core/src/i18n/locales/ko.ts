@@ -1106,6 +1106,7 @@ export const koOverrides: Record<string, string> = {
         'settings.syncSkippedOffline': '인터넷에 연결되지 않았습니다. 동기화를 건너뛰었습니다.',
         'settings.syncServerUnreachable': "동기화 서버에 연결할 수 없습니다. Mindwtr가 네트워크(모바일 데이터, VPN 또는 방화벽)를 사용할 수 있는지 확인하세요.",
         'settings.syncQueuedBody': '동기화 중에 로컬 변경 사항이 도착했습니다. 다시 시도가 자동으로 대기열에 추가되었습니다.',
+        'settings.syncActivationRequeuedBody': 'Mindwtr가 이 동기화 설정을 테스트하는 동안 새 변경 사항을 찾았습니다. 지금 동기화를 다시 실행하세요.',
         'settings.syncCompleted': '동기화가 완료되었습니다!',
         'settings.syncCompletedWithConflicts': '{count}개의 충돌과 함께 동기화가 완료되었습니다(자동으로 해결됨).',
         'settings.syncClockSkewWarning': '기기 간의 큰 시간 차이가 감지되었습니다({skew}). 각 기기의 시간 설정을 확인하세요.',
