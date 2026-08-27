@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MAX_DOWNLOAD_BYTES, SyncRemoteMutationFenceLostError, type AppData } from '@mindwtr/core';
+import {
+    globalProgressTracker,
+    MAX_DOWNLOAD_BYTES,
+    SyncRemoteMutationFenceLostError,
+    type AppData,
+} from '@mindwtr/core';
 
 import {
     clearAttachmentSyncState,
@@ -49,11 +54,18 @@ const pathMocks = vi.hoisted(() => ({
     join: vi.fn(),
 }));
 
-const cloudKitMocks = vi.hoisted(() => ({
-    deleteCloudKitAttachmentAssets: vi.fn(),
-    fetchCloudKitAttachmentAsset: vi.fn(),
-    saveCloudKitAttachmentAsset: vi.fn(),
-}));
+const cloudKitMocks = vi.hoisted(() => {
+    class CloudKitAttachmentNotFoundError extends Error {}
+    return {
+        CloudKitAttachmentNotFoundError,
+        deleteCloudKitAttachmentAssets: vi.fn(),
+        fetchCloudKitAttachmentAsset: vi.fn(),
+        isCloudKitAttachmentNotFoundError: (error: unknown) => (
+            error instanceof CloudKitAttachmentNotFoundError
+        ),
+        saveCloudKitAttachmentAsset: vi.fn(),
+    };
+});
 
 const dropboxMocks = vi.hoisted(() => ({
     downloadDropboxFile: vi.fn(),
@@ -975,13 +987,65 @@ describe('desktop sync attachment backends', () => {
             new Error(`Failed to open ${privatePath}`),
         );
 
-        await syncCloudKitAttachments(appData, deps);
+        const result = await syncCloudKitAttachments(appData, deps);
 
         const serialized = JSON.stringify(logSyncWarning.mock.calls);
         expect(serialized).not.toContain(privateTitle);
         expect(serialized).not.toContain(privatePath);
+        expect(result).toBe(false);
+        expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+            cloudKey: 'cloudkit:attachment-1',
+            localStatus: 'missing',
+        });
+        expect(appData.tasks[0].attachments?.[0].deletedAt).toBeUndefined();
         expect(logSyncWarning).toHaveBeenCalledWith(
             'Failed to download CloudKit attachment attachment-1',
+            expect.objectContaining({ message: 'Attachment sync operation failed' }),
+        );
+    });
+
+    it.each([
+        'attachment-record-not-found',
+        'attachment-asset-missing',
+    ])('marks a CloudKit attachment unrecoverable after cleaning a terminal %s stage', async (reason) => {
+        const appData = createDownloadData('cloudkit');
+        appData.tasks[0].attachments![0].fileHash = DOWNLOAD_BYTES_HASH;
+        const logSyncWarning = vi.fn();
+        const deps: AttachmentBackendDeps = {
+            getTauriFetch: vi.fn(),
+            isTauriRuntimeEnv: () => true,
+            logSyncInfo: vi.fn(),
+            logSyncWarning,
+            resolveWebdavPassword: vi.fn(),
+        };
+        cloudKitMocks.fetchCloudKitAttachmentAsset.mockRejectedValue(
+            new cloudKitMocks.CloudKitAttachmentNotFoundError(reason),
+        );
+
+        const result = expectFoldedData(await syncCloudKitAttachments(appData, deps));
+        const stagedPath = cloudKitMocks.fetchCloudKitAttachmentAsset.mock.calls[0]?.[1];
+
+        expect(stagedPath).toMatch(/^\/app-data\/mindwtr\/attachments\/\.download-/);
+        expect(fsMocks.remove).toHaveBeenCalledWith(stagedPath);
+        expect(installerMocks.installAttachmentDownload).not.toHaveBeenCalled();
+        expect(result.tasks[0].attachments?.[0]).toMatchObject({
+            localStatus: 'missing',
+            deletedAt: expect.any(String),
+        });
+        expect(result.tasks[0].attachments?.[0].cloudKey).toBeUndefined();
+        expect(result.tasks[0].attachments?.[0].fileHash).toBeUndefined();
+        expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+            cloudKey: 'cloudkit:attachment-1',
+            fileHash: DOWNLOAD_BYTES_HASH,
+            localStatus: 'missing',
+        });
+        expect(appData.tasks[0].attachments?.[0].deletedAt).toBeUndefined();
+        expect(globalProgressTracker.getProgress('attachment-1')).toMatchObject({
+            status: 'failed',
+            error: 'Attachment is no longer available',
+        });
+        expect(logSyncWarning).toHaveBeenCalledWith(
+            'CloudKit attachment attachment-1 is no longer available',
             expect.objectContaining({ message: 'Attachment sync operation failed' }),
         );
     });

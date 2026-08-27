@@ -26,6 +26,7 @@
 static NSString *const kContainerID    = @"iCloud.tech.dongdongbh.mindwtr";
 static NSString *const kZoneName       = @"MindwtrZone";
 static NSString *const kSubscriptionID = @"MindwtrZoneSubscription";
+static NSString *const kAttachmentNotFoundErrorCode = @"ERR_CLOUDKIT_ATTACHMENT_NOT_FOUND";
 static const NSInteger kBatchSize      = 400;
 static const int64_t   kTimeoutSec     = 60;
 
@@ -99,6 +100,24 @@ static char *ck_error_json(NSError *error) {
         msg = [NSString stringWithFormat:@"%@ [retryAfter=%@]", msg, retryAfter];
     }
     return ck_copy_json(@{@"error": msg, @"errorCode": @([error code])});
+}
+
+static BOOL ck_error_is_only_unknown_item(NSError *error) {
+    if (!error || ![error.domain isEqualToString:CKErrorDomain]) return NO;
+    if (error.code == CKErrorUnknownItem) return YES;
+    if (error.code != CKErrorPartialFailure) return NO;
+
+    NSDictionary *partials = error.userInfo[CKPartialErrorsByItemIDKey];
+    if (![partials isKindOfClass:[NSDictionary class]] || partials.count == 0) return NO;
+    for (id value in partials.allValues) {
+        if (![value isKindOfClass:[NSError class]]) return NO;
+        NSError *partial = (NSError *)value;
+        if (![partial.domain isEqualToString:CKErrorDomain] ||
+            partial.code != CKErrorUnknownItem) {
+            return NO;
+        }
+    }
+    return YES;
 }
 
 static char *ck_success_json(void) {
@@ -870,13 +889,27 @@ char *mindwtr_cloudkit_fetch_attachment_asset(const char *record_name_cstr,
         NSError *fetchError = nil;
         NSDictionary *fetched = ck_fetch_records_by_id(@[recordID], &fetchError);
         if (!fetched) {
+            if (ck_error_is_only_unknown_item(fetchError)) {
+                return ck_copy_json(@{
+                    @"error": @"attachment-record-not-found",
+                    @"errorCode": kAttachmentNotFoundErrorCode
+                });
+            }
             return ck_copy_json(@{@"error": fetchError.localizedDescription ?: @"fetch-attachment-failed"});
         }
         CKRecord *record = fetched[recordID];
-        if (!record) return ck_copy_json(@{@"error": @"attachment-record-not-found"});
+        if (!record) {
+            return ck_copy_json(@{
+                @"error": @"attachment-record-not-found",
+                @"errorCode": kAttachmentNotFoundErrorCode
+            });
+        }
         CKAsset *asset = record[kMindwtrAttachmentAssetField];
         if (![asset isKindOfClass:[CKAsset class]] || !asset.fileURL) {
-            return ck_copy_json(@{@"error": @"attachment-asset-missing"});
+            return ck_copy_json(@{
+                @"error": @"attachment-asset-missing",
+                @"errorCode": kAttachmentNotFoundErrorCode
+            });
         }
         NSURL *targetURL = ck_file_url_from_path(targetPath);
         if (!targetURL) return ck_copy_json(@{@"error": @"invalid-attachment-target"});

@@ -10,7 +10,12 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("./runtime", () => ({ isTauriRuntime: () => true }));
 vi.mock("./app-log", () => ({ logInfo, logWarn, logError }));
 
-import { readRemoteCloudKit, writeRemoteCloudKit } from "./cloudkit-sync";
+import {
+  CloudKitAttachmentNotFoundError,
+  fetchCloudKitAttachmentAsset,
+  readRemoteCloudKit,
+  writeRemoteCloudKit,
+} from "./cloudkit-sync";
 
 const CHANGE_TOKEN_KEY = "@mindwtr_cloudkit_change_token";
 const RECORD_TYPES = {
@@ -212,5 +217,41 @@ describe("desktop CloudKit transport", () => {
       changeToken: null,
     });
     expect(localStorage.getItem(CHANGE_TOKEN_KEY)).toBe("token-after-write");
+  });
+
+  it.each([
+    "attachment-record-not-found",
+    "attachment-asset-missing",
+  ])("normalizes the structured terminal attachment error for %s", async (message) => {
+    const nativeError = {
+      code: "ERR_CLOUDKIT_ATTACHMENT_NOT_FOUND",
+      message: `CloudKit error: ${message}`,
+    };
+    invoke.mockRejectedValue(nativeError);
+
+    let thrown: unknown;
+    try {
+      await fetchCloudKitAttachmentAsset("attachment-1", "/tmp/staged-attachment");
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(CloudKitAttachmentNotFoundError);
+    expect(thrown).toMatchObject({
+      code: "ERR_CLOUDKIT_ATTACHMENT_NOT_FOUND",
+      message: `CloudKit error: ${message}`,
+      cause: nativeError,
+    });
+  });
+
+  it("preserves transient attachment fetch failures without terminal normalization", async () => {
+    const transientError = {
+      message: "CloudKit error: network unavailable",
+    };
+    invoke.mockRejectedValue(transientError);
+
+    await expect(
+      fetchCloudKitAttachmentAsset("attachment-1", "/tmp/staged-attachment"),
+    ).rejects.toBe(transientError);
   });
 });

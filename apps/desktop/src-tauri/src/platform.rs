@@ -357,8 +357,54 @@ pub(crate) fn delete_macos_calendar_event(
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
+const CLOUDKIT_ATTACHMENT_NOT_FOUND_CODE: &str = "ERR_CLOUDKIT_ATTACHMENT_NOT_FOUND";
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CloudKitAttachmentCommandError {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<String>,
+    message: String,
+}
+
+impl CloudKitAttachmentCommandError {
+    fn transport(message: impl Into<String>) -> Self {
+        Self {
+            code: None,
+            message: message.into(),
+        }
+    }
+
+    #[cfg(any(target_os = "macos", test))]
+    fn bridge(message: &str, code: Option<&str>) -> Self {
+        Self {
+            code: (code == Some(CLOUDKIT_ATTACHMENT_NOT_FOUND_CODE))
+                .then(|| CLOUDKIT_ATTACHMENT_NOT_FOUND_CODE.to_string()),
+            message: format!("CloudKit error: {message}"),
+        }
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn parse_cloudkit_value(value: Value) -> Result<Value, String> {
+    if let Some(err) = value.get("error").and_then(|error| error.as_str()) {
+        return Err(format!("CloudKit error: {err}"));
+    }
+    Ok(value)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn parse_cloudkit_attachment_value(value: Value) -> Result<Value, CloudKitAttachmentCommandError> {
+    if let Some(err) = value.get("error").and_then(|error| error.as_str()) {
+        let code = value.get("errorCode").and_then(|code| code.as_str());
+        return Err(CloudKitAttachmentCommandError::bridge(err, code));
+    }
+    Ok(value)
+}
+
 #[cfg(target_os = "macos")]
-fn parse_cloudkit_json(raw: *mut c_char) -> Result<Value, String> {
+fn decode_cloudkit_json(raw: *mut c_char) -> Result<Value, String> {
     if raw.is_null() {
         return Err("CloudKit bridge returned null output".to_string());
     }
@@ -366,12 +412,21 @@ fn parse_cloudkit_json(raw: *mut c_char) -> Result<Value, String> {
         .to_string_lossy()
         .into_owned();
     unsafe { mindwtr_cloudkit_free_string(raw) };
-    let value: Value = serde_json::from_str(&text)
-        .map_err(|error| format!("Failed to parse CloudKit bridge output: {error}"))?;
-    if let Some(err) = value.get("error").and_then(|e| e.as_str()) {
-        return Err(format!("CloudKit error: {err}"));
-    }
-    Ok(value)
+    serde_json::from_str(&text)
+        .map_err(|error| format!("Failed to parse CloudKit bridge output: {error}"))
+}
+
+#[cfg(target_os = "macos")]
+fn parse_cloudkit_json(raw: *mut c_char) -> Result<Value, String> {
+    parse_cloudkit_value(decode_cloudkit_json(raw)?)
+}
+
+#[cfg(target_os = "macos")]
+fn parse_cloudkit_attachment_json(
+    raw: *mut c_char,
+) -> Result<Value, CloudKitAttachmentCommandError> {
+    let value = decode_cloudkit_json(raw).map_err(CloudKitAttachmentCommandError::transport)?;
+    parse_cloudkit_attachment_value(value)
 }
 
 #[tauri::command]
@@ -538,15 +593,21 @@ pub(crate) async fn cloudkit_save_attachment_asset(
 pub(crate) async fn cloudkit_fetch_attachment_asset(
     record_name: String,
     target_path: String,
-) -> Result<Value, String> {
+) -> Result<Value, CloudKitAttachmentCommandError> {
     #[cfg(target_os = "macos")]
     {
         let value = tauri::async_runtime::spawn_blocking(move || {
-            let c_record_name = CString::new(record_name.as_str())
-                .map_err(|e| format!("Invalid attachment record name: {e}"))?;
-            let c_target_path = CString::new(target_path.as_str())
-                .map_err(|e| format!("Invalid attachment target path: {e}"))?;
-            parse_cloudkit_json(unsafe {
+            let c_record_name = CString::new(record_name.as_str()).map_err(|e| {
+                CloudKitAttachmentCommandError::transport(format!(
+                    "Invalid attachment record name: {e}"
+                ))
+            })?;
+            let c_target_path = CString::new(target_path.as_str()).map_err(|e| {
+                CloudKitAttachmentCommandError::transport(format!(
+                    "Invalid attachment target path: {e}"
+                ))
+            })?;
+            parse_cloudkit_attachment_json(unsafe {
                 mindwtr_cloudkit_fetch_attachment_asset(
                     c_record_name.as_ptr(),
                     c_target_path.as_ptr(),
@@ -554,14 +615,20 @@ pub(crate) async fn cloudkit_fetch_attachment_asset(
             })
         })
         .await
-        .map_err(|error| format!("CloudKit fetch attachment task failed: {error}"))??;
+        .map_err(|error| {
+            CloudKitAttachmentCommandError::transport(format!(
+                "CloudKit fetch attachment task failed: {error}"
+            ))
+        })??;
         return Ok(value);
     }
 
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (record_name, target_path);
-        Err("CloudKit is not available on this platform".to_string())
+        Err(CloudKitAttachmentCommandError::transport(
+            "CloudKit is not available on this platform",
+        ))
     }
 }
 
@@ -833,6 +900,51 @@ pub(crate) fn open_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cloudkit_attachment_parser_preserves_only_the_terminal_missing_code() {
+        for reason in ["attachment-record-not-found", "attachment-asset-missing"] {
+            let error = parse_cloudkit_attachment_value(serde_json::json!({
+                "error": reason,
+                "errorCode": CLOUDKIT_ATTACHMENT_NOT_FOUND_CODE,
+            }))
+            .expect_err("terminal attachment absence must reject");
+
+            assert_eq!(
+                error,
+                CloudKitAttachmentCommandError {
+                    code: Some(CLOUDKIT_ATTACHMENT_NOT_FOUND_CODE.to_string()),
+                    message: format!("CloudKit error: {reason}"),
+                }
+            );
+            assert_eq!(
+                serde_json::to_value(&error).expect("serialize command error"),
+                serde_json::json!({
+                    "code": CLOUDKIT_ATTACHMENT_NOT_FOUND_CODE,
+                    "message": format!("CloudKit error: {reason}"),
+                })
+            );
+        }
+
+        let transient = parse_cloudkit_attachment_value(serde_json::json!({
+            "error": "network-unavailable",
+            "errorCode": 4,
+        }))
+        .expect_err("transient CloudKit errors still reject");
+        assert_eq!(
+            transient,
+            CloudKitAttachmentCommandError {
+                code: None,
+                message: "CloudKit error: network-unavailable".to_string(),
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(&transient).expect("serialize transient command error"),
+            serde_json::json!({
+                "message": "CloudKit error: network-unavailable",
+            })
+        );
+    }
 
     #[test]
     fn normalize_open_path_rejects_urls_and_relative_paths() {

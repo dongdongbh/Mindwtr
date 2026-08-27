@@ -70,6 +70,7 @@ import {
 import {
     deleteCloudKitAttachmentAssets,
     fetchCloudKitAttachmentAsset,
+    isCloudKitAttachmentNotFoundError,
     saveCloudKitAttachmentAsset,
     type CloudKitAttachmentMetadata,
 } from './cloudkit-sync';
@@ -1334,6 +1335,23 @@ export async function syncCloudKitAttachments(
                 expectedDownloadSha256 = await validateAndHashAttachmentDownload(attachment, bytes);
             } catch (error) {
                 await cleanOwnedAttachmentDownloadStage(stagedPath, remove, deps);
+                if (isCloudKitAttachmentNotFoundError(error)) {
+                    reportProgress(
+                        attachment.id,
+                        'download',
+                        0,
+                        attachment.size ?? 0,
+                        'failed',
+                        'Attachment is no longer available',
+                    );
+                    const mutated = markAttachmentUnrecoverable(attachment);
+                    logAttachmentWarning(
+                        deps,
+                        `CloudKit attachment ${attachment.id} is no longer available`,
+                        error,
+                    );
+                    return mutated;
+                }
                 throw error;
             }
             const installed = await installStagedAttachmentDownload(

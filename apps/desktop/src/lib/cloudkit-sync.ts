@@ -23,6 +23,38 @@ type ChangeResult = {
 
 type AccountStatus = 'available' | 'noAccount' | 'restricted' | 'temporarilyUnavailable' | 'unknown' | 'unsupported';
 
+export const CLOUDKIT_ATTACHMENT_NOT_FOUND_CODE = 'ERR_CLOUDKIT_ATTACHMENT_NOT_FOUND';
+
+export class CloudKitAttachmentNotFoundError extends Error {
+    readonly code = CLOUDKIT_ATTACHMENT_NOT_FOUND_CODE;
+
+    constructor(message = 'CloudKit attachment is no longer available', cause?: unknown) {
+        super(message);
+        this.name = 'CloudKitAttachmentNotFoundError';
+        if (cause !== undefined) {
+            (this as Error & { cause?: unknown }).cause = cause;
+        }
+    }
+}
+
+const getCloudKitErrorCode = (error: unknown): string | null => {
+    if (!error || typeof error !== 'object' || !('code' in error)) return null;
+    return typeof error.code === 'string' ? error.code : null;
+};
+
+const getCloudKitErrorMessage = (error: unknown): string | undefined => {
+    if (error instanceof Error) return error.message;
+    if (!error || typeof error !== 'object' || !('message' in error)) return undefined;
+    return typeof error.message === 'string' ? error.message : undefined;
+};
+
+export const isCloudKitAttachmentNotFoundError = (
+    error: unknown,
+): boolean => (
+    error instanceof CloudKitAttachmentNotFoundError
+    || getCloudKitErrorCode(error) === CLOUDKIT_ATTACHMENT_NOT_FOUND_CODE
+);
+
 export type CloudKitAttachmentMetadata = {
     recordName?: string;
     attachmentId: string;
@@ -294,10 +326,16 @@ export const fetchCloudKitAttachmentAsset = async (
     targetPath: string,
 ): Promise<CloudKitAttachmentMetadata> => {
     if (!isCloudKitAvailable()) throw new Error('CloudKit is not available on this platform');
-    return await invokeNative<CloudKitAttachmentMetadata>('cloudkit_fetch_attachment_asset', {
-        recordName,
-        targetPath,
-    });
+    try {
+        return await invokeNative<CloudKitAttachmentMetadata>('cloudkit_fetch_attachment_asset', {
+            recordName,
+            targetPath,
+        });
+    } catch (error) {
+        if (!isCloudKitAttachmentNotFoundError(error)) throw error;
+        if (error instanceof CloudKitAttachmentNotFoundError) throw error;
+        throw new CloudKitAttachmentNotFoundError(getCloudKitErrorMessage(error), error);
+    }
 };
 
 export const deleteCloudKitAttachmentAssets = async (recordNames: string[]): Promise<void> => {
