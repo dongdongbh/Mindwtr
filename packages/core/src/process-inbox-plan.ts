@@ -106,12 +106,12 @@ export function resolveProcessInboxPlan(settings?: AppData['settings']): Process
 
 export type ProcessInboxDecision =
     | { type: 'discard' | 'skip' | 'someday' | 'reference' | 'complete' | 'next' }
-    | { type: 'later'; allowUndated?: boolean }
+    | { type: 'later' }
     | { type: 'waiting'; followUpAt?: string };
 
 export type ProcessInboxDecisionDraft = {
     fields: ProcessInboxWorkflowFields;
-    taskUpdates?: Partial<Task>;
+    taskUpdates?: Partial<Pick<Task, 'title' | 'description'>>;
 };
 
 export type ProcessInboxValidationReason = 'later-start-required';
@@ -128,7 +128,7 @@ export type PreparedProcessInboxDecision =
     | {
         ok: true;
         event: ProcessInboxWorkflowEvent;
-        taskUpdates: Partial<Task> | undefined;
+        taskUpdates: Partial<Pick<Task, 'title' | 'description'>> | undefined;
         resetFields: readonly ProcessInboxDecisionResetField[];
     };
 
@@ -198,7 +198,7 @@ export function prepareProcessInboxDecision({
             break;
         case 'later': {
             const startTime = draft.fields.startTime;
-            if (!startTime && !decision.allowUndated) {
+            if (!startTime) {
                 return { ok: false, reason: 'later-start-required' };
             }
             event = { type: 'later', fields: { ...selectionFields, startTime } };

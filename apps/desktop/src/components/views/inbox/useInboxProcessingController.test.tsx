@@ -146,6 +146,50 @@ describe('useInboxProcessingController not-actionable destinations', () => {
             tags: ['#follow-up'],
         }));
     });
+
+    it('lets the explicit Waiting follow-up override a parsed review command', async () => {
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderController(updateTask);
+
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+
+        act(() => {
+            result.current.wizardProps.setField('title', 'Task one /review:2026-09-10');
+            result.current.wizardProps.setDelegateFollowUp('2026-09-20');
+        });
+        await act(async () => {
+            await result.current.wizardProps.handleConfirmWaiting();
+        });
+
+        expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+            status: 'waiting',
+            reviewAt: new Date('2026-09-20T09:00:00').toISOString(),
+        }));
+    });
+
+    it('lets the explicit Later date override a parsed start command', async () => {
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderController(updateTask);
+
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+
+        act(() => {
+            result.current.wizardProps.setField('title', 'Task one /start:2026-09-10');
+            result.current.wizardProps.scheduleFields.start.onDateChange('2026-09-20');
+        });
+        await act(async () => {
+            await result.current.wizardProps.handleLater();
+        });
+
+        expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+            status: 'next',
+            startTime: '2026-09-20',
+        }));
+    });
 });
 
 describe('useInboxProcessingController draft writes', () => {

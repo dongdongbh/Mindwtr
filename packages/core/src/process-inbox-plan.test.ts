@@ -142,7 +142,7 @@ describe('prepareProcessInboxDecision', () => {
         },
     );
 
-    it('requires a Later date unless the user explicitly chose no date', () => {
+    it('requires a Later date so undated work stays a Someday decision', () => {
         const draft = { ...fullDraft, fields: { ...fullDraft.fields, startTime: undefined } };
 
         expect(prepareProcessInboxDecision({
@@ -151,12 +151,6 @@ describe('prepareProcessInboxDecision', () => {
             decision: { type: 'later' },
             plan,
         })).toEqual({ ok: false, reason: 'later-start-required' });
-        expect(prepareProcessInboxDecision({
-            task,
-            draft,
-            decision: { type: 'later', allowUndated: true },
-            plan,
-        })).toMatchObject({ ok: true, event: { type: 'later', fields: { startTime: undefined } } });
     });
 
     it('prepares the same complete next-action event for either platform', () => {

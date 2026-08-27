@@ -269,7 +269,10 @@ export function useInboxProcessingController({
     const prepareProcessingEdits = useCallback((
         titleInput: string = draft.title,
         fallbackTitle?: string,
-    ): Partial<Task> | null => {
+    ): {
+        taskUpdates: Partial<Pick<Task, 'title' | 'description'>>;
+        decisionFields: ProcessInboxWorkflowFields;
+    } | null => {
         if (!processingTask) return null;
         const { title: parsedTitle, props: parsedDateProps, invalidDateCommands } = parseQuickAddDateCommands(
             titleInput,
@@ -284,9 +287,15 @@ export function useInboxProcessingController({
         const title = trimmedTitle.length > 0 ? trimmedTitle : (fallbackTitle ?? processingTask.title);
         const description = draft.description.trim();
         return {
-            title,
-            description: description.length > 0 ? description : undefined,
-            ...parsedDateProps,
+            taskUpdates: {
+                title,
+                description: description.length > 0 ? description : undefined,
+            },
+            decisionFields: {
+                ...(parsedDateProps.startTime ? { startTime: parsedDateProps.startTime } : {}),
+                ...(parsedDateProps.dueDate ? { dueDate: parsedDateProps.dueDate } : {}),
+                ...(parsedDateProps.reviewAt ? { reviewAt: parsedDateProps.reviewAt } : {}),
+            },
         };
     }, [draft.description, draft.title, processingTask, settings?.quickAddAutoClean, showToast, t]);
 
@@ -300,15 +309,21 @@ export function useInboxProcessingController({
         } = {},
     ): Promise<boolean> => {
         if (!processingTask) return false;
-        const taskUpdates = decision.type === 'discard'
+        const edits = decision.type === 'discard'
             ? undefined
             : prepareProcessingEdits(options.titleInput, options.fallbackTitle);
-        if (decision.type !== 'discard' && !taskUpdates) return false;
+        if (decision.type !== 'discard' && !edits) return false;
         const prepared = prepareProcessInboxDecision({
             task: processingTask,
             draft: {
-                fields: buildDecisionFields(options.fields),
-                taskUpdates: taskUpdates ?? undefined,
+                // Parsed date commands enter the shared draft before
+                // validation. Explicit destination controls (Later picker,
+                // Waiting follow-up) take final precedence.
+                fields: buildDecisionFields({
+                    ...edits?.decisionFields,
+                    ...options.fields,
+                }),
+                taskUpdates: edits?.taskUpdates,
             },
             decision,
             plan: processInboxPlan,

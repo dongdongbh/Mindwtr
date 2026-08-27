@@ -1436,7 +1436,7 @@ describe('InboxProcessingModal', () => {
     );
   });
 
-  it('moves Later items to next when No date is explicitly selected', async () => {
+  it('requires a start date before filing a Later item', async () => {
     const onClose = vi.fn();
     let tree: ReturnType<typeof create>;
 
@@ -1455,25 +1455,7 @@ describe('InboxProcessingModal', () => {
       laterButton.props.onPress();
     });
 
-    const noDateButton = findNodeWithText(root, 'No date').parent;
-
-    if (!noDateButton) {
-      throw new Error('No date button not found');
-    }
-
-    expect(noDateButton.props.accessibilityState?.selected).toBe(false);
-
-    act(() => {
-      noDateButton.props.onPress();
-    });
-
-    const selectedNoDateButton = findNodeWithText(root, 'No date').parent;
-
-    if (!selectedNoDateButton) {
-      throw new Error('No date button not found after selection');
-    }
-
-    expect(selectedNoDateButton.props.accessibilityState?.selected).toBe(true);
+    expect(findNodesWithText(root, 'No date')).toHaveLength(0);
 
     const nextTaskButton = findNodeWithText(root, 'File it').parent;
 
@@ -1485,18 +1467,13 @@ describe('InboxProcessingModal', () => {
       nextTaskButton.props.onPress();
     });
 
-    expect(updateTask).toHaveBeenCalledWith(
-      'inbox-1',
-      expect.objectContaining({
-        status: 'next',
-      })
-    );
-    expect(updateTask.mock.calls[0][1]).toHaveProperty('startTime', undefined);
     await flushAsyncActions();
-    expect(onClose).toHaveBeenCalled();
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(showToast.mock.calls.some(([options]) => options?.tone === 'warning')).toBe(true);
   });
 
-  it('advances to the next inbox item when Later No date is selected directly', async () => {
+  it('keeps the current inbox item active when Later has no date', async () => {
     storeState.tasks = [
       { ...baseInboxTask },
       {
@@ -1526,16 +1503,6 @@ describe('InboxProcessingModal', () => {
       laterButton.props.onPress();
     });
 
-    const noDateButton = findNodeWithText(root, 'No date').parent;
-
-    if (!noDateButton) {
-      throw new Error('No date button not found');
-    }
-
-    act(() => {
-      noDateButton.props.onPress();
-    });
-
     const nextTaskButton = findNodeWithText(root, 'File it').parent;
 
     if (!nextTaskButton) {
@@ -1546,20 +1513,12 @@ describe('InboxProcessingModal', () => {
       nextTaskButton.props.onPress();
     });
 
-    expect(updateTask).toHaveBeenCalledWith(
-      'inbox-1',
-      expect.objectContaining({
-        status: 'next',
-      })
-    );
-    expect(updateTask.mock.calls[0][1]).toHaveProperty('startTime', undefined);
     await flushAsyncActions();
+    expect(updateTask).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
     expect(root.findByProps({ placeholder: 'taskEdit.titleLabel', accessibilityLabel: 'taskEdit.titleLabel' }).props.value)
-      .toBe('Second inbox task');
-    // "No date" is a real answer, so nothing warns — the only toast is the
-    // Undo offered for the item that just moved.
-    expect(showToast.mock.calls.map(([options]) => options?.tone)).toEqual(['info']);
+      .toBe('Inbox task');
+    expect(showToast.mock.calls.some(([options]) => options?.tone === 'warning')).toBe(true);
   });
 
   it('saves the selected priority when the priority field is shown', async () => {
@@ -2283,6 +2242,19 @@ describe('InboxProcessingModal', () => {
       expect(findNodesWithText(root, 'inbox.whoShouldDoIt').length).toBeGreaterThan(0);
     });
 
+    it('starts with the two-minute question when the shared plan puts it first', async () => {
+      mockSettings.gtd.inboxProcessing = { twoMinuteFirst: true };
+      const root = await openFlow();
+
+      expect(findNodesWithText(root, 'inbox.twoMinRule').length).toBeGreaterThan(0);
+      expect(findNodesWithText(root, 'inbox.isActionable')).toHaveLength(0);
+
+      pressStep(root, 'inbox.takesLonger');
+
+      expect(findNodesWithText(root, 'inbox.isActionable').length).toBeGreaterThan(0);
+      expect(findNodesWithText(root, 'inbox.twoMinRule')).toHaveLength(0);
+    });
+
     it('drops the context step from the terminal step when it is off', async () => {
       mockSettings.gtd.inboxProcessing = { contextStepEnabled: false };
       const root = await openFlow();
@@ -2480,7 +2452,7 @@ describe('InboxProcessingModal', () => {
       }
     });
 
-    it('keeps the Later no-date and date-only controls in both modes', async () => {
+    it('keeps dated Later controls in both modes without an undated escape hatch', async () => {
       mockSettings.gtd.defaultScheduleTime = '09:00';
 
       for (const mode of ['guided', 'quick'] as const) {
@@ -2488,7 +2460,7 @@ describe('InboxProcessingModal', () => {
         const root = await openMode(mode);
         pressStep(root, 'Later');
 
-        expect(findNodesWithText(root, 'No date').length).toBeGreaterThan(0);
+        expect(findNodesWithText(root, 'No date')).toHaveLength(0);
         expect(findNodesWithText(root, 'common.notSet').length).toBeGreaterThan(0);
         expect(findNodesWithText(root, 'File it').length).toBeGreaterThan(0);
       }

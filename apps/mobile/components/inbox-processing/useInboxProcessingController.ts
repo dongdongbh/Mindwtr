@@ -142,7 +142,6 @@ export function useInboxProcessingController({
   const [selectedTimeEstimate, setSelectedTimeEstimate] = useState<TimeEstimate | undefined>(undefined);
   const [pendingStartDate, setPendingStartDate] = useState<Date | null>(null);
   const [pendingStartDateOnly, setPendingStartDateOnly] = useState(false);
-  const [laterNoDateSelected, setLaterNoDateSelected] = useState(false);
   const [pendingDueDate, setPendingDueDate] = useState<Date | null>(null);
   const [pendingDueDateOnly, setPendingDueDateOnly] = useState(false);
   const [pendingReviewDate, setPendingReviewDate] = useState<Date | null>(null);
@@ -173,6 +172,7 @@ export function useInboxProcessingController({
   const processInboxPlan = useMemo(() => resolveProcessInboxPlan(settings), [settings]);
   const {
     twoMinuteEnabled,
+    twoMinuteFirst,
     projectFirst,
     referenceEnabled,
   } = processInboxPlan;
@@ -354,10 +354,10 @@ export function useInboxProcessingController({
 
   const chooseActionability = useCallback((choice: Exclude<ActionabilityChoice, null>) => {
     setActionabilityChoice(choice);
-    setTwoMinuteChoice(null);
+    if (!twoMinuteFirst) setTwoMinuteChoice(null);
     setExecutionChoice(null);
     scrollProcessingToRevealedStep();
-  }, [scrollProcessingToRevealedStep]);
+  }, [scrollProcessingToRevealedStep, twoMinuteFirst]);
 
   const chooseTwoMinute = useCallback((choice: Exclude<TwoMinuteChoice, null>) => {
     setTwoMinuteChoice(choice);
@@ -374,9 +374,9 @@ export function useInboxProcessingController({
   // flow derived from it, so the next step can never be reached out of order.
   const clearDecision = useCallback((level: 'actionability' | 'twoMinute' | 'execution') => {
     if (level === 'actionability') setActionabilityChoice(null);
-    if (level !== 'execution') setTwoMinuteChoice(null);
+    if (level === 'twoMinute' || (level === 'actionability' && !twoMinuteFirst)) setTwoMinuteChoice(null);
     setExecutionChoice(null);
-  }, []);
+  }, [twoMinuteFirst]);
 
   // "More options" reveals below the fold exactly like answering a question
   // does, so expanding follows the reveal down too; collapsing stays put.
@@ -422,7 +422,6 @@ export function useInboxProcessingController({
     ));
     setPendingStartDate(task?.startTime ? safeParseDate(task.startTime) : null);
     setPendingStartDateOnly(Boolean(task?.startTime) && !hasTimeComponent(task?.startTime));
-    setLaterNoDateSelected(false);
     setPendingDueDate(task?.dueDate ? safeParseDate(task.dueDate) : null);
     setPendingDueDateOnly(Boolean(task?.dueDate) && !hasTimeComponent(task?.dueDate));
     setPendingReviewDate(task?.reviewAt ? safeParseDate(task.reviewAt) : null);
@@ -721,23 +720,18 @@ export function useInboxProcessingController({
   const handleLaterMobile = useCallback(async () => {
     if (!currentTask) return false;
     const startDate = pendingStartDate;
-    const applied = await applyWorkflowDecision({
-      type: 'later',
-      allowUndated: laterNoDateSelected,
-    }, {
+    const applied = await applyWorkflowDecision({ type: 'later' }, {
       fields: {
         startTime: startDate ? formatScheduledDateValue(startDate, pendingStartDateOnly) : undefined,
       },
     });
     if (!applied) return false;
     setPendingStartDate(null);
-    setLaterNoDateSelected(false);
     return true;
   }, [
     applyWorkflowDecision,
     currentTask,
     formatScheduledDateValue,
-    laterNoDateSelected,
     pendingStartDate,
     pendingStartDateOnly,
   ]);
@@ -1177,7 +1171,6 @@ export function useInboxProcessingController({
     isNextTaskDisabled,
     newContext,
     nextActionDraft,
-    laterNoDateSelected,
     pendingDueDate,
     pendingDueDateOnly,
     pendingReviewDate,
@@ -1209,7 +1202,6 @@ export function useInboxProcessingController({
     setDelegateWho,
     setExecutionChoice: chooseExecution,
     setNewContext,
-    setLaterNoDateSelected,
     setPendingDueDate,
     setPendingDueDateOnly,
     setPendingReviewDate,
@@ -1266,6 +1258,7 @@ export function useInboxProcessingController({
     totalCount,
     twoMinuteChoice,
     twoMinuteEnabled,
+    twoMinuteFirst,
     setTwoMinuteChoice: chooseTwoMinute,
     selectProjectEarly,
     toggleContext,
