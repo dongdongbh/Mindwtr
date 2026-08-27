@@ -22,6 +22,9 @@ export type SyncRemoteMutationFenceLease = {
     /** Revalidates ownership and renews when less than `minRemainingMs` remains. */
     assertHeld(minRemainingMs?: number): Promise<void>;
     renew(): Promise<void>;
+    /** Best-effort delay until this lease's last server-observed expiry. Used
+     *  only to schedule cleanup after a conditional release request fails. */
+    retryAfterMs(): number;
     /** Conditional and peer-safe. A failed release leaves only a bounded, expiring lease. */
     release(): Promise<void>;
 };
@@ -67,6 +70,10 @@ export const isSyncRemoteMutationFenceError = (error: unknown): boolean => (
 const FENCE_SCHEMA = 1;
 const MIN_TTL_MS = 10_000;
 const MAX_TTL_MS = 15 * 60_000;
+/** Provider Date headers can move slightly between frontends. Anything farther
+ *  into the future than a legal maximum lease plus this tolerance cannot have
+ *  been written by a conforming client and must not permanently block sync. */
+const MAX_FUTURE_EXPIRY_TOLERANCE_MS = 60_000;
 const MAX_RECORD_BYTES = 4_096;
 const DEFAULT_ACQUIRE_ATTEMPTS = 4;
 
@@ -81,6 +88,10 @@ const requireServerNow = (snapshot: SyncRemoteMutationFenceSnapshot): number => 
     }
     return snapshot.serverNowMs;
 };
+
+const isImpossibleFutureExpiry = (expiresAt: number, serverNowMs: number): boolean => (
+    expiresAt - serverNowMs > MAX_TTL_MS + MAX_FUTURE_EXPIRY_TOLERANCE_MS
+);
 
 const parseRecord = (bytes: Uint8Array): SyncRemoteMutationFenceRecord => {
     if (bytes.length === 0 || bytes.length > MAX_RECORD_BYTES) {
@@ -155,6 +166,7 @@ export async function acquireSyncRemoteMutationFence(
     if (leaseId.length < 8) throw new Error('Remote sync mutation fence leaseId is too short');
 
     let acquiredVersion: string | null = null;
+    let acquiredRemainingMs = ttlMs;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         const snapshot = await port.read();
         const serverNowMs = requireServerNow(snapshot);
@@ -165,7 +177,7 @@ export async function acquireSyncRemoteMutationFence(
                 );
             }
             const current = parseRecord(snapshot.bytes);
-            if (current.expiresAt > serverNowMs) {
+            if (current.expiresAt > serverNowMs && !isImpossibleFutureExpiry(current.expiresAt, serverNowMs)) {
                 throw new SyncRemoteMutationFenceBusyError(current.expiresAt - serverNowMs);
             }
         } else if (snapshot.version !== null) {
@@ -188,15 +200,26 @@ export async function acquireSyncRemoteMutationFence(
             throw error;
         }
         const verified = await port.read();
-        requireServerNow(verified);
+        const verifiedServerNowMs = requireServerNow(verified);
         if (!verified.bytes || !verified.version) {
             throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence disappeared after acquisition');
         }
         const verifiedRecord = parseRecord(verified.bytes);
-        if (verifiedRecord.leaseId !== leaseId || verifiedRecord.ownerId !== ownerId) {
+        if (
+            verifiedRecord.leaseId !== leaseId
+            || verifiedRecord.ownerId !== ownerId
+            || verifiedRecord.expiresAt !== record.expiresAt
+        ) {
             throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence was replaced during acquisition');
         }
+        if (
+            verifiedRecord.expiresAt <= verifiedServerNowMs
+            || isImpossibleFutureExpiry(verifiedRecord.expiresAt, verifiedServerNowMs)
+        ) {
+            throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence is not live after acquisition');
+        }
         acquiredVersion = verified.version;
+        acquiredRemainingMs = verifiedRecord.expiresAt - verifiedServerNowMs;
         break;
     }
     if (!acquiredVersion) {
@@ -204,6 +227,13 @@ export async function acquireSyncRemoteMutationFence(
     }
 
     let currentVersion = acquiredVersion;
+    let lastKnownRemainingMs = acquiredRemainingMs;
+    const monotonicNow = (): number => (
+        typeof performance !== 'undefined' && typeof performance.now === 'function'
+            ? performance.now()
+            : Date.now()
+    );
+    let remainingObservedAtMs = monotonicNow();
     let closed = false;
     let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
     let lostError: unknown = null;
@@ -235,6 +265,8 @@ export async function acquireSyncRemoteMutationFence(
             throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence expired');
         }
         currentVersion = snapshot.version;
+        lastKnownRemainingMs = record.expiresAt - serverNowMs;
+        remainingObservedAtMs = monotonicNow();
         return { snapshot, record, serverNowMs };
     };
 
@@ -254,24 +286,39 @@ export async function acquireSyncRemoteMutationFence(
             throw error;
         }
         const verified = await port.read();
-        requireServerNow(verified);
+        const verifiedServerNowMs = requireServerNow(verified);
         if (!verified.bytes || !verified.version) {
             throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence disappeared after renewal');
         }
         const verifiedRecord = parseRecord(verified.bytes);
-        if (verifiedRecord.leaseId !== leaseId || verifiedRecord.ownerId !== ownerId) {
+        if (
+            verifiedRecord.leaseId !== leaseId
+            || verifiedRecord.ownerId !== ownerId
+            || verifiedRecord.expiresAt !== replacement.expiresAt
+        ) {
             throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence was replaced during renewal');
         }
+        if (
+            verifiedRecord.expiresAt <= verifiedServerNowMs
+            || isImpossibleFutureExpiry(verifiedRecord.expiresAt, verifiedServerNowMs)
+        ) {
+            throw new SyncRemoteMutationFenceLostError('Remote sync mutation fence is not live after renewal');
+        }
         currentVersion = verified.version;
+        lastKnownRemainingMs = verifiedRecord.expiresAt - verifiedServerNowMs;
+        remainingObservedAtMs = monotonicNow();
     };
 
     const scheduleHeartbeat = (): void => {
         if (closed || heartbeatMs === 0 || lostError) return;
         heartbeatTimer = setTimeout(() => {
+            heartbeatTimer = null;
             void serialize(renewOwned).then(
                 () => scheduleHeartbeat(),
                 (error) => {
                     lostError = error;
+                    if (heartbeatTimer !== null) clearTimeout(heartbeatTimer);
+                    heartbeatTimer = null;
                 },
             );
         }, heartbeatMs);
@@ -289,6 +336,9 @@ export async function acquireSyncRemoteMutationFence(
             if (record.expiresAt - serverNowMs <= minRemainingMs) await renewOwned();
         }),
         renew: () => serialize(renewOwned),
+        retryAfterMs: () => Math.max(0, Math.ceil(
+            lastKnownRemainingMs - (monotonicNow() - remainingObservedAtMs),
+        )),
         release: () => serialize(async () => {
             if (closed) return;
             if (heartbeatTimer !== null) clearTimeout(heartbeatTimer);

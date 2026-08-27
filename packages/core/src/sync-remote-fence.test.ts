@@ -112,6 +112,39 @@ describe('remote sync mutation fence', () => {
         await lease.release();
     });
 
+    it('reclaims an impossible future lease only through its observed version', async () => {
+        const remote = createPort({
+            version: 'v7',
+            bytes: new TextEncoder().encode(JSON.stringify({
+                schema: 1,
+                leaseId: 'lease-peer-1',
+                ownerId: 'peer',
+                purpose: 'ordinary-sync',
+                expiresAt: 1_000_000 + (16 * 60_000) + 1,
+            })),
+        });
+
+        const lease = await acquire(remote.port);
+        expect(remote.writes[0]?.expected).toBe('v7');
+        await lease.release();
+    });
+
+    it('keeps a maximum legal future lease busy within the provider-time tolerance', async () => {
+        const remote = createPort({
+            version: 'v1',
+            bytes: new TextEncoder().encode(JSON.stringify({
+                schema: 1,
+                leaseId: 'lease-peer-1',
+                ownerId: 'peer',
+                purpose: 'ordinary-sync',
+                expiresAt: 1_000_000 + (16 * 60_000),
+            })),
+        });
+
+        await expect(acquire(remote.port)).rejects.toBeInstanceOf(SyncRemoteMutationFenceBusyError);
+        expect(remote.writes).toHaveLength(0);
+    });
+
     it('renews by CAS and refuses to release a peer replacement', async () => {
         const remote = createPort();
         const lease = await acquire(remote.port);
@@ -150,5 +183,31 @@ describe('remote sync mutation fence', () => {
             }),
         };
         await expect(acquire(noVersion)).rejects.toBeInstanceOf(SyncRemoteMutationFenceUnavailableError);
+    });
+
+    it('fails acquisition when the created lease is already expired at verification time', async () => {
+        let reads = 0;
+        let bytes: Uint8Array | null = null;
+        const port: SyncRemoteMutationFencePort = {
+            read: async () => ({
+                bytes,
+                version: bytes ? 'v1' : null,
+                serverNowMs: reads++ === 0 ? 1_000_000 : 1_010_001,
+            }),
+            write: async (value) => { bytes = new Uint8Array(value); },
+            remove: async () => undefined,
+            isConflict: () => false,
+        };
+
+        await expect(acquire(port)).rejects.toBeInstanceOf(SyncRemoteMutationFenceLostError);
+    });
+
+    it('reports the remaining server-observed expiry for deferred cleanup', async () => {
+        const remote = createPort();
+        const lease = await acquire(remote.port);
+
+        expect(lease.retryAfterMs()).toBeGreaterThan(9_000);
+        expect(lease.retryAfterMs()).toBeLessThanOrEqual(10_000);
+        await lease.release();
     });
 });
