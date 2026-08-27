@@ -181,6 +181,7 @@ export type SettingsSyncLabels = {
     syncEncryptionErrorGeneric: string;
     syncEncryptionErrorRotationFirst: string;
     syncEncryptionErrorBackendRequired: string;
+    syncEncryptionErrorBackendIncompatible: string;
     syncEncryptionStateUnavailable: string;
     syncEncryptionRetry: string;
     syncEncryptionEnableBeforeFirstSyncHint: string;
@@ -205,7 +206,12 @@ export type CloudProvider = 'selfhosted' | 'dropbox';
 /** Which message the section shows after a failed transition. `rotation-first` is
  *  the one terminal case with a real remedy: an interrupted passphrase change left
  *  the sync location on two salts, and only re-running the change can heal it. */
-export type SyncEncryptionErrorKind = 'wrong-passphrase' | 'rotation-first' | 'backend-required' | 'generic';
+export type SyncEncryptionErrorKind =
+    | 'wrong-passphrase'
+    | 'rotation-first'
+    | 'backend-required'
+    | 'backend-incompatible'
+    | 'generic';
 
 /**
  * Everything the Encryption section needs, as one object rather than a dozen flat

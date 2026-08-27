@@ -18,6 +18,7 @@ import { useSyncSettingsTransportActions } from './use-sync-settings-transport-a
 
 const mocked = vi.hoisted(() => ({
     addBreadcrumb: vi.fn(),
+    assertWebdavStrongEtagSupport: vi.fn(),
     authorizeDropbox: vi.fn(),
     storageValues: new Map<string, string>(),
     secureValues: new Map<string, string>(),
@@ -66,7 +67,6 @@ const mocked = vi.hoisted(() => ({
     showSettingsErrorToast: vi.fn(),
     showSettingsWarning: vi.fn(),
     showToast: vi.fn(),
-    webdavGetJson: vi.fn(),
 }));
 
 vi.mock('@react-native-async-storage/async-storage', () => ({
@@ -94,9 +94,13 @@ vi.mock('@mindwtr/core', async () => ({
         '../../../../packages/core/src/sync-client-helpers',
     )),
     addBreadcrumb: mocked.addBreadcrumb,
+    assertWebdavStrongEtagSupport: mocked.assertWebdavStrongEtagSupport,
     CLOCK_SKEW_THRESHOLD_MS: 60_000,
     cloudGetJson: mocked.cloudGetJson,
     isConnectionAllowed: mocked.isConnectionAllowed,
+    isSyncEncryptionRemoteVersionUnavailableError: (error: unknown) => (
+        String(error ?? '').includes('SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE')
+    ),
     isValidCloudSyncToken: mocked.isValidCloudSyncToken,
     // ./settings.constants imports isValidHttpUrl (a value, not type-only) from this module
     // and builds LANGUAGES from LOCALES at module load time; this test doesn't exercise
@@ -111,7 +115,6 @@ vi.mock('@mindwtr/core', async () => ({
     resolveSettingsSearchI18nKey: (key: string) => `settings.${key}`,
     SETTINGS_SEARCH_MOBILE_EXCLUSIONS: {},
     SYNC_LOCAL_INSECURE_URL_OPTIONS: { allowLocalHostnames: true, allowPrivateIpRanges: true },
-    webdavGetJson: mocked.webdavGetJson,
 }));
 
 vi.mock('@/lib/storage-file', () => ({
@@ -275,6 +278,8 @@ beforeEach(() => {
         mocked.secureValues.set(key, value);
     });
     mocked.addBreadcrumb.mockReset();
+    mocked.assertWebdavStrongEtagSupport.mockReset();
+    mocked.assertWebdavStrongEtagSupport.mockResolvedValue(undefined);
     mocked.authorizeDropbox.mockReset();
     mocked.authorizeDropbox.mockResolvedValue({
         accessToken: 'candidate-access-token',
@@ -314,7 +319,6 @@ beforeEach(() => {
     mocked.showSettingsErrorToast.mockReset();
     mocked.showSettingsWarning.mockReset();
     mocked.showToast.mockReset();
-    mocked.webdavGetJson.mockReset();
 });
 
 afterEach(() => {
@@ -425,7 +429,6 @@ describe('useSyncSettingsTransportActions', () => {
     });
 
     it('normalizes the WebDAV url before testing the mobile connection', async () => {
-        mocked.webdavGetJson.mockResolvedValue(null);
         await renderHarness();
 
         await act(async () => {
@@ -440,7 +443,7 @@ describe('useSyncSettingsTransportActions', () => {
         });
 
         expect(mocked.normalizeWebdavUrl).toHaveBeenCalledWith('http://nas.local/remote.php/dav/files/alice/mindwtr/');
-        expect(mocked.webdavGetJson).toHaveBeenCalledWith(
+        expect(mocked.assertWebdavStrongEtagSupport).toHaveBeenCalledWith(
             'http://nas.local/remote.php/dav/files/alice/mindwtr/data.json',
             expect.objectContaining({
                 password: 'secret',
@@ -448,12 +451,63 @@ describe('useSyncSettingsTransportActions', () => {
                 username: 'alice',
             }),
         );
-        expect(mocked.webdavGetJson.mock.calls[0][1]).not.toMatchObject({ allowInsecureHttp: true });
+        expect(mocked.assertWebdavStrongEtagSupport.mock.calls[0][1])
+            .not.toMatchObject({ allowInsecureHttp: true });
         expect(mocked.showToast).toHaveBeenCalledWith(expect.objectContaining({
             message: 'WebDAV endpoint is reachable.',
             title: 'Connection OK',
             tone: 'success',
         }));
+    });
+
+    it('shows localized strong-ETag guidance when ordinary WebDAV setup is unsafe', async () => {
+        mocked.assertWebdavStrongEtagSupport.mockRejectedValueOnce(
+            new Error('SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE: WebDAV data.json has no safe backend version'),
+        );
+        await renderHarness();
+
+        await act(async () => {
+            await latestHookResult?.handleTestConnection('webdav', {
+                webdav: {
+                    allowInsecureHttp: false,
+                    password: 'secret',
+                    url: 'https://dav.example.com/mindwtr',
+                    username: 'alice',
+                },
+            });
+        });
+
+        expect(mocked.showSettingsErrorToast).toHaveBeenCalledWith(
+            'settings.syncMobile.connectionFailed',
+            'settings.syncEncryptionErrorBackendIncompatible',
+            5200,
+        );
+        expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+    });
+
+    it('reports invalid JSON from a 200 WebDAV setup response instead of accepting the endpoint', async () => {
+        mocked.assertWebdavStrongEtagSupport.mockRejectedValueOnce(
+            new Error('WebDAV GET failed: invalid JSON (Unexpected token <)'),
+        );
+        await renderHarness();
+
+        await act(async () => {
+            await latestHookResult?.handleTestConnection('webdav', {
+                webdav: {
+                    allowInsecureHttp: false,
+                    password: 'secret',
+                    url: 'https://dav.example.com/mindwtr',
+                    username: 'alice',
+                },
+            });
+        });
+
+        expect(mocked.showSettingsErrorToast).toHaveBeenCalledWith(
+            'settings.syncMobile.connectionFailed',
+            'Error: WebDAV GET failed: invalid JSON (Unexpected token <)',
+            5200,
+        );
+        expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
     });
 
     it('reports a deferred remote write as an error even though performMobileSync succeeded', async () => {

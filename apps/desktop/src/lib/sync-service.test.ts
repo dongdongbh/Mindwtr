@@ -3,6 +3,7 @@ import {
     runAfterStoreWriteLock,
     runDataTransferTransactionWithoutSnapshot,
     runSerializedSyncDocumentOperation,
+    SyncEncryptionRemoteVersionUnavailableError,
     SyncRemoteWriteConflict,
     type AppData,
     type Attachment,
@@ -2651,7 +2652,7 @@ describe('SyncService testability hooks', () => {
     it('tests WebDAV connectivity against the normalized data.json URL', async () => {
         const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response('{}', {
             status: 200,
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', etag: '"v1"' },
         }));
         __syncServiceTestUtils.setDependenciesForTests({
             getTauriFetch: async () => fetchSpy as unknown as typeof fetch,
@@ -2673,10 +2674,75 @@ describe('SyncService testability hooks', () => {
         expect(firstCall[1]).toMatchObject({ method: 'GET' });
     });
 
+    it('preflights an empty WebDAV location by rereading a create-only probe', async () => {
+        const methods: string[] = [];
+        const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+            const method = init?.method ?? 'GET';
+            methods.push(method);
+            if (String(input).endsWith('/data.json')) return new Response(null, { status: 404 });
+            if (method === 'PUT') return new Response(null, { status: 201 });
+            if (method === 'GET') {
+                return new Response('probe', { status: 200, headers: { etag: '"probe-v1"' } });
+            }
+            if (method === 'DELETE') return new Response(null, { status: 204 });
+            throw new Error(`unexpected ${method}`);
+        });
+        __syncServiceTestUtils.setDependenciesForTests({
+            getTauriFetch: async () => fetchSpy as unknown as typeof fetch,
+        });
+
+        await SyncService.testWebDavConnection({
+            url: 'https://example.com/remote.php/dav/files/user/mindwtr',
+            username: 'alice',
+            password: 'secret',
+        });
+
+        expect(methods).toEqual(['GET', 'PUT', 'GET', 'DELETE']);
+        expect(new Headers(fetchSpy.mock.calls[1]?.[1]?.headers).get('if-none-match')).toBe('*');
+        expect(new Headers(fetchSpy.mock.calls[3]?.[1]?.headers).get('if-match')).toBe('"probe-v1"');
+    });
+
+    it.each([
+        ['missing', undefined],
+        ['weak', 'W/"v1"'],
+    ] as const)('rejects ordinary WebDAV setup when data.json has a %s ETag', async (_case, etag) => {
+        const fetchSpy = vi.fn(async () => new Response('{}', {
+            status: 200,
+            headers: etag ? { etag } : undefined,
+        }));
+        __syncServiceTestUtils.setDependenciesForTests({
+            getTauriFetch: async () => fetchSpy as unknown as typeof fetch,
+        });
+
+        await expect(SyncService.testWebDavConnection({
+            url: 'https://example.com/remote.php/dav/files/user/mindwtr',
+            username: 'alice',
+            password: 'secret',
+        })).rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+        expect(fetchSpy).toHaveBeenCalledOnce();
+    });
+
+    it('rejects an HTML/login response with 200 and a strong ETag during WebDAV setup', async () => {
+        const fetchSpy = vi.fn(async () => new Response('<html>Sign in</html>', {
+            status: 200,
+            headers: { etag: '"login-v1"' },
+        }));
+        __syncServiceTestUtils.setDependenciesForTests({
+            getTauriFetch: async () => fetchSpy as unknown as typeof fetch,
+        });
+
+        await expect(SyncService.testWebDavConnection({
+            url: 'https://example.com/remote.php/dav/files/user/mindwtr',
+            username: 'alice',
+            password: 'secret',
+        })).rejects.toThrow('WebDAV GET failed: invalid JSON');
+        expect(fetchSpy).toHaveBeenCalledOnce();
+    });
+
     it('reuses the stored WebDAV password when settings only expose hasPassword', async () => {
         const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response('{}', {
             status: 200,
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', etag: '"v1"' },
         }));
         const invoke = vi.fn(async (command: string) => {
             if (command === 'get_webdav_password') return 'stored-secret';
@@ -2709,7 +2775,7 @@ describe('SyncService testability hooks', () => {
     it('falls back to the stored WebDAV password when the form field is empty after a restart (#899)', async () => {
         const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response('{}', {
             status: 200,
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', etag: '"v1"' },
         }));
         const invoke = vi.fn(async (command: string) => {
             if (command === 'get_webdav_password') return 'stored-secret';

@@ -1027,6 +1027,7 @@ export const zhHant: Record<string, string> = {
         'settings.syncEncryptionErrorGeneric': '這次變更未能完成。沒有遺失任何內容——每個被刪除的原檔案都已有經過驗證的加密副本，可以安全地重試。',
         'settings.syncEncryptionErrorRotationFirst': '上次變更密碼短語時被中斷，此同步位置只更新了一半。請先再次執行「變更密碼短語」將其完成，再關閉加密。',
         'settings.syncEncryptionErrorBackendRequired': '此操作需要可用的同步連線——它會更新同步位置上的檔案，而目前尚未設定同步。請先完成一次同步，或先關閉加密再用新密碼短語重新開啟。',
+        'settings.syncEncryptionErrorBackendIncompatible': '此 WebDAV 伺服器不提供強 ETag，因此 Mindwtr 無法安全地同步或變更加密。同步資料未被變更。請使用支援強 ETag 的 WebDAV 供應商、檔案同步或 Dropbox。',
         'settings.syncEncryptionEnableBeforeFirstSyncHint': '同步尚未設定——密碼短語現在會儲存在此裝置上，首次同步時上傳的內容從一開始就是加密的。',
         'settings.syncEncryptionProgressAttachments': '正在更新附件',
         'settings.syncEncryptionProgressDocuments': '正在更新同步檔案',

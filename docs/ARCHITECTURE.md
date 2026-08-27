@@ -47,6 +47,7 @@ Important properties:
 - Attachments are merged and transferred separately from the main JSON payload.
 - The blob backends (file sync, WebDAV, Dropbox) can optionally encrypt everything written to the sync location with a user-held passphrase (Argon2id -> AES-256-GCM, MWENC1 container); the server-merged backends (self-hosted cloud, CloudKit) are excluded because their merge must read the document (ADR 0025).
 - New or changed sync destinations stay inactive until a candidate probe verifies snapshot IO and every live attachment. Failed commits restore the last verified setup or leave sync off.
+- WebDAV requires RFC-style strong ETags on file GETs. Setup checks an existing sync document, or creates and rereads a disposable create-only probe on an empty location; missing or weak ETags fail closed because conditional replacement, deletion, and encryption transitions cannot be made safe without a backend generation.
 
 The detailed algorithm, edge cases, and tie-break rules are documented in the public docs site. The source for those pages lives in the Mindwtr web docs source:
 

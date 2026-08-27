@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { generateDicewarePassphrase, type SyncBackend, type SyncEncryptionTransitionProgress } from '@mindwtr/core';
+import {
+    generateDicewarePassphrase,
+    isSyncEncryptionRemoteVersionUnavailableError,
+    type SyncBackend,
+    type SyncEncryptionTransitionProgress,
+} from '@mindwtr/core';
 
 import { logError } from '../../../../lib/app-log';
 import { isSyncEncryptionFailure } from '../../../../lib/sync-encryption-service';
@@ -24,6 +29,7 @@ export const classifyFailure = (error: unknown, terminal: SyncEncryptionErrorKin
     const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
     if (message.includes('SYNC_ENCRYPTION_WRONG_PASSPHRASE')) return 'wrong-passphrase';
     if (message.includes('SYNC_ENCRYPTION_BACKEND_REQUIRED')) return 'backend-required';
+    if (isSyncEncryptionRemoteVersionUnavailableError(error)) return 'backend-incompatible';
     return isSyncEncryptionFailure(error) ? terminal : 'generic';
 };
 

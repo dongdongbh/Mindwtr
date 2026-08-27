@@ -1,11 +1,11 @@
 
 import {
+    assertWebdavStrongEtagSupport,
     AppData,
     AppSettings,
     Attachment,
     useTaskStore,
     MergeStats,
-    webdavGetJson,
     webdavGetSyncDocument,
     type SyncEncryptionRemotePort,
     type SyncEncryptionStatus,
@@ -1574,7 +1574,7 @@ export class SyncService {
             hasPassword: config.hasPassword,
         });
         try {
-            await webdavGetJson<unknown>(normalizedUrl, {
+            await assertWebdavStrongEtagSupport(normalizedUrl, {
                 allowInsecureHttp: config.allowInsecureHttp,
                 username: config.username?.trim(),
                 password,

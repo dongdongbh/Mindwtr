@@ -29,6 +29,7 @@ import {
   deriveSyncKeyMaterial,
   encryptSyncArtifact,
   inspectSyncArtifact,
+  SyncEncryptionRemoteVersionUnavailableError,
   SyncEncryptionTerminalError,
   runDisableSyncEncryptionOverRemote,
   runEnableSyncEncryptionOverRemote,
@@ -195,6 +196,35 @@ describe('WebDAV remote port error boundaries', () => {
     const port = await createPort();
 
     await expect(port.remove('data.json', '"v1"')).rejects.toThrow('WebDAV DELETE failed (500)');
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['weak', 'W/"v1"'],
+  ] as const)('fails an end-to-end transition before writes for a %s ETag', async (_case, etag) => {
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') !== 'GET') throw new Error('transition attempted an unsafe write');
+      return new Response(new TextEncoder().encode('{"tasks":[]}'), {
+        status: 200,
+        headers: etag ? { etag } : undefined,
+      });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const port = await createPort();
+
+    await expect(runEnableSyncEncryptionOverRemote(
+      PASSPHRASE,
+      port,
+      syncEncryptionKeyCache,
+      syncEncryptionLocalState,
+      undefined,
+      mobileSyncCryptoPrimitives,
+      FAST_PARAMS,
+    )).rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+
+    expect(syncEncryptionLocalState.read()).toBeNull();
+    await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
+    expect(fetcher.mock.calls.every(([, init]) => (init?.method ?? 'GET') === 'GET')).toBe(true);
   });
 });
 

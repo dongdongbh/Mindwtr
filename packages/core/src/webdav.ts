@@ -12,7 +12,13 @@ import {
     toUint8Array,
 } from './http-utils';
 import { logWarn } from './logger';
-import { decryptRemoteArtifactOrThrow, detectForeignSaltArtifact, isPlaintextSyncArtifact, syncEncryptedArtifactName } from './sync-encryption';
+import {
+    decryptRemoteArtifactOrThrow,
+    detectForeignSaltArtifact,
+    isPlaintextSyncArtifact,
+    SyncEncryptionRemoteVersionUnavailableError,
+    syncEncryptedArtifactName,
+} from './sync-encryption';
 import { encryptSyncArtifact, inspectSyncArtifact, type SyncCryptoPrimitives, type SyncKeyMaterial } from './sync-crypto';
 
 export interface WebDavOptions {
@@ -420,6 +426,16 @@ const ensureWebdavParentCollections = async (
     await ensureWebdavCollectionExists(parentUrl, options);
 };
 
+const parseOptionalWebdavJson = <T>(text: string): T | null => {
+    const normalizedBody = text.startsWith(UTF8_BOM) ? text.slice(1).trim() : text.trim();
+    if (!normalizedBody) return null;
+    try {
+        return JSON.parse(normalizedBody) as T;
+    } catch (error) {
+        throw new Error(`WebDAV GET failed: invalid JSON (${(error as Error).message})`);
+    }
+};
+
 export async function webdavGetJson<T>(
     url: string,
     options: WebDavOptions = {}
@@ -443,13 +459,7 @@ export async function webdavGetJson<T>(
     }
 
     const text = await readResponseText(res, options.maxBytes ?? MAX_SYNC_DOCUMENT_BYTES);
-    const normalizedBody = text.startsWith(UTF8_BOM) ? text.slice(1).trim() : text.trim();
-    if (!normalizedBody) return null;
-    try {
-        return JSON.parse(normalizedBody) as T;
-    } catch (error) {
-        throw new Error(`WebDAV GET failed: invalid JSON (${(error as Error).message})`);
-    }
+    return parseOptionalWebdavJson<T>(text);
 }
 
 export async function webdavPutJson(
@@ -816,6 +826,52 @@ export async function webdavGetFileVersioned(
         bytes: new Uint8Array(await readResponseBody(res, options.onProgress, options.maxBytes ?? MAX_DOWNLOAD_BYTES)),
         version: normalizeStrongWebdavEtag(res.headers.get('etag')),
     };
+}
+
+const webdavStrongEtagProbeUrl = (documentUrl: string): string => {
+    const parsed = new URL(documentUrl);
+    const probeId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    parsed.pathname = `${parsed.pathname}.mindwtr-etag-probe-${probeId}`;
+    return parsed.toString();
+};
+
+/** Preflights the generation contract required by ordinary WebDAV sync and encryption
+ * transitions. An existing document must carry a strong ETag. For an empty remote, a unique
+ * create-only probe is reread before it is conditionally removed, because a successful PUT
+ * alone does not prove later GETs expose a usable validator. A server that omits the ETag
+ * leaves the harmless probe in place rather than deleting it without a generation guard. */
+export async function assertWebdavStrongEtagSupport(
+    documentUrl: string,
+    options: WebDavOptions = {},
+): Promise<void> {
+    const documentOptions = {
+        ...options,
+        maxBytes: options.maxBytes ?? MAX_SYNC_DOCUMENT_BYTES,
+    };
+    const current = await webdavGetFileVersioned(documentUrl, documentOptions);
+    if (current.bytes !== null) {
+        if (!current.version) throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV data.json');
+        // Preserve the previous Test Connection contract: the exact GET that proves a
+        // strong generation must also prove that every non-empty data.json body is JSON.
+        // Empty/whitespace-only bodies remain accepted, including after a UTF-8 BOM.
+        parseOptionalWebdavJson(new TextDecoder().decode(current.bytes));
+        return;
+    }
+
+    const probeUrl = webdavStrongEtagProbeUrl(documentUrl);
+    const probeBytes = new TextEncoder().encode('mindwtr strong-etag capability probe');
+    await webdavPutFileVersioned(
+        probeUrl,
+        probeBytes,
+        'application/octet-stream',
+        null,
+        documentOptions,
+    );
+    const reread = await webdavGetFileVersioned(probeUrl, documentOptions);
+    if (!reread.bytes || !reread.version) {
+        throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV capability probe');
+    }
+    await webdavDeleteFileVersioned(probeUrl, reread.version, documentOptions);
 }
 
 /** CAS byte write used only by encryption transitions. `null` is create-only. */

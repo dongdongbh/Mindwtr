@@ -92,6 +92,23 @@ export class SyncEncryptionRemoteConflictError extends Error {
     }
 }
 
+export const SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE = 'SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE';
+
+/** Existing remote bytes without an atomic backend generation cannot be mutated safely.
+ * WebDAV reaches this when a server omits ETag or returns only a weak validator. */
+export class SyncEncryptionRemoteVersionUnavailableError extends Error {
+    constructor(name: string) {
+        super(`${SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE}: ${name} has no safe backend version`);
+        this.name = 'SyncEncryptionRemoteVersionUnavailableError';
+    }
+}
+
+export const isSyncEncryptionRemoteVersionUnavailableError = (error: unknown): boolean => (
+    error instanceof SyncEncryptionRemoteVersionUnavailableError
+    || (error instanceof Error ? error.message : String(error ?? ''))
+        .includes(SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE)
+);
+
 /** Generic remote-blob port for the transition orchestration below. WebDAV and Dropbox
  * each implement this with their existing get/put/list primitives (see webdav.ts /
  * dropbox.ts) — this is the ADR 0014 shared-logic seam: one transition implementation,
@@ -268,7 +285,7 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
 const requireExistingRemoteVersion = (name: string, read: SyncEncryptionRemoteRead): string => {
     if (!read.bytes) throw new SyncEncryptionRemoteConflictError(`${name} disappeared during sync encryption transition`);
     if (!read.version) {
-        throw new Error(`sync encryption transition requires a safe version for existing artifact ${name}`);
+        throw new SyncEncryptionRemoteVersionUnavailableError(name);
     }
     return read.version;
 };
@@ -281,7 +298,7 @@ const verifyRemoteBytes = async (
     const written = await remote.read(name);
     if (!written.bytes) throw new Error(`sync encryption transition: failed to read back ${name}`);
     if (!written.version) {
-        throw new Error(`sync encryption transition requires a safe version for existing artifact ${name}`);
+        throw new SyncEncryptionRemoteVersionUnavailableError(name);
     }
     await verify(written.bytes);
     return written;

@@ -1084,6 +1084,7 @@ export const en: Record<string, string> = {
         'settings.syncEncryptionErrorGeneric': 'The change could not be completed. Nothing was lost — every original that was removed already had a verified encrypted copy in its place, so it is safe to try again.',
         'settings.syncEncryptionErrorRotationFirst': 'An interrupted passphrase change left this sync location half-updated. Run Change passphrase again to finish it, then turn encryption off.',
         'settings.syncEncryptionErrorBackendRequired': 'This needs a working sync connection — it updates the files at the sync location, and none is set up yet. Run one sync first, or turn encryption off and back on with the new passphrase.',
+        'settings.syncEncryptionErrorBackendIncompatible': 'This WebDAV server does not provide strong ETags, so Mindwtr cannot safely sync or change encryption. No sync data was changed. Use a WebDAV provider with strong ETags, File Sync, or Dropbox.',
         'settings.syncEncryptionEnableBeforeFirstSyncHint': 'Sync is not set up yet — the passphrase is saved on this device now, and the first sync uploads everything already encrypted.',
         'settings.syncEncryptionProgressAttachments': 'Updating attachments',
         'settings.syncEncryptionProgressDocuments': 'Updating sync files',

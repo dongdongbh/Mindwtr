@@ -1090,6 +1090,7 @@ export const jaOverrides: Record<string, string> = {
         'settings.syncEncryptionErrorGeneric': '変更を完了できませんでした。失われたものはありません。削除された元ファイルには、いずれも検証済みの暗号化されたコピーがすでに存在していたため、安全にやり直せます。',
         'settings.syncEncryptionErrorRotationFirst': 'パスフレーズの変更が中断され、この同期先は途中までしか更新されていません。まず「パスフレーズを変更」をもう一度実行して完了させてから、暗号化を解除してください。',
         'settings.syncEncryptionErrorBackendRequired': 'この操作には動作中の同期接続が必要です。同期先のファイルを更新する処理ですが、同期先がまだ設定されていません。先に一度同期を実行するか、暗号化をいったん解除して新しいパスフレーズで再度有効にしてください。',
+        'settings.syncEncryptionErrorBackendIncompatible': 'このWebDAVサーバーは強いETagを提供しないため、安全に同期したり暗号化を変更したりできません。同期データは変更されていません。強いETagに対応したWebDAVプロバイダー、ファイル同期、またはDropboxを使用してください。',
         'settings.syncEncryptionEnableBeforeFirstSyncHint': '同期はまだ設定されていません。パスフレーズは今この端末に保存され、最初の同期からすべて暗号化された状態でアップロードされます。',
         'settings.syncEncryptionProgressAttachments': '添付ファイルを更新中',
         'settings.syncEncryptionProgressDocuments': '同期ファイルを更新中',

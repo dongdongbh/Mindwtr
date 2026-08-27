@@ -109,9 +109,11 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
                 ? t.syncEncryptionErrorRotationFirst
                 : error === 'backend-required'
                     ? t.syncEncryptionErrorBackendRequired
-                    : error === 'generic'
-                        ? t.syncEncryptionErrorGeneric
-                        : null;
+                    : error === 'backend-incompatible'
+                        ? t.syncEncryptionErrorBackendIncompatible
+                        : error === 'generic'
+                            ? t.syncEncryptionErrorGeneric
+                            : null;
 
     const progressLabel = progress
         ? `${progress.phase === 'attachments' ? t.syncEncryptionProgressAttachments : t.syncEncryptionProgressDocuments} ${progress.completed} / ${progress.total}`

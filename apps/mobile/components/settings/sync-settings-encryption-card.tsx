@@ -3,6 +3,7 @@ import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from 'reac
 
 import {
     generateDicewarePassphrase,
+    isSyncEncryptionRemoteVersionUnavailableError,
     type AppData,
     type SyncEncryptionState,
     type SyncEncryptionTransitionProgress,
@@ -28,7 +29,13 @@ type Translate = (key: string) => string;
 /** Which message the card shows after a failed transition. `rotation-first` is the
  *  one terminal case with a remedy: an interrupted passphrase change left the sync
  *  location on two salts, and only re-running the change can heal it. */
-type ErrorKind = 'mismatch' | 'wrong-passphrase' | 'rotation-first' | 'backend-required' | 'generic';
+type ErrorKind =
+    | 'mismatch'
+    | 'wrong-passphrase'
+    | 'rotation-first'
+    | 'backend-required'
+    | 'backend-incompatible'
+    | 'generic';
 
 type Flow = 'none' | 'enable' | 'change' | 'disable' | 'unlock';
 
@@ -42,6 +49,7 @@ export type SyncEncryptionCardProps = {
 const classifyFailure = (error: unknown, terminal: ErrorKind): ErrorKind => {
     const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
     if (message.includes('SYNC_ENCRYPTION_BACKEND_REQUIRED')) return 'backend-required';
+    if (isSyncEncryptionRemoteVersionUnavailableError(error)) return 'backend-incompatible';
     if (/MWENC1|SYNC_ENCRYPTION|passphrase/i.test(message)) return terminal;
     return 'generic';
 };
@@ -250,9 +258,11 @@ export function SyncEncryptionCard({ appData, t, tc }: SyncEncryptionCardProps) 
                 ? t('settings.syncEncryptionErrorRotationFirst')
                 : error === 'backend-required'
                     ? t('settings.syncEncryptionErrorBackendRequired')
-                    : error === 'generic'
-                        ? t('settings.syncEncryptionErrorGeneric')
-                        : null;
+                    : error === 'backend-incompatible'
+                        ? t('settings.syncEncryptionErrorBackendIncompatible')
+                        : error === 'generic'
+                            ? t('settings.syncEncryptionErrorGeneric')
+                            : null;
 
     const progressLabel = progress
         ? `${progress.phase === 'attachments'

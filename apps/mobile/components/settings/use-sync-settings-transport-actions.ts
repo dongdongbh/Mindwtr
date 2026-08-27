@@ -4,14 +4,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
     addBreadcrumb,
+    assertWebdavStrongEtagSupport,
     CLOCK_SKEW_THRESHOLD_MS,
     cloudGetJson,
     isConnectionAllowed,
+    isSyncEncryptionRemoteVersionUnavailableError,
     isValidCloudSyncToken,
     normalizeCloudUrl,
     normalizeWebdavUrl,
     SYNC_LOCAL_INSECURE_URL_OPTIONS,
-    webdavGetJson,
     type AppSettings,
 } from '@mindwtr/core';
 
@@ -1003,7 +1004,7 @@ export function useSyncSettingsTransportActions({
                 if (!validateSyncHttpUrl(trimmedWebDavUrl, effectiveWebdav.allowInsecureHttp, 'WebDAV')) {
                     return;
                 }
-                await webdavGetJson<unknown>(normalizeWebdavUrl(trimmedWebDavUrl), {
+                await assertWebdavStrongEtagSupport(normalizeWebdavUrl(trimmedWebDavUrl), {
                     ...getMobileWebDavRequestOptions(effectiveWebdav.allowInsecureHttp),
                     username: effectiveWebdav.username.trim(),
                     password: effectiveWebdav.password,
@@ -1054,6 +1055,8 @@ export function useSyncSettingsTransportActions({
                 tr('settings.syncMobile.connectionFailed'),
                 effectiveCloudProvider === 'dropbox' && isDropboxUnauthorizedError(error)
                     ? tr('settings.syncMobile.dropboxTokenIsInvalidOrRevokedPleaseTapConnectDropbox')
+                    : backend === 'webdav' && isSyncEncryptionRemoteVersionUnavailableError(error)
+                        ? tr('settings.syncEncryptionErrorBackendIncompatible')
                     : formatError(error),
                 5200
             );

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     SyncEncryptionTerminalError,
     SyncEncryptionRemoteConflictError,
+    SyncEncryptionRemoteVersionUnavailableError,
     decryptRemoteArtifactOrThrow,
     detectForeignSaltArtifact,
     getSyncEncryptionStatusFromLocalState,
@@ -179,6 +180,29 @@ describe('local-only transitions (no configured backend, #1001)', () => {
 });
 
 describe('runEnableSyncEncryptionOverRemote', () => {
+    it('fails before remote or local commit when existing bytes have no safe backend version', async () => {
+        const original = utf8('{"tasks":[]}');
+        const remote = createFakeRemote({
+            'data.json': { bytes: original, kind: 'document' },
+        });
+        const originalRead = remote.read.bind(remote);
+        remote.read = async (name) => {
+            const result = await originalRead(name);
+            return result.bytes ? { ...result, version: null } : result;
+        };
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'correct horse', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+
+        expect(remote.store.get('data.json')).toEqual(original);
+        expect(remote.store.has('data.json.enc')).toBe(false);
+        expect(keyCache.current).toBeNull();
+        expect(localState.value).toBeNull();
+    });
+
     it('migrates data + bak + snapshot + attachment, verifies, then deletes plaintext', async () => {
         const remote = createFakeRemote({
             'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },

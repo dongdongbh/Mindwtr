@@ -1,6 +1,11 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { SyncCryptoAuthError, SyncEncryptionTerminalError, type SyncBackend } from '@mindwtr/core';
+import {
+    SyncCryptoAuthError,
+    SyncEncryptionRemoteVersionUnavailableError,
+    SyncEncryptionTerminalError,
+    type SyncBackend,
+} from '@mindwtr/core';
 
 import { getEnglishSettingsLabels } from '../labels';
 import { SyncEncryptionSection } from './SyncEncryptionSection';
@@ -190,6 +195,11 @@ describe('SyncEncryptionSection', () => {
         expect(screen.getByText(t.syncEncryptionErrorRotationFirst)).toBeTruthy();
     });
 
+    it('explains that a WebDAV server without strong ETags cannot safely transition', () => {
+        render(<SyncEncryptionSection t={t} encryption={controller({ state: 'enabled', error: 'backend-incompatible' })} />);
+        expect(screen.getByText(t.syncEncryptionErrorBackendIncompatible)).toBeTruthy();
+    });
+
     it('shows transition progress while a transition runs', () => {
         render(
             <SyncEncryptionSection
@@ -263,6 +273,10 @@ describe('classifyFailure', () => {
     it('blames the passphrase only on the verify sentinel, not on rotation failures', () => {
         expect(classifyFailure(new Error('SYNC_ENCRYPTION_WRONG_PASSPHRASE'), 'generic')).toBe('wrong-passphrase');
         expect(classifyFailure(new Error('SYNC_ENCRYPTION_BACKEND_REQUIRED'), 'generic')).toBe('backend-required');
+        expect(classifyFailure(
+            new SyncEncryptionRemoteVersionUnavailableError('data.json has no strong ETag'),
+            'generic',
+        )).toBe('backend-incompatible');
         expect(
             classifyFailure(new SyncEncryptionTerminalError(new SyncCryptoAuthError()), 'generic'),
         ).toBe('generic');

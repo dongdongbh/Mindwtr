@@ -3,7 +3,7 @@ import renderer, { act } from 'react-test-renderer';
 import { Text, TextInput, TouchableOpacity } from 'react-native';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AppData } from '@mindwtr/core';
+import { SyncEncryptionRemoteVersionUnavailableError, type AppData } from '@mindwtr/core';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 
 type EncryptionState = 'off' | 'enabled' | 'remote-encrypted-no-key' | 'remote-plaintext';
@@ -235,6 +235,20 @@ describe('SyncEncryptionCard', () => {
     await press(tree, 'settings.syncEncryptionDisable');
 
     expect(texts(tree)).toContain('settings.syncEncryptionErrorRotationFirst');
+  });
+
+  it('explains that a WebDAV server without strong ETags cannot safely transition', async () => {
+    encryptionMocks.getSyncEncryptionStatus.mockResolvedValue({ state: 'enabled' });
+    encryptionMocks.disableSyncEncryption.mockRejectedValueOnce(
+      new SyncEncryptionRemoteVersionUnavailableError('data.json has no strong ETag'),
+    );
+    const tree = await renderCard();
+
+    await press(tree, 'settings.syncEncryptionDisable');
+    await press(tree, 'settings.syncEncryptionDisable');
+
+    expect(texts(tree)).toContain('settings.syncEncryptionErrorBackendIncompatible');
+    expect(texts(tree)).not.toContain('settings.syncEncryptionErrorRotationFirst');
   });
 
   it('re-prompts inline when the entered passphrase is wrong', async () => {

@@ -8,7 +8,14 @@
 // KDF itself is already pinned by the shared TS/Rust interop fixtures.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { decryptRemoteArtifactOrThrow, deriveSyncKeyMaterial, encryptSyncArtifact, inspectSyncArtifact, SyncEncryptionTerminalError } from '@mindwtr/core';
+import {
+    decryptRemoteArtifactOrThrow,
+    deriveSyncKeyMaterial,
+    encryptSyncArtifact,
+    inspectSyncArtifact,
+    SyncEncryptionRemoteVersionUnavailableError,
+    SyncEncryptionTerminalError,
+} from '@mindwtr/core';
 
 type NativeState = {
     state: 'off' | 'enabled' | 'remote-encrypted-no-key' | 'remote-plaintext';
@@ -192,7 +199,11 @@ const createDropboxFetch = (store: ReturnType<typeof createBlobStore>) =>
         throw new Error(`unexpected Dropbox endpoint ${url}`);
     }) as unknown as typeof fetch;
 
-const createWebdavFetch = (store: ReturnType<typeof createBlobStore>, baseUrl: string) =>
+const createWebdavFetch = (
+    store: ReturnType<typeof createBlobStore>,
+    baseUrl: string,
+    etagMode: 'strong' | 'weak' | 'missing' = 'strong',
+) =>
     (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
         const url = String(input);
         const key = url.startsWith(`${baseUrl}/`) ? url.slice(baseUrl.length + 1) : url;
@@ -202,7 +213,9 @@ const createWebdavFetch = (store: ReturnType<typeof createBlobStore>, baseUrl: s
             if (!bytes) return new Response(null, { status: 404 });
             return new Response(bytes.slice() as unknown as BodyInit, {
                 status: 200,
-                headers: { etag: `"v${store.versions.get(key) ?? 1}"` },
+                headers: etagMode === 'missing'
+                    ? undefined
+                    : { etag: `${etagMode === 'weak' ? 'W/' : ''}"v${store.versions.get(key) ?? 1}"` },
             });
         }
         if (method === 'PUT') {
@@ -330,6 +343,28 @@ describe('WebDAV sync encryption transitions (config-override / web path)', () =
             APP_DATA_WITH_ATTACHMENT,
         );
     });
+
+    it.each(['missing', 'weak'] as const)(
+        'fails closed when existing WebDAV bytes have a %s ETag',
+        async (etagMode) => {
+            const baseUrl = 'https://dav.example/sync';
+            const store = seedRemote();
+            const snapshot = new Map([...store.files].map(([name, bytes]) => [name, bytes.slice()]));
+            const options = {
+                fetcher: createWebdavFetch(store, baseUrl, etagMode),
+                username: 'u',
+                password: 'p',
+            };
+
+            await expect(runEnableOverRemote(
+                'correct horse battery',
+                createWebdavRemotePort({ baseUrl, options }),
+            )).rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+
+            expect(store.files).toEqual(snapshot);
+            expect(native.state).toEqual({ state: 'off' });
+        },
+    );
 });
 
 describe('attachment bytes', () => {

@@ -214,7 +214,14 @@ export const assertSecureUrl = assertConnectionAllowed;
 export const toUint8Array = async (
     data: ArrayBuffer | Uint8Array | Blob
 ): Promise<Uint8Array<ArrayBuffer>> => {
-    if (data instanceof Uint8Array) return new Uint8Array(data);
+    // Vitest/browser/native callers can hand us a typed array created in a
+    // different JavaScript realm, where `instanceof Uint8Array` is false.
+    // ArrayBuffer.isView is realm-safe and keeps those bytes on the binary
+    // path instead of incorrectly treating the view as a Blob.
+    if (ArrayBuffer.isView(data)) {
+        const view = data as Uint8Array;
+        return new Uint8Array(view.buffer, view.byteOffset, view.byteLength).slice();
+    }
     if (data instanceof ArrayBuffer) return new Uint8Array(data);
     return new Uint8Array(await data.arrayBuffer());
 };
