@@ -58,6 +58,7 @@ const mocked = vi.hoisted(() => ({
             ? trimmed
             : `${trimmed}/data.json`;
     }),
+    getIncompleteSyncEncryptionTransition: vi.fn(),
     isSyncEncryptionBlocked: vi.fn(async () => false),
     resetSyncStatusForBackendSwitch: vi.fn(),
     performMobileSync: vi.fn(),
@@ -170,6 +171,7 @@ vi.mock('@/lib/sync-service-utils', () => ({
 }));
 
 vi.mock('@/lib/sync-encryption-state', () => ({
+    getIncompleteSyncEncryptionTransition: mocked.getIncompleteSyncEncryptionTransition,
     isSyncEncryptionBlocked: mocked.isSyncEncryptionBlocked,
 }));
 
@@ -304,6 +306,8 @@ beforeEach(() => {
     mocked.isDropboxConnected.mockResolvedValue(false);
     mocked.performMobileSync.mockReset();
     mocked.performMobileSync.mockResolvedValue({ success: true });
+    mocked.getIncompleteSyncEncryptionTransition.mockReset();
+    mocked.getIncompleteSyncEncryptionTransition.mockResolvedValue(null);
     mocked.isSyncEncryptionBlocked.mockReset();
     mocked.isSyncEncryptionBlocked.mockResolvedValue(false);
     mocked.revokeDropboxTokens.mockReset();
@@ -567,8 +571,12 @@ describe('useSyncSettingsTransportActions', () => {
             [WEBDAV_ALLOW_INSECURE_HTTP_KEY, 'false'],
             [WEBDAV_ALLOW_WEAK_FINGERPRINT_KEY, 'false'],
         ]);
-        expect(mocked.asyncStorage.setItem).toHaveBeenNthCalledWith(1, SYNC_BACKEND_KEY, 'off');
-        expect(mocked.asyncStorage.setItem).toHaveBeenLastCalledWith(SYNC_BACKEND_KEY, 'webdav');
+        const backendWriteIndexes = mocked.asyncStorage.setItem.mock.calls.flatMap(
+            ([key], index) => key === SYNC_BACKEND_KEY ? [index] : [],
+        );
+        expect(backendWriteIndexes).toHaveLength(2);
+        expect(mocked.asyncStorage.setItem.mock.calls[backendWriteIndexes[0]]).toEqual([SYNC_BACKEND_KEY, 'off']);
+        expect(mocked.asyncStorage.setItem.mock.calls[backendWriteIndexes[1]]).toEqual([SYNC_BACKEND_KEY, 'webdav']);
         expect(mocked.setSecureConfigValue).toHaveBeenCalledWith(WEBDAV_PASSWORD_KEY, 'new-secret');
         expect(mocked.performMobileSync).toHaveBeenCalledWith(undefined, {
             activationProbe: true,
@@ -595,11 +603,11 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.setSecureConfigValue.mock.invocationCallOrder[0]).toBeLessThan(
             mocked.performMobileSync.mock.invocationCallOrder[1]
         );
-        expect(mocked.asyncStorage.setItem.mock.invocationCallOrder[0]).toBeLessThan(
+        expect(mocked.asyncStorage.setItem.mock.invocationCallOrder[backendWriteIndexes[0]]).toBeLessThan(
             mocked.asyncStorage.multiSet.mock.invocationCallOrder[0],
         );
         expect(mocked.asyncStorage.multiSet.mock.invocationCallOrder[0]).toBeLessThan(
-            mocked.asyncStorage.setItem.mock.invocationCallOrder[1],
+            mocked.asyncStorage.setItem.mock.invocationCallOrder[backendWriteIndexes[1]],
         );
         expect(mocked.syncMobileBackgroundSyncRegistration).toHaveBeenCalledTimes(1);
     });
@@ -662,6 +670,49 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.showSettingsErrorToast).toHaveBeenCalledWith(
             'settings.syncMobile.error',
             'settings.syncEncryptionErrorBackendIncompatible',
+        );
+    });
+
+    it('does not activate WebDAV while an encryption transition is incomplete', async () => {
+        await renderHarness();
+        mocked.asyncStorage.multiSet.mockClear();
+        mocked.asyncStorage.setItem.mockClear();
+        mocked.performMobileSync.mockClear();
+        mocked.setSecureConfigValue.mockClear();
+        mocked.getIncompleteSyncEncryptionTransition.mockResolvedValue('enable');
+
+        await act(async () => {
+            await latestHookResult?.handleSync({
+                backend: 'webdav',
+                webdav: {
+                    allowInsecureHttp: false,
+                    password: 'secret',
+                    url: 'https://dav.example.com/mindwtr/',
+                    username: 'alice',
+                },
+            });
+        });
+
+        expect(mocked.performMobileSync).toHaveBeenCalledTimes(1);
+        expect(mocked.performMobileSync).toHaveBeenCalledWith(undefined, {
+            activationProbe: true,
+            manual: true,
+            configOverride: {
+                backend: 'webdav',
+                webdav: {
+                    allowInsecureHttp: false,
+                    password: 'secret',
+                    url: 'https://dav.example.com/mindwtr/',
+                    username: 'alice',
+                },
+            },
+        });
+        expect(mocked.asyncStorage.setItem).not.toHaveBeenCalledWith(SYNC_BACKEND_KEY, expect.anything());
+        expect(mocked.asyncStorage.multiSet).not.toHaveBeenCalled();
+        expect(mocked.setSecureConfigValue).not.toHaveBeenCalled();
+        expect(mocked.showSettingsErrorToast).toHaveBeenCalledWith(
+            'settings.syncMobile.error',
+            'Retry sync later.',
         );
     });
 
