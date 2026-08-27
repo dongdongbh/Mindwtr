@@ -111,6 +111,9 @@ const storeStateRef = vi.hoisted(() => ({
 }));
 
 const coreMocks = vi.hoisted(() => ({
+  acquireSyncRemoteMutationFence: vi.fn(),
+  createDropboxSyncRemoteMutationFencePort: vi.fn(),
+  createWebdavSyncRemoteMutationFencePort: vi.fn(),
   assertWebdavStrongEtagSupport: vi.fn(),
   webdavGetJson: vi.fn(),
   webdavGetSyncDocument: vi.fn(),
@@ -226,6 +229,9 @@ vi.mock('@mindwtr/core', async () => {
   const actual = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
   return {
     ...actual,
+    acquireSyncRemoteMutationFence: coreMocks.acquireSyncRemoteMutationFence,
+    createDropboxSyncRemoteMutationFencePort: coreMocks.createDropboxSyncRemoteMutationFencePort,
+    createWebdavSyncRemoteMutationFencePort: coreMocks.createWebdavSyncRemoteMutationFencePort,
     assertWebdavStrongEtagSupport: coreMocks.assertWebdavStrongEtagSupport,
     webdavGetJson: coreMocks.webdavGetJson,
     webdavGetSyncDocument: coreMocks.webdavGetSyncDocument,
@@ -325,6 +331,13 @@ describe('mobile sync-service runtime', () => {
     logMocks.logSyncError.mockResolvedValue(null);
 
     coreMocks.flushPendingSave.mockResolvedValue(undefined);
+    coreMocks.createWebdavSyncRemoteMutationFencePort.mockReturnValue({ provider: 'webdav-fence-port' });
+    coreMocks.createDropboxSyncRemoteMutationFencePort.mockReturnValue({ provider: 'dropbox-fence-port' });
+    coreMocks.acquireSyncRemoteMutationFence.mockResolvedValue({
+      assertHeld: vi.fn().mockResolvedValue(undefined),
+      renew: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn().mockResolvedValue(undefined),
+    });
     coreMocks.assertWebdavStrongEtagSupport.mockResolvedValue(undefined);
     coreMocks.withRetry.mockImplementation(async (operation: () => Promise<unknown>) => await operation());
     coreMocks.webdavGetJson.mockResolvedValue(emptyData);
@@ -563,6 +576,18 @@ describe('mobile sync-service runtime', () => {
     });
 
     expect(result.success).toBe(true);
+    expect(coreMocks.createWebdavSyncRemoteMutationFencePort).toHaveBeenCalledWith(
+      'https://pending.example.com/mindwtr/data.json',
+      expect.objectContaining({
+        username: 'pending-user',
+        password: 'pending-password',
+        fetcher: expect.any(Function),
+      }),
+    );
+    expect(coreMocks.acquireSyncRemoteMutationFence).toHaveBeenCalledWith(
+      { provider: 'webdav-fence-port' },
+      { ownerId: 'mindwtr-mobile', purpose: 'ordinary-sync' },
+    );
     expect(coreMocks.webdavGetJson).toHaveBeenCalledWith(
       'https://pending.example.com/mindwtr/data.json',
       expect.objectContaining({
@@ -689,7 +714,7 @@ describe('mobile sync-service runtime', () => {
     expect(result.skipped).toBeUndefined();
     expect(activityStates).toEqual(['idle', 'syncing', 'idle']);
     expect(coreMocks.performSyncCycle).toHaveBeenCalledTimes(1);
-    expect(coreMocks.webdavGetJson).toHaveBeenCalledTimes(1);
+    expect(coreMocks.webdavGetJson).toHaveBeenCalledTimes(2);
     expect(logMocks.logSyncError).not.toHaveBeenCalled();
   });
 
@@ -907,7 +932,10 @@ describe('mobile sync-service runtime', () => {
     expect(result).toEqual({ success: true, stats: emptyStats });
     expect(storageMocks.getData).toHaveBeenCalledTimes(1);
     expect(coreMocks.webdavHeadFile).toHaveBeenCalledTimes(2);
-    expect(coreMocks.webdavGetJson).toHaveBeenCalledTimes(1);
+    // The lock-free read-check is advisory. A changed document is read again
+    // after acquiring the mutation fence so stale pre-lease bytes cannot flow
+    // into the merge/write cycle.
+    expect(coreMocks.webdavGetJson).toHaveBeenCalledTimes(2);
     expect(coreMocks.performSyncCycle).toHaveBeenCalledTimes(1);
   });
 
@@ -1173,7 +1201,7 @@ describe('mobile sync-service runtime', () => {
     expect(result.success).toBe(true);
     expect(result.skipped).toBeUndefined();
     expect(coreMocks.performSyncCycle).toHaveBeenCalledTimes(1);
-    expect(coreMocks.webdavGetJson).toHaveBeenCalledTimes(1);
+    expect(coreMocks.webdavGetJson).toHaveBeenCalledTimes(2);
     expect(logMocks.logSyncError).not.toHaveBeenCalled();
   });
 

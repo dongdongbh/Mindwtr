@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { AppData, MergeStats, assertWebdavStrongEtagSupport, createSyncOrchestrator, runSerializedSyncDocumentOperation, runSharedSyncCycle, useTaskStore, webdavGetSyncDocument, webdavHeadFile, webdavPutSyncDocument, syncEncryptedArtifactName, markRemoteEncryptionDiscovered, markRemotePlaintextDiscovered, SyncEncryptionRemoteConflictError, SyncEncryptionRemotePlaintextError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, SyncEncryptionTransitionIncompleteError, SyncRemoteWriteConflict, type SyncKeyMaterial, cloudGetJson, cloudHeadJson, cloudPutJson, flushPendingSave, performSyncCycle, withRetry, isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeStrongWebdavEtag, normalizeWebdavUrl, normalizeCloudUrl, createSyncBackendIO, buildFastSyncScope, hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, getInMemoryAppDataSnapshot, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, isDropboxUnauthorizedError, parseFastSyncState, serializeFastSyncState, summarizeTaskLifecycleCounts, decodeUriSafe, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES, SYNC_FILE_NAME, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type Attachment, type CloudProvider, type FastSyncState, type SyncBackendContext, type SyncBackendIO, type SyncRunDiagnosticEvent, type SyncRunNotifier, type SyncRunPlatformHooks, type SyncRunStorage, type SyncTransport } from '@mindwtr/core';
+import { AppData, MergeStats, acquireSyncRemoteMutationFence, assertWebdavStrongEtagSupport, createDropboxSyncRemoteMutationFencePort, createSyncOrchestrator, createWebdavSyncRemoteMutationFencePort, runSerializedSyncDocumentOperation, runSharedSyncCycle, useTaskStore, webdavGetSyncDocument, webdavHeadFile, webdavPutSyncDocument, syncEncryptedArtifactName, markRemoteEncryptionDiscovered, markRemotePlaintextDiscovered, SyncEncryptionRemoteConflictError, SyncEncryptionRemotePlaintextError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, SyncEncryptionTransitionIncompleteError, SyncRemoteWriteConflict, type SyncKeyMaterial, cloudGetJson, cloudHeadJson, cloudPutJson, flushPendingSave, performSyncCycle, withRetry, isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeStrongWebdavEtag, normalizeWebdavUrl, normalizeCloudUrl, createSyncBackendIO, buildFastSyncScope, hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, getInMemoryAppDataSnapshot, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, isDropboxUnauthorizedError, parseFastSyncState, serializeFastSyncState, summarizeTaskLifecycleCounts, decodeUriSafe, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES, SYNC_FILE_NAME, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type Attachment, type CloudProvider, type FastSyncState, type SyncBackendContext, type SyncBackendIO, type SyncRunDiagnosticEvent, type SyncRunNotifier, type SyncRunPlatformHooks, type SyncRunStorage, type SyncTransport } from '@mindwtr/core';
 import { mobileStorage } from './storage-adapter';
 import { logInfo, logSyncError, logWarn, sanitizeLogMessage } from './app-log';
 import { readSyncFileVersioned, resolveSyncFileUri, writeSyncFile } from './storage-file';
@@ -1264,6 +1264,30 @@ class MobileSyncRun {
    *  retries of its own. */
   private createBackendTransport(): SyncTransport {
     return {
+      acquireWebdavRemoteMutationFence: async () => {
+        const webdavConfig = this.webdavConfig;
+        if (!webdavConfig?.url) throw new Error('WebDAV URL not configured');
+        this.ensureWebdavSyncNotRateLimited();
+        try {
+          return await acquireSyncRemoteMutationFence(
+            createWebdavSyncRemoteMutationFencePort(webdavConfig.url, {
+              ...getMobileWebDavRequestOptions(webdavConfig.allowInsecureHttp),
+              username: webdavConfig.username,
+              password: webdavConfig.password,
+              timeoutMs: DEFAULT_SYNC_TIMEOUT_MS,
+              fetcher: this.fetchWithAbort,
+            }),
+            { ownerId: 'mindwtr-mobile', purpose: 'ordinary-sync' },
+          );
+        } catch (error) {
+          if (!isSyncEncryptionError(error)) this.handleWebdavRateLimit(error);
+          throw error;
+        }
+      },
+      acquireDropboxRemoteMutationFence: (token) => acquireSyncRemoteMutationFence(
+        createDropboxSyncRemoteMutationFencePort(token, this.fetchWithAbort),
+        { ownerId: 'mindwtr-mobile', purpose: 'ordinary-sync' },
+      ),
       webdavGet: async () => {
         const webdavConfig = this.webdavConfig!;
         const requestOptions = {

@@ -95,6 +95,9 @@ const storeStateRef = vi.hoisted(() => ({
 }));
 
 const coreMocks = vi.hoisted(() => ({
+  acquireSyncRemoteMutationFence: vi.fn(),
+  createDropboxSyncRemoteMutationFencePort: vi.fn(),
+  createWebdavSyncRemoteMutationFencePort: vi.fn(),
   webdavGetJson: vi.fn(),
   webdavHeadFile: vi.fn(),
   webdavPutJson: vi.fn(),
@@ -207,6 +210,9 @@ vi.mock('@mindwtr/core', async () => {
   const actual = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
   return {
     ...actual,
+    acquireSyncRemoteMutationFence: coreMocks.acquireSyncRemoteMutationFence,
+    createDropboxSyncRemoteMutationFencePort: coreMocks.createDropboxSyncRemoteMutationFencePort,
+    createWebdavSyncRemoteMutationFencePort: coreMocks.createWebdavSyncRemoteMutationFencePort,
     webdavGetJson: coreMocks.webdavGetJson,
     webdavHeadFile: coreMocks.webdavHeadFile,
     webdavPutJson: coreMocks.webdavPutJson,
@@ -305,6 +311,13 @@ describe('mobile Dropbox sync transient retry', () => {
     logMocks.logSyncError.mockResolvedValue(null);
 
     coreMocks.flushPendingSave.mockResolvedValue(undefined);
+    coreMocks.createWebdavSyncRemoteMutationFencePort.mockReturnValue({ provider: 'webdav-fence-port' });
+    coreMocks.createDropboxSyncRemoteMutationFencePort.mockReturnValue({ provider: 'dropbox-fence-port' });
+    coreMocks.acquireSyncRemoteMutationFence.mockResolvedValue({
+      assertHeld: vi.fn().mockResolvedValue(undefined),
+      renew: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn().mockResolvedValue(undefined),
+    });
     // Delay-free withRetry that honors maxAttempts/shouldRetry/onRetry, so the
     // tests exercise the real retry policy without sleeping through backoff.
     coreMocks.withRetry.mockImplementation(async (
@@ -411,6 +424,14 @@ describe('mobile Dropbox sync transient retry', () => {
     });
 
     expect(result.success).toBe(true);
+    expect(coreMocks.createDropboxSyncRemoteMutationFencePort).toHaveBeenCalledWith(
+      'candidate-access-token',
+      expect.any(Function),
+    );
+    expect(coreMocks.acquireSyncRemoteMutationFence).toHaveBeenCalledWith(
+      { provider: 'dropbox-fence-port' },
+      { ownerId: 'mindwtr-mobile', purpose: 'ordinary-sync' },
+    );
     expect(dropboxSyncMocks.downloadDropboxAppData).toHaveBeenNthCalledWith(
       1,
       'candidate-access-token',

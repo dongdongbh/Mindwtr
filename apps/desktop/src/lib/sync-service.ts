@@ -34,6 +34,9 @@ import {
     runSerializedSyncDocumentOperation,
     runSerializedSyncDocumentWriteOperation,
     createSyncBackendIO,
+    acquireSyncRemoteMutationFence,
+    createDropboxSyncRemoteMutationFencePort,
+    createWebdavSyncRemoteMutationFencePort,
     runSharedSyncCycle,
     SyncRemoteWriteConflict,
     sanitizeAppDataForRemote,
@@ -2121,6 +2124,31 @@ export class SyncService {
         const ctx = SyncService.createBackendContext(context);
 
         const transport: SyncTransport = {
+            acquireWebdavRemoteMutationFence: async () => {
+                const webdavConfig = context.webdavConfig;
+                if (!webdavConfig?.url) throw new Error('WebDAV URL not configured');
+                const password = await resolveWebdavPassword(webdavConfig);
+                const fetcher = await createFetchWithAbortForContext(context);
+                return acquireSyncRemoteMutationFence(
+                    createWebdavSyncRemoteMutationFencePort(
+                        normalizeWebdavUrl(webdavConfig.url),
+                        {
+                            allowInsecureHttp: webdavConfig.allowInsecureHttp,
+                            username: webdavConfig.username,
+                            password,
+                            fetcher,
+                        },
+                    ),
+                    { ownerId: 'mindwtr-desktop', purpose: 'ordinary-sync' },
+                );
+            },
+            acquireDropboxRemoteMutationFence: async (token) => {
+                const fetcher = await createFetchWithAbortForContext(context);
+                return acquireSyncRemoteMutationFence(
+                    createDropboxSyncRemoteMutationFencePort(token, fetcher),
+                    { ownerId: 'mindwtr-desktop', purpose: 'ordinary-sync' },
+                );
+            },
             webdavGet: async () => {
                 // Error context must carry the file URL the request targets,
                 // not the configured base folder — a folder-only url field

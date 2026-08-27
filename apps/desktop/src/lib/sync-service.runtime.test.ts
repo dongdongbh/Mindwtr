@@ -85,10 +85,91 @@ const buildResponse = (
     },
 } as unknown as Response);
 
+const REMOTE_FENCE_NAME = '.mindwtr-sync-fence-v1.json';
+const REMOTE_FENCE_SERVER_DATE = 'Wed, 26 Aug 2026 12:00:00 GMT';
+
+/** Adds the compatible-client fence protocol to a provider fixture while
+ * leaving ordinary document/attachment behavior with the focused test. */
+const withRemoteMutationFence = (
+    delegate: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+) => {
+    let bytes: Uint8Array | null = null;
+    let version = 0;
+    const currentVersion = () => `fence-v${version}`;
+    const bodyBytes = (body: BodyInit | null | undefined): Uint8Array => {
+        if (body instanceof Uint8Array) return new Uint8Array(body);
+        if (body instanceof ArrayBuffer) return new Uint8Array(body);
+        throw new Error('expected byte-array fence body');
+    };
+
+    return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+        const headers = new Headers(init?.headers);
+        const apiArg = headers.get('Dropbox-API-Arg');
+        const dropboxArg = apiArg ? JSON.parse(apiArg) as {
+            path?: string;
+            mode?: { '.tag'?: string; update?: string };
+        } : null;
+        const deleteArg = url.endsWith('/delete_v2') && typeof init?.body === 'string'
+            ? JSON.parse(init.body) as { path?: string; parent_rev?: string }
+            : null;
+        const isWebdavFence = url.includes(REMOTE_FENCE_NAME);
+        const isDropboxFence = dropboxArg?.path === `/${REMOTE_FENCE_NAME}`
+            || deleteArg?.path === `/${REMOTE_FENCE_NAME}`;
+
+        if (!isWebdavFence && !isDropboxFence) return delegate(input, init);
+
+        if (method === 'GET' || url.endsWith('/download')) {
+            if (!bytes) {
+                return isDropboxFence
+                    ? buildResponse(409, '{"error_summary":"path/not_found/"}', { date: REMOTE_FENCE_SERVER_DATE })
+                    : buildResponse(404, '', { date: REMOTE_FENCE_SERVER_DATE });
+            }
+            return buildResponse(200, new TextDecoder().decode(bytes), {
+                date: REMOTE_FENCE_SERVER_DATE,
+                ...(isDropboxFence
+                    ? { 'dropbox-api-result': JSON.stringify({ rev: currentVersion() }) }
+                    : { etag: `"${currentVersion()}"` }),
+            });
+        }
+
+        if (method === 'PUT' || url.endsWith('/upload')) {
+            const expected = isDropboxFence
+                ? dropboxArg?.mode?.['.tag'] === 'update' ? dropboxArg.mode.update : null
+                : headers.get('if-match')?.replace(/^"|"$/g, '') ?? null;
+            const createOnly = isDropboxFence
+                ? dropboxArg?.mode?.['.tag'] === 'add'
+                : headers.get('if-none-match') === '*';
+            if ((bytes && createOnly) || (bytes && expected !== currentVersion()) || (!bytes && expected)) {
+                return buildResponse(isDropboxFence ? 409 : 412, '', { date: REMOTE_FENCE_SERVER_DATE });
+            }
+            bytes = bodyBytes(init?.body);
+            version += 1;
+            return buildResponse(isDropboxFence ? 200 : 201, JSON.stringify({ rev: currentVersion() }), {
+                date: REMOTE_FENCE_SERVER_DATE,
+            });
+        }
+
+        if (method === 'DELETE' || url.endsWith('/delete_v2')) {
+            const expected = isDropboxFence
+                ? deleteArg?.parent_rev
+                : headers.get('if-match')?.replace(/^"|"$/g, '');
+            if (!bytes || expected !== currentVersion()) {
+                return buildResponse(isDropboxFence ? 409 : 412, '', { date: REMOTE_FENCE_SERVER_DATE });
+            }
+            bytes = null;
+            return buildResponse(204, '', { date: REMOTE_FENCE_SERVER_DATE });
+        }
+
+        throw new Error(`unexpected fence ${method}`);
+    });
+};
+
 const createRuntimeWebdavCapabilityFetch = (documentBody: string) => {
     let probeBytes: Uint8Array | null = null;
     let probeVersion = 0;
-    return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    return withRemoteMutationFence(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         const method = init?.method ?? 'GET';
         const headers = new Headers(init?.headers);
@@ -694,6 +775,12 @@ describe('desktop sync-service runtime', () => {
         });
 
         expect(result).toEqual({ success: true, stats: emptyStats });
+        expect(httpFetchMock.mock.calls.some(([input, init]) => (
+            String(input).includes(REMOTE_FENCE_NAME) && init?.method === 'PUT'
+        ))).toBe(true);
+        expect(httpFetchMock.mock.calls.some(([input, init]) => (
+            String(input).includes(REMOTE_FENCE_NAME) && init?.method === 'DELETE'
+        ))).toBe(true);
         expect(invokeMock).not.toHaveBeenCalledWith('get_sync_backend', undefined);
         expect(invokeMock).not.toHaveBeenCalledWith('get_webdav_config', undefined);
         expect(invokeMock).not.toHaveBeenCalledWith('webdav_get_json', undefined);
@@ -734,7 +821,7 @@ describe('desktop sync-service runtime', () => {
             people: [],
             settings: {},
         };
-        const httpFetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const httpFetchMock = withRemoteMutationFence(async (_input: RequestInfo | URL, init?: RequestInit) => {
             if (init?.method === 'PUT') throw new Error('candidate remote write failed');
             return buildResponse(200, JSON.stringify(pendingRemote), { etag: '"pending-read"' });
         });
@@ -1276,7 +1363,7 @@ describe('desktop sync-service runtime', () => {
             url: 'https://sync.example.com/data.json',
             username: 'user',
         });
-        const headFetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const headFetchMock = withRemoteMutationFence(async (input: RequestInfo | URL, init?: RequestInit) => {
             expect(String(input)).toBe('https://sync.example.com/data.json');
             expect(init?.method).toBe('HEAD');
             return buildResponse(200, '', { etag: '"new"', 'content-length': '2' });
@@ -1351,7 +1438,7 @@ describe('desktop sync-service runtime', () => {
 
     it('proves a first Dropbox connection with attachments using only the staged credential handle', async () => {
         const syncServiceModule = await syncServiceModulePromise;
-        const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const fetchMock = withRemoteMutationFence(async (input: RequestInfo | URL, init?: RequestInit) => {
             const url = String(input);
             if (url === 'https://content.dropboxapi.com/2/files/upload') {
                 expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer first-connect-token');
@@ -1426,6 +1513,9 @@ describe('desktop sync-service runtime', () => {
             });
 
             expect(result).toEqual(expect.objectContaining({ success: true }));
+            expect(fetchMock.mock.calls.some(([, init]) => (
+                new Headers(init?.headers).get('Dropbox-API-Arg')?.includes(REMOTE_FENCE_NAME)
+            ))).toBe(true);
             const tokenCalls = invokeMock.mock.calls.filter(([command]) => (
                 command === 'get_dropbox_access_token'
             ));
@@ -1442,7 +1532,7 @@ describe('desktop sync-service runtime', () => {
         const syncServiceModule = await syncServiceModulePromise;
         let attachmentUploadAttempts = 0;
         const authorizationHeaders: string[] = [];
-        const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const fetchMock = withRemoteMutationFence(async (input: RequestInfo | URL, init?: RequestInit) => {
             const url = String(input);
             const authorization = new Headers(init?.headers).get('Authorization') ?? '';
             authorizationHeaders.push(authorization);
@@ -1542,7 +1632,7 @@ describe('desktop sync-service runtime', () => {
             settings: {},
         };
         let downloadAttempts = 0;
-        const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const fetchMock = withRemoteMutationFence(async (input: RequestInfo | URL) => {
             if (String(input) !== 'https://content.dropboxapi.com/2/files/download') {
                 throw new Error(`Unexpected Dropbox fetch input: ${String(input)}`);
             }
@@ -1637,7 +1727,7 @@ describe('desktop sync-service runtime', () => {
             areas: [],
             settings: {},
         };
-        const nativeFetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const nativeFetchMock = withRemoteMutationFence(async (input: RequestInfo | URL) => {
             if (String(input) === 'https://content.dropboxapi.com/2/files/download') {
                 return buildResponse(200, '', { 'dropbox-api-result': '{"rev":"rev-native"}' });
             }
@@ -1689,7 +1779,11 @@ describe('desktop sync-service runtime', () => {
             const result = await syncServiceModule.SyncService.performSync();
 
             expect(result).toEqual({ success: true, stats: emptyStats });
-            expect(nativeFetchMock).toHaveBeenCalledTimes(1);
+            const nativeDocumentCalls = nativeFetchMock.mock.calls.filter(([, init]) => {
+                const apiArg = new Headers(init?.headers).get('Dropbox-API-Arg');
+                return apiArg?.includes('"path":"/data.json"');
+            });
+            expect(nativeDocumentCalls).toHaveLength(1);
             expect(browserFetchMock).toHaveBeenCalledTimes(1);
             expect(logInfoMock).toHaveBeenCalledWith(
                 'Retrying Dropbox remote read with browser fetch fallback',
