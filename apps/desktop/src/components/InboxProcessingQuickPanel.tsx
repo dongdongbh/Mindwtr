@@ -1,5 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react';
-import { ArrowRight, BookOpen, CheckCircle, ClipboardList, Clock, Trash2, User, X } from 'lucide-react';
+import { ArrowRight, BookOpen, CheckCircle, ClipboardList, Clock, Hourglass, Trash2, User, X } from 'lucide-react';
 import { DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimateLabel, safeFormatDate, safeParseDate, tFallback, type Project, type Task, type TaskDraft, type TaskDraftSetter, type TaskPriority, type TimeEstimate,
     numericTextCollator,
 } from '@mindwtr/core';
@@ -25,7 +25,7 @@ import { ProjectSelector } from './ui/ProjectSelector';
 import { DateField } from './ui/DateField';
 import { QuickDateChips } from './QuickDateChips';
 
-type QuickActionabilityChoice = 'actionable' | 'later' | 'trash' | 'someday' | 'reference';
+type QuickActionabilityChoice = 'actionable' | 'later' | 'trash' | 'someday' | 'reference' | 'incubate';
 type QuickTwoMinuteChoice = 'yes' | 'no';
 type QuickExecutionChoice = 'defer' | 'delegate';
 
@@ -41,6 +41,8 @@ export type InboxProcessingQuickPanelProps = {
     processingMode: 'guided' | 'quick';
     onModeChange: (mode: 'guided' | 'quick') => void;
     onSkip: () => void;
+    /** This item reached the pass from Someday, not the Inbox (#1089). */
+    isReturningItem: boolean;
     onClose: () => void;
     actionabilityChoice: QuickActionabilityChoice;
     setActionabilityChoice: (value: QuickActionabilityChoice) => void;
@@ -109,6 +111,7 @@ export function InboxProcessingQuickPanel({
     processingMode,
     onModeChange,
     onSkip,
+    isReturningItem,
     onClose,
     actionabilityChoice,
     setActionabilityChoice,
@@ -186,12 +189,15 @@ export function InboxProcessingQuickPanel({
 
     const showActionFields = actionabilityChoice === 'actionable';
     const showLaterFields = actionabilityChoice === 'later';
+    const showIncubateFields = actionabilityChoice === 'incubate';
     const showDecisionFields = showActionFields && twoMinuteChoice === 'no';
     const showDelegationFields = showDecisionFields && executionChoice === 'delegate';
     const showNextActionFields = showDecisionFields && executionChoice === 'defer';
     const showReferenceOrganizationFields = actionabilityChoice === 'reference';
-    const laterLabel = tFallback(t, 'process.later', 'Later');
-    const laterHint = tFallback(t, 'process.laterHint', 'Set a start date and move this to Next.');
+    const laterLabel = tFallback(t, 'process.later', 'Start later');
+    const laterHint = tFallback(t, 'process.laterHint', 'Set a start date and move this to Next Actions.');
+    const incubateLabel = tFallback(t, 'process.incubate', 'Incubate');
+    const incubateHint = tFallback(t, 'process.incubateHint', 'Park this without deciding. It comes back to clarify on the date you choose.');
     const compareLabels = (left: string, right: string) =>
         numericTextCollator.compare(left, right);
     const sortedProjects = [...projects].sort((a, b) => compareLabels(a.title, b.title));
@@ -369,6 +375,16 @@ export function InboxProcessingQuickPanel({
 
             <div className="px-6 py-5 space-y-5">
                 <div className="space-y-1">
+                    {isReturningItem && (
+                        <div className="flex flex-col items-center gap-1 pb-1">
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-status-someday/10 px-2.5 py-1 text-[11px] font-medium text-status-someday">
+                                <Hourglass className="h-3 w-3" /> {tFallback(t, 'process.returningItem', 'Back to clarify')}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                                {tFallback(t, 'process.returningItemHint', 'You incubated this. Decide what it is now.')}
+                            </span>
+                        </div>
+                    )}
                     <p className="text-center font-medium text-base leading-snug">
                         {processingTitle || processingTask.title}
                     </p>
@@ -459,6 +475,19 @@ export function InboxProcessingQuickPanel({
                             <Clock className="w-3.5 h-3.5 inline mr-1.5" />
                             {t('process.someday')}
                         </button>
+                        <button
+                            type="button"
+                            onClick={() => setActionabilityChoice('incubate')}
+                            className={cn(
+                                'rounded-lg px-3 py-2 text-xs font-medium transition-colors border',
+                                actionabilityChoice === 'incubate'
+                                    ? 'bg-status-someday/15 text-status-someday border-status-someday/40'
+                                    : 'bg-muted/40 border-border hover:bg-muted/70'
+                            )}
+                        >
+                            <Hourglass className="w-3.5 h-3.5 inline mr-1.5" />
+                            {incubateLabel}
+                        </button>
                         {showReferenceOption ? (
                             <button
                                 type="button"
@@ -484,6 +513,18 @@ export function InboxProcessingQuickPanel({
                             t={t}
                             fields={scheduleFields}
                             visibleFieldKeys={['start']}
+                            variant="quick"
+                        />
+                    </div>
+                ) : null}
+
+                {showIncubateFields ? (
+                    <div className="space-y-3 rounded-lg border border-status-someday/20 bg-status-someday/5 p-3">
+                        <div className="text-xs text-muted-foreground">{incubateHint}</div>
+                        <InboxProcessingScheduleFields
+                            t={t}
+                            fields={scheduleFields}
+                            visibleFieldKeys={['review']}
                             variant="quick"
                         />
                     </div>

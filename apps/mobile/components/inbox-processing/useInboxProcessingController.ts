@@ -26,6 +26,7 @@ import {
   resolveFeatureFlags,
   safeFormatDate,
   safeParseDate,
+  isProcessInboxReturningTask,
   isTaskVisibleInArea,
   selectProcessInboxCandidates,
   skipCurrentProcessInboxTask,
@@ -72,7 +73,7 @@ import { styles } from '../inbox-processing-modal.styles';
 const MAX_TOKEN_SUGGESTIONS = 6;
 const PRIORITY_OPTIONS: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
 const ENERGY_LEVEL_OPTIONS: Array<NonNullable<Task['energyLevel']>> = ['low', 'medium', 'high'];
-type ActionabilityChoice = 'actionable' | 'later' | 'trash' | 'someday' | 'reference' | null;
+type ActionabilityChoice = 'actionable' | 'later' | 'incubate' | 'trash' | 'someday' | 'reference' | null;
 type TwoMinuteChoice = 'yes' | 'no' | null;
 type ExecutionChoice = 'defer' | 'delegate' | null;
 
@@ -139,7 +140,12 @@ export function useInboxProcessingController({
   const hasInitialized = useRef(false);
   // Last committed decision, kept so a presentation that auto-advances can
   // offer an Undo without re-deriving what it just did.
-  const lastCommittedRef = useRef<{ taskId: string; discarded: boolean } | null>(null);
+  const lastCommittedRef = useRef<{
+    taskId: string;
+    discarded: boolean;
+    /** Where the item came from, so Undo puts it back there (#1089). */
+    restore: Pick<Task, 'status' | 'reviewAt'>;
+  } | null>(null);
 
   const inboxProcessing = settings?.gtd?.inboxProcessing ?? {};
   const twoMinuteEnabled = inboxProcessing.twoMinuteEnabled !== false;
@@ -209,6 +215,10 @@ export function useInboxProcessingController({
     () => getProcessInboxCurrentCandidate(processingSession, inboxTasks),
     [inboxTasks, processingSession],
   );
+  // An incubated item whose date arrived: it reached this pass from Someday,
+  // not the Inbox, and the card says so rather than passing it off as a fresh
+  // capture (#1089).
+  const isReturningItem = Boolean(currentTask && isProcessInboxReturningTask(currentTask));
   const totalCount = inboxTasks.length;
   const processedCount = totalCount - processingQueue.length;
   const formatProgressLabel = useCallback((current: number, total: number) => {
@@ -598,7 +608,13 @@ export function useInboxProcessingController({
         showProcessingError(getActionFailureMessage(outcome.writeResult));
         return false;
       }
-      lastCommittedRef.current = { taskId: currentTask.id, discarded: event.type === 'discard' };
+      lastCommittedRef.current = {
+        taskId: currentTask.id,
+        discarded: event.type === 'discard',
+        // An incubated item reached this pass from Someday, so Undo restores
+        // Someday and its return date — not the Inbox it was never in.
+        restore: { status: currentTask.status, reviewAt: currentTask.reviewAt },
+      };
       if (options.advance !== false && !activateProcessingSession(outcome.session)) {
         handleClose();
       }
@@ -630,7 +646,7 @@ export function useInboxProcessingController({
   }), [selectedAreaId, selectedContexts, selectedProjectId, selectedTags, showContextsField, showTagsField]);
 
   // Undo the decision just committed: a discard is a soft delete that left the
-  // task in the Inbox, everything else moved its status out of it.
+  // task where it was, everything else moved its status out of that list.
   const undoLastDecision = useCallback(async () => {
     const committed = lastCommittedRef.current;
     if (!committed) return;
@@ -638,7 +654,7 @@ export function useInboxProcessingController({
     try {
       const result = committed.discarded
         ? await restoreTask(committed.taskId)
-        : await updateTask(committed.taskId, { status: 'inbox' });
+        : await updateTask(committed.taskId, committed.restore);
       if (isActionFailure(result)) showProcessingError(getActionFailureMessage(result));
     } catch (error) {
       showProcessingError(getUnknownErrorMessage(error));
@@ -662,7 +678,7 @@ export function useInboxProcessingController({
     if (!startDate && !laterNoDateSelected) {
       showToast({
         title: t('common.notice'),
-        message: tFallback(t, 'process.laterStartRequired', 'Choose a start date for Later.'),
+        message: tFallback(t, 'process.laterStartRequired', 'Choose a start date for Start later.'),
         tone: 'warning',
       });
       return false;
@@ -690,6 +706,43 @@ export function useInboxProcessingController({
     selectedProjectId,
     showAreaField,
     showProjectField,
+    showToast,
+    t,
+  ]);
+
+  /**
+   * Incubate: park the item without deciding what it is, and bring it back to
+   * the clarify pass on a chosen date (#1089). Someday plus a review date —
+   * the shape Daily and Weekly Review already treat as "due to reconsider" —
+   * so no new status and no background job that mutates it at midnight.
+   */
+  const handleIncubate = useCallback(async () => {
+    if (!currentTask) return false;
+    if (!pendingReviewDate) {
+      showToast({
+        title: t('common.notice'),
+        message: tFallback(t, 'process.incubateDateRequired', 'Choose a date to bring this back.'),
+        tone: 'warning',
+      });
+      return false;
+    }
+    const applied = await applyWorkflowEvent({
+      type: 'someday',
+      fields: {
+        ...buildSelectionFields(),
+        reviewAt: formatScheduledDateValue(pendingReviewDate, pendingReviewDateOnly),
+      },
+    });
+    if (!applied) return false;
+    setPendingReviewDate(null);
+    return true;
+  }, [
+    applyWorkflowEvent,
+    buildSelectionFields,
+    currentTask,
+    formatScheduledDateValue,
+    pendingReviewDate,
+    pendingReviewDateOnly,
     showToast,
     t,
   ]);
@@ -1048,6 +1101,9 @@ export function useInboxProcessingController({
     if (actionabilityChoice === 'later') {
       return handleLaterMobile();
     }
+    if (actionabilityChoice === 'incubate') {
+      return handleIncubate();
+    }
     if (actionabilityChoice === 'trash' || actionabilityChoice === 'someday' || actionabilityChoice === 'reference') {
       return handleNotActionable(actionabilityChoice);
     }
@@ -1070,6 +1126,7 @@ export function useInboxProcessingController({
     finalizeNextAction,
     handleConfirmWaitingMobile,
     handleConvertToProject,
+    handleIncubate,
     handleLaterMobile,
     handleNotActionable,
     handleTwoMinYes,
@@ -1260,9 +1317,11 @@ export function useInboxProcessingController({
     handleConfirmWaitingMobile,
     handleConvertToProject,
     handleCreateProjectEarly,
+    handleIncubate,
     handleLaterMobile,
     handleNextTask,
     handleNotActionable,
+    isReturningItem,
     handleTwoMinYes,
     finalizeNextAction,
     undoLastDecision,

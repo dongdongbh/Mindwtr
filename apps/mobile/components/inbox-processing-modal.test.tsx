@@ -790,6 +790,58 @@ describe('InboxProcessingModal', () => {
     expect(updateTask.mock.calls[0][1].dueDate).toContain('2026-09-01');
   });
 
+  // #1089: incubating parks the item without deciding what it is, and brings it
+  // back to this pass on a date. Someday + a review date, which Daily and
+  // Weekly Review already read as "due to reconsider".
+  it('incubates a capture as Someday with the return date', async () => {
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+
+    const root = tree!.root;
+    act(() => {
+      findPressableWithText(root, 'Incubate').props.onPress();
+    });
+
+    act(() => {
+      root.findByProps({ children: 'common.notSet' }).parent!.props.onPress();
+    });
+    act(() => {
+      root.findByType('DateTimePicker' as any).props.onChange({ type: 'set' }, new Date(2026, 8, 10, 12, 0, 0));
+    });
+
+    pressStep(root, 'File it');
+    await flushAsyncActions();
+
+    expect(updateTask).toHaveBeenCalledWith(
+      'inbox-1',
+      expect.objectContaining({
+        status: 'someday',
+        reviewAt: '2026-09-10',
+      })
+    );
+  });
+
+  it('brings a due incubated item back into the pass and says where it came from', () => {
+    storeState.tasks = [{
+      ...baseInboxTask,
+      id: 'incubated-1',
+      title: "Mom's birthday",
+      status: 'someday',
+      reviewAt: '2026-01-01',
+    }];
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+
+    const root = tree!.root;
+    expect(findNodesWithText(root, 'Back to clarify').length).toBeGreaterThan(0);
+  });
+
   it('hides the two-minute section when that shortcut is disabled', () => {
     mockSettings.features = undefined;
     mockSettings.gtd.inboxProcessing = { twoMinuteEnabled: false };
@@ -1297,7 +1349,7 @@ describe('InboxProcessingModal', () => {
     });
 
     const root = tree!.root;
-    const laterButton = findPressableWithText(root, 'Later');
+    const laterButton = findPressableWithText(root, 'Start later');
 
     if (!laterButton) {
       throw new Error('Later button not found');
@@ -1356,7 +1408,7 @@ describe('InboxProcessingModal', () => {
     });
 
     const root = tree!.root;
-    const laterButton = findPressableWithText(root, 'Later');
+    const laterButton = findPressableWithText(root, 'Start later');
 
     if (!laterButton) {
       throw new Error('Later button not found');
@@ -1411,7 +1463,7 @@ describe('InboxProcessingModal', () => {
     });
 
     const root = tree!.root;
-    const laterButton = findPressableWithText(root, 'Later');
+    const laterButton = findPressableWithText(root, 'Start later');
 
     if (!laterButton) {
       throw new Error('Later button not found');
@@ -1476,7 +1528,7 @@ describe('InboxProcessingModal', () => {
     });
 
     const root = tree!.root;
-    const laterButton = findPressableWithText(root, 'Later');
+    const laterButton = findPressableWithText(root, 'Start later');
 
     if (!laterButton) {
       throw new Error('Later button not found');
@@ -1547,7 +1599,7 @@ describe('InboxProcessingModal', () => {
     });
 
     const root = tree!.root;
-    const laterButton = findPressableWithText(root, 'Later');
+    const laterButton = findPressableWithText(root, 'Start later');
 
     if (!laterButton) {
       throw new Error('Later button not found');
@@ -2148,7 +2200,7 @@ describe('InboxProcessingModal', () => {
       const root = await openFlow();
 
       expect(findNodesWithText(root, 'inbox.isActionable')).toHaveLength(0);
-      for (const label of ['inbox.illDoIt', 'taskEdit.projectLabel', 'Later', 'inbox.delegate', 'inbox.someday', 'nav.reference', 'inbox.trash']) {
+      for (const label of ['inbox.illDoIt', 'taskEdit.projectLabel', 'Start later', 'inbox.delegate', 'inbox.someday', 'nav.reference', 'inbox.trash']) {
         expect(findNodesWithText(root, label).length).toBeGreaterThan(0);
       }
     });
@@ -2454,7 +2506,7 @@ describe('InboxProcessingModal', () => {
       for (const mode of ['guided', 'quick'] as const) {
         storeState.tasks = [{ ...baseInboxTask }];
         const root = await openMode(mode);
-        pressStep(root, 'Later');
+        pressStep(root, 'Start later');
 
         expect(findNodesWithText(root, 'No date').length).toBeGreaterThan(0);
         expect(findNodesWithText(root, 'common.notSet').length).toBeGreaterThan(0);

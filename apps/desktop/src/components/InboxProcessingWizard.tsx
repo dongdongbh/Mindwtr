@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { ArrowRight, BookOpen, Check, CheckCircle, ChevronLeft, ClipboardList, Clock, Loader2, Sparkles, Trash2, User, X } from 'lucide-react';
+import { ArrowRight, BookOpen, Check, CheckCircle, ChevronLeft, ClipboardList, Clock, Hourglass, Loader2, Sparkles, Trash2, User, X } from 'lucide-react';
 import { DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimateLabel, safeFormatDate, safeParseDate, tFallback, type AppData, type Area, type Project, type Task, type TaskDraft, type TaskDraftSetter, type TaskPriority, type TimeEstimate,
     numericTextCollator,
 } from '@mindwtr/core';
@@ -48,7 +48,10 @@ export type InboxProcessingWizardProps = {
     handleSkip: () => void;
     handleNotActionable: (destination: 'trash' | 'someday' | 'reference') => void;
     handleLater: () => void;
+    handleIncubate: () => void;
     handleActionable: () => void;
+    /** This item reached the pass from Someday, not the Inbox (#1089). */
+    isReturningItem: boolean;
     showDoneNowShortcut: boolean;
     handleProjectCheckNo: () => void;
     handleProjectCheckYes: () => void;
@@ -119,7 +122,9 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     handleSkip,
     handleNotActionable,
     handleLater,
+    handleIncubate,
     handleActionable,
+    isReturningItem,
     showDoneNowShortcut,
     handleProjectCheckNo,
     handleProjectCheckYes,
@@ -237,7 +242,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     // After a long step is submitted the view is left scrolled to the bottom;
     // bring the panel top (title of the next task) back into view on advance.
     const panelRef = useRef<HTMLDivElement | null>(null);
-    const [actionableChoice, setActionableChoice] = useState<'initial' | 'not-actionable' | 'later'>('initial');
+    const [actionableChoice, setActionableChoice] = useState<'initial' | 'not-actionable' | 'later' | 'incubate'>('initial');
     const processingTaskId = processingTask?.id;
     useEffect(() => {
         if (!processingTaskId) return;
@@ -253,8 +258,10 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     const currentProject = selectedProjectId
         ? projects.find((project) => project.id === selectedProjectId) ?? null
         : null;
-    const laterLabel = tFallback(t, 'process.later', 'Later');
-    const laterHint = tFallback(t, 'process.laterHint', 'Set a start date and move this to Next.');
+    const laterLabel = tFallback(t, 'process.later', 'Start later');
+    const laterHint = tFallback(t, 'process.laterHint', 'Set a start date and move this to Next Actions.');
+    const incubateLabel = tFallback(t, 'process.incubate', 'Incubate');
+    const incubateHint = tFallback(t, 'process.incubateHint', 'Park this without deciding. It comes back to clarify on the date you choose.');
     const isReferenceOrganizationStep = processingStep === 'reference';
     const selectedOrganizationCount = selectedContexts.length + selectedTags.length;
     const compareLabels = (left: string, right: string) =>
@@ -350,6 +357,17 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                     <span className="w-1.5 h-1.5 rounded-full bg-primary" />
                     <span className="text-xs font-medium text-primary">{stepLabel[processingStep]}</span>
                 </div>
+
+                {isReturningItem && (
+                    <div className="flex flex-col items-center gap-1">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-status-someday/10 px-2.5 py-1 text-[11px] font-medium text-status-someday">
+                            <Hourglass className="h-3 w-3" /> {tFallback(t, 'process.returningItem', 'Back to clarify')}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                            {tFallback(t, 'process.returningItemHint', 'You incubated this. Decide what it is now.')}
+                        </span>
+                    </div>
+                )}
 
                 {/* Task title */}
                 <p className="text-center font-medium text-base leading-snug">
@@ -506,6 +524,16 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     <CheckCircle className="h-4 w-4" /> {t('process.doneIt')}
                                 </button>
                             )}
+                            {/* Deferring an action you have already decided on is
+                                an actionable outcome, so it sits on this side of
+                                the question rather than under "No" (#1089). */}
+                            <button
+                                type="button"
+                                onClick={() => setActionableChoice('later')}
+                                className="mx-auto flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-info transition-colors hover:bg-info/10"
+                            >
+                                <Clock className="h-4 w-4" /> {laterLabel}
+                            </button>
                         </div>
                     )}
                     {actionableChoice === 'not-actionable' && (
@@ -540,10 +568,10 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                 )}
                                 <button
                                     type="button"
-                                    onClick={() => setActionableChoice('later')}
-                                    className="flex items-center justify-center gap-1.5 rounded-lg bg-info/10 py-2.5 text-xs font-medium text-info transition-colors hover:bg-info/20"
+                                    onClick={() => setActionableChoice('incubate')}
+                                    className="flex items-center justify-center gap-1.5 rounded-lg bg-status-someday/10 py-2.5 text-xs font-medium text-status-someday transition-colors hover:bg-status-someday/20"
                                 >
-                                    <Clock className="h-3.5 w-3.5" /> {laterLabel}
+                                    <Hourglass className="h-3.5 w-3.5" /> {incubateLabel}
                                 </button>
                             </div>
                         </div>
@@ -552,7 +580,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                         <div className="space-y-3 border-t border-border pt-3">
                             <button
                                 type="button"
-                                onClick={() => setActionableChoice('not-actionable')}
+                                onClick={() => setActionableChoice('initial')}
                                 className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
                             >
                                 <ChevronLeft className="h-3.5 w-3.5" /> {t('common.back')}
@@ -570,6 +598,31 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                 className="flex w-full items-center justify-center gap-2 rounded-lg bg-info py-2.5 text-sm font-medium text-info-foreground transition-colors hover:bg-info/90"
                             >
                                 <Clock className="h-4 w-4" /> {laterLabel}
+                            </button>
+                        </div>
+                    )}
+                    {actionableChoice === 'incubate' && (
+                        <div className="space-y-3 border-t border-border pt-3">
+                            <button
+                                type="button"
+                                onClick={() => setActionableChoice('not-actionable')}
+                                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                            >
+                                <ChevronLeft className="h-3.5 w-3.5" /> {t('common.back')}
+                            </button>
+                            <div className="text-xs text-muted-foreground">{incubateHint}</div>
+                            <InboxProcessingScheduleFields
+                                t={t}
+                                fields={scheduleFields}
+                                visibleFieldKeys={['review']}
+                                variant="guided"
+                            />
+                            <button
+                                type="button"
+                                onClick={handleIncubate}
+                                className="flex w-full items-center justify-center gap-2 rounded-lg bg-status-someday py-2.5 text-sm font-medium text-white transition-colors hover:bg-status-someday/90"
+                            >
+                                <Hourglass className="h-4 w-4" /> {incubateLabel}
                             </button>
                         </div>
                     )}

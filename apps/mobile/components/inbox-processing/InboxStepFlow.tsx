@@ -9,6 +9,7 @@ import {
   Clock3,
   Cloud,
   Folder,
+  Hourglass,
   Trash2,
   UserRound,
   type LucideIcon,
@@ -41,7 +42,7 @@ type Controller = ReturnType<typeof useInboxProcessingController>;
 /** Which decision landed — picks the Undo toast wording. */
 type Committed = 'trash' | Extract<TaskStatus, 'next' | 'waiting' | 'someday' | 'reference' | 'done'>;
 
-type Step = 'actionable' | 'decisions' | 'later' | 'twoMinute' | 'execution' | 'oneAction' | 'waiting' | 'file';
+type Step = 'actionable' | 'decisions' | 'later' | 'incubate' | 'twoMinute' | 'execution' | 'oneAction' | 'waiting' | 'file';
 
 const STEP_TRANSITION_MS = 200;
 const STEP_TRANSITION_OFFSET = 24;
@@ -153,6 +154,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
   const entryStep: Step = quick ? 'decisions' : 'actionable';
   const step: Step = (() => {
     if (actionabilityChoice === 'later') return 'later';
+    if (actionabilityChoice === 'incubate') return 'incubate';
     if (actionabilityChoice !== 'actionable') return entryStep;
     if (twoMinuteEnabled && twoMinuteChoice === null) return quick ? entryStep : 'twoMinute';
     if (executionChoice === null) return quick ? entryStep : 'execution';
@@ -160,7 +162,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
     if (showProjectField && !oneActionAnswered) return 'oneAction';
     return 'file';
   })();
-  const isTerminal = step === 'later' || step === 'waiting' || step === 'file';
+  const isTerminal = step === 'later' || step === 'incubate' || step === 'waiting' || step === 'file';
 
   useEffect(() => {
     setOneActionAnswered(false);
@@ -249,7 +251,9 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
 
   if (!currentTask) return null;
 
-  const terminalOutcome: Committed = step === 'waiting' ? 'waiting' : 'next';
+  const terminalOutcome: Committed = step === 'waiting'
+    ? 'waiting'
+    : (step === 'incubate' ? 'someday' : 'next');
 
   const moreOptionsDisclosure = (
     <>
@@ -373,7 +377,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
               <SecondaryButton
                 icon={Clock3}
                 tc={tc}
-                label={tFallback(t, 'process.later', 'Later')}
+                label={tFallback(t, 'process.later', 'Start later')}
                 onPress={() => chooseQuick('later')}
               />
               <SecondaryButton
@@ -387,6 +391,12 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
                 tc={tc}
                 label={t('inbox.someday')}
                 onPress={() => { void commit('someday', () => handleNotActionable('someday')); }}
+              />
+              <SecondaryButton
+                icon={Hourglass}
+                tc={tc}
+                label={tFallback(t, 'process.incubate', 'Incubate')}
+                onPress={() => setActionabilityChoice('incubate')}
               />
               <SecondaryButton
                 icon={BookOpen}
@@ -419,11 +429,20 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
               onPress={() => setActionabilityChoice('actionable')}
             />
             <View style={styles.stepSecondaryRow}>
+              {/* Deferring an action you have already decided on is an
+                  actionable outcome; incubating is the not-actionable one that
+                  comes back to this pass on a date (#1089). */}
               <SecondaryButton
                 icon={Clock3}
                 tc={tc}
-                label={tFallback(t, 'process.later', 'Later')}
+                label={tFallback(t, 'process.later', 'Start later')}
                 onPress={() => setActionabilityChoice('later')}
+              />
+              <SecondaryButton
+                icon={Hourglass}
+                tc={tc}
+                label={tFallback(t, 'process.incubate', 'Incubate')}
+                onPress={() => setActionabilityChoice('incubate')}
               />
               <SecondaryButton
                 icon={Cloud}
@@ -516,7 +535,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
               {tFallback(t, 'inbox.deferWhen', 'When should it start?')}
             </Text>
             <Text style={[styles.stepHint, { color: tc.secondaryText }]}>
-              {tFallback(t, 'process.laterHint', 'Set a start date and move this to Next.')}
+              {tFallback(t, 'process.laterHint', 'Set a start date and move this to Next Actions.')}
             </Text>
             <InboxDateSelectorRow
               t={t}
@@ -537,6 +556,41 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
               dateOnly={pendingStartDateOnly}
               onDateOnly={() => setPendingStartDateOnly(true)}
               onUseDefaultTime={() => setPendingStartDateOnly(false)}
+              defaultScheduleTime={controller.defaultScheduleTime}
+              dateOnlyLabel={dateOnlyLabel}
+              notSetLabel={t('common.notSet')}
+              clearLabel={t('common.clear')}
+              tc={tc}
+            />
+          </View>
+        );
+
+      case 'incubate':
+        return (
+          <View>
+            <Text style={[styles.stepQuestion, { color: tc.text }]}>
+              {tFallback(t, 'inbox.deferWhen', 'When should it come back?')}
+            </Text>
+            <Text style={[styles.stepHint, { color: tc.secondaryText }]}>
+              {tFallback(t, 'process.incubateHint', 'Park this without deciding. It comes back to clarify on the date you choose.')}
+            </Text>
+            <InboxDateSelectorRow
+              t={t}
+              label={t('taskEdit.reviewDateLabel')}
+              value={controller.pendingReviewDate}
+              selectedPreset={null}
+              onOpen={() => controller.setShowReviewDatePicker(true)}
+              onClear={() => {
+                controller.setPendingReviewDate(null);
+                controller.setPendingReviewDateOnly(false);
+              }}
+              onQuickDateSelect={(date) => {
+                controller.setPendingReviewDate(date);
+                controller.setPendingReviewDateOnly(false);
+              }}
+              dateOnly={controller.pendingReviewDateOnly}
+              onDateOnly={() => controller.setPendingReviewDateOnly(true)}
+              onUseDefaultTime={() => controller.setPendingReviewDateOnly(false)}
               defaultScheduleTime={controller.defaultScheduleTime}
               dateOnlyLabel={dateOnlyLabel}
               notSetLabel={t('common.notSet')}
@@ -656,6 +710,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
           setProcessingTitle={controller.setProcessingTitle}
           processingDescription={controller.processingDescription}
           setProcessingDescription={controller.setProcessingDescription}
+          isReturningItem={controller.isReturningItem}
           processingTitleFocused={controller.processingTitleFocused}
           setProcessingTitleFocused={controller.setProcessingTitleFocused}
           titleDirectionStyle={controller.titleDirectionStyle}
@@ -700,7 +755,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
               onSelect: (date) => { controller.setPendingDueDate(date); controller.setPendingDueDateOnly(false); },
             },
             {
-              show: controller.showReviewDateField && controller.showReviewDatePicker,
+              show: (controller.showReviewDateField || step === 'incubate') && controller.showReviewDatePicker,
               value: controller.pendingReviewDate,
               onClose: () => controller.setShowReviewDatePicker(false),
               onSelect: (date) => { controller.setPendingReviewDate(date); controller.setPendingReviewDateOnly(false); },

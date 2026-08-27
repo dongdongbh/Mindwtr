@@ -8,6 +8,7 @@ import {
     enterProcessInboxStep,
     getPersonOptionNames,
     goBackProcessInboxStep,
+    isProcessInboxReturningTask,
     parseProcessInboxTitleInput,
     resolveProcessInboxContainerFields,
     skipCurrentProcessInboxTask,
@@ -178,6 +179,10 @@ export function useInboxProcessingController({
     // The title the user is holding, parsed once: the commit reads its title and
     // the decision's fields read its tokens, so the two cannot disagree.
     const parsedTitle = useMemo(() => parseProcessingTitle(draft.title), [draft.title, parseProcessingTitle]);
+    // An incubated item whose date arrived: it reached this pass from Someday,
+    // not from the Inbox, and the card says so rather than passing it off as a
+    // fresh capture (#1089).
+    const isReturningItem = Boolean(processingTask && isProcessInboxReturningTask(processingTask));
     // The draft holds the raw token text; the commit path needs the parsed
     // lists, keyed on the text so callbacks keep their identity between edits.
     const selectedContexts = useMemo(() => parseContextsInput(draft.contexts), [draft.contexts]);
@@ -400,12 +405,42 @@ export function useInboxProcessingController({
         await applyWorkflowEvent({ type: 'reference', fields: buildSelectionFields() });
     }, [applyWorkflowEvent, buildSelectionFields, processingTask]);
 
+    /**
+     * Incubate: park the item without deciding what it is, and bring it back to
+     * the clarify pass on a chosen date (#1089). Someday plus a review date —
+     * the shape Daily and Weekly Review already treat as "due to reconsider" —
+     * so no new status and no background job that mutates it at midnight.
+     */
+    const handleIncubate = useCallback(async () => {
+        if (!processingTask) return;
+        handleReviewTimeCommit();
+        const reviewAt = buildDateTimeUpdate(reviewDate, reviewTimeDraft, reviewTime);
+        if (!reviewAt) {
+            showToast(tFallback(t, 'process.incubateDateRequired', 'Choose a date to bring this back.'), 'error');
+            return;
+        }
+        await applyWorkflowEvent({
+            type: 'someday',
+            fields: { ...buildSelectionFields(), reviewAt },
+        });
+    }, [
+        applyWorkflowEvent,
+        buildSelectionFields,
+        handleReviewTimeCommit,
+        processingTask,
+        reviewDate,
+        reviewTime,
+        reviewTimeDraft,
+        showToast,
+        t,
+    ]);
+
     const handleLater = useCallback(async () => {
         if (!processingTask) return;
         handleScheduleTimeCommit();
         const startTime = buildDateTimeUpdate(scheduleDate, scheduleTimeDraft, scheduleTime);
         if (!startTime) {
-            showToast(tFallback(t, 'process.laterStartRequired', 'Choose a start date for Later.'), 'error');
+            showToast(tFallback(t, 'process.laterStartRequired', 'Choose a start date for Start later.'), 'error');
             return;
         }
         await applyWorkflowEvent({
@@ -766,6 +801,10 @@ export function useInboxProcessingController({
             await handleLater();
             return;
         }
+        if (quickActionability === 'incubate') {
+            await handleIncubate();
+            return;
+        }
         if (quickActionability !== 'actionable') {
             await handleNotActionable(quickActionability);
             return;
@@ -789,6 +828,7 @@ export function useInboxProcessingController({
         handleConfirmWaiting,
         handleConvertToProject,
         handleDueTimeCommit,
+        handleIncubate,
         handleLater,
         handleNotActionable,
         handleReviewTimeCommit,
@@ -835,6 +875,7 @@ export function useInboxProcessingController({
             onModeChange: setProcessingMode,
             onSkip: handleSkip,
             onClose: closeProcessing,
+            isReturningItem,
             actionabilityChoice: quickActionability,
             setActionabilityChoice: setQuickActionability,
             twoMinuteChoice: quickTwoMinuteChoice,
@@ -880,7 +921,9 @@ export function useInboxProcessingController({
         handleSkip,
         handleNotActionable,
         handleLater,
+        handleIncubate,
         handleActionable,
+        isReturningItem,
         showDoneNowShortcut: twoMinuteEnabled && !twoMinuteFirst,
         handleProjectCheckNo,
         handleProjectCheckYes,

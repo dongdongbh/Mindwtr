@@ -519,17 +519,18 @@ describe('InboxProcessor', () => {
         expect(getByText('taskEdit.reviewDateLabel')).toBeTruthy();
     });
 
-    it('moves a task to next with a date-only start date from the guided Later shortcut', async () => {
+    it('moves a task to next with a date-only start date from the guided Start later shortcut', async () => {
         const { getByRole, getByText, getByLabelText, updateTask } = renderInboxProcessor();
 
         fireEvent.click(getByRole('button', { name: /process\.btn/i }));
         fireEvent.click(getByText('process.refineNext'));
-        fireEvent.click(getByText('inbox.no'));
-        fireEvent.click(getByText('Later'));
+        // Deferring a decided action is an actionable outcome, so it is offered
+        // beside the question rather than under "No, not actionable" (#1089).
+        fireEvent.click(getByText('Start later'));
         fireEvent.change(getByLabelText('taskEdit.startDateLabel'), {
             target: { value: '2026-03-23' },
         });
-        fireEvent.click(getByText('Later'));
+        fireEvent.click(getByText('Start later'));
 
         await waitFor(() => {
             expect(updateTask).toHaveBeenCalledWith(
@@ -569,12 +570,12 @@ describe('InboxProcessor', () => {
         });
     });
 
-    it('moves a task to next with a date-only start date from the quick Later outcome', async () => {
+    it('moves a task to next with a date-only start date from the quick Start later outcome', async () => {
         const { getByRole, getByText, getByLabelText, updateTask } = renderInboxProcessor();
 
         fireEvent.click(getByRole('button', { name: /process\.btn/i }));
         fireEvent.click(getByRole('button', { name: 'process.modeQuick' }));
-        fireEvent.click(getByText('Later'));
+        fireEvent.click(getByText('Start later'));
         fireEvent.change(getByLabelText('taskEdit.startDateLabel'), {
             target: { value: '2026-03-24' },
         });
@@ -589,6 +590,51 @@ describe('InboxProcessor', () => {
                 }),
             );
         });
+    });
+
+    // #1089: incubating parks the item without deciding what it is, and brings
+    // it back to this pass on a date. Someday + a review date, which Daily and
+    // Weekly Review already read as "due to reconsider".
+    it('incubates a capture as Someday with the return date', async () => {
+        const { getByRole, getByText, getByLabelText, updateTask } = renderInboxProcessor();
+
+        fireEvent.click(getByRole('button', { name: /process\.btn/i }));
+        fireEvent.click(getByText('process.refineNext'));
+        fireEvent.click(getByText('inbox.no'));
+        fireEvent.click(getByText('Incubate'));
+        fireEvent.change(getByLabelText('taskEdit.reviewDateLabel'), {
+            target: { value: '2026-09-10' },
+        });
+        fireEvent.click(getByText('Incubate'));
+
+        await waitFor(() => {
+            expect(updateTask).toHaveBeenCalledWith(
+                'task-1',
+                expect.objectContaining({
+                    status: 'someday',
+                    reviewAt: '2026-09-10',
+                }),
+            );
+        });
+    });
+
+    it('brings a due incubated item back into the pass and says where it came from', async () => {
+        const returning: Task = {
+            id: 'task-returning',
+            title: "Mom's birthday",
+            status: 'someday',
+            reviewAt: '2026-01-01',
+            tags: [],
+            contexts: [],
+            createdAt: nowIso,
+            updatedAt: nowIso,
+        };
+        const { getByRole, getByText } = renderInboxProcessor({ tasks: [returning] });
+
+        fireEvent.click(getByRole('button', { name: /process\.btn/i }));
+
+        expect(getByText("Mom's birthday")).toBeTruthy();
+        expect(getByText('Back to clarify')).toBeTruthy();
     });
 
     it('hides organization fields when the task editor layout disables them', () => {
