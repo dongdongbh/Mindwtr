@@ -224,7 +224,7 @@ export async function uploadDropboxAppData(
 ): Promise<{ rev: string | null }> {
     const mode = expectedRev
         ? { '.tag': 'update', update: expectedRev }
-        : { '.tag': 'overwrite' };
+        : { '.tag': 'add' };
     const path = crypto.material ? syncEncryptedArtifactName(DROPBOX_SYNC_PATH) : DROPBOX_SYNC_PATH;
     // `.slice()` copies into a fresh, exactly-sized ArrayBuffer — sidesteps the
     // Uint8Array<ArrayBufferLike> vs BodyInit's Uint8Array<ArrayBuffer> typing mismatch
@@ -239,8 +239,9 @@ export async function uploadDropboxAppData(
             'Dropbox-API-Arg': JSON.stringify({
                 path,
                 mode,
+                autorename: false,
                 mute: true,
-                strict_conflict: false,
+                strict_conflict: true,
             }),
             'Content-Type': 'application/octet-stream',
         },

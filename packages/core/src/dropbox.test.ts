@@ -49,6 +49,34 @@ function createFakeDropbox() {
 }
 
 describe('dropbox sync-document encryption', () => {
+    it('rejects a second plaintext or encrypted first-writer after both clients read an absent remote', async () => {
+        const data: AppData = { tasks: [] } as unknown as AppData;
+        const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(9), FAST_KDF);
+
+        for (const crypto of [{}, { material }]) {
+            let exists = false;
+            const args: Array<{ path: string; mode: { '.tag': string }; autorename?: boolean; strict_conflict?: boolean }> = [];
+            const fetcher = async (_url: string | URL, init?: RequestInit): Promise<Response> => {
+                const arg = JSON.parse(new Headers(init?.headers).get('dropbox-api-arg') ?? '{}') as typeof args[number];
+                args.push(arg);
+                if (exists && arg.mode['.tag'] === 'add') {
+                    return Response.json({ error_summary: 'path/conflict/file/...' }, { status: 409 });
+                }
+                exists = true;
+                return Response.json({ rev: `rev-${args.length}` });
+            };
+
+            await uploadDropboxAppData('token', data, null, fetcher, crypto);
+            await expect(uploadDropboxAppData('token', data, null, fetcher, crypto))
+                .rejects.toBeInstanceOf(DropboxConflictError);
+            expect(args[0]).toEqual(expect.objectContaining({
+                mode: { '.tag': 'add' },
+                autorename: false,
+                strict_conflict: true,
+            }));
+        }
+    });
+
     it('encrypts on upload to the .enc path and decrypts on download, leaving the plain path untouched', async () => {
         const { files, fetcher } = createFakeDropbox();
         const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(1), FAST_KDF);
