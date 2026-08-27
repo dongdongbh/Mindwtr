@@ -422,9 +422,21 @@ pub(crate) fn mark_remote_plaintext(app: &tauri::AppHandle) -> Result<(), String
     )
 }
 
+fn clear_encryption_state_with<PersistDisabled, ClearKey>(
+    persist_disabled: PersistDisabled,
+    clear_key: ClearKey,
+) -> Result<(), String>
+where
+    PersistDisabled: FnOnce() -> Result<(), String>,
+    ClearKey: FnOnce(),
+{
+    persist_disabled()?;
+    clear_key();
+    Ok(())
+}
+
 pub(crate) fn clear_encryption_state(app: &tauri::AppHandle) -> Result<(), String> {
-    clear_cached_key(app);
-    write_local_state(app, None)
+    clear_encryption_state_with(|| write_local_state(app, None), || clear_cached_key(app))
 }
 
 #[derive(Debug, Serialize)]
@@ -664,6 +676,20 @@ mod tests {
         assert!(read_state_file(&path).expect("read cleared state").is_none());
         // Clearing an already-absent file is not an error (idempotent disable).
         write_state_file(&path, None).expect("clear again");
+    }
+
+    #[test]
+    fn disabled_state_write_failure_preserves_cached_key_for_retry() {
+        let key_cleared = std::cell::Cell::new(false);
+
+        let error = clear_encryption_state_with(
+            || Err("state storage unavailable".to_string()),
+            || key_cleared.set(true),
+        )
+        .expect_err("failed disabled-state persistence must abort key clearing");
+
+        assert_eq!(error, "state storage unavailable");
+        assert!(!key_cleared.get(), "retry material must remain cached");
     }
 
     #[test]
