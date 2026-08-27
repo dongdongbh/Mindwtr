@@ -30,10 +30,24 @@ internal sealed class AttachmentInstallOutcome {
 internal class AttachmentInstallerFailure(message: String, cause: Throwable? = null) :
   Exception(message, cause)
 
+internal data class AttachmentFileIdentity(
+  val fileKey: String,
+  val size: Long,
+  val modificationTimeNs: Long,
+  val changeTimeNs: Long,
+)
+
+internal data class AttachmentFileHashSnapshot(
+  val sha256: String,
+  val size: Long,
+  val modificationTimeMs: Double,
+)
+
 internal interface AttachmentInstallerFileOps {
   fun canonical(file: File): File
   fun ensureDirectory(directory: File)
   fun nodeKind(file: File): InstallerNodeKind
+  fun fileIdentity(file: File): AttachmentFileIdentity
   fun copySnapshot(source: File, destination: File)
   fun sha256(file: File): String
   /** Move without replacing destination. False means destination already exists. */
@@ -43,6 +57,67 @@ internal interface AttachmentInstallerFileOps {
   fun writeUtf8Durably(file: File, content: String)
   fun syncDirectory(directory: File)
   fun <T> withExclusiveLock(lockFile: File, action: () -> T): T
+}
+
+/** Stable, streaming hash of one managed canonical attachment. The installer
+ * lock prevents our own publication path from moving the name while it is read;
+ * the before/after inode identity rejects uncoordinated replacement. */
+internal class AttachmentFileHasherCore(
+  targetRoot: File,
+  private val ops: AttachmentInstallerFileOps,
+) {
+  private val targetRoot = ops.canonical(targetRoot)
+
+  fun hash(input: File): AttachmentFileHashSnapshot {
+    requireDirectory(targetRoot)
+    rejectSymlink(input.absoluteFile)
+    val target = ops.canonical(input)
+    if (target.parentFile != targetRoot) {
+      throw AttachmentInstallerFailure("Attachment hash path escapes managed attachment root")
+    }
+    return ops.withExclusiveLock(File(targetRoot, INSTALLER_LOCK_NAME)) {
+      requireDirectory(targetRoot)
+      rejectSymlink(input.absoluteFile)
+      val canonical = ops.canonical(input)
+      if (canonical != target || canonical.parentFile != targetRoot) {
+        throw AttachmentInstallerFailure("Attachment hash path changed during validation")
+      }
+      requireRegularFile(target)
+      val before = ops.fileIdentity(target)
+      val sha256 = ops.sha256(target)
+      val after = ops.fileIdentity(target)
+      if (before != after) {
+        throw AttachmentInstallerFailure("Attachment changed while hashing")
+      }
+      AttachmentFileHashSnapshot(
+        sha256,
+        after.size,
+        after.modificationTimeNs.toDouble() / 1_000_000.0,
+      )
+    }
+  }
+
+  private fun requireDirectory(directory: File) {
+    if (ops.nodeKind(directory) != InstallerNodeKind.DIRECTORY) {
+      throw AttachmentInstallerFailure("Managed attachment root is unavailable")
+    }
+  }
+
+  private fun requireRegularFile(file: File) {
+    when (ops.nodeKind(file)) {
+      InstallerNodeKind.REGULAR_FILE -> Unit
+      InstallerNodeKind.MISSING -> throw AttachmentInstallerFailure("Attachment file is unavailable")
+      InstallerNodeKind.DIRECTORY -> throw AttachmentInstallerFailure("Attachment path is a directory")
+      InstallerNodeKind.SYMLINK -> throw AttachmentInstallerFailure("Attachment path is a symbolic link")
+      InstallerNodeKind.OTHER -> throw AttachmentInstallerFailure("Attachment path is not a regular file")
+    }
+  }
+
+  private fun rejectSymlink(file: File) {
+    if (ops.nodeKind(file) == InstallerNodeKind.SYMLINK) {
+      throw AttachmentInstallerFailure("Attachment path is a symbolic link")
+    }
+  }
 }
 
 private data class InstallJournal(

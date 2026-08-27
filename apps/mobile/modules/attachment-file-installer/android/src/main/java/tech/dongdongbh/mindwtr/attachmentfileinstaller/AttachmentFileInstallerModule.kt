@@ -42,6 +42,23 @@ private class AndroidAttachmentInstallerFileOps : AttachmentInstallerFileOps {
     }
   }
 
+  override fun fileIdentity(file: File): AttachmentFileIdentity {
+    val stat = try {
+      Os.lstat(file.path)
+    } catch (error: Throwable) {
+      throw AttachmentInstallerFailure("Could not inspect attachment identity", error)
+    }
+    if (!OsConstants.S_ISREG(stat.st_mode)) {
+      throw AttachmentInstallerFailure("Attachment path is not a regular file")
+    }
+    return AttachmentFileIdentity(
+      fileKey = "${stat.st_dev}:${stat.st_ino}",
+      size = stat.st_size,
+      modificationTimeNs = stat.st_mtim.tv_sec * 1_000_000_000L + stat.st_mtim.tv_nsec,
+      changeTimeNs = stat.st_ctim.tv_sec * 1_000_000_000L + stat.st_ctim.tv_nsec,
+    )
+  }
+
   override fun copySnapshot(source: File, destination: File) {
     val outputDescriptor = try {
       Os.open(
@@ -226,6 +243,26 @@ class AttachmentFileInstallerModule : Module() {
         throw error
       } catch (error: Throwable) {
         throw AttachmentFileInstallerException(error.message ?: "Attachment install failed", error)
+      }
+    }
+
+    AsyncFunction("hashAsync") { targetPath: String ->
+      try {
+        val filesRoot = context.filesDir.canonicalFile
+        val ops = AndroidAttachmentInstallerFileOps()
+        val snapshot = AttachmentFileHasherCore(
+          targetRoot = File(filesRoot, "attachments"),
+          ops = ops,
+        ).hash(fileFromPath(targetPath))
+        mapOf(
+          "sha256" to snapshot.sha256,
+          "size" to snapshot.size.toDouble(),
+          "modificationTimeMs" to snapshot.modificationTimeMs,
+        )
+      } catch (error: AttachmentFileInstallerException) {
+        throw error
+      } catch (error: Throwable) {
+        throw AttachmentFileInstallerException(error.message ?: "Attachment hash failed", error)
       }
     }
   }

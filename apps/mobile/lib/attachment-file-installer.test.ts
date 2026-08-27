@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { installAttachmentFileGeneration } from './attachment-file-installer';
+import {
+  hashAttachmentFileGeneration,
+  installAttachmentFileGeneration,
+} from './attachment-file-installer';
 
-const { installAsync, requireNativeModule } = vi.hoisted(() => ({
+const { hashAsync, installAsync, requireNativeModule } = vi.hoisted(() => ({
+  hashAsync: vi.fn(),
   installAsync: vi.fn(),
-  requireNativeModule: vi.fn(() => ({ installAsync })),
+  requireNativeModule: vi.fn(() => ({ hashAsync, installAsync })),
 }));
 const downloadHash = 'd'.repeat(64);
 
@@ -13,6 +17,7 @@ vi.mock('expo-modules-core', () => ({
 describe('installAttachmentFileGeneration', () => {
   beforeEach(() => {
     installAsync.mockReset();
+    hashAsync.mockReset();
   });
 
   it('passes the absent generation contract to the native installer', async () => {
@@ -76,6 +81,24 @@ describe('installAttachmentFileGeneration', () => {
 
     await expect(installAttachmentFileGeneration('/staged', '/target', { kind: 'absent' }, downloadHash))
       .rejects.toThrow('invalid result');
+  });
+
+  it('returns a normalized native streaming hash snapshot', async () => {
+    hashAsync.mockResolvedValue({
+      sha256: downloadHash.toUpperCase(),
+      size: 42,
+      modificationTimeMs: 1_234,
+    });
+
+    await expect(hashAttachmentFileGeneration(' file:///private/documents/attachments/a1 '))
+      .resolves.toEqual({ sha256: downloadHash, size: 42, modificationTimeMs: 1_234 });
+    expect(hashAsync).toHaveBeenCalledWith('file:///private/documents/attachments/a1');
+  });
+
+  it('rejects malformed native hash snapshots', async () => {
+    hashAsync.mockResolvedValue({ sha256: 'bad', size: 42, modificationTimeMs: 1_234 });
+
+    await expect(hashAttachmentFileGeneration('/target')).rejects.toThrow('invalid hash snapshot');
   });
 
   it('latches a typed failure when the native module is unavailable', async () => {

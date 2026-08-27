@@ -29,7 +29,9 @@ const fileSystemMock = vi.hoisted(() => ({
   StorageAccessFramework: {
     readDirectoryAsync: vi.fn().mockResolvedValue([]),
     makeDirectoryAsync: vi.fn().mockResolvedValue('content://attachments'),
-    createFileAsync: vi.fn().mockResolvedValue('content://attachments/file'),
+    createFileAsync: vi.fn(async (parentUri: string, name: string) => (
+      `${parentUri.replace(/\/$/, '')}/${encodeURIComponent(name)}`
+    )),
     readAsStringAsync: vi.fn().mockResolvedValue(''),
     writeAsStringAsync: vi.fn().mockResolvedValue(undefined),
   },
@@ -49,6 +51,7 @@ const fileSystemMock = vi.hoisted(() => ({
 }));
 
 const attachmentFileInstallerMock = vi.hoisted(() => ({
+  hashAttachmentFileGeneration: vi.fn(),
   installAttachmentFileGeneration: vi.fn(),
 }));
 
@@ -213,8 +216,13 @@ describe('attachment sync', () => {
     fileSystemMock.readAsStringAsync.mockReset();
     fileSystemMock.StorageAccessFramework.readDirectoryAsync.mockResolvedValue([]);
     fileSystemMock.StorageAccessFramework.makeDirectoryAsync.mockResolvedValue('content://attachments');
-    fileSystemMock.StorageAccessFramework.createFileAsync.mockResolvedValue('content://attachments/file');
+    fileSystemMock.StorageAccessFramework.createFileAsync.mockImplementation(
+      async (parentUri: string, name: string) => `${parentUri.replace(/\/$/, '')}/${encodeURIComponent(name)}`,
+    );
     fileSystemMock.StorageAccessFramework.writeAsStringAsync.mockResolvedValue(undefined);
+    attachmentFileInstallerMock.hashAttachmentFileGeneration.mockRejectedValue(
+      new Error('Native hash fixture not configured'),
+    );
     attachmentFileInstallerMock.installAttachmentFileGeneration.mockResolvedValue({ status: 'installed' });
   });
 
@@ -819,6 +827,99 @@ describe('attachment sync', () => {
       'AQID',
       { encoding: 'base64' }
     );
+    expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(createdRemoteFileUri, expect.anything());
+  });
+
+  it('fails closed when SAF attachment inventory is unreadable and preserves cloud metadata', async () => {
+    const syncFileUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fdata.json';
+    const attachmentsDirUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fattachments/';
+    const appData = singleAttachmentData({
+      id: 'inventory-unreadable',
+      uri: 'file://document/attachments/inventory-unreadable.txt',
+      cloudKey: 'attachments/inventory-unreadable.txt',
+      localStatus: 'available',
+      fileHash: 'ab'.repeat(32),
+    });
+    const original = structuredClone(appData);
+    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: true, size: 3, modificationTime: 1 });
+    fileSystemMock.StorageAccessFramework.readDirectoryAsync.mockImplementation(async (uri: string) => {
+      if (uri === attachmentsDirUri) throw new Error('provider permission revoked');
+      if (uri.includes('primary%3ADocuments%2FMindwtr%20Backup')) return [attachmentsDirUri];
+      return [];
+    });
+
+    await expect(attachmentSync.syncFileAttachments(appData, syncFileUri))
+      .rejects.toThrow('SAF attachment inventory is unreadable');
+
+    expect(appData).toEqual(original);
+    expect(fileSystemMock.StorageAccessFramework.createFileAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.StorageAccessFramework.writeAsStringAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.copyAsync).not.toHaveBeenCalled();
+  });
+
+  it('removes only its renamed SAF create and does not publish cloud metadata', async () => {
+    const syncFileUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fdata.json';
+    const attachmentsDirUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fattachments/';
+    const renamedUri = `${attachmentsDirUri}upload-renamed%20%281%29.txt`;
+    const localUri = 'file://document/attachments/upload-renamed.txt';
+    const appData = singleAttachmentData({
+      id: 'upload-renamed',
+      uri: localUri,
+      localStatus: 'available',
+    });
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+      uri === localUri || uri.startsWith('file://cache/mindwtr-upload-')
+        ? { exists: true, size: 3, modificationTime: 1 }
+        : { exists: false }
+    ));
+    fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
+    fileSystemMock.StorageAccessFramework.readDirectoryAsync.mockImplementation(async (uri: string) => {
+      if (uri === attachmentsDirUri) return [];
+      if (uri.includes('primary%3ADocuments%2FMindwtr%20Backup')) return [attachmentsDirUri];
+      return [];
+    });
+    fileSystemMock.StorageAccessFramework.createFileAsync.mockResolvedValue(renamedUri);
+
+    await expect(attachmentSync.syncFileAttachments(appData, syncFileUri)).resolves.toBe(false);
+
+    expect(fileSystemMock.deleteAsync).toHaveBeenCalledWith(renamedUri, { idempotent: true });
+    expect(fileSystemMock.StorageAccessFramework.writeAsStringAsync).not.toHaveBeenCalled();
+    expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
+  });
+
+  it('does not claim a SAF upload when the provider create capability is absent', async () => {
+    const syncFileUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fdata.json';
+    const attachmentsDirUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fattachments/';
+    const localUri = 'file://document/attachments/upload-no-create.txt';
+    const appData = singleAttachmentData({
+      id: 'upload-no-create',
+      uri: localUri,
+      localStatus: 'available',
+    });
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+      uri === localUri || uri.startsWith('file://cache/mindwtr-upload-')
+        ? { exists: true, size: 3, modificationTime: 1 }
+        : { exists: false }
+    ));
+    fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
+    fileSystemMock.StorageAccessFramework.readDirectoryAsync.mockImplementation(async (uri: string) => {
+      if (uri === attachmentsDirUri) return [];
+      if (uri.includes('primary%3ADocuments%2FMindwtr%20Backup')) return [attachmentsDirUri];
+      return [];
+    });
+    const createFileAsync = fileSystemMock.StorageAccessFramework.createFileAsync;
+    (fileSystemMock.StorageAccessFramework as { createFileAsync?: unknown }).createFileAsync = undefined;
+    try {
+      await expect(attachmentSync.syncFileAttachments(appData, syncFileUri)).resolves.toBe(false);
+    } finally {
+      fileSystemMock.StorageAccessFramework.createFileAsync = createFileAsync;
+    }
+
+    expect(fileSystemMock.StorageAccessFramework.writeAsStringAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.deleteAsync.mock.calls.some(([uri]) => (
+      typeof uri === 'string' && uri.startsWith(attachmentsDirUri)
+    ))).toBe(false);
+    expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
   });
 
   it('aborts file attachment sync before writing stale bytes', async () => {
@@ -1457,6 +1558,161 @@ describe('attachment sync', () => {
       { kind: 'absent' },
       sha256Hex(bytes),
     );
+  });
+
+  it('installs a normal File Sync remote winner over the exact stale local generation without JS reads', async () => {
+    const staleBytes = new Uint8Array([31, 32, 33, 34]);
+    const winningBytes = new Uint8Array([41, 42, 43]);
+    const id = 'file-remote-winner';
+    const localUri = `file://document/attachments/${id}.txt`;
+    const remoteUri = `file://sync/attachments/${id}.txt`;
+    let installed = false;
+    const appData = singleAttachmentData({
+      id,
+      uri: localUri,
+      cloudKey: `attachments/${id}.txt`,
+      localStatus: 'available',
+      fileHash: sha256Hex(winningBytes),
+      contentRev: 2,
+      contentMtimeMs: undefined,
+      contentSize: undefined,
+    });
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => {
+      if (uri === localUri) {
+        const bytes = installed ? winningBytes : staleBytes;
+        return { exists: true, size: bytes.length, modificationTime: installed ? 3 : 2 };
+      }
+      if (uri === remoteUri || uri.includes('.mindwtr-download-')) {
+        return { exists: true, size: winningBytes.length, modificationTime: 3 };
+      }
+      return { exists: false };
+    });
+    attachmentFileInstallerMock.hashAttachmentFileGeneration.mockImplementation(async () => ({
+      sha256: sha256Hex(installed ? winningBytes : staleBytes),
+      size: (installed ? winningBytes : staleBytes).length,
+      modificationTimeMs: installed ? 3000 : 2000,
+    }));
+    attachmentFileInstallerMock.installAttachmentFileGeneration.mockImplementation(async () => {
+      installed = true;
+      return { status: 'installed' };
+    });
+
+    const result = syncResult(await attachmentSync.syncFileAttachments(
+      appData,
+      'file://sync/data.json',
+      undefined,
+      { phase: 'post-merge' },
+    ), appData);
+
+    expect(fileSystemMock.copyAsync).toHaveBeenCalledWith({
+      from: remoteUri,
+      to: expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+    });
+    expect(attachmentFileInstallerMock.installAttachmentFileGeneration).toHaveBeenCalledWith(
+      expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+      localUri,
+      { kind: 'present', sha256: sha256Hex(staleBytes) },
+      sha256Hex(winningBytes),
+    );
+    expect(result.data.tasks[0].attachments?.[0]).toMatchObject({
+      uri: localUri,
+      fileHash: sha256Hex(winningBytes),
+      localStatus: 'available',
+    });
+    expect(attachmentFileInstallerMock.hashAttachmentFileGeneration).toHaveBeenLastCalledWith(localUri);
+    expect(fileSystemMock.readAsStringAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.StorageAccessFramework.readAsStringAsync).not.toHaveBeenCalled();
+  });
+
+  it('installs a normal SAF remote winner with H1 CAS and H2 native verification', async () => {
+    const staleBytes = new Uint8Array([51, 52, 53, 54]);
+    const winningBytes = new Uint8Array([61, 62, 63]);
+    const id = 'saf-remote-winner';
+    const syncFileUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fdata.json';
+    const attachmentsDirUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fattachments/';
+    const remoteUri = `${attachmentsDirUri}${id}.txt`;
+    const localUri = `file://document/attachments/${id}.txt`;
+    let installed = false;
+    const appData = singleAttachmentData({
+      id,
+      uri: localUri,
+      cloudKey: `attachments/${id}.txt`,
+      localStatus: 'available',
+      fileHash: sha256Hex(winningBytes),
+      contentRev: 2,
+      contentMtimeMs: undefined,
+      contentSize: undefined,
+    });
+    fileSystemMock.StorageAccessFramework.readDirectoryAsync.mockImplementation(async (uri: string) => {
+      if (uri === attachmentsDirUri) return [remoteUri];
+      if (uri.includes('primary%3ADocuments%2FMindwtr%20Backup')) return [attachmentsDirUri];
+      return [];
+    });
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => {
+      if (uri === localUri) {
+        const bytes = installed ? winningBytes : staleBytes;
+        return { exists: true, size: bytes.length, modificationTime: installed ? 3 : 2 };
+      }
+      if (uri === remoteUri || uri.includes('.mindwtr-download-')) {
+        return { exists: true, size: winningBytes.length, modificationTime: 3 };
+      }
+      return { exists: false };
+    });
+    attachmentFileInstallerMock.hashAttachmentFileGeneration.mockImplementation(async () => ({
+      sha256: sha256Hex(installed ? winningBytes : staleBytes),
+      size: (installed ? winningBytes : staleBytes).length,
+      modificationTimeMs: installed ? 3000 : 2000,
+    }));
+    attachmentFileInstallerMock.installAttachmentFileGeneration.mockImplementation(async () => {
+      installed = true;
+      return { status: 'installed' };
+    });
+
+    const result = syncResult(await attachmentSync.syncFileAttachments(
+      appData,
+      syncFileUri,
+      undefined,
+      { phase: 'post-merge' },
+    ), appData);
+
+    expect(attachmentFileInstallerMock.installAttachmentFileGeneration).toHaveBeenCalledWith(
+      expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+      localUri,
+      { kind: 'present', sha256: sha256Hex(staleBytes) },
+      sha256Hex(winningBytes),
+    );
+    expect(result.data.tasks[0].attachments?.[0]).toMatchObject({
+      fileHash: sha256Hex(winningBytes),
+      localStatus: 'available',
+    });
+    expect(attachmentFileInstallerMock.hashAttachmentFileGeneration).toHaveBeenLastCalledWith(localUri);
+    expect(fileSystemMock.readAsStringAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.StorageAccessFramework.readAsStringAsync).not.toHaveBeenCalled();
+  });
+
+  it('keeps an absent ordinary File Sync target on demand', async () => {
+    const bytes = new Uint8Array([71, 72, 73]);
+    const appData = singleAttachmentData({
+      id: 'file-on-demand',
+      cloudKey: 'attachments/file-on-demand.txt',
+      fileHash: sha256Hex(bytes),
+      pendingContentUpload: undefined,
+    });
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+      uri === 'file://sync/attachments/file-on-demand.txt'
+        ? { exists: true, size: bytes.length, modificationTime: 1 }
+        : { exists: false }
+    ));
+
+    await expect(attachmentSync.syncFileAttachments(
+      appData,
+      'file://sync/data.json',
+      undefined,
+      { phase: 'post-merge' },
+    )).resolves.toBe(false);
+
+    expect(fileSystemMock.copyAsync).not.toHaveBeenCalled();
+    expect(attachmentFileInstallerMock.installAttachmentFileGeneration).not.toHaveBeenCalled();
   });
 
   it('rejects oversized pending File Sync recovery before copy, read, or installation', async () => {
@@ -2641,7 +2897,11 @@ describe('attachment sync', () => {
         if (uri === remoteUri) return { exists: true, size: OLD_BYTES.length };
         return { exists: false };
       });
-      fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(NEW_BYTES));
+      attachmentFileInstallerMock.hashAttachmentFileGeneration.mockResolvedValue({
+        sha256: sha256Hex(NEW_BYTES),
+        size: NEW_BYTES.length,
+        modificationTimeMs: 2000,
+      });
 
       const { syncFileAttachments } = attachmentSync;
       const appData = makeEditedAppData('edited');
@@ -2654,6 +2914,7 @@ describe('attachment sync', () => {
 
       expect(didMutate).toBe(true);
       expect(fileSystemMock.copyAsync).not.toHaveBeenCalled();
+      expect(fileSystemMock.readAsStringAsync).not.toHaveBeenCalled();
       expect(attachment?.fileHash).toBe(sha256Hex(NEW_BYTES));
       expect(attachment?.contentMtimeMs).toBe(2000);
       expect(attachment?.contentSize).toBe(NEW_BYTES.length);
@@ -3339,7 +3600,9 @@ describe('attachment sync', () => {
         if (uri === 'file://sync/attachments/unhashable.txt') return { exists: true, size: OLD_BYTES.length };
         return { exists: false };
       });
-      fileSystemMock.readAsStringAsync.mockRejectedValue(new Error('permission revoked'));
+      attachmentFileInstallerMock.hashAttachmentFileGeneration.mockRejectedValue(
+        new Error('permission revoked'),
+      );
 
       const { syncFileAttachments } = attachmentSync;
       // Each cycle carries the previous cycle's folded document forward, exactly as the
@@ -3350,13 +3613,15 @@ describe('attachment sync', () => {
         await syncFileAttachments(current, syncPath, undefined, { phase: 'prepare' }),
         current,
       ).data;
-      expect(fileSystemMock.readAsStringAsync).toHaveBeenCalledTimes(1);
+      expect(attachmentFileInstallerMock.hashAttachmentFileGeneration).toHaveBeenCalledTimes(1);
+      expect(fileSystemMock.readAsStringAsync).not.toHaveBeenCalled();
 
       current = syncResult(
         await syncFileAttachments(current, syncPath, undefined, { phase: 'prepare' }),
         current,
       ).data;
-      expect(fileSystemMock.readAsStringAsync).toHaveBeenCalledTimes(1);
+      expect(attachmentFileInstallerMock.hashAttachmentFileGeneration).toHaveBeenCalledTimes(1);
+      expect(fileSystemMock.readAsStringAsync).not.toHaveBeenCalled();
 
       // Nothing is published on an unconfirmed guess.
       const attachment = current.tasks[0].attachments?.[0];

@@ -159,7 +159,7 @@ const stripUriQueryAndFragment = (value: string): string => (
   value.split('?')[0]?.split('#')[0] ?? value
 );
 
-const getSafLeafName = (value: string): string => {
+export const getSafLeafName = (value: string): string => {
   const decoded = decodeUriSafe(value);
   const stripped = stripUriQueryAndFragment(decoded).replace(/\/+$/, '');
   const lastSeparator = Math.max(stripped.lastIndexOf('/'), stripped.lastIndexOf(':'));
@@ -400,9 +400,11 @@ const resolveSafSyncDir = async (syncUri: string): Promise<Extract<ResolvedSyncD
   if (!parentTreeUri) return null;
   const directoryCandidates = parentDocumentUri ? [parentDocumentUri, parentTreeUri] : [parentTreeUri];
   let attachmentsDirUri: string | null = null;
+  const readableCandidates: string[] = [];
   for (const candidate of directoryCandidates) {
     try {
       const entries = await StorageAccessFramework.readDirectoryAsync(candidate);
+      readableCandidates.push(candidate);
       const matchEntry = entries.find((entry: string) => hasSafLeafName(entry, ATTACHMENTS_DIR_NAME));
       attachmentsDirUri = matchEntry ?? null;
       if (attachmentsDirUri) break;
@@ -413,7 +415,10 @@ const resolveSafSyncDir = async (syncUri: string): Promise<Extract<ResolvedSyncD
     }
   }
   if (!attachmentsDirUri) {
-    for (const candidate of directoryCandidates) {
+    // Creating after every inventory attempt failed can create a duplicate
+    // provider document and falsely turn an unreadable remote into an empty one.
+    if (readableCandidates.length === 0) return null;
+    for (const candidate of readableCandidates) {
       try {
         attachmentsDirUri = await StorageAccessFramework.makeDirectoryAsync(candidate, ATTACHMENTS_DIR_NAME);
         if (attachmentsDirUri) break;
@@ -468,6 +473,30 @@ export const readSafDirectoryEntriesByName = async (dirUri: string): Promise<Map
     logAttachmentWarn('Failed to read SAF directory', error);
   }
   return entriesByName;
+};
+
+export type SafDirectoryEntriesResult =
+  | { status: 'available'; entries: Map<string, string> }
+  | { status: 'unreadable' };
+
+/** Strict SAF inventory used by mutation-capable sync. Missing capability and
+ * provider errors are not equivalent to an empty directory. */
+export const inspectSafDirectoryEntriesByName = async (
+  dirUri: string,
+): Promise<SafDirectoryEntriesResult> => {
+  if (!StorageAccessFramework?.readDirectoryAsync) return { status: 'unreadable' };
+  try {
+    const entries = await StorageAccessFramework.readDirectoryAsync(dirUri);
+    const entriesByName = new Map<string, string>();
+    for (const entry of entries) {
+      const name = getSafLeafName(entry);
+      if (name && !entriesByName.has(name)) entriesByName.set(name, entry);
+    }
+    return { status: 'available', entries: entriesByName };
+  } catch (error) {
+    logAttachmentWarn('Failed to read SAF directory', error);
+    return { status: 'unreadable' };
+  }
 };
 
 export const findSafEntry = async (dirUri: string, fileName: string): Promise<string | null> => {
@@ -584,6 +613,7 @@ export const computeAttachmentFileHash = async (uri: string): Promise<string | n
     return null;
   }
 };
+
 
 export type PersistAttachmentOutcome = {
   attachment: Attachment;

@@ -38,6 +38,20 @@ private class TestInstallerFileOps : AttachmentInstallerFileOps {
     }
   }
 
+  override fun fileIdentity(file: File): AttachmentFileIdentity {
+    val attributes = Files.readAttributes(
+      file.toPath(),
+      BasicFileAttributes::class.java,
+      LinkOption.NOFOLLOW_LINKS,
+    )
+    return AttachmentFileIdentity(
+      fileKey = attributes.fileKey()?.toString() ?: file.canonicalPath,
+      size = attributes.size(),
+      modificationTimeNs = attributes.lastModifiedTime().toMillis() * 1_000_000L,
+      changeTimeNs = attributes.creationTime().toMillis() * 1_000_000L,
+    )
+  }
+
   override fun copySnapshot(source: File, destination: File) {
     Files.copy(source.toPath(), destination.toPath())
   }
@@ -511,6 +525,39 @@ class AttachmentFileInstallerCoreTest {
     assertEquals("same generation", target.readText())
   }
 
+  @Test
+  fun nativeHasherStreamsStableManagedGeneration() = withFixture { fixture ->
+    val target = fixture.target("hash.bin").apply { writeText("managed generation") }
+
+    val snapshot = fixture.hasher(ops).hash(target)
+
+    assertEquals(hash("managed generation"), snapshot.sha256)
+    assertEquals(target.length(), snapshot.size)
+  }
+
+  @Test
+  fun nativeHasherRejectsReplacementDuringRead() = withFixture { fixture ->
+    val target = fixture.target("hash-race.bin").apply { writeText("old generation") }
+    val racingOps = object : AttachmentInstallerFileOps by ops {
+      override fun sha256(file: File): String {
+        val digest = ops.sha256(file)
+        val replacement = fixture.target("hash-race-replacement.bin").apply {
+          writeText("new generation")
+        }
+        Files.move(
+          replacement.toPath(),
+          file.toPath(),
+          StandardCopyOption.REPLACE_EXISTING,
+        )
+        return digest
+      }
+    }
+
+    assertFailsWithMessage("changed while hashing") {
+      fixture.hasher(racingOps).hash(target)
+    }
+  }
+
   private fun assertFailsWithMessage(expected: String, action: () -> Unit) {
     try {
       action()
@@ -541,6 +588,11 @@ class AttachmentFileInstallerCoreTest {
     fun installer(ops: AttachmentInstallerFileOps) = AttachmentFileInstallerCore(
       targetRoot = attachments,
       sourceRoots = listOf(files, cache),
+      ops = ops,
+    )
+
+    fun hasher(ops: AttachmentInstallerFileOps) = AttachmentFileHasherCore(
+      targetRoot = attachments,
       ops = ops,
     )
 

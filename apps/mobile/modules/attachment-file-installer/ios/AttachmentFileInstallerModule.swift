@@ -28,6 +28,118 @@ enum AttachmentInstallOutcome {
   case conflict(preservedUrl: URL)
 }
 
+struct AttachmentFileHashSnapshot {
+  let sha256: String
+  let size: UInt64
+  let modificationTimeMs: Double
+}
+
+/** Native streaming verifier for the managed canonical attachment generation.
+ * It shares the installer lock and binds the digest to the same named inode
+ * before and after consumption. */
+final class AttachmentFileHashingEngine {
+  private let targetRoot: URL
+
+  init(targetRoot: URL) {
+    self.targetRoot = Self.canonical(targetRoot)
+  }
+
+  func hash(_ input: URL) throws -> AttachmentFileHashSnapshot {
+    try rejectSymlink(input)
+    let target = Self.canonical(input)
+    guard target.deletingLastPathComponent() == targetRoot else {
+      throw installerError("Attachment hash path escapes managed attachment root")
+    }
+    return try withExclusiveLock(targetRoot.appendingPathComponent(installerLockName)) {
+      try self.rejectSymlink(input)
+      guard Self.canonical(input) == target else {
+        throw installerError("Attachment hash path changed during validation")
+      }
+      let descriptor = Darwin.open(target.path, O_RDONLY | O_NOFOLLOW)
+      guard descriptor >= 0 else { throw installerError("Could not open regular attachment file") }
+      let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+      defer { try? handle.close() }
+
+      let before = try self.identity(descriptor: descriptor)
+      var digest = SHA256()
+      while let data = try handle.read(upToCount: 1024 * 1024), !data.isEmpty {
+        digest.update(data: data)
+      }
+      let after = try self.identity(descriptor: descriptor)
+      let namedAfter = try self.identity(path: target.path)
+      guard before == after, after == namedAfter else {
+        throw installerError("Attachment changed while hashing")
+      }
+      return AttachmentFileHashSnapshot(
+        sha256: digest.finalize().map { String(format: "%02x", $0) }.joined(),
+        size: UInt64(after.size),
+        modificationTimeMs: Double(after.modifiedSeconds) * 1_000
+          + Double(after.modifiedNanoseconds) / 1_000_000
+      )
+    }
+  }
+
+  private struct Identity: Equatable {
+    let device: UInt64
+    let inode: UInt64
+    let size: Int64
+    let modifiedSeconds: Int64
+    let modifiedNanoseconds: Int64
+    let changedSeconds: Int64
+    let changedNanoseconds: Int64
+  }
+
+  private func identity(descriptor: Int32) throws -> Identity {
+    var value = stat()
+    guard Darwin.fstat(descriptor, &value) == 0, value.st_mode & S_IFMT == S_IFREG else {
+      throw installerError("Attachment path is not a regular file")
+    }
+    return identity(value)
+  }
+
+  private func identity(path: String) throws -> Identity {
+    var value = stat()
+    guard Darwin.lstat(path, &value) == 0, value.st_mode & S_IFMT == S_IFREG else {
+      throw installerError("Attachment path is not a regular file")
+    }
+    return identity(value)
+  }
+
+  private func identity(_ value: stat) -> Identity {
+    Identity(
+      device: UInt64(value.st_dev),
+      inode: UInt64(value.st_ino),
+      size: Int64(value.st_size),
+      modifiedSeconds: Int64(value.st_mtimespec.tv_sec),
+      modifiedNanoseconds: Int64(value.st_mtimespec.tv_nsec),
+      changedSeconds: Int64(value.st_ctimespec.tv_sec),
+      changedNanoseconds: Int64(value.st_ctimespec.tv_nsec)
+    )
+  }
+
+  private func rejectSymlink(_ input: URL) throws {
+    var value = stat()
+    if Darwin.lstat(input.path, &value) == 0, value.st_mode & S_IFMT == S_IFLNK {
+      throw installerError("Attachment path is a symbolic link")
+    }
+  }
+
+  private func withExclusiveLock<T>(_ lock: URL, _ action: () throws -> T) throws -> T {
+    let descriptor = Darwin.open(lock.path, O_CREAT | O_RDWR | O_NOFOLLOW, 0o600)
+    guard descriptor >= 0 else { throw installerError("Could not open attachment installer lock") }
+    defer { Darwin.close(descriptor) }
+    guard Darwin.flock(descriptor, LOCK_EX) == 0 else {
+      throw installerError("Could not acquire attachment installer lock")
+    }
+    defer { _ = Darwin.flock(descriptor, LOCK_UN) }
+    return try action()
+  }
+
+  private static func canonical(_ url: URL) -> URL {
+    url.standardizedFileURL.resolvingSymlinksInPath()
+  }
+}
+
 private enum JournalRecovery {
   case proceed
   case completed(stagedUrl: URL, preservedUrl: URL?)
@@ -859,6 +971,21 @@ public final class AttachmentFileInstallerModule: Module {
       case .conflict(let preservedUrl):
         return ["status": "conflict", "preservedPath": preservedUrl.absoluteString]
       }
+    }
+
+    AsyncFunction("hashAsync") { (targetPath: String) -> [String: Any] in
+      let fileManager = FileManager.default
+      guard let documentsRoot = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+        throw installerError("App-private storage root is unavailable")
+      }
+      let snapshot = try AttachmentFileHashingEngine(
+        targetRoot: documentsRoot.appendingPathComponent("attachments", isDirectory: true)
+      ).hash(try Self.fileUrl(targetPath))
+      return [
+        "sha256": snapshot.sha256,
+        "size": Double(snapshot.size),
+        "modificationTimeMs": snapshot.modificationTimeMs,
+      ]
     }
   }
 

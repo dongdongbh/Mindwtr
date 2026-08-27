@@ -8,6 +8,35 @@ final class AttachmentFileInstallerEngineTests: XCTestCase {
     case fault
   }
 
+  func testNativeHasherStreamsStableManagedGeneration() throws {
+    try withFixture { fixture in
+      let target = fixture.target("hash.bin")
+      try write("managed generation", to: target)
+
+      let snapshot = try AttachmentFileHashingEngine(
+        targetRoot: target.deletingLastPathComponent()
+      ).hash(target)
+
+      XCTAssertEqual(snapshot.sha256, digest("managed generation"))
+      XCTAssertEqual(snapshot.size, UInt64("managed generation".utf8.count))
+    }
+  }
+
+  func testNativeHasherRejectsSymlinkTarget() throws {
+    try withFixture { fixture in
+      let peer = fixture.target("peer.bin")
+      let link = fixture.target("link.bin")
+      try write("peer generation", to: peer)
+      try FileManager.default.createSymbolicLink(at: link, withDestinationURL: peer)
+
+      XCTAssertThrowsError(
+        try AttachmentFileHashingEngine(
+          targetRoot: link.deletingLastPathComponent()
+        ).hash(link)
+      )
+    }
+  }
+
   func testAbsentGenerationUsesCreateNoReplace() throws {
     try withFixture { fixture in
       let staged = try fixture.stage("downloaded generation")
