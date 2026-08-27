@@ -17,11 +17,30 @@ type NativeAttachmentFileInstaller = {
   ): Promise<unknown>;
 };
 
-let resolvedModule: NativeAttachmentFileInstaller | undefined;
+export class AttachmentFileInstallerUnavailableError extends Error {
+  readonly code = 'ATTACHMENT_FILE_INSTALLER_UNAVAILABLE';
+
+  constructor(cause?: unknown) {
+    super('Attachment file installer native module is unavailable');
+    this.name = 'AttachmentFileInstallerUnavailableError';
+    if (cause !== undefined) (this as Error & { cause?: unknown }).cause = cause;
+  }
+}
+
+let resolvedModule: NativeAttachmentFileInstaller | null | undefined;
+let resolutionError: AttachmentFileInstallerUnavailableError | undefined;
 
 const getNativeModule = (): NativeAttachmentFileInstaller => {
-  if (!resolvedModule) {
+  if (resolvedModule) return resolvedModule;
+  if (resolvedModule === null) {
+    throw resolutionError ?? new AttachmentFileInstallerUnavailableError();
+  }
+  try {
     resolvedModule = requireNativeModule<NativeAttachmentFileInstaller>('AttachmentFileInstaller');
+  } catch (error) {
+    resolvedModule = null;
+    resolutionError = new AttachmentFileInstallerUnavailableError(error);
+    throw resolutionError;
   }
   return resolvedModule;
 };

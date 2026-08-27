@@ -77,4 +77,32 @@ describe('installAttachmentFileGeneration', () => {
     await expect(installAttachmentFileGeneration('/staged', '/target', { kind: 'absent' }, downloadHash))
       .rejects.toThrow('invalid result');
   });
+
+  it('latches a typed failure when the native module is unavailable', async () => {
+    const callsBefore = requireNativeModule.mock.calls.length;
+    requireNativeModule.mockImplementationOnce(() => {
+      throw new Error('Cannot find native module');
+    });
+    vi.resetModules();
+    const freshInstaller = await import('./attachment-file-installer');
+
+    await expect(freshInstaller.installAttachmentFileGeneration(
+      '/staged',
+      '/target',
+      { kind: 'absent' },
+      downloadHash,
+    )).rejects.toMatchObject({
+      name: 'AttachmentFileInstallerUnavailableError',
+      code: 'ATTACHMENT_FILE_INSTALLER_UNAVAILABLE',
+    });
+    await expect(freshInstaller.installAttachmentFileGeneration(
+      '/staged',
+      '/target',
+      { kind: 'absent' },
+      downloadHash,
+    )).rejects.toMatchObject({
+      code: 'ATTACHMENT_FILE_INSTALLER_UNAVAILABLE',
+    });
+    expect(requireNativeModule).toHaveBeenCalledTimes(callsBefore + 1);
+  });
 });

@@ -209,7 +209,11 @@ export const installStagedAttachmentDownload = async ({
     await deleteAttachmentDownloadStageBestEffort(stagedPath);
     return true;
   } catch (error) {
-    if (!nativeInstallStarted) await deleteAttachmentDownloadStageBestEffort(stagedPath);
+    const installerUnavailable = error instanceof Error
+      && (error as Error & { code?: unknown }).code === 'ATTACHMENT_FILE_INSTALLER_UNAVAILABLE';
+    if (!nativeInstallStarted || installerUnavailable) {
+      await deleteAttachmentDownloadStageBestEffort(stagedPath);
+    }
     throw error;
   }
 };

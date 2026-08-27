@@ -1436,6 +1436,46 @@ describe('attachment sync', () => {
     });
   });
 
+  it('cleans File Sync scratch when the native installer is unavailable before ownership', async () => {
+    const bytes = new Uint8Array([16, 17, 18]);
+    const id = 'file-installer-unavailable';
+    const targetUri = `file://document/attachments/${id}.txt`;
+    const appData = singleAttachmentData({
+      id,
+      cloudKey: `attachments/${id}.txt`,
+      fileHash: sha256Hex(bytes),
+      pendingContentUpload: true,
+    });
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+      uri === targetUri
+        ? { exists: false }
+        : { exists: true, size: bytes.byteLength, modificationTime: 1 }
+    ));
+    fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(bytes));
+    attachmentFileInstallerMock.installAttachmentFileGeneration.mockRejectedValue(
+      Object.assign(new Error('Attachment file installer native module is unavailable'), {
+        code: 'ATTACHMENT_FILE_INSTALLER_UNAVAILABLE',
+      }),
+    );
+
+    const result = await attachmentSync.syncFileAttachments(
+      appData,
+      'file://sync/data.json',
+      undefined,
+      { phase: 'post-merge' },
+    );
+
+    expect(result).toBe(false);
+    const stagedPath = attachmentFileInstallerMock.installAttachmentFileGeneration.mock.calls[0]?.[0];
+    expect(fileSystemMock.deleteAsync).toHaveBeenCalledWith(stagedPath, { idempotent: true });
+    expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+      uri: targetUri,
+      localStatus: 'missing',
+      fileHash: sha256Hex(bytes),
+      pendingContentUpload: true,
+    });
+  });
+
   it('preserves a staged WebDAV generation and document metadata when native install conflicts', async () => {
     const bytes = new Uint8Array([21, 22, 23]);
     const appData = singleAttachmentData({
