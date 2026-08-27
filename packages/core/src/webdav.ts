@@ -477,7 +477,7 @@ export async function webdavPutJson(
     headers[WEBDAV_AUTOMKCOL_HEADER] = headers[WEBDAV_AUTOMKCOL_HEADER] || '1';
 
     const payload = JSON.stringify(data, null, 2);
-    const sendPut = async (): Promise<Response> => fetchWithTimeout(
+    const sendPut = async (): Promise<WebDavPutResponse> => fetchWebdavPutAndConsumeError(
         url,
         {
             method: 'PUT',
@@ -485,9 +485,8 @@ export async function webdavPutJson(
             body: payload,
             signal: options.signal,
         },
-        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
-        WEBDAV_TIMEOUT_ERROR,
+        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     );
 
     let res = await sendPut();
@@ -504,8 +503,7 @@ export async function webdavPutJson(
         if (isConditionalWrite && (res.status === 409 || res.status === 412)) {
             throw new WebDavRemoteWriteConflictError(res.status);
         }
-        const text = await readResponseText(res, MAX_ERROR_BODY_BYTES).catch(() => '');
-        const error = new Error(`WebDAV PUT failed (${res.status}): ${text || res.statusText}`);
+        const error = new Error(`WebDAV PUT failed (${res.status}): ${res.errorText || res.statusText}`);
         (error as { status?: number }).status = res.status;
         throw error;
     }
@@ -516,6 +514,39 @@ export async function webdavPutJson(
 }
 
 type WebDavVersionedBytes = WebDavDocumentVersion & { bytes: Uint8Array | null };
+
+type WebDavPutResponse = {
+    ok: boolean;
+    status: number;
+    statusText: string;
+    headers: Headers;
+    errorText: string;
+};
+
+const fetchWebdavPutAndConsumeError = async (
+    url: string,
+    init: RequestInit,
+    fetcher: typeof fetch,
+    timeoutMs: number,
+): Promise<WebDavPutResponse> => fetchWithTimeoutAndConsume(
+    url,
+    init,
+    timeoutMs,
+    fetcher,
+    WEBDAV_TIMEOUT_ERROR,
+    async (response, signal) => ({
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+        errorText: response.ok
+            ? ''
+            : await readResponseText(response, MAX_ERROR_BODY_BYTES, signal).catch((error) => {
+                if (signal?.aborted) throw error;
+                return '';
+            }),
+    }),
+);
 
 /** One GET supplies both document bytes and the strong validator governing the later PUT. */
 async function webdavGetVersionedBytesOrNull(
@@ -578,12 +609,11 @@ async function putWebdavBytes(
     headers['Content-Type'] = 'application/octet-stream';
     headers[WEBDAV_AUTOMKCOL_HEADER] = headers[WEBDAV_AUTOMKCOL_HEADER] || '1';
     const body = new Uint8Array(bytes);
-    const sendPut = async (): Promise<Response> => fetchWithTimeout(
+    const sendPut = async (): Promise<WebDavPutResponse> => fetchWebdavPutAndConsumeError(
         url,
         { method: 'PUT', headers, body, signal: options.signal },
-        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
-        WEBDAV_TIMEOUT_ERROR,
+        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     );
     let res = await sendPut();
     if (!res.ok && (res.status === 404 || res.status === 409)) {
@@ -594,8 +624,7 @@ async function putWebdavBytes(
         if (res.status === 409 || res.status === 412) {
             throw new WebDavRemoteWriteConflictError(res.status);
         }
-        const text = await readResponseText(res, MAX_ERROR_BODY_BYTES).catch(() => '');
-        const error = new Error(`WebDAV PUT failed (${res.status}): ${text || res.statusText}`);
+        const error = new Error(`WebDAV PUT failed (${res.status}): ${res.errorText || res.statusText}`);
         (error as { status?: number }).status = res.status;
         throw error;
     }

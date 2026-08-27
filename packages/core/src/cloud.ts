@@ -3,6 +3,7 @@ import {
     assertConnectionAllowed,
     createProgressStream,
     fetchWithTimeout,
+    fetchWithTimeoutAndConsume,
     MAX_ERROR_BODY_BYTES,
     MAX_DOWNLOAD_BYTES,
     MAX_SYNC_DOCUMENT_BYTES,
@@ -111,8 +112,11 @@ const metadataFromHeaders = (headers: Headers): RemoteFileMetadata => {
     };
 };
 
-const parseCloudJsonWriteBody = async (res: Response): Promise<Partial<CloudJsonWriteResult>> => {
-    const text = await readResponseText(res, MAX_ERROR_BODY_BYTES).catch(() => '');
+const parseCloudJsonWriteBody = async (
+    res: Response,
+    signal?: AbortSignal,
+): Promise<Partial<CloudJsonWriteResult>> => {
+    const text = await readResponseText(res, MAX_ERROR_BODY_BYTES, signal).catch(() => '');
     const normalized = text.startsWith('\uFEFF') ? text.slice(1).trim() : text.trim();
     if (!normalized) return {};
     try {
@@ -149,7 +153,7 @@ export async function cloudGetJson<T>(
 ): Promise<T | null> {
     assertCloudUrl(url, options);
     const fetcher = options.fetcher ?? fetch;
-    const res = await fetchWithTimeout(
+    return await fetchWithTimeoutAndConsume(
         url,
         {
             method: 'GET',
@@ -159,24 +163,23 @@ export async function cloudGetJson<T>(
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         CLOUD_TIMEOUT_ERROR,
+        async (res, signal) => {
+            if (res.status === 404) return null;
+            if (!res.ok) throw cloudHttpError('Cloud GET', res);
+
+            const text = await readResponseText(res, options.maxBytes ?? MAX_SYNC_DOCUMENT_BYTES, signal);
+            try {
+                return JSON.parse(text) as T;
+            } catch (error) {
+                if (/^\s*(?:<!doctype\s+html|<html\b)/i.test(text)) {
+                    throw new Error(
+                        'Cloud GET failed: server returned HTML instead of Mindwtr sync data — check the Self-Hosted URL, host, and port',
+                    );
+                }
+                throw new Error(`Cloud GET failed: invalid JSON (${(error as Error).message})`);
+            }
+        },
     );
-
-    if (res.status === 404) return null;
-    if (!res.ok) {
-        throw cloudHttpError('Cloud GET', res);
-    }
-
-    const text = await readResponseText(res, options.maxBytes ?? MAX_SYNC_DOCUMENT_BYTES);
-    try {
-        return JSON.parse(text) as T;
-    } catch (error) {
-        if (/^\s*(?:<!doctype\s+html|<html\b)/i.test(text)) {
-            throw new Error(
-                'Cloud GET failed: server returned HTML instead of Mindwtr sync data — check the Self-Hosted URL, host, and port',
-            );
-        }
-        throw new Error(`Cloud GET failed: invalid JSON (${(error as Error).message})`);
-    }
 }
 
 export async function cloudRequestJson<T>(
@@ -191,7 +194,7 @@ export async function cloudRequestJson<T>(
     if (body !== undefined) {
         headers['Content-Type'] = headers['Content-Type'] || 'application/json';
     }
-    const res = await fetchWithTimeout(
+    return await fetchWithTimeoutAndConsume(
         url,
         {
             method,
@@ -202,32 +205,33 @@ export async function cloudRequestJson<T>(
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         CLOUD_TIMEOUT_ERROR,
+        async (res, signal) => {
+            // Success bodies are real entities and may be large; only an error body is
+            // truncated down to message size.
+            const text = res.ok
+                ? await readResponseText(res, MAX_SYNC_DOCUMENT_BYTES, signal)
+                : await readResponseText(res, MAX_ERROR_BODY_BYTES, signal).catch(() => '');
+            if (!res.ok) {
+                let serverMessage = '';
+                try {
+                    const parsed = JSON.parse(text) as Record<string, unknown>;
+                    if (typeof parsed.error === 'string') serverMessage = parsed.error;
+                } catch {
+                    // Non-JSON error body; fall back to the status line.
+                }
+                throw new CloudHttpError(
+                    serverMessage || `Cloud ${method} failed (${res.status}): ${res.statusText}`,
+                    res.status,
+                );
+            }
+            if (!text.trim()) return null;
+            try {
+                return JSON.parse(text) as T;
+            } catch (error) {
+                throw new Error(`Cloud ${method} failed: invalid JSON (${(error as Error).message})`);
+            }
+        },
     );
-
-    // Success bodies are real entities and may be large; only an error body is
-    // truncated down to message size.
-    const text = res.ok
-        ? await readResponseText(res, MAX_SYNC_DOCUMENT_BYTES)
-        : await readResponseText(res, MAX_ERROR_BODY_BYTES).catch(() => '');
-    if (!res.ok) {
-        let serverMessage = '';
-        try {
-            const parsed = JSON.parse(text) as Record<string, unknown>;
-            if (typeof parsed.error === 'string') serverMessage = parsed.error;
-        } catch {
-            // Non-JSON error body; fall back to the status line.
-        }
-        throw new CloudHttpError(
-            serverMessage || `Cloud ${method} failed (${res.status}): ${res.statusText}`,
-            res.status,
-        );
-    }
-    if (!text.trim()) return null;
-    try {
-        return JSON.parse(text) as T;
-    } catch (error) {
-        throw new Error(`Cloud ${method} failed: invalid JSON (${(error as Error).message})`);
-    }
 }
 
 export async function cloudHeadJson(
@@ -283,7 +287,7 @@ export async function cloudPutJson(
     const headers = buildHeaders(options);
     headers['Content-Type'] = headers['Content-Type'] || 'application/json';
 
-    const res = await fetchWithTimeout(
+    return await fetchWithTimeoutAndConsume(
         url,
         {
             method: 'PUT',
@@ -294,19 +298,18 @@ export async function cloudPutJson(
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         CLOUD_TIMEOUT_ERROR,
+        async (res, signal) => {
+            if (!res.ok) throw cloudHttpError('Cloud PUT', res);
+            const metadata = metadataFromHeaders(res.headers);
+            const body = await parseCloudJsonWriteBody(res, signal);
+            return {
+                ...metadata,
+                ...body,
+                exists: true,
+                fingerprint: body.fingerprint ?? metadata.fingerprint,
+            };
+        },
     );
-
-    if (!res.ok) {
-        throw cloudHttpError('Cloud PUT', res);
-    }
-    const metadata = metadataFromHeaders(res.headers);
-    const body = await parseCloudJsonWriteBody(res);
-    return {
-        ...metadata,
-        ...body,
-        exists: true,
-        fingerprint: body.fingerprint ?? metadata.fingerprint,
-    };
 }
 
 export async function cloudPutFile(
@@ -354,7 +357,7 @@ export async function cloudGetFile(
 ): Promise<ArrayBuffer> {
     assertCloudUrl(url, options);
     const fetcher = options.fetcher ?? fetch;
-    const res = await fetchWithTimeout(
+    return await fetchWithTimeoutAndConsume(
         url,
         {
             method: 'GET',
@@ -364,13 +367,11 @@ export async function cloudGetFile(
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         CLOUD_TIMEOUT_ERROR,
+        async (res, signal) => {
+            if (!res.ok) throw cloudHttpError('Cloud File GET', res);
+            return await readResponseBody(res, options.onProgress, options.maxBytes ?? MAX_DOWNLOAD_BYTES, signal);
+        },
     );
-
-    if (!res.ok) {
-        throw cloudHttpError('Cloud File GET', res);
-    }
-
-    return await readResponseBody(res, options.onProgress, options.maxBytes ?? MAX_DOWNLOAD_BYTES);
 }
 
 export async function cloudDeleteFile(

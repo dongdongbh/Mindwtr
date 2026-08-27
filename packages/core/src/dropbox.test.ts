@@ -273,11 +273,11 @@ describe('bounded Dropbox folder inventory', () => {
     const hangingResponse = (signal: AbortSignal): Promise<Response> => new Promise((_, reject) => {
         signal.addEventListener('abort', () => reject(signal.reason), { once: true });
     });
-    const hangingBodyResponse = (headers: Record<string, string> = {}) => {
+    const hangingBodyResponse = (headers: Record<string, string> = {}, status = 200) => {
         const cancel = vi.fn();
         return {
             cancel,
-            response: new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 200, headers }),
+            response: new Response(new ReadableStream<Uint8Array>({ cancel }), { status, headers }),
         };
     };
 
@@ -329,6 +329,14 @@ describe('bounded Dropbox folder inventory', () => {
 
     it('times out and cancels a first page whose body stalls after headers', async () => {
         const { cancel, response } = hangingBodyResponse();
+
+        await expect(listDropboxFolderFiles('token', '/attachments', async () => response, { timeoutMs: 1 }))
+            .rejects.toThrow('Dropbox folder inventory request timed out');
+        expect(cancel).toHaveBeenCalledOnce();
+    }, 100);
+
+    it('times out and cancels a stalled Dropbox error body used for path classification', async () => {
+        const { cancel, response } = hangingBodyResponse({}, 409);
 
         await expect(listDropboxFolderFiles('token', '/attachments', async () => response, { timeoutMs: 1 }))
             .rejects.toThrow('Dropbox folder inventory request timed out');

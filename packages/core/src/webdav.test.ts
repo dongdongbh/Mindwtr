@@ -513,6 +513,18 @@ describe('webdav http helpers', () => {
         ).rejects.toThrow('WebDAV PUT failed (409): Conflict');
     });
 
+    it('times out and cancels a stalled JSON PUT error body after response headers', async () => {
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 500 });
+
+        await expect(webdavPutJson(
+            'https://example.com/mindwtr/data.json',
+            { ok: true },
+            { fetcher: async () => response, timeoutMs: 1 },
+        )).rejects.toThrow('WebDAV request timed out');
+        expect(cancel).toHaveBeenCalledOnce();
+    }, 100);
+
     it('caps parent MKCOL creation depth for pathological nested paths', async () => {
         const nestedSegments = Array.from({ length: 40 }, (_, index) => `level-${index + 1}`).join('/');
         const url = `https://example.com/remote.php/dav/files/user/mindwtr/${nestedSegments}/data.json`;

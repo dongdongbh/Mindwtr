@@ -139,19 +139,22 @@ export type DropboxSyncCrypto = {
     cryptoPrims?: SyncCryptoPrimitives;
 };
 
-const requireDropboxPathNotFound = async (response: Response): Promise<void> => {
-    const errorTag = await parseDropboxApiErrorTag(response);
+const requireDropboxPathNotFound = async (response: Response, signal?: AbortSignal): Promise<void> => {
+    const errorTag = await parseDropboxApiErrorTag(response, signal);
     if (isDropboxPathNotFoundTag(errorTag)) return;
     const detail = errorTag ? ` (${errorTag})` : ' (missing path/not_found error tag)';
     throw new Error(`Dropbox download failed: HTTP ${response.status}${detail}`);
 };
 
-const requireDropboxDownloadOrNotFound = async (response: Response): Promise<'ok' | 'not-found'> => {
+const requireDropboxDownloadOrNotFound = async (
+    response: Response,
+    signal?: AbortSignal,
+): Promise<'ok' | 'not-found'> => {
     if (response.status === 401) {
         throw new DropboxUnauthorizedError('Dropbox download failed: HTTP 401');
     }
     if (response.status === 409) {
-        await requireDropboxPathNotFound(response);
+        await requireDropboxPathNotFound(response, signal);
         return 'not-found';
     }
     if (!response.ok) {
@@ -218,7 +221,7 @@ export async function getDropboxFileMetadata(
             throw new DropboxUnauthorizedError('Dropbox file metadata failed: HTTP 401');
         }
         if (response.status === 409) {
-            if (isDropboxPathNotFoundTag(await parseDropboxApiErrorTag(response))) return { rev: null };
+            if (isDropboxPathNotFoundTag(await parseDropboxApiErrorTag(response, signal))) return { rev: null };
             throw new Error('Dropbox file metadata failed: HTTP 409');
         }
         if (!response.ok) throw new Error(`Dropbox file metadata failed: HTTP ${response.status}`);
@@ -260,7 +263,7 @@ export async function listDropboxFolderFiles(
                 throw new DropboxUnauthorizedError('Dropbox folder inventory failed: HTTP 401');
             }
             if (!cursor && response.status === 409) {
-                const tag = await parseDropboxApiErrorTag(response);
+                const tag = await parseDropboxApiErrorTag(response, signal);
                 if (isDropboxPathNotFoundTag(tag)) return null;
                 throw new Error(`Dropbox folder inventory failed: HTTP 409${tag ? ` (${tag})` : ''}`);
             }
@@ -320,7 +323,7 @@ export async function downloadDropboxAppData(
             'Dropbox-API-Arg': JSON.stringify({ path }),
         },
     }, requestOptions, 'Dropbox download timed out', async (response, signal) => {
-        if (await requireDropboxDownloadOrNotFound(response) === 'not-found') {
+        if (await requireDropboxDownloadOrNotFound(response, signal) === 'not-found') {
             return { kind: 'not-found' } as const;
         }
         const rev = parseDropboxMetadataRev(response.headers.get('dropbox-api-result')).rev;
@@ -353,7 +356,7 @@ export async function downloadDropboxAppData(
                     'Dropbox-API-Arg': JSON.stringify({ path: syncEncryptedArtifactName(DROPBOX_SYNC_PATH) }),
                 },
             }, requestOptions, 'Dropbox encrypted-generation probe timed out', async (response, signal) => {
-                if (await requireDropboxDownloadOrNotFound(response) === 'not-found') return null;
+                if (await requireDropboxDownloadOrNotFound(response, signal) === 'not-found') return null;
                 return new Uint8Array(await readResponseBody(response, undefined, MAX_SYNC_DOCUMENT_BYTES, signal));
             });
             if (probe === null) return { data: null, rev: null };
@@ -373,7 +376,7 @@ export async function downloadDropboxAppData(
                     'Dropbox-API-Arg': JSON.stringify({ path: DROPBOX_SYNC_PATH }),
                 },
             }, requestOptions, 'Dropbox plaintext-generation probe timed out', async (response, signal) => {
-                if (await requireDropboxDownloadOrNotFound(response) === 'not-found') return null;
+                if (await requireDropboxDownloadOrNotFound(response, signal) === 'not-found') return null;
                 return new Uint8Array(await readResponseBody(response, undefined, MAX_SYNC_DOCUMENT_BYTES, signal));
             });
             if (probe === null) return { data: null, rev: null };
@@ -473,7 +476,7 @@ export async function uploadDropboxAppData(
         body,
     }, requestOptions, 'Dropbox upload timed out', async (response, signal) => {
         if (response.status === 409) {
-            const errorTag = await parseDropboxApiErrorTag(response);
+            const errorTag = await parseDropboxApiErrorTag(response, signal);
             if (isDropboxPathConflictTag(errorTag)) {
                 throw new DropboxConflictError();
             }
@@ -507,7 +510,7 @@ export async function downloadDropboxFile(
             throw new DropboxUnauthorizedError('Dropbox file download failed: HTTP 401');
         }
         if (response.status === 409) {
-            if (isDropboxPathNotFoundTag(await parseDropboxApiErrorTag(response))) {
+            if (isDropboxPathNotFoundTag(await parseDropboxApiErrorTag(response, signal))) {
                 throw new DropboxFileNotFoundError('Dropbox file not found');
             }
             throw new Error('Dropbox file download failed: HTTP 409');
@@ -538,7 +541,7 @@ export async function downloadDropboxFileVersionedWithServerTime(
         const serverNowMs = Number.isFinite(parsedServerNow) ? parsedServerNow : null;
         if (response.status === 401) throw new DropboxUnauthorizedError('Dropbox file download failed: HTTP 401');
         if (response.status === 409) {
-            if (isDropboxPathNotFoundTag(await parseDropboxApiErrorTag(response))) {
+            if (isDropboxPathNotFoundTag(await parseDropboxApiErrorTag(response, signal))) {
                 return { bytes: null, version: null, serverNowMs };
             }
             throw new Error('Dropbox file download failed: HTTP 409');
@@ -657,12 +660,12 @@ export async function deleteDropboxFile(
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({ path: resolveDropboxPath(path) }),
-    }, requestOptions, 'Dropbox file delete timed out', async (response) => {
+    }, requestOptions, 'Dropbox file delete timed out', async (response, signal) => {
         if (response.status === 401) {
             throw new DropboxUnauthorizedError('Dropbox file delete failed: HTTP 401');
         }
         if (response.status === 409) {
-            if (isDropboxPathNotFoundTag(await parseDropboxApiErrorTag(response))) return;
+            if (isDropboxPathNotFoundTag(await parseDropboxApiErrorTag(response, signal))) return;
             throw new Error('Dropbox file delete failed: HTTP 409');
         }
         if (!response.ok) {

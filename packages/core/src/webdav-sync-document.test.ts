@@ -58,6 +58,20 @@ function createFakeWebdavServer() {
 const URL_ = 'https://example.com/dav/data.json';
 
 describe('webdav sync-document encryption', () => {
+    it('times out and cancels a stalled encrypted PUT error body after response headers', async () => {
+        const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(1), FAST_KDF);
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 500 });
+
+        await expect(webdavPutSyncDocument(URL_, { tasks: [] }, {
+            fetcher: async () => response,
+            material,
+            expectedEtag: null,
+            timeoutMs: 1,
+        })).rejects.toThrow('WebDAV request timed out');
+        expect(cancel).toHaveBeenCalledOnce();
+    }, 100);
+
     it('encrypts on PUT to the .enc url and decrypts on GET, leaving the plain url untouched', async () => {
         const { files, fetcher } = createFakeWebdavServer();
         const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(1), FAST_KDF);

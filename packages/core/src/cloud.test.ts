@@ -44,7 +44,45 @@ const errorResponse = (status: number, statusText: string) =>
         text: async () => '',
     }) as unknown as Response;
 
+const hangingBodyResponse = () => {
+    const cancel = vi.fn();
+    return {
+        cancel,
+        response: new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 200 }),
+    };
+};
+
 describe('cloud sync http helpers', () => {
+    it('times out and cancels a JSON body that stalls after response headers', async () => {
+        const { cancel, response } = hangingBodyResponse();
+
+        await expect(cloudGetJson('https://example.com/v1/data', {
+            fetcher: async () => response,
+            timeoutMs: 1,
+        })).rejects.toThrow('Cloud request timed out');
+        expect(cancel).toHaveBeenCalledOnce();
+    }, 100);
+
+    it('times out and cancels a request JSON response body that stalls after headers', async () => {
+        const { cancel, response } = hangingBodyResponse();
+
+        await expect(cloudRequestJson('POST', 'https://example.com/v1/tasks', {}, {
+            fetcher: async () => response,
+            timeoutMs: 1,
+        })).rejects.toThrow('Cloud request timed out');
+        expect(cancel).toHaveBeenCalledOnce();
+    }, 100);
+
+    it('times out and cancels a post-write JSON body that stalls after mutation headers', async () => {
+        const { cancel, response } = hangingBodyResponse();
+
+        await expect(cloudPutJson('https://example.com/v1/data', { tasks: [] }, {
+            fetcher: async () => response,
+            timeoutMs: 1,
+        })).rejects.toThrow('Cloud request timed out');
+        expect(cancel).toHaveBeenCalledOnce();
+    }, 100);
+
     it('returns null on 404 when fetching json', async () => {
         const fetcher = vi.fn(async () => ({ ok: false, status: 404, statusText: 'Not Found', text: async () => '' } as Response));
         const result = await cloudGetJson('https://example.com/v1/data', { fetcher });
@@ -363,4 +401,14 @@ describe('cloudGetFile download cap', () => {
         expect(Array.from(new Uint8Array(buffer))).toEqual([9, 9, 9]);
         expect(onProgress.mock.calls).toEqual([[2, 3], [3, 3]]);
     });
+
+    it('times out and cancels a file body that stalls after response headers', async () => {
+        const { cancel, response } = hangingBodyResponse();
+
+        await expect(cloudGetFile('https://example.com/v1/files/a', {
+            fetcher: async () => response,
+            timeoutMs: 1,
+        })).rejects.toThrow('Cloud request timed out');
+        expect(cancel).toHaveBeenCalledOnce();
+    }, 100);
 });
