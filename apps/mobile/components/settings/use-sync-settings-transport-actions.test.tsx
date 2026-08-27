@@ -929,6 +929,13 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.setSecureConfigValue).not.toHaveBeenCalled();
         expect(mocked.clearMobileSyncConfigCache).not.toHaveBeenCalled();
         expect(mocked.syncMobileBackgroundSyncRegistration).not.toHaveBeenCalled();
+        if (_label === 'requeue') {
+            expect(mocked.showSettingsWarning).toHaveBeenCalledWith(
+                'settings.syncQueued',
+                'settings.syncQueuedBody',
+                4200,
+            );
+        }
     });
 
     it('rejects a self-hosted token that is too short and does not persist it', async () => {
