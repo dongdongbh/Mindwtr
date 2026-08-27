@@ -1925,6 +1925,7 @@ describe('mobile sync-service runtime', () => {
       settings: {},
     };
     let uploadSignal: AbortSignal | undefined;
+    let uploadFenceAssertion: ((minRemainingMs?: number) => Promise<void>) | undefined;
     let releaseUploadStart!: () => void;
     const uploadStarted = new Promise<void>((resolve) => {
       releaseUploadStart = resolve;
@@ -1945,6 +1946,7 @@ describe('mobile sync-service runtime', () => {
     attachmentSyncMocks.hasPendingAttachmentSyncWork.mockResolvedValue(true);
     attachmentSyncMocks.syncCloudAttachments.mockImplementation(async (_data, _config, _baseUrl, options) => {
       uploadSignal = options?.signal;
+      uploadFenceAssertion = options?.assertRemoteMutationFenceHeld;
       releaseUploadStart();
       await new Promise((_resolve, reject) => {
         options?.signal?.addEventListener('abort', () => reject(new Error('Upload aborted by lifecycle')), { once: true });
@@ -1956,6 +1958,7 @@ describe('mobile sync-service runtime', () => {
     await uploadStarted;
 
     expect(uploadSignal?.aborted).toBe(false);
+    expect(uploadFenceAssertion).toBeTypeOf('function');
     expect(syncServiceModule.abortMobileSync()).toBe(true);
 
     const result = await syncPromise;

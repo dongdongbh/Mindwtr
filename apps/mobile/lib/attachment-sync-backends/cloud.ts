@@ -36,9 +36,12 @@ import {
 export type CloudAttachmentSyncOptions = {
   activationProbe?: boolean;
   assertCurrent?: () => void;
+  assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
   phase?: 'prepare' | 'post-merge';
   signal?: AbortSignal;
 };
+
+const CLOUD_REMOTE_MUTATION_REQUEST_HORIZON_MS = 35_000;
 
 type PendingCloudUploadMutation = {
   attachment: Attachment;
@@ -177,6 +180,12 @@ export const syncCloudAttachments = async (
         reportProgress(attachment.id, 'upload', 0, totalBytes, 'active');
         const cloudKey = buildCloudKey(attachment);
         const uploadUrl = `${baseSyncUrl}/${cloudKey}`;
+        try {
+          await options.assertRemoteMutationFenceHeld?.(CLOUD_REMOTE_MUTATION_REQUEST_HORIZON_MS);
+        } catch (error) {
+          shouldPropagateError = true;
+          throw error;
+        }
         const uploadedWithFileSystem = await uploadCloudFileWithFileSystem(
           uploadUrl,
           uri,
@@ -198,6 +207,12 @@ export const syncCloudAttachments = async (
             uploadBytes = readResult.data;
           }
           const buffer = toArrayBuffer(uploadBytes);
+          try {
+            await options.assertRemoteMutationFenceHeld?.(CLOUD_REMOTE_MUTATION_REQUEST_HORIZON_MS);
+          } catch (error) {
+            shouldPropagateError = true;
+            throw error;
+          }
           await cloudPutFile(
             uploadUrl,
             buffer,

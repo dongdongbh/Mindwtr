@@ -334,6 +334,43 @@ describe('desktop sync attachment backends', () => {
         expect(expectFoldedData(result).tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
     });
 
+    it.each([false, true])(
+        'revalidates the self-hosted Cloud fence before every upload retry (activation=%s)',
+        async (activationProbe) => {
+            const appData = createCandidateAttachmentData();
+            appData.tasks[0].attachments![0].cloudKey = undefined;
+            fsMocks.exists.mockResolvedValue(true);
+            fsMocks.readFile.mockResolvedValue(new Uint8Array([1, 2, 3]));
+            const lost = new SyncRemoteMutationFenceLostError();
+            const assertRemoteMutationFenceHeld = vi.fn()
+                .mockResolvedValueOnce(undefined)
+                .mockRejectedValueOnce(lost);
+            const fetcher = vi.fn(async () => errorResponse(503, 'Unavailable'));
+            coreMocks.withRetry.mockImplementationOnce(async (operation: () => Promise<unknown>) => {
+                await operation().catch(() => undefined);
+                return await operation();
+            });
+
+            await expect(syncCloudAttachments(
+                appData,
+                { url: 'https://cloud.example/v1/data', token: 'token' },
+                'https://cloud.example/v1',
+                {
+                    getTauriFetch: async () => fetcher as unknown as typeof fetch,
+                    isTauriRuntimeEnv: () => true,
+                    logSyncInfo: vi.fn(),
+                    logSyncWarning: vi.fn(),
+                    resolveWebdavPassword: vi.fn(),
+                },
+                { activationProbe, ensureLocalSnapshotFresh: vi.fn(), assertRemoteMutationFenceHeld },
+            )).rejects.toBe(lost);
+
+            expect(assertRemoteMutationFenceHeld).toHaveBeenNthCalledWith(1, 125_000);
+            expect(assertRemoteMutationFenceHeld).toHaveBeenNthCalledWith(2, 125_000);
+            expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
+        },
+    );
+
     it('does not manufacture candidate proof when an activation upload fails', async () => {
         const fetcher = vi.fn(async () => errorResponse(503, 'Unavailable'));
         const appData = createCandidateAttachmentData();

@@ -1582,6 +1582,7 @@ class MobileSyncRun {
         return syncCloudAttachments(data, cloudConfig, baseSyncUrl, {
           activationProbe: helpers.activationProbe,
           assertCurrent: () => helpers.ensureLocalSnapshotFresh(),
+          assertRemoteMutationFenceHeld: helpers.assertRemoteMutationFenceHeld,
           phase: helpers.phase,
           signal: this.requestAbortController.signal,
         });

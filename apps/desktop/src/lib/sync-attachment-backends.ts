@@ -671,6 +671,7 @@ export async function syncCloudAttachments(
         getLocalFileStat: statLocalFile,
         computeLocalFileHash,
         contentChangePhase: helpers?.phase,
+        isFatalError: isSyncRemoteMutationFenceError,
         onUpload: async (attachment, localPath) => {
             const cloudKey = buildCloudKey(attachment);
             const fileData = await readLocalFile(localPath, attachment);
@@ -693,8 +694,9 @@ export async function syncCloudAttachments(
             clearAttachmentValidationFailure(attachment.id);
             reportProgress(attachment.id, 'upload', 0, fileData.length, 'active');
             await withRetry(
-                () =>
-                    cloudPutFile(
+                async () => {
+                    await helpers?.assertRemoteMutationFenceHeld?.(UPLOAD_TIMEOUT_MS + 5_000);
+                    return await cloudPutFile(
                         `${baseSyncUrl}/${cloudKey}`,
                         fileData,
                         attachment.mimeType || 'application/octet-stream',
@@ -706,7 +708,8 @@ export async function syncCloudAttachments(
                             onProgress: (loaded, total) =>
                                 reportProgress(attachment.id, 'upload', loaded, total, 'active'),
                         },
-                    ),
+                    );
+                },
                 {
                     ...CLOUD_ATTACHMENT_RETRY_OPTIONS,
                     onRetry: (error, attempt, delayMs) => {

@@ -912,6 +912,86 @@ describe('attachment sync', () => {
   );
 
   it.each([false, true])(
+    'prevents a mobile self-hosted Cloud attachment PUT after lease takeover (activation=%s)',
+    async (activationProbe) => {
+      const localUri = 'file://document/attachments/cloud-lease.txt';
+      fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+        uri === localUri ? { exists: true, size: 3 } : { exists: false }
+      ));
+      fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
+      // The streamed uploader reports unsupported after the first fence check;
+      // the buffered fallback must revalidate instead of inheriting that check.
+      fileSystemMock.createUploadTask.mockReturnValue(undefined);
+      const core = await import('@mindwtr/core');
+      const lost = new SyncRemoteMutationFenceLostError();
+      const assertRemoteMutationFenceHeld = vi.fn()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(lost);
+      const appData: AppData = {
+        tasks: [{
+          id: 'task-cloud-lease', title: 'Task', status: 'inbox', tags: [], contexts: [],
+          attachments: [{
+            id: 'cloud-lease', kind: 'file', title: 'cloud-lease.txt',
+            uri: localUri, localStatus: 'available',
+            createdAt: '2026-08-27T00:00:00.000Z', updatedAt: '2026-08-27T00:00:00.000Z',
+          }],
+          createdAt: '2026-08-27T00:00:00.000Z', updatedAt: '2026-08-27T00:00:00.000Z',
+        }],
+        projects: [], sections: [], areas: [], settings: {},
+      };
+
+      await expect(attachmentSync.syncCloudAttachments(
+        appData,
+        { url: 'https://cloud.example/v1/data', token: 'token' },
+        'https://cloud.example/v1',
+        { activationProbe, assertRemoteMutationFenceHeld },
+      )).rejects.toBe(lost);
+
+      expect(assertRemoteMutationFenceHeld).toHaveBeenNthCalledWith(1, 35_000);
+      expect(assertRemoteMutationFenceHeld).toHaveBeenNthCalledWith(2, 35_000);
+      expect(fileSystemMock.createUploadTask).toHaveBeenCalledTimes(1);
+      expect(core.cloudPutFile).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([false, true])(
+    'does not start a mobile self-hosted Cloud streamed upload after fence loss (activation=%s)',
+    async (activationProbe) => {
+      const localUri = 'file://document/attachments/cloud-stream-lease.txt';
+      fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+        uri === localUri ? { exists: true, size: 3 } : { exists: false }
+      ));
+      fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
+      const core = await import('@mindwtr/core');
+      const lost = new SyncRemoteMutationFenceLostError();
+      const assertRemoteMutationFenceHeld = vi.fn().mockRejectedValue(lost);
+      const appData: AppData = {
+        tasks: [{
+          id: 'task-cloud-stream-lease', title: 'Task', status: 'inbox', tags: [], contexts: [],
+          attachments: [{
+            id: 'cloud-stream-lease', kind: 'file', title: 'cloud-stream-lease.txt',
+            uri: localUri, localStatus: 'available',
+            createdAt: '2026-08-27T00:00:00.000Z', updatedAt: '2026-08-27T00:00:00.000Z',
+          }],
+          createdAt: '2026-08-27T00:00:00.000Z', updatedAt: '2026-08-27T00:00:00.000Z',
+        }],
+        projects: [], sections: [], areas: [], settings: {},
+      };
+
+      await expect(attachmentSync.syncCloudAttachments(
+        appData,
+        { url: 'https://cloud.example/v1/data', token: 'token' },
+        'https://cloud.example/v1',
+        { activationProbe, assertRemoteMutationFenceHeld },
+      )).rejects.toBe(lost);
+
+      expect(assertRemoteMutationFenceHeld).toHaveBeenCalledWith(35_000);
+      expect(fileSystemMock.createUploadTask).not.toHaveBeenCalled();
+      expect(core.cloudPutFile).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([false, true])(
     'prevents a mobile Dropbox attachment upload after lease takeover (activation=%s)',
     async (activationProbe) => {
       fileSystemMock.getInfoAsync.mockResolvedValue({ exists: true, size: 3 });
