@@ -127,6 +127,7 @@ const coreMocks = vi.hoisted(() => ({
   flushPendingSave: vi.fn(),
   performSyncCycle: vi.fn(),
   webdavDeleteFile: vi.fn(),
+  webdavDeleteFileVersioned: vi.fn(),
   cloudDeleteFile: vi.fn(),
   getInMemoryAppDataSnapshot: vi.fn(),
   useTaskStoreGetState: vi.fn(),
@@ -245,6 +246,7 @@ vi.mock('@mindwtr/core', async () => {
     flushPendingSave: coreMocks.flushPendingSave,
     performSyncCycle: coreMocks.performSyncCycle,
     webdavDeleteFile: coreMocks.webdavDeleteFile,
+    webdavDeleteFileVersioned: coreMocks.webdavDeleteFileVersioned,
     cloudDeleteFile: coreMocks.cloudDeleteFile,
     getInMemoryAppDataSnapshot: coreMocks.getInMemoryAppDataSnapshot,
     useTaskStore: {
@@ -357,7 +359,12 @@ describe('mobile sync-service runtime', () => {
     coreMocks.webdavPutSyncDocument.mockImplementation(
       async (url: string, data: AppData, options: unknown) => coreMocks.webdavPutJson(url, data, options),
     );
-    coreMocks.webdavHeadFile.mockResolvedValue({ exists: true, fingerprint: 'webdav:v1:etag="initial"' });
+    coreMocks.webdavHeadFile.mockResolvedValue({
+      exists: true,
+      fingerprint: 'webdav:v1:etag="initial"',
+      etag: '"initial"',
+    });
+    coreMocks.webdavDeleteFileVersioned.mockResolvedValue(undefined);
     coreMocks.cloudHeadJson.mockResolvedValue({ exists: true, fingerprint: 'cloud:v1:etag="initial"' });
     coreMocks.getInMemoryAppDataSnapshot.mockReturnValue(emptyData);
     coreMocks.useTaskStoreGetState.mockImplementation(() => storeStateRef.current);

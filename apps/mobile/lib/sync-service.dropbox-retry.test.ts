@@ -427,6 +427,7 @@ describe('mobile Dropbox sync transient retry', () => {
     expect(coreMocks.createDropboxSyncRemoteMutationFencePort).toHaveBeenCalledWith(
       'candidate-access-token',
       expect.any(Function),
+      expect.objectContaining({ timeoutMs: 30_000 }),
     );
     expect(coreMocks.acquireSyncRemoteMutationFence).toHaveBeenCalledWith(
       { provider: 'dropbox-fence-port' },

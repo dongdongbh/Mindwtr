@@ -11,13 +11,17 @@ import {
     cloudPutFile,
     computeSha256Hex,
     getErrorStatus,
+    isSyncRemoteMutationFenceError,
+    isWebdavRemoteWriteConflictError,
     isWebdavRateLimitedError,
+    normalizeStrongWebdavEtag,
     parseCloudKitAttachmentKey,
     validateAttachmentForUpload,
     webdavFileExists,
     webdavGetFile,
+    webdavHeadFile,
     webdavMakeDirectory,
-    webdavPutFile,
+    webdavPutFileVersioned,
     withRetry,
 } from '@mindwtr/core';
 
@@ -55,9 +59,11 @@ import {
 import { openAttachmentBytes, sealAttachmentBytes } from './sync-encryption-service';
 import {
     downloadDropboxFile,
+    DropboxConflictError,
     DropboxFileNotFoundError,
     DropboxUnauthorizedError,
-    uploadDropboxFile,
+    getDropboxFileMetadata,
+    uploadDropboxFileVersioned,
 } from './dropbox-sync';
 import {
     deleteCloudKitAttachmentAssets,
@@ -260,6 +266,7 @@ export async function syncWebdavAttachments(
 
     const attachmentsDirUrl = `${baseSyncUrl}/${ATTACHMENTS_DIR_NAME}`;
     try {
+        await helpers?.assertRemoteMutationFenceHeld?.(UPLOAD_TIMEOUT_MS + 5_000);
         await webdavMakeDirectory(attachmentsDirUrl, {
             allowInsecureHttp: webDavConfig.allowInsecureHttp,
             username: webDavConfig.username,
@@ -267,6 +274,7 @@ export async function syncWebdavAttachments(
             fetcher,
         });
     } catch (error) {
+        if (isSyncRemoteMutationFenceError(error)) throw error;
         if (markWebdavAttachmentRateLimited(error, deps.logSyncWarning)) {
             return null;
         }
@@ -429,6 +437,10 @@ export async function syncWebdavAttachments(
         getLocalFileStat: statLocalFile,
         computeLocalFileHash,
         contentChangePhase: helpers?.phase,
+        isFatalError: (error) => (
+            isSyncRemoteMutationFenceError(error)
+            || isWebdavRemoteWriteConflictError(error)
+        ),
         policy: {
             shouldSkip: () => abortedByRateLimit,
             shouldUpload,
@@ -464,13 +476,32 @@ export async function syncWebdavAttachments(
             // keyed and immutable once uploaded), but they are longer than the plaintext — the
             // Content-Length header has to describe what actually goes on the wire.
             const wireData = await sealAttachmentBytes(fileData);
+            const uploadUrl = `${baseSyncUrl}/${cloudKey}`;
+            const remoteVersion = await withRetry(async () => {
+                await waitForSlot();
+                return webdavHeadFile(uploadUrl, {
+                    allowInsecureHttp: webDavConfig.allowInsecureHttp,
+                    username: webDavConfig.username,
+                    password,
+                    fetcher,
+                    timeoutMs: UPLOAD_TIMEOUT_MS,
+                });
+            }, WEBDAV_ATTACHMENT_RETRY_OPTIONS);
+            const expectedEtag = remoteVersion.exists
+                ? normalizeStrongWebdavEtag(remoteVersion.etag)
+                : null;
+            if (remoteVersion.exists && !expectedEtag) {
+                throw new Error('WebDAV attachment version is unavailable; refusing an unconditional overwrite');
+            }
             await withRetry(
                 async () => {
                     await waitForSlot();
-                    return await webdavPutFile(
-                        `${baseSyncUrl}/${cloudKey}`,
+                    await helpers?.assertRemoteMutationFenceHeld?.(UPLOAD_TIMEOUT_MS + 5_000);
+                    return await webdavPutFileVersioned(
+                        uploadUrl,
                         wireData,
                         attachment.mimeType || 'application/octet-stream',
+                        expectedEtag,
                         {
                             allowInsecureHttp: webDavConfig.allowInsecureHttp,
                             headers: { 'Content-Length': String(wireData.length) },
@@ -812,6 +843,10 @@ export async function syncDropboxAttachments(
         getLocalFileStat: statLocalFile,
         computeLocalFileHash,
         contentChangePhase: helpers?.phase,
+        isFatalError: (error) => (
+            isSyncRemoteMutationFenceError(error)
+            || error instanceof DropboxConflictError
+        ),
         onUpload: async (attachment, localPath) => {
             const cloudKey = buildCloudKey(attachment);
             const fileData = await readLocalFile(localPath, attachment);
@@ -834,17 +869,28 @@ export async function syncDropboxAttachments(
             clearAttachmentValidationFailure(attachment.id);
             reportProgress(attachment.id, 'upload', 0, fileData.length, 'active');
             const wireData = await sealAttachmentBytes(fileData);
+            const expectedRev = await withRetry(
+                () => withDropboxAccess((token) => getDropboxFileMetadata(
+                    token,
+                    cloudKey,
+                    dropboxFetcher,
+                    { timeoutMs: UPLOAD_TIMEOUT_MS },
+                )),
+                CLOUD_ATTACHMENT_RETRY_OPTIONS,
+            ).then((metadata) => metadata.rev);
             await withRetry(
                 () =>
-                    withDropboxAccess((token) =>
-                        uploadDropboxFile(
+                    withDropboxAccess(async (token) => {
+                        await helpers?.assertRemoteMutationFenceHeld?.(UPLOAD_TIMEOUT_MS + 5_000);
+                        return uploadDropboxFileVersioned(
                             token,
                             cloudKey,
                             wireData,
-                            attachment.mimeType || 'application/octet-stream',
+                            expectedRev,
                             dropboxFetcher,
-                        ),
-                    ),
+                            { timeoutMs: UPLOAD_TIMEOUT_MS },
+                        );
+                    }),
                 {
                     ...CLOUD_ATTACHMENT_RETRY_OPTIONS,
                     onRetry: (error, attempt, delayMs) => {

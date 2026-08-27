@@ -19,9 +19,10 @@ import {
 } from './dropbox-auth';
 import {
   DropboxFileNotFoundError,
-  deleteDropboxFile,
+  deleteDropboxFileVersioned,
   downloadDropboxAppData,
   getDropboxAppDataMetadata,
+  getDropboxFileMetadata,
   uploadDropboxAppData,
 } from './dropbox-sync';
 import * as Network from 'expo-network';
@@ -98,11 +99,11 @@ type MobileSyncActivityListener = (state: MobileSyncActivityState) => void;
 // an unresolvable file-backend config, or an automatic run without the
 // encryption key. Mobile callers gate on configuration status before syncing,
 // so none branch on it today.
-type MobileSyncSkipReason = 'offline' | 'requeued' | 'unchanged' | 'pendingRemoteWriteBackoff' | 'disabled';
+type MobileSyncSkipReason = 'offline' | 'requeued' | 'unchanged' | 'pendingRemoteWriteBackoff' | 'remoteFenceBusy' | 'disabled';
 // 'network': the OS reported the device offline. 'request': the device looked
 // online but the app's requests failed (per-app cellular block, VPN/firewall).
 type MobileSyncOfflineCause = 'network' | 'request';
-type MobileSyncResult = { success: boolean; stats?: MergeStats; error?: string; skipped?: MobileSyncSkipReason; offlineCause?: MobileSyncOfflineCause; remoteWriteDeferred?: boolean; activationProof?: 'remote-encrypted-no-key' };
+type MobileSyncResult = { success: boolean; stats?: MergeStats; error?: string; skipped?: MobileSyncSkipReason; offlineCause?: MobileSyncOfflineCause; remoteWriteDeferred?: boolean; remoteFenceDeferred?: 'busy' | 'cleanup'; retryAfterMs?: number; activationProof?: 'remote-encrypted-no-key' };
 export type MobileWebDavSyncConfig = { url: string; username: string; password: string; allowInsecureHttp?: boolean; allowWeakFingerprint?: boolean };
 export type MobileCloudSyncConfig = { url: string; token: string; allowInsecureHttp?: boolean };
 export type MobileDropboxSyncCredentials = { tokens: DropboxAuthTokens };
@@ -516,6 +517,7 @@ type MobileSyncRequest = {
 };
 
 type MobileRequestFollowUp = (nextArg?: MobileSyncRequest) => void;
+type MobileRequestFollowUpAfter = (delayMs: number, nextArg?: MobileSyncRequest) => void;
 
 // One sync cycle. The shared phase sequencing and cycle state live in the core
 // machine (runSharedSyncCycle, ADR 0014); this class carries mobile transport
@@ -531,6 +533,7 @@ class MobileSyncRun {
   private readonly ignorePendingRemoteWriteBackoff: boolean;
   private readonly configOverride: MobileSyncConfigOverride | undefined;
   private readonly requestFollowUp: MobileRequestFollowUp;
+  private readonly requestFollowUpAfter: MobileRequestFollowUpAfter;
 
   private lastStep = 'init';
   private readonly syncDiagnosticStartedAt = Date.now();
@@ -559,7 +562,12 @@ class MobileSyncRun {
    *  every seam below then behaves byte-for-byte as it did before the feature. */
   private encryptionMaterial: SyncKeyMaterial | null = null;
 
-  constructor(backend: SyncBackend, request: MobileSyncRequest | undefined, requestFollowUp: MobileRequestFollowUp) {
+  constructor(
+    backend: SyncBackend,
+    request: MobileSyncRequest | undefined,
+    requestFollowUp: MobileRequestFollowUp,
+    requestFollowUpAfter: MobileRequestFollowUpAfter,
+  ) {
     this.backend = backend;
     this.syncPathOverride = request?.syncPathOverride;
     this.manual = request?.manual === true;
@@ -567,6 +575,7 @@ class MobileSyncRun {
     this.ignorePendingRemoteWriteBackoff = request?.ignorePendingRemoteWriteBackoff === true;
     this.configOverride = request?.configOverride;
     this.requestFollowUp = requestFollowUp;
+    this.requestFollowUpAfter = requestFollowUpAfter;
     activeMobileSyncAbortController = this.requestAbortController;
     activeMobileSyncAbortReason = null;
   }
@@ -613,6 +622,16 @@ class MobileSyncRun {
 
   private queueFollowUp(): void {
     this.requestFollowUp({
+      syncPathOverride: this.syncPathOverride,
+      manual: this.manual,
+      activationProbe: this.activationProbe,
+      ignorePendingRemoteWriteBackoff: this.ignorePendingRemoteWriteBackoff,
+      configOverride: this.configOverride,
+    });
+  }
+
+  private queueFollowUpAfter(delayMs: number): void {
+    this.requestFollowUpAfter(delayMs, {
       syncPathOverride: this.syncPathOverride,
       manual: this.manual,
       activationProbe: this.activationProbe,
@@ -1074,6 +1093,7 @@ class MobileSyncRun {
         };
       },
       requestFollowUp: () => this.queueFollowUp(),
+      requestFollowUpAfter: (delayMs) => this.queueFollowUpAfter(delayMs),
       ensureNetworkStillAvailable: this.ensureNetworkStillAvailable,
       onStaleSnapshot: ({ localSnapshotChangeAt, currentChangeAt, step }) => {
         logSyncInfo('Sync detected local data changes during cycle; queued follow-up', {
@@ -1136,12 +1156,27 @@ class MobileSyncRun {
           fileSyncPath: this.fileSyncPath,
           fetcher: this.fetchWithAbort,
           ensureLocalSnapshotFresh: () => context.ensureLocalSnapshotFresh(),
+          assertRemoteMutationFenceHeld: context.assertRemoteMutationFenceHeld,
           deleteDropboxAttachment: (cloudKey, ensureBeforeProviderDelete) =>
-            this.runDropboxOperation((accessToken) => {
+            this.runDropboxOperation(async (accessToken) => {
+              const { rev } = await getDropboxFileMetadata(
+                accessToken,
+                cloudKey,
+                this.fetchWithAbort,
+                { signal: this.requestAbortController.signal },
+              );
+              if (!rev) throw new DropboxFileNotFoundError('Dropbox file not found');
               // Token refresh can yield long enough for a local edit. Guard at
               // the final provider call, not only before resolving credentials.
               ensureBeforeProviderDelete();
-              return deleteDropboxFile(accessToken, cloudKey, this.fetchWithAbort);
+              await context.assertRemoteMutationFenceHeld(35_000);
+              return deleteDropboxFileVersioned(
+                accessToken,
+                cloudKey,
+                rev,
+                this.fetchWithAbort,
+                { signal: this.requestAbortController.signal },
+              );
             }),
           isRemoteMissingError: (error) => error instanceof DropboxFileNotFoundError,
           logSyncInfo,
@@ -1285,7 +1320,10 @@ class MobileSyncRun {
         }
       },
       acquireDropboxRemoteMutationFence: (token) => acquireSyncRemoteMutationFence(
-        createDropboxSyncRemoteMutationFencePort(token, this.fetchWithAbort),
+        createDropboxSyncRemoteMutationFencePort(token, this.fetchWithAbort, {
+          signal: this.requestAbortController.signal,
+          timeoutMs: DEFAULT_SYNC_TIMEOUT_MS,
+        }),
         { ownerId: 'mindwtr-mobile', purpose: 'ordinary-sync' },
       ),
       webdavGet: async () => {
@@ -1501,6 +1539,7 @@ class MobileSyncRun {
         return syncWebdavAttachments(data, webdavConfig, baseSyncUrl, this.requestAbortController.signal, {
           activationProbe: helpers.activationProbe,
           phase: helpers.phase,
+          assertRemoteMutationFenceHeld: helpers.assertRemoteMutationFenceHeld,
           ...(this.encryptionMaterial ? { material: this.encryptionMaterial } : {}),
         });
       },
@@ -1522,6 +1561,7 @@ class MobileSyncRun {
         activationProbe: helpers.activationProbe,
         resolveAccessToken: (forceRefresh) => this.resolveDropboxAccessToken(forceRefresh),
         signal: this.requestAbortController.signal,
+        assertRemoteMutationFenceHeld: helpers.assertRemoteMutationFenceHeld,
         ...(this.encryptionMaterial ? { material: this.encryptionMaterial } : {}),
       }),
       syncFileAttachments: async (data, helpers) => syncFileAttachments(
@@ -1584,7 +1624,7 @@ const mobileSyncOrchestrator = createSyncOrchestrator<MobileSyncRequest | undefi
     });
     return delayMs;
   },
-  runCycle: async (request, { requestFollowUp }) => {
+  runCycle: async (request, { requestFollowUp, requestFollowUpAfter }) => {
     const rawBackend = request?.configOverride?.backend
       ?? (await getCachedConfigValue(SYNC_BACKEND_KEY))?.trim()
       ?? null;
@@ -1597,7 +1637,7 @@ const mobileSyncOrchestrator = createSyncOrchestrator<MobileSyncRequest | undefi
       return buildOfflineSkipResult('network');
     }
 
-    const syncRun = new MobileSyncRun(backend, request, requestFollowUp);
+    const syncRun = new MobileSyncRun(backend, request, requestFollowUp, requestFollowUpAfter);
     return runSerializedSyncDocumentOperation(() => syncRun.run());
   },
   onQueuedRunComplete: (queuedResult) => {

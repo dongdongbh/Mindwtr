@@ -3,16 +3,27 @@ import {
     type Attachment,
     type AttachmentCleanupRemoteDelete,
     cloudDeleteFile,
+    getErrorStatus,
+    isSyncRemoteMutationFenceError,
+    isWebdavRemoteWriteConflictError,
     LEGACY_SYNC_FILE_NAME,
     sanitizeAttachmentUriForSyncMerge,
     type CloudProvider,
     runAttachmentCleanupLifecycle,
     SYNC_FILE_NAME,
-    webdavDeleteFile,
+    normalizeStrongWebdavEtag,
+    webdavDeleteFileVersioned,
+    webdavHeadFile,
 } from '@mindwtr/core';
 
 import { resolveAttachmentReadPath } from './attachment-paths';
-import { deleteDropboxFile, DropboxFileNotFoundError, DropboxUnauthorizedError } from './dropbox-sync';
+import {
+    deleteDropboxFileVersioned,
+    DropboxConflictError,
+    DropboxFileNotFoundError,
+    DropboxUnauthorizedError,
+    getDropboxFileMetadata,
+} from './dropbox-sync';
 import { getBaseSyncUrl, getCloudBaseUrl } from './sync-attachments';
 import type { CloudConfig, WebDavConfig } from './sync-attachment-backends';
 import {
@@ -44,6 +55,7 @@ export type AttachmentCleanupGuards = {
     /** Throws LocalSyncAbort when the cleanup snapshot no longer covers the
      * current store. Call immediately before every irreversible delete. */
     ensureLocalSnapshotFresh: () => void;
+    assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
 };
 
 export const cleanupAttachmentTempFiles = async (deps: Pick<AttachmentCleanupDeps, 'isTauriRuntimeEnv' | 'logSyncWarning'>): Promise<void> => {
@@ -148,8 +160,11 @@ export const cleanupOrphanedAttachments = async (
         const deleteDropboxAttachment = async (cloudKey: string): Promise<void> => {
             const run = async (forceRefresh: boolean) => {
                 const token = await resolveDropboxAccessToken(forceRefresh);
+                const { rev } = await getDropboxFileMetadata(token, cloudKey, dropboxFetcher);
+                if (!rev) throw new DropboxFileNotFoundError('Dropbox file not found');
                 guards.ensureLocalSnapshotFresh();
-                await deleteDropboxFile(token, cloudKey, dropboxFetcher);
+                await guards.assertRemoteMutationFenceHeld?.(35_000);
+                await deleteDropboxFileVersioned(token, cloudKey, rev, dropboxFetcher);
             };
             try {
                 await run(false);
@@ -165,8 +180,23 @@ export const cleanupOrphanedAttachments = async (
         return async (target) => {
             if (backend === 'webdav' && webdavConfig?.url) {
                 const baseUrl = getBaseSyncUrl(webdavConfig.url);
+                const targetUrl = baseUrl + '/' + target.cloudKey;
+                const metadata = await webdavHeadFile(targetUrl, {
+                    allowInsecureHttp: webdavConfig.allowInsecureHttp,
+                    username: webdavConfig.username,
+                    password: webdavPassword,
+                    fetcher,
+                });
+                if (!metadata.exists) {
+                    const missing = new Error('WebDAV attachment is already missing');
+                    (missing as Error & { status?: number }).status = 404;
+                    throw missing;
+                }
+                const etag = normalizeStrongWebdavEtag(metadata.etag);
+                if (!etag) throw new Error('WebDAV attachment version is unavailable; refusing an unconditional delete');
                 guards.ensureLocalSnapshotFresh();
-                await webdavDeleteFile(baseUrl + '/' + target.cloudKey, {
+                await guards.assertRemoteMutationFenceHeld?.(35_000);
+                await webdavDeleteFileVersioned(targetUrl, etag, {
                     allowInsecureHttp: webdavConfig.allowInsecureHttp,
                     username: webdavConfig.username,
                     password: webdavPassword,
@@ -205,13 +235,20 @@ export const cleanupOrphanedAttachments = async (
         beforeEachRemoteDelete: yieldThenEnsureFresh,
         deleteLocalAttachment: (attachment) => deleteAttachmentFile(attachment, deps, guards),
         resolveRemoteDeleteAttachment,
-        isRemoteMissingError: (error) => error instanceof DropboxFileNotFoundError,
+        isRemoteMissingError: (error) => (
+            error instanceof DropboxFileNotFoundError || getErrorStatus(error) === 404
+        ),
         onRemoteAttachmentMissing: (target) => {
             deps.logSyncInfo('Remote attachment already missing during cleanup', {
                 cloudKey: target.cloudKey,
             });
         },
         onRemoteDeleteError: (target, error) => {
+            if (
+                isSyncRemoteMutationFenceError(error)
+                || isWebdavRemoteWriteConflictError(error)
+                || error instanceof DropboxConflictError
+            ) throw error;
             deps.logSyncWarning('Failed to delete remote attachment ' + target.title, error);
         },
     });

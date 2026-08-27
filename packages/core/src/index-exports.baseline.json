@@ -358,6 +358,7 @@
     "getDefaultCopilotModel",
     "getDefaultTaskAreaMode",
     "getDropboxAppDataMetadata",
+    "getDropboxFileMetadata",
     "getDueReminderRepeatTimes",
     "getEnglishI18nValue",
     "getErrorStatus",

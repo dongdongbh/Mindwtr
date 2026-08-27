@@ -856,6 +856,16 @@ export class SyncService {
         SyncService.syncOrchestrator.requestFollowUp();
     }
 
+    private static requestQueuedSyncRunAfter(delayMs: number, nextOptions?: SyncRunOptions) {
+        if (nextOptions) SyncService.queuedSyncOptions = nextOptions;
+        const queuedOptions = SyncService.queuedSyncOptions ?? nextOptions;
+        logSyncInfo('Sync trace deferred follow-up requested', {
+            delayMs: String(Math.max(0, Math.ceil(delayMs))),
+            hasQueuedOptions: String(Boolean(queuedOptions)),
+        });
+        SyncService.syncOrchestrator.requestFollowUpAfter(delayMs, queuedOptions);
+    }
+
     private static areSyncRunOptionsEquivalent(left?: SyncRunOptions | null, right?: SyncRunOptions | null): boolean {
         return (left?.backendOverride ?? undefined) === (right?.backendOverride ?? undefined)
             && (left?.configOverride ?? undefined) === (right?.configOverride ?? undefined)
@@ -2145,7 +2155,9 @@ export class SyncService {
             acquireDropboxRemoteMutationFence: async (token) => {
                 const fetcher = await createFetchWithAbortForContext(context);
                 return acquireSyncRemoteMutationFence(
-                    createDropboxSyncRemoteMutationFencePort(token, fetcher),
+                    createDropboxSyncRemoteMutationFencePort(token, fetcher, {
+                        signal: context.requestAbortController.signal,
+                    }),
                     { ownerId: 'mindwtr-desktop', purpose: 'ordinary-sync' },
                 );
             },
@@ -2647,6 +2659,19 @@ export class SyncService {
 
     static async cleanupAttachmentsNow(): Promise<void> {
         if (!isTauriRuntimeEnv()) return;
+        const backend = await SyncService.getSyncBackend();
+        const cloudProvider = backend === 'cloud' ? await SyncService.getCloudProvider() : null;
+        if (backend === 'webdav' || (backend === 'cloud' && cloudProvider === 'dropbox')) {
+            // These providers share the compatible-client mutation fence. Route
+            // the manual button through the ordinary sync machine so cleanup
+            // cannot become an unfenced writer outside the normal lease/CAS path.
+            const result = await SyncService.performSync({
+                manual: true,
+                ignorePendingRemoteWriteBackoff: true,
+            });
+            if (!result.success) throw new Error(result.error || 'Attachment cleanup sync failed');
+            return;
+        }
         await runSyncDocumentExclusive(async () => {
             await syncServiceDependencies.flushPendingSave();
             const localSnapshotChangeAt = getStoreState().lastDataChangeAt;
@@ -2657,7 +2682,6 @@ export class SyncService {
                     requestFollowUp: () => SyncService.requestQueuedSyncRun(),
                 });
             };
-            const backend = await SyncService.getSyncBackend();
             const data = await invokeSyncNative<AppData>('get_data');
             ensureLocalSnapshotFresh();
             const cleaned = await cleanupOrphanedAttachments(
@@ -2829,6 +2853,7 @@ export class SyncService {
                 hooks: {
                     setupCycle: (setupContext) => SyncService.setupDesktopCycle(context, options, setupContext.setStep),
                     requestFollowUp: () => SyncService.requestQueuedSyncRun(options, false),
+                    requestFollowUpAfter: (delayMs) => SyncService.requestQueuedSyncRunAfter(delayMs, options),
                     ensureNetworkStillAvailable: () => {
                         if (context.backend !== 'cloud' && context.backend !== 'webdav' && context.backend !== 'cloudkit') return;
                         if (
@@ -2858,7 +2883,10 @@ export class SyncService {
                             data,
                             context.backend,
                             getAttachmentCleanupDeps(context.dropboxCredentialHandle),
-                            { ensureLocalSnapshotFresh },
+                            {
+                                ensureLocalSnapshotFresh,
+                                assertRemoteMutationFenceHeld: cleanupContext.assertRemoteMutationFenceHeld,
+                            },
                         );
                         return {
                             data: cleanedData,

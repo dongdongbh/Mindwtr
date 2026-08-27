@@ -48,6 +48,7 @@ const createFenceLease = (overrides: Partial<SyncRemoteMutationFenceLease> = {})
     assertHeld: vi.fn().mockResolvedValue(undefined),
     renew: vi.fn().mockResolvedValue(undefined),
     release: vi.fn().mockResolvedValue(undefined),
+    retryAfterMs: vi.fn(() => 5_000),
     ...overrides,
 });
 
@@ -150,6 +151,7 @@ const createHarness = (config: HarnessConfig = {}) => {
             fastSyncScope: config.fastSyncScope ?? null,
         })),
         requestFollowUp: vi.fn(),
+        requestFollowUpAfter: vi.fn(),
         formatErrorMessage: (error, backend) => `[${backend}] ${error instanceof Error ? error.message : String(error)}`,
         finalizeErrorStatus: vi.fn(async () => {}),
         finalizeSuccess: vi.fn(async () => {}),
@@ -827,7 +829,7 @@ describe('runSharedSyncCycle', () => {
         expect(bundle.harness.persisted.tasks.some((task) => task.id === 't-stale')).toBe(false);
     });
 
-    it('fails closed before remote or local mutation when fence acquisition is busy', async () => {
+    it('defers a busy fence without recording an error or touching data', async () => {
         const { io, storage, hooks, run } = createHarness({
             io: {
                 acquireRemoteMutationFence: vi.fn(async () => {
@@ -838,11 +840,38 @@ describe('runSharedSyncCycle', () => {
 
         const result = await run();
 
-        expect(result).toMatchObject({ success: false });
+        expect(result).toMatchObject({
+            success: true,
+            skipped: 'remoteFenceBusy',
+            remoteFenceDeferred: 'busy',
+            retryAfterMs: 5_000,
+        });
+        expect(hooks.requestFollowUpAfter).toHaveBeenCalledWith(5_000);
         expect(io.readRemote).not.toHaveBeenCalled();
         expect(io.writeRemote).not.toHaveBeenCalled();
         expect(storage.persistLocal).not.toHaveBeenCalled();
         expect(hooks.finalizeSuccess).not.toHaveBeenCalled();
+        expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
+    });
+
+    it('marks a successful run cleanup-deferred when conditional fence release fails', async () => {
+        const lease = createFenceLease({
+            release: vi.fn().mockRejectedValue(new Error('Dropbox versioned file delete timed out')),
+            retryAfterMs: vi.fn(() => 12_345),
+        });
+        const { hooks, run } = createHarness({
+            io: { acquireRemoteMutationFence: vi.fn().mockResolvedValue(lease) },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: true,
+            remoteFenceDeferred: 'cleanup',
+            retryAfterMs: 12_345,
+        });
+        expect(hooks.requestFollowUpAfter).toHaveBeenCalledWith(12_345);
+        expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
     });
 
     it('does not downgrade fence loss during attachment pre-sync into a warning', async () => {

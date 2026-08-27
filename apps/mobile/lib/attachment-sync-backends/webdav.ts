@@ -2,12 +2,16 @@ import type { AppData, Attachment, SyncKeyMaterial } from '@mindwtr/core';
 import {
   applyAttachmentPatches,
   getErrorStatus,
+  isSyncRemoteMutationFenceError,
+  isWebdavRemoteWriteConflictError,
   isWebdavRateLimitedError,
+  normalizeStrongWebdavEtag,
   validateAttachmentForUpload,
   webdavFileExists,
   webdavGetFile,
+  webdavHeadFile,
   webdavMakeDirectory,
-  webdavPutFile,
+  webdavPutFileVersioned,
   withRetry,
 } from '@mindwtr/core';
 import { sanitizeLogMessage } from '../app-log';
@@ -75,6 +79,7 @@ export const syncWebdavAttachments = async (
     phase?: 'prepare' | 'post-merge';
     /** #1056: seal bytes before upload / open them after download. Null = encryption off. */
     material?: SyncKeyMaterial | null;
+    assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
   } = {}
 ): Promise<AppData | false> => {
   assertAttachmentSyncNotAborted(signal);
@@ -106,6 +111,7 @@ export const syncWebdavAttachments = async (
   // failure to shrug off, and swallowing it let the whole insecure pass continue (SEC-10a).
   assertMobileWebdavConnection(attachmentsDirUrl, webDavConfig.allowInsecureHttp);
   try {
+    await options.assertRemoteMutationFenceHeld?.(35_000);
     await webdavMakeDirectory(attachmentsDirUrl, {
       ...getMobileWebDavRequestOptions(webDavConfig.allowInsecureHttp),
       username: webDavConfig.username,
@@ -114,6 +120,7 @@ export const syncWebdavAttachments = async (
     });
   } catch (error) {
     if (isAttachmentSyncAbortError(error, signal)) throw error;
+    if (isSyncRemoteMutationFenceError(error)) throw error;
     logAttachmentWarn('Failed to ensure WebDAV attachments directory', error);
   }
 
@@ -233,7 +240,11 @@ export const syncWebdavAttachments = async (
     getLocalFileStat: (path) => statAttachmentFile(path),
     computeLocalFileHash: (path) => computeAttachmentFileHash(path),
     contentChangePhase: options.phase,
-    isFatalError: (error) => isAttachmentSyncAbortError(error, signal),
+    isFatalError: (error) => (
+      isAttachmentSyncAbortError(error, signal)
+      || isSyncRemoteMutationFenceError(error)
+      || isWebdavRemoteWriteConflictError(error)
+    ),
     policy: options.activationProbe
       ? undefined
       : {
@@ -261,6 +272,21 @@ export const syncWebdavAttachments = async (
         const uploadBytes = Math.max(0, Number(size ?? 0));
         reportProgress(attachment.id, 'upload', 0, uploadBytes, 'active');
         const uploadUrl = `${baseSyncUrl}/${cloudKey}`;
+        const remoteVersion = await withRetry(async () => {
+          await waitForSlot();
+          return webdavHeadFile(uploadUrl, {
+            ...getMobileWebDavRequestOptions(webDavConfig.allowInsecureHttp),
+            username: webDavConfig.username,
+            password: webDavConfig.password,
+            signal,
+          });
+        }, WEBDAV_ATTACHMENT_RETRY_OPTIONS);
+        const expectedEtag = remoteVersion.exists
+          ? normalizeStrongWebdavEtag(remoteVersion.etag)
+          : null;
+        if (remoteVersion.exists && !expectedEtag) {
+          throw new Error('WebDAV attachment version is unavailable; refusing an unconditional overwrite');
+        }
         logAttachmentInfo('WebDAV attachment upload start', {
           id: attachment.id,
           bytes: String(uploadBytes),
@@ -272,6 +298,7 @@ export const syncWebdavAttachments = async (
         const uploadedWithFileSystem = material ? false : await withRetry(
           async () => {
             await waitForSlot();
+            await options.assertRemoteMutationFenceHeld?.(35_000);
             return await uploadWebdavFileWithFileSystem(
               uploadUrl,
               localPath,
@@ -281,7 +308,8 @@ export const syncWebdavAttachments = async (
               webDavConfig.allowInsecureHttp,
               (loaded, total) => reportProgress(attachment.id, 'upload', loaded, total, 'active'),
               uploadBytes,
-              signal
+              signal,
+              expectedEtag,
             );
           },
           {
@@ -307,7 +335,8 @@ export const syncWebdavAttachments = async (
           await withRetry(
             async () => {
               await waitForSlot();
-              return await webdavPutFile(uploadUrl, buffer, attachment.mimeType || DEFAULT_CONTENT_TYPE, {
+              await options.assertRemoteMutationFenceHeld?.(35_000);
+              return await webdavPutFileVersioned(uploadUrl, buffer, attachment.mimeType || DEFAULT_CONTENT_TYPE, expectedEtag, {
                 ...getMobileWebDavRequestOptions(webDavConfig.allowInsecureHttp),
                 username: webDavConfig.username,
                 password: webDavConfig.password,
@@ -342,6 +371,7 @@ export const syncWebdavAttachments = async (
         return true;
       } catch (error) {
         if (isAttachmentSyncAbortError(error, signal)) throw error;
+        if (isSyncRemoteMutationFenceError(error) || isWebdavRemoteWriteConflictError(error)) throw error;
         if (handleRateLimit(error)) {
           abortedByRateLimit = true;
           return false;

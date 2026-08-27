@@ -1,14 +1,20 @@
 import type { AppData, Attachment, SyncKeyMaterial } from '@mindwtr/core';
-import { applyAttachmentPatches, isAbortError, validateAttachmentForUpload } from '@mindwtr/core';
 import {
+  applyAttachmentPatches,
+  isAbortError,
+  isSyncRemoteMutationFenceError,
+  validateAttachmentForUpload,
+} from '@mindwtr/core';
+import {
+  DropboxConflictError,
   DropboxFileNotFoundError,
   downloadDropboxFile,
-  uploadDropboxFile,
+  getDropboxFileMetadata,
+  uploadDropboxFileVersioned,
 } from '../dropbox-sync';
 import {
   buildCloudKey,
   collectAttachments,
-  DEFAULT_CONTENT_TYPE,
   canUploadAttachmentFrom,
   DROPBOX_ATTACHMENT_MAX_DOWNLOADS_PER_SYNC,
   DROPBOX_ATTACHMENT_MAX_UPLOADS_PER_SYNC,
@@ -40,6 +46,7 @@ export type DropboxAttachmentSyncOptions = {
   activationProbe?: boolean;
   resolveAccessToken?: DropboxAccessTokenResolver;
   signal?: AbortSignal;
+  assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
   /** #1056: seal bytes before upload / open them after download. Null = encryption off. */
   material?: SyncKeyMaterial | null;
 };
@@ -161,16 +168,30 @@ export const syncDropboxAttachments = async (
           uploadBytes = readResult.data;
         }
         const wireBytes = await sealAttachmentBytesForUpload(uploadBytes, options.material);
+        const expectedRev = await runDropboxAuthorized(
+          dropboxClientId,
+          (accessToken) => getDropboxFileMetadata(
+            accessToken,
+            cloudKey,
+            fetcher,
+            { signal: options.signal },
+          ),
+          fetcher,
+          options.resolveAccessToken,
+        ).then((metadata) => metadata.rev);
         await runDropboxAuthorized(
           dropboxClientId,
-          (accessToken) =>
-            uploadDropboxFile(
+          async (accessToken) => {
+            await options.assertRemoteMutationFenceHeld?.(35_000);
+            return uploadDropboxFileVersioned(
               accessToken,
               cloudKey,
               toArrayBuffer(wireBytes),
-              attachment.mimeType || DEFAULT_CONTENT_TYPE,
-              fetcher
-            ),
+              expectedRev,
+              fetcher,
+              { signal: options.signal },
+            );
+          },
           fetcher,
           options.resolveAccessToken,
         );
@@ -184,6 +205,9 @@ export const syncDropboxAttachments = async (
         });
       } catch (error) {
         if (isAbortLikeError(error, options.signal)) {
+          throw error;
+        }
+        if (isSyncRemoteMutationFenceError(error) || error instanceof DropboxConflictError) {
           throw error;
         }
         if (localReadFailed) {

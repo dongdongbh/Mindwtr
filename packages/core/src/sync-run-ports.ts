@@ -17,7 +17,7 @@ import type { SyncRemoteMutationFenceLease } from './sync-remote-fence';
  * transports, platform storage, and UI notification behind these ports.
  */
 
-export type SyncRunSkipReason = 'offline' | 'requeued' | 'unchanged' | 'pendingRemoteWriteBackoff' | 'disabled';
+export type SyncRunSkipReason = 'offline' | 'requeued' | 'unchanged' | 'pendingRemoteWriteBackoff' | 'remoteFenceBusy' | 'disabled';
 
 export type SyncRunResult = {
     success: boolean;
@@ -33,6 +33,11 @@ export type SyncRunResult = {
      *  flag lets manual-sync UI avoid reporting a plain success while the
      *  sidebar still shows `lastSyncStatus: 'error'`. */
     remoteWriteDeferred?: boolean;
+    /** A compatible peer currently owns the mutation fence, or this run could
+     *  not conditionally remove its own lease. Suppresses plain-success UI. */
+    remoteFenceDeferred?: 'busy' | 'cleanup';
+    /** Provider-time-derived lower bound before the deferred retry is useful. */
+    retryAfterMs?: number;
 };
 
 /** Transport metadata from one remote write. Adapters normalize backend-specific
@@ -205,6 +210,9 @@ export type SyncRunAttachmentPhase = 'prepare' | 'post-merge';
 export type SyncRunAttachmentHelpers = {
     /** Abort (requeue) when local data changed mid-pass. */
     ensureLocalSnapshotFresh(): void;
+    /** Revalidate/renew the compatible-client lease at the final provider
+     *  mutation boundary, after any throttle wait or retry delay. */
+    assertRemoteMutationFenceHeld?(minRemainingMs?: number): Promise<void>;
     /** Candidate transports must prove attachment bytes before activation. */
     activationProbe: boolean;
     /**
@@ -227,6 +235,7 @@ export type SyncRunAttachmentCleanupContext = {
      *  cycle synced to allow the desktop covered-snapshot acceptance. */
     ensureLocalSnapshotFresh(expectedData?: AppData): void;
     ensureNetworkStillAvailable(): Promise<void>;
+    assertRemoteMutationFenceHeld(minRemainingMs?: number): Promise<void>;
 };
 
 export type SyncRunErrorStatusDetails = {
@@ -261,6 +270,9 @@ export interface SyncRunPlatformHooks {
     setupCycle(context: { setStep(step: string): void }): Promise<SyncRunCycleSetup>;
     /** Queue a follow-up sync cycle with the current cycle's options. */
     requestFollowUp(): void;
+    /** Queue no earlier than a provider-time-derived delay (remote lease
+     *  contention/cleanup). Implementations may let an explicit user run win. */
+    requestFollowUpAfter?(delayMs: number): void;
     /** Throw when the platform knows the network is gone (remote backends
      *  only; implementations self-gate on their backend). The machine calls
      *  this before remote reads/writes/fingerprints and network-backend

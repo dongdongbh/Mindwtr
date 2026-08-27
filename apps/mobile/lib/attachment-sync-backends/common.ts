@@ -6,6 +6,7 @@ import {
   runAttachmentTransferLifecycle,
   SyncCryptoUnsupportedError,
   SyncEncryptionTerminalError,
+  WebDavRemoteWriteConflictError,
   type AttachmentTransferLifecycleOptions,
   type AttachmentTransferResult,
 } from '@mindwtr/core';
@@ -245,7 +246,8 @@ export const uploadWebdavFileWithFileSystem = async (
   allowInsecureHttp: boolean | undefined,
   onProgress?: (sent: number, total: number) => void,
   totalBytes?: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  expectedEtag: string | null | undefined = undefined,
 ): Promise<boolean> => {
   // Before anything is read or sent: this uploader bypasses core's transports, so it is
   // the only place the cleartext guard can run for it (SEC-10a).
@@ -260,6 +262,8 @@ export const uploadWebdavFileWithFileSystem = async (
     'Content-Type': contentType || DEFAULT_CONTENT_TYPE,
   };
   if (authHeader) headers.Authorization = authHeader;
+  if (expectedEtag === null) headers['If-None-Match'] = '*';
+  else if (expectedEtag !== undefined) headers['If-Match'] = expectedEtag;
 
   const uploadType = resolveUploadType();
   const createUploadTask = (FileSystem as any).createUploadTask;
@@ -284,6 +288,7 @@ export const uploadWebdavFileWithFileSystem = async (
     const result = await runUploadTask(task, signal);
     const status = Number((result as { status?: number } | null)?.status ?? 0);
     if (status && (status < 200 || status >= 300)) {
+      if (status === 409 || status === 412) throw new WebDavRemoteWriteConflictError(status);
       const error = new Error(`WebDAV File PUT failed (${status})`);
       (error as { status?: number }).status = status;
       throw error;
@@ -296,6 +301,7 @@ export const uploadWebdavFileWithFileSystem = async (
   const result = await uploadAsync(url, fileUri, { httpMethod: 'PUT', headers, uploadType });
   const status = Number((result as { status?: number } | null)?.status ?? 0);
   if (status && (status < 200 || status >= 300)) {
+    if (status === 409 || status === 412) throw new WebDavRemoteWriteConflictError(status);
     const error = new Error(`WebDAV File PUT failed (${status})`);
     (error as { status?: number }).status = status;
     throw error;

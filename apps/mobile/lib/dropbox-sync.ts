@@ -8,6 +8,7 @@ export {
   DropboxFileNotFoundError,
   DropboxUnauthorizedError,
   getDropboxAppDataMetadata,
+  getDropboxFileMetadata,
   isDropboxUnauthorizedError,
   testDropboxAccess,
   uploadDropboxAppData,

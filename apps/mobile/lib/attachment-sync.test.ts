@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppData, Attachment } from '@mindwtr/core';
+import { SyncRemoteMutationFenceLostError, type AppData, type Attachment } from '@mindwtr/core';
 
 /** Real digests, not fixtures: core's `validateAttachmentHash` now fails closed, and the
  *  node test env has `crypto.subtle`, so the values the code computes must be the values
@@ -58,9 +58,11 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
     cloudDeleteFile: vi.fn(),
     cloudPutFile: vi.fn(),
     webdavGetFile: vi.fn(),
+    webdavHeadFile: vi.fn(),
     webdavFileExists: vi.fn(),
     webdavMakeDirectory: vi.fn(),
     webdavPutFile: vi.fn(),
+    webdavPutFileVersioned: vi.fn(),
     // Retry/backoff is transport timing, not behaviour under test: the real
     // helper sleeps up to a minute between attempts.
     withRetry: vi.fn(async (fn: () => Promise<unknown>) => await fn()),
@@ -69,10 +71,13 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
 });
 
 vi.mock('./dropbox-sync', () => ({
+  DropboxConflictError: class DropboxConflictError extends Error {},
   DropboxFileNotFoundError: class DropboxFileNotFoundError extends Error {},
   DropboxUnauthorizedError: class DropboxUnauthorizedError extends Error {},
   downloadDropboxFile: vi.fn(),
+  getDropboxFileMetadata: vi.fn(),
   uploadDropboxFile: vi.fn(),
+  uploadDropboxFileVersioned: vi.fn(),
 }));
 
 // Only the three functions the CloudKit attachment backend uses; nothing else in this
@@ -126,7 +131,17 @@ describe('attachment sync', () => {
     // The real lifecycle keeps a module-scoped "stat we already failed to hash" map
     // (BUG-16); leaking it between tests would silently skip a re-read a later test
     // is asserting on.
-    (await import('@mindwtr/core')).resetUnhashableAttachmentStatsForTests();
+    const core = await import('@mindwtr/core');
+    core.resetUnhashableAttachmentStatsForTests();
+    vi.mocked(core.webdavHeadFile).mockResolvedValue({
+      exists: false,
+      fingerprint: null,
+      etag: null,
+      lastModified: null,
+      contentLength: null,
+    });
+    const dropbox = await import('./dropbox-sync');
+    vi.mocked(dropbox.getDropboxFileMetadata).mockResolvedValue({ rev: null });
     fileSystemMock.getInfoAsync.mockReset();
     fileSystemMock.makeDirectoryAsync.mockResolvedValue(undefined);
     fileSystemMock.copyAsync.mockResolvedValue(undefined);
@@ -794,7 +809,7 @@ describe('attachment sync', () => {
     fileSystemMock.getInfoAsync.mockResolvedValue({ exists: true, size: 3 });
     fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
     const core = await import('@mindwtr/core');
-    vi.mocked(core.webdavPutFile).mockResolvedValue(undefined);
+    vi.mocked(core.webdavPutFileVersioned).mockResolvedValue(undefined);
     vi.mocked(core.webdavFileExists).mockResolvedValue(false);
 
     const controller = new AbortController();
@@ -838,13 +853,83 @@ describe('attachment sync', () => {
     expect(core.webdavMakeDirectory).toHaveBeenCalledWith('https://example.com/attachments', expect.objectContaining({
       signal: controller.signal,
     }));
-    expect(core.webdavPutFile).toHaveBeenCalledWith(
+    expect(core.webdavPutFileVersioned).toHaveBeenCalledWith(
       'https://example.com/attachments/webdav-upload.jpg',
       expect.any(ArrayBuffer),
       'application/octet-stream',
+      null,
       expect.objectContaining({ signal: controller.signal })
     );
   });
+
+  it.each([false, true])(
+    'prevents a mobile WebDAV attachment PUT after lease takeover (activation=%s)',
+    async (activationProbe) => {
+      fileSystemMock.getInfoAsync.mockResolvedValue({ exists: true, size: 3 });
+      fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
+      const core = await import('@mindwtr/core');
+      const lost = new SyncRemoteMutationFenceLostError();
+      const assertRemoteMutationFenceHeld = vi.fn()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(lost);
+      const appData: AppData = {
+        tasks: [{
+          id: 'task-lease', title: 'Task', status: 'inbox', tags: [], contexts: [],
+          attachments: [{
+            id: 'webdav-lease', kind: 'file', title: 'lease.txt',
+            uri: 'file://document/attachments/lease.txt', localStatus: 'available',
+            createdAt: '2026-08-27T00:00:00.000Z', updatedAt: '2026-08-27T00:00:00.000Z',
+          }],
+          createdAt: '2026-08-27T00:00:00.000Z', updatedAt: '2026-08-27T00:00:00.000Z',
+        }],
+        projects: [], sections: [], areas: [], settings: {},
+      };
+
+      await expect(attachmentSync.syncWebdavAttachments(
+        appData,
+        { url: 'https://example.com/data.json', username: 'u', password: 'p' },
+        'https://example.com',
+        undefined,
+        { activationProbe, assertRemoteMutationFenceHeld },
+      )).rejects.toBe(lost);
+
+      expect(assertRemoteMutationFenceHeld).toHaveBeenCalledTimes(2);
+      expect(core.webdavPutFileVersioned).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([false, true])(
+    'prevents a mobile Dropbox attachment upload after lease takeover (activation=%s)',
+    async (activationProbe) => {
+      fileSystemMock.getInfoAsync.mockResolvedValue({ exists: true, size: 3 });
+      fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
+      const dropbox = await import('./dropbox-sync');
+      const lost = new SyncRemoteMutationFenceLostError();
+      const assertRemoteMutationFenceHeld = vi.fn().mockRejectedValue(lost);
+      const appData: AppData = {
+        tasks: [{
+          id: 'task-lease', title: 'Task', status: 'inbox', tags: [], contexts: [],
+          attachments: [{
+            id: 'dropbox-lease', kind: 'file', title: 'lease.txt',
+            uri: 'file://document/attachments/lease.txt', localStatus: 'available',
+            createdAt: '2026-08-27T00:00:00.000Z', updatedAt: '2026-08-27T00:00:00.000Z',
+          }],
+          createdAt: '2026-08-27T00:00:00.000Z', updatedAt: '2026-08-27T00:00:00.000Z',
+        }],
+        projects: [], sections: [], areas: [], settings: {},
+      };
+
+      await expect(attachmentSync.syncDropboxAttachments(
+        appData,
+        'dropbox-client-id',
+        fetch,
+        { activationProbe, assertRemoteMutationFenceHeld },
+      )).rejects.toBe(lost);
+
+      expect(dropbox.getDropboxFileMetadata).toHaveBeenCalled();
+      expect(dropbox.uploadDropboxFileVersioned).not.toHaveBeenCalled();
+    },
+  );
 
   // SEC-07: `uri` travels inside the synced document, so an attachment that still points
   // outside the managed attachments directory after the migration pre-pass is refused as
@@ -1128,7 +1213,7 @@ describe('attachment sync', () => {
       settings: {},
     };
 
-    vi.mocked(dropbox.uploadDropboxFile).mockImplementationOnce(async () => {
+    vi.mocked(dropbox.uploadDropboxFileVersioned).mockImplementationOnce(async () => {
       abortController.abort();
       throw uploadError;
     });
@@ -1153,7 +1238,7 @@ describe('attachment sync', () => {
     fileSystemMock.readAsStringAsync.mockResolvedValue('AQID');
     const dropbox = await import('./dropbox-sync');
     const dropboxAuth = await import('./dropbox-auth');
-    vi.mocked(dropbox.uploadDropboxFile).mockResolvedValue({ rev: null });
+    vi.mocked(dropbox.uploadDropboxFileVersioned).mockResolvedValue({ rev: null });
     vi.mocked(dropboxAuth.getValidDropboxAccessToken).mockRejectedValue(
       new Error('Dropbox is not connected'),
     );
@@ -1192,12 +1277,13 @@ describe('attachment sync', () => {
     expect(didMutate).toBe(true);
     expect(resolveAccessToken).toHaveBeenCalledWith(false);
     expect(dropboxAuth.getValidDropboxAccessToken).not.toHaveBeenCalled();
-    expect(dropbox.uploadDropboxFile).toHaveBeenCalledWith(
+    expect(dropbox.uploadDropboxFileVersioned).toHaveBeenCalledWith(
       'candidate-token',
       'attachments/first-connect.txt',
       expect.any(ArrayBuffer),
-      'application/octet-stream',
+      null,
       fetch,
+      expect.anything(),
     );
     expect(data.tasks[0].attachments?.[0]).toMatchObject({
       cloudKey: 'attachments/first-connect.txt',
@@ -1214,7 +1300,7 @@ describe('attachment sync', () => {
     const dropbox = await import('./dropbox-sync');
     const dropboxAuth = await import('./dropbox-auth');
     vi.mocked(dropboxAuth.getValidDropboxAccessToken).mockResolvedValue('old-account-token');
-    vi.mocked(dropbox.uploadDropboxFile)
+    vi.mocked(dropbox.uploadDropboxFileVersioned)
       .mockRejectedValueOnce(new Error('Dropbox upload failed: HTTP 401'))
       .mockResolvedValueOnce({ rev: null });
     const resolveAccessToken = vi.fn(async (forceRefresh: boolean) => (
@@ -1254,9 +1340,10 @@ describe('attachment sync', () => {
 
     expect(didMutate).toBe(true);
     expect(resolveAccessToken).toHaveBeenNthCalledWith(1, false);
-    expect(resolveAccessToken).toHaveBeenNthCalledWith(2, true);
+    expect(resolveAccessToken).toHaveBeenNthCalledWith(2, false);
+    expect(resolveAccessToken).toHaveBeenNthCalledWith(3, true);
     expect(dropboxAuth.getValidDropboxAccessToken).not.toHaveBeenCalled();
-    expect(vi.mocked(dropbox.uploadDropboxFile).mock.calls.map(([token]) => token)).toEqual([
+    expect(vi.mocked(dropbox.uploadDropboxFileVersioned).mock.calls.map(([token]) => token)).toEqual([
       'candidate-access-token',
       'candidate-refreshed-token',
     ]);
@@ -1516,7 +1603,7 @@ describe('attachment sync', () => {
       ).rejects.toThrow(/HTTPS/);
 
       expect(core.webdavMakeDirectory).not.toHaveBeenCalled();
-      expect(core.webdavPutFile).not.toHaveBeenCalled();
+      expect(core.webdavPutFileVersioned).not.toHaveBeenCalled();
     });
 
     it('re-uploads a WebDAV attachment during prepare but re-downloads the very same mismatch post-merge', async () => {
@@ -1533,7 +1620,7 @@ describe('attachment sync', () => {
         ));
         fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(NEW_BYTES));
         vi.mocked(core.webdavFileExists).mockResolvedValue(true);
-        vi.mocked(core.webdavPutFile).mockResolvedValue(undefined);
+        vi.mocked(core.webdavPutFileVersioned).mockResolvedValue(undefined);
         // Remote still holds the bytes the recorded fileHash describes.
         vi.mocked(core.webdavGetFile).mockResolvedValue(
           OLD_BYTES.slice().buffer as ArrayBuffer
@@ -1547,10 +1634,11 @@ describe('attachment sync', () => {
         prepared,
       );
 
-      expect(core.webdavPutFile).toHaveBeenCalledWith(
+      expect(core.webdavPutFileVersioned).toHaveBeenCalledWith(
         'https://example.com/attachments/edited-webdav.txt',
         expect.any(ArrayBuffer),
         'application/octet-stream',
+        null,
         expect.anything()
       );
       expect(core.webdavGetFile).not.toHaveBeenCalled();
@@ -1563,7 +1651,7 @@ describe('attachment sync', () => {
       const merged = makeEditedAppData('edited-webdav');
       await syncWebdavAttachments(merged, config, 'https://example.com', undefined, { phase: 'post-merge' });
 
-      expect(core.webdavPutFile).not.toHaveBeenCalled();
+      expect(core.webdavPutFileVersioned).not.toHaveBeenCalled();
       expect(core.webdavGetFile).toHaveBeenCalledWith(
         'https://example.com/attachments/edited-webdav.txt',
         expect.anything()
@@ -1593,7 +1681,7 @@ describe('attachment sync', () => {
       ));
       fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(NEW_BYTES));
       vi.mocked(core.webdavFileExists).mockResolvedValue(true);
-      vi.mocked(core.webdavPutFile).mockResolvedValue(undefined);
+      vi.mocked(core.webdavPutFileVersioned).mockResolvedValue(undefined);
 
       const merged = makeEditedAppData('nohash', { fileHash: undefined });
       const mergedResult = syncResult(
@@ -1604,7 +1692,7 @@ describe('attachment sync', () => {
 
       expect(mergedResult.didMutate).toBe(true);
       expect(core.webdavGetFile).not.toHaveBeenCalled();
-      expect(core.webdavPutFile).not.toHaveBeenCalled();
+      expect(core.webdavPutFileVersioned).not.toHaveBeenCalled();
       expect(mergedAttachment?.fileHash).toBe(sha256Hex(NEW_BYTES));
       expect(mergedAttachment?.contentMtimeMs).toBe(2000);
       expect(mergedAttachment?.contentRev).toBeUndefined();
@@ -1615,10 +1703,11 @@ describe('attachment sync', () => {
         prepared,
       );
 
-      expect(core.webdavPutFile).toHaveBeenCalledWith(
+      expect(core.webdavPutFileVersioned).toHaveBeenCalledWith(
         'https://example.com/attachments/nohash.txt',
         expect.any(ArrayBuffer),
         'application/octet-stream',
+        null,
         expect.anything()
       );
       expect(preparedResult.data.tasks[0].attachments?.[0]?.contentRev).toBe(1);
@@ -1701,7 +1790,7 @@ describe('attachment sync', () => {
       fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(BYTES));
       const core = await import('@mindwtr/core');
       vi.mocked(core.webdavFileExists).mockResolvedValue(false);
-      vi.mocked(core.webdavPutFile).mockResolvedValue(undefined);
+      vi.mocked(core.webdavPutFileVersioned).mockResolvedValue(undefined);
       vi.mocked(core.cloudPutFile).mockResolvedValue(undefined);
     });
 

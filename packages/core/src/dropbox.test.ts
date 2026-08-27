@@ -5,6 +5,7 @@ import {
     downloadDropboxFile,
     downloadDropboxFileVersioned,
     DropboxConflictError,
+    getDropboxFileMetadata,
     uploadDropboxAppData,
     uploadDropboxFileVersioned,
 } from './dropbox';
@@ -267,6 +268,27 @@ describe('dropbox sync-document encryption', () => {
 });
 
 describe('versioned Dropbox transition byte operations', () => {
+    it('classifies only exact path absence as a missing attachment generation', async () => {
+        const existing = await getDropboxFileMetadata('token', '/attachments/a.bin', async () => (
+            Response.json({ rev: 'abc123456' })
+        ));
+        const missing = await getDropboxFileMetadata('token', '/attachments/missing.bin', async () => (
+            Response.json({
+                error_summary: 'path/not_found/...',
+                error: { '.tag': 'path', path: { '.tag': 'not_found' } },
+            }, { status: 409 })
+        ));
+
+        expect(existing).toEqual({ rev: 'abc123456' });
+        expect(missing).toEqual({ rev: null });
+        await expect(getDropboxFileMetadata('token', '/attachments/a.bin', async () => (
+            Response.json({
+                error_summary: 'path/conflict/file/...',
+                error: { '.tag': 'path', path: { '.tag': 'conflict' } },
+            }, { status: 409 })
+        ))).rejects.toThrow('Dropbox file metadata failed: HTTP 409');
+    });
+
     it('returns bytes and revision from the same download response', async () => {
         const result = await downloadDropboxFileVersioned('token', '/attachments/a.bin', async () => (
             new Response(new Uint8Array([1, 2]), {

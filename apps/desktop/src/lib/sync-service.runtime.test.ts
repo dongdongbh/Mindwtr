@@ -118,6 +118,16 @@ const withRemoteMutationFence = (
         const isDropboxFence = dropboxArg?.path === `/${REMOTE_FENCE_NAME}`
             || deleteArg?.path === `/${REMOTE_FENCE_NAME}`;
 
+        if (!isDropboxFence && url.endsWith('/get_metadata') && typeof init?.body === 'string') {
+            const metadataArg = JSON.parse(init.body) as { path?: string };
+            if (metadataArg.path?.startsWith('/attachments/')) {
+                return buildResponse(409, JSON.stringify({
+                    error_summary: 'path/not_found/...',
+                    error: { '.tag': 'path', path: { '.tag': 'not_found' } },
+                }));
+            }
+        }
+
         if (!isWebdavFence && !isDropboxFence) return delegate(input, init);
 
         if (method === 'GET' || url.endsWith('/download')) {

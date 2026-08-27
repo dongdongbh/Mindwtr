@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppData } from '@mindwtr/core';
+import { SyncRemoteMutationFenceLostError, type AppData } from '@mindwtr/core';
 
 import {
     clearAttachmentSyncState,
@@ -13,6 +13,7 @@ import {
 
 const coreMocks = vi.hoisted(() => ({
     webdavFileExists: vi.fn(),
+    webdavHeadFile: vi.fn(),
     webdavMakeDirectory: vi.fn(),
     withRetry: vi.fn((operation: () => Promise<unknown>) => operation()),
 }));
@@ -54,6 +55,7 @@ const cloudKitMocks = vi.hoisted(() => ({
 
 const dropboxMocks = vi.hoisted(() => ({
     downloadDropboxFile: vi.fn(),
+    getDropboxFileMetadata: vi.fn(),
     uploadDropboxFile: vi.fn(),
 }));
 
@@ -62,6 +64,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
     return {
         ...actual,
         webdavFileExists: coreMocks.webdavFileExists,
+        webdavHeadFile: coreMocks.webdavHeadFile,
         webdavMakeDirectory: coreMocks.webdavMakeDirectory,
         withRetry: coreMocks.withRetry,
     };
@@ -72,7 +75,9 @@ vi.mock('@tauri-apps/api/path', () => pathMocks);
 vi.mock('./cloudkit-sync', () => cloudKitMocks);
 vi.mock('./dropbox-sync', () => ({
     downloadDropboxFile: dropboxMocks.downloadDropboxFile,
-    uploadDropboxFile: dropboxMocks.uploadDropboxFile,
+    getDropboxFileMetadata: dropboxMocks.getDropboxFileMetadata,
+    uploadDropboxFileVersioned: dropboxMocks.uploadDropboxFile,
+    DropboxConflictError: class DropboxConflictError extends Error {},
     DropboxFileNotFoundError: class DropboxFileNotFoundError extends Error {},
     DropboxUnauthorizedError: class DropboxUnauthorizedError extends Error {},
 }));
@@ -146,6 +151,14 @@ describe('desktop sync attachment backends', () => {
         syncFsMocks.mkdir.mockResolvedValue(undefined);
         syncFsMocks.rename.mockResolvedValue(undefined);
         syncFsMocks.remove.mockResolvedValue(undefined);
+        coreMocks.webdavHeadFile.mockResolvedValue({
+            exists: false,
+            fingerprint: null,
+            etag: null,
+            lastModified: null,
+            contentLength: null,
+        });
+        dropboxMocks.getDropboxFileMetadata.mockResolvedValue({ rev: null });
     });
 
     afterEach(() => {
@@ -504,6 +517,11 @@ describe('desktop sync attachment backends', () => {
     });
 
     it('caps WebDAV uploads per sync run and logs once when the limit is reached', async () => {
+        let now = 0;
+        vi.spyOn(Date, 'now').mockImplementation(() => {
+            now += 1_000;
+            return now;
+        });
         // WEBDAV_ATTACHMENT_MAX_UPLOADS_PER_SYNC is 10; one attachment over that must be skipped.
         const attachmentCount = 11;
         const bytes = new Uint8Array([1, 2, 3]);
@@ -594,6 +612,69 @@ describe('desktop sync attachment backends', () => {
         );
         expect(result?.tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.txt');
     });
+
+    it.each([false, true])(
+        'prevents a WebDAV attachment PUT after lease takeover (activation=%s)',
+        async (activationProbe) => {
+            const appData = createCandidateAttachmentData();
+            appData.tasks[0].attachments![0].cloudKey = undefined;
+            fsMocks.exists.mockResolvedValue(true);
+            fsMocks.readFile.mockResolvedValue(new Uint8Array([1, 2, 3]));
+            const lost = new SyncRemoteMutationFenceLostError();
+            const assertRemoteMutationFenceHeld = vi.fn()
+                .mockResolvedValueOnce(undefined)
+                .mockRejectedValueOnce(lost);
+            const fetcher = vi.fn(async (
+                _input: RequestInfo | URL,
+                _init?: RequestInit,
+            ) => new Response(null, { status: 200 }));
+
+            await expect(syncWebdavAttachments(
+                appData,
+                { url: 'https://dav.example/mindwtr', username: 'alice' },
+                'https://dav.example/mindwtr',
+                {
+                    getTauriFetch: async () => fetcher as unknown as typeof fetch,
+                    isTauriRuntimeEnv: () => true,
+                    logSyncInfo: vi.fn(),
+                    logSyncWarning: vi.fn(),
+                    resolveWebdavPassword: vi.fn(async () => 'secret'),
+                },
+                { activationProbe, ensureLocalSnapshotFresh: vi.fn(), assertRemoteMutationFenceHeld },
+            )).rejects.toBe(lost);
+
+            expect(assertRemoteMutationFenceHeld).toHaveBeenCalledTimes(2);
+            expect(fetcher.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
+        },
+    );
+
+    it.each([false, true])(
+        'prevents a Dropbox attachment upload after lease takeover (activation=%s)',
+        async (activationProbe) => {
+            const appData = createCandidateAttachmentData();
+            appData.tasks[0].attachments![0].cloudKey = undefined;
+            fsMocks.exists.mockResolvedValue(true);
+            fsMocks.readFile.mockResolvedValue(new Uint8Array([1, 2, 3]));
+            const lost = new SyncRemoteMutationFenceLostError();
+            const assertRemoteMutationFenceHeld = vi.fn().mockRejectedValue(lost);
+
+            await expect(syncDropboxAttachments(
+                appData,
+                vi.fn(async () => 'token'),
+                {
+                    getTauriFetch: async () => undefined,
+                    isTauriRuntimeEnv: () => true,
+                    logSyncInfo: vi.fn(),
+                    logSyncWarning: vi.fn(),
+                    resolveWebdavPassword: vi.fn(),
+                },
+                { activationProbe, ensureLocalSnapshotFresh: vi.fn(), assertRemoteMutationFenceHeld },
+            )).rejects.toBe(lost);
+
+            expect(dropboxMocks.getDropboxFileMetadata).toHaveBeenCalled();
+            expect(dropboxMocks.uploadDropboxFile).not.toHaveBeenCalled();
+        },
+    );
 
     it('never reads or uploads an attachment whose uri points outside the profile (SEC-07)', async () => {
         // A hostile sync document can put any absolute path in `uri` — it survives the

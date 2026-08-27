@@ -1083,6 +1083,7 @@ export const useSyncSettings = ({
                 if (
                     !probeResult.success
                     || probeResult.remoteWriteDeferred
+                    || probeResult.remoteFenceDeferred
                     || probeResult.skipped === 'offline'
                     || probeResult.skipped === 'pendingRemoteWriteBackoff'
                 ) {
@@ -1128,6 +1129,7 @@ export const useSyncSettings = ({
             } else if (
                 result.success
                 && !result.remoteWriteDeferred
+                && !result.remoteFenceDeferred
                 && result.skipped !== 'offline'
                 && result.skipped !== 'pendingRemoteWriteBackoff'
             ) {

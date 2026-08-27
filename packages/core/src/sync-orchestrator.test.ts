@@ -125,6 +125,28 @@ describe('sync orchestrator', () => {
         }
     });
 
+    it('honors a provider-derived minimum delay requested by the running cycle', async () => {
+        vi.useFakeTimers();
+        try {
+            const calls: number[] = [];
+            const orchestrator = createSyncOrchestrator<undefined, number>({
+                runCycle: async (_arg, { requestFollowUpAfter }) => {
+                    calls.push(calls.length + 1);
+                    if (calls.length === 1) requestFollowUpAfter(5_000);
+                    return calls.length;
+                },
+            });
+
+            await orchestrator.run(undefined);
+            await vi.advanceTimersByTimeAsync(4_999);
+            expect(calls).toHaveLength(1);
+            await vi.advanceTimersByTimeAsync(1);
+            expect(calls).toHaveLength(2);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('lets a direct run during the follow-up delay absorb the queued cycle', async () => {
         vi.useFakeTimers();
         try {

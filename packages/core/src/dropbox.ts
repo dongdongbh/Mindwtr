@@ -152,6 +152,41 @@ export async function getDropboxAppDataMetadata(
     return { rev: typeof payload?.rev === 'string' ? payload.rev : null };
 }
 
+/** Cheap exact-generation lookup for one attachment. A missing path returns
+ * `null`; every other 409 is an error so callers never turn unreadable state
+ * into an unsafe create. */
+export async function getDropboxFileMetadata(
+    accessToken: string,
+    path: string,
+    fetcher: typeof fetch = fetch,
+    requestOptions: DropboxRequestOptions = {},
+): Promise<{ rev: string | null }> {
+    const response = await fetchDropbox(fetcher, FILE_METADATA_ENDPOINT, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            path: resolveDropboxPath(path),
+            include_media_info: false,
+            include_deleted: false,
+        }),
+    }, requestOptions, 'Dropbox file metadata request timed out');
+    if (response.status === 401) {
+        throw new DropboxUnauthorizedError('Dropbox file metadata failed: HTTP 401');
+    }
+    if (response.status === 409) {
+        if (isDropboxPathNotFoundTag(await parseDropboxApiErrorTag(response))) return { rev: null };
+        throw new Error('Dropbox file metadata failed: HTTP 409');
+    }
+    if (!response.ok) throw new Error(`Dropbox file metadata failed: HTTP ${response.status}`);
+    const payload = await response.json().catch(() => null) as { rev?: unknown } | null;
+    const rev = typeof payload?.rev === 'string' ? payload.rev.trim() : '';
+    if (!rev) throw new Error('Dropbox file metadata response is missing a revision');
+    return { rev };
+}
+
 export async function downloadDropboxAppData(
     accessToken: string,
     fetcher: typeof fetch = fetch,

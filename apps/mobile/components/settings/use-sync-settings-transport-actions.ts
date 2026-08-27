@@ -803,6 +803,7 @@ export function useSyncSettingsTransportActions({
                 if (
                     !probeResult.success
                     || probeResult.remoteWriteDeferred
+                    || probeResult.remoteFenceDeferred
                     || probeResult.skipped === 'pendingRemoteWriteBackoff'
                 ) {
                     // An encrypted remote is transport PROOF, not a failed probe: the
@@ -856,6 +857,7 @@ export function useSyncSettingsTransportActions({
             if (
                 result.success
                 && !result.remoteWriteDeferred
+                && !result.remoteFenceDeferred
                 && result.skipped !== 'pendingRemoteWriteBackoff'
             ) {
                 const conflictCount = getSyncConflictCount(result.stats);

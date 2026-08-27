@@ -45,9 +45,12 @@ import { appendSyncHistory, mergeAppData, performSyncCycle } from './sync';
 import { hasUncompactedPurgedTombstones } from './tombstone-compaction';
 import {
     isSyncRemoteMutationFenceError,
+    SyncRemoteMutationFenceBusyError,
     SyncRemoteMutationFenceUnavailableError,
     type SyncRemoteMutationFenceLease,
 } from './sync-remote-fence';
+
+const REMOTE_MUTATION_REQUEST_SAFETY_MS = 35_000;
 
 /**
  * ADR 0014 — the platform-independent sync cycle state machine.
@@ -217,7 +220,8 @@ class SharedSyncRunMachine {
     }
 
     async run(): Promise<SyncRunResult> {
-        let result: SyncRunResult;
+        let result!: SyncRunResult;
+        let cleanupRetryAfterMs: number | null = null;
         try {
             try {
                 result = await this.runPhases();
@@ -225,7 +229,11 @@ class SharedSyncRunMachine {
                 result = await this.handleRunError(error);
             }
         } finally {
-            await this.releaseRemoteMutationFence();
+            cleanupRetryAfterMs = await this.releaseRemoteMutationFence();
+        }
+        if (cleanupRetryAfterMs !== null) {
+            result.remoteFenceDeferred = 'cleanup';
+            result.retryAfterMs = cleanupRetryAfterMs;
         }
         if (this.state.hadAttachmentWarning) {
             result.hadAttachmentWarning = true;
@@ -306,7 +314,7 @@ class SharedSyncRunMachine {
         if (this.remoteMutationFence) {
             await this.runRemoteMutationFenceOperation(
                 'Remote sync mutation fence validation failed',
-                () => this.remoteMutationFence!.assertHeld(30_000),
+                () => this.remoteMutationFence!.assertHeld(REMOTE_MUTATION_REQUEST_SAFETY_MS),
             );
             return;
         }
@@ -322,11 +330,13 @@ class SharedSyncRunMachine {
         this.state.remoteDataForCompare = null;
     }
 
-    private async assertRemoteMutationFenceHeld(): Promise<void> {
+    private async assertRemoteMutationFenceHeld(
+        minRemainingMs = REMOTE_MUTATION_REQUEST_SAFETY_MS,
+    ): Promise<void> {
         if (!this.remoteMutationFence) return;
         await this.runRemoteMutationFenceOperation(
             'Remote sync mutation fence validation failed',
-            () => this.remoteMutationFence!.assertHeld(30_000),
+            () => this.remoteMutationFence!.assertHeld(minRemainingMs),
         );
     }
 
@@ -340,19 +350,22 @@ class SharedSyncRunMachine {
         }
     }
 
-    private async releaseRemoteMutationFence(): Promise<void> {
+    private async releaseRemoteMutationFence(): Promise<number | null> {
         const lease = this.remoteMutationFence;
         this.remoteMutationFence = null;
-        if (!lease) return;
+        if (!lease) return null;
         try {
             await lease.release();
+            return null;
         } catch (error) {
             // Release is conditional, so an error can never justify deleting
             // whatever generation is now present. A crashed lease is bounded
             // by its server-time expiry; request a later retry and surface the
             // delayed availability without rewriting an otherwise valid run.
             this.notifier.logWarning('Failed to release remote sync mutation fence', error);
-            this.requestFollowUp();
+            const retryAfterMs = lease.retryAfterMs();
+            this.requestFollowUpAfter(retryAfterMs);
+            return retryAfterMs;
         }
     }
 
@@ -361,9 +374,21 @@ class SharedSyncRunMachine {
         this.hooks.requestFollowUp();
     }
 
+    private requestFollowUpAfter(delayMs: number): void {
+        if (this.options.activationProbe) return;
+        if (this.hooks.requestFollowUpAfter) {
+            this.hooks.requestFollowUpAfter(delayMs);
+            return;
+        }
+        this.hooks.requestFollowUp();
+    }
+
     private attachmentHelpers(phase: SyncRunAttachmentPhase) {
         return {
             ensureLocalSnapshotFresh: () => this.ensureLocalSnapshotFresh(),
+            assertRemoteMutationFenceHeld: (minRemainingMs?: number) => (
+                this.assertRemoteMutationFenceHeld(minRemainingMs)
+            ),
             activationProbe: this.options.activationProbe === true,
             phase,
         };
@@ -569,6 +594,7 @@ class SharedSyncRunMachine {
         }
         let outcome: SyncRemoteWriteOutcome;
         try {
+            await this.assertRemoteMutationFenceHeld(REMOTE_MUTATION_REQUEST_SAFETY_MS);
             outcome = await this.requireIo().writeRemote(remoteDocument);
         } catch (error) {
             if (error instanceof SyncRemoteWriteConflict) {
@@ -1014,6 +1040,9 @@ class SharedSyncRunMachine {
                 setStep: (step) => this.setStep(step),
                 ensureLocalSnapshotFresh: (expectedData) => this.ensureLocalSnapshotFresh(expectedData),
                 ensureNetworkStillAvailable: () => this.ensureNetwork(),
+                assertRemoteMutationFenceHeld: (minRemainingMs?: number) => (
+                    this.assertRemoteMutationFenceHeld(minRemainingMs)
+                ),
             });
             await this.assertRemoteMutationFenceHeld();
             // Cleanup may resolve credentials, remote targets, and provider IO
@@ -1056,6 +1085,15 @@ class SharedSyncRunMachine {
     }
 
     private async handleRunError(error: unknown): Promise<SyncRunResult> {
+        if (error instanceof SyncRemoteMutationFenceBusyError) {
+            if (!this.options.activationProbe) this.requestFollowUpAfter(error.retryAfterMs);
+            return {
+                success: true,
+                skipped: 'remoteFenceBusy',
+                remoteFenceDeferred: 'busy',
+                retryAfterMs: error.retryAfterMs,
+            };
+        }
         const errorContext: SyncRunErrorContext = {
             step: this.state.step,
             getWroteLocal: () => this.state.wroteLocal,

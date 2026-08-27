@@ -109,7 +109,7 @@ export function useManualPullSync() {
         return;
       }
 
-      if (result.skipped === 'requeued') {
+      if (result.skipped === 'requeued' || result.remoteFenceDeferred) {
         finishIndicator('success');
         showToast({
           title: tFallback(t, 'settings.syncQueued', 'Sync queued'),
