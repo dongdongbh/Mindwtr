@@ -1005,6 +1005,9 @@ describe('attachment sync', () => {
       ), appData).data;
 
       expect(candidate.tasks[0].attachments?.[0]?.cloudKey).toBe(h1Key);
+      expect(candidate.settings.attachments?.pendingRemoteDeletes).toEqual([
+        { cloudKey: h1Key, title: `${id}.txt`, attempts: 0 },
+      ]);
       expect(remoteFiles.get(h1Uri)).toBe(base64Of(H1_BYTES));
       // Model data.json CAS loss by discarding `candidate`: the already-published
       // winning H2 generation is byte-identical and was never a mutation target.
@@ -1023,7 +1026,12 @@ describe('attachment sync', () => {
       const generationKey = `attachments/${id}.${hash}.txt`;
       const targetUri = `file://sync/${generationKey}`;
       const localUri = `file://document/attachments/${id}.txt`;
-      const appData = singleAttachmentData({ id, uri: localUri, localStatus: 'available' });
+      const appData = singleAttachmentData({
+        id,
+        uri: localUri,
+        localStatus: 'available',
+        cloudKey: generationKey,
+      });
       let targetProbes = 0;
       fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => {
         if (uri === localUri || uri.startsWith('file://cache/mindwtr-upload-')) {
@@ -1031,7 +1039,7 @@ describe('attachment sync', () => {
         }
         if (uri === targetUri) {
           targetProbes += 1;
-          return targetProbes < 3
+          return targetProbes < 4
             ? { exists: false }
             : { exists: true, size: H1_BYTES.length, modificationTime: 1 };
         }
@@ -1053,6 +1061,9 @@ describe('attachment sync', () => {
       ), appData);
 
       expect(result.data.tasks[0].attachments?.[0]?.cloudKey).toBe(generationKey);
+      expect(result.data.settings.attachments?.pendingRemoteDeletes).toEqual([
+        { cloudKey: generationKey, title: `${id}.txt`, attempts: 0 },
+      ]);
       expect(modernFileSystemMock.create).toHaveBeenCalledWith(
         `${targetUri}.mindwtr-staged`,
         { overwrite: false },
@@ -1171,6 +1182,9 @@ describe('attachment sync', () => {
       ), appData).data;
 
       expect(candidate.tasks[0].attachments?.[0]?.cloudKey).toBe(h1Key);
+      expect(candidate.settings.attachments?.pendingRemoteDeletes).toEqual([
+        { cloudKey: h1Key, title: `${id}.txt`, attempts: 0 },
+      ]);
       expect(remoteFiles.get(h1Uri)).toBe(base64Of(H1_BYTES));
       expect(remoteFiles.get(h2Uri)).toBe(base64Of(H2_BYTES));
       expect(fileSystemMock.writeAsStringAsync).not.toHaveBeenCalledWith(
@@ -1190,7 +1204,12 @@ describe('attachment sync', () => {
       const targetUri = `${attachmentsDirUri}${generationKey.split('/').pop()}`;
       const localUri = `file://document/attachments/${id}.txt`;
       const renamedUri = `${attachmentsDirUri}${id}.${hash}%20%281%29.txt`;
-      const appData = singleAttachmentData({ id, uri: localUri, localStatus: 'available' });
+      const appData = singleAttachmentData({
+        id,
+        uri: localUri,
+        localStatus: 'available',
+        cloudKey: generationKey,
+      });
       fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
         uri === localUri || uri.startsWith('file://cache/mindwtr-upload-')
           ? { exists: true, size: H1_BYTES.length, modificationTime: 1 }
@@ -1216,6 +1235,9 @@ describe('attachment sync', () => {
       ), appData);
 
       expect(result.data.tasks[0].attachments?.[0]?.cloudKey).toBe(generationKey);
+      expect(result.data.settings.attachments?.pendingRemoteDeletes).toEqual([
+        { cloudKey: generationKey, title: `${id}.txt`, attempts: 0 },
+      ]);
       expect(fileSystemMock.StorageAccessFramework.createFileAsync).toHaveBeenCalledWith(
         attachmentsDirUri,
         generationKey.split('/').pop(),

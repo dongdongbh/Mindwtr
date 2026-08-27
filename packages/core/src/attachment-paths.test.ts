@@ -6,6 +6,7 @@ import {
     extractExtension,
     getBaseSyncUrl,
     getCloudBaseUrl,
+    isFileSyncGenerationCloudKey,
 } from './attachment-paths';
 import type { Attachment } from './types';
 
@@ -36,8 +37,12 @@ describe('attachment-paths', () => {
 
     it('binds File Sync keys to an immutable lowercase content generation', () => {
         const hash = 'A'.repeat(64);
-        expect(buildFileSyncGenerationCloudKey(makeAttachment(), hash))
-            .toBe(`${ATTACHMENTS_DIR_NAME}/att-1.${hash.toLowerCase()}.png`);
+        const key = `${ATTACHMENTS_DIR_NAME}/att-1.${hash.toLowerCase()}.png`;
+        expect(buildFileSyncGenerationCloudKey(makeAttachment(), hash)).toBe(key);
+        expect(isFileSyncGenerationCloudKey(key)).toBe(true);
+        expect(isFileSyncGenerationCloudKey(`${ATTACHMENTS_DIR_NAME}/att-1.${hash.toLowerCase()}`)).toBe(true);
+        expect(isFileSyncGenerationCloudKey(`${ATTACHMENTS_DIR_NAME}/att-1.${hash}.png`)).toBe(false);
+        expect(isFileSyncGenerationCloudKey(`${ATTACHMENTS_DIR_NAME}/att-1.png`)).toBe(false);
         expect(() => buildFileSyncGenerationCloudKey(makeAttachment(), 'not-a-hash'))
             .toThrow('requires a SHA-256 digest');
     });

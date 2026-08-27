@@ -39,6 +39,14 @@ export const buildFileSyncGenerationCloudKey = (
     return `${ATTACHMENTS_DIR_NAME}/${attachment.id}.${normalizedHash}${ext}`;
 };
 
+const FILE_SYNC_GENERATION_CLOUD_KEY_PATTERN = /^attachments\/[^/]+\.[a-f0-9]{64}(?:\.[a-z0-9]{1,8})?$/;
+
+/** Whether a sanitized attachment key names one immutable File Sync content
+ * generation. Legacy identity-only keys and other providers' opaque keys are
+ * deliberately excluded from File Sync generation garbage collection. */
+export const isFileSyncGenerationCloudKey = (value: unknown): value is string =>
+    typeof value === 'string' && FILE_SYNC_GENERATION_CLOUD_KEY_PATTERN.test(value);
+
 /** Base folder URL from a WebDAV/file sync URL that points at the data.json file itself. */
 export const getBaseSyncUrl = (fullUrl: string): string => {
     const trimmed = fullUrl.replace(/\/+$/, '');

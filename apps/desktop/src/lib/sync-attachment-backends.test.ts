@@ -1438,6 +1438,13 @@ describe('desktop sync attachment backends', () => {
                 contentRev: 7,
                 pendingContentUpload: undefined,
             });
+            expect(result.settings.attachments?.pendingRemoteDeletes).toEqual([
+                {
+                    cloudKey: generationKey,
+                    title: 'candidate-proof.txt',
+                    attempts: 0,
+                },
+            ]);
         });
 
         it('publishes a losing File Sync candidate under its own generation key', async () => {
@@ -1516,6 +1523,13 @@ describe('desktop sync attachment backends', () => {
             );
             expect(syncFsMocks.remove).not.toHaveBeenCalledWith(peerPath);
             expect(result.tasks[0].attachments?.[0]?.cloudKey).toBe(generationKey);
+            expect(result.settings.attachments?.pendingRemoteDeletes).toEqual([
+                {
+                    cloudKey: generationKey,
+                    title: 'candidate-proof.txt',
+                    attempts: 0,
+                },
+            ]);
         });
 
         it('cleans only its owned scratch when native generation publication fails', async () => {
