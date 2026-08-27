@@ -208,6 +208,27 @@ describe('prepareProcessInboxDecision', () => {
         expect(prepared.event.fields).not.toHaveProperty('dueDate');
     });
 
+    it.each(['next', 'complete'] as const)(
+        'keeps explicit title date commands for %s when scheduling fields are hidden',
+        (type) => {
+            const prepared = prepareProcessInboxDecision({
+                task,
+                draft: {
+                    fields: { contexts: [], tags: [] },
+                    explicitDateFields: { dueDate: '2026-09-12' },
+                    taskUpdates: { title: 'Call Sam' },
+                },
+                decision: { type },
+                plan: resolveProcessInboxPlan(),
+            });
+
+            expect(prepared).toMatchObject({
+                ok: true,
+                event: { type, fields: { dueDate: '2026-09-12' } },
+            });
+        },
+    );
+
     it('prepares Waiting follow-up and reset policy together', () => {
         const prepared = prepareProcessInboxDecision({
             task,

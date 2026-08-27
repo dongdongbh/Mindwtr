@@ -323,6 +323,7 @@ export function useInboxProcessingController({
                     ...edits?.decisionFields,
                     ...options.fields,
                 }),
+                explicitDateFields: edits?.decisionFields,
                 taskUpdates: edits?.taskUpdates,
             },
             decision,

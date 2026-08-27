@@ -494,9 +494,9 @@ export function useReviewModalController({
 
     useEffect(() => {
         if (currentStep !== displayedStep) {
-            setCurrentStep(displayedStep);
+            setReviewSession((session) => ({ ...session, step: displayedStep }));
         }
-    }, [currentStep, displayedStep, setCurrentStep]);
+    }, [currentStep, displayedStep]);
 
     const nextStep = useCallback(() => {
         if (nextStepId) setCurrentStep(nextStepId);

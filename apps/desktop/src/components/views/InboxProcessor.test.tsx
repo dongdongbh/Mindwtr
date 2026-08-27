@@ -1110,7 +1110,9 @@ describe('InboxProcessor', () => {
         });
 
         fireEvent.click(getByRole('button', { name: 'inbox.skip' }));
-        expect(getByText('Follow up with Casey')).toBeInTheDocument();
+        await waitFor(() => {
+            expect(getByText('Follow up with Casey')).toBeInTheDocument();
+        });
 
         await act(async () => {
             resolveClarify({

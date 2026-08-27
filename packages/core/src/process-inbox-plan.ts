@@ -111,6 +111,9 @@ export type ProcessInboxDecision =
 
 export type ProcessInboxDecisionDraft = {
     fields: ProcessInboxWorkflowFields;
+    /** Date commands parsed directly from the title. Unlike hydrated editor
+     * state, these are explicit user input and must survive hidden fields. */
+    explicitDateFields?: Partial<Pick<ProcessInboxWorkflowFields, 'startTime' | 'dueDate' | 'reviewAt'>>;
     taskUpdates?: Partial<Pick<Task, 'title' | 'description'>>;
 };
 
@@ -151,6 +154,7 @@ function resolveActionFields(
     task: Task,
     fields: ProcessInboxWorkflowFields,
     plan: ProcessInboxPlan,
+    explicitDateFields: ProcessInboxDecisionDraft['explicitDateFields'] = {},
 ): ProcessInboxWorkflowFields {
     return {
         ...resolveSelectionFields(task, fields, plan),
@@ -158,6 +162,9 @@ function resolveActionFields(
         ...(plan.visibleFields.energyLevel ? { energyLevel: fields.energyLevel } : {}),
         ...(plan.visibleFields.assignedTo ? { assignedTo: fields.assignedTo } : {}),
         ...(plan.visibleFields.timeEstimate ? { timeEstimate: fields.timeEstimate } : {}),
+        ...explicitDateFields,
+        // Visible controls take precedence over a title command. The desktop
+        // adapter places the parsed value in `fields` until a control changes.
         ...(plan.visibleFields.startTime ? { startTime: fields.startTime } : {}),
         ...(plan.visibleFields.dueDate ? { dueDate: fields.dueDate } : {}),
         ...(plan.visibleFields.reviewAt ? { reviewAt: fields.reviewAt } : {}),
@@ -189,12 +196,12 @@ export function prepareProcessInboxDecision({
             event = { type: 'discard' };
             break;
         case 'skip':
-            event = { type: 'skip', fields: resolveActionFields(task, draft.fields, plan) };
+            event = { type: 'skip', fields: resolveActionFields(task, draft.fields, plan, draft.explicitDateFields) };
             break;
         case 'someday':
         case 'reference':
         case 'complete':
-            event = { type: decision.type, fields: selectionFields };
+            event = { type: decision.type, fields: { ...selectionFields, ...draft.explicitDateFields } };
             break;
         case 'later': {
             const startTime = draft.fields.startTime;
@@ -211,7 +218,7 @@ export function prepareProcessInboxDecision({
                 // The delegate answer is part of this decision even when the
                 // generic Assigned To editor field is hidden.
                 fields: {
-                    ...resolveActionFields(task, draft.fields, plan),
+                    ...resolveActionFields(task, draft.fields, plan, draft.explicitDateFields),
                     assignedTo: draft.fields.assignedTo,
                 },
                 followUpAt: decision.followUpAt,
@@ -219,7 +226,7 @@ export function prepareProcessInboxDecision({
             resetFields = ['delegate'];
             break;
         case 'next':
-            event = { type: 'next', fields: resolveActionFields(task, draft.fields, plan) };
+            event = { type: 'next', fields: resolveActionFields(task, draft.fields, plan, draft.explicitDateFields) };
             resetFields = ['startTime', 'dueDate', 'reviewAt', 'projectConversion'];
             break;
     }

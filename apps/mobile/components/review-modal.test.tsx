@@ -437,6 +437,24 @@ describe('ReviewModal', () => {
         expect(mockStorageRemoveItem).toHaveBeenCalledWith('mindwtr:weeklyReview:currentStep');
     });
 
+    it('restores a later active checkpoint after canonicalizing an empty initial step', async () => {
+        storeState.tasks = defaultTasks
+            .filter((task) => task.status !== 'inbox')
+            .map((task) => ({ ...task }));
+        mockStorageGetItem.mockResolvedValue(JSON.stringify({
+            step: 'waiting',
+            startedAt: new Date().toISOString(),
+        }));
+
+        let tree!: ReturnType<typeof create>;
+        await act(async () => {
+            tree = create(<ReviewModal visible onClose={vi.fn()} />);
+            await Promise.resolve();
+        });
+
+        expect(tree.root.findAll((node) => flattenText(node.props?.children).includes('Waiting For')).length).toBeGreaterThan(0);
+    });
+
     it('does not let delayed resume hydration overwrite an immediate step choice', async () => {
         let resolveStored!: (value: string | null) => void;
         mockStorageGetItem.mockReturnValue(new Promise((resolve) => {

@@ -190,6 +190,48 @@ describe('useInboxProcessingController not-actionable destinations', () => {
             startTime: '2026-09-20',
         }));
     });
+
+    it('keeps a parsed due command on Next when scheduling controls are off', async () => {
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderController(updateTask);
+
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+
+        act(() => {
+            result.current.wizardProps.setField('title', 'Call Sam /due:2026-09-21');
+        });
+        await act(async () => {
+            await result.current.wizardProps.handleSetProject(null);
+        });
+
+        expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+            status: 'next',
+            dueDate: expect.stringContaining('2026-09-21'),
+        }));
+    });
+
+    it('keeps a parsed review command on Complete when scheduling controls are off', async () => {
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderController(updateTask);
+
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+
+        act(() => {
+            result.current.wizardProps.setField('title', 'Call Sam /review:2026-09-22');
+        });
+        await act(async () => {
+            await result.current.wizardProps.handleTwoMinDone();
+        });
+
+        expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+            status: 'done',
+            reviewAt: expect.stringContaining('2026-09-22'),
+        }));
+    });
 });
 
 describe('useInboxProcessingController draft writes', () => {

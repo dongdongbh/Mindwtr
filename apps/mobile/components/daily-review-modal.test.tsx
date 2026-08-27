@@ -278,6 +278,25 @@ describe('DailyReviewScreen', () => {
         expect(mockStorageRemoveItem).toHaveBeenCalledWith('mindwtr:dailyReview:currentStep');
     });
 
+    it('restores a later active checkpoint after canonicalizing an empty initial step', async () => {
+        storeState.tasks = [
+            makeTask({ id: 'inbox-1', status: 'inbox', dueDate: undefined }),
+            makeTask({ id: 'waiting-1', status: 'waiting', dueDate: undefined }),
+        ];
+        mockStorageGetItem.mockResolvedValue(JSON.stringify({
+            step: 'waiting',
+            startedAt: new Date('2026-07-15T08:00:00.000Z').toISOString(),
+        }));
+
+        let tree!: ReturnType<typeof create>;
+        await act(async () => {
+            tree = create(<DailyReviewScreen onClose={vi.fn()} />);
+            await Promise.resolve();
+        });
+
+        expect(tree.root.findAll((node) => node.props?.children === 'Waiting For').length).toBeGreaterThan(0);
+    });
+
     it('does not let delayed resume hydration overwrite an immediate step choice', async () => {
         storeState.tasks = [
             makeTask({ id: 'today-1', dueDate: '2026-07-15' }),

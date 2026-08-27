@@ -240,8 +240,10 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
     const displayedStepDefinition = activeSteps[safeActiveStepIndex];
 
     useEffect(() => {
-        if (currentStep !== displayedStep) setCurrentStep(displayedStep);
-    }, [currentStep, displayedStep, setCurrentStep]);
+        if (currentStep !== displayedStep) {
+            setReviewSession((session) => ({ ...session, step: displayedStep }));
+        }
+    }, [currentStep, displayedStep]);
 
     const next = () => {
         if (nextStepId) setCurrentStep(nextStepId);
