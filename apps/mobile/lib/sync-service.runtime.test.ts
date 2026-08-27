@@ -369,6 +369,29 @@ describe('mobile sync-service runtime', () => {
     expect(coreMocks.webdavPutJson).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])(
+    'performs no provider I/O while a persisted transition journal blocks sync (manual=%s)',
+    async (manual) => {
+      asyncStorageMocks.getItem.mockImplementation(async (key: string) => {
+        if (key === SYNC_ENCRYPTION_STATE_KEY) {
+          return JSON.stringify({ state: 'off', incompleteTransition: 'enable' });
+        }
+        const values: Record<string, string | null> = {
+          '@mindwtr_sync_backend': 'webdav',
+          '@mindwtr_webdav_url': 'https://sync.example.com/data.json',
+          '@mindwtr_webdav_username': 'user',
+          '@mindwtr_webdav_password': 'pass',
+        };
+        return values[key] ?? null;
+      });
+
+      await syncServiceModule.performMobileSync(undefined, { manual });
+
+      expect(coreMocks.webdavGetJson).not.toHaveBeenCalled();
+      expect(coreMocks.webdavPutJson).not.toHaveBeenCalled();
+    },
+  );
+
   it('probes a candidate transport despite stale global no-key state', async () => {
     asyncStorageMocks.getItem.mockImplementation(async (key: string) => (
       key === SYNC_ENCRYPTION_STATE_KEY

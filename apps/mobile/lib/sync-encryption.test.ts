@@ -967,4 +967,18 @@ describe('local-state persistence and the remote-plaintext state', () => {
       kdfParams: FAST_PARAMS,
     });
   });
+
+  it('reloads an incomplete transition journal and keeps ordinary sync blocked', async () => {
+    await syncEncryptionLocalState.write({
+      state: 'off',
+      incompleteTransition: 'enable',
+    });
+    __resetSyncEncryptionStateForTests();
+
+    await expect(getMobileSyncEncryptionStatus()).resolves.toEqual({
+      state: 'off',
+      incompleteTransition: 'enable',
+    });
+    await expect(isSyncEncryptionBlocked()).resolves.toBe(true);
+  });
 });

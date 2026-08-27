@@ -248,7 +248,7 @@ describe('runEnableSyncEncryptionOverRemote', () => {
 
         expect(write).toHaveBeenCalledOnce();
         expect(keyCache.current).toBeNull();
-        expect(localState.value).toBeNull();
+        expect(localState.value).toEqual({ state: 'off', incompleteTransition: 'enable' });
     });
 
     it('migrates data + bak + snapshot + attachment, verifies, then deletes plaintext', async () => {
@@ -357,7 +357,7 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         expect(calls).toBe(1);
         expect(remote.store.has('data.json')).toBe(true); // plaintext untouched
         expect(remote.store.has('data.json.enc')).toBe(false);
-        expect(localState.value).toBeNull();
+        expect(localState.value).toEqual({ state: 'off', incompleteTransition: 'enable' });
     });
 
     it('aborts on a peer attachment update, preserves peer bytes, and converges on retry', async () => {
@@ -381,7 +381,7 @@ describe('runEnableSyncEncryptionOverRemote', () => {
             'pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
         )).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
         expect(text(remote.store.get('attachments/a1.png')!)).toBe('PEER');
-        expect(localState.value).toBeNull();
+        expect(localState.value).toEqual({ state: 'off', incompleteTransition: 'enable' });
         expect(await keyCache.getKey()).toBeNull();
 
         remote.write = originalWrite;
@@ -563,7 +563,10 @@ describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
             'old-pw', 'new-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
         )).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
         expect(remote.store.get('attachments/a1.png')).toEqual(peerBytes);
-        expect(localState.value).toEqual(oldState);
+        expect(localState.value).toEqual({
+            ...oldState,
+            incompleteTransition: 'change-passphrase',
+        });
         expect(await keyCache.getKey()).toEqual(oldKey);
     });
 });
