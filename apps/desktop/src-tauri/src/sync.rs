@@ -5239,6 +5239,49 @@ mod tests {
     }
 
     #[test]
+    fn desktop_transitions_recover_mobile_flat_generations_in_place() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        let retained = [
+            dir.path().join(".mindwtr-et-s-mobile-root"),
+            dir.path()
+                .join(SYNC_ATTACHMENTS_DIR_NAME)
+                .join(".mindwtr-et-q-mobile-attachment"),
+        ];
+        fs::write(&retained[0], b"mobile retained document generation").expect("root recovery");
+        fs::write(&retained[1], b"mobile retained attachment generation")
+            .expect("attachment recovery");
+
+        let first = enable_sync_encryption_in_dir(dir.path(), "first pass")
+            .expect("enable mobile recovery generations");
+        for path in &retained {
+            let sealed = fs::read(path).expect("retained ciphertext");
+            decrypt_sync_artifact(&sealed, &first.key)
+                .unwrap_or_else(|_| panic!("{} must decrypt under enabled key", path.display()));
+        }
+
+        let next = change_sync_encryption_passphrase_in_dir(dir.path(), &first.key, "second pass")
+            .expect("rotate mobile recovery generations");
+        for path in &retained {
+            let rotated = fs::read(path).expect("rotated recovery generation");
+            assert!(decrypt_sync_artifact(&rotated, &first.key).is_err());
+            decrypt_sync_artifact(&rotated, &next.key)
+                .unwrap_or_else(|_| panic!("{} must decrypt under rotated key", path.display()));
+        }
+
+        disable_sync_encryption_in_dir(dir.path(), &next.key)
+            .expect("disable mobile recovery generations");
+        assert_eq!(
+            fs::read(&retained[0]).expect("opened root recovery"),
+            b"mobile retained document generation"
+        );
+        assert_eq!(
+            fs::read(&retained[1]).expect("opened attachment recovery"),
+            b"mobile retained attachment generation"
+        );
+    }
+
+    #[test]
     fn a_disable_with_the_wrong_key_changes_nothing() {
         let dir = tempfile::tempdir().expect("temp dir");
         seed_transition_folder(dir.path());
@@ -10530,6 +10573,7 @@ pub(crate) fn write_sync_file(
 const SYNC_ENCRYPTION_TRANSITION_TMP_SUFFIX: &str = ".enctransition";
 const SYNC_ENCRYPTION_STAGE_DIR_PREFIX: &str = ".mindwtr-encryption-stage-";
 const SYNC_ENCRYPTION_QUARANTINE_DIR_PREFIX: &str = ".mindwtr-encryption-quarantine-";
+const SYNC_ENCRYPTION_MOBILE_SCRATCH_PREFIX: &str = ".mindwtr-et-";
 /// Mirrors ATTACHMENTS_DIR_NAME in packages/core/src/attachment-paths.ts.
 const SYNC_ATTACHMENTS_DIR_NAME: &str = "attachments";
 
@@ -10610,7 +10654,10 @@ fn collect_transition_recovery_artifacts(sync_dir: &Path) -> Vec<PathBuf> {
                 stack.push((path, child_is_recovery));
                 continue;
             }
-            if inside_recovery || name.ends_with(SYNC_ENCRYPTION_TRANSITION_TMP_SUFFIX) {
+            if inside_recovery
+                || name.ends_with(SYNC_ENCRYPTION_TRANSITION_TMP_SUFFIX)
+                || name.starts_with(SYNC_ENCRYPTION_MOBILE_SCRATCH_PREFIX)
+            {
                 found.push(path);
             }
         }

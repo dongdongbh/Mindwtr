@@ -31,6 +31,17 @@ const fs = vi.hoisted(() => {
 
 const dirOf = (uri: string) => uri.slice(0, uri.lastIndexOf('/'));
 const leafOf = (uri: string) => uri.slice(uri.lastIndexOf('/') + 1);
+const childUrisOf = (dir: string): string[] => {
+  const normalized = dir.replace(/\/+$/, '');
+  const prefix = `${normalized}/`;
+  const children = new Set<string>();
+  for (const uri of fs.files.keys()) {
+    if (!uri.startsWith(prefix)) continue;
+    const child = uri.slice(prefix.length).split('/')[0];
+    if (child) children.add(`${prefix}${child}`);
+  }
+  return [...children];
+};
 
 vi.mock('./file-system', () => {
   const read = (uri: string, options?: { encoding?: string }) => {
@@ -43,8 +54,7 @@ vi.mock('./file-system', () => {
     writeAsStringAsync: vi.fn(async (uri: string, content: string, options?: { encoding?: string }) => {
       fs.write(uri, fs.toBytes(content, options?.encoding));
     }),
-    readDirectoryAsync: vi.fn(async (dir: string) =>
-      [...fs.files.keys()].filter((uri) => dirOf(uri) === dir.replace(/\/+$/, ''))),
+    readDirectoryAsync: vi.fn(async (dir: string) => childUrisOf(dir)),
     createFileAsync: vi.fn(async (dir: string, name: string) => {
       const requested = `${dir.replace(/\/+$/, '')}/${name}`;
       const uri = fs.files.has(requested) ? `${requested}.provider-copy` : requested;
@@ -58,13 +68,15 @@ vi.mock('./file-system', () => {
   return {
     StorageAccessFramework,
     EncodingType: { UTF8: 'utf8', Base64: 'base64' },
-    getInfoAsync: vi.fn(async (uri: string) => ({ exists: fs.files.has(uri), size: fs.files.get(uri)?.length ?? 0 })),
+    getInfoAsync: vi.fn(async (uri: string) => ({
+      exists: fs.files.has(uri) || childUrisOf(uri).length > 0,
+      size: fs.files.get(uri)?.length ?? 0,
+    })),
     readAsStringAsync: vi.fn(async (uri: string, options?: { encoding?: string }) => read(uri, options)),
     writeAsStringAsync: vi.fn(async (uri: string, content: string, options?: { encoding?: string }) => {
       fs.write(uri, fs.toBytes(content, options?.encoding));
     }),
-    readDirectoryAsync: vi.fn(async (dir: string) =>
-      [...fs.files.keys()].filter((uri) => dirOf(uri) === dir.replace(/\/+$/, '')).map(leafOf)),
+    readDirectoryAsync: vi.fn(async (dir: string) => childUrisOf(dir).map(leafOf)),
     deleteAsync: vi.fn(async (uri: string) => { fs.files.delete(uri); }),
     copyAsync: vi.fn(async ({ from, to }: { from: string; to: string }) => {
       const bytes = fs.files.get(from);
@@ -733,6 +745,31 @@ describe('File Sync transitions through core orchestration', () => {
       expect(inspectSyncArtifact(sealed).kind).toBe('encrypted');
       await expect(decryptSyncArtifact(sealed, material!.key, mobileSyncCryptoPrimitives)).resolves.toBeDefined();
     }
+    await expect(getMobileSyncEncryptionStatus()).resolves.toMatchObject({ state: 'enabled' });
+  }, 30_000);
+
+  it('seals desktop directory recovery generations in place before enable commits', async () => {
+    seedPlaintextFolder();
+    const retained = [
+      `${SYNC_DIR}/.mindwtr-encryption-stage-desktop/data.json`,
+      `${SYNC_DIR}/attachments/.mindwtr-encryption-quarantine-desktop/a1.png`,
+    ];
+    fs.files.set(retained[0], new TextEncoder().encode('desktop retained document generation'));
+    fs.files.set(retained[1], new TextEncoder().encode('desktop retained attachment generation'));
+
+    await enableSyncEncryption(PASSPHRASE);
+
+    const material = await getSyncEncryptionMaterial();
+    expect(material).not.toBeNull();
+    const { decryptSyncArtifact } = await import('@mindwtr/core');
+    for (const uri of retained) {
+      const sealed = fs.files.get(uri)!;
+      expect(inspectSyncArtifact(sealed).kind).toBe('encrypted');
+      await expect(decryptSyncArtifact(sealed, material!.key, mobileSyncCryptoPrimitives))
+        .resolves.toBeDefined();
+    }
+    expect(fs.files.has(retained[0])).toBe(true);
+    expect(fs.files.has(retained[1])).toBe(true);
     await expect(getMobileSyncEncryptionStatus()).resolves.toMatchObject({ state: 'enabled' });
   }, 30_000);
 

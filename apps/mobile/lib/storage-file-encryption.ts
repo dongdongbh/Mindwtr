@@ -471,6 +471,9 @@ export const resolveSyncArtifactSiblingUri = async (
 };
 
 const ATTACHMENT_PREFIX = `${ATTACHMENTS_DIR_NAME}/`;
+const DESKTOP_TRANSITION_STAGE_DIR_PREFIX = '.mindwtr-encryption-stage-';
+const DESKTOP_TRANSITION_QUARANTINE_DIR_PREFIX = '.mindwtr-encryption-quarantine-';
+const DESKTOP_RECOVERY_ENTRY_PREFIX = '.mindwtr-desktop-recovery-entry-';
 // Keep provider-facing scratch names bounded. Attachment names can be arbitrarily long,
 // and prefixing the canonical leaf made otherwise-valid transitions exceed SAF/provider
 // display-name limits. The timestamp/counter/random tuple remains collision-resistant
@@ -491,6 +494,11 @@ const transitionScratchName = (kind: 'stage' | 'quarantine'): string => {
 };
 
 const isTransitionScratchName = (name: string): boolean => name.includes(TRANSITION_SCRATCH_MARKER);
+const isDesktopTransitionRecoveryDir = (name: string): boolean =>
+    name.startsWith(DESKTOP_TRANSITION_STAGE_DIR_PREFIX)
+    || name.startsWith(DESKTOP_TRANSITION_QUARANTINE_DIR_PREFIX);
+
+type ArtifactLocation = { directory: DirectoryHandle; leaf: string; mimeType: string };
 
 /**
  * Adapts a File Sync folder to core's generic transition port. Entry names are relative
@@ -510,8 +518,27 @@ export const createFileSyncEncryptionRemotePort = async (
 
     const documents = await openDirectory(target.dirUri);
     const attachments = target.attachmentsDirUri ? await openDirectory(target.attachmentsDirUri) : null;
+    const desktopRecoveryLocations = new Map<string, ArtifactLocation>();
+
+    const collectDesktopRecoveryDirectory = async (dirUri: string): Promise<void> => {
+        const directory = await openDirectory(dirUri);
+        for (const [leaf, uri] of directory.entries) {
+            if (isDesktopTransitionRecoveryDir(leaf)) {
+                await collectDesktopRecoveryDirectory(uri);
+                continue;
+            }
+            const name = `${DESKTOP_RECOVERY_ENTRY_PREFIX}${desktopRecoveryLocations.size}`;
+            desktopRecoveryLocations.set(name, {
+                directory,
+                leaf,
+                mimeType: leaf.endsWith('.json') ? 'application/json' : DEFAULT_ARTIFACT_MIME,
+            });
+        }
+    };
 
     const locate = async (name: string, createIfMissing: boolean): Promise<string | null> => {
+        const recovery = desktopRecoveryLocations.get(name);
+        if (recovery) return recovery.directory.resolve(recovery.leaf, { createIfMissing: false });
         if (name.startsWith(ATTACHMENT_PREFIX)) {
             // Attachments are rewritten in place under their existing names (cloudKey is
             // identity-keyed and immutable), so a missing one is never created here.
@@ -523,7 +550,9 @@ export const createFileSyncEncryptionRemotePort = async (
         });
     };
 
-    const locationFor = (name: string): { directory: DirectoryHandle; leaf: string; mimeType: string } | null => {
+    const locationFor = (name: string): ArtifactLocation | null => {
+        const recovery = desktopRecoveryLocations.get(name);
+        if (recovery) return recovery;
         if (name.startsWith(ATTACHMENT_PREFIX)) {
             if (!attachments) return null;
             return {
@@ -588,14 +617,26 @@ export const createFileSyncEncryptionRemotePort = async (
             // created by this run is added to the maps only after this snapshot and cannot
             // recursively enter the same transition.
             const entries: SyncEncryptionRemoteEntry[] = [];
-            for (const name of documents.entries.keys()) {
+            desktopRecoveryLocations.clear();
+            for (const [name, uri] of documents.entries) {
+                if (isDesktopTransitionRecoveryDir(name)) {
+                    await collectDesktopRecoveryDirectory(uri);
+                    continue;
+                }
                 if (isTransitionScratchName(name)) entries.push({ name, kind: 'attachment' });
                 else if (isSyncDocumentName(name)) entries.push({ name, kind: 'document' });
             }
             if (attachments) {
-                for (const name of attachments.entries.keys()) {
+                for (const [name, uri] of attachments.entries) {
+                    if (isDesktopTransitionRecoveryDir(name)) {
+                        await collectDesktopRecoveryDirectory(uri);
+                        continue;
+                    }
                     entries.push({ name: `${ATTACHMENT_PREFIX}${name}`, kind: 'attachment' });
                 }
+            }
+            for (const name of desktopRecoveryLocations.keys()) {
+                entries.push({ name, kind: 'attachment' });
             }
             return entries;
         },
