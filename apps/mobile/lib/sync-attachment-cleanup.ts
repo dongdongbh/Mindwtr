@@ -3,17 +3,23 @@ import {
   cloudDeleteFile,
   decodeUriSafe,
   getErrorStatus,
+  isFileSyncGenerationCloudKey,
   isSyncRemoteMutationFenceError,
   isWebdavRemoteWriteConflictError,
   normalizeStrongWebdavEtag,
   runAttachmentCleanupLifecycle,
+  sanitizeAttachmentCloudKeyForSyncMerge,
   sanitizeAttachmentUriForSyncMerge,
   webdavDeleteFileVersioned,
   webdavHeadFile,
   type CloudProvider,
 } from '@mindwtr/core';
 import { getBaseSyncUrl, getCloudBaseUrl } from './attachment-sync';
-import { ATTACHMENTS_DIR_NAME } from './attachment-sync-utils';
+import {
+  ATTACHMENTS_DIR_NAME,
+  inspectSafDirectoryEntriesByName,
+  resolveFileSyncDir,
+} from './attachment-sync-utils';
 import * as FileSystem from './file-system';
 import { getFileSyncBaseDir, type SyncBackend } from './sync-service-utils';
 import { getMobileCloudRequestOptions, getMobileWebDavRequestOptions } from './webdav-request-options';
@@ -97,6 +103,8 @@ export const runMobileAttachmentCleanup = async (
     && options.cloudProvider === 'selfhosted'
     && Boolean(options.cloudConfig?.url);
   const isDropboxBackend = options.backend === 'cloud' && options.cloudProvider === 'dropbox';
+  const isSafFileBackend = options.backend === 'file'
+    && Boolean(options.fileSyncPath?.startsWith('content://'));
   const fileBaseDir = options.backend === 'file'
     && options.fileSyncPath
     && !options.fileSyncPath.startsWith('content://')
@@ -106,6 +114,7 @@ export const runMobileAttachmentCleanup = async (
     isWebdavBackend
     || isCloudBackend
     || isDropboxBackend
+    || isSafFileBackend
     || fileBaseDir
   );
   const deleteRemoteAttachment = canAttemptRemoteDelete
@@ -154,6 +163,27 @@ export const runMobileAttachmentCleanup = async (
       } else if (fileBaseDir) {
         options.ensureLocalSnapshotFresh();
         await FileSystem.deleteAsync(fileBaseDir + '/' + target.cloudKey, { idempotent: true });
+      } else if (isSafFileBackend && options.fileSyncPath) {
+        const cloudKey = sanitizeAttachmentCloudKeyForSyncMerge(target.cloudKey);
+        if (cloudKey !== target.cloudKey || !isFileSyncGenerationCloudKey(cloudKey)) {
+          throw new Error('SAF File Sync cleanup requires an exact generation key');
+        }
+        const fileName = cloudKey.slice(`${ATTACHMENTS_DIR_NAME}/`.length);
+
+        options.ensureLocalSnapshotFresh();
+        const syncDir = await resolveFileSyncDir(options.fileSyncPath);
+        if (!syncDir || syncDir.type !== 'saf') {
+          throw new Error('SAF File Sync attachments directory is unavailable');
+        }
+        const inventory = await inspectSafDirectoryEntriesByName(syncDir.attachmentsDirUri);
+        if (inventory.status !== 'available') {
+          throw new Error('SAF File Sync attachments directory is unreadable');
+        }
+        const targetUri = inventory.entries.get(fileName);
+        if (!targetUri) return;
+
+        options.ensureLocalSnapshotFresh();
+        await FileSystem.deleteAsync(targetUri, { idempotent: true });
       }
     }
     : undefined;
