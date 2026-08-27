@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { computeStableValueFingerprint, computeSyncPayloadFingerprint, type AppData } from '@mindwtr/core';
+import { rememberWebdavCapabilityProof } from './webdav-capability-proof';
 
 type MockStoreState = {
     _allTasks: AppData['tasks'];
@@ -83,6 +84,49 @@ const buildResponse = (
         }
     },
 } as unknown as Response);
+
+const createRuntimeWebdavCapabilityFetch = (documentBody: string) => {
+    let probeBytes: Uint8Array | null = null;
+    let probeVersion = 0;
+    return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+        const headers = new Headers(init?.headers);
+        if (!url.includes('.mindwtr-etag-probe-')) {
+            if (method === 'PUT') return buildResponse(200, '', { etag: '"pending-write"' });
+            if (method !== 'GET') throw new Error(`unexpected document ${method}`);
+            return buildResponse(200, documentBody, { etag: '"pending-read"' });
+        }
+        if (method === 'GET') {
+            if (!probeBytes) return buildResponse(404, '');
+            return buildResponse(
+                200,
+                new TextDecoder().decode(probeBytes),
+                { etag: `"probe-v${probeVersion}"` },
+            );
+        }
+        if (method === 'PUT') {
+            const body = init?.body;
+            if (!(body instanceof Uint8Array)) throw new Error('expected byte-array probe body');
+            const currentEtag = probeBytes ? `"probe-v${probeVersion}"` : null;
+            if (probeBytes && headers.get('if-none-match') === '*') return buildResponse(412, '');
+            if (probeBytes && headers.has('if-match') && headers.get('if-match') !== currentEtag) {
+                return buildResponse(412, '');
+            }
+            probeBytes = new Uint8Array(body);
+            probeVersion += 1;
+            return buildResponse(currentEtag ? 204 : 201, '');
+        }
+        if (method === 'DELETE') {
+            if (!probeBytes || headers.get('if-match') !== `"probe-v${probeVersion}"`) {
+                return buildResponse(412, '');
+            }
+            probeBytes = null;
+            return buildResponse(204, '');
+        }
+        throw new Error(`unexpected ${method}`);
+    });
+};
 
 const invokeMock = vi.hoisted(() => vi.fn());
 const markLocalWriteMock = vi.hoisted(() => vi.fn());
@@ -611,12 +655,7 @@ describe('desktop sync-service runtime', () => {
             people: [],
             settings: {},
         };
-        const httpFetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-            if (init?.method === 'PUT') {
-                return buildResponse(200, '', { etag: '"pending-write"' });
-            }
-            return buildResponse(200, JSON.stringify(pendingRemote), { etag: '"pending-read"' });
-        });
+        const httpFetchMock = createRuntimeWebdavCapabilityFetch(JSON.stringify(pendingRemote));
         invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
             if (command === 'create_data_snapshot') return undefined;
             if (command === 'get_data') return structuredClone(pendingRemote);
@@ -1181,6 +1220,11 @@ describe('desktop sync-service runtime', () => {
             if (command === 'save_data') return undefined;
             throw new Error(`Unexpected command: ${command} ${JSON.stringify(args)}`);
         });
+        rememberWebdavCapabilityProof({
+            url: 'https://sync.example.com/data.json',
+            username: 'user',
+            allowInsecureHttp: false,
+        });
         syncServiceModule.__syncServiceTestUtils.setDependenciesForTests({
             getTauriFetch: async () => headFetchMock as unknown as typeof fetch,
         });
@@ -1275,6 +1319,11 @@ describe('desktop sync-service runtime', () => {
             }
             if (command === 'save_data') return undefined;
             throw new Error(`Unexpected command: ${command} ${JSON.stringify(args)}`);
+        });
+        rememberWebdavCapabilityProof({
+            url: 'https://sync.example.com/data.json',
+            username: 'user',
+            allowInsecureHttp: false,
         });
         syncServiceModule.__syncServiceTestUtils.setDependenciesForTests({
             getTauriFetch: async () => headFetchMock as unknown as typeof fetch,
