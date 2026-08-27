@@ -1,5 +1,11 @@
 import type { AppData, Attachment, SyncKeyMaterial } from '@mindwtr/core';
-import { applyAttachmentPatches, validateAttachmentForUpload, validateAttachmentHash } from '@mindwtr/core';
+import {
+  applyAttachmentPatches,
+  computeSha256Hex,
+  isSha256Hex,
+  validateAttachmentForUpload,
+  validateAttachmentHash,
+} from '@mindwtr/core';
 import * as FileSystem from '../file-system';
 import {
   buildCloudKey,
@@ -27,9 +33,12 @@ import {
 } from '../attachment-sync-utils';
 import {
   assertAttachmentSyncNotAborted,
+  copyAttachmentDownloadToStage,
+  deleteAttachmentDownloadStageBestEffort,
+  installStagedAttachmentDownload,
   isAttachmentSyncAbortError,
-  installAttachmentDownloadBytes,
   openAttachmentBytesFromDownload,
+  readAttachmentDownloadStageBytes,
   resolveAttachmentDownloadTargetPath,
   runMobileAttachmentLifecycle,
   sealAttachmentBytesForUpload,
@@ -157,28 +166,60 @@ export const syncFileAttachments = async (
       }
       const remoteExists = remotePresence === 'present';
       if (attachment.pendingContentUpload === true && remoteUri && remoteExists) {
-        const bytes = await readFileAsBytes(remoteUri)
-          .then((value) => openAttachmentBytesFromDownload(value, options.material));
-        await validateAttachmentHash(attachment, bytes);
-        assertAttachmentSyncNotAborted(signal);
-        const targetUri = resolveAttachmentDownloadTargetPath(
-          attachment,
-          `${attachmentsDir}${filename}`,
-          expectation,
-        );
-        const installed = await installAttachmentDownloadBytes(
-          attachment,
-          attachmentsDir,
-          targetUri,
-          bytes,
-          expectation,
-          signal,
-        );
-        if (!installed) return false;
-        attachment.uri = targetUri;
-        attachment.localStatus = 'available';
-        if (!Number.isFinite(attachment.size ?? NaN)) attachment.size = bytes.byteLength;
-        return true;
+        let stagedPath: string | null = null;
+        let installHelperOwnsStage = false;
+        try {
+          assertAttachmentSyncNotAborted(signal);
+          stagedPath = await copyAttachmentDownloadToStage(attachment, attachmentsDir, remoteUri);
+          let expectedStagedHash = !options.material && isSha256Hex(attachment.fileHash)
+            ? attachment.fileHash.toLowerCase()
+            : null;
+          let downloadedSize: number | null = null;
+          if (!expectedStagedHash) {
+            const wireBytes = await readAttachmentDownloadStageBytes(stagedPath);
+            const plaintextBytes = await openAttachmentBytesFromDownload(wireBytes, options.material);
+            const plaintextHash = await computeSha256Hex(plaintextBytes);
+            if (!plaintextHash) throw new Error('Attachment download hash is unavailable');
+            await validateAttachmentHash(attachment, plaintextBytes);
+            if (plaintextBytes !== wireBytes) {
+              await writeBytesSafely(stagedPath, plaintextBytes);
+            }
+            expectedStagedHash = plaintextHash;
+            downloadedSize = plaintextBytes.byteLength;
+          } else if (!Number.isFinite(attachment.size ?? NaN)) {
+            const stagedInfo = await FileSystem.getInfoAsync(stagedPath);
+            downloadedSize = stagedInfo.exists && typeof stagedInfo.size === 'number'
+              ? stagedInfo.size
+              : null;
+          }
+          assertAttachmentSyncNotAborted(signal);
+          const targetUri = resolveAttachmentDownloadTargetPath(
+            attachment,
+            `${attachmentsDir}${filename}`,
+            expectation,
+          );
+          installHelperOwnsStage = true;
+          const installed = await installStagedAttachmentDownload({
+            attachment,
+            stagedPath,
+            targetPath: targetUri,
+            expectation,
+            signal,
+            expectedStagedHash,
+          });
+          if (!installed) return false;
+          attachment.uri = targetUri;
+          attachment.localStatus = 'available';
+          if (!Number.isFinite(attachment.size ?? NaN) && downloadedSize != null) {
+            attachment.size = downloadedSize;
+          }
+          return true;
+        } catch (error) {
+          if (stagedPath && !installHelperOwnsStage) {
+            await deleteAttachmentDownloadStageBestEffort(stagedPath);
+          }
+          throw error;
+        }
       }
       if (!options.activationProbe) return false;
       if (!remoteExists) {

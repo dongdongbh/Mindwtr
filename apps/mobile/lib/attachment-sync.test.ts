@@ -1,11 +1,16 @@
-import { createHash } from 'node:crypto';
+import * as nodeCrypto from 'node:crypto';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SyncRemoteMutationFenceLostError, type AppData, type Attachment } from '@mindwtr/core';
+import {
+  MAX_DOWNLOAD_BYTES,
+  SyncRemoteMutationFenceLostError,
+  type AppData,
+  type Attachment,
+} from '@mindwtr/core';
 
 /** Real digests, not fixtures: core's `validateAttachmentHash` now fails closed, and the
  *  node test env has `crypto.subtle`, so the values the code computes must be the values
  *  the tests expect. */
-const sha256Hex = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
+const sha256Hex = (bytes: Uint8Array): string => nodeCrypto.createHash('sha256').update(bytes).digest('hex');
 const base64Of = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64');
 const deferred = <T = void>() => {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -1367,6 +1372,7 @@ describe('attachment sync', () => {
 
   it('restores matching pending bytes from File Sync before clearing the marker', async () => {
     const bytes = new Uint8Array([10, 11, 12]);
+    const remoteUri = 'file://sync/attachments/recover-file.txt';
     const appData = singleAttachmentData({
       id: 'recover-file',
       cloudKey: 'attachments/recover-file.txt',
@@ -1377,7 +1383,6 @@ describe('attachment sync', () => {
       if (uri === 'file://document/attachments/recover-file.txt') return { exists: false };
       return { exists: true, size: bytes.byteLength, modificationTime: 1 };
     });
-    fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(bytes));
 
     const result = await attachmentSync.syncFileAttachments(
       appData,
@@ -1391,12 +1396,181 @@ describe('attachment sync', () => {
       localStatus: 'available',
       pendingContentUpload: undefined,
     });
+    expect(fileSystemMock.copyAsync).toHaveBeenCalledWith({
+      from: remoteUri,
+      to: expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+    });
+    expect(fileSystemMock.readAsStringAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.StorageAccessFramework.readAsStringAsync).not.toHaveBeenCalled();
     expect(attachmentFileInstallerMock.installAttachmentFileGeneration).toHaveBeenCalledWith(
       expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
       'file://document/attachments/recover-file.txt',
       { kind: 'absent' },
       sha256Hex(bytes),
     );
+  });
+
+  it('restores matching pending SAF bytes through native staging without a base64 read', async () => {
+    const bytes = new Uint8Array([19, 20, 21]);
+    const syncFileUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fdata.json';
+    const attachmentsDirUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fattachments/';
+    const remoteUri = `${attachmentsDirUri}recover-saf.txt`;
+    const targetUri = 'file://document/attachments/recover-saf.txt';
+    const appData = singleAttachmentData({
+      id: 'recover-saf',
+      cloudKey: 'attachments/recover-saf.txt',
+      fileHash: sha256Hex(bytes),
+      pendingContentUpload: true,
+    });
+    fileSystemMock.StorageAccessFramework.readDirectoryAsync.mockImplementation(async (uri: string) => {
+      if (uri === attachmentsDirUri) return [remoteUri];
+      if (uri.includes('primary%3ADocuments%2FMindwtr%20Backup')) return [attachmentsDirUri];
+      return [];
+    });
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+      uri === targetUri
+        ? { exists: false }
+        : { exists: true, size: bytes.byteLength, modificationTime: 1 }
+    ));
+
+    const result = await attachmentSync.syncFileAttachments(
+      appData,
+      syncFileUri,
+      undefined,
+      { phase: 'post-merge' },
+    );
+
+    expect(syncResult(result, appData).data.tasks[0].attachments?.[0]).toMatchObject({
+      uri: targetUri,
+      localStatus: 'available',
+      pendingContentUpload: undefined,
+    });
+    expect(fileSystemMock.copyAsync).toHaveBeenCalledWith({
+      from: remoteUri,
+      to: expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+    });
+    expect(fileSystemMock.readAsStringAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.StorageAccessFramework.readAsStringAsync).not.toHaveBeenCalled();
+    expect(attachmentFileInstallerMock.installAttachmentFileGeneration).toHaveBeenCalledWith(
+      expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
+      targetUri,
+      { kind: 'absent' },
+      sha256Hex(bytes),
+    );
+  });
+
+  it('rejects oversized pending File Sync recovery before copy, read, or installation', async () => {
+    const remoteUri = 'file://sync/attachments/recover-file-oversized.txt';
+    const targetUri = 'file://document/attachments/recover-file-oversized.txt';
+    const appData = singleAttachmentData({
+      id: 'recover-file-oversized',
+      cloudKey: 'attachments/recover-file-oversized.txt',
+      fileHash: sha256Hex(new Uint8Array([1, 2, 3])),
+      pendingContentUpload: true,
+    });
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => {
+      if (uri === targetUri) return { exists: false };
+      if (uri === remoteUri) {
+        return { exists: true, size: MAX_DOWNLOAD_BYTES + 1, modificationTime: 1 };
+      }
+      return { exists: false };
+    });
+
+    const result = await attachmentSync.syncFileAttachments(
+      appData,
+      'file://sync/data.json',
+      undefined,
+      { phase: 'post-merge' },
+    );
+
+    expect(result).toBe(false);
+    expect(fileSystemMock.copyAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.readAsStringAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.StorageAccessFramework.readAsStringAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.writeAsStringAsync).not.toHaveBeenCalled();
+    expect(attachmentFileInstallerMock.installAttachmentFileGeneration).not.toHaveBeenCalled();
+    expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+      uri: targetUri,
+      localStatus: 'missing',
+      pendingContentUpload: true,
+    });
+  });
+
+  it('reads encrypted pending File Sync recovery only from bounded native scratch chunks', async () => {
+    const core = await import('@mindwtr/core');
+    const { setSyncCryptoNativeModuleForTests } = await import('./sync-crypto-native');
+    setSyncCryptoNativeModuleForTests({
+      argon2: () => { throw new Error('not needed: the key is constructed directly'); },
+      createCipheriv: (a, k, i) => nodeCrypto.createCipheriv(a, k, i) as never,
+      createDecipheriv: (a, k, i) => nodeCrypto.createDecipheriv(a, k, i) as never,
+      createHash: (a) => nodeCrypto.createHash(a) as never,
+      randomBytes: (size) => new Uint8Array(nodeCrypto.randomBytes(size)),
+    });
+    const material = {
+      key: new Uint8Array(32).fill(7),
+      salt: new Uint8Array(16).fill(3),
+      params: core.SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
+    };
+    const bytes = new Uint8Array([22, 23, 24]);
+    const sealed = await core.encryptSyncArtifact(
+      bytes,
+      material,
+      (await import('./sync-crypto-native')).mobileSyncCryptoPrimitives,
+    );
+    const remoteUri = 'file://sync/attachments/recover-file-encrypted.txt';
+    const targetUri = 'file://document/attachments/recover-file-encrypted.txt';
+    const appData = singleAttachmentData({
+      id: 'recover-file-encrypted',
+      cloudKey: 'attachments/recover-file-encrypted.txt',
+      fileHash: sha256Hex(bytes),
+      pendingContentUpload: true,
+    });
+    let stagedPath = '';
+    let stagedSize = sealed.byteLength;
+    fileSystemMock.copyAsync.mockImplementation(async ({ to }: { from: string; to: string }) => {
+      stagedPath = to;
+    });
+    fileSystemMock.moveAsync.mockImplementation(async ({ to }: { from: string; to: string }) => {
+      if (to === stagedPath) stagedSize = bytes.byteLength;
+    });
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => {
+      if (uri === targetUri) return { exists: false };
+      if (uri === remoteUri) return { exists: true, size: sealed.byteLength, modificationTime: 1 };
+      if (uri === stagedPath) return { exists: true, size: stagedSize, modificationTime: 1 };
+      return { exists: false };
+    });
+    fileSystemMock.readAsStringAsync.mockImplementation(async (uri: string) => (
+      uri === stagedPath ? base64Of(sealed) : base64Of(bytes)
+    ));
+
+    const result = await attachmentSync.syncFileAttachments(
+      appData,
+      'file://sync/data.json',
+      undefined,
+      { phase: 'post-merge', material },
+    );
+
+    expect(fileSystemMock.copyAsync).toHaveBeenCalledWith({ from: remoteUri, to: stagedPath });
+    expect(fileSystemMock.readAsStringAsync).toHaveBeenCalledWith(
+      stagedPath,
+      { encoding: 'base64', position: 0, length: sealed.byteLength },
+    );
+    expect(fileSystemMock.readAsStringAsync).not.toHaveBeenCalledWith(
+      remoteUri,
+      expect.anything(),
+    );
+    expect(attachmentFileInstallerMock.installAttachmentFileGeneration).toHaveBeenCalledWith(
+      stagedPath,
+      targetUri,
+      { kind: 'absent' },
+      sha256Hex(bytes),
+    );
+    expect(syncResult(result, appData).data.tasks[0].attachments?.[0]).toMatchObject({
+      uri: targetUri,
+      localStatus: 'available',
+      pendingContentUpload: undefined,
+    });
+    setSyncCryptoNativeModuleForTests(null);
   });
 
   it('preserves File Sync scratch and terminates progress when native install conflicts', async () => {
