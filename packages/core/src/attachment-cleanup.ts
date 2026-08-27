@@ -171,12 +171,16 @@ const isLocalSyncAbortError = (error: unknown): boolean => (
 export function normalizeAttachmentCleanupUri(uri?: string): string | undefined {
     if (!uri) return undefined;
     if (/^https?:\/\//i.test(uri) || uri.startsWith('content://')) return undefined;
-    const path = uri.replace(/^file:\/\//i, '').replace(/\\/g, '/');
+    let path = uri.replace(/^file:\/\//i, '').replace(/\\/g, '/');
+    // A canonical Windows file URI spells C:\ as file:///C:/; strip the URI's
+    // extra root slash before applying Windows' case-insensitive identity.
+    if (/^\/[a-z]:\//i.test(path)) path = path.slice(1);
     try {
-        return decodeURIComponent(path);
+        path = decodeURIComponent(path);
     } catch {
-        return path;
+        // Keep the undecoded spelling; malformed user paths must not abort GC.
     }
+    return /^[a-z]:\//i.test(path) ? path.toLowerCase() : path;
 }
 
 export function findLiveAttachmentResourceReferences(appData: AppData): LiveAttachmentResourceReferences {

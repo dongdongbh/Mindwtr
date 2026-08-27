@@ -384,6 +384,13 @@ describe('findLiveAttachmentResourceReferences', () => {
         )).toBe(true);
     });
 
+    it('matches Windows drive paths case-insensitively across file URI spellings', () => {
+        expect(isAttachmentLocalResourceReferenced(
+            orphanWithUri('C:/Users/Alice/Docs/Report.PDF'),
+            buildLiveReferences('file:///c:/users/alice/docs/report.pdf'),
+        )).toBe(true);
+    });
+
     it('tolerates malformed percent sequences without throwing', () => {
         expect(() => buildLiveReferences('/a/100%.pdf')).not.toThrow();
         expect(isAttachmentLocalResourceReferenced(
@@ -751,6 +758,55 @@ describe('applyAttachmentCleanupResult', () => {
 
 describe('runAttachmentCleanupLifecycle', () => {
     const now = '2026-07-14T12:00:00.000Z';
+
+    it('does not delete a Windows path alias still referenced with different casing', async () => {
+        const data = buildData();
+        data.tasks.push(
+            {
+                id: 'purged',
+                title: 'Purged',
+                status: 'done',
+                contexts: [],
+                createdAt: now,
+                updatedAt: now,
+                deletedAt: now,
+                purgedAt: now,
+                attachments: [{
+                    id: 'orphan',
+                    kind: 'file',
+                    title: 'shared',
+                    uri: 'C:/Users/Alice/Mindwtr/attachments/shared.pdf',
+                    createdAt: now,
+                    updatedAt: now,
+                }],
+            },
+            {
+                id: 'live',
+                title: 'Live',
+                status: 'next',
+                contexts: [],
+                createdAt: now,
+                updatedAt: now,
+                attachments: [{
+                    id: 'live-attachment',
+                    kind: 'file',
+                    title: 'shared',
+                    uri: 'file:///c:/users/alice/mindwtr/ATTACHMENTS/shared.pdf',
+                    createdAt: now,
+                    updatedAt: now,
+                }],
+            },
+        );
+        const deleteLocalAttachment = vi.fn(async () => undefined);
+
+        await runAttachmentCleanupLifecycle({
+            appData: data,
+            now: () => now,
+            deleteLocalAttachment,
+        });
+
+        expect(deleteLocalAttachment).not.toHaveBeenCalled();
+    });
 
     it('keeps a soft-deleted record as a tombstone and goes quiet once processed (#1064)', async () => {
         // Removing the record never stuck: the merge unions attachments by id,
