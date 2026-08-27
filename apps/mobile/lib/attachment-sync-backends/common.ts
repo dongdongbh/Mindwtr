@@ -225,11 +225,13 @@ const cancelUploadTask = async (task: unknown): Promise<void> => {
 };
 
 const WEBDAV_STREAM_UPLOAD_TIMEOUT_MS = 30_000;
+const CLOUD_STREAM_UPLOAD_TIMEOUT_MS = 30_000;
 
 const runUploadTask = async <T,>(
   task: { uploadAsync: () => Promise<T> },
   signal?: AbortSignal,
   timeoutMs?: number,
+  timeoutMessage = 'Streamed upload timed out',
 ): Promise<T> => {
   assertUploadNotAborted(signal);
   if (!signal && timeoutMs === undefined) {
@@ -279,7 +281,7 @@ const runUploadTask = async <T,>(
     signal?.addEventListener('abort', onAbort, { once: true });
     if (timeoutMs !== undefined) {
       timeoutId = setTimeout(() => {
-        beginCancellation(new Error('WebDAV streamed upload timed out'));
+        beginCancellation(new Error(timeoutMessage));
       }, timeoutMs);
     }
     void uploadOutcome.then((outcome) => {
@@ -352,7 +354,7 @@ export const uploadWebdavFileWithFileSystem = async (
       }
     );
     if (!task || typeof task.uploadAsync !== 'function') return false;
-    const result = await runUploadTask(task, signal, timeoutMs);
+    const result = await runUploadTask(task, signal, timeoutMs, 'WebDAV streamed upload timed out');
     const status = Number((result as { status?: number } | null)?.status ?? 0);
     if (status && (status < 200 || status >= 300)) {
       if (status === 409 || status === 412) throw new WebDavRemoteWriteConflictError(status);
@@ -375,10 +377,11 @@ export const uploadCloudFileWithFileSystem = async (
   token: string,
   onProgress?: (sent: number, total: number) => void,
   totalBytes?: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  timeoutMs = CLOUD_STREAM_UPLOAD_TIMEOUT_MS,
 ): Promise<boolean> => {
   assertUploadNotAborted(signal);
-  const uploadAsync = (FileSystem as any).uploadAsync;
+  const uploadAsync = LegacyFileSystem.uploadAsync;
   if (typeof uploadAsync !== 'function') return false;
   if (!fileUri.startsWith('file://')) return false;
 
@@ -389,8 +392,8 @@ export const uploadCloudFileWithFileSystem = async (
   if (authHeader) headers.Authorization = authHeader;
 
   const uploadType = resolveUploadType();
-  const createUploadTask = (FileSystem as any).createUploadTask;
-  if (typeof createUploadTask === 'function' && (onProgress || signal)) {
+  const createUploadTask = LegacyFileSystem.createUploadTask;
+  if (typeof createUploadTask === 'function') {
     const task = createUploadTask(
       url,
       fileUri,
@@ -408,7 +411,8 @@ export const uploadCloudFileWithFileSystem = async (
         }
       }
     );
-    const result = await runUploadTask(task, signal);
+    if (!task || typeof task.uploadAsync !== 'function') return false;
+    const result = await runUploadTask(task, signal, timeoutMs, 'Cloud streamed upload timed out');
     const status = Number((result as { status?: number } | null)?.status ?? 0);
     if (status && (status < 200 || status >= 300)) {
       const error = new Error(`Cloud File PUT failed (${status})`);
@@ -418,17 +422,7 @@ export const uploadCloudFileWithFileSystem = async (
     return true;
   }
 
-  if (signal) return false;
-
-  const result = await uploadAsync(url, fileUri, { httpMethod: 'PUT', headers, uploadType });
-  const status = Number((result as { status?: number } | null)?.status ?? 0);
-  if (status && (status < 200 || status >= 300)) {
-    const error = new Error(`Cloud File PUT failed (${status})`);
-    (error as { status?: number }).status = status;
-    throw error;
-  }
-  if (onProgress && Number.isFinite(totalBytes ?? NaN) && (totalBytes ?? 0) > 0) {
-    onProgress(totalBytes ?? 0, totalBytes ?? 0);
-  }
-  return true;
+  // uploadAsync has no cancellation handle. Fall back to core's bounded byte PUT
+  // rather than start a request that can occupy the singleton sync indefinitely.
+  return false;
 };

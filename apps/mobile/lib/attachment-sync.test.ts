@@ -1652,6 +1652,44 @@ describe('attachment sync', () => {
       expect(uploadAsync).toHaveBeenCalledTimes(1);
     });
 
+    it('bounds a cloud streamed upload and allows the next upload after it terminates', async () => {
+      const upload = deferred<{ status: number }>();
+      const cancelAsync = vi.fn(async () => undefined);
+      const nextUploadAsync = vi.fn().mockResolvedValue({ status: 200 });
+      fileSystemMock.createUploadTask
+        .mockReturnValueOnce({ uploadAsync: () => upload.promise, cancelAsync })
+        .mockReturnValueOnce({ uploadAsync: nextUploadAsync, cancelAsync: vi.fn() });
+      const { uploadCloudFileWithFileSystem } = await import('./attachment-sync-backends/common');
+
+      const pending = uploadCloudFileWithFileSystem(
+        'https://sync.example/attachments/a.bin',
+        'file://document/attachments/a.bin',
+        'application/octet-stream',
+        'token',
+        undefined,
+        3,
+        undefined,
+        1,
+      );
+
+      await vi.waitFor(() => expect(cancelAsync).toHaveBeenCalledOnce());
+      await Promise.resolve();
+      upload.reject(new Error('native upload cancelled'));
+      await expect(pending).rejects.toThrow('Cloud streamed upload timed out');
+
+      await expect(uploadCloudFileWithFileSystem(
+        'https://sync.example/attachments/b.bin',
+        'file://document/attachments/b.bin',
+        'application/octet-stream',
+        'token',
+        undefined,
+        3,
+        undefined,
+        100,
+      )).resolves.toBe(true);
+      expect(nextUploadAsync).toHaveBeenCalledOnce();
+    });
+
     it('does not finish after cancellation acknowledgement while the native upload is still live', async () => {
       const upload = deferred<{ status: number }>();
       const cancelAsync = vi.fn(async () => undefined);
