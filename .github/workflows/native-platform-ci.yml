@@ -174,7 +174,7 @@ jobs:
     if: needs.changes.outputs.windows == 'true'
     needs: changes
     runs-on: windows-latest
-    name: Windows Rust check
+    name: Windows Rust check and tests
     timeout-minutes: 35
     steps:
       - name: Checkout code
@@ -190,6 +190,9 @@ jobs:
 
       - name: Check Windows Rust
         run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+
+      - name: Run Windows native library tests
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
 
   android-native:
     if: needs.changes.outputs.android == 'true'

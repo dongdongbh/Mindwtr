@@ -29,7 +29,7 @@ test("native CI generates clean projects and compiles Android and iOS sources", 
   expect(workflow).toContain("CODE_SIGNING_ALLOWED=NO");
 });
 
-test("desktop Rust pull requests run a stable Windows cargo check", () => {
+test("desktop Rust pull requests check and test the native library on Windows", () => {
   const workflow = readFileSync(".github/workflows/native-platform-ci.yml", "utf8");
   const windowsJob = workflow.match(
     /\n  windows-rust:\n([\s\S]*?)(?=\n  [a-z][a-z-]+:\n|$)/,
@@ -52,6 +52,10 @@ test("desktop Rust pull requests run a stable Windows cargo check", () => {
   );
   expect(windowsJob).toContain(
     "run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml",
+  );
+  expect(windowsJob).toContain("name: Run Windows native library tests");
+  expect(windowsJob).toContain(
+    "run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib",
   );
 });
 
