@@ -781,7 +781,10 @@ describe('desktop sync attachment backends', () => {
         ).resolves.toBeNull();
 
         expect(coreMocks.webdavMakeDirectory).toHaveBeenCalledTimes(1);
-        expect(logSyncWarning).toHaveBeenCalledWith('WebDAV rate limited; pausing attachment sync', rateLimitError);
+        expect(logSyncWarning).toHaveBeenCalledWith(
+            'WebDAV rate limited; pausing attachment sync',
+            expect.objectContaining({ message: 'Attachment sync operation failed (503)' }),
+        );
         expect(logSyncInfo).toHaveBeenCalledWith(
             'WebDAV attachment sync skipped during rate-limit cooldown',
             { remainingMs: '60000' },
@@ -887,7 +890,7 @@ describe('desktop sync attachment backends', () => {
             resolveWebdavPassword: vi.fn(async () => 'secret'),
         };
         fsMocks.exists.mockResolvedValue(true);
-        fsMocks.readFile.mockRejectedValue(new Error('safe read failure'));
+        fsMocks.readFile.mockRejectedValue(new Error(`Failed to read ${privatePath}`));
 
         await syncWebdavAttachments(
             appData,
@@ -909,7 +912,35 @@ describe('desktop sync attachment backends', () => {
         );
         expect(logSyncWarning).toHaveBeenCalledWith(
             'Failed to upload attachment attachment-1',
-            expect.any(Error),
+            expect.objectContaining({ message: 'Attachment sync operation failed' }),
+        );
+    });
+
+    it('redacts a path-bearing attachment download error before logging it', async () => {
+        const privateTitle = 'Divorce settlement draft.pdf';
+        const privatePath = `/app-data/mindwtr/attachments/${privateTitle}`;
+        const appData = createDownloadData('cloudkit');
+        appData.tasks[0].attachments![0].title = privateTitle;
+        const logSyncWarning = vi.fn();
+        const deps: AttachmentBackendDeps = {
+            getTauriFetch: vi.fn(),
+            isTauriRuntimeEnv: () => true,
+            logSyncInfo: vi.fn(),
+            logSyncWarning,
+            resolveWebdavPassword: vi.fn(),
+        };
+        cloudKitMocks.fetchCloudKitAttachmentAsset.mockRejectedValue(
+            new Error(`Failed to open ${privatePath}`),
+        );
+
+        await syncCloudKitAttachments(appData, deps);
+
+        const serialized = JSON.stringify(logSyncWarning.mock.calls);
+        expect(serialized).not.toContain(privateTitle);
+        expect(serialized).not.toContain(privatePath);
+        expect(logSyncWarning).toHaveBeenCalledWith(
+            'Failed to download CloudKit attachment attachment-1',
+            expect.objectContaining({ message: 'Attachment sync operation failed' }),
         );
     });
 

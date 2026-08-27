@@ -58,6 +58,23 @@ export type AttachmentCleanupGuards = {
     assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
 };
 
+const describeAttachmentCleanupErrorForLog = (error: unknown): Error => {
+    const status = getErrorStatus(error);
+    return new Error(
+        status == null
+            ? 'Attachment cleanup operation failed'
+            : `Attachment cleanup operation failed (${status})`,
+    );
+};
+
+const logAttachmentCleanupWarning = (
+    deps: Pick<AttachmentCleanupDeps, 'logSyncWarning'>,
+    message: string,
+    error: unknown,
+): void => {
+    deps.logSyncWarning(message, describeAttachmentCleanupErrorForLog(error));
+};
+
 export const cleanupAttachmentTempFiles = async (deps: Pick<AttachmentCleanupDeps, 'isTauriRuntimeEnv' | 'logSyncWarning'>): Promise<void> => {
     if (!deps.isTauriRuntimeEnv()) return;
     try {
@@ -71,11 +88,11 @@ export const cleanupAttachmentTempFiles = async (deps: Pick<AttachmentCleanupDep
             try {
                 await remove(`${attachmentsDir}/${name}`);
             } catch (error) {
-                deps.logSyncWarning('Failed to remove temp attachment file', error);
+                logAttachmentCleanupWarning(deps, 'Failed to remove temp attachment file', error);
             }
         }
     } catch (error) {
-        deps.logSyncWarning('Failed to scan temp attachment files', error);
+        logAttachmentCleanupWarning(deps, 'Failed to scan temp attachment files', error);
     }
 };
 
@@ -106,7 +123,7 @@ export const deleteAttachmentFile = async (
         await remove(normalizedRawUri);
     } catch (error) {
         if (error instanceof Error && error.name === 'LocalSyncAbort') throw error;
-        deps.logSyncWarning(`Failed to delete attachment file ${attachment.id}`, error);
+        logAttachmentCleanupWarning(deps, `Failed to delete attachment file ${attachment.id}`, error);
     }
 };
 
@@ -247,7 +264,7 @@ export const cleanupOrphanedAttachments = async (
                 || isWebdavRemoteWriteConflictError(error)
                 || error instanceof DropboxConflictError
             ) throw error;
-            deps.logSyncWarning('Failed to delete remote attachment', error);
+            logAttachmentCleanupWarning(deps, 'Failed to delete remote attachment', error);
         },
     });
 

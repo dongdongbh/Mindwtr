@@ -25,7 +25,6 @@ import {
     withRetry,
 } from '@mindwtr/core';
 
-import { sanitizeLogMessage } from './app-log';
 import {
     collectAttachmentsById,
     createAttachmentUploadSnapshotFactory,
@@ -149,6 +148,23 @@ const describeAttachmentUriForLog = (
     return `${scheme}${location}${extractExtension(normalizedPath.split(/[?#]/, 1)[0])}`;
 };
 
+const describeAttachmentErrorForLog = (error: unknown): Error => {
+    const status = getErrorStatus(error);
+    return new Error(
+        status == null
+            ? 'Attachment sync operation failed'
+            : `Attachment sync operation failed (${status})`,
+    );
+};
+
+const logAttachmentWarning = (
+    deps: Pick<AttachmentBackendDeps, 'logSyncWarning'>,
+    message: string,
+    error: unknown,
+): void => {
+    deps.logSyncWarning(message, describeAttachmentErrorForLog(error));
+};
+
 type AttachmentDownloadStageOps = {
     join: (...paths: string[]) => Promise<string>;
     writeFile: (path: string, bytes: Uint8Array) => Promise<void>;
@@ -181,7 +197,7 @@ const cleanOwnedAttachmentDownloadStage = async (
     try {
         await remove(stagedPath);
     } catch (error) {
-        deps.logSyncWarning('Failed to clean incomplete attachment download stage', error);
+        logAttachmentWarning(deps, 'Failed to clean incomplete attachment download stage', error);
     }
 };
 
@@ -282,14 +298,14 @@ const getWebdavAttachmentRateLimitRemainingMs = (): number => Math.max(0, webdav
 
 const markWebdavAttachmentRateLimited = (
     error: unknown,
-    logSyncWarning: AttachmentBackendDeps['logSyncWarning'],
+    deps: Pick<AttachmentBackendDeps, 'logSyncWarning'>,
 ): boolean => {
     if (!isWebdavRateLimitedError(error)) return false;
     webdavAttachmentRateLimitedUntil = Math.max(
         webdavAttachmentRateLimitedUntil,
         Date.now() + WEBDAV_ATTACHMENT_COOLDOWN_MS,
     );
-    logSyncWarning('WebDAV rate limited; pausing attachment sync', error);
+    logAttachmentWarning(deps, 'WebDAV rate limited; pausing attachment sync', error);
     return true;
 };
 
@@ -425,16 +441,16 @@ export async function syncWebdavAttachments(
         });
     } catch (error) {
         if (isSyncRemoteMutationFenceError(error)) throw error;
-        if (markWebdavAttachmentRateLimited(error, deps.logSyncWarning)) {
+        if (markWebdavAttachmentRateLimited(error, deps)) {
             return null;
         }
-        deps.logSyncWarning('Failed to ensure WebDAV attachments directory', error);
+        logAttachmentWarning(deps, 'Failed to ensure WebDAV attachments directory', error);
     }
 
     try {
         await mkdir(await getManagedPath(ATTACHMENTS_DIR_NAME), { recursive: true });
     } catch (error) {
-        deps.logSyncWarning('Failed to ensure local attachments directory', error);
+        logAttachmentWarning(deps, 'Failed to ensure local attachments directory', error);
     }
 
     const baseDataDir = await dataDir();
@@ -469,17 +485,20 @@ export async function syncWebdavAttachments(
         lastRequestAt = Date.now();
     };
     const handleRateLimit = (error: unknown): boolean => {
-        return markWebdavAttachmentRateLimited(error, deps.logSyncWarning);
+        return markWebdavAttachmentRateLimited(error, deps);
     };
 
-    const { readLocalFile, localFilePresence, statLocalFile } = createLocalAttachmentFs(deps.logSyncWarning, {
-        baseDataDir,
-        dataBaseDir: BaseDirectory.Data,
-        exists,
-        readFile,
-        managedAttachmentsDir,
-        stat,
-    });
+    const { readLocalFile, localFilePresence, statLocalFile } = createLocalAttachmentFs(
+        (message, error) => logAttachmentWarning(deps, message, error),
+        {
+            baseDataDir,
+            dataBaseDir: BaseDirectory.Data,
+            exists,
+            readFile,
+            managedAttachmentsDir,
+            stat,
+        },
+    );
     const computeLocalFileHash = async (path: string, attachment: Attachment): Promise<string | null> =>
         computeSha256Hex(await readLocalFile(path, attachment));
     const createUploadSnapshot = createAttachmentUploadSnapshotFactory({ readLocalFile, statLocalFile });
@@ -542,7 +561,7 @@ export async function syncWebdavAttachments(
                     abortedByRateLimit = true;
                     break;
                 }
-                deps.logSyncWarning('Failed to check WebDAV attachment remote status', error);
+            logAttachmentWarning(deps, 'Failed to check WebDAV attachment remote status', error);
             }
         }
     }
@@ -676,7 +695,7 @@ export async function syncWebdavAttachments(
                             id: attachment.id,
                             attempt: String(attempt + 1),
                             delayMs: String(delayMs),
-                            error: sanitizeLogMessage(error instanceof Error ? error.message : String(error)),
+                            error: describeAttachmentErrorForLog(error).message,
                         });
                     },
                 },
@@ -703,7 +722,7 @@ export async function syncWebdavAttachments(
                 'failed',
                 error instanceof Error ? error.message : String(error),
             );
-            deps.logSyncWarning(`Failed to upload attachment ${attachment.id}`, error);
+            logAttachmentWarning(deps, `Failed to upload attachment ${attachment.id}`, error);
         },
         onDownload: async (attachment, expectation) => {
             if (!attachment.cloudKey) return false;
@@ -784,7 +803,7 @@ export async function syncWebdavAttachments(
                 'failed',
                 error instanceof Error ? error.message : String(error),
             );
-            deps.logSyncWarning(`Failed to download attachment ${attachment.id}`, error);
+            logAttachmentWarning(deps, `Failed to download attachment ${attachment.id}`, error);
         },
     });
 
@@ -817,21 +836,24 @@ export async function syncCloudAttachments(
     try {
         await mkdir(await getManagedPath(ATTACHMENTS_DIR_NAME), { recursive: true });
     } catch (error) {
-        deps.logSyncWarning('Failed to ensure local attachments directory', error);
+        logAttachmentWarning(deps, 'Failed to ensure local attachments directory', error);
     }
 
     const baseDataDir = await dataDir();
     const managedAttachmentsDir = await getManagedPath(ATTACHMENTS_DIR_NAME);
     const attachmentsById = collectAttachmentsById(appData);
 
-    const { readLocalFile, localFilePresence, statLocalFile } = createLocalAttachmentFs(deps.logSyncWarning, {
-        baseDataDir,
-        dataBaseDir: BaseDirectory.Data,
-        exists,
-        readFile,
-        managedAttachmentsDir,
-        stat,
-    });
+    const { readLocalFile, localFilePresence, statLocalFile } = createLocalAttachmentFs(
+        (message, error) => logAttachmentWarning(deps, message, error),
+        {
+            baseDataDir,
+            dataBaseDir: BaseDirectory.Data,
+            exists,
+            readFile,
+            managedAttachmentsDir,
+            stat,
+        },
+    );
     const computeLocalFileHash = async (path: string, attachment: Attachment): Promise<string | null> =>
         computeSha256Hex(await readLocalFile(path, attachment));
     const createUploadSnapshot = createAttachmentUploadSnapshotFactory({ readLocalFile, statLocalFile });
@@ -893,7 +915,7 @@ export async function syncCloudAttachments(
                             id: attachment.id,
                             attempt: String(attempt + 1),
                             delayMs: String(delayMs),
-                            error: sanitizeLogMessage(error instanceof Error ? error.message : String(error)),
+                            error: describeAttachmentErrorForLog(error).message,
                         });
                     },
                 },
@@ -912,7 +934,7 @@ export async function syncCloudAttachments(
                 'failed',
                 error instanceof Error ? error.message : String(error),
             );
-            deps.logSyncWarning(`Failed to upload attachment ${attachment.id}`, error);
+            logAttachmentWarning(deps, `Failed to upload attachment ${attachment.id}`, error);
         },
         onDownload: async (attachment, expectation) => {
             if (!attachment.cloudKey) return false;
@@ -972,7 +994,7 @@ export async function syncCloudAttachments(
                 'failed',
                 error instanceof Error ? error.message : String(error),
             );
-            deps.logSyncWarning(`Failed to download attachment ${attachment.id}`, error);
+            logAttachmentWarning(deps, `Failed to download attachment ${attachment.id}`, error);
         },
     });
 
@@ -996,7 +1018,7 @@ export async function syncDropboxAttachments(
     try {
         await mkdir(await getManagedPath(ATTACHMENTS_DIR_NAME), { recursive: true });
     } catch (error) {
-        deps.logSyncWarning('Failed to ensure local attachments directory', error);
+        logAttachmentWarning(deps, 'Failed to ensure local attachments directory', error);
     }
 
     const baseDataDir = await dataDir();
@@ -1014,14 +1036,17 @@ export async function syncDropboxAttachments(
         }
     };
 
-    const { readLocalFile, localFilePresence, statLocalFile } = createLocalAttachmentFs(deps.logSyncWarning, {
-        baseDataDir,
-        dataBaseDir: BaseDirectory.Data,
-        exists,
-        readFile,
-        managedAttachmentsDir,
-        stat,
-    });
+    const { readLocalFile, localFilePresence, statLocalFile } = createLocalAttachmentFs(
+        (message, error) => logAttachmentWarning(deps, message, error),
+        {
+            baseDataDir,
+            dataBaseDir: BaseDirectory.Data,
+            exists,
+            readFile,
+            managedAttachmentsDir,
+            stat,
+        },
+    );
     const computeLocalFileHash = async (path: string, attachment: Attachment): Promise<string | null> =>
         computeSha256Hex(await readLocalFile(path, attachment));
     const createUploadSnapshot = createAttachmentUploadSnapshotFactory({ readLocalFile, statLocalFile });
@@ -1091,7 +1116,7 @@ export async function syncDropboxAttachments(
                             id: attachment.id,
                             attempt: String(attempt + 1),
                             delayMs: String(delayMs),
-                            error: sanitizeLogMessage(error instanceof Error ? error.message : String(error)),
+                            error: describeAttachmentErrorForLog(error).message,
                         });
                     },
                 },
@@ -1110,7 +1135,7 @@ export async function syncDropboxAttachments(
                 'failed',
                 error instanceof Error ? error.message : String(error),
             );
-            deps.logSyncWarning(`Failed to upload attachment ${attachment.id}`, error);
+            logAttachmentWarning(deps, `Failed to upload attachment ${attachment.id}`, error);
         },
         onDownload: async (attachment, expectation) => {
             if (!attachment.cloudKey) return false;
@@ -1166,7 +1191,7 @@ export async function syncDropboxAttachments(
                 'failed',
                 error instanceof Error ? error.message : String(error),
             );
-            deps.logSyncWarning(`Failed to download attachment ${attachment.id}`, error);
+            logAttachmentWarning(deps, `Failed to download attachment ${attachment.id}`, error);
         },
     });
 
@@ -1187,7 +1212,7 @@ export async function syncCloudKitAttachments(
     try {
         await mkdir(await getManagedPath(ATTACHMENTS_DIR_NAME), { recursive: true });
     } catch (error) {
-        deps.logSyncWarning('Failed to ensure CloudKit attachments directory', error);
+        logAttachmentWarning(deps, 'Failed to ensure CloudKit attachments directory', error);
     }
 
     const baseDataDir = await dataDir();
@@ -1197,7 +1222,7 @@ export async function syncCloudKitAttachments(
     const settingsPatch = await flushPendingCloudKitAttachmentDeletes(appData);
 
     const { readLocalFile, localFilePresence, statLocalFile } = createLocalAttachmentFs(
-        deps.logSyncWarning,
+        (message, error) => logAttachmentWarning(deps, message, error),
         { baseDataDir, dataBaseDir: BaseDirectory.Data, exists, readFile, managedAttachmentsDir, stat },
         'Failed to check CloudKit attachment file',
     );
@@ -1254,7 +1279,7 @@ export async function syncCloudKitAttachments(
                     'failed',
                     failure.message,
                 );
-                deps.logSyncWarning(failure.message, validation.error);
+                logAttachmentWarning(deps, failure.message, validation.error);
                 return failure.mutated;
             }
 
@@ -1281,7 +1306,7 @@ export async function syncCloudKitAttachments(
                 'failed',
                 error instanceof Error ? error.message : String(error),
             );
-            deps.logSyncWarning(`Failed to upload CloudKit attachment ${attachment.id}`, error);
+            logAttachmentWarning(deps, `Failed to upload CloudKit attachment ${attachment.id}`, error);
         },
         onDownload: async (attachment, expectation) => {
             const recordName = parseCloudKitAttachmentKey(attachment.cloudKey);
@@ -1335,7 +1360,7 @@ export async function syncCloudKitAttachments(
                 'failed',
                 error instanceof Error ? error.message : String(error),
             );
-            deps.logSyncWarning(`Failed to download CloudKit attachment ${attachment.id}`, error);
+            logAttachmentWarning(deps, `Failed to download CloudKit attachment ${attachment.id}`, error);
         },
     });
 
@@ -1366,36 +1391,39 @@ export async function syncFileAttachments(
     try {
         await syncFsMkdir(attachmentsDir);
     } catch (error) {
-        deps.logSyncWarning('Failed to ensure sync attachments directory', error);
+        logAttachmentWarning(deps, 'Failed to ensure sync attachments directory', error);
     }
 
     try {
         await syncFsMkdir(await getManagedPath(ATTACHMENTS_DIR_NAME));
     } catch (error) {
-        deps.logSyncWarning('Failed to ensure local attachments directory', error);
+        logAttachmentWarning(deps, 'Failed to ensure local attachments directory', error);
     }
 
     const baseDataDir = await dataDir();
     const managedAttachmentsDir = await getManagedPath(ATTACHMENTS_DIR_NAME);
     const attachmentsById = collectAttachmentsById(appData);
 
-    const { readLocalFile, localFilePresence, statLocalFile } = createLocalAttachmentFs(deps.logSyncWarning, {
-        baseDataDir,
-        dataBaseDir: BaseDirectory.Data,
+    const { readLocalFile, localFilePresence, statLocalFile } = createLocalAttachmentFs(
+        (message, error) => logAttachmentWarning(deps, message, error),
+        {
+            baseDataDir,
+            dataBaseDir: BaseDirectory.Data,
         // An absolute attachment uri can point at the slow mount too; only the
         // base-directory-relative branch is guaranteed to be local app data.
-        exists: (path, options) => (options ? exists(path, options) : syncFsExists(path)),
-        readFile,
-        managedAttachmentsDir,
+            exists: (path, options) => (options ? exists(path, options) : syncFsExists(path)),
+            readFile,
+            managedAttachmentsDir,
         // Same #1037 risk as `exists` above — the fs plugin's `stat` is main-thread
         // too (review S5), so a non-managed-dir path goes through the async Rust
         // command instead.
-        stat: async (path, options) => {
-            if (options) return stat(path, options);
-            const result = await syncFsStat(path);
-            return { mtime: new Date(result.mtimeMs), size: result.size };
+            stat: async (path, options) => {
+                if (options) return stat(path, options);
+                const result = await syncFsStat(path);
+                return { mtime: new Date(result.mtimeMs), size: result.size };
+            },
         },
-    });
+    );
     const computeLocalFileHash = async (path: string, attachment: Attachment): Promise<string | null> =>
         computeSha256Hex(await readLocalFile(path, attachment));
     const createUploadSnapshot = createAttachmentUploadSnapshotFactory({ readLocalFile, statLocalFile });
@@ -1428,7 +1456,7 @@ export async function syncFileAttachments(
                 attachmentsById.set(patched.id, patched);
             }
         } catch (error) {
-            deps.logSyncWarning('Failed to check sync-folder attachment presence', error);
+            logAttachmentWarning(deps, 'Failed to check sync-folder attachment presence', error);
         }
     }
 
@@ -1472,7 +1500,7 @@ export async function syncFileAttachments(
             return true;
         },
         onUploadError: (attachment, error) => {
-            deps.logSyncWarning(`Failed to copy attachment ${attachment.id} to sync folder`, error);
+            logAttachmentWarning(deps, `Failed to copy attachment ${attachment.id} to sync folder`, error);
         },
         onDownload: async (attachment, expectation) => {
             if (!attachment.cloudKey) return false;
@@ -1507,7 +1535,7 @@ export async function syncFileAttachments(
             return true;
         },
         onDownloadError: (attachment, error) => {
-            deps.logSyncWarning(`Failed to copy attachment ${attachment.id} from sync folder`, error);
+            logAttachmentWarning(deps, `Failed to copy attachment ${attachment.id} from sync folder`, error);
         },
     });
 

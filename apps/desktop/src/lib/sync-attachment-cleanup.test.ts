@@ -119,7 +119,7 @@ describe('deleteAttachmentFile', () => {
         const privateTitle = 'Divorce settlement draft.pdf';
         const privatePath = `/new-profile/attachments/${privateTitle}`;
         const logSyncWarning = vi.fn();
-        fsMocks.remove.mockRejectedValueOnce(new Error('safe remove failure'));
+        fsMocks.remove.mockRejectedValueOnce(new Error(`Failed to remove ${privatePath}`));
 
         await deleteAttachmentFile(
             { ...attachment(privatePath), title: privateTitle },
