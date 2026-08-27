@@ -547,27 +547,39 @@ export async function runEnableSyncEncryptionOverRemote(
 ): Promise<EnableRemoteEncryptionResult> {
     const { entries, snapshot } = await captureRemoteEntryVersions(remote, passphrase);
 
-    // Resume: if a previous partial run already produced an `.enc` document, its header
-    // salt/params are authoritative — reuse them so this run doesn't derive a second key
-    // under a fresh salt and orphan what the first run wrote.
+    // Authenticate every encrypted generation before the first transition write. A partial
+    // enable can leave only encrypted attachments (no `.enc` document yet), or several
+    // abandoned salts after repeated interruptions. Merely inspecting a public header is not
+    // proof of the passphrase: derive once per salt and open every encrypted artifact now, so
+    // a later encrypted attachment/document cannot reveal a typo after an earlier plaintext
+    // attachment has already been rewritten.
+    const recoveredMaterialBySalt = new Map<string, SyncKeyMaterial>();
+    const recoverMaterialForSalt = async (salt: Uint8Array, params: SyncCryptoKdfParams): Promise<SyncKeyMaterial> => {
+        const cacheKey = bytesToHex(salt);
+        const cached = recoveredMaterialBySalt.get(cacheKey);
+        if (cached) return cached;
+        const recovered = await deriveSyncKeyMaterial(passphrase, salt, params, prims);
+        recoveredMaterialBySalt.set(cacheKey, recovered);
+        return recovered;
+    };
+
+    // Resume: an `.enc` document is authoritative when present. If the interruption happened
+    // earlier, the first encrypted attachment supplies the generation instead. Reusing either
+    // avoids inventing a fresh salt and needlessly rewrapping the partial generation.
     let material: SyncKeyMaterial | null = null;
+    let attachmentMaterial: SyncKeyMaterial | null = null;
     for (const entry of entries) {
-        if (entry.kind !== 'document' || !entry.name.includes('.enc')) continue;
         const { bytes } = snapshotRemoteRead(snapshot, entry.name);
         if (!bytes) continue;
         const inspected = inspectSyncArtifact(bytes);
-        if (inspected.kind === 'encrypted') {
-            const candidate = await deriveSyncKeyMaterial(passphrase, inspected.salt, inspected.params, prims);
-            // The header is not an authentication proof: any passphrase derives a key from
-            // its public salt/params. Authenticate the generation that supplied the material
-            // before the attachment phase can write anything, or an interrupted-enable retry
-            // with a typo could re-encrypt plaintext attachments under an unusable key and
-            // fail only when it eventually reaches this document.
-            await decryptRemoteArtifactOrThrow(bytes, candidate.key, prims);
-            material = candidate;
-            break;
-        }
+        if (inspected.kind === 'unsupported') throw unsupportedArtifact(entry.name, inspected.reason);
+        if (inspected.kind !== 'encrypted') continue;
+        const candidate = await recoverMaterialForSalt(inspected.salt, inspected.params);
+        await decryptRemoteArtifactOrThrow(bytes, candidate.key, prims);
+        if (!attachmentMaterial && entry.kind === 'attachment') attachmentMaterial = candidate;
+        if (!material && entry.kind === 'document' && entry.name.includes('.enc')) material = candidate;
     }
+    material ??= attachmentMaterial;
     if (!material) {
         const salt = prims.randomBytes(16);
         material = await deriveSyncKeyMaterial(passphrase, salt, kdfParams, prims);
@@ -588,26 +600,6 @@ export async function runEnableSyncEncryptionOverRemote(
         if (transitionJournalStarted) return;
         await beginSyncEncryptionTransition(localState, 'enable');
         transitionJournalStarted = true;
-    };
-
-    // Resume self-heal: attachments never rename, so an attachment already sealed by an
-    // earlier, interrupted enable() attempt can exist BEFORE any `.enc` document does —
-    // the salt-recovery scan above only looks at documents and would miss it, causing
-    // this run to derive a fresh salt and then wrongly treat that attachment as "already
-    // migrated" (it decrypts under neither the fresh key nor gets re-keyed). Recovering
-    // the abandoned salt from the artifact's OWN header (same passphrase, re-derive)
-    // fixes this without costing the common fresh-enable path anything extra — it only
-    // triggers when an attachment is already ciphertext under a key that isn't the one
-    // this run picked. Cached per salt so a batch of attachments from the same abandoned
-    // attempt only pays the Argon2id cost once.
-    const recoveredMaterialBySalt = new Map<string, SyncKeyMaterial>();
-    const recoverMaterialForSalt = async (salt: Uint8Array, params: SyncCryptoKdfParams): Promise<SyncKeyMaterial> => {
-        const cacheKey = bytesToHex(salt);
-        const cached = recoveredMaterialBySalt.get(cacheKey);
-        if (cached) return cached;
-        const recovered = await deriveSyncKeyMaterial(passphrase, salt, params, prims);
-        recoveredMaterialBySalt.set(cacheKey, recovered);
-        return recovered;
     };
 
     for (const entry of attachments) {

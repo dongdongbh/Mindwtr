@@ -348,6 +348,36 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         }
     });
 
+    it('authenticates attachment-only interrupted generations before mutating earlier plaintext attachments', async () => {
+        const material = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(11), FAST_KDF);
+        const encryptedAttachment = await encryptSyncArtifact(utf8('SEALED'), material);
+        const remote = createFakeRemote({
+            'attachments/a-plain.bin': { bytes: utf8('PLAIN'), kind: 'attachment' },
+            'attachments/z-sealed.bin': { bytes: encryptedAttachment, kind: 'attachment' },
+        });
+        const write = vi.spyOn(remote, 'write');
+        const remove = vi.spyOn(remote, 'remove');
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        const before = new Map([...remote.store].map(([name, bytes]) => [name, new Uint8Array(bytes)]));
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'typo',
+            remote,
+            keyCache,
+            localState,
+            undefined,
+            undefined,
+            FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(remove).not.toHaveBeenCalled();
+        expect(await keyCache.getKey()).toBeNull();
+        expect(localState.value).toBeNull();
+        for (const [name, bytes] of before) expect(remote.store.get(name)).toEqual(bytes);
+    });
+
     it('is resumable when the crash happens during the attachment phase, before any document is sealed (self-heals an abandoned salt)', async () => {
         const remote = createFakeRemote({
             'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
