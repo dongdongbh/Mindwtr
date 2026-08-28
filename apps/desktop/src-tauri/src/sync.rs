@@ -6371,6 +6371,41 @@ mod tests {
         );
     }
 
+    #[test]
+    #[cfg(unix)]
+    fn sync_folder_probe_preserves_publication_after_post_publish_authority_loss() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let tmp_file = dir.path().join(".mindwtr-folder-probe-authority.tmp");
+        let final_file = dir.path().join(".mindwtr-folder-probe-authority");
+        let lock_file = dir.path().join(".mindwtr.lock");
+        let displaced_lock = dir.path().join(".mindwtr.lock.displaced");
+        let mut before_stage = |_stage: AtomicWriteStage| Ok(());
+        let mut read_back = |_path: &Path, _bytes: Vec<u8>| {
+            fs::rename(&lock_file, &displaced_lock).map_err(|error| error.to_string())?;
+            fs::write(&lock_file, b"replacement lock").map_err(|error| error.to_string())?;
+            Err("injected read failure after lock replacement".to_string())
+        };
+        let mut before_remove = |_path: &Path| Ok(());
+
+        let error = probe_sync_dir_at_with(
+            dir.path(),
+            &tmp_file,
+            &final_file,
+            &mut before_stage,
+            &mut read_back,
+            &mut before_remove,
+        )
+        .expect_err("post-publication authority loss must fail closed");
+
+        assert!(error.contains("lock identity changed"), "unexpected error: {error}");
+        assert_eq!(
+            fs::read(&final_file).expect("published bytes remain recoverable"),
+            SYNC_FOLDER_PROBE_BYTES
+        );
+        assert!(!tmp_file.exists(), "publication already consumed the temp leaf");
+        assert!(displaced_lock.exists(), "original authority remains observable");
+    }
+
     // ---------------------------------------------------------------
     // Sync encryption at the file-sync seam (#1056 phase 2)
     // ---------------------------------------------------------------
@@ -14746,7 +14781,7 @@ where
             before_stage(stage)?;
             revalidate_sync_lock(&sync_lock, sync_dir).map_err(retained_cleanup_authority_error)
         };
-        let publication = atomic_retained_tmp_write_then_rename_with(
+        let mut publication = atomic_retained_tmp_write_then_rename_with(
             &root,
             tmp_file,
             final_file,
@@ -14756,23 +14791,62 @@ where
             false,
         )
         .map_err(|error| sync_folder_probe_stage_error(error.stage, &error.detail))?;
+        // Once publication succeeds, implicit Drop cleanup is no longer safe:
+        // any later error may be the evidence that this invocation lost its
+        // lock/root authority. All cleanup below is explicit and fenced.
+        publication.keep();
 
-        revalidate_sync_lock(&sync_lock, sync_dir)
-            .map_err(|error| format!("Wrote a file but could not read it back: {error}"))?;
-        let actual = publication
-            .read_back(final_file)
-            .map_err(|error| format!("Wrote a file but could not read it back: {error}"))?;
-        let actual = read_back(final_file, actual)
-            .map_err(|error| format!("Wrote a file but could not read it back: {error}"))?;
+        if let Err(error) = revalidate_sync_lock(&sync_lock, sync_dir) {
+            return Err(format!("Wrote a file but could not read it back: {error}"));
+        }
+        let actual = match publication.read_back(final_file) {
+            Ok(actual) => actual,
+            Err(error) => {
+                let error = format!("Wrote a file but could not read it back: {error}");
+                return Err(remove_probe_publication_after_error(
+                    &publication,
+                    final_file,
+                    &sync_lock,
+                    sync_dir,
+                    before_remove,
+                    error,
+                ));
+            }
+        };
+        let transformed = read_back(final_file, actual);
+        if let Err(error) = revalidate_sync_lock(&sync_lock, sync_dir) {
+            return Err(format!("Wrote a file but could not read it back: {error}"));
+        }
+        let actual = match transformed {
+            Ok(actual) => actual,
+            Err(error) => {
+                let error = format!("Wrote a file but could not read it back: {error}");
+                return Err(remove_probe_publication_after_error(
+                    &publication,
+                    final_file,
+                    &sync_lock,
+                    sync_dir,
+                    before_remove,
+                    error,
+                ));
+            }
+        };
         if actual != SYNC_FOLDER_PROBE_BYTES {
-            return Err(
+            return Err(remove_probe_publication_after_error(
+                &publication,
+                final_file,
+                &sync_lock,
+                sync_dir,
+                before_remove,
                 "Wrote a file but could not read it back: contents did not match".to_string(),
-            );
+            ));
         }
 
-        revalidate_sync_lock(&sync_lock, sync_dir)
-            .map_err(|error| format!("Could not remove the test file: {error}"))?;
-        publication.remove_with(final_file, before_remove)
+        let mut guarded_before_remove = |path: &Path| {
+            before_remove(path)?;
+            revalidate_sync_lock(&sync_lock, sync_dir).map_err(retained_cleanup_authority_error)
+        };
+        publication.remove_with(final_file, &mut guarded_before_remove)
             .map_err(|error| format!("Could not remove the test file: {error}"))
     })();
 
@@ -14781,6 +14855,29 @@ where
     // successful-write branch above; unowned pre-existing leaves are untouched.
     release_sync_lock(&sync_lock);
     result
+}
+
+fn remove_probe_publication_after_error<BeforeRemove>(
+    publication: &OwnedRetainedRootPublication,
+    final_file: &Path,
+    sync_lock: &SyncFileLock,
+    sync_dir: &Path,
+    before_remove: &mut BeforeRemove,
+    original_error: String,
+) -> String
+where
+    BeforeRemove: FnMut(&Path) -> Result<(), String>,
+{
+    let mut guarded_before_remove = |path: &Path| {
+        before_remove(path)?;
+        revalidate_sync_lock(sync_lock, sync_dir).map_err(retained_cleanup_authority_error)
+    };
+    match publication.remove_with(final_file, &mut guarded_before_remove) {
+        Ok(()) => original_error,
+        Err(cleanup_error) => {
+            format!("{original_error}; probe cleanup was preserved safely: {cleanup_error}")
+        }
+    }
 }
 
 fn probe_sync_dir_at(sync_dir: &Path, tmp_file: &Path, final_file: &Path) -> Result<(), String> {
