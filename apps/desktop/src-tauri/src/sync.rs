@@ -9,7 +9,10 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::error::Error as StdError;
 #[cfg(target_os = "macos")]
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
+#[cfg(unix)]
+use std::ffi::CString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -23,9 +26,9 @@ use tauri_plugin_fs::FsExt;
 #[cfg(test)]
 use crate::attachment_installer::move_no_replace;
 #[cfg(unix)]
-use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _};
+use std::os::unix::fs::MetadataExt as _;
 #[cfg(target_os = "windows")]
-use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+use std::os::windows::fs::MetadataExt as _;
 #[cfg(target_os = "windows")]
 use std::os::windows::io::AsRawHandle as _;
 
@@ -4587,7 +4590,7 @@ mod tests {
             serde_json::json!({"tasks": [], "projects": [], "sections": [], "areas": [], "people": [], "settings": {}}),
             None,
             SyncFileCrypto::Off,
-            true,
+            Some(&held._sync_lock),
         )
         .expect("write under existing lease");
         drop(leases);
@@ -4639,7 +4642,7 @@ mod tests {
                 }),
                 None,
                 SyncFileCrypto::Off,
-                true,
+                Some(&lease._sync_lock),
                 &mut validate_lease,
             )
         })
@@ -4696,7 +4699,7 @@ mod tests {
             }),
             None,
             SyncFileCrypto::Off,
-            false,
+            None,
             &mut replace_before_finalization,
         )
         .expect_err("replaced legacy lock must invalidate the self-acquired write");
@@ -4927,7 +4930,7 @@ mod tests {
         // `write_sync_file_to_dir` delegate and the `_with` function holding the real write.
         // Pin that: a refactor that moves the actual write out of this span would otherwise
         // leave the guard scanning a one-line wrapper and silently guarding nothing.
-        let atomic_helper_call = format!("{}(", "atomic_tmp_write_then_rename_with");
+        let atomic_helper_call = format!("{}(", "atomic_retained_tmp_write_then_rename_with");
         assert!(
             body.contains(&atomic_helper_call),
             "the scanned span must still delegate to the shared atomic writer"
@@ -4952,7 +4955,7 @@ mod tests {
     #[test]
     fn sync_folder_probe_and_real_write_share_one_atomic_write_helper() {
         let source = include_str!("sync.rs");
-        let helper_name = ["atomic_tmp_write_then_", "rename_with"].concat();
+        let helper_name = ["atomic_retained_tmp_write_then_", "rename_with"].concat();
         let helper_call = format!("{helper_name}(");
         assert_eq!(
             source.matches(&helper_call).count(),
@@ -4969,10 +4972,10 @@ mod tests {
             .expect("end of atomic helper")
             .0;
         for required in [
-            ".create_new(true)",
+            "root.create_new(",
             ".write_all(",
             ".sync_all(",
-            "fs::rename(",
+            ".rename(",
         ] {
             assert!(
                 helper_body.contains(required),
@@ -5113,11 +5116,10 @@ mod tests {
                 Ok(())
             }
         };
-        let mut read_back = |path: &Path| {
+        let mut read_back = |_path: &Path, mut content: Vec<u8>| {
             if failure == Some(ProbeFailureStage::ReadBack) {
                 return Err("injected read failure".to_string());
             }
-            let mut content = fs::read(path).map_err(|error| error.to_string())?;
             if failure == Some(ProbeFailureStage::ReadBackMismatch) {
                 content.push(b'!');
             }
@@ -5386,7 +5388,7 @@ mod tests {
             }
             Ok(())
         };
-        let mut read_back = |path: &Path| fs::read(path).map_err(|error| error.to_string());
+        let mut read_back = |_path: &Path, bytes: Vec<u8>| Ok(bytes);
         let mut before_remove = |_path: &Path| Ok(());
 
         let error = probe_sync_dir_at_with(
@@ -5400,17 +5402,68 @@ mod tests {
         .expect_err("root replacement must abort the probe");
 
         assert!(error.starts_with("Could not finalize a file in this folder"));
-        assert!(error.contains("Sync folder changed during the test"));
+        assert!(error.contains("root authority changed"));
         assert_eq!(
             fs::read(&replacement_final_file).expect("replacement leaf remains"),
             b"replacement-owned"
         );
         assert!(
-            displaced_dir
+            !displaced_dir
                 .join(".mindwtr-folder-probe-root-swap.tmp")
                 .exists(),
-            "cleanup must not follow the replaced root name"
+            "cleanup must remove only the temp identity through the retained root"
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn retained_document_publication_never_follows_a_rebound_root_name() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let sync_dir = parent.path().join("sync");
+        let displaced_dir = parent.path().join("displaced-sync");
+        fs::create_dir(&sync_dir).expect("create sync root");
+        let tmp_file = sync_dir.join("data.json.tmp");
+        let final_file = sync_dir.join(DATA_FILE_NAME);
+        let lock = acquire_sync_lock(&sync_dir).expect("acquire retained authority");
+        let root = RetainedSyncRoot::new(&sync_dir, &lock);
+        let mut swapped = false;
+        let mut before_stage = |stage: AtomicWriteStage| {
+            if stage == AtomicWriteStage::Rename && !swapped {
+                fs::rename(&sync_dir, &displaced_dir).map_err(|error| error.to_string())?;
+                fs::create_dir(&sync_dir).map_err(|error| error.to_string())?;
+                fs::write(sync_dir.join(DATA_FILE_NAME), b"replacement-root")
+                    .map_err(|error| error.to_string())?;
+                swapped = true;
+            }
+            Ok(())
+        };
+
+        let mut publication = atomic_retained_tmp_write_then_rename_with(
+            &root,
+            &tmp_file,
+            &final_file,
+            b"retained-root",
+            &mut before_stage,
+            None,
+            false,
+        )
+        .expect("publish through retained root");
+
+        assert_eq!(
+            fs::read(sync_dir.join(DATA_FILE_NAME)).expect("replacement document"),
+            b"replacement-root"
+        );
+        assert_eq!(
+            fs::read(displaced_dir.join(DATA_FILE_NAME)).expect("retained-root document"),
+            b"retained-root"
+        );
+        assert!(
+            revalidate_sync_lock(&lock, &sync_dir)
+                .expect_err("caller finalization must reject rebound root")
+                .contains("root authority changed")
+        );
+        publication.keep();
+        release_sync_lock(&lock);
     }
 
     #[test]
@@ -11885,10 +11938,13 @@ fn open_sync_root_authority(sync_dir: &Path) -> Result<File, String> {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::fs::OpenOptionsExt as _;
+        use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE};
         use windows_sys::Win32::Storage::FileSystem::{
             FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
         };
-        options.custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+        options
+            .access_mode(GENERIC_READ | GENERIC_WRITE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
     }
     let file = options
         .open(sync_dir)
@@ -12283,6 +12339,418 @@ fn sync_parent_directory_for_durability(path: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Direct-child I/O rooted at the exact directory handle retained by the File
+/// Sync lease. Absolute paths are accepted only to validate/derive a single
+/// leaf name; every native operation below is issued relative to `directory`.
+/// This closes crashes and races with cooperating clients/providers. A malicious
+/// same-UID process that can mutate private process handles remains outside the
+/// File Sync threat boundary.
+struct RetainedSyncRoot<'a> {
+    sync_dir: &'a Path,
+    directory: &'a File,
+}
+
+impl<'a> RetainedSyncRoot<'a> {
+    fn new(sync_dir: &'a Path, sync_lock: &'a SyncFileLock) -> Self {
+        Self {
+            sync_dir,
+            directory: &sync_lock.sync_root,
+        }
+    }
+
+    fn leaf<'b>(&self, path: &'b Path) -> std::io::Result<&'b OsStr> {
+        if path.parent() != Some(self.sync_dir) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "File Sync operation escaped the retained root",
+            ));
+        }
+        path.file_name().filter(|name| !name.is_empty()).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "File Sync operation has no direct-child leaf",
+            )
+        })
+    }
+
+    fn open_read(&self, path: &Path) -> std::io::Result<File> {
+        retained_root_open(self.directory, self.leaf(path)?, false, false, false)
+    }
+
+    fn create_new(&self, path: &Path) -> std::io::Result<File> {
+        retained_root_open(self.directory, self.leaf(path)?, true, true, false)
+    }
+
+    fn create_or_truncate(&self, path: &Path) -> std::io::Result<File> {
+        retained_root_open(self.directory, self.leaf(path)?, true, false, true)
+    }
+
+    fn read(&self, path: &Path) -> std::io::Result<Vec<u8>> {
+        let mut file = self.open_read(path)?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+
+    fn write_new(&self, path: &Path, bytes: &[u8]) -> std::io::Result<File> {
+        let mut file = self.create_new(path)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        Ok(file)
+    }
+
+    fn write_replace(&self, path: &Path, bytes: &[u8]) -> std::io::Result<File> {
+        let mut file = self.create_or_truncate(path)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        Ok(file)
+    }
+
+    fn exists(&self, path: &Path) -> std::io::Result<bool> {
+        match self.open_read(path) {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn identity(&self, path: &Path) -> std::io::Result<NativeFileIdentity> {
+        native_file_identity(&self.open_read(path)?)
+    }
+
+    fn has_identity(&self, path: &Path, expected: NativeFileIdentity) -> bool {
+        self.identity(path).is_ok_and(|actual| actual == expected)
+    }
+
+    fn rename(&self, source: &Path, destination: &Path, replace: bool) -> std::io::Result<()> {
+        retained_root_rename(
+            self.directory,
+            self.leaf(source)?,
+            self.leaf(destination)?,
+            replace,
+        )
+    }
+
+    fn remove(&self, path: &Path) -> std::io::Result<()> {
+        retained_root_remove(self.directory, self.leaf(path)?)
+    }
+
+    fn sync_directory(&self) -> std::io::Result<()> {
+        retained_root_sync_directory(self.directory)
+    }
+
+    fn try_clone_directory(&self) -> std::io::Result<File> {
+        self.directory.try_clone()
+    }
+}
+
+#[cfg(unix)]
+fn retained_root_leaf_c_string(leaf: &OsStr) -> std::io::Result<CString> {
+    use std::os::unix::ffi::OsStrExt as _;
+    CString::new(leaf.as_bytes())
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "leaf contains NUL"))
+}
+
+#[cfg(unix)]
+fn retained_root_open(
+    directory: &File,
+    leaf: &OsStr,
+    writable: bool,
+    create_new: bool,
+    truncate: bool,
+) -> std::io::Result<File> {
+    use std::os::fd::{AsRawFd as _, FromRawFd as _};
+
+    let leaf = retained_root_leaf_c_string(leaf)?;
+    let mut flags = if writable { libc::O_RDWR } else { libc::O_RDONLY };
+    flags |= libc::O_CLOEXEC | libc::O_NOFOLLOW;
+    if create_new {
+        flags |= libc::O_CREAT | libc::O_EXCL;
+    } else if truncate {
+        flags |= libc::O_CREAT | libc::O_TRUNC;
+    }
+    let descriptor = unsafe { libc::openat(directory.as_raw_fd(), leaf.as_ptr(), flags, 0o600) };
+    if descriptor < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let file = unsafe { File::from_raw_fd(descriptor) };
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "File Sync direct child is not a regular file",
+        ));
+    }
+    Ok(file)
+}
+
+#[cfg(target_os = "windows")]
+fn retained_root_open(
+    directory: &File,
+    leaf: &OsStr,
+    writable: bool,
+    create_new: bool,
+    truncate: bool,
+) -> std::io::Result<File> {
+    use std::os::windows::ffi::OsStrExt as _;
+    use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _};
+    use windows_sys::Wdk::Foundation::{RtlNtStatusToDosError, OBJECT_ATTRIBUTES};
+    use windows_sys::Wdk::Storage::FileSystem::{
+        NtCreateFile, FILE_CREATE, FILE_NON_DIRECTORY_FILE, FILE_OPEN,
+        FILE_OPEN_REPARSE_POINT, FILE_OVERWRITE_IF, FILE_SYNCHRONOUS_IO_NONALERT,
+    };
+    use windows_sys::Win32::Foundation::{
+        GENERIC_READ, GENERIC_WRITE, OBJ_CASE_INSENSITIVE, UNICODE_STRING,
+    };
+    use windows_sys::Win32::Storage::FileSystem::{
+        DELETE, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        SYNCHRONIZE,
+    };
+    use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
+
+    let mut name = leaf.encode_wide().collect::<Vec<_>>();
+    let byte_len = name
+        .len()
+        .checked_mul(std::mem::size_of::<u16>())
+        .and_then(|length| u16::try_from(length).ok())
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "File Sync leaf is too long")
+        })?;
+    let unicode = UNICODE_STRING {
+        Length: byte_len,
+        MaximumLength: byte_len,
+        Buffer: name.as_mut_ptr(),
+    };
+    let attributes = OBJECT_ATTRIBUTES {
+        Length: std::mem::size_of::<OBJECT_ATTRIBUTES>() as u32,
+        RootDirectory: directory.as_raw_handle(),
+        ObjectName: &unicode,
+        Attributes: OBJ_CASE_INSENSITIVE,
+        SecurityDescriptor: std::ptr::null(),
+        SecurityQualityOfService: std::ptr::null(),
+    };
+    let mut handle = std::ptr::null_mut();
+    let mut status_block = IO_STATUS_BLOCK::default();
+    let desired_access = GENERIC_READ
+        | if writable { GENERIC_WRITE } else { 0 }
+        | if writable { DELETE } else { 0 }
+        | SYNCHRONIZE;
+    let disposition = if create_new {
+        FILE_CREATE
+    } else if truncate {
+        FILE_OVERWRITE_IF
+    } else {
+        FILE_OPEN
+    };
+    let status = unsafe {
+        NtCreateFile(
+            &mut handle,
+            desired_access,
+            &attributes,
+            &mut status_block,
+            std::ptr::null(),
+            FILE_ATTRIBUTE_NORMAL,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            disposition,
+            FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT,
+            std::ptr::null(),
+            0,
+        )
+    };
+    if status < 0 {
+        return Err(std::io::Error::from_raw_os_error(unsafe {
+            RtlNtStatusToDosError(status)
+        } as i32));
+    }
+    let file = unsafe { File::from_raw_handle(handle) };
+    if !file.metadata()?.is_file()
+        || file.metadata()?.file_attributes()
+            & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+            != 0
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "File Sync direct child is a reparse point or unexpected node",
+        ));
+    }
+    Ok(file)
+}
+
+#[cfg(not(any(unix, target_os = "windows")))]
+fn retained_root_open(
+    _directory: &File,
+    _leaf: &OsStr,
+    _writable: bool,
+    _create_new: bool,
+    _truncate: bool,
+) -> std::io::Result<File> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "retained-root File Sync I/O is unsupported",
+    ))
+}
+
+#[cfg(unix)]
+fn retained_root_rename(
+    directory: &File,
+    source: &OsStr,
+    destination: &OsStr,
+    _replace: bool,
+) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd as _;
+
+    let source = retained_root_leaf_c_string(source)?;
+    let destination = retained_root_leaf_c_string(destination)?;
+    if unsafe {
+        libc::renameat(
+            directory.as_raw_fd(),
+            source.as_ptr(),
+            directory.as_raw_fd(),
+            destination.as_ptr(),
+        )
+    } == 0
+    {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn retained_root_rename(
+    directory: &File,
+    source: &OsStr,
+    destination: &OsStr,
+    replace: bool,
+) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt as _;
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FileRenameInfo, SetFileInformationByHandle, FILE_RENAME_INFO,
+    };
+
+    let source = retained_root_open(directory, source, true, false, false)?;
+    let target = destination.encode_wide().collect::<Vec<_>>();
+    let fixed = std::mem::size_of::<FILE_RENAME_INFO>() - std::mem::size_of::<u16>();
+    let buffer_bytes = fixed + target.len() * std::mem::size_of::<u16>();
+    let words = buffer_bytes.div_ceil(std::mem::size_of::<usize>());
+    // `FILE_RENAME_INFO` has pointer alignment; a byte vector does not promise
+    // enough alignment for the typed header even though system allocators often
+    // happen to provide it.
+    let mut buffer = vec![0_usize; words];
+    let information = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    unsafe {
+        (*information).Anonymous.ReplaceIfExists = replace;
+        (*information).RootDirectory = directory.as_raw_handle();
+        (*information).FileNameLength = (target.len() * std::mem::size_of::<u16>()) as u32;
+        std::ptr::copy_nonoverlapping(
+            target.as_ptr(),
+            (*information).FileName.as_mut_ptr(),
+            target.len(),
+        );
+        if SetFileInformationByHandle(
+            source.as_raw_handle(),
+            FileRenameInfo,
+            information.cast(),
+            buffer_bytes as u32,
+        ) == 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, target_os = "windows")))]
+fn retained_root_rename(
+    _directory: &File,
+    _source: &OsStr,
+    _destination: &OsStr,
+    _replace: bool,
+) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "retained-root File Sync rename is unsupported",
+    ))
+}
+
+#[cfg(unix)]
+fn retained_root_remove(directory: &File, leaf: &OsStr) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd as _;
+
+    let leaf = retained_root_leaf_c_string(leaf)?;
+    if unsafe { libc::unlinkat(directory.as_raw_fd(), leaf.as_ptr(), 0) } == 0 {
+        Ok(())
+    } else {
+        let error = std::io::Error::last_os_error();
+        if error.kind() == std::io::ErrorKind::NotFound {
+            Ok(())
+        } else {
+            Err(error)
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn retained_root_remove(directory: &File, leaf: &OsStr) -> std::io::Result<()> {
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FileDispositionInfo, SetFileInformationByHandle, FILE_DISPOSITION_INFO,
+    };
+
+    let file = match retained_root_open(directory, leaf, true, false, false) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let information = FILE_DISPOSITION_INFO { DeleteFile: true };
+    if unsafe {
+        SetFileInformationByHandle(
+            file.as_raw_handle(),
+            FileDispositionInfo,
+            (&information as *const FILE_DISPOSITION_INFO).cast(),
+            std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32,
+        )
+    } == 0
+    {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(any(unix, target_os = "windows")))]
+fn retained_root_remove(_directory: &File, _leaf: &OsStr) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "retained-root File Sync cleanup is unsupported",
+    ))
+}
+
+#[cfg(unix)]
+fn retained_root_sync_directory(directory: &File) -> std::io::Result<()> {
+    directory.sync_all()
+}
+
+#[cfg(target_os = "windows")]
+fn retained_root_sync_directory(directory: &File) -> std::io::Result<()> {
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Storage::FileSystem::FlushFileBuffers;
+
+    if unsafe { FlushFileBuffers(directory.as_raw_handle()) } == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(any(unix, target_os = "windows")))]
+fn retained_root_sync_directory(_directory: &File) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "retained-root File Sync directory flush is unsupported",
+    ))
+}
+
 /// `fs::copy` presizes the destination before writing it — `CopyFileExW` on
 /// Windows, an explicit size change elsewhere — and a cache-off rclone VFS
 /// refuses any size change ("WriteFileHandle: Truncate: Can't change size",
@@ -12290,11 +12758,13 @@ fn sync_parent_directory_for_durability(path: &Path) -> std::io::Result<()> {
 /// the destination sequentially through one freshly created handle is the write
 /// shape those mounts always allow, and flushing that same handle avoids
 /// reopening the file for write afterwards, which they also refuse.
+#[cfg(test)]
 fn copy_file_sequentially(source: &Path, destination: &Path) -> std::io::Result<()> {
     let contents = fs::read(source)?;
     write_bytes_sequentially(&contents, destination)
 }
 
+#[cfg(test)]
 fn write_bytes_sequentially(contents: &[u8], destination: &Path) -> std::io::Result<()> {
     let mut file = File::create(destination)?;
     file.write_all(contents)?;
@@ -12308,6 +12778,7 @@ enum AtomicWriteStage {
     Rename,
 }
 
+#[cfg(test)]
 #[derive(Debug, PartialEq, Eq)]
 struct AtomicWriteError {
     stage: AtomicWriteStage,
@@ -12350,39 +12821,11 @@ fn native_file_identity(file: &File) -> std::io::Result<NativeFileIdentity> {
     })
 }
 
-fn open_sync_root_no_follow(path: &Path) -> std::io::Result<File> {
-    #[cfg(unix)]
-    {
-        return OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
-            .open(path);
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        use windows_sys::Win32::Storage::FileSystem::{
-            FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
-            FILE_FLAG_OPEN_REPARSE_POINT,
-        };
-
-        let directory = OpenOptions::new()
-            .read(true)
-            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-            .open(path)?;
-        if directory.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "sync root is a reparse point",
-            ));
-        }
-        return Ok(directory);
-    }
-}
-
+#[cfg(test)]
 fn open_file_leaf_no_follow(path: &Path) -> std::io::Result<File> {
     #[cfg(unix)]
     {
+        use std::os::unix::fs::OpenOptionsExt as _;
         return OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)
@@ -12391,6 +12834,7 @@ fn open_file_leaf_no_follow(path: &Path) -> std::io::Result<File> {
 
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::fs::OpenOptionsExt as _;
         use windows_sys::Win32::Storage::FileSystem::{
             FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
         };
@@ -12409,12 +12853,14 @@ fn open_file_leaf_no_follow(path: &Path) -> std::io::Result<File> {
     }
 }
 
+#[cfg(test)]
 fn path_has_identity(path: &Path, expected: NativeFileIdentity) -> bool {
     open_file_leaf_no_follow(path)
         .and_then(|file| native_file_identity(&file))
         .is_ok_and(|actual| actual == expected)
 }
 
+#[cfg(test)]
 #[derive(Debug, PartialEq, Eq)]
 struct OwnedAtomicPublication {
     identity: NativeFileIdentity,
@@ -12422,6 +12868,7 @@ struct OwnedAtomicPublication {
     cleanup_on_drop: bool,
 }
 
+#[cfg(test)]
 impl OwnedAtomicPublication {
     fn verify_at(&self, path: &Path) -> Result<(), String> {
         if path_has_identity(path, self.identity) {
@@ -12429,16 +12876,6 @@ impl OwnedAtomicPublication {
         } else {
             Err("atomic write leaf was replaced before the operation completed".to_string())
         }
-    }
-
-    fn read_back_with<ReadBack>(&self, path: &Path, read_back: &mut ReadBack) -> Result<Vec<u8>, String>
-    where
-        ReadBack: FnMut(&Path) -> Result<Vec<u8>, String>,
-    {
-        self.verify_at(path)?;
-        let bytes = read_back(path)?;
-        self.verify_at(path)?;
-        Ok(bytes)
     }
 
     fn remove_with<BeforeRemove>(
@@ -12468,11 +12905,9 @@ impl OwnedAtomicPublication {
         fs::remove_file(path).map_err(|error| error.to_string())
     }
 
-    fn keep(&mut self) {
-        self.cleanup_on_drop = false;
-    }
 }
 
+#[cfg(test)]
 impl Drop for OwnedAtomicPublication {
     fn drop(&mut self) {
         if self.cleanup_on_drop {
@@ -12481,47 +12916,10 @@ impl Drop for OwnedAtomicPublication {
     }
 }
 
+#[cfg(test)]
 fn remove_if_owned(path: &Path, identity: NativeFileIdentity) {
     if path_has_identity(path, identity) {
         let _ = fs::remove_file(path);
-    }
-}
-
-#[derive(Debug)]
-struct SyncRootAuthority {
-    directory: File,
-    identity: NativeFileIdentity,
-}
-
-impl SyncRootAuthority {
-    fn retain(sync_dir: &Path) -> Result<Self, String> {
-        let directory = open_sync_root_no_follow(sync_dir)
-            .map_err(|error| format!("Failed to retain sync folder authority: {error}"))?;
-        let identity = native_file_identity(&directory)
-            .map_err(|error| format!("Failed to identify sync folder: {error}"))?;
-        Ok(Self {
-            directory,
-            identity,
-        })
-    }
-
-    fn revalidate(&self, sync_dir: &Path) -> Result<(), String> {
-        // Keep the original descriptor alive for the entire probe, then compare
-        // the name currently configured by the UI to that exact directory.
-        let current = open_sync_root_no_follow(sync_dir)
-            .map_err(|error| format!("Sync folder changed during the test: {error}"))?;
-        let current_identity = native_file_identity(&current)
-            .map_err(|error| format!("Could not identify the current sync folder: {error}"))?;
-        if current_identity != self.identity {
-            return Err("Sync folder changed during the test".to_string());
-        }
-        // Read metadata through the retained descriptor as well. Besides making
-        // the authority lifetime explicit, this catches an invalidated remote
-        // directory handle before any path-based operation is attempted.
-        self.directory
-            .metadata()
-            .map_err(|error| format!("Sync folder authority became unavailable: {error}"))?;
-        Ok(())
     }
 }
 
@@ -12530,6 +12928,7 @@ impl SyncRootAuthority {
 /// release it before renaming. Virtual filesystems can refuse the flush lazily,
 /// so the checked `sync_all` is part of the contract; the optional override only
 /// preserves the existing Windows replacement behavior.
+#[cfg(test)]
 fn atomic_tmp_write_then_rename_with<BeforeStage>(
     tmp_file: &Path,
     destination: &Path,
@@ -12634,6 +13033,212 @@ where
     Ok(publication)
 }
 
+#[derive(Debug)]
+struct RetainedAtomicWriteError {
+    stage: AtomicWriteStage,
+    detail: String,
+    owned_temp: Option<OwnedRetainedRootPublication>,
+}
+
+#[derive(Debug)]
+struct OwnedRetainedRootPublication {
+    directory: File,
+    sync_dir: PathBuf,
+    leaf: OsString,
+    identity: NativeFileIdentity,
+    cleanup_on_drop: bool,
+}
+
+impl OwnedRetainedRootPublication {
+    fn path(&self) -> PathBuf {
+        self.sync_dir.join(&self.leaf)
+    }
+
+    fn root(&self) -> RetainedSyncRoot<'_> {
+        RetainedSyncRoot {
+            sync_dir: &self.sync_dir,
+            directory: &self.directory,
+        }
+    }
+
+    fn verify_at(&self, path: &Path) -> Result<(), String> {
+        if path == self.path() && self.root().has_identity(path, self.identity) {
+            Ok(())
+        } else {
+            Err("atomic write leaf was replaced before the operation completed".to_string())
+        }
+    }
+
+    fn read_back(&self, path: &Path) -> Result<Vec<u8>, String> {
+        self.verify_at(path)?;
+        let bytes = self.root().read(path).map_err(|error| error.to_string())?;
+        self.verify_at(path)?;
+        Ok(bytes)
+    }
+
+    fn remove_with<BeforeRemove>(
+        &self,
+        path: &Path,
+        before_remove: &mut BeforeRemove,
+    ) -> Result<(), String>
+    where
+        BeforeRemove: FnMut(&Path) -> Result<(), String>,
+    {
+        if !self.root().exists(path).map_err(|error| error.to_string())? {
+            return Ok(());
+        }
+        self.verify_at(path)?;
+        before_remove(path)?;
+        self.verify_at(path)?;
+        self.root().remove(path).map_err(|error| error.to_string())
+    }
+
+    fn keep(&mut self) {
+        self.cleanup_on_drop = false;
+    }
+}
+
+impl Drop for OwnedRetainedRootPublication {
+    fn drop(&mut self) {
+        if self.cleanup_on_drop {
+            let path = self.path();
+            if self.root().has_identity(&path, self.identity) {
+                let _ = self.root().remove(&path);
+            }
+        }
+    }
+}
+
+fn atomic_retained_tmp_write_then_rename_with<BeforeStage>(
+    root: &RetainedSyncRoot<'_>,
+    tmp_file: &Path,
+    destination: &Path,
+    content: &[u8],
+    before_stage: &mut BeforeStage,
+    rename_override: Option<
+        &mut dyn FnMut(&RetainedSyncRoot<'_>, &Path, &Path) -> Result<(), String>,
+    >,
+    destination_may_exist: bool,
+) -> Result<OwnedRetainedRootPublication, RetainedAtomicWriteError>
+where
+    BeforeStage: FnMut(AtomicWriteStage) -> Result<(), String>,
+{
+    before_stage(AtomicWriteStage::Create).map_err(|detail| RetainedAtomicWriteError {
+        stage: AtomicWriteStage::Create,
+        detail,
+        owned_temp: None,
+    })?;
+    let mut file = root.create_new(tmp_file).map_err(|error| RetainedAtomicWriteError {
+        stage: AtomicWriteStage::Create,
+        detail: error.to_string(),
+        owned_temp: None,
+    })?;
+    let identity = native_file_identity(&file).map_err(|error| RetainedAtomicWriteError {
+        stage: AtomicWriteStage::Create,
+        detail: format!("Could not identify newly-created temp file: {error}"),
+        owned_temp: None,
+    })?;
+
+    let write_result = (|| {
+        before_stage(AtomicWriteStage::WriteAndSync)?;
+        file.write_all(content).map_err(|error| error.to_string())?;
+        file.sync_all().map_err(|error| error.to_string())
+    })();
+    drop(file);
+    if let Err(detail) = write_result {
+        if root.has_identity(tmp_file, identity) {
+            let _ = root.remove(tmp_file);
+        }
+        return Err(RetainedAtomicWriteError {
+            stage: AtomicWriteStage::WriteAndSync,
+            detail,
+            owned_temp: None,
+        });
+    }
+
+    if let Err(detail) = before_stage(AtomicWriteStage::Rename) {
+        if root.has_identity(tmp_file, identity) {
+            let _ = root.remove(tmp_file);
+        }
+        return Err(RetainedAtomicWriteError {
+            stage: AtomicWriteStage::Rename,
+            detail,
+            owned_temp: None,
+        });
+    }
+    if !root.has_identity(tmp_file, identity) {
+        return Err(RetainedAtomicWriteError {
+            stage: AtomicWriteStage::Rename,
+            detail: "Atomic write temp file was replaced before publication".to_string(),
+            owned_temp: None,
+        });
+    }
+    if !destination_may_exist && root.exists(destination).unwrap_or(true) {
+        if root.has_identity(tmp_file, identity) {
+            let _ = root.remove(tmp_file);
+        }
+        return Err(RetainedAtomicWriteError {
+            stage: AtomicWriteStage::Rename,
+            detail: "Atomic write destination already exists".to_string(),
+            owned_temp: None,
+        });
+    }
+    let retained_directory = match root.try_clone_directory() {
+        Ok(directory) => directory,
+        Err(error) => {
+            if root.has_identity(tmp_file, identity) {
+                let _ = root.remove(tmp_file);
+            }
+            return Err(RetainedAtomicWriteError {
+                stage: AtomicWriteStage::Rename,
+                detail: format!("Failed to retain sync root before publication: {error}"),
+                owned_temp: None,
+            });
+        }
+    };
+    let rename_result = match rename_override {
+        Some(rename) => rename(root, tmp_file, destination),
+        None => root
+            .rename(tmp_file, destination, destination_may_exist)
+            .map_err(|error| error.to_string()),
+    };
+    if let Err(detail) = rename_result {
+        let owned_temp = root.has_identity(tmp_file, identity).then(|| {
+            OwnedRetainedRootPublication {
+                directory: retained_directory,
+                sync_dir: root.sync_dir.to_path_buf(),
+                leaf: tmp_file
+                    .file_name()
+                    .expect("validated direct-child temp has a leaf")
+                    .to_os_string(),
+                identity,
+                cleanup_on_drop: true,
+            }
+        });
+        return Err(RetainedAtomicWriteError {
+            stage: AtomicWriteStage::Rename,
+            detail,
+            owned_temp,
+        });
+    }
+    let publication = OwnedRetainedRootPublication {
+        directory: retained_directory,
+        sync_dir: root.sync_dir.to_path_buf(),
+        leaf: destination
+            .file_name()
+            .expect("validated direct-child destination has a leaf")
+            .to_os_string(),
+        identity,
+        cleanup_on_drop: true,
+    };
+    publication.verify_at(destination).map_err(|detail| RetainedAtomicWriteError {
+        stage: AtomicWriteStage::Rename,
+        detail,
+        owned_temp: None,
+    })?;
+    Ok(publication)
+}
+
 const SYNC_FOLDER_PROBE_BYTES: &[u8] = b"mindwtr sync folder probe\n";
 
 fn sync_folder_probe_stage_error(stage: AtomicWriteStage, detail: &str) -> String {
@@ -12655,12 +13260,9 @@ fn probe_sync_dir_at_with<BeforeStage, ReadBack, BeforeRemove>(
 ) -> Result<(), String>
 where
     BeforeStage: FnMut(AtomicWriteStage) -> Result<(), String>,
-    ReadBack: FnMut(&Path) -> Result<Vec<u8>, String>,
+    ReadBack: FnMut(&Path, Vec<u8>) -> Result<Vec<u8>, String>,
     BeforeRemove: FnMut(&Path) -> Result<(), String>,
 {
-    let root_authority = SyncRootAuthority::retain(sync_dir).map_err(|error| {
-        sync_folder_probe_stage_error(AtomicWriteStage::Create, &error)
-    })?;
     let sync_lock = match acquire_sync_lock(sync_dir) {
         Ok(sync_lock) => sync_lock,
         Err(error) => {
@@ -12670,16 +13272,18 @@ where
             ));
         }
     };
+    let root = RetainedSyncRoot::new(sync_dir, &sync_lock);
 
     let result = (|| -> Result<(), String> {
-        root_authority.revalidate(sync_dir).map_err(|error| {
+        revalidate_sync_lock(&sync_lock, sync_dir).map_err(|error| {
             sync_folder_probe_stage_error(AtomicWriteStage::Create, &error)
         })?;
         let mut guarded_before_stage = |stage: AtomicWriteStage| {
             before_stage(stage)?;
-            root_authority.revalidate(sync_dir)
+            revalidate_sync_lock(&sync_lock, sync_dir)
         };
-        let publication = atomic_tmp_write_then_rename_with(
+        let publication = atomic_retained_tmp_write_then_rename_with(
+            &root,
             tmp_file,
             final_file,
             SYNC_FOLDER_PROBE_BYTES,
@@ -12689,10 +13293,12 @@ where
         )
         .map_err(|error| sync_folder_probe_stage_error(error.stage, &error.detail))?;
 
-        root_authority
-            .revalidate(sync_dir)
+        revalidate_sync_lock(&sync_lock, sync_dir)
             .map_err(|error| format!("Wrote a file but could not read it back: {error}"))?;
-        let actual = publication.read_back_with(final_file, read_back)
+        let actual = publication
+            .read_back(final_file)
+            .map_err(|error| format!("Wrote a file but could not read it back: {error}"))?;
+        let actual = read_back(final_file, actual)
             .map_err(|error| format!("Wrote a file but could not read it back: {error}"))?;
         if actual != SYNC_FOLDER_PROBE_BYTES {
             return Err(
@@ -12700,8 +13306,7 @@ where
             );
         }
 
-        root_authority
-            .revalidate(sync_dir)
+        revalidate_sync_lock(&sync_lock, sync_dir)
             .map_err(|error| format!("Could not remove the test file: {error}"))?;
         publication.remove_with(final_file, before_remove)
             .map_err(|error| format!("Could not remove the test file: {error}"))
@@ -12716,7 +13321,7 @@ where
 
 fn probe_sync_dir_at(sync_dir: &Path, tmp_file: &Path, final_file: &Path) -> Result<(), String> {
     let mut before_stage = |_stage: AtomicWriteStage| Ok(());
-    let mut read_back = |path: &Path| fs::read(path).map_err(|error| error.to_string());
+    let mut read_back = |_path: &Path, bytes: Vec<u8>| Ok(bytes);
     let mut before_remove = |_path: &Path| Ok(());
 
     probe_sync_dir_at_with(
@@ -12743,6 +13348,7 @@ fn probe_sync_dir(sync_dir: &Path) -> Result<(), String> {
     probe_sync_dir_at(sync_dir, &tmp_file, &final_file)
 }
 
+#[cfg(test)]
 fn finish_copied_sync_file_durably<SyncFile, Remove, SyncParent>(
     tmp_file: &Path,
     sync_file: &Path,
@@ -12762,6 +13368,7 @@ where
         .map_err(|error| format!("Failed to flush sync directory metadata: {error}"))
 }
 
+#[cfg(test)]
 fn replace_file_preserving_previous<Remove, Rename>(
     replacement: &Path,
     target: &Path,
@@ -12800,6 +13407,7 @@ where
     }
 }
 
+#[cfg(test)]
 fn replace_sync_backup_preserving_previous<Remove, Rename>(
     replacement: &Path,
     target: &Path,
@@ -12814,6 +13422,7 @@ where
     replace_file_preserving_previous(replacement, target, previous, "sync backup", remove, rename)
 }
 
+#[cfg(test)]
 fn replace_sync_file_preserving_previous<Remove, Rename>(
     replacement: &Path,
     target: &Path,
@@ -12826,6 +13435,47 @@ where
     Rename: FnMut(&Path, &Path) -> std::io::Result<()>,
 {
     replace_file_preserving_previous(replacement, target, previous, "sync file", remove, rename)
+}
+
+fn replace_retained_file_preserving_previous(
+    root: &RetainedSyncRoot<'_>,
+    replacement: &Path,
+    target: &Path,
+    previous: &Path,
+    description: &str,
+) -> Result<(), String> {
+    if root.exists(previous).map_err(|error| error.to_string())? {
+        root.remove(previous).map_err(|error| {
+            format!("Failed to clear the previous {description} recovery file: {error}")
+        })?;
+    }
+
+    let target_was_present = root.exists(target).map_err(|error| error.to_string())?;
+    if target_was_present {
+        root.rename(target, previous, false)
+            .map_err(|error| format!("Failed to preserve the current {description}: {error}"))?;
+    }
+
+    match root.rename(replacement, target, false) {
+        Ok(()) => {
+            if target_was_present {
+                let _ = root.remove(previous);
+            }
+            Ok(())
+        }
+        Err(replace_error) if !target_was_present => Err(format!(
+            "Failed to install the replacement {description}: {replace_error}"
+        )),
+        Err(replace_error) => match root.rename(previous, target, false) {
+            Ok(()) => Err(format!(
+                "Failed to install the replacement {description}; restored the previous {description}: {replace_error}"
+            )),
+            Err(restore_error) => Err(format!(
+                "Failed to install the replacement {description} ({replace_error}); the previous {description} remains at {} because restoration also failed: {restore_error}",
+                previous.display()
+            )),
+        },
+    }
 }
 
 /// How the file backend should treat the bytes on disk for this operation. `Off` is the
@@ -12905,6 +13555,21 @@ fn sync_payload_is_valid(value: &Value) -> Result<(), String> {
     validate(value)
 }
 
+fn normalize_sync_document_value(value: Value) -> Value {
+    let Value::Object(mut map) = value else {
+        return empty_remote_app_data();
+    };
+    for surface in ["tasks", "projects", "areas", "sections", "people"] {
+        if !matches!(map.get(surface), Some(Value::Array(_))) {
+            map.insert(surface.to_string(), Value::Array(Vec::new()));
+        }
+    }
+    if !matches!(map.get("settings"), Some(Value::Object(_))) {
+        map.insert("settings".to_string(), serde_json::Map::new().into());
+    }
+    Value::Object(map)
+}
+
 fn read_sync_candidate(path: &Path, attempts: usize) -> Result<Value, String> {
     read_json_with_retries_validated(path, attempts, sync_payload_is_valid)
 }
@@ -12944,6 +13609,126 @@ fn read_sync_candidate_with(
         None => read_sync_candidate(path, attempts),
         Some(material) => read_encrypted_sync_candidate(path, attempts, material),
     }
+}
+
+fn read_sync_candidate_bytes_with(
+    bytes: &[u8],
+    crypto: SyncFileCrypto<'_>,
+) -> Result<Value, String> {
+    let plaintext = match crypto.material() {
+        None => String::from_utf8(bytes.to_vec()).map_err(|error| error.to_string())?,
+        Some(material) => {
+            if let Some(discovery) = foreign_salt_discovery(bytes, material) {
+                return Err(discovery);
+            }
+            let plaintext = decrypt_sync_artifact(bytes, &material.key)
+                .map_err(|error| terminal_error(error))?;
+            String::from_utf8(plaintext).map_err(|error| {
+                terminal_error(format!("decrypted sync payload is not UTF-8: {error}"))
+            })?
+        }
+    };
+    let value: Value = serde_json::from_str(&plaintext).map_err(|error| error.to_string())?;
+    sync_payload_is_valid(&value)?;
+    Ok(normalize_sync_document_value(value))
+}
+
+fn read_sync_candidate_from_retained_root(
+    root: &RetainedSyncRoot<'_>,
+    path: &Path,
+    crypto: SyncFileCrypto<'_>,
+) -> Result<Value, String> {
+    let bytes = root.read(path).map_err(|error| error.to_string())?;
+    read_sync_candidate_bytes_with(&bytes, crypto)
+}
+
+fn read_sync_file_from_retained_root_with(
+    root: &RetainedSyncRoot<'_>,
+    crypto: SyncFileCrypto<'_>,
+) -> Result<Value, String> {
+    let data_base = crypto.data_base();
+    let primary = root.sync_dir.join(&data_base);
+    let primary_previous = root.sync_dir.join(format!("{data_base}.previous"));
+    let backup = root.sync_dir.join(format!("{data_base}.bak"));
+    let backup_previous = root.sync_dir.join(format!("{data_base}.bak.previous"));
+    let legacy_name = format!("{}-sync.json", APP_NAME);
+    let legacy = root.sync_dir.join(if crypto.is_on() {
+        encrypted_artifact_name(&legacy_name)
+    } else {
+        legacy_name
+    });
+
+    let mut first_non_terminal_error = None;
+    for path in [&primary, &primary_previous, &backup, &backup_previous, &legacy] {
+        let exists = root.exists(path).map_err(|error| error.to_string())?;
+        if !exists {
+            continue;
+        }
+        match read_sync_candidate_from_retained_root(root, path, crypto) {
+            Ok(data) => return Ok(data),
+            Err(error) if is_terminal_error(&error) => return Err(error),
+            Err(error) => first_non_terminal_error.get_or_insert(error),
+        };
+    }
+
+    // Seed recovery is legacy-only. The pathname inventory supplies leaf names,
+    // but the bytes are always opened through the retained root handle.
+    let seed_suffix = if crypto.is_on() { ".json.enc" } else { ".json" };
+    let mut seed_names = fs::read_dir(root.sync_dir)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .filter_map(|entry| entry.file_name().into_string().ok())
+                .filter(|name| {
+                    let lower = name.to_ascii_lowercase();
+                    (lower.starts_with("mindwtr-backup-")
+                        || lower.starts_with("data-backup-"))
+                        && lower.ends_with(seed_suffix)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    seed_names.sort();
+    seed_names.reverse();
+    for name in seed_names {
+        let path = root.sync_dir.join(name);
+        match read_sync_candidate_from_retained_root(root, &path, crypto) {
+            Ok(data) => return Ok(data),
+            Err(error) if is_terminal_error(&error) => return Err(error),
+            Err(error) => {
+                first_non_terminal_error.get_or_insert(error);
+            }
+        }
+    }
+
+    if let Some(error) = first_non_terminal_error {
+        return Err(error);
+    }
+    if !crypto.is_on() {
+        let encrypted = root
+            .sync_dir
+            .join(encrypted_artifact_name(DATA_FILE_NAME));
+        if root.exists(&encrypted).map_err(|error| error.to_string())? {
+            let bytes = root.read(&encrypted).map_err(|error| error.to_string())?;
+            return match inspect_sync_artifact(&bytes) {
+                SyncArtifactInspection::Encrypted(header) => {
+                    Err(encrypted_discovery_marker(&header))
+                }
+                SyncArtifactInspection::Unsupported(reason) => Err(terminal_error(reason)),
+                SyncArtifactInspection::Plaintext => Ok(empty_remote_app_data()),
+            };
+        }
+    } else {
+        let plaintext = root.sync_dir.join(DATA_FILE_NAME);
+        if root.exists(&plaintext).map_err(|error| error.to_string())?
+            && is_plaintext_sync_artifact(
+                &root.read(&plaintext).map_err(|error| error.to_string())?,
+            )
+        {
+            return Err(SYNC_ENCRYPTION_REMOTE_PLAINTEXT.to_string());
+        }
+    }
+    Ok(empty_remote_app_data())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -13383,7 +14168,7 @@ fn write_sync_file_to_dir_with(
     expected_fingerprint: Option<&str>,
     crypto: SyncFileCrypto<'_>,
 ) -> Result<bool, String> {
-    write_sync_file_to_dir_with_lease(sync_dir, data, expected_fingerprint, crypto, false)
+    write_sync_file_to_dir_with_lease(sync_dir, data, expected_fingerprint, crypto, None)
 }
 
 fn write_sync_file_to_dir_with_lease(
@@ -13391,7 +14176,7 @@ fn write_sync_file_to_dir_with_lease(
     data: Value,
     expected_fingerprint: Option<&str>,
     crypto: SyncFileCrypto<'_>,
-    lease_already_held: bool,
+    existing_sync_lock: Option<&SyncFileLock>,
 ) -> Result<bool, String> {
     let mut validate_existing_lease = || Ok(());
     write_sync_file_to_dir_with_lease_and_validation(
@@ -13399,7 +14184,7 @@ fn write_sync_file_to_dir_with_lease(
         data,
         expected_fingerprint,
         crypto,
-        lease_already_held,
+        existing_sync_lock,
         &mut validate_existing_lease,
     )
 }
@@ -13409,7 +14194,7 @@ fn write_sync_file_to_dir_with_lease_and_validation<ValidateLease>(
     data: Value,
     expected_fingerprint: Option<&str>,
     crypto: SyncFileCrypto<'_>,
-    lease_already_held: bool,
+    existing_sync_lock: Option<&SyncFileLock>,
     validate_existing_lease: &mut ValidateLease,
 ) -> Result<bool, String>
 where
@@ -13428,28 +14213,29 @@ where
         );
     }
 
-    if let Some(parent) = sync_file.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-
-    let sync_lock = if lease_already_held {
+    let sync_lock = if existing_sync_lock.is_some() {
         None
     } else {
         Some(acquire_sync_lock(sync_dir)?)
     };
+    let authority_lock = existing_sync_lock
+        .or(sync_lock.as_ref())
+        .ok_or_else(|| "File Sync write has no retained root authority".to_string())?;
+    let root = RetainedSyncRoot::new(sync_dir, authority_lock);
 
     let result = (|| -> Result<bool, String> {
         if let Some(expected_fingerprint) = expected_fingerprint {
             // Fingerprints stay plaintext-domain: the read below decrypts first, so the same
             // document fingerprints identically before and after a re-encryption (decision #9).
-            let current = read_sync_file_from_dir_with(sync_dir, crypto)?;
-            if sync_document_fingerprint(&current)? != expected_fingerprint {
+            let current = read_sync_file_from_retained_root_with(&root, crypto)?;
+            let current_fingerprint = sync_document_fingerprint(&current)?;
+            if current_fingerprint != expected_fingerprint {
                 return Err(SYNC_FILE_WRITE_CONFLICT.to_string());
             }
         }
 
-        let existing_primary = if sync_file.exists() {
-            match read_sync_candidate_with(&sync_file, 1, crypto) {
+        let existing_primary = if root.exists(&sync_file).map_err(|error| error.to_string())? {
+            match read_sync_candidate_from_retained_root(&root, &sync_file, crypto) {
                 Ok(_) => Some(true),
                 // Fail closed: ciphertext we cannot open may be a peer's newer generation.
                 // Refuse to write over it at all — do not rotate, do not overwrite, do not
@@ -13469,28 +14255,38 @@ where
             // file, always allowed) and rename over the old backup, the same
             // shape the data file itself uses.
             let backup_tmp = sync_dir.join(format!("{data_base}.bak.tmp"));
-            let _ = fs::remove_file(&backup_tmp);
-            if let Err(error) = copy_file_sequentially(&sync_file, &backup_tmp) {
+            let backup_copy = (|| -> Result<(), String> {
+                root.remove(&backup_tmp).map_err(|error| error.to_string())?;
+                let primary_bytes = root.read(&sync_file).map_err(|error| error.to_string())?;
+                root.write_new(&backup_tmp, &primary_bytes)
+                    .map_err(|error| error.to_string())?;
+                Ok(())
+            })();
+            if let Err(error) = backup_copy {
                 log::warn!("Sync backup copy failed: {error}");
             } else {
-                let replacement = if cfg!(windows) && backup_file.exists() {
-                    replace_sync_backup_preserving_previous(
+                let replacement = if cfg!(windows)
+                    && root
+                        .exists(&backup_file)
+                        .map_err(|error| error.to_string())?
+                {
+                    replace_retained_file_preserving_previous(
+                        &root,
                         &backup_tmp,
                         &backup_file,
                         &backup_previous_file,
-                        |path| fs::remove_file(path),
-                        |from, to| fs::rename(from, to),
+                        "sync backup",
                     )
                 } else {
-                    fs::rename(&backup_tmp, &backup_file).map_err(|error| error.to_string())
+                    root.rename(&backup_tmp, &backup_file, true)
+                        .map_err(|error| error.to_string())
                 };
-                let directory_flush =
-                    sync_parent_directory_for_durability(&backup_file).map_err(|error| {
+                let directory_flush = root.sync_directory().map_err(|error| {
                         format!("Failed to flush sync backup directory metadata: {error}")
                     });
                 if let Err(err) = replacement.and(directory_flush) {
                     log::warn!("Sync backup replacement failed: {err}");
-                    let _ = fs::remove_file(&backup_tmp);
+                    let _ = root.remove(&backup_tmp);
                 }
             }
         }
@@ -13513,29 +14309,33 @@ where
             revalidate_sync_lock(sync_lock, sync_dir)?;
         }
 
-        let windows_replacement = cfg!(windows) && sync_file.exists();
+        let windows_replacement = cfg!(windows)
+            && root
+                .exists(&sync_file)
+                .map_err(|error| error.to_string())?;
         let mut before_stage = |_stage: AtomicWriteStage| Ok(());
         // Windows cannot rename over an existing destination. Move the primary
         // aside so a failed installation can roll back without depending on the
         // best-effort backup copy. New destinations use the helper's normal rename.
-        let mut replace_existing = |from: &Path, to: &Path| {
-            replace_sync_file_preserving_previous(
+        let mut replace_existing = |retained_root: &RetainedSyncRoot<'_>, from: &Path, to: &Path| {
+            replace_retained_file_preserving_previous(
+                retained_root,
                 from,
                 to,
                 &primary_previous_file,
-                |path| fs::remove_file(path),
-                |rename_from, rename_to| fs::rename(rename_from, rename_to),
+                "sync file",
             )
         };
         let rename_override: Option<
-            &mut dyn FnMut(&Path, &Path) -> Result<(), String>,
+            &mut dyn FnMut(&RetainedSyncRoot<'_>, &Path, &Path) -> Result<(), String>,
         > = if windows_replacement {
             Some(&mut replace_existing)
         } else {
             None
         };
 
-        let finalized = match atomic_tmp_write_then_rename_with(
+        let finalized = match atomic_retained_tmp_write_then_rename_with(
+            &root,
             &tmp_file,
             &sync_file,
             &content,
@@ -13545,7 +14345,7 @@ where
         ) {
             Ok(mut publication) => {
                 publication.keep();
-                sync_parent_directory_for_durability(&sync_file)
+                root.sync_directory()
                     .map_err(|error| format!("Failed to flush sync directory metadata: {error}"))?;
                 Ok(true)
             }
@@ -13568,24 +14368,13 @@ where
                         "Sync write failed: rename error: {rename_err}; temp ownership error: {ownership_error}"
                     )
                 })?;
-                match write_bytes_sequentially(&content, &sync_file) {
+                match root.write_replace(&sync_file, &content) {
                     Ok(_) => {
-                        let mut remove_owned_temp = |path: &Path| {
-                            let mut before_remove = |_owned_path: &Path| Ok(());
-                            publication
-                                .remove_with(path, &mut before_remove)
-                                .map_err(std::io::Error::other)
-                        };
-                        finish_copied_sync_file_durably(
-                            &tmp_file,
-                            &sync_file,
-                            // Already flushed on the handle that wrote it.
-                            // Reopening it for write is the shape a cache-off
-                            // VFS mount refuses (#1001).
-                            |_| Ok(()),
-                            &mut remove_owned_temp,
-                            sync_parent_directory_for_durability,
-                        )?;
+                        let mut before_remove = |_owned_path: &Path| Ok(());
+                        publication.remove_with(&tmp_file, &mut before_remove)?;
+                        root.sync_directory().map_err(|error| {
+                            format!("Failed to flush sync directory metadata: {error}")
+                        })?;
                         Ok(true)
                     }
                     Err(copy_err) => Err(format!(
@@ -13644,7 +14433,7 @@ pub(crate) fn write_sync_file(
                 data,
                 expected_fingerprint.as_deref(),
                 crypto_for(&material),
-                true,
+                Some(&lease._sync_lock),
                 &mut validate_lease,
             )
         });
