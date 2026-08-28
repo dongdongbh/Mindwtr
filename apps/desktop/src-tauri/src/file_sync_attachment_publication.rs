@@ -959,6 +959,37 @@ fn open_verified_stage(entry: &PublicationEntry) -> Result<File, String> {
     Ok(file)
 }
 
+#[cfg(windows)]
+fn open_named_stage_for_identity(entry: &PublicationEntry) -> Result<Option<File>, String> {
+    use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
+        FILE_SHARE_READ, FILE_SHARE_WRITE,
+    };
+
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    let named = match options.open(&entry.scratch_path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "Failed to reopen named attachment stage for identity comparison: {error}"
+            ))
+        }
+    };
+    let metadata = named.metadata().map_err(|error| {
+        format!("Failed to inspect named attachment stage for identity comparison: {error}")
+    })?;
+    if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Ok(None);
+    }
+    Ok(Some(named))
+}
+
 fn named_stage_matches_handle(
     private_directory: &BoundDirectory,
     stage: &File,
@@ -999,7 +1030,9 @@ fn named_stage_matches_handle(
 
     #[cfg(windows)]
     {
-        let named = open_verified_stage(_entry)?;
+        let Some(named) = open_named_stage_for_identity(_entry)? else {
+            return Ok(false);
+        };
         return Ok(directory_identity(&named)? == directory_identity(stage)?);
     }
 
@@ -1361,6 +1394,39 @@ mod tests {
         assert!(windows_rename.contains("RtlNtStatusToDosError(status)"));
         assert!(!windows_rename.contains("SetFileInformationByHandle("));
         assert!(windows_rename.contains("(*information).FileName.as_mut_ptr()"));
+    }
+
+    #[test]
+    fn windows_named_stage_identity_check_does_not_reverify_replacement_bytes() {
+        let source = include_str!("file_sync_attachment_publication.rs").replace("\r\n", "\n");
+        let named_stage_match = source
+            .split_once("fn named_stage_matches_handle(")
+            .expect("named stage identity check")
+            .1
+            .split_once("\n#[cfg(target_os = \"linux\")]\nfn publish_exact_stage")
+            .expect("end of named stage identity check")
+            .0;
+        let windows_match = named_stage_match
+            .split_once("#[cfg(windows)]")
+            .expect("Windows named stage identity check")
+            .1
+            .split_once("#[cfg(not(any(unix, windows)))]")
+            .expect("end of Windows named stage identity check")
+            .0;
+        let named_reopen = source
+            .split_once("fn open_named_stage_for_identity(")
+            .expect("Windows named stage reopen")
+            .1
+            .split_once("\nfn named_stage_matches_handle(")
+            .expect("end of Windows named stage reopen")
+            .0;
+
+        assert!(windows_match.contains("open_named_stage_for_identity("));
+        assert!(!windows_match.contains("open_verified_stage("));
+        assert!(named_reopen.contains("FILE_FLAG_OPEN_REPARSE_POINT"));
+        assert!(!named_reopen.contains("Sha256"));
+        assert!(!named_reopen.contains("expected_sha256"));
+        assert!(!named_reopen.contains("expected_size"));
     }
 
     #[test]

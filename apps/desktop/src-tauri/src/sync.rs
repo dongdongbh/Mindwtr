@@ -7028,6 +7028,32 @@ mod tests {
     }
 
     #[test]
+    fn windows_retained_rename_revalidates_bound_source_after_mutation_hook() {
+        let source = include_str!("sync.rs").replace("\r\n", "\n");
+        let windows_rename = source
+            .split_once("#[cfg(target_os = \"windows\")]\nfn retained_root_rename")
+            .expect("Windows retained-root rename")
+            .1
+            .split_once("\n#[cfg(not(any(unix, target_os = \"windows\")))]")
+            .expect("end of Windows retained-root rename")
+            .0;
+        let (before_hook, after_hook) = windows_rename
+            .split_once("before_mutation()?;")
+            .expect("authority callback immediately before rename");
+        let identity_check = after_hook
+            .find("retained_root_open(directory, source")
+            .expect("source leaf reopened after mutation callback");
+        let mutation = after_hook
+            .find("NtSetInformationByHandle")
+            .or_else(|| after_hook.find("NtSetInformationFile"))
+            .expect("native source-handle rename");
+
+        assert!(before_hook.contains("source_identity = native_file_identity(&source_file)?"));
+        assert!(identity_check < mutation);
+        assert!(after_hook[..mutation].contains("native_file_identity("));
+    }
+
+    #[test]
     fn windows_directory_parser_rejects_malformed_next_offsets() {
         assert_eq!(
             retained_directory_next_entry_offset(0, 112, 106, 104, 216)
@@ -14600,7 +14626,8 @@ fn retained_root_rename(
     use windows_sys::Win32::Foundation::RtlNtStatusToDosError;
     use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
-    let source = retained_root_open(directory, source, true, false, false)?;
+    let source_file = retained_root_open(directory, source, true, false, false)?;
+    let source_identity = native_file_identity(&source_file)?;
     let target = destination.encode_wide().collect::<Vec<_>>();
     // NtSetInformationFile consumes the native variable-length record while
     // preserving the retained RootDirectory-relative namespace operation.
@@ -14642,6 +14669,12 @@ fn retained_root_rename(
     let information = buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
     let mut status_block = IO_STATUS_BLOCK::default();
     before_mutation()?;
+    let named_source = retained_root_open(directory, source, false, false, false)?;
+    if native_file_identity(&named_source)? != source_identity {
+        return Err(std::io::Error::other(
+            "File Sync retained-root rename captured a replacement leaf; source identity changed before mutation",
+        ));
+    }
     unsafe {
         (*information).Anonymous.ReplaceIfExists = replace;
         (*information).RootDirectory = directory.as_raw_handle();
@@ -14652,7 +14685,7 @@ fn retained_root_rename(
             target.len(),
         );
         let status = NtSetInformationFile(
-            source.as_raw_handle(),
+            source_file.as_raw_handle(),
             &mut status_block,
             information.cast(),
             information_bytes,
