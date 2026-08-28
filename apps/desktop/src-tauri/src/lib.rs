@@ -119,7 +119,7 @@ use sync::{
     recover_dropbox_credentials_before_sync_configuration, recover_dropbox_credentials_on_startup,
     rollback_staged_dropbox_credentials, set_sync_path, sync_fs_create_dir, sync_fs_exists,
     sync_fs_remove_file, sync_fs_rename, sync_fs_stat, webdav_get_json, webdav_put_json,
-    write_sync_file,
+    test_sync_path, write_sync_file,
     DropboxStagedCredentialState, DropboxStartupRecoveryOutcome,
 };
 use sync::{
@@ -1623,6 +1623,7 @@ pub fn run() {
             get_sync_path,
             clear_sync_path,
             set_sync_path,
+            test_sync_path,
             get_sync_backend,
             get_sync_cloud_provider,
             get_sync_cloud_provider_state,

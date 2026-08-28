@@ -83,6 +83,10 @@ export type SettingsSyncLabels = {
     syncFolderLocation: string;
     savePath: string;
     browse: string;
+    testFolder: string;
+    testingFolder: string;
+    folderTestSucceeded: string;
+    portalPathNote: string;
     pathHint: string;
     webdavUrl: string;
     webdavHint: string;
@@ -248,6 +252,8 @@ export type SyncConfigurationProps = {
     onSyncPathChange: (value: string) => void;
     onSaveSyncPath: () => Promise<void> | void;
     onBrowseSyncPath: () => void;
+    isTestingSyncPath: boolean;
+    onTestSyncPath: () => Promise<void> | void;
     webdavUrl: string;
     webdavUsername: string;
     webdavPassword: string;

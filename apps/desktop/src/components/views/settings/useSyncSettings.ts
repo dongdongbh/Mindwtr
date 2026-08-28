@@ -59,6 +59,8 @@ export type { SyncBackend };
 export type DropboxTestState = 'idle' | 'success' | 'error';
 export type WebDavTestState = 'idle' | 'success' | 'error';
 
+class SyncPathConfigurationError extends Error {}
+
 const IMPORT_DIAGNOSTIC_FALLBACKS: Record<string, string> = {
     'settings.backupDiagnostics.newerVersion': 'This backup was created by a newer Mindwtr version ({{version}}).',
     'settings.backupDiagnostics.noActiveRecords': 'This backup does not contain any active tasks or projects.',
@@ -148,6 +150,7 @@ export const useSyncSettings = ({
     const [webdavPassword, setWebdavPassword] = useState('');
     const [webdavHasPassword, setWebdavHasPassword] = useState(false);
     const [webdavAllowInsecureHttp, setWebdavAllowInsecureHttp] = useState(false);
+    const [isTestingSyncPath, setIsTestingSyncPath] = useState(false);
     const [isSavingWebDav, setIsSavingWebDav] = useState(false);
     const [isTestingWebDav, setIsTestingWebDav] = useState(false);
     const [webdavTestState, setWebdavTestState] = useState<WebDavTestState>('idle');
@@ -198,6 +201,15 @@ export const useSyncSettings = ({
 
     const formatSyncPathError = useCallback((message?: string): string => {
         const normalized = (message || '').toLowerCase();
+        if ([
+            'could not create a file in this folder',
+            'could not finish writing a file in this folder',
+            'could not finalize a file in this folder',
+            'wrote a file but could not read it back',
+            'could not remove the test file',
+        ].some((stage) => normalized.includes(stage))) {
+            return message || resolveText('settings.syncMobile.failedToSetSyncPath', 'Failed to set sync path');
+        }
         if (normalized.includes('must be a directory')) {
             return resolveText(
                 'settings.sync.folderRequired',
@@ -512,6 +524,27 @@ export const useSyncSettings = ({
         setSyncError(null);
         showToast(resolveText('settings.sync.readyToVerify', 'Settings ready. Sync now to verify and save them.'), 'info');
     }, [advanceSyncConfigurationGeneration, resolveText, showToast, syncPath]);
+
+    const handleTestSyncPath = useCallback(async () => {
+        const path = syncPath.trim();
+        if (!path || !isTauri) return;
+        setIsTestingSyncPath(true);
+        setSyncError(null);
+        try {
+            await SyncService.testSyncPath(path);
+            showToast(resolveText('settings.folderTestSucceeded', 'Folder test passed.'), 'success');
+        } catch (error) {
+            const message = toErrorMessage(
+                error,
+                resolveText('settings.feedback.actionFailed', "Couldn't complete this action. Try again."),
+            );
+            void logError(error, { scope: 'sync', step: 'testSyncPath' });
+            setSyncError(message);
+            showToast(message, 'error');
+        } finally {
+            setIsTestingSyncPath(false);
+        }
+    }, [isTauri, resolveText, showToast, syncPath, toErrorMessage]);
 
     const handleChangeSyncLocation = useCallback(async () => {
         try {
@@ -909,7 +942,7 @@ export const useSyncSettings = ({
         } catch (error) {
             if (config.backend === 'file') {
                 const message = error instanceof Error ? error.message : String(error);
-                throw new Error(formatSyncPathError(message));
+                throw new SyncPathConfigurationError(formatSyncPathError(message));
             }
             throw error;
         }
@@ -1164,7 +1197,10 @@ export const useSyncSettings = ({
                 await resolveCapturedCredential();
             }
             void logError(error, { scope: 'sync', step: 'perform' });
-            const message = resolveText('settings.lastSyncError', 'Sync failed');
+            const fallback = resolveText('settings.lastSyncError', 'Sync failed');
+            const message = error instanceof SyncPathConfigurationError
+                ? error.message
+                : fallback;
             setSyncError(message);
             showToast(message, 'error');
         }
@@ -1769,6 +1805,8 @@ export const useSyncSettings = ({
             onSyncPathChange: handleSyncPathChange,
             onSaveSyncPath: handleSaveSyncPath,
             onBrowseSyncPath: handleChangeSyncLocation,
+            isTestingSyncPath,
+            onTestSyncPath: handleTestSyncPath,
             webdavUrl,
             webdavUsername,
             webdavPassword,

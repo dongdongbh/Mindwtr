@@ -2824,6 +2824,7 @@ pub(crate) fn set_sync_path(
 ) -> Result<serde_json::Value, String> {
     let config_path = get_config_path(&app);
     let sanitized_path = resolve_sync_dir(&app, Some(sync_path))?;
+    probe_sync_dir(&sanitized_path)?;
 
     // Inform the user when they point sync at an iCloud Drive path.
     let icloud = is_icloud_path(&sanitized_path);
@@ -2857,6 +2858,18 @@ pub(crate) fn set_sync_path(
         "path": config.sync_path,
         "icloud": icloud
     }))
+}
+
+// A non-persisting re-check for the explicit settings action. Keep this off
+// ordinary sync cycles; `set_sync_path` performs the only automatic probe.
+#[tauri::command(async)]
+pub(crate) fn test_sync_path(
+    app: tauri::AppHandle,
+    sync_path: String,
+) -> Result<bool, String> {
+    let sanitized_path = resolve_sync_dir_granting_scope(&app, sync_path)?;
+    probe_sync_dir(&sanitized_path)?;
+    Ok(true)
 }
 
 fn normalize_webdav_url(raw: &str) -> String {
@@ -4353,6 +4366,22 @@ mod tests {
     }
 
     #[test]
+    fn folder_probe_rejects_a_lockless_sync_holder() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let real = acquire_sync_lock(dir.path()).expect("locked holder");
+        let lockless = SyncFileLock {
+            file: File::open(dir.path().join(".mindwtr.lock")).expect("open lock file"),
+            locked: false,
+        };
+
+        let error = require_exclusive_probe_lock(lockless)
+            .expect_err("folder probe must reject unsupported file locking");
+
+        assert!(error.contains("does not support safe concurrent writes"));
+        release_sync_lock(&real);
+    }
+
+    #[test]
     fn expired_lease_content_cannot_break_an_active_sync_lock() {
         let dir = tempfile::tempdir().expect("temp dir");
         let lock_path = dir.path().join(".mindwtr.lock");
@@ -4443,9 +4472,10 @@ mod tests {
         // `write_sync_file_to_dir` delegate and the `_with` function holding the real write.
         // Pin that: a refactor that moves the actual write out of this span would otherwise
         // leave the guard scanning a one-line wrapper and silently guarding nothing.
+        let atomic_helper_call = format!("{}(", "atomic_tmp_write_then_rename_with");
         assert!(
-            body.contains("File::create(&tmp_file)"),
-            "the scanned span must still contain the real sync write"
+            body.contains(&atomic_helper_call),
+            "the scanned span must still delegate to the shared atomic writer"
         );
         for (forbidden, reason) in [
             (
@@ -4462,6 +4492,277 @@ mod tests {
                 "the sync write path {reason} (found {forbidden:?})"
             );
         }
+    }
+
+    #[test]
+    fn sync_folder_probe_and_real_write_share_one_atomic_write_helper() {
+        let source = include_str!("sync.rs");
+        let helper_name = ["atomic_tmp_write_then_", "rename_with"].concat();
+        let helper_call = format!("{helper_name}(");
+        assert_eq!(
+            source.matches(&helper_call).count(),
+            2,
+            "only the real sync writer and folder probe may call the atomic helper"
+        );
+
+        let helper_declaration = format!("fn {helper_name}<");
+        let helper_body = source
+            .split_once(&helper_declaration)
+            .expect("atomic helper")
+            .1
+            .split_once("\nconst SYNC_FOLDER_PROBE_BYTES")
+            .expect("end of atomic helper")
+            .0;
+        for required in ["File::create(", ".write_all(", ".sync_all(", "fs::rename("] {
+            assert!(
+                helper_body.contains(required),
+                "the shared helper must own the atomic write primitive {required}"
+            );
+        }
+        for forbidden in ["fs::copy(", "sync_regular_file_for_durability"] {
+            assert!(
+                !helper_body.contains(forbidden),
+                "the shared atomic helper must not use {forbidden}"
+            );
+        }
+
+        let probe_declaration = format!("fn {}<", "probe_sync_dir_at_with");
+        let probe_end_declaration = format!("\nfn {}(", "probe_sync_dir");
+        let probe_body = source
+            .split_once(&probe_declaration)
+            .expect("probe_sync_dir_at_with")
+            .1
+            .split_once(&probe_end_declaration)
+            .expect("end of folder probe implementation")
+            .0;
+        assert!(
+            probe_body.contains(&helper_call),
+            "the folder probe must use the shared atomic helper"
+        );
+        assert!(
+            probe_body.contains(
+                "acquire_sync_lock(sync_dir).and_then(require_exclusive_probe_lock)"
+            ),
+            "the folder probe must reject filesystems that cannot take the real sync lock"
+        );
+        for forbidden in ["File::create(", ".write_all(", ".sync_all(", "fs::rename("] {
+            assert!(
+                !probe_body.contains(forbidden),
+                "the folder probe must not reimplement the atomic write sequence ({forbidden})"
+            );
+        }
+
+        let real_write_declaration = format!("fn {}(", "write_sync_file_to_dir_with");
+        let real_write_body = source
+            .split_once(&real_write_declaration)
+            .expect("write_sync_file_to_dir_with")
+            .1
+            .split_once("\n// Off the UI thread for the same reason as `read_sync_file`")
+            .expect("end of write_sync_file_to_dir_with")
+            .0;
+        assert!(
+            real_write_body.contains(&helper_call),
+            "the real sync writer must use the shared atomic helper"
+        );
+    }
+
+    #[test]
+    fn sync_folder_probe_stays_off_the_ordinary_sync_cycle() {
+        let source = include_str!("sync.rs");
+        let probe_call = format!("{}(", "probe_sync_dir");
+        assert_eq!(
+            source.matches(&probe_call).count(),
+            3,
+            "the probe may only be declared and called by set_sync_path and test_sync_path"
+        );
+
+        let set_path_declaration = format!("pub(crate) fn {}(", "set_sync_path");
+        let set_path_body = source
+            .split_once(&set_path_declaration)
+            .expect("set_sync_path")
+            .1
+            .split_once("\npub(crate) fn test_sync_path(")
+            .expect("end of set_sync_path")
+            .0;
+        let probe_position = set_path_body
+            .find(&probe_call)
+            .expect("set_sync_path must run the probe");
+        let config_write_position = set_path_body
+            .find("write_config_files(")
+            .expect("set_sync_path config write");
+        assert!(
+            probe_position < config_write_position,
+            "set_sync_path must finish the probe before saving the path"
+        );
+
+        let test_path_body = source
+            .split_once("pub(crate) fn test_sync_path(")
+            .expect("test_sync_path")
+            .1
+            .split_once("\nfn normalize_webdav_url(")
+            .expect("end of test_sync_path")
+            .0;
+        assert!(
+            test_path_body.contains(&probe_call),
+            "the explicit folder test must run the probe"
+        );
+
+        let write_command_declaration = format!("pub(crate) fn {}(", "write_sync_file");
+        let write_command_body = source
+            .split_once(&write_command_declaration)
+            .expect("write_sync_file")
+            .1
+            .split_once("\n// ---------------------------------------------------------------------------")
+            .expect("end of write_sync_file")
+            .0;
+        assert!(
+            !write_command_body.contains(&probe_call),
+            "ordinary file sync must not run the folder capability probe"
+        );
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum ProbeFailureStage {
+        Create,
+        WriteAndSync,
+        Rename,
+        ReadBack,
+        ReadBackMismatch,
+        Delete,
+    }
+
+    fn run_folder_probe_with_failure(
+        failure: Option<ProbeFailureStage>,
+    ) -> (tempfile::TempDir, PathBuf, PathBuf, Result<(), String>) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let tmp_file = dir.path().join(".mindwtr-folder-probe-test.tmp");
+        let final_file = dir.path().join(".mindwtr-folder-probe-test");
+        let final_file_for_remove = final_file.clone();
+        let mut delete_failure_injected = false;
+        let mut before_stage = |stage: AtomicWriteStage| {
+            let should_fail = matches!(
+                (stage, failure),
+                (AtomicWriteStage::Create, Some(ProbeFailureStage::Create))
+                    | (
+                        AtomicWriteStage::WriteAndSync,
+                        Some(ProbeFailureStage::WriteAndSync)
+                    )
+                    | (AtomicWriteStage::Rename, Some(ProbeFailureStage::Rename))
+            );
+            if should_fail {
+                Err(format!("injected {stage:?} failure"))
+            } else {
+                Ok(())
+            }
+        };
+        let mut read_back = |path: &Path| {
+            if failure == Some(ProbeFailureStage::ReadBack) {
+                return Err("injected read failure".to_string());
+            }
+            let mut content = fs::read(path).map_err(|error| error.to_string())?;
+            if failure == Some(ProbeFailureStage::ReadBackMismatch) {
+                content.push(b'!');
+            }
+            Ok(content)
+        };
+        let mut remove_file = |path: &Path| {
+            if failure == Some(ProbeFailureStage::Delete)
+                && path == final_file_for_remove
+                && path.exists()
+                && !delete_failure_injected
+            {
+                delete_failure_injected = true;
+                return Err("injected delete failure".to_string());
+            }
+            match fs::remove_file(path) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(error.to_string()),
+            }
+        };
+
+        let result = probe_sync_dir_at_with(
+            dir.path(),
+            &tmp_file,
+            &final_file,
+            &mut before_stage,
+            &mut read_back,
+            &mut remove_file,
+        );
+
+        (dir, tmp_file, final_file, result)
+    }
+
+    fn assert_folder_probe_failure(stage: ProbeFailureStage, expected: &str) {
+        let (_dir, tmp_file, final_file, result) = run_folder_probe_with_failure(Some(stage));
+        let error = result.expect_err("probe must report the injected failure");
+        assert!(
+            error.starts_with(expected),
+            "unexpected probe error: {error}"
+        );
+        assert!(!tmp_file.exists(), "failed probe temp file must be removed");
+        assert!(
+            !final_file.exists(),
+            "failed probe final file must be removed"
+        );
+    }
+
+    #[test]
+    fn sync_folder_probe_round_trips_bytes_and_removes_probe_files() {
+        let (_dir, tmp_file, final_file, result) = run_folder_probe_with_failure(None);
+
+        result.expect("probe succeeds");
+
+        assert!(!tmp_file.exists(), "probe temp file must be removed");
+        assert!(!final_file.exists(), "probe final file must be removed");
+    }
+
+    #[test]
+    fn sync_folder_probe_reports_create_failure_and_cleans_up() {
+        assert_folder_probe_failure(
+            ProbeFailureStage::Create,
+            "Could not create a file in this folder",
+        );
+    }
+
+    #[test]
+    fn sync_folder_probe_reports_write_and_sync_failure_and_cleans_up() {
+        assert_folder_probe_failure(
+            ProbeFailureStage::WriteAndSync,
+            "Could not finish writing a file in this folder",
+        );
+    }
+
+    #[test]
+    fn sync_folder_probe_reports_rename_failure_and_cleans_up() {
+        assert_folder_probe_failure(
+            ProbeFailureStage::Rename,
+            "Could not finalize a file in this folder",
+        );
+    }
+
+    #[test]
+    fn sync_folder_probe_reports_read_back_failure_and_cleans_up() {
+        assert_folder_probe_failure(
+            ProbeFailureStage::ReadBack,
+            "Wrote a file but could not read it back",
+        );
+    }
+
+    #[test]
+    fn sync_folder_probe_verifies_read_back_bytes_and_cleans_up() {
+        assert_folder_probe_failure(
+            ProbeFailureStage::ReadBackMismatch,
+            "Wrote a file but could not read it back",
+        );
+    }
+
+    #[test]
+    fn sync_folder_probe_reports_delete_failure_and_retries_cleanup() {
+        assert_folder_probe_failure(
+            ProbeFailureStage::Delete,
+            "Could not remove the test file",
+        );
     }
 
     // ---------------------------------------------------------------
@@ -9094,6 +9395,17 @@ fn acquire_sync_lock(sync_dir: &Path) -> Result<SyncFileLock, String> {
     }
 }
 
+fn require_exclusive_probe_lock(sync_lock: SyncFileLock) -> Result<SyncFileLock, String> {
+    if sync_lock.locked {
+        Ok(sync_lock)
+    } else {
+        Err(
+            "Failed to acquire an exclusive sync lock; this filesystem does not support safe concurrent writes"
+                .to_string(),
+        )
+    }
+}
+
 fn release_sync_lock(sync_lock: &SyncFileLock) {
     if !sync_lock.locked {
         return;
@@ -9171,6 +9483,170 @@ fn copy_file_sequentially(source: &Path, destination: &Path) -> std::io::Result<
     let mut file = File::create(destination)?;
     file.write_all(&contents)?;
     file.sync_all()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AtomicWriteStage {
+    Create,
+    WriteAndSync,
+    Rename,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct AtomicWriteError {
+    stage: AtomicWriteStage,
+    detail: String,
+}
+
+/// The one atomic write shape shared by real file sync and folder probing.
+/// Keep the newly-created handle open through `write_all` and `sync_all`, then
+/// release it before renaming. Virtual filesystems can refuse the flush lazily,
+/// so the checked `sync_all` is part of the contract; the optional override only
+/// preserves the existing Windows replacement behavior.
+fn atomic_tmp_write_then_rename_with<BeforeStage>(
+    tmp_file: &Path,
+    destination: &Path,
+    content: &[u8],
+    before_stage: &mut BeforeStage,
+    rename_override: Option<&mut dyn FnMut(&Path, &Path) -> Result<(), String>>,
+) -> Result<(), AtomicWriteError>
+where
+    BeforeStage: FnMut(AtomicWriteStage) -> Result<(), String>,
+{
+    before_stage(AtomicWriteStage::Create).map_err(|detail| AtomicWriteError {
+        stage: AtomicWriteStage::Create,
+        detail,
+    })?;
+    let mut file = File::create(tmp_file).map_err(|error| AtomicWriteError {
+        stage: AtomicWriteStage::Create,
+        detail: error.to_string(),
+    })?;
+
+    before_stage(AtomicWriteStage::WriteAndSync).map_err(|detail| AtomicWriteError {
+        stage: AtomicWriteStage::WriteAndSync,
+        detail,
+    })?;
+    file.write_all(content).map_err(|error| AtomicWriteError {
+        stage: AtomicWriteStage::WriteAndSync,
+        detail: error.to_string(),
+    })?;
+    file.sync_all().map_err(|error| AtomicWriteError {
+        stage: AtomicWriteStage::WriteAndSync,
+        detail: error.to_string(),
+    })?;
+    drop(file);
+
+    before_stage(AtomicWriteStage::Rename).map_err(|detail| AtomicWriteError {
+        stage: AtomicWriteStage::Rename,
+        detail,
+    })?;
+    let rename_result = match rename_override {
+        Some(rename_file) => rename_file(tmp_file, destination),
+        None => fs::rename(tmp_file, destination).map_err(|error| error.to_string()),
+    };
+    rename_result.map_err(|detail| AtomicWriteError {
+        stage: AtomicWriteStage::Rename,
+        detail,
+    })
+}
+
+const SYNC_FOLDER_PROBE_BYTES: &[u8] = b"mindwtr sync folder probe\n";
+
+fn sync_folder_probe_stage_error(stage: AtomicWriteStage, detail: &str) -> String {
+    let message = match stage {
+        AtomicWriteStage::Create => "Could not create a file in this folder",
+        AtomicWriteStage::WriteAndSync => "Could not finish writing a file in this folder",
+        AtomicWriteStage::Rename => "Could not finalize a file in this folder",
+    };
+    format!("{message}: {detail}")
+}
+
+fn probe_sync_dir_at_with<BeforeStage, ReadBack, Remove>(
+    sync_dir: &Path,
+    tmp_file: &Path,
+    final_file: &Path,
+    before_stage: &mut BeforeStage,
+    read_back: &mut ReadBack,
+    remove_file: &mut Remove,
+) -> Result<(), String>
+where
+    BeforeStage: FnMut(AtomicWriteStage) -> Result<(), String>,
+    ReadBack: FnMut(&Path) -> Result<Vec<u8>, String>,
+    Remove: FnMut(&Path) -> Result<(), String>,
+{
+    let sync_lock = match acquire_sync_lock(sync_dir).and_then(require_exclusive_probe_lock) {
+        Ok(sync_lock) => sync_lock,
+        Err(error) => {
+            let _ = remove_file(tmp_file);
+            let _ = remove_file(final_file);
+            return Err(sync_folder_probe_stage_error(
+                AtomicWriteStage::Create,
+                &error,
+            ));
+        }
+    };
+
+    let result = (|| -> Result<(), String> {
+        atomic_tmp_write_then_rename_with(
+            tmp_file,
+            final_file,
+            SYNC_FOLDER_PROBE_BYTES,
+            before_stage,
+            None,
+        )
+        .map_err(|error| sync_folder_probe_stage_error(error.stage, &error.detail))?;
+
+        let actual = read_back(final_file)
+            .map_err(|error| format!("Wrote a file but could not read it back: {error}"))?;
+        if actual != SYNC_FOLDER_PROBE_BYTES {
+            return Err(
+                "Wrote a file but could not read it back: contents did not match".to_string(),
+            );
+        }
+
+        remove_file(final_file)
+            .map_err(|error| format!("Could not remove the test file: {error}"))
+    })();
+
+    // Every stage gets a best-effort cleanup pass. In particular, a failed
+    // delete is retried here before its stage-specific error is returned.
+    let _ = remove_file(tmp_file);
+    let _ = remove_file(final_file);
+    release_sync_lock(&sync_lock);
+    result
+}
+
+fn probe_sync_dir_at(sync_dir: &Path, tmp_file: &Path, final_file: &Path) -> Result<(), String> {
+    let mut before_stage = |_stage: AtomicWriteStage| Ok(());
+    let mut read_back = |path: &Path| fs::read(path).map_err(|error| error.to_string());
+    let mut remove_file = |path: &Path| match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    };
+
+    probe_sync_dir_at_with(
+        sync_dir,
+        tmp_file,
+        final_file,
+        &mut before_stage,
+        &mut read_back,
+        &mut remove_file,
+    )
+}
+
+fn probe_sync_dir(sync_dir: &Path) -> Result<(), String> {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let base = format!(
+        ".mindwtr-folder-probe-{}-{nonce}",
+        std::process::id()
+    );
+    let tmp_file = sync_dir.join(format!("{base}.tmp"));
+    let final_file = sync_dir.join(base);
+    probe_sync_dir_at(sync_dir, &tmp_file, &final_file)
 }
 
 fn finish_copied_sync_file_durably<SyncFile, Remove, SyncParent>(
@@ -9887,37 +10363,45 @@ fn write_sync_file_to_dir_with(
                 .map_err(|error| terminal_error(error))?,
         };
 
-        {
-            let mut file = File::create(&tmp_file).map_err(|e| e.to_string())?;
-            file.write_all(&content).map_err(|e| e.to_string())?;
-            file.sync_all().map_err(|e| e.to_string())?;
-        }
-
-        if cfg!(windows) && sync_file.exists() {
-            // Windows cannot rename over an existing destination. Move the
-            // primary aside instead of deleting it so a failed installation
-            // can roll back without depending on the best-effort .bak copy.
-            let replacement = replace_sync_file_preserving_previous(
-                &tmp_file,
-                &sync_file,
+        let windows_replacement = cfg!(windows) && sync_file.exists();
+        let mut before_stage = |_stage: AtomicWriteStage| Ok(());
+        // Windows cannot rename over an existing destination. Move the primary
+        // aside so a failed installation can roll back without depending on the
+        // best-effort backup copy. New destinations use the helper's normal rename.
+        let mut replace_existing = |from: &Path, to: &Path| {
+            replace_sync_file_preserving_previous(
+                from,
+                to,
                 &primary_previous_file,
                 |path| fs::remove_file(path),
-                |from, to| fs::rename(from, to),
-            );
-            let directory_flush = sync_parent_directory_for_durability(&sync_file)
-                .map_err(|error| format!("Failed to flush sync directory metadata: {error}"));
-            replacement?;
-            directory_flush?;
-            return Ok(true);
-        }
+                |rename_from, rename_to| fs::rename(rename_from, rename_to),
+            )
+        };
+        let rename_override: Option<
+            &mut dyn FnMut(&Path, &Path) -> Result<(), String>,
+        > = if windows_replacement {
+            Some(&mut replace_existing)
+        } else {
+            None
+        };
 
-        match fs::rename(&tmp_file, &sync_file) {
+        match atomic_tmp_write_then_rename_with(
+            &tmp_file,
+            &sync_file,
+            &content,
+            &mut before_stage,
+            rename_override,
+        ) {
             Ok(()) => {
                 sync_parent_directory_for_durability(&sync_file)
                     .map_err(|error| format!("Failed to flush sync directory metadata: {error}"))?;
                 Ok(true)
             }
-            Err(rename_err) => {
+            Err(error) if error.stage != AtomicWriteStage::Rename || windows_replacement => {
+                Err(error.detail)
+            }
+            Err(error) => {
+                let rename_err = error.detail;
                 log::warn!(
                     "Atomic rename failed ({}), falling back to direct write",
                     rename_err
