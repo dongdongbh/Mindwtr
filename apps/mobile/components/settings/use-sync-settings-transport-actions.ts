@@ -4,7 +4,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
     addBreadcrumb,
-    assertWebdavStrongEtagSupport,
     CLOCK_SKEW_THRESHOLD_MS,
     cloudGetJson,
     isConnectionAllowed,
@@ -12,6 +11,8 @@ import {
     isValidCloudSyncToken,
     normalizeCloudUrl,
     normalizeWebdavUrl,
+    probeWebdavSyncCompatibility,
+    SyncEncryptionRemoteVersionUnavailableError,
     SYNC_LOCAL_INSECURE_URL_OPTIONS,
     type AppSettings,
 } from '@mindwtr/core';
@@ -44,7 +45,10 @@ import {
 import { syncMobileBackgroundSyncRegistration } from '@/lib/background-sync-task';
 import { getMobileCloudRequestOptions, getMobileWebDavRequestOptions } from '@/lib/webdav-request-options';
 import { rememberWebdavCapabilityProof } from '@/lib/webdav-capability-proof';
-import { getIncompleteSyncEncryptionTransition } from '@/lib/sync-encryption-state';
+import {
+    getIncompleteSyncEncryptionTransition,
+    getMobileSyncEncryptionStatus,
+} from '@/lib/sync-encryption-state';
 import {
     getSyncConflictCount,
     getSyncMaxClockSkewMs,
@@ -86,6 +90,16 @@ type SyncActionOptions = {
 
 const reconcileBackgroundSyncRegistration = () => {
     void syncMobileBackgroundSyncRegistration().catch(logSettingsError);
+};
+
+const assertLegacyWebdavAllowedForCurrentEncryptionPosture = async (
+    compatibility: 'strong-etag' | 'legacy-plaintext',
+): Promise<void> => {
+    if (compatibility !== 'legacy-plaintext') return;
+    const status = await getMobileSyncEncryptionStatus();
+    if (status.state !== 'off' || status.incompleteTransition) {
+        throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV data.json');
+    }
 };
 
 const persistSyncConfigItem = (key: string, value: string, afterSave?: () => void) => {
@@ -798,13 +812,19 @@ export function useSyncSettingsTransportActions({
             );
             if (needsActivationProbe) {
                 if (configOverride.backend === 'webdav' && configOverride.webdav) {
-                    await assertWebdavStrongEtagSupport(normalizeWebdavUrl(configOverride.webdav.url), {
+                    const compatibility = await probeWebdavSyncCompatibility(
+                        normalizeWebdavUrl(configOverride.webdav.url),
+                        {
                         ...getMobileWebDavRequestOptions(configOverride.webdav.allowInsecureHttp),
                         username: configOverride.webdav.username,
                         password: configOverride.webdav.password,
                         timeoutMs: 10_000,
-                    });
-                    await rememberWebdavCapabilityProof(configOverride.webdav);
+                        },
+                    );
+                    await assertLegacyWebdavAllowedForCurrentEncryptionPosture(compatibility);
+                    if (compatibility === 'strong-etag') {
+                        await rememberWebdavCapabilityProof(configOverride.webdav);
+                    }
                 }
                 const probeResult = await performMobileSync(
                     effectiveBackend === 'file' ? syncPath || undefined : undefined,
@@ -1145,13 +1165,16 @@ export function useSyncSettingsTransportActions({
                 if (!validateSyncHttpUrl(trimmedWebDavUrl, effectiveWebdav.allowInsecureHttp, 'WebDAV')) {
                     return;
                 }
-                await assertWebdavStrongEtagSupport(normalizeWebdavUrl(trimmedWebDavUrl), {
+                const compatibility = await probeWebdavSyncCompatibility(normalizeWebdavUrl(trimmedWebDavUrl), {
                     ...getMobileWebDavRequestOptions(effectiveWebdav.allowInsecureHttp),
                     username: effectiveWebdav.username.trim(),
                     password: effectiveWebdav.password,
                     timeoutMs: 10_000,
                 });
-                await rememberWebdavCapabilityProof(effectiveWebdav);
+                await assertLegacyWebdavAllowedForCurrentEncryptionPosture(compatibility);
+                if (compatibility === 'strong-etag') {
+                    await rememberWebdavCapabilityProof(effectiveWebdav);
+                }
                 showToast({
                     title: tr('settings.syncMobile.connectionOk'),
                     message: tr('settings.syncMobile.webdavEndpointIsReachable'),

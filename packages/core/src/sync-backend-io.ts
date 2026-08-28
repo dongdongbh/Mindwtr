@@ -39,6 +39,9 @@ export type SyncBackendContext = {
     /** Cached Dropbox content-hash rev; mutated by the ladder after every
      *  Dropbox read/write/fingerprint call. */
     dropboxRev: string | null;
+    /** True only when the platform has proven both that sync encryption is exactly
+     * off and that this endpoint is the legacy weak/no-ETag compatibility case. */
+    allowLegacyWebdavPlaintext?: boolean;
 };
 
 /** One remote-write transport result (webdav/cloud PUT response shape). */
@@ -76,6 +79,12 @@ export type SyncTransport = {
     webdavPut(
         sanitized: AppData,
         expectedEtag: string | null,
+        assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>,
+    ): Promise<RemoteWriteResult>;
+    /** One-shot compatibility write for plaintext providers without strong ETags.
+     * Core rereads and compares the remote snapshot immediately before calling this. */
+    webdavPutLegacyPlaintext?(
+        sanitized: AppData,
         assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>,
     ): Promise<RemoteWriteResult>;
     webdavHead(): Promise<RemoteHeadResult>;
@@ -120,6 +129,11 @@ export function createSyncBackendIO(ctx: SyncBackendContext, transport: SyncTran
     let fileRemoteFingerprint: string | null = null;
     let fileRemoteNeedsRepair = false;
     let webdavDocumentVersion: WebDavDocumentVersion | null = null;
+    let webdavDocumentSnapshot: string | null = null;
+    const snapshotWebdavRead = (remote: WebdavSyncReadResult): string => JSON.stringify({
+        exists: remote.exists,
+        data: remote.data,
+    });
     /** Dropbox token-retry policy: try with the current token; on an
      *  unauthorized response, force-refresh once and retry once; any other
      *  error, or a second unauthorized response, propagates. Outer transient
@@ -143,6 +157,13 @@ export function createSyncBackendIO(ctx: SyncBackendContext, transport: SyncTran
     return {
         acquireRemoteMutationFence: async () => {
             if (ctx.backend === 'webdav' && ctx.webdav?.url) {
+                // The legacy plaintext compatibility mode exists specifically for
+                // providers that cannot supply strong ETags. The WebDAV fence uses
+                // the same conditional-write capability, so attempting to acquire it
+                // would fail before the bounded legacy reread/write path can run.
+                // Current-version callers still serialize cycles locally; without a
+                // server CAS primitive, cross-device atomicity cannot be guaranteed.
+                if (ctx.allowLegacyWebdavPlaintext) return null;
                 return transport.acquireWebdavRemoteMutationFence?.() ?? null;
             }
             if (ctx.backend === 'cloud' && ctx.cloudProvider === 'dropbox') {
@@ -169,11 +190,13 @@ export function createSyncBackendIO(ctx: SyncBackendContext, transport: SyncTran
                 try {
                     const remote = await transport.webdavGet();
                     webdavDocumentVersion = { exists: remote.exists, strongEtag: remote.strongEtag };
+                    webdavDocumentSnapshot = snapshotWebdavRead(remote);
                     return remote.data;
                 } catch (error) {
                     // Invalid JSON still enters the shared repair path. Preserve the GET
                     // validator carried by that error so the repair is conditional too.
                     webdavDocumentVersion = getWebdavDocumentVersionFromError(error);
+                    webdavDocumentSnapshot = null;
                     throw error;
                 }
             }
@@ -215,11 +238,43 @@ export function createSyncBackendIO(ctx: SyncBackendContext, transport: SyncTran
                 if (!webdavDocumentVersion) {
                     throw new Error('WebDAV document version is unavailable; refusing an unconditional write');
                 }
-                if (webdavDocumentVersion.exists && !webdavDocumentVersion.strongEtag) {
+                if (
+                    webdavDocumentVersion.exists
+                    && !webdavDocumentVersion.strongEtag
+                    && !ctx.allowLegacyWebdavPlaintext
+                ) {
                     throw new Error('WebDAV server did not provide a safe strong ETag for the existing sync document; refusing to overwrite it');
                 }
                 try {
-                    const expectedEtag = webdavDocumentVersion.exists ? webdavDocumentVersion.strongEtag : null;
+                    let expectedEtag = webdavDocumentVersion.exists ? webdavDocumentVersion.strongEtag : null;
+                    if (ctx.allowLegacyWebdavPlaintext && !expectedEtag) {
+                        if (!webdavDocumentSnapshot || !transport.webdavPutLegacyPlaintext) {
+                            throw new Error('WebDAV legacy plaintext write is unavailable; refusing an unconditional write');
+                        }
+                        // A legacy provider has no atomic compare-and-swap primitive. Bound
+                        // the unavoidable race window with a fresh semantic snapshot
+                        // immediately before one non-retried plaintext PUT. Current-version
+                        // cycles remain locally serialized, but peer races are unavoidable.
+                        await assertRemoteMutationFenceHeld?.();
+                        const confirmed = await transport.webdavGet();
+                        if (snapshotWebdavRead(confirmed) !== webdavDocumentSnapshot) {
+                            throw new SyncRemoteWriteConflict();
+                        }
+                        webdavDocumentVersion = {
+                            exists: confirmed.exists,
+                            strongEtag: confirmed.strongEtag,
+                        };
+                        expectedEtag = confirmed.exists ? confirmed.strongEtag : null;
+                        if (!expectedEtag) {
+                            const result = assertRemoteMutationFenceHeld
+                                ? await transport.webdavPutLegacyPlaintext(
+                                    sanitized,
+                                    assertRemoteMutationFenceHeld,
+                                )
+                                : await transport.webdavPutLegacyPlaintext(sanitized);
+                            return normalizeRemoteWriteResult('webdav', result);
+                        }
+                    }
                     const result = assertRemoteMutationFenceHeld
                         ? await transport.webdavPut(sanitized, expectedEtag, assertRemoteMutationFenceHeld)
                         : await transport.webdavPut(sanitized, expectedEtag);

@@ -255,6 +255,45 @@ describe('webdav sync-document encryption', () => {
         expect(puts[1].headers.get('if-none-match')).toBeNull();
     });
 
+    it('allows one explicitly requested unconditional plaintext legacy write without a conditional header', async () => {
+        const requests: Headers[] = [];
+        const fetcher = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+            requests.push(new Headers(init?.headers));
+            return new Response(null, { status: 204 });
+        }) as unknown as typeof fetch;
+
+        await webdavPutSyncDocument(URL_, { tasks: [] }, {
+            fetcher,
+            legacyUnconditionalPlaintext: true,
+        });
+
+        expect(fetcher).toHaveBeenCalledOnce();
+        expect(requests[0]?.get('if-match')).toBeNull();
+        expect(requests[0]?.get('if-none-match')).toBeNull();
+    });
+
+    it('never permits the legacy unconditional path for an encrypted document', async () => {
+        const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(11), FAST_KDF);
+        const fetcher = vi.fn();
+
+        await expect(webdavPutSyncDocument(URL_, { tasks: [] }, {
+            fetcher: fetcher as unknown as typeof fetch,
+            legacyUnconditionalPlaintext: true,
+            material,
+        })).rejects.toBeInstanceOf(Error);
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+
+    it('does not retry a legacy plaintext write after an ambiguous conflict response', async () => {
+        const fetcher = vi.fn(async () => new Response(null, { status: 409 })) as unknown as typeof fetch;
+
+        await expect(webdavPutSyncDocument(URL_, { tasks: [] }, {
+            fetcher,
+            legacyUnconditionalPlaintext: true,
+        })).rejects.toThrow('WebDAV PUT failed (409)');
+        expect(fetcher).toHaveBeenCalledOnce();
+    });
+
     it('uses the encrypted artifact ETag and rejects a stale replacement', async () => {
         const { fetcher, requests } = createFakeWebdavServer();
         const material = await deriveSyncKeyMaterial('pw', new Uint8Array(16).fill(8), FAST_KDF);

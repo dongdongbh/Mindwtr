@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { normalizeWebdavUrl } from '@mindwtr/core';
+import { normalizeWebdavUrl, type WebdavSyncCompatibility } from '@mindwtr/core';
 
 export const WEBDAV_CAPABILITY_PROOF_STORAGE_KEY = '@mindwtr_webdav_capability_proof_v1';
 
@@ -39,9 +39,12 @@ export const rememberWebdavCapabilityProof = async (config: WebdavCapabilityProo
 
 export const ensureWebdavCapabilityProof = async (
   config: WebdavCapabilityProofConfig,
-  probe: () => Promise<void>,
-): Promise<void> => {
-  if (await hasWebdavCapabilityProof(config)) return;
-  await probe();
-  await rememberWebdavCapabilityProof(config);
+  probe: () => Promise<WebdavSyncCompatibility | void>,
+): Promise<WebdavSyncCompatibility> => {
+  if (await hasWebdavCapabilityProof(config)) return 'strong-etag';
+  const compatibility = await probe() ?? 'strong-etag';
+  // Do not pin a legacy result; ordinary sync should notice when a provider
+  // later starts serving strong ETags.
+  if (compatibility === 'strong-etag') await rememberWebdavCapabilityProof(config);
+  return compatibility;
 };

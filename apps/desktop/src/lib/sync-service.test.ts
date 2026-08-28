@@ -3,7 +3,6 @@ import {
     runAfterStoreWriteLock,
     runDataTransferTransactionWithoutSnapshot,
     runSerializedSyncDocumentOperation,
-    SyncEncryptionRemoteVersionUnavailableError,
     SyncFileLockBusyError,
     SyncRemoteWriteConflict,
     type AppData,
@@ -639,7 +638,7 @@ describe('SyncService testability hooks', () => {
         localStorage.setItem(WEBDAV_ALLOW_INSECURE_HTTP_KEY, 'false');
         sessionStorage.setItem(WEBDAV_PASSWORD_KEY, 'secret');
         const performSyncCycleMock = vi.fn();
-        const capabilityProbe = vi.spyOn(SyncService as any, 'probeWebDavStrongEtagSupport')
+        const capabilityProbe = vi.spyOn(SyncService as any, 'probeWebDavCompatibility')
             .mockRejectedValue(
                 new Error('SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE: conditional writes unavailable'),
             );
@@ -662,11 +661,14 @@ describe('SyncService testability hooks', () => {
                 success: false,
                 error: expect.stringContaining('conditional writes unavailable'),
             });
-            expect(capabilityProbe).toHaveBeenCalledWith(expect.objectContaining({
-                url: 'https://sync.example.com',
-                username: 'alice',
-                password: 'secret',
-            }));
+            expect(capabilityProbe).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    url: 'https://sync.example.com',
+                    username: 'alice',
+                    password: 'secret',
+                }),
+                true,
+            );
             expect(performSyncCycleMock).not.toHaveBeenCalled();
             expect(localStorage.getItem(WEBDAV_CAPABILITY_PROOF_STORAGE_KEY)).toBeNull();
         } finally {
@@ -2786,7 +2788,7 @@ describe('SyncService testability hooks', () => {
         expect(firstCall[1]).toMatchObject({ method: 'GET' });
     });
 
-    it('preflights an empty WebDAV location by rereading a create-only probe', async () => {
+    it('accepts an empty WebDAV location observationally without creating a capability probe', async () => {
         const { fetchSpy, methods } = createTestWebdavCapabilityFetch(null);
         __syncServiceTestUtils.setDependenciesForTests({
             getTauriFetch: async () => fetchSpy as unknown as typeof fetch,
@@ -2798,18 +2800,14 @@ describe('SyncService testability hooks', () => {
             password: 'secret',
         });
 
-        expect(methods).toEqual(['GET', 'PUT', 'GET', 'PUT', 'PUT', 'GET', 'PUT', 'DELETE', 'GET', 'DELETE']);
-        expect(new Headers(fetchSpy.mock.calls[1]?.[1]?.headers).get('if-none-match')).toBe('*');
-        expect(new Headers(fetchSpy.mock.calls[3]?.[1]?.headers).get('if-none-match')).toBe('*');
-        expect(new Headers(fetchSpy.mock.calls[6]?.[1]?.headers).get('if-match')).toBe('"probe-v1"');
-        expect(new Headers(fetchSpy.mock.calls[7]?.[1]?.headers).get('if-match')).toBe('"probe-v1"');
-        expect(new Headers(fetchSpy.mock.calls[9]?.[1]?.headers).get('if-match')).toBe('"probe-v2"');
+        expect(methods).toEqual(['GET']);
+        expect(localStorage.getItem(WEBDAV_CAPABILITY_PROOF_STORAGE_KEY)).toBeNull();
     });
 
     it.each([
         ['missing', undefined],
         ['weak', 'W/"v1"'],
-    ] as const)('rejects ordinary WebDAV setup when data.json has a %s ETag', async (_case, etag) => {
+    ] as const)('accepts legacy plaintext WebDAV setup when data.json has a %s ETag', async (_case, etag) => {
         const fetchSpy = vi.fn(async () => new Response('{}', {
             status: 200,
             headers: etag ? { etag } : undefined,
@@ -2822,8 +2820,17 @@ describe('SyncService testability hooks', () => {
             url: 'https://example.com/remote.php/dav/files/user/mindwtr',
             username: 'alice',
             password: 'secret',
-        })).rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+        })).resolves.toBeUndefined();
         expect(fetchSpy).toHaveBeenCalledOnce();
+        expect(localStorage.getItem(WEBDAV_CAPABILITY_PROOF_STORAGE_KEY)).toBeNull();
+    });
+
+    it.each([
+        [{ state: 'off' }, true],
+        [{ state: 'enabled' }, false],
+        [{ state: 'off', incompleteTransition: 'enable' }, false],
+    ] as const)('allows legacy plaintext WebDAV only for exact-off posture %j', (status, expected) => {
+        expect(__syncServiceTestUtils.isLegacyWebdavPlaintextPostureAllowed(status)).toBe(expected);
     });
 
     it('rejects an HTML/login response with 200 and a strong ETag during WebDAV setup', async () => {

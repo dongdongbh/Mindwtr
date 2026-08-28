@@ -37,6 +37,9 @@ export interface WebDavOptions {
     onProgress?: (loaded: number, total: number) => void;
     allowInsecureHttp?: boolean;
     allowWeakFingerprint?: boolean;
+    /** Internal one-shot write mode. A legacy plaintext document without a usable
+     * generation cannot safely retry after an ambiguous response. */
+    disableParentCollectionRetry?: boolean;
 }
 
 export type RemoteFileMetadata = {
@@ -502,7 +505,11 @@ export async function webdavPutJson(
     );
 
     let res = await sendPut();
-    if (!res.ok && (res.status === 404 || res.status === 409)) {
+    if (
+        !options.disableParentCollectionRetry
+        && !res.ok
+        && (res.status === 404 || res.status === 409)
+    ) {
         await ensureWebdavParentCollectionsBeforePut(url, options);
         res = await sendPut();
     }
@@ -631,7 +638,11 @@ async function putWebdavBytes(
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     );
     let res = await sendPut();
-    if (!res.ok && (res.status === 404 || res.status === 409)) {
+    if (
+        !options.disableParentCollectionRetry
+        && !res.ok
+        && (res.status === 404 || res.status === 409)
+    ) {
         await ensureWebdavParentCollectionsBeforePut(url, options);
         res = await sendPut();
     }
@@ -659,6 +670,11 @@ export type WebDavSyncDataOptions = WebDavOptions & {
     /** null creates only if absent; a strong ETag replaces only that exact generation.
      * Required by webdavPutSyncDocument and ignored by reads. */
     expectedEtag?: string | null;
+    /** Explicit compatibility path for an existing plaintext document on a
+     * provider that supplies no strong ETag. Callers must reread and compare the
+     * remote snapshot immediately before writing. It is deliberately one-shot
+     * and is rejected whenever encryption material is present. */
+    legacyUnconditionalPlaintext?: boolean;
 };
 
 export type WebDavSyncDataResult<T> = WebDavDocumentVersion & (
@@ -799,10 +815,29 @@ export async function webdavPutSyncDocument(
     data: unknown,
     options: WebDavSyncDataOptions = {},
 ): Promise<RemoteJsonWriteResult> {
-    if (!Object.prototype.hasOwnProperty.call(options, 'expectedEtag')) {
+    const legacyPlaintext = options.legacyUnconditionalPlaintext === true;
+    if (!legacyPlaintext && !Object.prototype.hasOwnProperty.call(options, 'expectedEtag')) {
         throw new Error('WebDAV sync-document write requires an expected ETag or an explicit create condition');
     }
-    const { material, cryptoPrims, expectedEtag = null, ...webdavOptions } = options;
+    const {
+        material,
+        cryptoPrims,
+        expectedEtag = null,
+        legacyUnconditionalPlaintext: _legacyUnconditionalPlaintext,
+        ...webdavOptions
+    } = options;
+    if (legacyPlaintext) {
+        if (material) {
+            throw new SyncEncryptionRemoteVersionUnavailableError('Encrypted WebDAV sync document');
+        }
+        if (Object.prototype.hasOwnProperty.call(options, 'expectedEtag')) {
+            throw new Error('Legacy WebDAV plaintext write cannot also carry a conditional generation');
+        }
+        return webdavPutJson(url, data, {
+            ...webdavOptions,
+            disableParentCollectionRetry: true,
+        });
+    }
     const conditionalOptions = withWebdavDocumentWriteCondition(webdavOptions, expectedEtag);
     if (!material) {
         return webdavPutJson(url, data, conditionalOptions);
@@ -1039,7 +1074,29 @@ const assertWebdavConditionalWriteSupport = async (
     }
 };
 
-/** Preflights the generation contract required by ordinary WebDAV sync and encryption
+export type WebdavSyncCompatibility = 'strong-etag' | 'legacy-plaintext';
+
+/** Validates the ordinary plaintext endpoint and reports whether it supports the full
+ * generation contract. Legacy mode is observational only: it does not issue an
+ * unconditional probe write, and callers must not cache it because provider capability
+ * can improve later. */
+export async function probeWebdavSyncCompatibility(
+    documentUrl: string,
+    options: WebDavOptions = {},
+): Promise<WebdavSyncCompatibility> {
+    const documentOptions = {
+        ...options,
+        maxBytes: options.maxBytes ?? MAX_SYNC_DOCUMENT_BYTES,
+    };
+    const current = await webdavGetFileVersioned(documentUrl, documentOptions);
+    if (current.bytes === null) return 'legacy-plaintext';
+    parseOptionalWebdavJson(new TextDecoder().decode(current.bytes));
+    if (!current.version) return 'legacy-plaintext';
+    await assertWebdavConditionalWriteSupport(documentUrl, documentOptions);
+    return 'strong-etag';
+}
+
+/** Preflights the generation contract required by encrypted WebDAV sync and encryption
  * transitions. An existing document must carry a strong ETag. A unique probe then proves
  * create-only, stale-replacement, and stale-delete conditions are enforced, not merely accepted as headers.
  * Cleanup rereads and conditionally deletes the probe; it never issues an unguarded delete. */
