@@ -4117,12 +4117,18 @@ mod tests {
                     .to_vec())
             }
         };
-        let mut wait = |_duration: Duration| waits += 1;
+        let mut is_evicted = |_path: &Path| Ok(false);
+        let mut durations = Vec::new();
+        let mut wait = |duration: Duration| {
+            waits += 1;
+            durations.push(duration);
+        };
 
         let value = read_sync_candidate_from_retained_root_with(
             &primary,
             5,
             SyncFileCrypto::Off,
+            &mut is_evicted,
             &mut read_bytes,
             &mut wait,
         )
@@ -4131,6 +4137,7 @@ mod tests {
         assert_eq!(value["tasks"][0]["id"], "new-primary");
         assert_eq!(reads, 2, "primary retries before considering recovery files");
         assert_eq!(waits, 1);
+        assert_eq!(durations, vec![Duration::from_millis(120)]);
 
         let source = include_str!("sync.rs");
         let retained_reader = source
@@ -4151,6 +4158,71 @@ mod tests {
                 "retained reader must preserve the old recovery attempt count ({required})"
             );
         }
+    }
+
+    #[test]
+    fn retained_reader_preserves_icloud_hydration_retry_timing() {
+        let primary = PathBuf::from(DATA_FILE_NAME);
+        let mut eviction_checks = 0;
+        let mut reads = 0;
+        let mut waits = Vec::new();
+        let mut is_evicted = |_path: &Path| {
+            eviction_checks += 1;
+            Ok(true)
+        };
+        let mut read_bytes = |_path: &Path| {
+            reads += 1;
+            Ok(Vec::new())
+        };
+
+        let error = read_sync_candidate_from_retained_root_with(
+            &primary,
+            5,
+            SyncFileCrypto::Off,
+            &mut is_evicted,
+            &mut read_bytes,
+            &mut |duration| waits.push(duration),
+        )
+        .expect_err("an evicted primary remains unavailable");
+
+        assert!(error.contains("iCloud-evicted"));
+        assert_eq!(eviction_checks, 5);
+        assert_eq!(reads, 0, "placeholder bytes must not be parsed");
+        assert_eq!(waits, vec![Duration::from_millis(500); 4]);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn retained_icloud_check_follows_held_root_after_path_rebind() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let sync_dir = parent.path().join("sync");
+        let displaced = parent.path().join("displaced-sync");
+        fs::create_dir(&sync_dir).expect("create sync root");
+        let primary = sync_dir.join(DATA_FILE_NAME);
+        fs::write(sync_dir.join(format!(".{DATA_FILE_NAME}.icloud")), b"placeholder")
+            .expect("seed retained placeholder");
+        let lock = acquire_sync_lock(&sync_dir).expect("acquire retained authority");
+        let root = RetainedSyncRoot::new(&sync_dir, &lock);
+        fs::rename(&sync_dir, &displaced).expect("displace retained root");
+        fs::create_dir(&sync_dir).expect("create replacement root");
+        fs::write(&primary, vec![b'x'; 100]).expect("seed hydrated-looking replacement");
+
+        let evicted = retained_icloud_eviction_state_with(
+            &primary,
+            true,
+            &mut |candidate| root.exists(candidate).map_err(|error| error.to_string()),
+            &mut |candidate| {
+                root.open_read(candidate)
+                    .and_then(|file| file.metadata())
+                    .map(|metadata| metadata.len())
+                    .map_err(|error| error.to_string())
+            },
+        )
+        .expect("inspect held root");
+
+        assert!(evicted, "the held root's placeholder is authoritative");
+        assert_eq!(fs::read(&primary).expect("replacement untouched").len(), 100);
+        release_sync_lock(&lock);
     }
 
     #[test]
@@ -14601,32 +14673,87 @@ fn read_sync_candidate_from_retained_root(
     attempts: usize,
     crypto: SyncFileCrypto<'_>,
 ) -> Result<Value, String> {
+    let mut is_evicted = |path: &Path| retained_icloud_eviction_state(root, path);
     let mut read_bytes = |path: &Path| root.read(path).map_err(|error| error.to_string());
     let mut wait = |duration| std::thread::sleep(duration);
     read_sync_candidate_from_retained_root_with(
         path,
         attempts,
         crypto,
+        &mut is_evicted,
         &mut read_bytes,
         &mut wait,
     )
 }
 
-fn read_sync_candidate_from_retained_root_with<ReadBytes, Wait>(
+fn retained_icloud_eviction_state_with<Exists, FileLen>(
+    path: &Path,
+    macos_semantics: bool,
+    exists: &mut Exists,
+    file_len: &mut FileLen,
+) -> Result<bool, String>
+where
+    Exists: FnMut(&Path) -> Result<bool, String>,
+    FileLen: FnMut(&Path) -> Result<u64, String>,
+{
+    if !macos_semantics {
+        return Ok(false);
+    }
+    if path.extension().is_some_and(|extension| extension == "icloud") {
+        return Ok(true);
+    }
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name().and_then(OsStr::to_str))
+    else {
+        return Ok(false);
+    };
+    let placeholder = parent.join(format!(".{name}.icloud"));
+    if !exists(&placeholder)? {
+        return Ok(false);
+    }
+    if !exists(path)? {
+        return Ok(true);
+    }
+    Ok(file_len(path)? < 50)
+}
+
+fn retained_icloud_eviction_state(
+    root: &RetainedSyncRoot<'_>,
+    path: &Path,
+) -> Result<bool, String> {
+    retained_icloud_eviction_state_with(
+        path,
+        cfg!(target_os = "macos"),
+        &mut |candidate| root.exists(candidate).map_err(|error| error.to_string()),
+        &mut |candidate| {
+            root.open_read(candidate)
+                .and_then(|file| file.metadata())
+                .map(|metadata| metadata.len())
+                .map_err(|error| error.to_string())
+        },
+    )
+}
+
+fn read_sync_candidate_from_retained_root_with<IsEvicted, ReadBytes, Wait>(
     path: &Path,
     attempts: usize,
     crypto: SyncFileCrypto<'_>,
+    is_evicted: &mut IsEvicted,
     read_bytes: &mut ReadBytes,
     wait: &mut Wait,
 ) -> Result<Value, String>
 where
+    IsEvicted: FnMut(&Path) -> Result<bool, String>,
     ReadBytes: FnMut(&Path) -> Result<Vec<u8>, String>,
     Wait: FnMut(Duration),
 {
     let mut last_error = None;
     for attempt in 0..attempts {
-        if is_icloud_evicted(path) {
+        if is_evicted(path)? {
             last_error = Some("File is iCloud-evicted (placeholder only)".to_string());
+            if attempt + 1 < attempts {
+                wait(Duration::from_millis(500));
+            }
+            continue;
         } else {
             match read_bytes(path)
                 .and_then(|bytes| read_sync_candidate_bytes_with(&bytes, crypto))
@@ -14760,7 +14887,7 @@ fn read_sync_file_from_retained_root_with(
         Ok(None)
     };
 
-    if is_icloud_evicted(&primary) {
+    if retained_icloud_eviction_state(root, &primary)? {
         if let Some(data) = read_recovery()? {
             return Ok(data);
         }
