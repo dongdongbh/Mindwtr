@@ -6039,6 +6039,34 @@ mod tests {
     }
 
     #[test]
+    fn windows_directory_parser_accepts_a_packed_final_name_at_the_field_offset() {
+        // On x64 FILE_ID_BOTH_DIR_INFO has trailing structure padding: the
+        // FileName field starts at byte 104 even though size_of - 2 is 110.
+        // A final one-code-unit name can therefore validly end at byte 106.
+        assert_eq!(
+            retained_directory_name_range(0, 104, 2, 106).expect("packed final entry"),
+            104..106
+        );
+        assert!(retained_directory_name_range(0, 104, 4, 106).is_err());
+        assert!(retained_directory_name_range(usize::MAX, 104, 2, usize::MAX).is_err());
+
+        let source = include_str!("sync.rs");
+        let windows_enumerator = source
+            .split_once("#[cfg(target_os = \"windows\")]\nfn retained_root_list_names")
+            .expect("Windows retained enumerator")
+            .1
+            .split_once("\nfn retained_directory_name_range")
+            .expect("end of Windows retained enumerator")
+            .0;
+        assert!(windows_enumerator.contains(
+            "std::mem::offset_of!(FILE_ID_BOTH_DIR_INFO, FileName)"
+        ));
+        assert!(!windows_enumerator.contains(
+            "std::mem::size_of::<FILE_ID_BOTH_DIR_INFO>()\n                - std::mem::size_of::<u16>()"
+        ));
+    }
+
+    #[test]
     fn sync_folder_probe_reports_create_failure_and_cleans_up() {
         assert_folder_probe_failure(
             ProbeFailureStage::Create,
@@ -13602,7 +13630,11 @@ fn retained_root_list_names(directory: &File) -> std::io::Result<Vec<OsString>> 
 
         let mut offset = 0_usize;
         loop {
-            if offset + std::mem::size_of::<FILE_ID_BOTH_DIR_INFO>() > buffer_bytes {
+            let fixed = std::mem::offset_of!(FILE_ID_BOTH_DIR_INFO, FileName);
+            if offset
+                .checked_add(fixed)
+                .is_none_or(|end| end > buffer_bytes)
+            {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "File Sync directory enumeration returned a truncated entry",
@@ -13625,14 +13657,12 @@ fn retained_root_list_names(directory: &File) -> std::io::Result<Vec<OsString>> 
                         "File Sync directory enumeration returned an invalid name length",
                     )
                 })?;
-            let fixed = std::mem::size_of::<FILE_ID_BOTH_DIR_INFO>()
-                - std::mem::size_of::<u16>();
-            if offset + fixed + name_units * std::mem::size_of::<u16>() > buffer_bytes {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "File Sync directory enumeration returned a truncated name",
-                ));
-            }
+            retained_directory_name_range(
+                offset,
+                fixed,
+                name_units * std::mem::size_of::<u16>(),
+                buffer_bytes,
+            )?;
             let name = unsafe { std::slice::from_raw_parts(entry.FileName.as_ptr(), name_units) };
             if name != ['.' as u16] && name != ['.' as u16, '.' as u16] {
                 names.push(OsString::from_wide(name));
@@ -13656,6 +13686,36 @@ fn retained_root_list_names(directory: &File) -> std::io::Result<Vec<OsString>> 
         }
     }
     Ok(names)
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn retained_directory_name_range(
+    entry_offset: usize,
+    file_name_offset: usize,
+    file_name_bytes: usize,
+    buffer_bytes: usize,
+) -> std::io::Result<std::ops::Range<usize>> {
+    let start = entry_offset
+        .checked_add(file_name_offset)
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "File Sync directory enumeration name offset overflowed",
+            )
+        })?;
+    let end = start.checked_add(file_name_bytes).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "File Sync directory enumeration name length overflowed",
+        )
+    })?;
+    if end > buffer_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "File Sync directory enumeration returned a truncated name",
+        ));
+    }
+    Ok(start..end)
 }
 
 #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
