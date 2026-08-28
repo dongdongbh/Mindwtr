@@ -82,16 +82,30 @@ export const buildSyncPayloadSurfaceTraceExtra = (
  */
 const payloadTraceSignatureCache = new WeakMap<AppData, Record<string, string>>();
 
+/** Past this many records the whole-document `fingerprint` stops being worth its
+ *  cost. It hashes ~98% of the same bytes as `tasksSig`, and the six surface
+ *  signatures together identify a document more precisely than it does, so above
+ *  the threshold we drop it and keep them. #766's reporter confirmed the trace
+ *  was itself what made the app feel slow while they captured a log; a diagnostic
+ *  must not be the thing it is measuring. Ordinary libraries are far below this
+ *  and keep the full trace. */
+const SYNC_TRACE_FULL_FINGERPRINT_MAX_RECORDS = 2000;
+
+const countTraceRecords = (data: AppData): number => (
+    (Array.isArray(data.tasks) ? data.tasks.length : 0)
+    + (Array.isArray(data.projects) ? data.projects.length : 0)
+);
+
 const getPayloadTraceSignatures = (data: AppData): Record<string, string> => {
     const cached = payloadTraceSignatureCache.get(data);
     if (cached) return cached;
+    const sanitized = sanitizeAppDataForRemote(data);
+    const surfaces = nameSurfaceSignatures(buildSurfaceSignatures(sanitized), '');
     // computeStableValueFingerprint of the sanitized document IS
     // computeSyncPayloadFingerprint(data) — same value, one less sanitize pass.
-    const sanitized = sanitizeAppDataForRemote(data);
-    const signatures = {
-        fingerprint: computeStableValueFingerprint(sanitized),
-        ...nameSurfaceSignatures(buildSurfaceSignatures(sanitized), ''),
-    };
+    const signatures = countTraceRecords(data) > SYNC_TRACE_FULL_FINGERPRINT_MAX_RECORDS
+        ? { fingerprintSkipped: 'large-document', ...surfaces }
+        : { fingerprint: computeStableValueFingerprint(sanitized), ...surfaces };
     payloadTraceSignatureCache.set(data, signatures);
     return signatures;
 };

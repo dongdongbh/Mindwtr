@@ -202,3 +202,28 @@ describe('sync payload trace signature memo (#766)', () => {
         expect(buildSyncPayloadTraceExtra({ ...data }).tasksSig).not.toBe(first.tasksSig);
     });
 });
+
+describe('large-document trace budget (#766)', () => {
+    const bigData = (count: number): AppData => appData({
+        tasks: Array.from({ length: count }, (_, index) => task(`t-${index}`)),
+    });
+
+    it('keeps the whole-document fingerprint for an ordinary library', () => {
+        const extra = buildSyncPayloadTraceExtra(bigData(50));
+        expect(extra.fingerprint).toBeDefined();
+        expect(extra.fingerprintSkipped).toBeUndefined();
+        expect(extra.tasksSig).toBeDefined();
+    });
+
+    it('drops only that fingerprint past the record threshold, keeping every surface signature', () => {
+        const extra = buildSyncPayloadTraceExtra(bigData(2001));
+        expect(extra.fingerprint).toBeUndefined();
+        expect(extra.fingerprintSkipped).toBe('large-document');
+        // The surface signatures are what actually identify the document; the
+        // dropped fingerprint hashed ~98% of the same bytes as tasksSig.
+        expect(extra.tasksSig).toBeDefined();
+        expect(extra.projectsSig).toBeDefined();
+        expect(extra.settingsSig).toBeDefined();
+        expect(extra.tasks).toBe('2001');
+    });
+});
