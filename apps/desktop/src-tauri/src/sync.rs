@@ -4532,6 +4532,33 @@ mod tests {
         release_file_sync_lease_token(&state, &token, "main").expect("release cycle lease");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn renderer_cycle_lease_rejects_a_replaced_sync_root() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let sync_root = temp.path().join("sync-root");
+        fs::create_dir(&sync_root).expect("sync root");
+        let state = FileSyncLeaseState::default();
+        let token = acquire_file_sync_lease_for_dir(&state, &sync_root, "main")
+            .expect("cycle lease");
+
+        let original_root = temp.path().join("original-sync-root");
+        fs::rename(&sync_root, &original_root).expect("move leased root");
+        fs::create_dir(&sync_root).expect("replacement root");
+        let replacement_marker = sync_root.join("must-remain");
+        fs::write(&replacement_marker, b"replacement").expect("replacement marker");
+
+        let error = with_file_sync_lease(&state, &token, "main", |_| Ok(()))
+            .expect_err("replaced root must invalidate the held lease");
+        assert!(error.contains("root directory changed"));
+        assert_eq!(
+            fs::read(replacement_marker).expect("replacement untouched"),
+            b"replacement"
+        );
+
+        release_file_sync_lease_token(&state, &token, "main").expect("release cycle lease");
+    }
+
     #[test]
     fn destroyed_renderer_releases_its_leases_and_allows_reacquisition() {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -10936,6 +10963,7 @@ struct HeldFileSyncLease {
     sync_dir: PathBuf,
     owner_window_label: String,
     _sync_lock: SyncFileLock,
+    publication_root: file_sync_attachment_publication::PublicationRoot,
 }
 
 /// Opaque, process-bounded File Sync leases held for a complete renderer sync
@@ -11033,7 +11061,12 @@ fn acquire_file_sync_lease_for_dir(
     owner_window_label: &str,
 ) -> Result<String, String> {
     let sync_dir = normalize_lease_sync_dir(sync_dir);
+    let publication_root = file_sync_attachment_publication::PublicationRoot::bind(&sync_dir)?;
     let sync_lock = acquire_sync_lock(&sync_dir)?;
+    if let Err(error) = publication_root.revalidate_root() {
+        release_sync_lock(&sync_lock);
+        return Err(error);
+    }
     let mut leases = state
         .leases
         .lock()
@@ -11054,6 +11087,7 @@ fn acquire_file_sync_lease_for_dir(
             sync_dir,
             owner_window_label: owner_window_label.to_string(),
             _sync_lock: sync_lock,
+            publication_root,
         },
     );
     Ok(token)
@@ -11066,21 +11100,22 @@ fn with_file_sync_lease<T, F>(
     operation: F,
 ) -> Result<T, String>
 where
-    F: FnOnce(&Path) -> Result<T, String>,
+    F: FnOnce(&mut HeldFileSyncLease) -> Result<T, String>,
 {
     // Keep the map guard for the whole operation so a concurrent release cannot
     // drop the OS lock between token validation and the final journal/file write.
-    let leases = state
+    let mut leases = state
         .leases
         .lock()
         .map_err(|_| "File Sync lease state is unavailable".to_string())?;
     let lease = leases
-        .get(token)
+        .get_mut(token)
         .ok_or_else(|| "Unknown or already released File Sync lease".to_string())?;
     if lease.owner_window_label != owner_window_label {
         return Err("File Sync lease belongs to a different renderer window".to_string());
     }
-    operation(&lease.sync_dir)
+    lease.publication_root.revalidate_root()?;
+    operation(lease)
 }
 
 fn release_file_sync_lease_token(
@@ -11147,10 +11182,10 @@ pub(crate) fn acquire_file_sync_lease(
             .ok_or_else(|| "Sync path is not configured".to_string())?,
     };
     let token = acquire_file_sync_lease_for_dir(&state, &sync_dir, window.label())?;
-    let recovery = with_file_sync_lease(&state, &token, window.label(), |leased_root| {
+    let recovery = with_file_sync_lease(&state, &token, window.label(), |lease| {
         file_sync_attachment_publication::recover(
             &crate::storage::get_data_dir(&app),
-            leased_root,
+            &mut lease.publication_root,
         )
         .map(|_| ())
     });
@@ -12080,6 +12115,7 @@ pub(crate) fn write_sync_file(
         if lease.owner_window_label != window.label() {
             return Err("File Sync lease belongs to a different renderer window".to_string());
         }
+        lease.publication_root.revalidate_root()?;
         return write_sync_file_to_dir_with_lease(
             &sync_dir,
             data,
@@ -14290,10 +14326,10 @@ pub(crate) fn sync_fs_reserve_attachment_generation(
     expected_sha256: String,
 ) -> Result<PublicationReservation, String> {
     let target_path = PathBuf::from(target_path);
-    with_file_sync_lease(&state, &lease_token, window.label(), |leased_root| {
+    with_file_sync_lease(&state, &lease_token, window.label(), |lease| {
         file_sync_attachment_publication::reserve(
             &crate::storage::get_data_dir(&app),
-            leased_root,
+            &mut lease.publication_root,
             &target_path,
             expected_size,
             &expected_sha256,
@@ -14429,10 +14465,10 @@ pub(crate) fn sync_fs_publish_attachment_generation(
     lease_token: String,
     operation_id: String,
 ) -> Result<FileSyncAttachmentGenerationPublication, String> {
-    with_file_sync_lease(&state, &lease_token, window.label(), |leased_root| {
+    with_file_sync_lease(&state, &lease_token, window.label(), |lease| {
         let outcome = file_sync_attachment_publication::publish_with(
             &crate::storage::get_data_dir(&app),
-            leased_root,
+            &mut lease.publication_root,
             &operation_id,
             |scratch_path, target_path, expected_size, expected_sha256| {
                 publish_file_sync_attachment_generation_with(
@@ -14470,10 +14506,10 @@ pub(crate) fn sync_fs_abandon_attachment_generation(
     lease_token: String,
     operation_id: String,
 ) -> Result<(), String> {
-    with_file_sync_lease(&state, &lease_token, window.label(), |leased_root| {
+    with_file_sync_lease(&state, &lease_token, window.label(), |lease| {
         file_sync_attachment_publication::abandon(
             &crate::storage::get_data_dir(&app),
-            leased_root,
+            &mut lease.publication_root,
             &operation_id,
         )
     })
