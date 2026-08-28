@@ -4553,8 +4553,8 @@ mod tests {
     fn renderer_cycle_lease_blocks_native_transitions_until_release() {
         let dir = tempfile::tempdir().expect("temp dir");
         let state = FileSyncLeaseState::default();
-        let token =
-            acquire_file_sync_lease_for_dir(&state, dir.path(), "main").expect("cycle lease");
+        let token = acquire_file_sync_lease_for_dir(&state, dir.path(), "main")
+            .expect("cycle lease");
 
         // Enable, passphrase change and disable all enter through
         // `acquire_sync_lock`; none may cross the ordinary cycle's final
@@ -4593,6 +4593,122 @@ mod tests {
         drop(leases);
 
         release_file_sync_lease_token(&state, &token, "main").expect("release cycle lease");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn renderer_cycle_document_write_rejects_lock_replacement_before_finalization() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let initial = serde_json::json!({
+            "tasks": [{"id": "original"}],
+            "projects": [],
+            "sections": [],
+            "areas": [],
+            "people": [],
+            "settings": {}
+        });
+        write_sync_file_to_dir(dir.path(), initial, None).expect("seed document");
+        let document_path = dir.path().join("data.json");
+        let document_before = fs::read(&document_path).expect("read seeded document");
+        let state = FileSyncLeaseState::default();
+        let token =
+            acquire_file_sync_lease_for_dir(&state, dir.path(), "main").expect("cycle lease");
+
+        let error = with_file_sync_lease(&state, &token, "main", |lease| {
+            let sync_dir = lease.sync_dir.clone();
+            let lock_path = sync_dir.join(".mindwtr.lock");
+            let displaced_lock = sync_dir.join(".mindwtr.lock.displaced");
+            let mut replaced = false;
+            let mut validate_lease = || {
+                if !replaced {
+                    fs::rename(&lock_path, &displaced_lock).map_err(|error| error.to_string())?;
+                    fs::write(&lock_path, b"peer lock").map_err(|error| error.to_string())?;
+                    replaced = true;
+                }
+                revalidate_sync_lock(&lease._sync_lock, &sync_dir)
+            };
+            write_sync_file_to_dir_with_lease_and_validation(
+                &sync_dir,
+                serde_json::json!({
+                    "tasks": [{"id": "replacement"}],
+                    "projects": [],
+                    "sections": [],
+                    "areas": [],
+                    "people": [],
+                    "settings": {}
+                }),
+                None,
+                SyncFileCrypto::Off,
+                true,
+                &mut validate_lease,
+            )
+        })
+        .expect_err("replaced legacy lock must invalidate the renderer write");
+
+        assert!(
+            error.contains("lock identity changed"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(
+            fs::read(&document_path).expect("read unchanged document"),
+            document_before
+        );
+        release_file_sync_lease_token(&state, &token, "main")
+            .expect_err("release must retain the identity-loss result");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn self_acquired_document_write_rejects_lock_replacement_before_finalization() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let initial = serde_json::json!({
+            "tasks": [{"id": "original"}],
+            "projects": [],
+            "sections": [],
+            "areas": [],
+            "people": [],
+            "settings": {}
+        });
+        write_sync_file_to_dir(dir.path(), initial, None).expect("seed document");
+        let document_path = dir.path().join("data.json");
+        let document_before = fs::read(&document_path).expect("read seeded document");
+        let lock_path = dir.path().join(".mindwtr.lock");
+        let displaced_lock = dir.path().join(".mindwtr.lock.displaced");
+        let mut replaced = false;
+        let mut replace_before_finalization = || {
+            if !replaced {
+                fs::rename(&lock_path, &displaced_lock).map_err(|error| error.to_string())?;
+                fs::write(&lock_path, b"peer lock").map_err(|error| error.to_string())?;
+                replaced = true;
+            }
+            Ok(())
+        };
+
+        let error = write_sync_file_to_dir_with_lease_and_validation(
+            dir.path(),
+            serde_json::json!({
+                "tasks": [{"id": "replacement"}],
+                "projects": [],
+                "sections": [],
+                "areas": [],
+                "people": [],
+                "settings": {}
+            }),
+            None,
+            SyncFileCrypto::Off,
+            false,
+            &mut replace_before_finalization,
+        )
+        .expect_err("replaced legacy lock must invalidate the self-acquired write");
+
+        assert!(
+            error.contains("lock identity changed"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(
+            fs::read(&document_path).expect("read unchanged document"),
+            document_before
+        );
     }
 
     #[cfg(unix)]
@@ -13277,6 +13393,28 @@ fn write_sync_file_to_dir_with_lease(
     crypto: SyncFileCrypto<'_>,
     lease_already_held: bool,
 ) -> Result<bool, String> {
+    let mut validate_existing_lease = || Ok(());
+    write_sync_file_to_dir_with_lease_and_validation(
+        sync_dir,
+        data,
+        expected_fingerprint,
+        crypto,
+        lease_already_held,
+        &mut validate_existing_lease,
+    )
+}
+
+fn write_sync_file_to_dir_with_lease_and_validation<ValidateLease>(
+    sync_dir: &Path,
+    data: Value,
+    expected_fingerprint: Option<&str>,
+    crypto: SyncFileCrypto<'_>,
+    lease_already_held: bool,
+    validate_existing_lease: &mut ValidateLease,
+) -> Result<bool, String>
+where
+    ValidateLease: FnMut() -> Result<(), String>,
+{
     let data_base = crypto.data_base();
     let sync_file = sync_dir.join(&data_base);
     let backup_file = sync_dir.join(format!("{data_base}.bak"));
@@ -13366,6 +13504,15 @@ fn write_sync_file_to_dir_with_lease(
                 .map_err(|error| terminal_error(error))?,
         };
 
+        // This is the final boundary before any canonical document mutation.
+        // A renderer-held lease supplies its retained root/legacy-lock validator;
+        // a self-acquired write validates the lock it owns locally. The second
+        // check below binds the reported success to the same authority.
+        validate_existing_lease()?;
+        if let Some(sync_lock) = &sync_lock {
+            revalidate_sync_lock(sync_lock, sync_dir)?;
+        }
+
         let windows_replacement = cfg!(windows) && sync_file.exists();
         let mut before_stage = |_stage: AtomicWriteStage| Ok(());
         // Windows cannot rename over an existing destination. Move the primary
@@ -13388,7 +13535,7 @@ fn write_sync_file_to_dir_with_lease(
             None
         };
 
-        match atomic_tmp_write_then_rename_with(
+        let finalized = match atomic_tmp_write_then_rename_with(
             &tmp_file,
             &sync_file,
             &content,
@@ -13446,7 +13593,15 @@ fn write_sync_file_to_dir_with_lease(
                     )),
                 }
             }
+        };
+
+        if finalized.is_ok() {
+            validate_existing_lease()?;
+            if let Some(sync_lock) = &sync_lock {
+                revalidate_sync_lock(sync_lock, sync_dir)?;
+            }
         }
+        finalized
     })();
 
     if let Some(sync_lock) = &sync_lock {
@@ -13477,29 +13632,22 @@ pub(crate) fn write_sync_file(
     };
     let material = resolve_sync_encryption_material(&app)?;
     if let Some(token) = lease_token {
-        // Keep the map guard for the whole write so a concurrent release cannot
-        // drop the OS lock between token validation and the final durable rename.
-        let leases = lease_state
-            .leases
-            .lock()
-            .map_err(|_| "File Sync lease state is unavailable".to_string())?;
-        let lease = leases
-            .get(&token)
-            .ok_or_else(|| "Unknown or already released File Sync lease".to_string())?;
-        if lease.sync_dir != normalize_lease_sync_dir(&sync_dir) {
-            return Err("File Sync lease does not belong to this sync folder".to_string());
-        }
-        if lease.owner_window_label != window.label() {
-            return Err("File Sync lease belongs to a different renderer window".to_string());
-        }
-        lease.publication_root.revalidate_root()?;
-        return write_sync_file_to_dir_with_lease(
-            &sync_dir,
-            data,
-            expected_fingerprint.as_deref(),
-            crypto_for(&material),
-            true,
-        );
+        let normalized_sync_dir = normalize_lease_sync_dir(&sync_dir);
+        return with_file_sync_lease(&lease_state, &token, window.label(), |lease| {
+            if lease.sync_dir != normalized_sync_dir {
+                return Err("File Sync lease does not belong to this sync folder".to_string());
+            }
+            let held_sync_dir = lease.sync_dir.clone();
+            let mut validate_lease = || revalidate_sync_lock(&lease._sync_lock, &held_sync_dir);
+            write_sync_file_to_dir_with_lease_and_validation(
+                &held_sync_dir,
+                data,
+                expected_fingerprint.as_deref(),
+                crypto_for(&material),
+                true,
+                &mut validate_lease,
+            )
+        });
     }
     write_sync_file_to_dir_with(
         &sync_dir,
