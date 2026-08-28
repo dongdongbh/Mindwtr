@@ -5206,6 +5206,70 @@ mod tests {
         release_file_sync_lease_token(&state, &token, "main").expect("release restored lease");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn final_lease_authority_loss_suppresses_displaced_root_encryption_discovery() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let sync_root = temp.path().join("sync-root");
+        let displaced_root = temp.path().join("displaced-sync-root");
+        let replacement_root = temp.path().join("replacement-sync-root");
+        fs::create_dir(&sync_root).expect("sync root");
+        fs::write(
+            sync_root.join(encrypted_artifact_name(DATA_FILE_NAME)),
+            seal(b"{}", &test_material(31)),
+        )
+        .expect("seed held-root encrypted generation");
+        let state = FileSyncLeaseState::default();
+        let token =
+            acquire_file_sync_lease_for_dir(&state, &sync_root, "main").expect("cycle lease");
+        let mut observed_discovery = false;
+
+        let result: Result<Value, String> = with_file_sync_lease(&state, &token, "main", |lease| {
+            fs::rename(&sync_root, &displaced_root).map_err(|error| error.to_string())?;
+            fs::create_dir(&sync_root).map_err(|error| error.to_string())?;
+            let root = RetainedSyncRoot::new(&lease.sync_dir, &lease._sync_lock);
+            let read = read_sync_file_from_retained_root_with(&root, SyncFileCrypto::Off);
+            observed_discovery = read
+                .as_ref()
+                .err()
+                .is_some_and(|error| parse_encrypted_discovery(error).is_some());
+            read
+        });
+
+        assert!(
+            observed_discovery,
+            "held-root read reaches the discovery marker"
+        );
+        let authority_error = result.expect_err("final authority loss must outrank discovery");
+        assert!(
+            authority_error.contains("root authority changed"),
+            "unexpected error: {authority_error}"
+        );
+        let mut encrypted_marks = 0;
+        let mut plaintext_marks = 0;
+        let reduced = persist_discovery_and_reduce_with::<Value, _, _>(
+            Err(authority_error.clone()),
+            |_salt, _params| {
+                encrypted_marks += 1;
+                Ok(())
+            },
+            || {
+                plaintext_marks += 1;
+                Ok(())
+            },
+        );
+        assert_eq!(
+            reduced.expect_err("authority error remains terminal"),
+            authority_error
+        );
+        assert_eq!(encrypted_marks, 0, "must not persist encrypted discovery");
+        assert_eq!(plaintext_marks, 0, "must not persist plaintext discovery");
+
+        fs::rename(&sync_root, &replacement_root).expect("preserve replacement root");
+        fs::rename(&displaced_root, &sync_root).expect("restore leased root name");
+        release_file_sync_lease_token(&state, &token, "main").expect("release restored lease");
+    }
+
     #[test]
     fn destroyed_renderer_releases_its_leases_and_allows_reacquisition() {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -13331,9 +13395,8 @@ where
     let result = operation(lease);
     let final_lock_validation = revalidate_sync_lock(&lease._sync_lock, &lease.sync_dir);
     match (result, final_lock_validation) {
-        (Err(error), _) => Err(error),
-        (Ok(_), Err(error)) => Err(error),
-        (Ok(value), Ok(())) => Ok(value),
+        (_, Err(error)) => Err(error),
+        (result, Ok(())) => result,
     }
 }
 
@@ -16276,23 +16339,39 @@ fn crypto_for<'a>(material: &'a Option<SyncKeyMaterial>) -> SyncFileCrypto<'a> {
 
 /// Turns an in-band discovery marker into persisted `remote-encrypted-no-key` state plus the
 /// bare sentinel TS classifies on. Anything else passes through untouched.
-fn persist_discovery_and_reduce<T>(
-    app: &tauri::AppHandle,
+fn persist_discovery_and_reduce_with<T, MarkEncrypted, MarkPlaintext>(
     result: Result<T, String>,
-) -> Result<T, String> {
+    mut mark_encrypted: MarkEncrypted,
+    mut mark_plaintext: MarkPlaintext,
+) -> Result<T, String>
+where
+    MarkEncrypted: FnMut(&[u8; SALT_LEN], SyncCryptoKdfParams) -> Result<(), String>,
+    MarkPlaintext: FnMut() -> Result<(), String>,
+{
     match result {
         Err(error) => {
             if let Some((salt, params)) = parse_encrypted_discovery(&error) {
-                mark_remote_encrypted_no_key(app, &salt, params)?;
+                mark_encrypted(&salt, params)?;
                 return Err(SYNC_ENCRYPTION_REMOTE_ENCRYPTED.to_string());
             }
             if error == SYNC_ENCRYPTION_REMOTE_PLAINTEXT {
-                mark_remote_plaintext(app)?;
+                mark_plaintext()?;
             }
             Err(error)
         }
         ok => ok,
     }
+}
+
+fn persist_discovery_and_reduce<T>(
+    app: &tauri::AppHandle,
+    result: Result<T, String>,
+) -> Result<T, String> {
+    persist_discovery_and_reduce_with(
+        result,
+        |salt, params| mark_remote_encrypted_no_key(app, salt, params),
+        || mark_remote_plaintext(app),
+    )
 }
 
 #[tauri::command(async)]
