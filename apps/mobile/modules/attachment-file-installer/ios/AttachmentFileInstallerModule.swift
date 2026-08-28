@@ -156,10 +156,10 @@ final class AttachmentFileHashingEngine {
     let descriptor = Darwin.open(lock.path, O_CREAT | O_RDWR | O_NOFOLLOW, 0o600)
     guard descriptor >= 0 else { throw installerError("Could not open attachment installer lock") }
     defer { Darwin.close(descriptor) }
-    guard Darwin.flock(descriptor, LOCK_EX) == 0 else {
+    guard flock(descriptor, LOCK_EX) == 0 else {
       throw installerError("Could not acquire attachment installer lock")
     }
-    defer { _ = Darwin.flock(descriptor, LOCK_UN) }
+    defer { _ = flock(descriptor, LOCK_UN) }
     return try action()
   }
 
@@ -1357,10 +1357,10 @@ final class AttachmentFileInstallerEngine {
       throw installerError("Could not open attachment installer lock")
     }
     defer { Darwin.close(descriptor) }
-    guard Darwin.flock(descriptor, LOCK_EX) == 0 else {
+    guard flock(descriptor, LOCK_EX) == 0 else {
       throw installerError("Could not acquire attachment installer lock")
     }
-    defer { _ = Darwin.flock(descriptor, LOCK_UN) }
+    defer { _ = flock(descriptor, LOCK_UN) }
     return try action()
   }
 

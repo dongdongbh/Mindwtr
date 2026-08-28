@@ -115,6 +115,10 @@ test("attachment installer native CI collects the recovery suites", () => {
     "apps/mobile/modules/attachment-file-installer/ios/Package.swift",
     "utf8",
   );
+  const swiftEngine = readFileSync(
+    "apps/mobile/modules/attachment-file-installer/ios/AttachmentFileInstallerModule.swift",
+    "utf8",
+  );
   const swiftTests = readFileSync(
     "apps/mobile/modules/attachment-file-installer/ios/Tests/AttachmentFileInstallerEngineTests.swift",
     "utf8",
@@ -159,6 +163,8 @@ test("attachment installer native CI collects the recovery suites", () => {
   expect(androidDirectoryRetirementTests).toContain("resumes_an_unclaimed_reserved_quarantine");
   expect(androidDirectoryRetirementTests).toContain("retains_the_open_parent_across_path_rebind");
   expect(swiftPackage).toContain(".testTarget(");
+  expect(swiftEngine).not.toContain("Darwin.flock(");
+  expect(swiftEngine.match(/\bflock\(descriptor, LOCK_(?:EX|UN)\)/g)).toHaveLength(4);
   expect(swiftTests).toContain("testAbsentGenerationUsesCreateNoReplace");
   expect(swiftTests).toContain("testPresentGenerationReplacesOnlyMatchingTargetAndPreservesIt");
   expect(swiftTests).toContain("testInitialJournalCrashRecoversUntouchedTargetAndRetries");
