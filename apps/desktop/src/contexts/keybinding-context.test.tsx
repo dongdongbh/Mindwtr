@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, waitFor } from '@testing-library/react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTaskStore } from '@mindwtr/core';
@@ -9,6 +9,67 @@ import { KeybindingProvider } from './keybinding-context';
 import { useKeybindings } from './keybinding-context';
 import { useUiStore } from '../store/ui-store';
 import { AREA_FILTER_ALL } from '@mindwtr/core';
+import {
+    GLOBAL_QUICK_ADD_SHORTCUT_ALTERNATE_N,
+    GLOBAL_QUICK_ADD_SHORTCUT_ALTERNATE_Q,
+    GLOBAL_QUICK_ADD_SHORTCUT_DEFAULT,
+    GLOBAL_QUICK_ADD_SHORTCUT_LEGACY,
+    type GlobalQuickAddShortcutSetting,
+} from '../lib/global-quick-add-shortcut';
+
+type ShortcutRuntimeWindow = Window & {
+    __MINDWTR_FLATPAK__?: boolean;
+    __TAURI_INTERNALS__?: object;
+};
+
+const shortcutCases: Array<{
+    label: string;
+    shortcut: GlobalQuickAddShortcutSetting;
+    event: {
+        key: string;
+        code: string;
+        ctrlKey?: boolean;
+        metaKey?: boolean;
+        altKey?: boolean;
+        shiftKey?: boolean;
+    };
+}> = [
+    {
+        label: 'Ctrl+Alt+M',
+        shortcut: GLOBAL_QUICK_ADD_SHORTCUT_DEFAULT,
+        event: { key: 'm', code: 'KeyM', ctrlKey: true, altKey: true },
+    },
+    {
+        label: 'Ctrl+Alt+N',
+        shortcut: GLOBAL_QUICK_ADD_SHORTCUT_ALTERNATE_N,
+        event: { key: 'n', code: 'KeyN', ctrlKey: true, altKey: true },
+    },
+    {
+        label: 'Ctrl+Alt+Q',
+        shortcut: GLOBAL_QUICK_ADD_SHORTCUT_ALTERNATE_Q,
+        event: { key: 'q', code: 'KeyQ', ctrlKey: true, altKey: true },
+    },
+    {
+        label: 'Ctrl+Shift+A',
+        shortcut: GLOBAL_QUICK_ADD_SHORTCUT_LEGACY,
+        event: { key: 'a', code: 'KeyA', ctrlKey: true, shiftKey: true },
+    },
+    {
+        label: 'Cmd+Shift+A',
+        shortcut: GLOBAL_QUICK_ADD_SHORTCUT_LEGACY,
+        event: { key: 'a', code: 'KeyA', metaKey: true, shiftKey: true },
+    },
+];
+
+const shortcutRuntimeCases = [
+    { runtimeLabel: 'native Tauri', isTauri: true, isFlatpak: false, expectedInAppOpens: 0 },
+    { runtimeLabel: 'Flatpak Tauri', isTauri: true, isFlatpak: true, expectedInAppOpens: 0 },
+    { runtimeLabel: 'browser/PWA', isTauri: false, isFlatpak: false, expectedInAppOpens: 1 },
+].flatMap((runtime) => shortcutCases.map((shortcutCase) => ({
+    ...runtime,
+    ...shortcutCase,
+    shortcutLabel: shortcutCase.label,
+})));
 
 const DummyList = ({ focusAddInput, openSelected, setStatusSelected }: { focusAddInput?: () => boolean; openSelected?: () => void; setStatusSelected?: (status: string) => void } = {}) => {
     const { registerTaskListScope } = useKeybindings();
@@ -169,6 +230,12 @@ describe('KeybindingProvider (vim)', () => {
         }));
     });
 
+    afterEach(() => {
+        const runtimeWindow = window as ShortcutRuntimeWindow;
+        delete runtimeWindow.__TAURI_INTERNALS__;
+        delete runtimeWindow.__MINDWTR_FLATPAK__;
+    });
+
     it('moves selection with j/k', async () => {
         render(
             <LanguageProvider>
@@ -212,6 +279,37 @@ describe('KeybindingProvider (vim)', () => {
         expect(quickAddListener).toHaveBeenCalledTimes(1);
         window.removeEventListener('mindwtr:quick-add', quickAddListener);
     });
+
+    it.each(shortcutRuntimeCases)(
+        'routes $shortcutLabel through the correct owner in $runtimeLabel',
+        ({ shortcut, event, isTauri, isFlatpak, expectedInAppOpens }) => {
+            const runtimeWindow = window as ShortcutRuntimeWindow;
+            if (isTauri) runtimeWindow.__TAURI_INTERNALS__ = {};
+            if (isFlatpak) runtimeWindow.__MINDWTR_FLATPAK__ = true;
+            useTaskStore.setState((state) => ({
+                settings: {
+                    ...state.settings,
+                    globalQuickAddShortcut: shortcut,
+                },
+            }));
+
+            const quickAddListener = vi.fn();
+            window.addEventListener('mindwtr:quick-add', quickAddListener);
+
+            render(
+                <LanguageProvider>
+                    <KeybindingProvider currentView="inbox" onNavigate={vi.fn()}>
+                        <DummyList />
+                    </KeybindingProvider>
+                </LanguageProvider>
+            );
+
+            fireEvent.keyDown(window, event);
+
+            expect(quickAddListener).toHaveBeenCalledTimes(expectedInAppOpens);
+            window.removeEventListener('mindwtr:quick-add', quickAddListener);
+        }
+    );
 
     it.each(['vim', 'emacs'] as const)('a focuses the scope add input instead of the global quick add in %s style (#978)', (style) => {
         const focusAddInput = vi.fn(() => true);

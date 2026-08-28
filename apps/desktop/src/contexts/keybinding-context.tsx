@@ -826,7 +826,13 @@ export function KeybindingProvider({
                     }
                 }
             }
-            if (!isEditableTarget(e.target) && matchesGlobalQuickAddShortcut(e, quickAddShortcut)) {
+            // Native builds give this shortcut one owner: Tauri opens the
+            // standalone window. Browser/PWA builds keep the webview fallback.
+            if (
+                !isTauriRuntime()
+                && !isEditableTarget(e.target)
+                && matchesGlobalQuickAddShortcut(e, quickAddShortcut)
+            ) {
                 e.preventDefault();
                 triggerQuickAdd();
                 return;
