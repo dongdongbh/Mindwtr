@@ -2425,6 +2425,7 @@ export const zhHant: Record<string, string> = {
         'settings.syncRemoteBusy': '另一台相容的 Mindwtr 裝置正在更新此同步位置。請等待其完成，然後再次同步。',
         'settings.syncRemoteCleanupDeferred': '同步作業已完成。Mindwtr 無法移除暫時同步鎖，但該鎖會自動失效。無需重試。',
         'settings.syncAttachmentWriteDeferred': '部分附件變更未能完成。請還原缺少的本機檔案或移除受影響的附件，然後再次同步。',
+        'settings.syncFileGenerationCorrupt': 'Mindwtr 已保留本機附件，但所選同步資料夾中的副本已損壞。請從該資料夾中移除損壞的附件版本，或選擇其他同步資料夾，然後執行「立即同步」。',
         'settings.syncFileLockBusy': '另一個 Mindwtr 作業正在使用檔案同步。請等待其完成；Mindwtr 會自動重試。',
         'settings.syncFileLockActivationBusy': '另一個 Mindwtr 作業正在使用檔案同步。請等待其完成，然後再次選擇「立即同步」。',
         'settings.syncFileLockCleanupDeferred': '同步已完成，但 Mindwtr 無法釋放檔案同步鎖。再次同步前請重新啟動 Mindwtr。無需重試。',

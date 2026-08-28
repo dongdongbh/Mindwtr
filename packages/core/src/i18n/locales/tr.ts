@@ -1524,6 +1524,7 @@ export const trOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': 'Başka bir uyumlu Mindwtr cihazı bu eşitleme konumunu güncelliyor. Bitmesini bekleyin, ardından yeniden eşitleyin.',
         'settings.syncRemoteCleanupDeferred': 'Eşitleme işlemi tamamlandı. Mindwtr geçici eşitleme kilidini kaldıramadı, ancak kilit otomatik olarak sona erecek. Yeniden denemeniz gerekmez.',
         'settings.syncAttachmentWriteDeferred': 'Eklerdeki bazı değişiklikler tamamlanamadı. Eksik yerel dosyaları geri yükleyin veya etkilenen ekleri kaldırın, ardından yeniden eşitleyin.',
+        'settings.syncFileGenerationCorrupt': 'Mindwtr yerel eki korudu, ancak seçilen eşitleme klasöründeki kopyası bozuk. Bozuk ek neslini bu klasörden kaldırın veya başka bir eşitleme klasörü seçin, ardından Şimdi Eşitle’yi çalıştırın.',
         'settings.syncFileLockBusy': 'Başka bir Mindwtr işlemi Dosya Eşitleme’yi kullanıyor. Bitmesini bekleyin; Mindwtr otomatik olarak yeniden deneyecek.',
         'settings.syncFileLockActivationBusy': 'Başka bir Mindwtr işlemi Dosya Eşitleme’yi kullanıyor. Bitmesini bekleyin, ardından Şimdi eşitle’yi yeniden seçin.',
         'settings.syncFileLockCleanupDeferred': 'Eşitleme tamamlandı ancak Mindwtr Dosya Eşitleme kilidini bırakamadı. Yeniden eşitlemeden önce Mindwtr’ı yeniden başlatın. Tekrar denemeniz gerekmez.',

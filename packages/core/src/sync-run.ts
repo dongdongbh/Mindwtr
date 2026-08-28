@@ -1,7 +1,11 @@
 import type { AppData, Attachment } from './types';
 import type { CloudProvider } from './sync-client-helpers';
 import type { SyncBackend } from './sync-service-utils';
-import { SyncFileLockBusyError, SyncFileLockUnavailableError } from './sync-service-utils';
+import {
+    isSyncFileGenerationCorruptError,
+    SyncFileLockBusyError,
+    SyncFileLockUnavailableError,
+} from './sync-service-utils';
 import type { SyncCycleIO, SyncCycleResult, SyncHistoryEntry } from './sync-types';
 import type {
     SyncBackendIO,
@@ -1199,12 +1203,14 @@ class SharedSyncRunMachine {
         if (afterResult) return afterResult;
 
         const fileSyncLockUnavailable = error instanceof SyncFileLockUnavailableError;
+        const fileGenerationCorrupt = isSyncFileGenerationCorruptError(error);
         this.notifier.logWarning('Sync failed', error);
         if (this.options.activationProbe) {
             return {
                 success: false,
                 error: this.hooks.formatErrorMessage(error, this.backend),
                 ...(fileSyncLockUnavailable ? { fileSyncLockUnavailable: true } : {}),
+                ...(fileGenerationCorrupt ? { fileGenerationCorrupt: true } : {}),
             };
         }
         const now = this.nowIso();
@@ -1249,6 +1255,7 @@ class SharedSyncRunMachine {
             success: false,
             error: finalErrorMessage,
             ...(fileSyncLockUnavailable ? { fileSyncLockUnavailable: true } : {}),
+            ...(fileGenerationCorrupt ? { fileGenerationCorrupt: true } : {}),
         };
     }
 }

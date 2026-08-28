@@ -158,7 +158,11 @@ vi.mock('@/lib/sync-service-utils', () => ({
     // encrypted-remote activation tests: the production messages all mention
     // the passphrase or encryption.
     classifySyncFailure: (error: unknown) => (
-        /passphrase|encrypt/i.test(String(error ?? '')) ? 'encryption' : 'unknown'
+        /SYNC_FILE_GENERATION_CORRUPT|generation remains corrupt after bounded retries/i.test(String(error ?? ''))
+            ? 'fileGenerationCorrupt'
+            : /passphrase|encrypt/i.test(String(error ?? ''))
+                ? 'encryption'
+                : 'unknown'
     ),
     coerceSupportedBackend: (backend: string, supportsNativeICloudSync: boolean) => (
         backend === 'cloudkit' && !supportsNativeICloudSync ? 'off' : backend
@@ -605,6 +609,29 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.showSettingsErrorToast).not.toHaveBeenCalled();
     });
 
+    it('does not activate a File Sync folder whose attachment generation is terminally corrupt', async () => {
+        seedStorage([[SYNC_PATH_KEY, 'file:///sync-folder/data.json']]);
+        mocked.performMobileSync.mockResolvedValueOnce({
+            success: false,
+            fileGenerationCorrupt: true,
+            error: 'SYNC_FILE_GENERATION_CORRUPT',
+        });
+        await renderHarness();
+        mocked.asyncStorage.setItem.mockClear();
+
+        await act(async () => {
+            await latestHookResult?.handleSync({ backend: 'file' });
+        });
+
+        expect(mocked.performMobileSync).toHaveBeenCalledTimes(1);
+        expect(mocked.asyncStorage.setItem).not.toHaveBeenCalledWith(SYNC_BACKEND_KEY, 'file');
+        expect(mocked.showSettingsErrorToast).toHaveBeenCalledWith(
+            'settings.syncMobile.error',
+            'settings.syncFileGenerationCorrupt',
+        );
+        expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+    });
+
     it('commits a cleanup-deferred File Sync activation and warns without suggesting retry', async () => {
         seedStorage([[SYNC_PATH_KEY, 'file:///sync-folder/data.json']]);
         mocked.performMobileSync
@@ -924,6 +951,31 @@ describe('useSyncSettingsTransportActions', () => {
             'common.notice',
             'settings.syncAttachmentWriteDeferred',
             6000,
+        );
+        expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+    });
+
+    it('shows terminal corrupt-generation recovery guidance without a success toast', async () => {
+        seedStorage([
+            [SYNC_BACKEND_KEY, 'file'],
+            [SYNC_PATH_KEY, 'file:///sync-folder/data.json'],
+        ]);
+        await renderHarness();
+        mocked.performMobileSync.mockClear();
+        mocked.performMobileSync.mockResolvedValueOnce({
+            success: false,
+            fileGenerationCorrupt: true,
+            error: 'SYNC_FILE_GENERATION_CORRUPT',
+        });
+
+        await act(async () => {
+            await latestHookResult?.handleSync();
+        });
+
+        expect(mocked.performMobileSync).toHaveBeenCalledTimes(1);
+        expect(mocked.showSettingsErrorToast).toHaveBeenCalledWith(
+            'settings.syncMobile.error',
+            'settings.syncFileGenerationCorrupt',
         );
         expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
     });

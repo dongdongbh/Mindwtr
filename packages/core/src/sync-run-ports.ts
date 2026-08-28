@@ -46,6 +46,9 @@ export type SyncRunResult = {
     fileSyncLockDeferred?: 'busy' | 'cleanup';
     /** Safe exclusive locking could not be established for this File Sync location. */
     fileSyncLockUnavailable?: boolean;
+    /** A File Sync attachment target remained corrupt through bounded recovery.
+     * Terminal until the user removes the damaged generation or changes folder. */
+    fileGenerationCorrupt?: boolean;
     /** Provider-time-derived lower bound before the deferred retry is useful. */
     retryAfterMs?: number;
 };

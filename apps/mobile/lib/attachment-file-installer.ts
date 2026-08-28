@@ -1,4 +1,5 @@
 import { requireNativeModule } from 'expo-modules-core';
+import { SyncFileGenerationCorruptError } from '@mindwtr/core';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type AttachmentFileExpectedGeneration =
@@ -281,7 +282,7 @@ export const reserveFileSyncAttachmentPublication = async (
   }
   const invalidTargetAttempts = prior?.invalidTargetAttempts ?? 0;
   if (invalidTargetAttempts >= FILE_SYNC_PUBLICATION_MAX_INVALID_TARGET_ATTEMPTS) {
-    throw new Error('File Sync attachment generation remains corrupt after bounded retries');
+    throw new SyncFileGenerationCorruptError();
   }
   const recordsWithoutTarget = records.filter((record) => record.targetPath !== target);
   if (recordsWithoutTarget.length >= FILE_SYNC_PUBLICATION_MAX_RESERVATIONS) {

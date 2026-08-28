@@ -17,6 +17,7 @@ import { cloneAppData } from './sync-runtime-utils';
 import { toRemoteSyncDocument } from './sync-document';
 import type { FastSyncState } from './sync-fast-sync';
 import {
+    SyncFileGenerationCorruptError,
     SyncFileLockBusyError,
     SyncFileLockUnavailableError,
     type SyncBackend,
@@ -1172,6 +1173,28 @@ describe('runSharedSyncCycle', () => {
         expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
         expect(hooks.finalizeErrorStatus).toHaveBeenCalledTimes(1);
     });
+
+    it.each([false, true])(
+        'returns terminal corrupt-generation guidance without scheduling a retry (activationProbe=%s)',
+        async (activationProbe) => {
+            const { hooks, run } = createHarness({
+                backend: 'file',
+                hooks: {
+                    setupCycle: vi.fn(async () => {
+                        throw new SyncFileGenerationCorruptError();
+                    }),
+                },
+            });
+
+            await expect(run({ activationProbe })).resolves.toMatchObject({
+                success: false,
+                fileGenerationCorrupt: true,
+            });
+            expect(hooks.requestFollowUp).not.toHaveBeenCalled();
+            expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
+            expect(hooks.finalizeErrorStatus).toHaveBeenCalledTimes(activationProbe ? 0 : 1);
+        },
+    );
 
     it('marks a successful run cleanup-deferred when conditional fence release fails', async () => {
         const lease = createFenceLease({

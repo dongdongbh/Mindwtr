@@ -134,6 +134,12 @@ describe('mobile sync-service test utils', () => {
     )).toBe('fileLockUnavailable');
   });
 
+  it('classifies terminal File Sync generation corruption separately from retryable failures', () => {
+    expect(classifySyncFailure(
+      'SYNC_FILE_GENERATION_CORRUPT: File Sync attachment generation remains corrupt after bounded retries',
+    )).toBe('fileGenerationCorrupt');
+  });
+
   it('classifies rate-limited, misconfigured, and conflict sync failures', () => {
     expect(classifySyncFailure('WebDAV rate limited. Sync paused briefly; try again in about a minute.')).toBe('rateLimited');
     expect(classifySyncFailure('WebDAV folder URL is not configured. Save WebDAV settings first.')).toBe('misconfigured');

@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  SYNC_FILE_GENERATION_CORRUPT_CODE,
+  SyncFileGenerationCorruptError,
+} from '@mindwtr/core';
+import {
   clearFileSyncAttachmentPublicationRecovery,
   claimFileSyncAttachmentPublication,
   recoverFileSyncAttachmentPublications,
@@ -217,8 +221,13 @@ describe('installAttachmentFileGeneration', () => {
       await recoverFileSyncAttachmentPublications('file:///sync/attachments/');
     }
 
-    await expect(reserveFileSyncAttachmentPublication(target, downloadHash))
-      .rejects.toThrow('remains corrupt after bounded retries');
+    const terminalError = await reserveFileSyncAttachmentPublication(target, downloadHash)
+      .then(() => null, (error: unknown) => error);
+    expect(terminalError).toBeInstanceOf(SyncFileGenerationCorruptError);
+    expect(terminalError).toMatchObject({
+      code: SYNC_FILE_GENERATION_CORRUPT_CODE,
+      message: expect.stringContaining('remains corrupt after bounded retries'),
+    });
     expect(cleanupImmutableStageAsync).toHaveBeenCalledTimes(3);
     expect(deleteAsync).not.toHaveBeenCalled();
 

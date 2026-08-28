@@ -839,6 +839,13 @@ export function useSyncSettingsTransportActions({
                     showFileSyncLockFeedback('unavailable');
                     return;
                 }
+                if (probeResult.fileGenerationCorrupt) {
+                    showSettingsErrorToast(
+                        tr('settings.syncMobile.error'),
+                        tr('settings.syncFileGenerationCorrupt'),
+                    );
+                    return;
+                }
                 const probeRemoteCleanupDeferred = probeResult.success
                     && probeResult.remoteFenceDeferred === 'cleanup';
                 const probeFileCleanupDeferred = probeResult.success
@@ -916,6 +923,13 @@ export function useSyncSettingsTransportActions({
             }
             if (result.fileSyncLockUnavailable) {
                 showFileSyncLockFeedback('unavailable');
+                return;
+            }
+            if (result.fileGenerationCorrupt) {
+                showSettingsErrorToast(
+                    tr('settings.syncMobile.error'),
+                    tr('settings.syncFileGenerationCorrupt'),
+                );
                 return;
             }
             if (result.success && result.remoteFenceDeferred) {

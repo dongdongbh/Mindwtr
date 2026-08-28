@@ -2493,6 +2493,7 @@ export const en: Record<string, string> = {
         'settings.syncRemoteBusy': 'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
         'settings.syncRemoteCleanupDeferred': 'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
         'settings.syncAttachmentWriteDeferred': 'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
+        'settings.syncFileGenerationCorrupt': 'Mindwtr kept the local attachment, but its copy in the selected sync folder is damaged. Remove the damaged attachment generation from that folder, or choose another sync folder, then run Sync Now.',
         'settings.syncFileLockBusy': 'Another Mindwtr operation is using File Sync. Wait for it to finish; Mindwtr will retry automatically.',
         'settings.syncFileLockActivationBusy': 'Another Mindwtr operation is using File Sync. Wait for it to finish, then try Sync Now again.',
         'settings.syncFileLockCleanupDeferred': 'Sync completed, but Mindwtr could not release the File Sync lock. Restart Mindwtr before syncing again. No retry is needed.',
