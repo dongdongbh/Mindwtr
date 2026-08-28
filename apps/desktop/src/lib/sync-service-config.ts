@@ -308,6 +308,18 @@ export async function writeSyncPath(
     }
 }
 
+export async function testSyncPath(path: string, deps: ConfigDeps): Promise<void> {
+    if (!deps.isTauriRuntimeEnv()) {
+        throw new Error('Desktop runtime is required to test a file sync folder.');
+    }
+    try {
+        await deps.invokeNative('test_sync_path', { syncPath: path });
+    } catch (error) {
+        deps.reportError('Failed to test sync path', error);
+        throw error;
+    }
+}
+
 export async function clearSyncPath(deps: ConfigWriteDeps): Promise<void> {
     if (!deps.isTauriRuntimeEnv()) return;
     try {

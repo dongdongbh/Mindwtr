@@ -180,6 +180,7 @@ import {
     readSyncBackend,
     readSyncPath,
     readWebDavConfig,
+    testSyncPath,
     writeCloudConfig,
     writeCloudProvider,
     writeDropboxAppKey,
@@ -1984,6 +1985,11 @@ export class SyncService {
      */
     static async setSyncPath(path: string): Promise<{ success: boolean; path: string; error?: string }> {
         return writeSyncPath(path, getSyncConfigDeps());
+    }
+
+    /** Exercise the native file-sync write contract without saving the path. */
+    static async testSyncPath(path: string): Promise<void> {
+        return runSyncRestoreExclusive(() => testSyncPath(path, getSyncConfigDeps()));
     }
 
     private static async markSyncWrite(data: AppData) {

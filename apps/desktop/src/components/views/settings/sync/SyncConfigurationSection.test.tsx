@@ -23,6 +23,10 @@ const baseProps: Parameters<typeof SyncConfigurationSection>[0] = {
         syncFolderLocation: 'Folder',
         savePath: 'Save',
         browse: 'Browse',
+        testFolder: 'Test folder',
+        testingFolder: 'Testing folder…',
+        folderTestSucceeded: 'Folder test passed.',
+        portalPathNote: 'This path is a sandbox mapping to the folder you chose. External tools should watch the original folder.',
         pathHint: 'Path hint',
         webdavUrl: 'WebDAV URL',
         webdavHint: 'WebDAV hint',
@@ -71,6 +75,8 @@ const baseProps: Parameters<typeof SyncConfigurationSection>[0] = {
     onSyncPathChange: vi.fn(),
     onSaveSyncPath: vi.fn(),
     onBrowseSyncPath: vi.fn(),
+    isTestingSyncPath: false,
+    onTestSyncPath: vi.fn(),
     webdavUrl: '',
     webdavUsername: '',
     webdavPassword: '',
@@ -116,6 +122,46 @@ const baseProps: Parameters<typeof SyncConfigurationSection>[0] = {
 };
 
 describe('SyncConfigurationSection', () => {
+    it('offers a folder test and explains document-portal paths', () => {
+        const onTestSyncPath = vi.fn();
+        const { getByRole, getByText, queryByText, rerender } = render(
+            <SyncConfigurationSection
+                {...baseProps}
+                syncBackend="file"
+                syncPath="/run/user/1000/doc/portal-id/Sync"
+                onTestSyncPath={onTestSyncPath}
+            />
+        );
+
+        fireEvent.click(getByRole('button', { name: 'Test folder' }));
+
+        expect(onTestSyncPath).toHaveBeenCalledTimes(1);
+        expect(getByText(baseProps.t.portalPathNote)).toBeInTheDocument();
+
+        rerender(
+            <SyncConfigurationSection
+                {...baseProps}
+                syncBackend="file"
+                syncPath="/home/user/Sync"
+                onTestSyncPath={onTestSyncPath}
+            />
+        );
+        expect(queryByText(baseProps.t.portalPathNote)).not.toBeInTheDocument();
+    });
+
+    it('disables the folder test while it is running', () => {
+        const { getByRole } = render(
+            <SyncConfigurationSection
+                {...baseProps}
+                syncBackend="file"
+                syncPath="/home/user/Sync"
+                isTestingSyncPath
+            />
+        );
+
+        expect(getByRole('button', { name: 'Testing folder…' })).toBeDisabled();
+    });
+
     it('shows Dropbox as a first-level sync backend without the nested cloud provider picker', () => {
         const { getByRole, queryByText } = render(<SyncConfigurationSection {...baseProps} />);
         const dropboxButton = getByRole('button', { name: /^Dropbox$/ });

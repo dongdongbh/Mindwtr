@@ -150,6 +150,8 @@ const syncProps: Parameters<typeof SettingsSyncPage>[0] = {
     onSyncPathChange: noop,
     onSaveSyncPath: noop,
     onBrowseSyncPath: noop,
+    isTestingSyncPath: false,
+    onTestSyncPath: noop,
     webdavUrl: '',
     webdavUsername: '',
     webdavPassword: '',
