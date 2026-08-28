@@ -4140,12 +4140,16 @@ mod tests {
         assert_eq!(durations, vec![Duration::from_millis(120)]);
 
         let source = include_str!("sync.rs");
+        // Build the needles so this test's own source cannot satisfy split_once before the
+        // implementation. The source-bearing helper owns both recovery ordering and metadata.
+        let helper_start = ["fn read_sync_file_with_source_from_retained_root_with", "("].concat();
+        let helper_end = ["\nfn read_sync_file_from_retained_root_with", "("].concat();
         let retained_reader = source
-            .split_once("fn read_sync_file_from_retained_root_with(")
-            .expect("retained reader")
+            .split_once(&helper_start)
+            .expect("source-bearing retained reader")
             .1
-            .split_once("\n#[derive(Clone, Copy, Debug, Eq, PartialEq)]")
-            .expect("end of retained reader")
+            .split_once(&helper_end)
+            .expect("end of source-bearing retained reader")
             .0;
         for required in [
             "root, &primary, 5, crypto",
