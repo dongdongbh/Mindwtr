@@ -382,8 +382,12 @@ export default function FocusScreen() {
   // produced activeTasks is exactly what hides these rows today (#1061).
   // Starred tasks are excluded — they render in Today's Focus regardless of
   // deferral, and one task must not appear in both sections.
+  // futureStartTick, not just the day key: the section now lists tasks that
+  // start later today, so a row has to leave it the moment its start arrives
+  // rather than at midnight.
   const upcomingEntries = useMemo(() => {
     void localDayKey;
+    void futureStartTick;
     const now = new Date();
     return getUpcomingDeferredTasks(
       applyFilter(
@@ -393,7 +397,7 @@ export default function FocusScreen() {
       ),
       { now },
     );
-  }, [baseActiveTasks, localDayKey, projects, selections.criteria]);
+  }, [baseActiveTasks, futureStartTick, localDayKey, projects, selections.criteria]);
   const upcomingCandidates = useMemo(
     () => upcomingEntries.map((entry) => entry.task),
     [upcomingEntries],
@@ -1374,9 +1378,15 @@ export default function FocusScreen() {
           actions={rowActions}
           isHighlighted={item.task.id === highlightTaskId}
           showFocusToggle
-          // Every Upcoming row is deferred by construction, so the star could only
-          // ever refuse — disabled with the reason beats a tap that just toasts.
-          focusToggleDisabledLabel={section.type === 'upcoming' ? upcomingFocusBlockedLabel : undefined}
+          // A row deferred to another day could only ever refuse the star, so
+          // disabled with the reason beats a tap that just toasts. A row that
+          // starts later today is star-eligible and is why the section lists it:
+          // the star survives to resurface it in Today's Focus at its start time.
+          focusToggleDisabledLabel={
+            section.type === 'upcoming' && !shouldShowTaskForStart(item.task, { now: new Date() })
+              ? upcomingFocusBlockedLabel
+              : undefined
+          }
           showFocusHighlight={section.type !== 'focus'}
           hideStatusBadge={section.type !== 'reviewDue'}
           projectDeadlineLabel={projectDeadlineLabel}

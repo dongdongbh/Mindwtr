@@ -1082,6 +1082,31 @@ describe('task-utils', () => {
             expect(upcoming[1]?.appearsAt.getTime()).toBe(new Date(2026, 3, 10).getTime());
         });
 
+        it('previews a task that starts later today, which Next Actions is still hiding', () => {
+            // Hidden from Next Actions by time granularity and previously too
+            // early for Upcoming, so it appeared in neither and could not be
+            // starred for today (dashboard feedback, 1.2.5-rc.1).
+            const laterToday = makeTask({ id: 'later-today', startTime: '2026-04-05T15:00' });
+            const alreadyStarted = makeTask({ id: 'already', startTime: '2026-04-05T09:00' });
+
+            const upcoming = getUpcomingDeferredTasks([laterToday, alreadyStarted], { now });
+
+            expect(upcoming.map((entry) => entry.task.id)).toEqual(['later-today']);
+            expect(upcoming[0]?.appearsAt.getTime()).toBe(new Date(2026, 3, 5, 15, 0).getTime());
+        });
+
+        it('leaves out a recurring task due later today, which Next Actions already shows', () => {
+            // A due date never hides a task, so listing it here would show the
+            // same row in two sections at once.
+            const recurringDueToday = makeTask({
+                id: 'recurring-today',
+                dueDate: '2026-04-05T18:00',
+                recurrence: { rule: 'daily' },
+            });
+
+            expect(getUpcomingDeferredTasks([recurringDueToday], { now })).toEqual([]);
+        });
+
         it('honours the last day of the window and a custom window length', () => {
             const lastDay = makeTask({ id: 'last-day', startTime: '2026-04-12' });
             const dayAfter = makeTask({ id: 'day-after', startTime: '2026-04-13' });

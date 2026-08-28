@@ -461,7 +461,8 @@ export const UPCOMING_DEFERRED_WINDOW_DAYS = 7;
  * deferral currently hides but which surface within the window, sorted by the
  * date they will appear. Derives the date via getTaskDeferUntil — the same
  * derivation isTaskFutureStart uses — so the preview cannot disagree with the
- * actual reveal.
+ * actual reveal. Includes tasks that start later *today*, which are hidden
+ * until their time arrives and so belong here rather than nowhere.
  */
 export function getUpcomingDeferredTasks(
     tasks: readonly Task[],
@@ -469,7 +470,6 @@ export function getUpcomingDeferredTasks(
 ): UpcomingDeferredTask[] {
     const now = options.now ?? new Date();
     const windowDays = options.windowDays ?? UPCOMING_DEFERRED_WINDOW_DAYS;
-    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
     const windowEnd = new Date(
         now.getFullYear(),
         now.getMonth(),
@@ -483,7 +483,16 @@ export function getUpcomingDeferredTasks(
     for (const task of tasks) {
         if (task.status !== 'next') continue;
         const deferUntil = getTaskDeferUntil(task);
-        if (!deferUntil || deferUntil <= endOfToday || deferUntil > windowEnd) continue;
+        if (!deferUntil || deferUntil > windowEnd) continue;
+        // Membership is exactly "hidden right now", asked of the same predicate
+        // Focus filters Next Actions with. The bound used to be "later than
+        // today", which left a start *time* later today in neither section — it
+        // is hidden from Next Actions by time granularity and was too early for
+        // Upcoming — so it could not be seen, and therefore could not be starred
+        // for today either. Asking the predicate instead of comparing dates also
+        // keeps a recurring task due later today out: that one is already
+        // visible, so it must not be listed twice.
+        if (shouldShowTaskForStart(task, { now, granularity: 'time' })) continue;
         upcoming.push({ task, appearsAt: deferUntil });
     }
     return upcoming.sort((a, b) => (

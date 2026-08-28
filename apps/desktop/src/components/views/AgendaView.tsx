@@ -524,6 +524,9 @@ export function AgendaView() {
 
     const { filteredActiveTasks, reviewDueCandidates, upcomingCandidates, upcomingAppearsAtById } = useMemo(() => {
         void localDayKey;
+        // Upcoming now lists tasks that start later today, so a row has to leave
+        // it the moment its start arrives rather than at midnight.
+        void futureStartTick;
         const now = new Date();
         const filtered = applyFilter(activeTasks, effectiveFilterCriteria, { projects, now, tokenMatchMode: 'all' })
             .filter((task) => matchesSearchQuery(task.title));
@@ -555,7 +558,7 @@ export function AgendaView() {
                 [entry.task.id, safeFormatDate(entry.appearsAt, 'P')]
             ))),
         };
-    }, [activeTasks, baseActiveTasks, effectiveFilterCriteria, localDayKey, matchesSearchQuery, projects]);
+    }, [activeTasks, baseActiveTasks, effectiveFilterCriteria, futureStartTick, localDayKey, matchesSearchQuery, projects]);
     const getUpcomingAppearsAtLabel = useCallback(
         (taskId: string) => upcomingAppearsAtById.get(taskId),
         [upcomingAppearsAtById],
@@ -904,13 +907,19 @@ export function AgendaView() {
         };
     }, [focusTaskLimit, focusedCount, handleToggleFocus, t]);
 
-    // Every Upcoming row is deferred by construction, so the star can only ever
-    // refuse — the cap-only render gate above would show an enabled "Add to Focus"
-    // whose sole outcome is a toast. Disabled-with-the-reason instead, matching
-    // how the project Order row states an unavailable action rather than hiding it.
+    // A row deferred to another day can only ever refuse the star — the cap-only
+    // render gate above would show an enabled "Add to Focus" whose sole outcome
+    // is a toast. Disabled-with-the-reason instead, matching how the project
+    // Order row states an unavailable action rather than hiding it.
+    //
+    // A row that starts later *today* is different, and is why the section lists
+    // it at all: starring it is exactly what the user wants, the store allows it
+    // (focus eligibility asks shouldShowTaskForStart at day granularity), and the
+    // star survives to resurface the task in Today's Focus at its start time.
     const buildUpcomingFocusToggle = useCallback((task: Task) => {
         const toggle = buildFocusToggle(task);
         if (toggle.isFocused) return toggle;
+        if (shouldShowTaskForStart(task, { now: new Date() })) return toggle;
         const deferredText = getFocusStarBlockedText(t, { blockedReason: 'deferred' }, focusTaskLimit)
             ?? toggle.title;
         return { ...toggle, canToggle: false, title: deferredText, ariaLabel: deferredText };

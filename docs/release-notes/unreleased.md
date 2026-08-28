@@ -6,6 +6,8 @@ Changes collected after `v1.2.1` and before the next version tag.
 
 ## Full Change List
 
+- Focus's **Upcoming** section now also lists tasks that start later the same day, on desktop and mobile. A task set to start at 5:00 PM was hidden from Next Actions until then and was too early for Upcoming, so it sat in neither section — you could not see it, and so could not star it for today either. Those rows can now be starred: the star holds, and the task moves into Today's Focus when its start time arrives. Rows deferred to another day still cannot be starred.
+
 - Desktop task lists now have an **Export CSV** button that exports exactly what the list is showing — the current status list plus any area, search, context, tag, priority, energy and time filters — instead of the whole database. Collapsed groups are still included, since folding a group only hides it. (#1096)
 - Quick add accepts `/reference`, so a scrap of information you want to keep can be filed straight to Reference from the capture box on desktop and mobile — no capture-then-move round trip. It combines with `+Project`, `!Area`, `@context` and `#tag` like the other status tokens, and processing the inbox still ignores it so the destination you pick there wins. (#1093)
 - The Pomodoro timer now sounds its end-of-session alert without needing Task reminders turned on. Task reminders are off by default, so on a new install the focus and break alerts never fired. To work in silence, turn off the new **Session-end alert** switch in Settings → GTD → Pomodoro timer. (#528)
