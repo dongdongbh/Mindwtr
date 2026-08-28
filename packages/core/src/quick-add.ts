@@ -230,8 +230,8 @@ const QUICK_ADD_FOCUS_COMMAND_PATTERN = String.raw`\*(?:\s+focus\b)?`;
 // would corrupt real text — `https://example.com/next-steps` is a link, not
 // a status.
 const QUICK_ADD_COMMAND_START = String.raw`(?:^|\s)`;
-const QUICK_ADD_COMMAND_BOUNDARY = String.raw`(?=\s\/(?:${QUICK_ADD_FOCUS_COMMAND_PATTERN}|link:|note:|start:|due:|review:|project:|area:|energy:|inbox\b|next\b|in-progress\b|waiting\b|someday\b|done\b|archived\b)|$)`;
-const QUICK_ADD_INLINE_CONTROL_BOUNDARY = String.raw`(?=\s(?:[@#+!%]|\/(?:${QUICK_ADD_FOCUS_COMMAND_PATTERN}|link:|note:|start:|due:|review:|project:|area:|energy:|inbox\b|next\b|in-progress\b|waiting\b|someday\b|done\b|archived\b))|$)`;
+const QUICK_ADD_COMMAND_BOUNDARY = String.raw`(?=\s\/(?:${QUICK_ADD_FOCUS_COMMAND_PATTERN}|link:|note:|start:|due:|review:|project:|area:|energy:|inbox\b|next\b|in-progress\b|waiting\b|someday\b|reference\b|done\b|archived\b)|$)`;
+const QUICK_ADD_INLINE_CONTROL_BOUNDARY = String.raw`(?=\s(?:[@#+!%]|\/(?:${QUICK_ADD_FOCUS_COMMAND_PATTERN}|link:|note:|start:|due:|review:|project:|area:|energy:|inbox\b|next\b|in-progress\b|waiting\b|someday\b|reference\b|done\b|archived\b))|$)`;
 const SIMPLE_TASK_TOKEN_RE = /[@#][\p{L}\p{N}_-]+/gu;
 const RICH_TASK_TOKEN_RE = new RegExp(
     String.raw`(?:^|\s)([@#](?![\s\p{L}\p{N}_-])[^@#+/!%]+?)${QUICK_ADD_INLINE_CONTROL_BOUNDARY}`,
@@ -1018,7 +1018,7 @@ export function parseQuickAdd(
     // `\b` would also match inside `/someday-maybe`, which used to be harmless
     // when preserve mode handed the title back verbatim and is not now: the
     // token has to be the whole word.
-    const statusMatch = working.match(/(?:^|\s)\/(inbox|next|in-progress|waiting|someday|done|archived)(?=\s|$)/i);
+    const statusMatch = working.match(/(?:^|\s)\/(inbox|next|in-progress|waiting|someday|reference|done|archived)(?=\s|$)/i);
     if (statusMatch) {
         const token = statusMatch[1].toLowerCase();
         status = STATUS_TOKENS[token] ?? normalizeTaskStatus(token);

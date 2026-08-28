@@ -11,7 +11,7 @@ import {
 type TriggerType = 'project' | 'context' | 'tag' | 'area' | 'person' | 'command';
 type SlashCommand =
     | 'due' | 'start' | 'review' | 'note' | 'link' | 'energy' | 'area'
-    | 'inbox' | 'next' | 'waiting' | 'someday' | 'done' | 'archived' | '*';
+    | 'inbox' | 'next' | 'waiting' | 'someday' | 'reference' | 'done' | 'archived' | '*';
 
 interface TriggerState {
     type: TriggerType;
@@ -116,6 +116,7 @@ const SLASH_COMMANDS: Array<{
     { command: 'next', requiresArgument: false },
     { command: 'waiting', requiresArgument: false },
     { command: 'someday', requiresArgument: false },
+    { command: 'reference', requiresArgument: false },
     { command: 'inbox', requiresArgument: false },
     { command: 'done', requiresArgument: false },
     { command: 'archived', requiresArgument: false },

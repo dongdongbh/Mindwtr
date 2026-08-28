@@ -70,6 +70,56 @@ describe('quick-add', () => {
         expect(result.props.isFocusedToday).toBe(true);
     });
 
+    describe('/reference status token (#1093)', () => {
+        const now = new Date('2026-08-28T10:00:00Z');
+
+        it('files a capture straight to Reference', () => {
+            const result = parseQuickAdd('German grammar acceptance-criteria template /reference', undefined, now);
+
+            expect(result.title).toBe('German grammar acceptance-criteria template');
+            expect(result.props.status).toBe('reference');
+        });
+
+        it('combines with the project, area, context and tag tokens', () => {
+            const projects = [{ id: 'p1', title: 'German', status: 'active' } as Project];
+            const areas = [{ id: 'a1', name: 'Learning' } as Area];
+            const result = parseQuickAdd(
+                'Grammar sheet /reference +German !Learning @desk #language',
+                projects,
+                now,
+                areas,
+            );
+
+            expect(result.title).toBe('Grammar sheet');
+            expect(result.props.status).toBe('reference');
+            expect(result.props.projectId).toBe('p1');
+            expect(result.props.areaId).toBe('a1');
+            expect(result.props.contexts).toEqual(['@desk']);
+            expect(result.props.tags).toEqual(['#language']);
+        });
+
+        it('keeps an escaped token as literal text', () => {
+            const result = parseQuickAdd('Explain \\/reference in the docs', undefined, now);
+
+            expect(result.title).toBe('Explain /reference in the docs');
+            expect(result.props.status).toBeUndefined();
+        });
+
+        it('never reads the bare word or a URL path as a status', () => {
+            const bare = parseQuickAdd('File the reference manual', undefined, now);
+            expect(bare.title).toBe('File the reference manual');
+            expect(bare.props.status).toBeUndefined();
+
+            const url = parseQuickAdd('Read https://example.com/reference', undefined, now);
+            expect(url.title).toBe('Read https://example.com/reference');
+            expect(url.props.status).toBeUndefined();
+
+            const suffixed = parseQuickAdd('Read the /reference-guide chapter', undefined, now);
+            expect(suffixed.title).toBe('Read the /reference-guide chapter');
+            expect(suffixed.props.status).toBeUndefined();
+        });
+    });
+
     it('parses energy quick-add commands', () => {
         const result = parseQuickAdd('Draft proposal /energy:High /next');
 
@@ -1424,6 +1474,13 @@ describe('parseProcessInboxTitleInput', () => {
         expect(parsed.props.status).toBeUndefined();
         expect(parsed.props.contexts).toEqual(['@phone']);
         expect(parsed.title).toBe('Ask Bob');
+    });
+
+    it('drops /reference too, so clarifying still owns the destination (#1093)', () => {
+        const parsed = parseProcessInboxTitleInput('Grammar sheet /reference @desk', { projects, areas });
+        expect(parsed.props.status).toBeUndefined();
+        expect(parsed.props.contexts).toEqual(['@desk']);
+        expect(parsed.title).toBe('Grammar sheet');
     });
 
     it('never creates a project: an unknown +Name goes back into the title', () => {

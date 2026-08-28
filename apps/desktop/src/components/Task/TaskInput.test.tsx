@@ -210,7 +210,7 @@ describe('TaskInput autocomplete', () => {
         input.setSelectionRange(input.value.length, input.value.length);
         fireEvent.click(input);
 
-        for (const name of ['/link:<url>', '/energy:<level>', '/area:<name>', '/archived', '/*']) {
+        for (const name of ['/link:<url>', '/energy:<level>', '/area:<name>', '/reference', '/archived', '/*']) {
             expect(getByRole('option', { name })).toBeInTheDocument();
         }
     });

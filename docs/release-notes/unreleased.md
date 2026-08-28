@@ -6,6 +6,7 @@ Changes collected after `v1.2.1` and before the next version tag.
 
 ## Full Change List
 
+- Quick add accepts `/reference`, so a scrap of information you want to keep can be filed straight to Reference from the capture box on desktop and mobile — no capture-then-move round trip. It combines with `+Project`, `!Area`, `@context` and `#tag` like the other status tokens, and processing the inbox still ignores it so the destination you pick there wins. (#1093)
 - The Pomodoro timer now sounds its end-of-session alert without needing Task reminders turned on. Task reminders are off by default, so on a new install the focus and break alerts never fired. To work in silence, turn off the new **Session-end alert** switch in Settings → GTD → Pomodoro timer. (#528)
 - WebDAV sync now checks that the server returns strong ETags and enforces conditional writes before using it. Existing WebDAV setups are checked on their first sync after updating; an incompatible server stops with a compatibility error instead of risking one device overwriting another device's changes.
 - File Sync keeps immutable attachment generations in the shared folder when you remove an attachment. This protects bytes that a lagging device may still reference, but the folder can grow over time. To reclaim space, back up the folder and let every device finish syncing before you remove generation files you have verified are obsolete.
