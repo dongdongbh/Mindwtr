@@ -5690,6 +5690,55 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn probe_rename_error_does_not_drop_retry_after_cleanup_authority_loss() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let tmp_file = dir.path().join(".mindwtr-folder-probe-owned.tmp");
+        let final_file = dir.path().join(".mindwtr-folder-probe-owned");
+        let lock_file = dir.path().join(".mindwtr.lock");
+        let displaced_lock = dir.path().join(".mindwtr.lock.displaced");
+        fs::write(&final_file, b"peer-generation").expect("seed conflicting final leaf");
+        let mut before_stage = |_stage: AtomicWriteStage| Ok(());
+        let mut read_back = |_path: &Path, bytes: Vec<u8>| Ok(bytes);
+        let mut replaced_lock = false;
+        let mut before_remove = |_path: &Path| {
+            if !replaced_lock {
+                fs::rename(&lock_file, &displaced_lock).map_err(|error| error.to_string())?;
+                fs::write(&lock_file, b"replacement lock").map_err(|error| error.to_string())?;
+                replaced_lock = true;
+            }
+            Ok(())
+        };
+
+        let error = probe_sync_dir_at_with(
+            dir.path(),
+            &tmp_file,
+            &final_file,
+            &mut before_stage,
+            &mut read_back,
+            &mut before_remove,
+        )
+        .expect_err("cleanup authority loss must preserve the armed error owner");
+
+        assert!(replaced_lock);
+        assert!(
+            error.contains(RETAINED_CLEANUP_AUTHORITY_LOST),
+            "unexpected error: {error}"
+        );
+        assert_eq!(
+            fs::read(&tmp_file).expect("owned temp remains recoverable"),
+            SYNC_FOLDER_PROBE_BYTES
+        );
+        assert_eq!(
+            fs::read(&final_file).expect("peer final remains untouched"),
+            b"peer-generation"
+        );
+
+        fs::remove_file(&lock_file).expect("remove replacement lock");
+        fs::rename(&displaced_lock, &lock_file).expect("restore original lock identity");
+    }
+
+    #[test]
     fn sync_folder_probe_cleanup_quarantines_and_preserves_a_final_gap_peer_leaf() {
         let dir = tempfile::tempdir().expect("temp dir");
         let tmp_file = dir.path().join(".mindwtr-folder-probe-cleanup-race.tmp");
@@ -6294,7 +6343,7 @@ mod tests {
             ))
         };
 
-        let error = atomic_retained_tmp_write_then_rename_with(
+        let mut error = atomic_retained_tmp_write_then_rename_with(
             &root,
             &tmp_file,
             &final_file,
@@ -6307,7 +6356,11 @@ mod tests {
 
         assert!(!final_file.exists(), "the exact partial destination is retired");
         assert!(tmp_file.exists(), "the source remains owned until error disposal");
-        drop(error);
+        let mut owned_temp = error.owned_temp.take().expect("owned retained source");
+        owned_temp.keep();
+        owned_temp
+            .remove_with(&tmp_file, &mut |_path| Ok(()))
+            .expect("explicit caller-authorized source cleanup");
         assert!(!tmp_file.exists(), "the source owner retires its exact stage");
         release_sync_lock(&lock);
     }
@@ -6337,7 +6390,7 @@ mod tests {
             ))
         };
 
-        let error = atomic_retained_tmp_write_then_rename_with(
+        let mut error = atomic_retained_tmp_write_then_rename_with(
             &root,
             &tmp_file,
             &final_file,
@@ -6354,7 +6407,11 @@ mod tests {
             fs::read(&displaced_link).expect("linked generation preserved"),
             b"probe-generation"
         );
-        drop(error);
+        let mut owned_temp = error.owned_temp.take().expect("owned retained source");
+        owned_temp.keep();
+        owned_temp
+            .remove_with(&tmp_file, &mut |_path| Ok(()))
+            .expect("explicit caller-authorized source cleanup");
         release_sync_lock(&lock);
     }
 
@@ -14385,6 +14442,7 @@ enum AtomicWriteStage {
     Create,
     WriteAndSync,
     Rename,
+    Cleanup,
 }
 
 const RETAINED_CLEANUP_AUTHORITY_LOST: &str = "RETAINED_CLEANUP_AUTHORITY_LOST";
@@ -14741,14 +14799,6 @@ where
     Err("Could not allocate a unique probe cleanup quarantine".to_string())
 }
 
-fn quarantine_and_remove_retained_identity(
-    root: &RetainedSyncRoot<'_>,
-    path: &Path,
-    identity: NativeFileIdentity,
-) -> Result<(), String> {
-    quarantine_and_remove_retained_identity_with(root, path, identity, &mut |_, _| Ok(()))
-}
-
 impl OwnedRetainedRootPublication {
     fn path(&self) -> PathBuf {
         self.sync_dir.join(&self.leaf)
@@ -14774,11 +14824,6 @@ impl OwnedRetainedRootPublication {
         let bytes = self.root().read(path).map_err(|error| error.to_string())?;
         self.verify_at(path)?;
         Ok(bytes)
-    }
-
-    fn quarantine_and_remove(&self, path: &Path) -> Result<(), String> {
-        let root = self.root();
-        quarantine_and_remove_retained_identity(&root, path, self.identity)
     }
 
     fn remove_with<BeforeRemove>(
@@ -14836,8 +14881,11 @@ impl OwnedRetainedRootPublication {
 impl Drop for OwnedRetainedRootPublication {
     fn drop(&mut self) {
         if self.cleanup_on_drop {
-            let path = self.path();
-            let _ = self.quarantine_and_remove(&path);
+            // An owner cannot retain the caller's live lock/root validator. Mutating here would
+            // turn any authority-loss error into an unguarded cleanup retry during unwinding.
+            // Production callers disarm Drop before explicit fenced cleanup; otherwise preserve
+            // the exact invocation-owned bytes for recovery rather than guessing authority.
+            log::warn!("Preserved a File Sync temporary publication because cleanup authority was unavailable");
         }
     }
 }
@@ -14883,9 +14931,18 @@ where
         file.sync_all().map_err(|error| error.to_string())
     })();
     drop(file);
-    if let Err(detail) = write_result {
+    if let Err(mut detail) = write_result {
         if !is_retained_cleanup_authority_error(&detail) {
-            let _ = quarantine_and_remove_retained_identity(root, tmp_file, identity);
+            if let Err(cleanup_error) = quarantine_and_remove_retained_identity_with(
+                root,
+                tmp_file,
+                identity,
+                &mut |_, _| before_stage(AtomicWriteStage::Cleanup),
+            ) {
+                detail = format!(
+                    "{detail}; retained temp cleanup was preserved safely: {cleanup_error}"
+                );
+            }
         }
         return Err(RetainedAtomicWriteError {
             stage: AtomicWriteStage::WriteAndSync,
@@ -14894,9 +14951,18 @@ where
         });
     }
 
-    if let Err(detail) = before_stage(AtomicWriteStage::Rename) {
+    if let Err(mut detail) = before_stage(AtomicWriteStage::Rename) {
         if !is_retained_cleanup_authority_error(&detail) {
-            let _ = quarantine_and_remove_retained_identity(root, tmp_file, identity);
+            if let Err(cleanup_error) = quarantine_and_remove_retained_identity_with(
+                root,
+                tmp_file,
+                identity,
+                &mut |_, _| before_stage(AtomicWriteStage::Cleanup),
+            ) {
+                detail = format!(
+                    "{detail}; retained temp cleanup was preserved safely: {cleanup_error}"
+                );
+            }
         }
         return Err(RetainedAtomicWriteError {
             stage: AtomicWriteStage::Rename,
@@ -14914,10 +14980,20 @@ where
     let retained_directory = match root.try_clone_directory() {
         Ok(directory) => directory,
         Err(error) => {
-            let _ = quarantine_and_remove_retained_identity(root, tmp_file, identity);
+            let mut detail = format!("Failed to retain sync root before publication: {error}");
+            if let Err(cleanup_error) = quarantine_and_remove_retained_identity_with(
+                root,
+                tmp_file,
+                identity,
+                &mut |_, _| before_stage(AtomicWriteStage::Cleanup),
+            ) {
+                detail = format!(
+                    "{detail}; retained temp cleanup was preserved safely: {cleanup_error}"
+                );
+            }
             return Err(RetainedAtomicWriteError {
                 stage: AtomicWriteStage::Rename,
-                detail: format!("Failed to retain sync root before publication: {error}"),
+                detail,
                 owned_temp: None,
             });
         }
@@ -14948,9 +15024,12 @@ where
             });
         }
         if detail.starts_with(RETAINED_LINKED_DESTINATION_PRESERVED) {
-            if let Err(cleanup_error) =
-                quarantine_and_remove_retained_identity(root, destination, identity)
-            {
+            if let Err(cleanup_error) = quarantine_and_remove_retained_identity_with(
+                root,
+                destination,
+                identity,
+                &mut |_, _| before_stage(AtomicWriteStage::Cleanup),
+            ) {
                 detail = format!(
                     "{detail}; linked destination cleanup preserved an ambiguous generation: {cleanup_error}"
                 );
@@ -14972,7 +15051,7 @@ where
             owned_temp,
         });
     }
-    let publication = OwnedRetainedRootPublication {
+    let mut publication = OwnedRetainedRootPublication {
         directory: retained_directory,
         sync_dir: root.sync_dir.to_path_buf(),
         leaf: destination
@@ -14982,11 +15061,14 @@ where
         identity,
         cleanup_on_drop: true,
     };
-    publication.verify_at(destination).map_err(|detail| RetainedAtomicWriteError {
-        stage: AtomicWriteStage::Rename,
-        detail,
-        owned_temp: None,
-    })?;
+    if let Err(detail) = publication.verify_at(destination) {
+        publication.keep();
+        return Err(RetainedAtomicWriteError {
+            stage: AtomicWriteStage::Rename,
+            detail,
+            owned_temp: None,
+        });
+    }
     Ok(publication)
 }
 
@@ -14997,6 +15079,7 @@ fn sync_folder_probe_stage_error(stage: AtomicWriteStage, detail: &str) -> Strin
         AtomicWriteStage::Create => "Could not create a file in this folder",
         AtomicWriteStage::WriteAndSync => "Could not finish writing a file in this folder",
         AtomicWriteStage::Rename => "Could not finalize a file in this folder",
+        AtomicWriteStage::Cleanup => "Could not safely clean up a temporary file",
     };
     format!("{message}: {detail}")
 }
@@ -15033,7 +15116,7 @@ where
             before_stage(stage)?;
             revalidate_sync_lock(&sync_lock, sync_dir).map_err(retained_cleanup_authority_error)
         };
-        let mut publication = atomic_retained_tmp_write_then_rename_with(
+        let mut publication = match atomic_retained_tmp_write_then_rename_with(
             &root,
             tmp_file,
             final_file,
@@ -15041,8 +15124,31 @@ where
             &mut guarded_before_stage,
             None,
             false,
-        )
-        .map_err(|error| sync_folder_probe_stage_error(error.stage, &error.detail))?;
+        ) {
+            Ok(publication) => publication,
+            Err(mut error) => {
+                if let Some(mut owned_temp) = error.owned_temp.take() {
+                    // The error owner starts armed for safety if a caller forgets it, but Drop
+                    // cannot revalidate this live lease. Disarm before explicit fenced cleanup.
+                    owned_temp.keep();
+                    let owned_path = owned_temp.path();
+                    let mut guarded_cleanup = |path: &Path| {
+                        before_remove(path)?;
+                        revalidate_sync_lock(&sync_lock, sync_dir)
+                            .map_err(retained_cleanup_authority_error)
+                    };
+                    if let Err(cleanup_error) =
+                        owned_temp.remove_with(&owned_path, &mut guarded_cleanup)
+                    {
+                        error.detail = format!(
+                            "{}; retained temp cleanup was preserved safely: {cleanup_error}",
+                            error.detail
+                        );
+                    }
+                }
+                return Err(sync_folder_probe_stage_error(error.stage, &error.detail));
+            }
+        };
         // Once publication succeeds, implicit Drop cleanup is no longer safe:
         // any later error may be the evidence that this invocation lost its
         // lock/root authority. All cleanup below is explicit and fenced.
@@ -16484,7 +16590,22 @@ where
                 validate_authority()?;
                 Ok(true)
             }
-            Err(error) if error.stage != AtomicWriteStage::Rename || windows_replacement => {
+            Err(mut error) if error.stage != AtomicWriteStage::Rename || windows_replacement => {
+                if let Some(mut owned_temp) = error.owned_temp.take() {
+                    owned_temp.keep();
+                    let owned_path = owned_temp.path();
+                    let mut before_remove = |_owned_path: &Path| {
+                        validate_authority().map_err(retained_cleanup_authority_error)
+                    };
+                    if let Err(cleanup_error) =
+                        owned_temp.remove_with(&owned_path, &mut before_remove)
+                    {
+                        error.detail = format!(
+                            "{}; retained temp cleanup was preserved safely: {cleanup_error}",
+                            error.detail
+                        );
+                    }
+                }
                 Err(error.detail)
             }
             Err(mut error) => {
@@ -16498,11 +16619,12 @@ where
                     "Atomic rename failed ({}), falling back to direct write",
                     rename_err
                 );
-                publication.verify_at(&tmp_file).map_err(|ownership_error| {
-                    format!(
+                if let Err(ownership_error) = publication.verify_at(&tmp_file) {
+                    publication.keep();
+                    return Err(format!(
                         "Sync write failed: rename error: {rename_err}; temp ownership error: {ownership_error}"
-                    )
-                })?;
+                    ));
+                }
                 if let Err(authority_error) = validate_authority() {
                     publication.keep();
                     return Err(authority_error);
@@ -16513,7 +16635,12 @@ where
                             publication.keep();
                             return Err(authority_error);
                         }
-                        let mut before_remove = |_owned_path: &Path| Ok(());
+                        // Drop cannot retain the live authority validator. From here cleanup is
+                        // explicit, so disarm it before any fenced mutation can fail.
+                        publication.keep();
+                        let mut before_remove = |_owned_path: &Path| {
+                            validate_authority().map_err(retained_cleanup_authority_error)
+                        };
                         publication.remove_with(&tmp_file, &mut before_remove)?;
                         root.sync_directory().map_err(|error| {
                             format!("Failed to flush sync directory metadata: {error}")
@@ -16521,9 +16648,22 @@ where
                         validate_authority()?;
                         Ok(true)
                     }
-                    Err(copy_err) => Err(format!(
-                        "Sync write failed: rename error: {rename_err}, copy fallback error: {copy_err}"
-                    )),
+                    Err(copy_err) => {
+                        publication.keep();
+                        let mut before_remove = |_owned_path: &Path| {
+                            validate_authority().map_err(retained_cleanup_authority_error)
+                        };
+                        let cleanup = publication.remove_with(&tmp_file, &mut before_remove);
+                        let detail = format!(
+                            "Sync write failed: rename error: {rename_err}, copy fallback error: {copy_err}"
+                        );
+                        match cleanup {
+                            Ok(()) => Err(detail),
+                            Err(cleanup_error) => Err(format!(
+                                "{detail}; retained temp cleanup was preserved safely: {cleanup_error}"
+                            )),
+                        }
+                    }
                 }
             }
         };
