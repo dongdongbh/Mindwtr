@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppData, Attachment, AttachmentSettings, Project, Task } from './types';
 import {
+    AttachmentUploadTooLargeError,
+    AttachmentUploadSizeUnavailableError,
     applyAttachmentPatches,
+    assertBufferedAttachmentUploadSize,
     collectAttachmentsById,
+    MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES,
     normalizePendingRemoteDeletes,
     resetUnhashableAttachmentStatsForTests,
     runAttachmentTransferLifecycle,
@@ -78,6 +82,91 @@ const deepFreeze = <T>(value: T): T => {
 };
 
 describe('runAttachmentTransferLifecycle', () => {
+    it('rejects an oversized buffered upload before snapshot creation without changing pending metadata', async () => {
+        const attachment = makeAttachment({
+            cloudKey: 'attachments/attachment-1.txt',
+            fileHash: 'ab'.repeat(32),
+            pendingContentUpload: true,
+            localStatus: 'available',
+            contentMtimeMs: 1000,
+            contentSize: 10,
+        });
+        const createUploadSnapshot = vi.fn();
+        const onUpload = vi.fn();
+
+        await expect(runLifecycle({
+            attachmentsById: new Map([[attachment.id, attachment]]),
+            getLocalFilePresence: vi.fn(async () => 'present' as const),
+            getLocalFileStat: vi.fn(async () => ({ mtimeMs: 2000, size: 11 })),
+            maxBufferedUploadBytes: 10,
+            createUploadSnapshot,
+            requireUploadSnapshot: true,
+            contentChangePhase: 'post-merge',
+            onUpload,
+            onUploadError: vi.fn(),
+            onDownload: vi.fn(),
+            onDownloadError: vi.fn(),
+            isFatalError: (error) => error instanceof AttachmentUploadTooLargeError,
+        })).rejects.toMatchObject({
+            name: 'AttachmentUploadTooLargeError',
+            actualBytes: 11,
+            limitBytes: 10,
+        });
+
+        expect(createUploadSnapshot).not.toHaveBeenCalled();
+        expect(onUpload).not.toHaveBeenCalled();
+        expect(attachment).toEqual(makeAttachment({
+            cloudKey: 'attachments/attachment-1.txt',
+            fileHash: 'ab'.repeat(32),
+            pendingContentUpload: true,
+            localStatus: 'available',
+            contentMtimeMs: 1000,
+            contentSize: 10,
+        }));
+    });
+
+    it('rejects an oversized changed file before hashing it', async () => {
+        const attachment = makeAttachment({
+            cloudKey: 'attachments/attachment-1.txt',
+            fileHash: 'ab'.repeat(32),
+            localStatus: 'available',
+            contentMtimeMs: 1000,
+            contentSize: 10,
+        });
+        const computeLocalFileHash = vi.fn();
+
+        await expect(runLifecycle({
+            attachmentsById: new Map([[attachment.id, attachment]]),
+            getLocalFilePresence: vi.fn(async () => 'present' as const),
+            getLocalFileStat: vi.fn(async () => ({ mtimeMs: 2000, size: 11 })),
+            computeLocalFileHash,
+            maxBufferedUploadBytes: 10,
+            contentChangePhase: 'prepare',
+            onUpload: vi.fn(),
+            onUploadError: vi.fn(),
+            onDownload: vi.fn(),
+            onDownloadError: vi.fn(),
+        })).rejects.toBeInstanceOf(AttachmentUploadTooLargeError);
+
+        expect(computeLocalFileHash).not.toHaveBeenCalled();
+    });
+
+    it('reserves the MWENC1 envelope inside the File Sync buffered-read ceiling', () => {
+        expect(MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES + 70).toBe(100 * 1024 * 1024);
+        expect(() => assertBufferedAttachmentUploadSize(
+            MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES,
+            MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES,
+        )).not.toThrow();
+        expect(() => assertBufferedAttachmentUploadSize(
+            MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES + 1,
+            MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES,
+        )).toThrow(AttachmentUploadTooLargeError);
+        expect(() => assertBufferedAttachmentUploadSize(
+            Number.NaN,
+            MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES,
+        )).toThrow(AttachmentUploadSizeUnavailableError);
+    });
+
     it('uploads local file attachments that do not yet have a cloud key', async () => {
         const attachment = makeAttachment({ localStatus: 'missing' });
         const onUpload = vi.fn(async (item: Attachment) => {

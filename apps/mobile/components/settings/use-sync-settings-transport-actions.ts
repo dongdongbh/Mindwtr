@@ -846,6 +846,13 @@ export function useSyncSettingsTransportActions({
                     );
                     return;
                 }
+                if (probeResult.fileAttachmentUploadBlocked === 'too-large') {
+                    showSettingsErrorToast(
+                        tr('settings.syncMobile.error'),
+                        tr('settings.syncFileAttachmentTooLarge'),
+                    );
+                    return;
+                }
                 const probeRemoteCleanupDeferred = probeResult.success
                     && probeResult.remoteFenceDeferred === 'cleanup';
                 const probeFileCleanupDeferred = probeResult.success
@@ -929,6 +936,18 @@ export function useSyncSettingsTransportActions({
                 showSettingsErrorToast(
                     tr('settings.syncMobile.error'),
                     tr('settings.syncFileGenerationCorrupt'),
+                );
+                return;
+            }
+            if (
+                result.success
+                && !result.remoteWriteDeferred
+                && result.fileAttachmentUploadBlocked === 'too-large'
+            ) {
+                showSettingsWarning(
+                    tr('common.notice'),
+                    tr('settings.syncFileAttachmentTooLarge'),
+                    6000,
                 );
                 return;
             }

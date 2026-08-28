@@ -25,6 +25,7 @@ vi.mock('@/contexts/language-context', () => ({
         'settings.syncQueued': 'Sync queued',
         'settings.syncQueuedBody': 'Local changes arrived during sync. A retry was queued automatically.',
         'settings.syncAttachmentWriteDeferred': 'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
+        'settings.syncFileAttachmentTooLarge': 'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
         'settings.syncRemoteBusy': 'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
         'settings.syncRemoteCleanupDeferred': 'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
         'settings.syncFileLockBusy': 'Another Mindwtr operation is using File Sync. Wait for it to finish; Mindwtr will retry automatically.',
@@ -253,6 +254,63 @@ describe('useManualPullSync', () => {
       tone: 'warning',
       durationMs: 6000,
     });
+  });
+
+  it('shows actionable File Sync size guidance without a green manual-sync result', async () => {
+    mocked.performMobileSync.mockResolvedValue({
+      success: true,
+      fileAttachmentUploadBlocked: 'too-large',
+    });
+    renderHarness();
+
+    await act(async () => {
+      await latest?.onRefresh();
+    });
+
+    expect(latest?.indicatorState).toBe('idle');
+    expect(mocked.showToast).toHaveBeenCalledWith({
+      title: 'Notice',
+      message: 'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
+      tone: 'warning',
+      durationMs: 6000,
+    });
+    expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+  });
+
+  it.each([
+    {
+      outcome: 'failed',
+      result: { success: false, error: 'Document sync failed.' },
+    },
+    {
+      outcome: 'deferred',
+      result: {
+        success: true,
+        remoteWriteDeferred: true,
+        error: 'Remote write failed. Retrying in the background.',
+      },
+    },
+  ])('prioritizes a $outcome document sync result over attachment guidance', async ({ result }) => {
+    mocked.performMobileSync.mockResolvedValue({
+      ...result,
+      fileAttachmentUploadBlocked: 'too-large',
+    });
+    renderHarness();
+
+    await act(async () => {
+      await latest?.onRefresh();
+    });
+
+    expect(latest?.indicatorState).toBe('error');
+    expect(mocked.showToast).toHaveBeenCalledWith({
+      title: 'Sync failed',
+      message: result.error,
+      tone: 'error',
+      durationMs: 5200,
+    });
+    expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
+    }));
   });
 
   it.each([

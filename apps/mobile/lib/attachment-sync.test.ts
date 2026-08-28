@@ -114,6 +114,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@mindwtr/core')>();
   return {
     ...actual,
+    MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES: 15,
     cloudGetFile: vi.fn(),
     cloudDeleteFile: vi.fn(),
     cloudPutFile: vi.fn(),
@@ -280,6 +281,83 @@ describe('attachment sync', () => {
         targetPath,
       };
     });
+  });
+
+  it('rejects an oversized mobile File Sync source before copy, read, encryption, or metadata mutation', async () => {
+    const id = 'oversized-file-upload';
+    const localUri = `file://document/attachments/${id}.txt`;
+    const attachment = singleAttachmentData({
+      id,
+      uri: localUri,
+      localStatus: 'available',
+      cloudKey: 'attachments/old-generation.txt',
+      fileHash: 'ab'.repeat(32),
+      contentRev: 3,
+      contentMtimeMs: 1000,
+      contentSize: 16,
+      pendingContentUpload: true,
+    });
+    const original = structuredClone(attachment.tasks[0].attachments?.[0]);
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+      uri === localUri
+        ? { exists: true, size: 16, modificationTime: 1 }
+        : { exists: false }
+    ));
+
+    await expect(attachmentSync.syncFileAttachments(
+      attachment,
+      'file://sync/data.json',
+      undefined,
+      { phase: 'post-merge' },
+    )).rejects.toMatchObject({
+      name: 'AttachmentUploadTooLargeError',
+      actualBytes: 16,
+      limitBytes: 15,
+    });
+
+    expect(fileSystemMock.copyAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.readAsStringAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.writeAsStringAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.StorageAccessFramework.writeAsStringAsync).not.toHaveBeenCalled();
+    expect(attachmentFileInstallerMock.reserveFileSyncAttachmentPublication).not.toHaveBeenCalled();
+    expect(attachment.tasks[0].attachments?.[0]).toEqual(original);
+  });
+
+  it('fails closed and cleans owned mobile upload scratch when a content source size is unavailable', async () => {
+    const { createMobileAttachmentUploadSnapshotWithLimit } = await import('./attachment-sync-backends/common');
+    const sourceUri = 'content://provider/document/no-size';
+    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+
+    await expect(createMobileAttachmentUploadSnapshotWithLimit(
+      sourceUri,
+      singleAttachmentData({ id: 'no-size' }).tasks[0].attachments![0],
+      15,
+    )).rejects.toMatchObject({ name: 'AttachmentUploadSizeUnavailableError' });
+
+    const stagedPath = vi.mocked(fileSystemMock.copyAsync).mock.calls[0]?.[0]?.to as string;
+    expect(stagedPath).toMatch(/^file:\/\/cache\/mindwtr-upload-/);
+    expect(fileSystemMock.readAsStringAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.deleteAsync).toHaveBeenCalledWith(stagedPath, { idempotent: true });
+  });
+
+  it('rejects an oversized content source from its owned scratch stat and cleans it without reading', async () => {
+    const { createMobileAttachmentUploadSnapshotWithLimit } = await import('./attachment-sync-backends/common');
+    const sourceUri = 'content://provider/document/oversized';
+    fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+      uri.startsWith('file://cache/mindwtr-upload-')
+        ? { exists: true, size: 16, modificationTime: 1 }
+        : { exists: false }
+    ));
+
+    await expect(createMobileAttachmentUploadSnapshotWithLimit(
+      sourceUri,
+      singleAttachmentData({ id: 'content-oversized' }).tasks[0].attachments![0],
+      15,
+    )).rejects.toMatchObject({ name: 'AttachmentUploadTooLargeError' });
+
+    const stagedPath = vi.mocked(fileSystemMock.copyAsync).mock.calls[0]?.[0]?.to as string;
+    expect(fileSystemMock.readAsStringAsync).not.toHaveBeenCalled();
+    expect(fileSystemMock.deleteAsync).toHaveBeenCalledWith(stagedPath, { idempotent: true });
   });
 
   it('persists generic Android content uris with a native copy into managed storage', async () => {
@@ -1726,6 +1804,69 @@ describe('attachment sync', () => {
     expect(data.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
   });
 
+  it('downloads a remote-only attachment through the generation installer when proving a candidate cloud backend', async () => {
+    const remoteBytes = new Uint8Array([1, 2, 3]);
+    const remoteHash = sha256Hex(remoteBytes);
+    mockMissingTargetWithDownloadStage(remoteBytes);
+    const core = await import('@mindwtr/core');
+    vi.mocked(core.cloudGetFile).mockResolvedValue(remoteBytes.buffer);
+    const appData: AppData = {
+      tasks: [{
+        id: 'task-1',
+        title: 'Task',
+        status: 'inbox',
+        tags: [],
+        contexts: [],
+        attachments: [{
+          id: 'report',
+          kind: 'file',
+          title: 'Report.pdf',
+          uri: '',
+          cloudKey: 'attachments/report.pdf',
+          fileHash: remoteHash,
+          localStatus: 'missing',
+          createdAt: '2026-08-03T10:00:00.000Z',
+          updatedAt: '2026-08-03T10:00:00.000Z',
+        }],
+        createdAt: '2026-08-03T10:00:00.000Z',
+        updatedAt: '2026-08-03T10:00:00.000Z',
+      }],
+      projects: [],
+      sections: [],
+      areas: [],
+      settings: {},
+    };
+
+    const { syncCloudAttachments } = attachmentSync;
+    const { didMutate, data } = syncResult(
+      await syncCloudAttachments(
+        appData,
+        { url: 'https://candidate.example/v1/data', token: 'candidate-token' },
+        'https://candidate.example/v1',
+        { activationProbe: true, phase: 'post-merge' },
+      ),
+      appData,
+    );
+
+    expect(didMutate).toBe(true);
+    expect(core.cloudGetFile).toHaveBeenCalledWith(
+      'https://candidate.example/v1/attachments/report.pdf',
+      { token: 'candidate-token' },
+    );
+    expect(attachmentFileInstallerMock.installAttachmentFileGeneration).toHaveBeenCalledWith(
+      expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-download-/),
+      'file://document/attachments/report.pdf',
+      { kind: 'absent' },
+      remoteHash,
+    );
+    expect(data.tasks[0]?.attachments?.[0]).toMatchObject({
+      cloudKey: 'attachments/report.pdf',
+      uri: 'file://document/attachments/report.pdf',
+      fileHash: remoteHash,
+      localStatus: 'available',
+    });
+  });
+
   it('uploads a candidate-cleared local attachment when proving a cloud backend', async () => {
     const localUri = 'file://document/attachments/notes.txt';
     fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
@@ -1792,7 +1933,7 @@ describe('attachment sync', () => {
 
   it('proves an existing candidate cloud attachment with a bounded GET and hash check', async () => {
     const remoteBytes = new Uint8Array([1, 2, 3]);
-    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+    mockMissingTargetWithDownloadStage(remoteBytes);
     const core = await import('@mindwtr/core');
     vi.mocked(core.cloudGetFile).mockResolvedValue(remoteBytes.slice().buffer as ArrayBuffer);
     const appData: AppData = {

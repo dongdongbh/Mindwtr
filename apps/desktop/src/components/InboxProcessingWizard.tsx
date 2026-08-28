@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { ArrowRight, BookOpen, Check, CheckCircle, ChevronLeft, ClipboardList, Clock, Loader2, Sparkles, Trash2, User, X } from 'lucide-react';
-import { DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimateLabel, safeFormatDate, safeParseDate, tFallback, type AppData, type Area, type Project, type Task, type TaskDraft, type TaskDraftSetter, type TaskPriority, type TimeEstimate,
+import { ArrowRight, BookOpen, Check, CheckCircle, ChevronLeft, ClipboardList, Clock, Hourglass, Loader2, Sparkles, Trash2, User, X } from 'lucide-react';
+import { DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimateLabel, safeFormatDate, safeParseDate, setTaskViewSectionId, tFallback, type AppData, type Area, type Project, type Task, type TaskDraft, type TaskDraftSetter, type TaskPriority, type TimeEstimate,
     numericTextCollator,
 } from '@mindwtr/core';
 
@@ -14,6 +14,7 @@ import {
 import {
     parseContextsInput,
     parseTagsInput,
+    useProcessingTitleFocus,
     type InboxProcessingOptionLists,
     type InboxProcessingVisibility,
 } from './views/inbox/inbox-processing-utils';
@@ -25,8 +26,9 @@ import { AreaSelector } from './ui/AreaSelector';
 import { ProjectSelector } from './ui/ProjectSelector';
 import { DateField } from './ui/DateField';
 import { QuickDateChips } from './QuickDateChips';
+import { SomedaySectionSelector } from './ui/SomedaySectionSelector';
 
-export type ProcessingStep = 'refine' | 'actionable' | 'projectcheck' | 'twomin' | 'decide' | 'context' | 'reference' | 'project' | 'delegate';
+export type ProcessingStep = 'refine' | 'actionable' | 'projectcheck' | 'twomin' | 'decide' | 'context' | 'reference' | 'someday' | 'project' | 'delegate';
 
 export type InboxProcessingWizardProps = {
     t: (key: string) => string;
@@ -47,7 +49,10 @@ export type InboxProcessingWizardProps = {
     handleSkip: () => void;
     handleNotActionable: (destination: 'trash' | 'someday' | 'reference') => void;
     handleLater: () => void;
+    handleIncubate: () => void;
     handleActionable: () => void;
+    /** This item reached the pass from Someday, not the Inbox (#1089). */
+    isReturningItem: boolean;
     showDoneNowShortcut: boolean;
     handleProjectCheckNo: () => void;
     handleProjectCheckYes: () => void;
@@ -63,7 +68,9 @@ export type InboxProcessingWizardProps = {
     handleSendDelegateRequest: () => void;
     handleConfirmWaiting: () => void;
     handleConfirmReference: () => void;
+    handleConfirmSomeday: () => void;
     onCreatePerson: (name: string) => void | Promise<void>;
+    onCreateSomedaySection: (title: string) => Promise<string | null>;
     customContext: string;
     setCustomContext: (value: string) => void;
     addCustomContext: (value?: string) => void;
@@ -118,7 +125,9 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     handleSkip,
     handleNotActionable,
     handleLater,
+    handleIncubate,
     handleActionable,
+    isReturningItem,
     showDoneNowShortcut,
     handleProjectCheckNo,
     handleProjectCheckYes,
@@ -134,7 +143,9 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     handleSendDelegateRequest,
     handleConfirmWaiting,
     handleConfirmReference,
+    handleConfirmSomeday,
     onCreatePerson,
+    onCreateSomedaySection,
     customContext,
     setCustomContext,
     addCustomContext,
@@ -192,6 +203,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     // The body keeps its own names for the draft fields: one alias block beats
     // rewriting every reference (and re-growing the prop list to do it).
     const processingTitle = draft.title;
+    const titleInputRef = useProcessingTitleFocus(processingTask?.id, processingStep);
     const processingDescription = draft.description;
     const selectedContexts = parseContextsInput(draft.contexts);
     const selectedTags = parseTagsInput(draft.tags);
@@ -209,6 +221,25 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     const setSelectedTimeEstimate = (value: TimeEstimate | undefined) => setField('timeEstimate', value ?? '');
     const setSelectedProjectId = (value: string | null) => setField('projectId', value ?? '');
     const setSelectedAreaId = (value: string | null) => setField('areaId', value ?? '');
+    const somedaySections = settings?.gtd?.viewSections?.someday ?? [];
+    const somedaySectionField = (
+        <div className="space-y-1">
+            <label className="text-xs text-muted-foreground font-medium">
+                {tFallback(t, 'viewSections.somedaySection', 'Someday section')}
+            </label>
+            <SomedaySectionSelector
+                sections={somedaySections}
+                value={draft.viewSectionIds?.someday}
+                onChange={(sectionId) => setField(
+                    'viewSectionIds',
+                    setTaskViewSectionId(draft.viewSectionIds, 'someday', sectionId),
+                )}
+                onCreateSection={onCreateSomedaySection}
+                t={t}
+                className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+            />
+        </div>
+    );
 
     // The same clarify action the task editor offers, on the task being
     // processed (#1022). Copilot stays off: the wizard makes no background AI
@@ -235,7 +266,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     // After a long step is submitted the view is left scrolled to the bottom;
     // bring the panel top (title of the next task) back into view on advance.
     const panelRef = useRef<HTMLDivElement | null>(null);
-    const [actionableChoice, setActionableChoice] = useState<'initial' | 'not-actionable' | 'later'>('initial');
+    const [actionableChoice, setActionableChoice] = useState<'initial' | 'not-actionable' | 'later' | 'incubate'>('initial');
     const processingTaskId = processingTask?.id;
     useEffect(() => {
         if (!processingTaskId) return;
@@ -251,8 +282,10 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     const currentProject = selectedProjectId
         ? projects.find((project) => project.id === selectedProjectId) ?? null
         : null;
-    const laterLabel = tFallback(t, 'process.later', 'Later');
-    const laterHint = tFallback(t, 'process.laterHint', 'Set a start date and move this to Next.');
+    const laterLabel = tFallback(t, 'process.later', 'Start later');
+    const laterHint = tFallback(t, 'process.laterHint', 'Set a start date and move this to Next Actions.');
+    const incubateLabel = tFallback(t, 'process.incubate', 'Incubate');
+    const incubateHint = tFallback(t, 'process.incubateHint', 'Park this without deciding. It comes back to clarify on the date you choose.');
     const isReferenceOrganizationStep = processingStep === 'reference';
     const selectedOrganizationCount = selectedContexts.length + selectedTags.length;
     const compareLabels = (left: string, right: string) =>
@@ -260,6 +293,57 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     const sortedProjects = [...projects].sort((a, b) => compareLabels(a.title, b.title));
     const projectFilterAreaId = selectedAreaId || undefined;
     const areaFilteredProjects = filterProjectsBySelectedArea(sortedProjects, projectFilterAreaId);
+    const projectAssignmentFields = showAreaField || showProjectField ? (
+        <div className="space-y-3">
+            {!selectedProjectId && showAreaField ? (
+                <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.areaLabel')}</label>
+                    <AreaSelector
+                        areas={areas}
+                        value={selectedAreaId ?? ''}
+                        onChange={(value) => setSelectedAreaId(value || null)}
+                        placeholder={t('projects.noArea')}
+                        noAreaLabel={t('projects.noArea')}
+                        searchPlaceholder={t('areas.search')}
+                        noMatchesLabel={t('common.noMatches')}
+                        controlClassName="bg-card rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
+                        menuClassName="text-sm"
+                    />
+                </div>
+            ) : null}
+            {showProjectField ? (
+                <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground font-medium">{t('taskEdit.projectLabel')}</label>
+                    <ProjectSelector
+                        projects={areaFilteredProjects}
+                        allProjects={sortedProjects}
+                        value={selectedProjectId ?? ''}
+                        onChange={(value) => {
+                            const nextProjectId = value || null;
+                            setSelectedProjectId(nextProjectId);
+                            if (nextProjectId) setSelectedAreaId(null);
+                        }}
+                        onCreateProject={async (title) => {
+                            const created = await addProject(
+                                title,
+                                DEFAULT_PROJECT_COLOR,
+                                projectFilterAreaId ? { areaId: projectFilterAreaId } : undefined,
+                            );
+                            return created?.id ?? null;
+                        }}
+                        placeholder={t('process.project')}
+                        noProjectLabel={t('process.noProject')}
+                        searchPlaceholder={t('projects.search')}
+                        noMatchesLabel={t('common.noMatches')}
+                        emptyLabel={projectFilterAreaId ? t('projects.noProjectsInArea') : undefined}
+                        createProjectLabel={t('projects.create')}
+                        controlClassName="bg-card rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
+                        menuClassName="text-sm"
+                    />
+                </div>
+            ) : null}
+        </div>
+    ) : null;
 
     const stepLabel: Record<ProcessingStep, string> = {
         refine: t('process.refineTitle'),
@@ -269,6 +353,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
         decide: t('process.nextStep'),
         context: t('process.context'),
         reference: t('process.reference'),
+        someday: t('process.someday'),
         project: t('process.project'),
         delegate: t('process.delegateTitle'),
     };
@@ -349,6 +434,17 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                     <span className="text-xs font-medium text-primary">{stepLabel[processingStep]}</span>
                 </div>
 
+                {isReturningItem && (
+                    <div className="flex flex-col items-center gap-1">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-status-someday/10 px-2.5 py-1 text-[11px] font-medium text-status-someday">
+                            <Hourglass className="h-3 w-3" /> {tFallback(t, 'process.returningItem', 'Back to clarify')}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                            {tFallback(t, 'process.returningItemHint', 'You incubated this. Decide what it is now.')}
+                        </span>
+                    </div>
+                )}
+
                 {/* Task title */}
                 <p className="text-center font-medium text-base leading-snug">
                     {processingTitle || processingTask.title}
@@ -361,6 +457,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                         <div className="space-y-1">
                             <label className="text-[11px] text-muted-foreground font-medium">{t('taskEdit.titleLabel')}</label>
                             <input
+                                ref={titleInputRef}
                                 value={processingTitle}
                                 onChange={(e) => setProcessingTitle(e.target.value)}
                                 className="w-full bg-muted/50 border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
@@ -503,6 +600,16 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     <CheckCircle className="h-4 w-4" /> {t('process.doneIt')}
                                 </button>
                             )}
+                            {/* Deferring an action you have already decided on is
+                                an actionable outcome, so it sits on this side of
+                                the question rather than under "No" (#1089). */}
+                            <button
+                                type="button"
+                                onClick={() => setActionableChoice('later')}
+                                className="mx-auto flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-info transition-colors hover:bg-info/10"
+                            >
+                                <Clock className="h-4 w-4" /> {laterLabel}
+                            </button>
                         </div>
                     )}
                     {actionableChoice === 'not-actionable' && (
@@ -537,10 +644,10 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                 )}
                                 <button
                                     type="button"
-                                    onClick={() => setActionableChoice('later')}
-                                    className="flex items-center justify-center gap-1.5 rounded-lg bg-info/10 py-2.5 text-xs font-medium text-info transition-colors hover:bg-info/20"
+                                    onClick={() => setActionableChoice('incubate')}
+                                    className="flex items-center justify-center gap-1.5 rounded-lg bg-status-someday/10 py-2.5 text-xs font-medium text-status-someday transition-colors hover:bg-status-someday/20"
                                 >
-                                    <Clock className="h-3.5 w-3.5" /> {laterLabel}
+                                    <Hourglass className="h-3.5 w-3.5" /> {incubateLabel}
                                 </button>
                             </div>
                         </div>
@@ -549,7 +656,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                         <div className="space-y-3 border-t border-border pt-3">
                             <button
                                 type="button"
-                                onClick={() => setActionableChoice('not-actionable')}
+                                onClick={() => setActionableChoice('initial')}
                                 className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
                             >
                                 <ChevronLeft className="h-3.5 w-3.5" /> {t('common.back')}
@@ -567,6 +674,33 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                 className="flex w-full items-center justify-center gap-2 rounded-lg bg-info py-2.5 text-sm font-medium text-info-foreground transition-colors hover:bg-info/90"
                             >
                                 <Clock className="h-4 w-4" /> {laterLabel}
+                            </button>
+                        </div>
+                    )}
+                    {actionableChoice === 'incubate' && (
+                        <div className="space-y-3 border-t border-border pt-3">
+                            <button
+                                type="button"
+                                onClick={() => setActionableChoice('not-actionable')}
+                                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                            >
+                                <ChevronLeft className="h-3.5 w-3.5" /> {t('common.back')}
+                            </button>
+                            <div className="text-xs text-muted-foreground">{incubateHint}</div>
+                            {projectAssignmentFields}
+                            {somedaySectionField}
+                            <InboxProcessingScheduleFields
+                                t={t}
+                                fields={scheduleFields}
+                                visibleFieldKeys={['review']}
+                                variant="guided"
+                            />
+                            <button
+                                type="button"
+                                onClick={handleIncubate}
+                                className="flex w-full items-center justify-center gap-2 rounded-lg bg-status-someday py-2.5 text-sm font-medium text-white transition-colors hover:bg-status-someday/90"
+                            >
+                                <Hourglass className="h-4 w-4" /> {incubateLabel}
                             </button>
                         </div>
                     )}
@@ -936,6 +1070,23 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                         {selectedOrganizationCount > 0
                             ? `${t('process.next')} (${selectedOrganizationCount})`
                             : `${t('process.next')} (${t('process.noContext')})`} <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                </div>
+            )}
+
+            {processingStep === 'someday' && (
+                <div className="space-y-4">
+                    <p className="text-center text-sm text-muted-foreground">
+                        {t('process.someday')}
+                    </p>
+                    {projectAssignmentFields}
+                    {somedaySectionField}
+                    <button
+                        type="button"
+                        onClick={handleConfirmSomeday}
+                        className="w-full flex items-center justify-center gap-2 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90"
+                    >
+                        {t('process.someday')}
                     </button>
                 </div>
             )}

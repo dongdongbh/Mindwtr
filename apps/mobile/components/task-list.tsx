@@ -383,11 +383,13 @@ function TaskListComponent({
   const timeSpentEnabled = resolvedFeatureFlags.pomodoro
     && settings?.gtd?.pomodoro?.linkTask === true;
   const showTaskAge = settings?.appearance?.showTaskAge === true;
+  const sectionById = useMemo(() => new Map(sections.map((section) => [section.id, section])), [sections]);
   const rowContext = useMemo<SwipeableTaskItemRowContext>(() => ({
     addTask,
     updateTask,
     restoreTask,
     projects,
+    sectionById,
     areas,
     focusedCount,
     focusTaskLimit,
@@ -400,6 +402,7 @@ function TaskListComponent({
     focusedCount,
     focusTaskLimit,
     projects,
+    sectionById,
     restoreTask,
     showTaskAge,
     timeEstimatesEnabled,

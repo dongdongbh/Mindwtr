@@ -16,8 +16,12 @@ import { Task,
     getLocalizedWeekdayButtons,
     getLocalizedWeekdayLabels,
     normalizeClockTimeInput,
+    resolveTaskViewSection,
     resolveFeatureFlags,
-    shallow, tFallback, } from '@mindwtr/core';
+    setTaskViewSectionId,
+    shallow,
+    sortViewSectionDefinitions,
+    tFallback, } from '@mindwtr/core';
 import { taskDraftToUpdatePatch } from '@mindwtr/core/task-draft';
 import { useLanguage } from '../contexts/language-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
@@ -57,6 +61,7 @@ import {
 } from './task-edit/use-task-edit-state';
 import { useTaskEditDerivedState } from './task-edit/use-task-edit-derived-state';
 import { useTaskTokenSuggestions } from './task-edit/use-task-token-suggestions';
+import { createSomedaySection } from '../lib/someday-section-actions';
 
 
 const EMPTY_COPILOT_TAGS: string[] = [];
@@ -394,6 +399,31 @@ function TaskEditModalInner({
         t,
     });
     const isReference = (taskEditDraft?.draft.status ?? task?.status) === 'reference';
+    const somedaySections = useMemo(
+        () => sortViewSectionDefinitions(settings.gtd?.viewSections?.someday ?? []),
+        [settings.gtd?.viewSections?.someday],
+    );
+    const selectedSomedaySectionId = taskEditDraft
+        ? resolveTaskViewSection(taskEditDraft.draft, 'someday', somedaySections)?.id
+        : undefined;
+    const handleSomedaySectionChange = useCallback((sectionId: string | undefined) => {
+        setDraftField(
+            'viewSectionIds',
+            setTaskViewSectionId(taskEditDraft?.draft.viewSectionIds, 'someday', sectionId),
+        );
+    }, [setDraftField, taskEditDraft?.draft.viewSectionIds]);
+    const handleCreateSomedaySection = useCallback(async (title: string) => {
+        try {
+            return await createSomedaySection(title);
+        } catch {
+            showToast({
+                title: tFallback(t, 'common.error', 'Error'),
+                message: tFallback(t, 'viewSections.updateFailed', 'Could not update Someday sections.'),
+                tone: 'error',
+            });
+            return null;
+        }
+    }, [showToast, t]);
 
     const editedTaskProjectId = taskEditDraft?.draft.projectId;
     const editedTaskSectionId = taskEditDraft?.draft.sectionId;
@@ -977,6 +1007,10 @@ function TaskEditModalInner({
                                 timeEstimatesEnabled={timeEstimatesEnabled}
                                 renderField={renderField}
                                 basicFields={basicFields}
+                                somedaySections={somedaySections}
+                                selectedSomedaySectionId={selectedSomedaySectionId}
+                                onSomedaySectionChange={handleSomedaySectionChange}
+                                onCreateSomedaySection={handleCreateSomedaySection}
                                 schedulingFields={schedulingFields}
                                 organizationFields={organizationFields}
                                 detailsFields={detailsFields}

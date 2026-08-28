@@ -300,6 +300,150 @@ describe('ListView', () => {
     window.removeEventListener('mindwtr:quick-add', quickAddListener);
   });
 
+  it('does not leak a Someday task from a Someday project into the Someday task list', () => {
+    const workArea = {
+      id: 'area-work',
+      name: 'Work',
+      color: '#3b82f6',
+      order: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const somedayProject = {
+      id: 'project-someday',
+      title: 'Someday ideas',
+      status: 'someday' as const,
+      color: '#8b5cf6',
+      order: 0,
+      tagIds: [],
+      areaId: workArea.id,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const somedayTask = makeTask('someday-project-task', {
+      title: 'Try a pottery class',
+      status: 'someday',
+      projectId: somedayProject.id,
+    });
+
+    useTaskStore.setState({
+      _allAreas: [workArea],
+      _allProjects: [somedayProject],
+      _allTasks: [somedayTask],
+      lastDataChangeAt: 1,
+      settings: { filters: { areaId: workArea.id } },
+    });
+    useUiStore.setState((state) => ({
+      ...state,
+      listOptions: { ...state.listOptions, somedayGroupBy: 'project' },
+    }));
+
+    const { queryByText } = renderListView('someday', 'Someday');
+
+    expect(queryByText('Try a pottery class')).not.toBeInTheDocument();
+  });
+
+  it('renders area-filtered Someday projects as rows with open and reactivate actions', async () => {
+    const workArea = {
+      id: 'area-work',
+      name: 'Work',
+      color: '#3b82f6',
+      order: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const personalArea = {
+      ...workArea,
+      id: 'area-personal',
+      name: 'Personal',
+      order: 1,
+    };
+    const workProject = {
+      id: 'project-work-someday',
+      title: 'Plan Japan trip',
+      status: 'someday' as const,
+      color: '#8b5cf6',
+      order: 0,
+      tagIds: [],
+      areaId: workArea.id,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const personalProject = {
+      ...workProject,
+      id: 'project-personal-someday',
+      title: 'Remodel kitchen',
+      areaId: personalArea.id,
+    };
+    const updateProject = vi.fn(async () => ({ success: true }));
+
+    useTaskStore.setState({
+      _allAreas: [workArea, personalArea],
+      _allProjects: [workProject, personalProject],
+      _allTasks: [],
+      lastDataChangeAt: 1,
+      settings: { filters: { areaId: workArea.id } },
+      updateProject,
+    });
+
+    const view = renderListView('someday', 'Someday');
+
+    expect(view.getByRole('button', { name: 'Projects: Plan Japan trip' })).toBeInTheDocument();
+    expect(view.queryByText('Remodel kitchen')).not.toBeInTheDocument();
+
+    fireEvent.click(view.getByRole('button', { name: 'Projects: Plan Japan trip' }));
+    expect(useUiStore.getState().projectView.selectedProjectId).toBe(workProject.id);
+
+    fireEvent.click(view.getByRole('button', { name: 'Reactivate' }));
+    await waitFor(() => {
+      expect(updateProject).toHaveBeenCalledWith(workProject.id, { status: 'active' });
+    });
+  });
+
+  it('renders orphaned Someday assignments under No section without an inline admin panel', () => {
+    const known = makeTask('known-section', {
+      title: 'Read DDIA',
+      status: 'someday',
+      viewSectionIds: { someday: 'books' },
+    });
+    const orphan = makeTask('orphan-section', {
+      title: 'Learn pottery',
+      status: 'someday',
+      viewSectionIds: { someday: 'heading-from-another-device' },
+    });
+    const orphanBeforeRender = JSON.stringify(orphan);
+    const updateTask = vi.fn(async () => ({ success: true }));
+    useTaskStore.setState({
+      _allTasks: [known, orphan],
+      _allProjects: [],
+      lastDataChangeAt: 1,
+      settings: {
+        gtd: {
+          viewSections: {
+            someday: [{ id: 'books', title: 'Books to read', order: 0 }],
+          },
+        },
+      },
+      updateTask,
+    });
+    useUiStore.setState((state) => ({
+      ...state,
+      listOptions: { ...state.listOptions, somedayGroupBy: 'viewSection' },
+    }));
+
+    const view = renderListView('someday', 'Someday');
+
+    expect(view.getAllByText('Books to read')).toHaveLength(1);
+    expect(view.queryByText('Someday sections')).not.toBeInTheDocument();
+    expect(view.getByText('No section')).toBeInTheDocument();
+    expect(view.getByText('Learn pottery')).toBeInTheDocument();
+    expect(JSON.stringify(orphan)).toBe(orphanBeforeRender);
+    expect(updateTask).not.toHaveBeenCalled();
+
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(orphan.viewSectionIds?.someday).toBe('heading-from-another-device');
+  });
+
   it('keeps future-start inbox tasks visible while hiding future-start next actions', async () => {
     vi.useFakeTimers();
     try {

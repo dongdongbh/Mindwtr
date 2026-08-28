@@ -1501,6 +1501,7 @@ export const plOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': 'Inne zgodne urządzenie z Mindwtr aktualizuje tę lokalizację synchronizacji. Poczekaj, aż skończy, a następnie zsynchronizuj ponownie.',
         'settings.syncRemoteCleanupDeferred': 'Operacja synchronizacji została zakończona. Mindwtr nie mógł usunąć tymczasowej blokady synchronizacji, ale wygaśnie ona automatycznie. Ponawianie próby nie jest potrzebne.',
         'settings.syncAttachmentWriteDeferred': 'Nie udało się ukończyć niektórych zmian załączników. Przywróć brakujące pliki lokalne lub usuń powiązane załączniki, a następnie zsynchronizuj ponownie.',
+        'settings.syncFileAttachmentTooLarge': 'Mindwtr zachował lokalny załącznik. File Sync może synchronizować tylko załączniki mniejsze niż 100 MB. Zastąp go mniejszym plikiem lub usuń załącznik, a następnie zsynchronizuj ponownie.',
         'settings.syncFileGenerationCorrupt': 'Mindwtr zachował lokalny załącznik, ale jego kopia w wybranym folderze synchronizacji jest uszkodzona. Usuń uszkodzoną generację załącznika z tego folderu albo wybierz inny folder synchronizacji, a następnie uruchom Synchronizuj teraz.',
         'settings.syncFileLockBusy': 'Inna operacja Mindwtr korzysta z synchronizacji plików. Poczekaj na jej zakończenie; Mindwtr ponowi próbę automatycznie.',
         'settings.syncFileLockActivationBusy': 'Inna operacja Mindwtr korzysta z synchronizacji plików. Poczekaj na jej zakończenie, a następnie ponownie wybierz Synchronizuj teraz.',

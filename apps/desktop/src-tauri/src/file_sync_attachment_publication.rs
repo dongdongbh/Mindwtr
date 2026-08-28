@@ -22,6 +22,15 @@ const PRIVATE_DIRECTORY_PREFIX: &str = ".mindwtr-install-";
 const PRIVATE_DIRECTORY_SUFFIX: &str = ".candidate";
 const PRIVATE_STAGE_NAME: &str = "stage";
 
+#[cfg(windows)]
+const RETAINED_DIRECTORY_ACCESS: u32 =
+    windows_sys::Win32::Foundation::GENERIC_READ | windows_sys::Win32::Foundation::GENERIC_WRITE;
+#[cfg(windows)]
+const _: () = assert!(
+    RETAINED_DIRECTORY_ACCESS & windows_sys::Win32::Foundation::GENERIC_WRITE
+        == windows_sys::Win32::Foundation::GENERIC_WRITE
+);
+
 // Publication is hardened against crashes and cooperating Mindwtr writers by
 // retaining a mode-0700 private namespace and exact file/directory handles.
 // A malicious same-UID process that can bypass that private namespace is out
@@ -158,7 +167,12 @@ fn open_directory_no_follow(path: &Path, label: &str) -> Result<BoundDirectory, 
         use windows_sys::Win32::Storage::FileSystem::{
             FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
         };
-        options.custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+        // FlushFileBuffers requires a handle opened with GENERIC_WRITE. Keep
+        // the retained handle itself flush-capable so publication durability
+        // never reopens a replaceable directory name.
+        options
+            .access_mode(RETAINED_DIRECTORY_ACCESS)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
     }
     let handle = options
         .open(path)

@@ -3,6 +3,7 @@ import {
   applyAttachmentContentStat,
   cloudGetFile,
   cloudPutFile,
+  computeSha256Hex,
   isAbortError,
   validateAttachmentHash,
   validateAttachmentForUpload,
@@ -18,6 +19,7 @@ import {
   canUploadAttachmentFrom,
   collectAttachments,
   DEFAULT_CONTENT_TYPE,
+  extractExtension,
   getAttachmentLocalStatus,
   getAttachmentsDir,
   getLocalAttachmentPresence,
@@ -153,20 +155,60 @@ export const syncCloudAttachments = async (
       && attachment.cloudKey
       && !existsLocally
       && !isHttp
+      && attachmentsDir
     ) {
       try {
         assertNotAborted(options.signal);
+        reportProgress(attachment.id, 'download', 0, attachment.size ?? 0, 'active');
         const data = await cloudGetFile(
           `${baseSyncUrl}/${attachment.cloudKey}`,
           options.signal
             ? { ...cloudRequestOptions, token: cloudConfig.token, signal: options.signal }
             : { ...cloudRequestOptions, token: cloudConfig.token },
         );
-        await validateAttachmentHash(attachment, new Uint8Array(data));
+        const bytes = new Uint8Array(data);
+        await validateAttachmentHash(attachment, bytes);
+        const fileHash = await computeSha256Hex(bytes);
+        if (!fileHash) throw new Error('Attachment download hash is unavailable');
+        const filename = attachment.cloudKey.split('/').pop()
+          || `${attachment.id}${extractExtension(attachment.title)}`;
+        const targetUri = `${attachmentsDir}${filename}`;
+        assertNotAborted(options.signal);
+        const installed = await installAttachmentDownloadBytes(
+          attachment,
+          attachmentsDir,
+          targetUri,
+          bytes,
+          { kind: 'absent' },
+          options.signal,
+        );
+        if (!installed) {
+          reportProgress(
+            attachment.id,
+            'download',
+            0,
+            attachment.size ?? 0,
+            'failed',
+            'Local attachment changed during download',
+          );
+          logAttachmentWarn(`Skipped candidate attachment download after a native conflict (${attachment.id})`);
+          continue;
+        }
+        attachment.uri = targetUri;
+        attachment.fileHash = attachment.fileHash || fileHash;
         attachment.localStatus = 'available';
         recordPatch(attachment);
+        reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
       } catch (error) {
         if (isAbortLikeError(error, options.signal)) throw error;
+        reportProgress(
+          attachment.id,
+          'download',
+          0,
+          attachment.size ?? 0,
+          'failed',
+          error instanceof Error ? error.message : String(error),
+        );
         logAttachmentWarn(`Failed to prove candidate attachment ${attachment.id}`, error);
       }
       continue;

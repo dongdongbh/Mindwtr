@@ -13,6 +13,7 @@ import {
     groupTasks,
     DONE_AXES,
     REFERENCE_AXES,
+    SOMEDAY_AXES,
     sanitizeAxis,
     sanitizeCollapsedGroups,
     type TaskGroupAxis,
@@ -255,7 +256,7 @@ describe('groupTasksByProject', () => {
 // axis added later cannot quietly reintroduce a leading catch-all.
 describe('every grouping axis', () => {
     const EVERY_AXIS: TaskGroupAxis[] = Array.from(new Set<TaskGroupAxis>([
-        ...FOCUS_AXES, ...REFERENCE_AXES, ...DONE_AXES, ...CONTEXTS_AXES,
+        ...FOCUS_AXES, ...REFERENCE_AXES, ...DONE_AXES, ...SOMEDAY_AXES, ...CONTEXTS_AXES,
     ])).filter((axis) => axis !== 'none');
 
     const areas: Area[] = [{
@@ -308,6 +309,7 @@ describe('every grouping axis', () => {
 const ROSTERS: Array<[string, readonly TaskGroupAxis[]]> = [
     ['FOCUS_AXES', FOCUS_AXES],
     ['REFERENCE_AXES', REFERENCE_AXES],
+    ['SOMEDAY_AXES', SOMEDAY_AXES],
     ['CONTEXTS_AXES', CONTEXTS_AXES],
 ];
 

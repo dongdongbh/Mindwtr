@@ -549,6 +549,16 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
             }
             if (result.skipped === 'requeued') {
                 showToast(tFallback(t, 'settings.syncRetryQueued', 'Local changes arrived during sync. Retry queued.'), 'info');
+            } else if (
+                result.success
+                && !result.remoteWriteDeferred
+                && result.fileAttachmentUploadBlocked === 'too-large'
+            ) {
+                showToast(tFallback(
+                    t,
+                    'settings.syncFileAttachmentTooLarge',
+                    'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
+                ), 'info', 6000);
             } else if (result.success && result.attachmentWriteDeferred) {
                 showToast(tFallback(
                     t,

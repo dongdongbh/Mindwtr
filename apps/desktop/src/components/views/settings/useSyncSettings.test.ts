@@ -551,6 +551,32 @@ describe('useSyncSettings cloud token validation', () => {
         );
     });
 
+    it('rejects File Sync activation with actionable size guidance and keeps the proven backend', async () => {
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: false,
+            fileAttachmentUploadBlocked: 'too-large',
+        });
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        act(() => {
+            void result.current.syncPageProps.onSetSyncBackend('file');
+            result.current.syncPageProps.onSyncPathChange('/tmp/mindwtr-sync');
+        });
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
+        expect(showToast).toHaveBeenCalledWith(
+            'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
+            'error',
+            6000,
+        );
+    });
+
     it('commits a cleanup-deferred File Sync activation and warns without suggesting a retry', async () => {
         const showToast = vi.fn();
         useUiStore.setState({ showToast } as never);
@@ -1295,7 +1321,44 @@ describe('useSyncSettings cloud token validation', () => {
         expect(showToast).not.toHaveBeenCalledWith('Sync completed', 'success');
     });
 
-    it('prioritizes a deferred remote document write over attachment recovery guidance', async () => {
+    it('shows actionable File Sync size guidance instead of success for an already proven backend', async () => {
+        vi.mocked(SyncService.getSyncBackend).mockResolvedValue('file');
+        vi.mocked(SyncService.getSyncPath).mockResolvedValue('/tmp/mindwtr-sync');
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: true,
+            fileAttachmentUploadBlocked: 'too-large',
+        });
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        const { result } = setup();
+        await waitFor(() => expect(result.current.syncPageProps.syncBackend).toBe('file'));
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(showToast).toHaveBeenCalledWith(
+            'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
+            'info',
+            6000,
+        );
+        expect(showToast).not.toHaveBeenCalledWith('Sync completed', 'success');
+    });
+
+    it.each([
+        {
+            outcome: 'failed',
+            result: { success: false, error: 'Document sync failed.' },
+        },
+        {
+            outcome: 'deferred',
+            result: {
+                success: true,
+                remoteWriteDeferred: true,
+                error: 'Remote write failed. Retrying in the background.',
+            },
+        },
+    ])('prioritizes a $outcome document sync result over attachment guidance', async ({ result: syncResult }) => {
         vi.mocked(SyncService.getSyncBackend).mockResolvedValue('cloud');
         vi.mocked(SyncService.getCloudProvider).mockResolvedValue('selfhosted');
         vi.mocked(SyncService.getCloudConfig).mockResolvedValue({
@@ -1305,10 +1368,8 @@ describe('useSyncSettings cloud token validation', () => {
             allowInsecureHttp: false,
         });
         vi.mocked(SyncService.performSync).mockResolvedValueOnce({
-            success: true,
-            remoteWriteDeferred: true,
-            attachmentWriteDeferred: true,
-            error: 'Remote write failed. Retrying in the background.',
+            ...syncResult,
+            fileAttachmentUploadBlocked: 'too-large',
         });
         const showToast = vi.fn();
         useUiStore.setState({ showToast } as never);
@@ -1324,7 +1385,7 @@ describe('useSyncSettings cloud token validation', () => {
             'error',
         );
         expect(showToast).not.toHaveBeenCalledWith(
-            'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
+            'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
             'info',
             6000,
         );

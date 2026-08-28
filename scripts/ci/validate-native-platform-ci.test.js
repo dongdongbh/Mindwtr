@@ -98,6 +98,10 @@ test("attachment installer native CI collects the recovery suites", () => {
   expect(androidPublisher).toContain("fstatat(private_fd, \"stage\"");
   expect(androidPublisher).toContain("SYS_renameat2");
   expect(androidPublisher).toContain("RENAME_NOREPLACE");
+  expect(androidPublisher).toContain("error == EINVAL");
+  expect(androidPublisher).toContain(
+    "static_assert(!rename_noreplace_needs_exact_handle_fallback(EEXIST))",
+  );
   expect(androidPublisher).toContain("AT_SYMLINK_FOLLOW");
   expect(swiftPackage).toContain(".testTarget(");
   expect(swiftTests).toContain("testAbsentGenerationUsesCreateNoReplace");

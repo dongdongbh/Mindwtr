@@ -1,7 +1,7 @@
 import React from 'react';
 import type { RefObject } from 'react';
 import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { ChevronDown, ChevronUp, Sparkles } from 'lucide-react-native';
+import { ChevronDown, ChevronUp, Hourglass, Sparkles } from 'lucide-react-native';
 import { stripMarkdown, tFallback } from '@mindwtr/core';
 
 import { styles } from '../inbox-processing-modal.styles';
@@ -26,6 +26,8 @@ type Props = {
   aiWorkingText: string;
   notesOpen: boolean;
   setNotesOpen: (v: boolean) => void;
+  /** This item reached the pass from Someday, not the Inbox (#1089). */
+  isReturningItem: boolean;
 };
 
 /**
@@ -50,11 +52,21 @@ export function InboxCaptureCard({
   aiWorkingText,
   notesOpen,
   setNotesOpen,
+  isReturningItem,
 }: Props) {
   const notePreview = stripMarkdown(processingDescription).trim().slice(0, NOTE_PREVIEW_LIMIT);
 
   return (
     <View style={[styles.anchorCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
+      {isReturningItem ? (
+        <View style={styles.anchorActionsRow}>
+          <Hourglass size={13} color={tc.secondaryText} />
+          <Text style={[styles.anchorActionText, { color: tc.secondaryText }]}>
+            {tFallback(t, 'process.returningItem', 'Back to clarify')}
+          </Text>
+        </View>
+      ) : null}
+
       <TextInput
         ref={titleInputRef}
         style={[styles.anchorTitleInput, titleDirectionStyle, { color: tc.text }]}

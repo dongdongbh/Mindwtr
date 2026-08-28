@@ -1567,6 +1567,7 @@ export const ptOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': 'Outro dispositivo compatível com o Mindwtr está atualizando este local de sincronização. Aguarde até terminar e sincronize novamente.',
         'settings.syncRemoteCleanupDeferred': 'A operação de sincronização foi concluída. O Mindwtr não conseguiu remover o bloqueio temporário de sincronização, mas ele expirará automaticamente. Não é necessário tentar novamente.',
         'settings.syncAttachmentWriteDeferred': 'Não foi possível concluir algumas alterações nos anexos. Restaure os arquivos locais ausentes ou remova os anexos afetados e sincronize novamente.',
+        'settings.syncFileAttachmentTooLarge': 'O Mindwtr manteve o anexo local. O File Sync só pode sincronizar anexos com menos de 100 MB. Substitua-o por um arquivo menor ou remova o anexo e sincronize novamente.',
         'settings.syncFileGenerationCorrupt': 'O Mindwtr manteve o anexo local, mas a cópia dele na pasta de sincronização selecionada está danificada. Remova a geração danificada do anexo dessa pasta ou escolha outra pasta de sincronização e execute Sincronizar agora.',
         'settings.syncFileLockBusy': 'Outra operação do Mindwtr está usando a sincronização de arquivos. Aguarde até ela terminar; o Mindwtr tentará novamente automaticamente.',
         'settings.syncFileLockActivationBusy': 'Outra operação do Mindwtr está usando a sincronização de arquivos. Aguarde até ela terminar e selecione Sincronizar agora novamente.',

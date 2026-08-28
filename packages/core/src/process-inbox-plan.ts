@@ -117,7 +117,9 @@ export type ProcessInboxDecisionDraft = {
     /** Visible date controls touched during this decision. Property presence
      * matters: `undefined` means the user explicitly cleared that control. */
     dateControlFields?: Partial<Pick<ProcessInboxWorkflowFields, 'startTime' | 'dueDate' | 'reviewAt'>>;
-    taskUpdates?: Partial<Pick<Task, 'title' | 'description'>>;
+    /** Explicit task edits that do not belong to destination policy (for
+     * example a cleaned title, appended link, or Today focus token). */
+    taskUpdates?: Partial<Task>;
 };
 
 export type ProcessInboxValidationReason = 'later-start-required';
@@ -134,7 +136,7 @@ export type PreparedProcessInboxDecision =
     | {
         ok: true;
         event: ProcessInboxWorkflowEvent;
-        taskUpdates: Partial<Pick<Task, 'title' | 'description'>> | undefined;
+        taskUpdates: Partial<Task> | undefined;
         resetFields: readonly ProcessInboxDecisionResetField[];
     };
 
@@ -150,6 +152,11 @@ function resolveSelectionFields(
         ...(includeContainers ? resolveProcessInboxContainerFields(projectId, areaId) : {}),
         ...(plan.visibleFields.contexts ? { contexts: fields.contexts ?? [] } : {}),
         ...(plan.visibleFields.tags ? { tags: fields.tags ?? [] } : {}),
+        // Someday sections are destination metadata, not a generic editor
+        // field. An explicit selection must survive the shared policy gate.
+        ...(Object.prototype.hasOwnProperty.call(fields, 'viewSectionIds')
+            ? { viewSectionIds: fields.viewSectionIds }
+            : {}),
     };
 }
 

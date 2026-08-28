@@ -2285,6 +2285,7 @@ export const csOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': 'Jiné kompatibilní zařízení s Mindwtr právě aktualizuje toto umístění synchronizace. Počkejte na dokončení a poté synchronizaci spusťte znovu.',
         'settings.syncRemoteCleanupDeferred': 'Operace synchronizace byla dokončena. Mindwtr nemohl odebrat dočasný zámek synchronizace, ale jeho platnost automaticky vyprší. Není třeba akci opakovat.',
         'settings.syncAttachmentWriteDeferred': 'Některé změny příloh se nepodařilo dokončit. Obnovte chybějící místní soubory nebo odeberte dotčené přílohy a poté synchronizaci spusťte znovu.',
+        'settings.syncFileAttachmentTooLarge': 'Mindwtr zachoval místní přílohu. File Sync může synchronizovat pouze přílohy menší než 100 MB. Nahraďte ji menším souborem nebo přílohu odeberte a spusťte synchronizaci znovu.',
         'settings.syncFileGenerationCorrupt': 'Mindwtr zachoval místní přílohu, ale její kopie ve vybrané synchronizační složce je poškozená. Odstraňte z této složky poškozenou generaci přílohy nebo vyberte jinou synchronizační složku a potom spusťte Synchronizovat nyní.',
         'settings.syncFileLockBusy': 'Jiná operace Mindwtr používá synchronizaci souborů. Počkejte na její dokončení; Mindwtr to zkusí znovu automaticky.',
         'settings.syncFileLockActivationBusy': 'Jiná operace Mindwtr používá synchronizaci souborů. Počkejte na její dokončení a pak znovu zvolte Synchronizovat nyní.',

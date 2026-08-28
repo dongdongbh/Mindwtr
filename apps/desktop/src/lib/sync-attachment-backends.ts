@@ -4,6 +4,7 @@ import {
     type AttachmentSettings,
     type SyncRunAttachmentHelpers,
     MAX_DOWNLOAD_BYTES,
+    MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES,
     ResponseTooLargeError,
     applyAttachmentPatches,
     withAttachmentSettingsPatch,
@@ -14,6 +15,7 @@ import {
     cloudPutFile,
     computeSha256Hex,
     getErrorStatus,
+    isAttachmentUploadAdmissionError,
     isSyncRemoteMutationFenceError,
     isWebdavRemoteWriteConflictError,
     isWebdavRateLimitedError,
@@ -1459,7 +1461,11 @@ export async function syncFileAttachments(
     );
     const computeLocalFileHash = async (path: string, attachment: Attachment): Promise<string | null> =>
         computeSha256Hex(await readLocalFile(path, attachment));
-    const createUploadSnapshot = createAttachmentUploadSnapshotFactory({ readLocalFile, statLocalFile });
+    const createUploadSnapshot = createAttachmentUploadSnapshotFactory({
+        readLocalFile,
+        statLocalFile,
+        maxBufferedUploadBytes: MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES,
+    });
 
     const readFileSyncWireData = async (
         sourcePath: string,
@@ -1636,7 +1642,9 @@ export async function syncFileAttachments(
         getLocalFileStat: statLocalFile,
         computeLocalFileHash,
         createUploadSnapshot,
+        maxBufferedUploadBytes: MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES,
         contentChangePhase: helpers?.phase,
+        isFatalError: isAttachmentUploadAdmissionError,
         onUpload: async (attachment, _localPath, snapshot) => {
             if (!snapshot?.bytes) throw new Error('Immutable attachment upload bytes are unavailable');
             const cloudKey = buildFileSyncGenerationCloudKey(attachment, snapshot.fileHash);
