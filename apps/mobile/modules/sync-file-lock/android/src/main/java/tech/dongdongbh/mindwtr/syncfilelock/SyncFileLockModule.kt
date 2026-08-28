@@ -12,7 +12,6 @@ import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.File
-import java.io.FileOutputStream
 import java.io.RandomAccessFile
 import java.nio.charset.StandardCharsets
 import java.nio.channels.FileChannel
@@ -29,12 +28,13 @@ internal class SyncFileLockUnavailableException(message: String, cause: Throwabl
   CodedException(message, cause)
 
 internal data class HeldSyncFileLock(
-  val lock: FileLock,
-  val channel: FileChannel,
+  val lock: FileLock?,
+  val channel: FileChannel?,
   val closeOwner: AutoCloseable,
   val descriptorOwner: AutoCloseable? = null,
   val stableAuthority: StableSyncAuthority? = null,
   val revalidateLegacy: (() -> Unit)? = null,
+  val releaseNativeLock: (() -> Unit)? = null,
 ) {
   fun revalidate() {
     stableAuthority?.revalidate()
@@ -45,10 +45,10 @@ internal data class HeldSyncFileLock(
 
   fun close() {
     try {
-      lock.release()
+      if (releaseNativeLock != null) releaseNativeLock.invoke() else lock?.release()
     } finally {
       try {
-        channel.close()
+        channel?.close()
       } finally {
         try {
           closeOwner.close()
@@ -77,6 +77,8 @@ internal object StableRootLockNative {
 
   external fun tryLock(fd: Int): Int
   external fun unlock(fd: Int): Int
+  external fun tryOfdLock(fd: Int): Int
+  external fun unlockOfdLock(fd: Int): Int
 }
 
 private fun descriptorIdentity(descriptor: java.io.FileDescriptor): SyncFileNodeIdentity {
@@ -522,37 +524,54 @@ class SyncFileLockModule : Module() {
       stableAuthority.close()
       throw SyncFileLockUnavailableException("SYNC_FILE_LOCK_UNAVAILABLE: provider returned no lock descriptor")
     }
-    val stream = try {
-      FileOutputStream(descriptor.fileDescriptor)
-    } catch (error: Throwable) {
+    val lockResult = StableRootLockNative.tryOfdLock(descriptor.fd)
+    if (lockResult != 0) {
       descriptor.close()
       stableAuthority.close()
+      if (lockResult == OsConstants.EAGAIN || lockResult == OsConstants.EACCES) {
+        throw SyncFileLockUnavailableException("SYNC_FILE_LOCK_BUSY: another File Sync operation is active")
+      }
       throw SyncFileLockUnavailableException(
-        "SYNC_FILE_LOCK_UNAVAILABLE: provider cannot open a lock channel for $LOCK_NAME",
-        error,
+        "SYNC_FILE_LOCK_UNAVAILABLE: provider cannot take a durable compatibility lock on $LOCK_NAME (errno=$lockResult)",
       )
     }
     val lockIdentity = descriptorIdentity(descriptor.fileDescriptor)
-    return acquireChannelLock(
-      stream.channel,
-      stream,
-      descriptor,
-      stableAuthority,
-    ) {
-      val matches = exactLockDocuments(directoryUri)
-      if (matches.size != 1 || matches.single() != lockUri) {
-        throw SyncFileLockUnavailableException("SYNC_FILE_LOCK_UNAVAILABLE: $LOCK_NAME identity changed")
-      }
-      val validation = resolver.openFileDescriptor(lockUri, "r")
-        ?: throw SyncFileLockUnavailableException("SYNC_FILE_LOCK_UNAVAILABLE: provider returned no validation descriptor")
-      validation.use {
-        if (descriptorIdentity(it.fileDescriptor) != lockIdentity
-          || descriptorIdentity(descriptor.fileDescriptor) != lockIdentity
-        ) {
+    val held = HeldSyncFileLock(
+      lock = null,
+      channel = null,
+      closeOwner = descriptor,
+      stableAuthority = stableAuthority,
+      revalidateLegacy = {
+        val matches = exactLockDocuments(directoryUri)
+        if (matches.size != 1 || matches.single() != lockUri) {
           throw SyncFileLockUnavailableException("SYNC_FILE_LOCK_UNAVAILABLE: $LOCK_NAME identity changed")
         }
-      }
+        val validation = resolver.openFileDescriptor(lockUri, "r")
+          ?: throw SyncFileLockUnavailableException("SYNC_FILE_LOCK_UNAVAILABLE: provider returned no validation descriptor")
+        validation.use {
+          if (descriptorIdentity(it.fileDescriptor) != lockIdentity
+            || descriptorIdentity(descriptor.fileDescriptor) != lockIdentity
+          ) {
+            throw SyncFileLockUnavailableException("SYNC_FILE_LOCK_UNAVAILABLE: $LOCK_NAME identity changed")
+          }
+        }
+      },
+      releaseNativeLock = {
+        val result = StableRootLockNative.unlockOfdLock(descriptor.fd)
+        if (result != 0) {
+          throw SyncFileLockUnavailableException(
+            "SYNC_FILE_LOCK_UNAVAILABLE: failed to release compatibility lock on $LOCK_NAME (errno=$result)",
+          )
+        }
+      },
+    )
+    try {
+      held.revalidate()
+    } catch (error: Throwable) {
+      held.close()
+      throw error
     }
+    return held
   }
 
   override fun definition() = ModuleDefinition {
