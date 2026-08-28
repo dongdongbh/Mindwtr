@@ -7,6 +7,8 @@ import {
     isSyncPayloadTraceEnabled,
     SYNC_TRACE_EVENT_MESSAGES,
 } from './sync-payload-trace';
+import { buildSyncPayloadSurfaceTraceExtra } from './sync-payload-trace';
+import { computeSyncPayloadFingerprint } from './sync-helpers';
 import type { AppData, Task } from './types';
 
 const task = (id: string, overrides: Partial<Task> = {}): Task => ({
@@ -178,5 +180,25 @@ describe('SYNC_TRACE_EVENT_MESSAGES', () => {
         const messages = Object.values(SYNC_TRACE_EVENT_MESSAGES);
         expect(new Set(messages).size).toBe(messages.length);
         expect(messages.every((message) => message.startsWith('Sync trace'))).toBe(true);
+    });
+});
+
+describe('sync payload trace signature memo (#766)', () => {
+    it('still reports the document fingerprint sync itself computes', () => {
+        const data = appData({ tasks: [task('a'), task('b')] });
+        expect(buildSyncPayloadTraceExtra(data).fingerprint).toBe(computeSyncPayloadFingerprint(data));
+        expect(buildSyncPayloadTraceExtra(data).tasksSig)
+            .toBe(buildSyncPayloadSurfaceTraceExtra(data).tasksSig);
+    });
+
+    it('reuses the signatures it already computed for a document', () => {
+        // Documents are replaced, never mutated in place, so an in-place edit is
+        // only a way to observe that the second trace did not recompute. If this
+        // ever fails the memo is dead and every trace pays full price again.
+        const data = appData({ tasks: [task('a')] });
+        const first = buildSyncPayloadTraceExtra(data);
+        data.tasks.push(task('b'));
+        expect(buildSyncPayloadTraceExtra(data).tasksSig).toBe(first.tasksSig);
+        expect(buildSyncPayloadTraceExtra({ ...data }).tasksSig).not.toBe(first.tasksSig);
     });
 });

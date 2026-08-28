@@ -4,7 +4,6 @@
 // fingerprints — never task content (#854).
 import {
     computeStableValueFingerprint,
-    computeSyncPayloadFingerprint,
     sanitizeAppDataForRemote,
     toStableSyncJson as toStableJson,
 } from './sync-helpers';
@@ -39,17 +38,62 @@ const getSyncTraceSurfaceValue = (data: AppData, surface: SyncTraceSurface): unk
     return Array.isArray(value) ? value : [];
 };
 
+type SurfaceSignatures = Record<SyncTraceSurface, string>;
+
+const buildSurfaceSignatures = (sanitized: AppData): SurfaceSignatures => Object.fromEntries(
+    SYNC_TRACE_SURFACES.map((surface) => [
+        surface,
+        computeStableValueFingerprint(getSyncTraceSurfaceValue(sanitized, surface)),
+    ]),
+) as SurfaceSignatures;
+
+const nameSurfaceSignatures = (
+    signatures: SurfaceSignatures,
+    prefix: string,
+): Record<string, string> => Object.fromEntries(
+    SYNC_TRACE_SURFACES.map((surface) => [
+        `${prefix}${prefix ? capitalizeTraceName(surface) : surface}Sig`,
+        signatures[surface],
+    ]),
+);
+
 export const buildSyncPayloadSurfaceTraceExtra = (
     data: AppData,
     prefix = '',
-): Record<string, string> => {
+): Record<string, string> => nameSurfaceSignatures(
+    buildSurfaceSignatures(sanitizeAppDataForRemote(data)),
+    prefix,
+);
+
+/**
+ * #766: each of `fingerprint` and the six surface signatures stringifies and
+ * hashes the whole sanitized document, and at 7k tasks the tasks surface alone
+ * is ~98% of it. One trace cost ~3.4s on the reporter's device and a sync cycle
+ * emits seven of them — about a third of the cycle, spent only while a user is
+ * capturing a log, which is exactly when the app already feels slow.
+ *
+ * So: sanitize once per document instead of twice, and memoize the derived
+ * strings on the document's identity, since a cycle re-traces the same object
+ * several times (write-remote/remote-write-completed, core-result/post-attachment).
+ * Keyed on identity, which is sound because synced documents and entities are
+ * replaced, never mutated in place (sync-signatures.ts carries the test teeth for
+ * that invariant). Only strings are retained — never the sanitized copy, which is
+ * document-sized and would put this device back under memory pressure.
+ */
+const payloadTraceSignatureCache = new WeakMap<AppData, Record<string, string>>();
+
+const getPayloadTraceSignatures = (data: AppData): Record<string, string> => {
+    const cached = payloadTraceSignatureCache.get(data);
+    if (cached) return cached;
+    // computeStableValueFingerprint of the sanitized document IS
+    // computeSyncPayloadFingerprint(data) — same value, one less sanitize pass.
     const sanitized = sanitizeAppDataForRemote(data);
-    return Object.fromEntries(
-        SYNC_TRACE_SURFACES.map((surface) => {
-            const name = `${prefix}${prefix ? capitalizeTraceName(surface) : surface}Sig`;
-            return [name, computeStableValueFingerprint(getSyncTraceSurfaceValue(sanitized, surface))];
-        }),
-    );
+    const signatures = {
+        fingerprint: computeStableValueFingerprint(sanitized),
+        ...nameSurfaceSignatures(buildSurfaceSignatures(sanitized), ''),
+    };
+    payloadTraceSignatureCache.set(data, signatures);
+    return signatures;
 };
 
 export const buildSyncPayloadTraceExtra = (
@@ -75,8 +119,7 @@ export const buildSyncPayloadTraceExtra = (
         areaIdsSample: areaIds.slice(0, 24).join(','),
         areaIdsTruncated: String(areaIds.length > 24),
         pendingRemoteWrite: String(Boolean(data.settings?.pendingRemoteWriteAt)),
-        fingerprint: computeSyncPayloadFingerprint(data),
-        ...buildSyncPayloadSurfaceTraceExtra(data),
+        ...getPayloadTraceSignatures(data),
     };
 };
 
@@ -142,17 +185,22 @@ export const buildCollectionDiffTraceSample = (left: unknown, right: unknown): s
 export const buildSyncPayloadDiffTraceExtra = (currentData: AppData, syncedData: AppData): Record<string, string> => {
     const current = sanitizeAppDataForRemote(currentData);
     const synced = sanitizeAppDataForRemote(syncedData);
-    const changedSurfaces = SYNC_TRACE_SURFACES.filter((surface) => (
-        toStableJson(getSyncTraceSurfaceValue(current, surface)) !== toStableJson(getSyncTraceSurfaceValue(synced, surface))
-    ));
+    // Same #766 economy: the signatures below already answer "did this surface
+    // change", so compare those instead of stringifying every surface a second
+    // time (both sides were already sanitized here, too).
+    const currentSignatures = buildSurfaceSignatures(current);
+    const syncedSignatures = buildSurfaceSignatures(synced);
+    const changedSurfaces = SYNC_TRACE_SURFACES.filter(
+        (surface) => currentSignatures[surface] !== syncedSignatures[surface],
+    );
     const extra: Record<string, string> = {
         surfaceDiffs: changedSurfaces.join(',') || 'none',
         ...Object.fromEntries(SYNC_TRACE_SURFACES.map((surface) => [
             `${surface}Changed`,
             String(changedSurfaces.includes(surface)),
         ])),
-        ...buildSyncPayloadSurfaceTraceExtra(current, 'current'),
-        ...buildSyncPayloadSurfaceTraceExtra(synced, 'synced'),
+        ...nameSurfaceSignatures(currentSignatures, 'current'),
+        ...nameSurfaceSignatures(syncedSignatures, 'synced'),
     };
 
     for (const surface of SYNC_TRACE_SURFACES) {
