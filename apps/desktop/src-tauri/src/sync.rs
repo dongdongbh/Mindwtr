@@ -5967,10 +5967,12 @@ mod tests {
         let root = RetainedSyncRoot::new(dir.path(), &lock);
         let identity = root.identity(&owned).expect("capture owned identity");
         let mut swapped = false;
-        let mut swap_before_quarantine = |path: &Path| {
-            fs::rename(path, &displaced_owned).map_err(|error| error.to_string())?;
-            fs::write(path, b"peer-stage").map_err(|error| error.to_string())?;
-            swapped = true;
+        let mut swap_before_quarantine = |mutation: RetainedCleanupMutation, path: &Path| {
+            if mutation == RetainedCleanupMutation::Quarantine && !swapped {
+                fs::rename(path, &displaced_owned).map_err(|error| error.to_string())?;
+                fs::write(path, b"peer-stage").map_err(|error| error.to_string())?;
+                swapped = true;
+            }
             Ok(())
         };
 
@@ -5989,6 +5991,113 @@ mod tests {
             fs::read(&displaced_owned).expect("owned stage preserved"),
             b"owned-stage"
         );
+        release_sync_lock(&lock);
+    }
+
+    #[test]
+    fn retained_cleanup_authority_loss_is_terminal_without_retry() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let owned = dir.path().join("data.json.tmp");
+        fs::write(&owned, b"owned-stage").expect("seed owned stage");
+        let lock = acquire_sync_lock(dir.path()).expect("acquire retained authority");
+        let root = RetainedSyncRoot::new(dir.path(), &lock);
+        let identity = root.identity(&owned).expect("capture owned identity");
+        let publication = OwnedRetainedRootPublication {
+            directory: root.try_clone_directory().expect("retain root"),
+            sync_dir: dir.path().to_path_buf(),
+            leaf: owned.file_name().unwrap().to_os_string(),
+            identity,
+            cleanup_on_drop: false,
+        };
+        let mut validations = 0;
+        let mut transient_authority = |_path: &Path| {
+            validations += 1;
+            if validations == 1 {
+                Err(retained_cleanup_authority_error(
+                    "injected authority loss".to_string(),
+                ))
+            } else {
+                Ok(())
+            }
+        };
+
+        let error = publication
+            .remove_with(&owned, &mut transient_authority)
+            .expect_err("authority loss must abort cleanup without retry");
+
+        assert!(is_retained_cleanup_authority_error(&error));
+        assert_eq!(validations, 1, "authority validation must be terminal");
+        assert_eq!(fs::read(&owned).expect("owned stage remains"), b"owned-stage");
+        release_sync_lock(&lock);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn retained_cleanup_preserves_quarantine_after_post_move_authority_loss() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let owned = dir.path().join("data.json.tmp");
+        let lock_path = dir.path().join(".mindwtr.lock");
+        let displaced_lock = dir.path().join(".mindwtr.lock.displaced");
+        fs::write(&owned, b"owned-stage").expect("seed owned stage");
+        let lock = acquire_sync_lock(dir.path()).expect("acquire retained authority");
+        let root = RetainedSyncRoot::new(dir.path(), &lock);
+        let identity = root.identity(&owned).expect("capture owned identity");
+        let publication = OwnedRetainedRootPublication {
+            directory: root.try_clone_directory().expect("retain root"),
+            sync_dir: dir.path().to_path_buf(),
+            leaf: owned.file_name().unwrap().to_os_string(),
+            identity,
+            cleanup_on_drop: false,
+        };
+        let mut validations = 0;
+        let mut authority = |mutation_path: &Path| {
+            validations += 1;
+            if validations == 3 {
+                assert!(!owned.exists(), "owned leaf has already moved to quarantine");
+                assert!(
+                    mutation_path
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with(".mindwtr-probe-cleanup-"),
+                    "final validation must target the invocation-private quarantine"
+                );
+                fs::rename(&lock_path, &displaced_lock).map_err(|error| error.to_string())?;
+                fs::write(&lock_path, b"replacement lock").map_err(|error| error.to_string())?;
+            } else if validations > 3 && displaced_lock.exists() {
+                // Model a transient pathname restoration. Cleanup must never
+                // call us again and continue deleting after the first marker.
+                fs::remove_file(&lock_path).map_err(|error| error.to_string())?;
+                fs::rename(&displaced_lock, &lock_path).map_err(|error| error.to_string())?;
+            }
+            revalidate_sync_lock(&lock, dir.path()).map_err(retained_cleanup_authority_error)
+        };
+
+        let error = publication
+            .remove_with(&owned, &mut authority)
+            .expect_err("post-quarantine authority loss must preserve bytes");
+
+        assert!(is_retained_cleanup_authority_error(&error));
+        assert_eq!(validations, 3, "authority loss must stop before unlink");
+        let quarantine = fs::read_dir(dir.path())
+            .expect("enumerate retained root")
+            .filter_map(Result::ok)
+            .find(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".mindwtr-probe-cleanup-")
+            })
+            .expect("quarantined generation remains")
+            .path();
+        assert_eq!(
+            fs::read(&quarantine).expect("read retained quarantine"),
+            b"owned-stage"
+        );
+
+        fs::remove_file(&lock_path).expect("remove replacement lock");
+        fs::rename(&displaced_lock, &lock_path).expect("restore original lock authority");
+        revalidate_sync_lock(&lock, dir.path()).expect("authority restored for release");
         release_sync_lock(&lock);
     }
 
@@ -14485,25 +14594,33 @@ struct OwnedRetainedRootPublication {
 
 static RETAINED_CLEANUP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-fn quarantine_and_remove_retained_identity_with<BeforeQuarantine>(
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RetainedCleanupMutation {
+    Quarantine,
+    Restore,
+    Remove,
+}
+
+fn quarantine_and_remove_retained_identity_with<BeforeMutation>(
     root: &RetainedSyncRoot<'_>,
     path: &Path,
     identity: NativeFileIdentity,
-    before_quarantine: &mut BeforeQuarantine,
+    before_mutation: &mut BeforeMutation,
 ) -> Result<(), String>
 where
-    BeforeQuarantine: FnMut(&Path) -> Result<(), String>,
+    BeforeMutation: FnMut(RetainedCleanupMutation, &Path) -> Result<(), String>,
 {
-    before_quarantine(path)?;
     for _ in 0..16 {
         let sequence = RETAINED_CLEANUP_SEQUENCE.fetch_add(1, AtomicOrdering::Relaxed);
         let quarantine = root.sync_dir.join(format!(
             ".mindwtr-probe-cleanup-{}-{sequence:016x}",
             std::process::id()
         ));
+        before_mutation(RetainedCleanupMutation::Quarantine, path)?;
         match root.rename(path, &quarantine, false) {
             Ok(()) => {
                 if !root.has_identity(&quarantine, identity) {
+                    before_mutation(RetainedCleanupMutation::Restore, &quarantine)?;
                     let restore = root.rename(&quarantine, path, false);
                     let preservation = match restore {
                         Ok(()) => {
@@ -14528,6 +14645,7 @@ where
                 // The quarantine name is invocation-private and allocated with
                 // a no-replace move. Cooperative peers never target it, so the
                 // unlink cannot remove a shared canonical generation.
+                before_mutation(RetainedCleanupMutation::Remove, &quarantine)?;
                 root.remove(&quarantine)
                     .map_err(|error| format!("Failed to remove quarantined probe file: {error}"))?;
                 root.sync_directory().map_err(|error| {
@@ -14552,7 +14670,7 @@ fn quarantine_and_remove_retained_identity(
     path: &Path,
     identity: NativeFileIdentity,
 ) -> Result<(), String> {
-    quarantine_and_remove_retained_identity_with(root, path, identity, &mut |_| Ok(()))
+    quarantine_and_remove_retained_identity_with(root, path, identity, &mut |_, _| Ok(()))
 }
 
 impl OwnedRetainedRootPublication {
@@ -14600,15 +14718,38 @@ impl OwnedRetainedRootPublication {
         }
         self.verify_at(path)?;
         if let Err(first_error) = before_remove(path) {
-            if before_remove(path).is_err() {
+            if is_retained_cleanup_authority_error(&first_error) {
                 return Err(first_error);
             }
-            if let Err(cleanup_error) = self.quarantine_and_remove(path) {
+            if let Err(retry_error) = before_remove(path) {
+                return if is_retained_cleanup_authority_error(&retry_error) {
+                    Err(retry_error)
+                } else {
+                    Err(first_error)
+                };
+            }
+            let root = self.root();
+            let cleanup = quarantine_and_remove_retained_identity_with(
+                &root,
+                path,
+                self.identity,
+                &mut |_, mutation_path| before_remove(mutation_path),
+            );
+            if let Err(cleanup_error) = cleanup {
+                if is_retained_cleanup_authority_error(&cleanup_error) {
+                    return Err(cleanup_error);
+                }
                 return Err(format!("{first_error}; cleanup retry failed safely: {cleanup_error}"));
             }
             return Err(first_error);
         }
-        self.quarantine_and_remove(path)
+        let root = self.root();
+        quarantine_and_remove_retained_identity_with(
+            &root,
+            path,
+            self.identity,
+            &mut |_, mutation_path| before_remove(mutation_path),
+        )
     }
 
     fn keep(&mut self) {
