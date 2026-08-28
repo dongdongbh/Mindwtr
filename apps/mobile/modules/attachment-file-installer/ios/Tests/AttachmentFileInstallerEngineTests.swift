@@ -67,6 +67,33 @@ final class AttachmentFileInstallerEngineTests: XCTestCase {
     }
   }
 
+  func testSourceContainmentAcceptsAbsoluteDescendantAndRejectsSiblingPrefix() throws {
+    try withFixture { fixture in
+      let staged = try fixture.stage("managed candidate")
+      let target = fixture.target("managed.bin")
+      XCTAssertTrue(staged.path.hasPrefix("/"))
+
+      let installed = try fixture.engine().install(
+        stagedInput: staged,
+        targetInput: target,
+        expected: .absent,
+        expectedDownloadSha256: digest("managed candidate")
+      )
+      assertInstalled(installed)
+
+      let outside = try fixture.stageOutsideManagedRoots("peer candidate")
+      let untouchedTarget = fixture.target("outside.bin")
+      XCTAssertThrowsError(try fixture.engine().install(
+        stagedInput: outside,
+        targetInput: untouchedTarget,
+        expected: .absent,
+        expectedDownloadSha256: digest("peer candidate")
+      ))
+      XCTAssertEqual(try contents(outside), "peer candidate")
+      XCTAssertFalse(FileManager.default.fileExists(atPath: untouchedTarget.path))
+    }
+  }
+
   func testImmutablePublisherCreatesNoSharedInstallerRecoveryArtifacts() throws {
     try withFixture { fixture in
       let target = fixture.target("a.\(digest("candidate")).txt")
@@ -541,6 +568,14 @@ private struct Fixture {
 
   func stage(_ value: String) throws -> URL {
     let file = cacheRoot.appendingPathComponent("stage-\(UUID().uuidString).bin")
+    try value.write(to: file, atomically: false, encoding: .utf8)
+    return file
+  }
+
+  func stageOutsideManagedRoots(_ value: String) throws -> URL {
+    let sibling = root.appendingPathComponent("cache-peer", isDirectory: true)
+    try FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: false)
+    let file = sibling.appendingPathComponent("stage.bin")
     try value.write(to: file, atomically: false, encoding: .utf8)
     return file
   }

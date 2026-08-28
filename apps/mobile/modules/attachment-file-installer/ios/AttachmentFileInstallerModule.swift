@@ -1095,7 +1095,10 @@ final class AttachmentFileInstallerEngine {
   }
 
   private func isDescendant(_ file: URL, of root: URL) -> Bool {
-    file.path.hasPrefix(root.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/")
+    let fileComponents = file.pathComponents
+    let rootComponents = root.pathComponents
+    return fileComponents.count > rootComponents.count
+      && fileComponents.starts(with: rootComponents)
   }
 
   private func ensureDirectory(_ directory: URL) throws {
