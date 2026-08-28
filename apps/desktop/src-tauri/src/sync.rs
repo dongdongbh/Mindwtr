@@ -5946,6 +5946,27 @@ mod tests {
     }
 
     #[test]
+    fn retained_directory_flush_tolerates_only_unsupported_filesystems() {
+        assert!(finish_retained_directory_sync(Ok(())).is_ok());
+        assert!(finish_retained_directory_sync(Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "injected EINVAL",
+        )))
+        .is_ok());
+        assert!(finish_retained_directory_sync(Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "injected unsupported directory fsync",
+        )))
+        .is_ok());
+        let error = finish_retained_directory_sync(Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "injected permission failure",
+        )))
+        .expect_err("real retained-directory flush errors stay fatal");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
     fn sync_folder_probe_reports_create_failure_and_cleans_up() {
         assert_folder_probe_failure(
             ProbeFailureStage::Create,
@@ -13376,7 +13397,7 @@ fn retained_root_remove(_directory: &File, _leaf: &OsStr) -> std::io::Result<()>
 
 #[cfg(unix)]
 fn retained_root_sync_directory(directory: &File) -> std::io::Result<()> {
-    directory.sync_all()
+    finish_retained_directory_sync(directory.sync_all())
 }
 
 #[cfg(target_os = "windows")]
@@ -13384,10 +13405,29 @@ fn retained_root_sync_directory(directory: &File) -> std::io::Result<()> {
     use std::os::windows::io::AsRawHandle as _;
     use windows_sys::Win32::Storage::FileSystem::FlushFileBuffers;
 
-    if unsafe { FlushFileBuffers(directory.as_raw_handle()) } == 0 {
+    let result = if unsafe { FlushFileBuffers(directory.as_raw_handle()) } == 0 {
         Err(std::io::Error::last_os_error())
     } else {
         Ok(())
+    };
+    finish_retained_directory_sync(result)
+}
+
+fn finish_retained_directory_sync(result: std::io::Result<()>) -> std::io::Result<()> {
+    match result {
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::InvalidInput | std::io::ErrorKind::Unsupported
+            ) || cfg!(target_os = "windows")
+                && matches!(error.raw_os_error(), Some(1) | Some(50)) =>
+        {
+            log::warn!(
+                "Sync filesystem does not support retained directory metadata flushes: {error}"
+            );
+            Ok(())
+        }
+        result => result,
     }
 }
 
