@@ -1137,13 +1137,30 @@ fn publish_exact_stage(
     };
 
     let target = target_name.encode_wide().collect::<Vec<_>>();
-    let fixed = std::mem::size_of::<FILE_RENAME_INFO>() - std::mem::size_of::<u16>();
-    let mut buffer = vec![0_u8; fixed + target.len() * std::mem::size_of::<u16>()];
+    // `FILE_RENAME_INFO` is a variable-length record. Its x64 Rust layout has
+    // trailing padding after `FileName`; Windows expects the payload length to
+    // begin at the field offset, not at `size_of - 2`.
+    let fixed = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
+    let target_bytes = target
+        .len()
+        .checked_mul(std::mem::size_of::<u16>())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "target name is too long"))?;
+    let buffer_bytes = fixed
+        .checked_add(target_bytes)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "rename buffer overflowed"))?;
+    let information_bytes = u32::try_from(buffer_bytes)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "target name is too long"))?;
+    let target_bytes = u32::try_from(target_bytes)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "target name is too long"))?;
+    // `FILE_RENAME_INFO` has pointer alignment. A byte vector does not promise
+    // enough alignment for the typed header.
+    let words = buffer_bytes.div_ceil(std::mem::size_of::<usize>());
+    let mut buffer = vec![0_usize; words];
     let information = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
     unsafe {
         (*information).Anonymous.ReplaceIfExists = false;
         (*information).RootDirectory = attachments_directory.handle.as_raw_handle();
-        (*information).FileNameLength = (target.len() * std::mem::size_of::<u16>()) as u32;
+        (*information).FileNameLength = target_bytes;
         std::ptr::copy_nonoverlapping(
             target.as_ptr(),
             (*information).FileName.as_mut_ptr(),
@@ -1153,7 +1170,7 @@ fn publish_exact_stage(
             stage.as_raw_handle(),
             FileRenameInfo,
             information.cast(),
-            buffer.len() as u32,
+            information_bytes,
         ) == 0
         {
             return Err(io::Error::last_os_error());
@@ -1447,13 +1464,24 @@ mod tests {
         let original = temp.path().join("held-attachments");
 
         let error = publish_with_hook(&data_dir, &mut root, &reservation.operation_id, |_| {
-            fs::rename(&attachments, &original).map_err(|error| error.to_string())?;
+            if let Err(error) = fs::rename(&attachments, &original) {
+                #[cfg(windows)]
+                if error.kind() == io::ErrorKind::PermissionDenied {
+                    return Err(
+                        "retained attachments handle blocked directory replacement".to_string()
+                    );
+                }
+                return Err(error.to_string());
+            }
             fs::create_dir(&attachments).map_err(|error| error.to_string())?;
             Ok(())
         })
         .expect_err("replacement must fail closed");
 
+        #[cfg(not(windows))]
         assert!(error.contains("attachments directory changed"));
+        #[cfg(windows)]
+        assert!(error.contains("retained attachments handle blocked directory replacement"));
         assert!(!target.exists());
         assert!(!attachments
             .join(target.file_name().expect("target name"))
@@ -1543,40 +1571,60 @@ mod tests {
         let mut root = bind(&sync_root);
         let reservation =
             reserve(&data_dir, &mut root, &target, 3, &"b".repeat(64)).expect("reserve");
+        #[cfg(not(windows))]
         let scratch_relative = Path::new(&reservation.scratch_path)
             .strip_prefix(sync_root.join(ATTACHMENTS_DIR_NAME))
             .expect("scratch relative path")
             .to_owned();
 
-        let original_root = temp.path().join("original-sync-root");
-        fs::rename(&sync_root, &original_root).expect("move leased root");
-        let original_scratch = original_root
-            .join(ATTACHMENTS_DIR_NAME)
-            .join(&scratch_relative);
-        fs::write(&original_scratch, b"original").expect("original scratch");
+        #[cfg(windows)]
+        {
+            fs::write(&reservation.scratch_path, b"original").expect("original scratch");
+            let original_root = temp.path().join("original-sync-root");
+            let error = fs::rename(&sync_root, &original_root)
+                .expect_err("retained Windows handles must block root replacement");
+            assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+            assert_eq!(
+                fs::read(&reservation.scratch_path).expect("original remains"),
+                b"original"
+            );
+            assert!(!target.exists());
+            assert!(entry_path(&data_dir, &sync_root, &reservation.operation_id).exists());
+            return;
+        }
 
-        let replacement_attachments = sync_root.join(ATTACHMENTS_DIR_NAME);
-        fs::create_dir_all(&replacement_attachments).expect("replacement root");
-        let replacement_scratch = replacement_attachments.join(&scratch_relative);
-        fs::create_dir_all(
-            replacement_scratch
-                .parent()
-                .expect("replacement private parent"),
-        )
-        .expect("replacement private namespace");
-        fs::write(&replacement_scratch, b"replacement").expect("replacement scratch");
+        #[cfg(not(windows))]
+        {
+            let original_root = temp.path().join("original-sync-root");
+            fs::rename(&sync_root, &original_root).expect("move leased root");
+            let original_scratch = original_root
+                .join(ATTACHMENTS_DIR_NAME)
+                .join(&scratch_relative);
+            fs::write(&original_scratch, b"original").expect("original scratch");
 
-        let error = recover(&data_dir, &mut root).expect_err("root replacement must fail");
-        assert!(error.contains("root directory changed"));
-        assert_eq!(
-            fs::read(original_scratch).expect("original remains"),
-            b"original"
-        );
-        assert_eq!(
-            fs::read(replacement_scratch).expect("replacement remains"),
-            b"replacement"
-        );
-        assert!(entry_path(&data_dir, &sync_root, &reservation.operation_id).exists());
+            let replacement_attachments = sync_root.join(ATTACHMENTS_DIR_NAME);
+            fs::create_dir_all(&replacement_attachments).expect("replacement root");
+            let replacement_scratch = replacement_attachments.join(&scratch_relative);
+            fs::create_dir_all(
+                replacement_scratch
+                    .parent()
+                    .expect("replacement private parent"),
+            )
+            .expect("replacement private namespace");
+            fs::write(&replacement_scratch, b"replacement").expect("replacement scratch");
+
+            let error = recover(&data_dir, &mut root).expect_err("root replacement must fail");
+            assert!(error.contains("root directory changed"));
+            assert_eq!(
+                fs::read(original_scratch).expect("original remains"),
+                b"original"
+            );
+            assert_eq!(
+                fs::read(replacement_scratch).expect("replacement remains"),
+                b"replacement"
+            );
+            assert!(entry_path(&data_dir, &sync_root, &reservation.operation_id).exists());
+        }
     }
 
     #[test]

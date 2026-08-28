@@ -4283,11 +4283,17 @@ mod tests {
             .expect("write older seed");
         fs::write(&actually_newer, br#"{"tasks":[{"id":"newer"}]}"#)
             .expect("write newer seed");
-        File::open(&lexically_later)
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lexically_later)
             .expect("open older seed")
             .set_modified(UNIX_EPOCH + Duration::from_secs(10))
             .expect("set older mtime");
-        File::open(&actually_newer)
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&actually_newer)
             .expect("open newer seed")
             .set_modified(UNIX_EPOCH + Duration::from_secs(20))
             .expect("set newer mtime");
@@ -5420,6 +5426,7 @@ mod tests {
             "Sync lock held by another process"
         );
         release_sync_lock(&first);
+        drop(first);
 
         let next = acquire_sync_lock(dir.path()).expect("released lock can be acquired");
         release_sync_lock(&next);
@@ -5433,6 +5440,7 @@ mod tests {
 
         let owner = acquire_sync_lock(dir.path()).expect("unlocked legacy file can be reused");
         release_sync_lock(&owner);
+        drop(owner);
 
         assert!(lock_path.exists(), "stable lock inode must not be unlinked");
         let next = acquire_sync_lock(dir.path()).expect("next owner reuses stable lock inode");
@@ -6967,7 +6975,10 @@ mod tests {
         assert!(retained_directory_name_range(usize::MAX, 104, 2, usize::MAX).is_err());
         assert!(retained_directory_entry_range(0, 112, 106).is_err());
 
-        let source = include_str!("sync.rs");
+        // Git may materialize this source with CRLF on Windows. Normalize the
+        // fixture before inspecting it so the safety regression tests code,
+        // not checkout line-ending policy.
+        let source = include_str!("sync.rs").replace("\r\n", "\n");
         let windows_enumerator = source
             .split_once("#[cfg(target_os = \"windows\")]\nfn retained_root_list_names")
             .expect("Windows retained enumerator")
@@ -6982,6 +6993,17 @@ mod tests {
             "std::mem::size_of::<FILE_ID_BOTH_DIR_INFO>()\n                - std::mem::size_of::<u16>()"
         ));
         assert!(!windows_enumerator.contains(".is_none_or("));
+
+        #[cfg(target_os = "windows")]
+        {
+            use windows_sys::Win32::Storage::FileSystem::FILE_RENAME_INFO;
+
+            assert!(
+                std::mem::offset_of!(FILE_RENAME_INFO, FileName)
+                    < std::mem::size_of::<FILE_RENAME_INFO>(),
+                "rename buffers must start their variable name at the field offset"
+            );
+        }
     }
 
     #[test]
@@ -14557,8 +14579,38 @@ fn retained_root_rename(
 
     let source = retained_root_open(directory, source, true, false, false)?;
     let target = destination.encode_wide().collect::<Vec<_>>();
-    let fixed = std::mem::size_of::<FILE_RENAME_INFO>() - std::mem::size_of::<u16>();
-    let buffer_bytes = fixed + target.len() * std::mem::size_of::<u16>();
+    // `FILE_RENAME_INFO` is a variable-length record. In particular, the x64
+    // Rust layout has trailing padding after `FileName`, so `size_of - 2`
+    // overstates the fixed prefix accepted by SetFileInformationByHandle and
+    // makes an otherwise valid retained-root rename fail with ERROR_INVALID_PARAMETER.
+    let fixed = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
+    let target_bytes = target
+        .len()
+        .checked_mul(std::mem::size_of::<u16>())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "File Sync rename target is too long",
+            )
+        })?;
+    let buffer_bytes = fixed.checked_add(target_bytes).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "File Sync rename buffer size overflowed",
+        )
+    })?;
+    let information_bytes = u32::try_from(buffer_bytes).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "File Sync rename target is too long",
+        )
+    })?;
+    let target_bytes = u32::try_from(target_bytes).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "File Sync rename target is too long",
+        )
+    })?;
     let words = buffer_bytes.div_ceil(std::mem::size_of::<usize>());
     // `FILE_RENAME_INFO` has pointer alignment; a byte vector does not promise
     // enough alignment for the typed header even though system allocators often
@@ -14569,7 +14621,7 @@ fn retained_root_rename(
     unsafe {
         (*information).Anonymous.ReplaceIfExists = replace;
         (*information).RootDirectory = directory.as_raw_handle();
-        (*information).FileNameLength = (target.len() * std::mem::size_of::<u16>()) as u32;
+        (*information).FileNameLength = target_bytes;
         std::ptr::copy_nonoverlapping(
             target.as_ptr(),
             (*information).FileName.as_mut_ptr(),
@@ -14579,7 +14631,7 @@ fn retained_root_rename(
             source.as_raw_handle(),
             FileRenameInfo,
             information.cast(),
-            buffer_bytes as u32,
+            information_bytes,
         ) == 0
         {
             return Err(std::io::Error::last_os_error());
