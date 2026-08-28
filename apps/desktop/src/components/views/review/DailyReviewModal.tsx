@@ -7,11 +7,13 @@ import {
     formatFocusTaskLimitText,
     isDueForReview,
     normalizeFocusTaskLimit,
+    parseStoredReviewStepSession,
     resolveReviewStepSession,
     safeFormatDate,
     safeParseDate,
     tFallback,
     type ExternalCalendarEvent,
+    type StoredReviewStepSession,
     type Task,
     shallow,
     useTaskStore,
@@ -37,11 +39,13 @@ type DailyReviewStepDefinition = {
 const DAILY_REVIEW_STEP_STORAGE_KEY = 'mindwtr:dailyReview:currentStep';
 const DAILY_REVIEW_STEPS = new Set<DailyReviewStep>(['today', 'focus', 'inbox', 'waiting', 'completed']);
 
-function loadStoredDailyReviewStep(): DailyReviewStep {
-    if (typeof window === 'undefined') return 'today';
-    const stored = window.localStorage.getItem(DAILY_REVIEW_STEP_STORAGE_KEY);
-    if (stored === 'completed') return 'today';
-    return stored && DAILY_REVIEW_STEPS.has(stored as DailyReviewStep) ? stored as DailyReviewStep : 'today';
+function loadStoredDailyReviewSession(): StoredReviewStepSession<DailyReviewStep> {
+    const now = new Date();
+    const stored = typeof window === 'undefined'
+        ? null
+        : window.localStorage.getItem(DAILY_REVIEW_STEP_STORAGE_KEY);
+    return parseStoredReviewStepSession(stored, DAILY_REVIEW_STEPS, { cadence: 'daily', now })
+        ?? { step: 'today', startedAt: now.toISOString() };
 }
 
 interface DailyReviewGuideModalProps {
@@ -49,7 +53,13 @@ interface DailyReviewGuideModalProps {
 }
 
 export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
-    const [currentStep, setCurrentStep] = useState<DailyReviewStep>(() => loadStoredDailyReviewStep());
+    const [reviewSession, setReviewSession] = useState<StoredReviewStepSession<DailyReviewStep>>(
+        () => loadStoredDailyReviewSession(),
+    );
+    const currentStep = reviewSession.step;
+    const setCurrentStep = useCallback((step: DailyReviewStep) => {
+        setReviewSession((session) => ({ ...session, step }));
+    }, []);
     const { tasks, projects, areas, settings, addTask, addProject, updateTask, deleteTask } = useTaskStore(
         (state) => ({
             tasks: state.tasks,
@@ -109,12 +119,8 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
     }, [currentStep, isProcessing]);
 
     useEffect(() => {
-        if (currentStep === 'completed') {
-            window.localStorage.removeItem(DAILY_REVIEW_STEP_STORAGE_KEY);
-            return;
-        }
-        window.localStorage.setItem(DAILY_REVIEW_STEP_STORAGE_KEY, currentStep);
-    }, [currentStep]);
+        window.localStorage.setItem(DAILY_REVIEW_STEP_STORAGE_KEY, JSON.stringify(reviewSession));
+    }, [reviewSession]);
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
@@ -216,7 +222,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
         if (currentStep !== activeStep) {
             setCurrentStep(activeStep);
         }
-    }, [activeStep, currentStep]);
+    }, [activeStep, currentStep, setCurrentStep]);
 
     const finishReview = () => {
         window.localStorage.removeItem(DAILY_REVIEW_STEP_STORAGE_KEY);
@@ -574,7 +580,8 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
                     <div className="flex justify-between items-center pt-3.5 border-t border-border mt-5">
                         <button
                             onClick={prevStep}
-                            className="flex items-center gap-1.5 px-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                            disabled={!previousStepId}
+                            className="flex items-center gap-1.5 px-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-muted-foreground"
                         >
                             <ChevronLeft className="w-3.5 h-3.5" /> {t('review.back')}
                         </button>

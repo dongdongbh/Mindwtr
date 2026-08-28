@@ -4,14 +4,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
     addBreadcrumb,
+    assertWebdavStrongEtagSupport,
     CLOCK_SKEW_THRESHOLD_MS,
     cloudGetJson,
     isConnectionAllowed,
+    isSyncEncryptionRemoteVersionUnavailableError,
     isValidCloudSyncToken,
     normalizeCloudUrl,
     normalizeWebdavUrl,
     SYNC_LOCAL_INSECURE_URL_OPTIONS,
-    webdavGetJson,
     type AppSettings,
 } from '@mindwtr/core';
 
@@ -42,8 +43,9 @@ import {
 } from '@/lib/sync-configuration-transaction';
 import { syncMobileBackgroundSyncRegistration } from '@/lib/background-sync-task';
 import { getMobileCloudRequestOptions, getMobileWebDavRequestOptions } from '@/lib/webdav-request-options';
+import { rememberWebdavCapabilityProof } from '@/lib/webdav-capability-proof';
+import { getIncompleteSyncEncryptionTransition } from '@/lib/sync-encryption-state';
 import {
-    classifySyncFailure,
     getSyncConflictCount,
     getSyncMaxClockSkewMs,
     getSyncTimestampAdjustments,
@@ -51,7 +53,6 @@ import {
     isLikelyOfflineSyncError,
     coerceSupportedBackend,
 } from '@/lib/sync-service-utils';
-import { isSyncEncryptionBlocked } from '@/lib/sync-encryption-state';
 import { testDropboxAccess } from '@/lib/dropbox-sync';
 import { formatClockSkew, formatError, isDropboxUnauthorizedError, logSettingsError } from '@/lib/settings-utils';
 import {
@@ -613,6 +614,7 @@ export function useSyncSettingsTransportActions({
                 clearDropboxTokens,
                 deleteSecret: deleteSecureConfigValue,
                 getDropboxTokens: getStoredDropboxTokens,
+                getIncompleteSyncEncryptionTransition,
                 getSecret: getSecureConfigValue,
                 multiGet: (keys) => AsyncStorage.multiGet(keys),
                 multiSet: (entries) => AsyncStorage.multiSet(entries),
@@ -650,6 +652,33 @@ export function useSyncSettingsTransportActions({
     const handleSync = useCallback(async (options?: SyncActionOptions) => {
         addBreadcrumb('sync:manual');
         setIsSyncing(true);
+        let activationCleanupDeferred: 'remote' | 'file' | null = null;
+        const showRemoteFenceFeedback = (deferred: 'busy' | 'cleanup') => {
+            showSettingsWarning(
+                tr('common.notice'),
+                tr(deferred === 'busy'
+                    ? 'settings.syncRemoteBusy'
+                    : 'settings.syncRemoteCleanupDeferred'),
+                6000,
+            );
+        };
+        const showFileSyncLockFeedback = (
+            outcome: 'busy' | 'cleanup' | 'unavailable',
+            activationBusy = false,
+        ) => {
+            showToast({
+                title: outcome === 'unavailable' ? tr('settings.syncMobile.error') : tr('common.notice'),
+                message: tr(outcome === 'busy'
+                    ? activationBusy
+                        ? 'settings.syncFileLockActivationBusy'
+                        : 'settings.syncFileLockBusy'
+                    : outcome === 'cleanup'
+                        ? 'settings.syncFileLockCleanupDeferred'
+                        : 'settings.syncFileLockUnavailable'),
+                tone: outcome === 'unavailable' ? 'error' : 'warning',
+                durationMs: 6000,
+            });
+        };
         try {
             const previousLastSyncStatus = lastSyncStatus;
             const previousLastSyncStats = lastSyncStats ?? null;
@@ -766,8 +795,17 @@ export function useSyncSettingsTransportActions({
                 || (
                     effectiveBackend === 'cloudkit'
                     && provenCloudProviderRef.current !== 'cloudkit'
-                );
+            );
             if (needsActivationProbe) {
+                if (configOverride.backend === 'webdav' && configOverride.webdav) {
+                    await assertWebdavStrongEtagSupport(normalizeWebdavUrl(configOverride.webdav.url), {
+                        ...getMobileWebDavRequestOptions(configOverride.webdav.allowInsecureHttp),
+                        username: configOverride.webdav.username,
+                        password: configOverride.webdav.password,
+                        timeoutMs: 10_000,
+                    });
+                    await rememberWebdavCapabilityProof(configOverride.webdav);
+                }
                 const probeResult = await performMobileSync(
                     effectiveBackend === 'file' ? syncPath || undefined : undefined,
                     { activationProbe: true, manual: true, configOverride }
@@ -784,14 +822,51 @@ export function useSyncSettingsTransportActions({
                 if (probeResult.skipped === 'requeued') {
                     showSettingsWarning(
                         tr('common.notice'),
-                        tr('settings.syncFailureGeneric'),
+                        tr('settings.syncActivationRequeuedBody'),
                         4200,
                     );
                     return;
                 }
+                if (probeResult.success && probeResult.remoteFenceDeferred === 'busy') {
+                    showRemoteFenceFeedback('busy');
+                    return;
+                }
+                if (probeResult.success && probeResult.fileSyncLockDeferred === 'busy') {
+                    showFileSyncLockFeedback('busy', true);
+                    return;
+                }
+                if (probeResult.fileSyncLockUnavailable) {
+                    showFileSyncLockFeedback('unavailable');
+                    return;
+                }
+                if (probeResult.fileGenerationCorrupt) {
+                    showSettingsErrorToast(
+                        tr('settings.syncMobile.error'),
+                        tr('settings.syncFileGenerationCorrupt'),
+                    );
+                    return;
+                }
+                if (probeResult.fileAttachmentUploadBlocked === 'too-large') {
+                    showSettingsErrorToast(
+                        tr('settings.syncMobile.error'),
+                        tr('settings.syncFileAttachmentTooLarge'),
+                    );
+                    return;
+                }
+                const probeRemoteCleanupDeferred = probeResult.success
+                    && probeResult.remoteFenceDeferred === 'cleanup';
+                const probeFileCleanupDeferred = probeResult.success
+                    && probeResult.fileSyncLockDeferred === 'cleanup';
+                activationCleanupDeferred = probeFileCleanupDeferred
+                    ? 'file'
+                    : probeRemoteCleanupDeferred
+                        ? 'remote'
+                        : null;
                 if (
                     !probeResult.success
                     || probeResult.remoteWriteDeferred
+                    || (probeResult.remoteFenceDeferred && !probeRemoteCleanupDeferred)
+                    || (probeResult.fileSyncLockDeferred && !probeFileCleanupDeferred)
                     || probeResult.skipped === 'pendingRemoteWriteBackoff'
                 ) {
                     // An encrypted remote is transport PROOF, not a failed probe: the
@@ -803,8 +878,7 @@ export function useSyncSettingsTransportActions({
                     // needs the key (#1001).
                     if (
                         !probeResult.success
-                        && classifySyncFailure(probeResult.error) === 'encryption'
-                        && (await isSyncEncryptionBlocked())
+                        && probeResult.activationProof === 'remote-encrypted-no-key'
                     ) {
                         await commitProvenSyncConfiguration(configOverride);
                         showSettingsWarning(
@@ -817,6 +891,11 @@ export function useSyncSettingsTransportActions({
                     throw new Error(probeResult.error || 'Sync setup could not be verified');
                 }
                 await commitProvenSyncConfiguration(configOverride);
+                if (activationCleanupDeferred) {
+                    if (activationCleanupDeferred === 'file') showFileSyncLockFeedback('cleanup');
+                    else showRemoteFenceFeedback('cleanup');
+                    return;
+                }
             }
 
             const result = await performMobileSync(undefined, {
@@ -843,11 +922,66 @@ export function useSyncSettingsTransportActions({
                 });
                 return;
             }
+            if (result.success && result.fileSyncLockDeferred) {
+                showFileSyncLockFeedback(
+                    activationCleanupDeferred === 'file' ? 'cleanup' : result.fileSyncLockDeferred,
+                );
+                return;
+            }
+            if (result.fileSyncLockUnavailable) {
+                showFileSyncLockFeedback('unavailable');
+                return;
+            }
+            if (result.fileGenerationCorrupt) {
+                showSettingsErrorToast(
+                    tr('settings.syncMobile.error'),
+                    tr('settings.syncFileGenerationCorrupt'),
+                );
+                return;
+            }
+            if (
+                result.success
+                && !result.remoteWriteDeferred
+                && result.fileAttachmentUploadBlocked === 'too-large'
+            ) {
+                showSettingsWarning(
+                    tr('common.notice'),
+                    tr('settings.syncFileAttachmentTooLarge'),
+                    6000,
+                );
+                return;
+            }
+            if (result.success && result.remoteFenceDeferred) {
+                showRemoteFenceFeedback(activationCleanupDeferred === 'remote' ? 'cleanup' : result.remoteFenceDeferred);
+                return;
+            }
+            if (
+                result.success
+                && result.attachmentWriteDeferred
+                && !result.remoteWriteDeferred
+            ) {
+                if (activationCleanupDeferred) {
+                    if (activationCleanupDeferred === 'file') showFileSyncLockFeedback('cleanup');
+                    else showRemoteFenceFeedback('cleanup');
+                    return;
+                }
+                showSettingsWarning(
+                    tr('common.notice'),
+                    tr('settings.syncAttachmentWriteDeferred'),
+                    6000,
+                );
+                return;
+            }
             if (
                 result.success
                 && !result.remoteWriteDeferred
                 && result.skipped !== 'pendingRemoteWriteBackoff'
             ) {
+                if (activationCleanupDeferred) {
+                    if (activationCleanupDeferred === 'file') showFileSyncLockFeedback('cleanup');
+                    else showRemoteFenceFeedback('cleanup');
+                    return;
+                }
                 const conflictCount = getSyncConflictCount(result.stats);
                 const maxResultClockSkewMs = getSyncMaxClockSkewMs(result.stats);
                 const resultTimestampAdjustments = getSyncTimestampAdjustments(result.stats);
@@ -891,7 +1025,12 @@ export function useSyncSettingsTransportActions({
                 );
                 return;
             }
-            showSettingsErrorToast(tr('settings.syncMobile.error'), getSyncFailureToastMessage(error));
+            showSettingsErrorToast(
+                tr('settings.syncMobile.error'),
+                isSyncEncryptionRemoteVersionUnavailableError(error)
+                    ? tr('settings.syncEncryptionErrorBackendIncompatible')
+                    : getSyncFailureToastMessage(error),
+            );
         } finally {
             setIsSyncing(false);
         }
@@ -1006,12 +1145,13 @@ export function useSyncSettingsTransportActions({
                 if (!validateSyncHttpUrl(trimmedWebDavUrl, effectiveWebdav.allowInsecureHttp, 'WebDAV')) {
                     return;
                 }
-                await webdavGetJson<unknown>(normalizeWebdavUrl(trimmedWebDavUrl), {
+                await assertWebdavStrongEtagSupport(normalizeWebdavUrl(trimmedWebDavUrl), {
                     ...getMobileWebDavRequestOptions(effectiveWebdav.allowInsecureHttp),
                     username: effectiveWebdav.username.trim(),
                     password: effectiveWebdav.password,
                     timeoutMs: 10_000,
                 });
+                await rememberWebdavCapabilityProof(effectiveWebdav);
                 showToast({
                     title: tr('settings.syncMobile.connectionOk'),
                     message: tr('settings.syncMobile.webdavEndpointIsReachable'),
@@ -1057,6 +1197,8 @@ export function useSyncSettingsTransportActions({
                 tr('settings.syncMobile.connectionFailed'),
                 effectiveCloudProvider === 'dropbox' && isDropboxUnauthorizedError(error)
                     ? tr('settings.syncMobile.dropboxTokenIsInvalidOrRevokedPleaseTapConnectDropbox')
+                    : backend === 'webdav' && isSyncEncryptionRemoteVersionUnavailableError(error)
+                        ? tr('settings.syncEncryptionErrorBackendIncompatible')
                     : formatError(error),
                 5200
             );

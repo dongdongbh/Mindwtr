@@ -1,6 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from './file-system';
-import type { AppData, Attachment } from '@mindwtr/core';
 import {
   ATTACHMENTS_DIR_NAME,
   buildCloudKey,
@@ -16,6 +15,9 @@ import {
   reportProgress,
   sleep,
   validateAttachmentHash,
+  type AppData,
+  type Attachment,
+  type LocalAttachmentPresence,
   type LocalFileStat,
 } from '@mindwtr/core';
 import {
@@ -157,7 +159,7 @@ const stripUriQueryAndFragment = (value: string): string => (
   value.split('?')[0]?.split('#')[0] ?? value
 );
 
-const getSafLeafName = (value: string): string => {
+export const getSafLeafName = (value: string): string => {
   const decoded = decodeUriSafe(value);
   const stripped = stripUriQueryAndFragment(decoded).replace(/\/+$/, '');
   const lastSeparator = Math.max(stripped.lastIndexOf('/'), stripped.lastIndexOf(':'));
@@ -168,13 +170,17 @@ const hasSafLeafName = (value: string, expected: string): boolean => (
   getSafLeafName(value) === expected
 );
 
+const ATTACHMENT_TEMP_FILE_PREFIX = '.mindwtr-attachment-write-';
+
 const buildTempUri = (targetUri: string): string => {
-  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-  return `${targetUri}.tmp-${suffix}`;
+  const separatorIndex = targetUri.lastIndexOf('/');
+  const parent = separatorIndex >= 0 ? targetUri.slice(0, separatorIndex + 1) : '';
+  const suffix = `${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 14).padEnd(12, '0')}`;
+  return `${parent}${ATTACHMENT_TEMP_FILE_PREFIX}${suffix}.tmp`;
 };
 
 const isTempAttachmentFile = (name: string): boolean => {
-  return name.includes('.tmp-') || name.endsWith('.tmp') || name.endsWith('.partial');
+  return /^\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/.test(name);
 };
 
 export const writeBytesSafely = async (targetUri: string, bytes: Uint8Array): Promise<void> => {
@@ -183,7 +189,7 @@ export const writeBytesSafely = async (targetUri: string, bytes: Uint8Array): Pr
   await FileSystem.writeAsStringAsync(tempUri, base64, { encoding: FileSystem.EncodingType.Base64 });
   try {
     await FileSystem.moveAsync({ from: tempUri, to: targetUri });
-  } catch (error) {
+  } catch {
     await FileSystem.writeAsStringAsync(targetUri, base64, { encoding: FileSystem.EncodingType.Base64 });
     try {
       await FileSystem.deleteAsync(tempUri, { idempotent: true });
@@ -231,8 +237,11 @@ export type ResolvedSyncDir =
 
 export const isHttpAttachmentUri = (uri: string): boolean => /^https?:\/\//i.test(uri);
 export const isContentAttachmentUri = (uri: string): boolean => uri.startsWith('content://');
-export const getAttachmentLocalStatus = (uri: string, existsLocally: boolean): Attachment['localStatus'] => {
-  return (existsLocally || isContentAttachmentUri(uri) || isHttpAttachmentUri(uri)) ? 'available' : 'missing';
+export const getAttachmentLocalStatus = (
+  uri: string,
+  presence: Exclude<LocalAttachmentPresence, 'unreadable'>,
+): Attachment['localStatus'] => {
+  return (presence === 'present' || isHttpAttachmentUri(uri)) ? 'available' : 'missing';
 };
 
 export const getDropboxClientId = async (): Promise<string> => {
@@ -326,6 +335,28 @@ export const getAttachmentsDir = async (): Promise<string | null> => {
   return dir;
 };
 
+/**
+ * Removes a local attachment only when its URI proves it is the id-named copy
+ * owned by Mindwtr's managed attachments directory. Draft settlement passes
+ * candidates here; arbitrary user-picked paths and sibling directories are
+ * intentionally rejected.
+ */
+export const deleteManagedAttachmentFile = async (attachment: Attachment): Promise<boolean> => {
+  if (attachment.kind !== 'file' || !attachment.uri || !attachment.id) return false;
+  const dir = await getAttachmentsDir();
+  if (!dir || !attachment.uri.startsWith(dir)) return false;
+  const fileName = attachment.uri.slice(dir.length).split(/[?#]/, 1)[0];
+  if (!fileName || fileName.includes('/')) return false;
+  if (fileName !== attachment.id && !fileName.startsWith(`${attachment.id}.`)) return false;
+  try {
+    await FileSystem.deleteAsync(attachment.uri, { idempotent: true });
+    return true;
+  } catch (error) {
+    logAttachmentWarn('Failed to delete abandoned attachment draft file', error);
+    return false;
+  }
+};
+
 export const cleanupAttachmentTempFiles = async (): Promise<void> => {
   const dir = await getAttachmentsDir();
   if (!dir) return;
@@ -373,9 +404,11 @@ const resolveSafSyncDir = async (syncUri: string): Promise<Extract<ResolvedSyncD
   if (!parentTreeUri) return null;
   const directoryCandidates = parentDocumentUri ? [parentDocumentUri, parentTreeUri] : [parentTreeUri];
   let attachmentsDirUri: string | null = null;
+  const readableCandidates: string[] = [];
   for (const candidate of directoryCandidates) {
     try {
       const entries = await StorageAccessFramework.readDirectoryAsync(candidate);
+      readableCandidates.push(candidate);
       const matchEntry = entries.find((entry: string) => hasSafLeafName(entry, ATTACHMENTS_DIR_NAME));
       attachmentsDirUri = matchEntry ?? null;
       if (attachmentsDirUri) break;
@@ -386,7 +419,10 @@ const resolveSafSyncDir = async (syncUri: string): Promise<Extract<ResolvedSyncD
     }
   }
   if (!attachmentsDirUri) {
-    for (const candidate of directoryCandidates) {
+    // Creating after every inventory attempt failed can create a duplicate
+    // provider document and falsely turn an unreadable remote into an empty one.
+    if (readableCandidates.length === 0) return null;
+    for (const candidate of readableCandidates) {
       try {
         attachmentsDirUri = await StorageAccessFramework.makeDirectoryAsync(candidate, ATTACHMENTS_DIR_NAME);
         if (attachmentsDirUri) break;
@@ -441,6 +477,30 @@ export const readSafDirectoryEntriesByName = async (dirUri: string): Promise<Map
     logAttachmentWarn('Failed to read SAF directory', error);
   }
   return entriesByName;
+};
+
+export type SafDirectoryEntriesResult =
+  | { status: 'available'; entries: Map<string, string> }
+  | { status: 'unreadable' };
+
+/** Strict SAF inventory used by mutation-capable sync. Missing capability and
+ * provider errors are not equivalent to an empty directory. */
+export const inspectSafDirectoryEntriesByName = async (
+  dirUri: string,
+): Promise<SafDirectoryEntriesResult> => {
+  if (!StorageAccessFramework?.readDirectoryAsync) return { status: 'unreadable' };
+  try {
+    const entries = await StorageAccessFramework.readDirectoryAsync(dirUri);
+    const entriesByName = new Map<string, string>();
+    for (const entry of entries) {
+      const name = getSafLeafName(entry);
+      if (name && !entriesByName.has(name)) entriesByName.set(name, entry);
+    }
+    return { status: 'available', entries: entriesByName };
+  } catch (error) {
+    logAttachmentWarn('Failed to read SAF directory', error);
+    return { status: 'unreadable' };
+  }
 };
 
 export const findSafEntry = async (dirUri: string, fileName: string): Promise<string | null> => {
@@ -498,14 +558,27 @@ export const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
   return copy.buffer;
 };
 
-export const fileExists = async (uri: string): Promise<boolean> => {
-  if (uri.startsWith('content://')) return true;
+const isExplicitLocalFileNotFoundError = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') return false;
+  const code = 'code' in error && typeof error.code === 'string'
+    ? error.code.trim().toUpperCase()
+    : '';
+  if (code === 'ENOENT' || code === 'ERR_FILE_NOT_FOUND' || code === 'FILE_NOT_FOUND') return true;
+  const message = error instanceof Error ? error.message : '';
+  return /(?:^|\b)ENOENT(?:\b|$)|no such file or directory|file not found/i.test(message);
+};
+
+export const getLocalAttachmentPresence = async (uri: string): Promise<LocalAttachmentPresence> => {
   try {
     const info = await FileSystem.getInfoAsync(uri);
-    return info.exists;
+    if (info.exists === true) return 'present';
+    if (info.exists === false) return 'confirmed-not-found';
+    logAttachmentWarn('Attachment file presence was ambiguous');
+    return 'unreadable';
   } catch (error) {
+    if (isExplicitLocalFileNotFoundError(error)) return 'confirmed-not-found';
     logAttachmentWarn('Failed to check attachment file', error);
-    return false;
+    return 'unreadable';
   }
 };
 
@@ -545,6 +618,7 @@ export const computeAttachmentFileHash = async (uri: string): Promise<string | n
   }
 };
 
+
 export type PersistAttachmentOutcome = {
   attachment: Attachment;
   /**
@@ -575,8 +649,11 @@ export const persistAttachmentLocallyDetailed = async (attachment: Attachment): 
       uri: describeAttachmentUriForLog(uri),
       size: Number.isFinite(attachment.size ?? NaN) ? String(attachment.size) : 'unknown',
     });
-    const alreadyExists = await fileExists(targetUri);
-    if (!alreadyExists) {
+    const targetPresence = await getLocalAttachmentPresence(targetUri);
+    if (targetPresence === 'unreadable') {
+      return { attachment, status: 'failed' };
+    }
+    if (targetPresence === 'confirmed-not-found') {
       // copyFileSafely streams through native copyAsync (temp + rename) and
       // only falls back to the JS byte round-trip when the provider refuses
       // the copy — content:// sources included, so share-sheet files avoid a

@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
     SyncEncryptionTerminalError,
+    SyncEncryptionRemoteConflictError,
+    SyncEncryptionRemoteVersionUnavailableError,
     decryptRemoteArtifactOrThrow,
     detectForeignSaltArtifact,
     getSyncEncryptionStatusFromLocalState,
@@ -27,29 +29,44 @@ import { SYNC_CRYPTO_DEFAULT_KDF_PARAMS, encryptSyncArtifact, deriveSyncKeyMater
 // pattern already used by sync-crypto.test.ts fixtures).
 const FAST_KDF = { mKib: 8, t: 1, p: 1 };
 
-function createFakeRemote(seed: Record<string, { bytes: Uint8Array; kind: 'document' | 'attachment' }> = {}): SyncEncryptionRemotePort & { store: Map<string, Uint8Array>; kinds: Map<string, 'document' | 'attachment'> } {
+function createFakeRemote(seed: Record<string, { bytes: Uint8Array; kind: 'document' | 'attachment' }> = {}): SyncEncryptionRemotePort & {
+    store: Map<string, Uint8Array>;
+    kinds: Map<string, 'document' | 'attachment'>;
+    peerWrite(name: string, bytes: Uint8Array): void;
+} {
     const store = new Map<string, Uint8Array>();
     const kinds = new Map<string, 'document' | 'attachment'>();
+    const versions = new Map<string, number>();
     for (const [name, entry] of Object.entries(seed)) {
         store.set(name, entry.bytes);
         kinds.set(name, entry.kind);
+        versions.set(name, 1);
     }
+    const versionFor = (name: string): string | null => store.has(name) ? `v${versions.get(name) ?? 1}` : null;
+    const peerWrite = (name: string, bytes: Uint8Array): void => {
+        store.set(name, bytes);
+        versions.set(name, (versions.get(name) ?? 0) + 1);
+        if (!kinds.has(name)) kinds.set(name, name.startsWith('attachments/') ? 'attachment' : 'document');
+    };
     return {
         store,
         kinds,
+        peerWrite,
         async list(): Promise<SyncEncryptionRemoteEntry[]> {
             return [...store.keys()].map((name) => ({ name, kind: kinds.get(name) ?? 'document' }));
         },
         async read(name) {
-            return store.has(name) ? store.get(name)! : null;
+            return { bytes: store.has(name) ? store.get(name)! : null, version: versionFor(name) };
         },
-        async write(name, bytes) {
-            store.set(name, bytes);
-            if (!kinds.has(name)) kinds.set(name, name.startsWith('attachments/') ? 'attachment' : 'document');
+        async write(name, bytes, expectedVersion) {
+            if (versionFor(name) !== expectedVersion) throw new SyncEncryptionRemoteConflictError();
+            peerWrite(name, bytes);
         },
-        async remove(name) {
+        async remove(name, expectedVersion) {
+            if (versionFor(name) !== expectedVersion) throw new SyncEncryptionRemoteConflictError();
             store.delete(name);
             kinds.delete(name);
+            versions.delete(name);
         },
     };
 }
@@ -89,6 +106,12 @@ function createFakeLocalState(): SyncEncryptionLocalStatePort & { value: SyncEnc
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
 const text = (b: Uint8Array) => new TextDecoder().decode(b);
+const bytesToHexForTest = (bytes: Uint8Array): string =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+const hexToBytesForTest = (hex: string): Uint8Array => Uint8Array.from(
+    { length: hex.length / 2 },
+    (_, index) => Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16),
+);
 
 // Shared with apps/desktop/src-tauri/src/sync_encryption.rs's test module — both languages'
 // name mapping must agree on every case, including compound suffix chains (S1: `.bak.previous`
@@ -156,9 +179,104 @@ describe('local-only transitions (no configured backend, #1001)', () => {
         expect(keyCache.current).toBeNull();
         expect(localState.value).toBeNull();
     });
+
+    it('local-only disable retains the key when disabled-state persistence fails', async () => {
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionLocalOnly('pw', keyCache, localState, undefined, FAST_KDF);
+        const enabledState = structuredClone(localState.value);
+        const writeState = localState.write.bind(localState);
+        let failDisabledStateWrite = true;
+        localState.write = async (state) => {
+            if (state === null && failDisabledStateWrite) throw new Error('simulated state persistence failure');
+            await writeState(state);
+        };
+
+        await expect(runDisableSyncEncryptionLocalOnly(keyCache, localState))
+            .rejects.toThrow('simulated state persistence failure');
+
+        expect(localState.value).toEqual(enabledState);
+        expect(await keyCache.getKey()).not.toBeNull();
+
+        failDisabledStateWrite = false;
+        await runDisableSyncEncryptionLocalOnly(keyCache, localState);
+        expect(localState.value).toBeNull();
+        expect(await keyCache.getKey()).toBeNull();
+    });
 });
 
 describe('runEnableSyncEncryptionOverRemote', () => {
+    it('fails before remote or local commit when existing bytes have no safe backend version', async () => {
+        const original = utf8('{"tasks":[]}');
+        const remote = createFakeRemote({
+            'data.json': { bytes: original, kind: 'document' },
+        });
+        const originalRead = remote.read.bind(remote);
+        remote.read = async (name) => {
+            const result = await originalRead(name);
+            return result.bytes ? { ...result, version: null } : result;
+        };
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'correct horse', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+
+        expect(remote.store.get('data.json')).toEqual(original);
+        expect(remote.store.has('data.json.enc')).toBe(false);
+        expect(keyCache.current).toBeNull();
+        expect(localState.value).toBeNull();
+    });
+
+    it('preflights every listed version before writing an earlier attachment', async () => {
+        const remote = createFakeRemote({
+            'attachments/first.png': { bytes: utf8('FIRST'), kind: 'attachment' },
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+        });
+        const originalRead = remote.read.bind(remote);
+        remote.read = async (name) => {
+            const result = await originalRead(name);
+            return name === 'data.json' && result.bytes ? { ...result, version: null } : result;
+        };
+        const write = vi.spyOn(remote, 'write');
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'correct horse', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(text(remote.store.get('attachments/first.png')!)).toBe('FIRST');
+        expect(keyCache.current).toBeNull();
+        expect(localState.value).toBeNull();
+    });
+
+    it('leaves a post-write missing-version failure resumable instead of committing local state', async () => {
+        const remote = createFakeRemote({
+            'attachments/first.png': { bytes: utf8('FIRST'), kind: 'attachment' },
+        });
+        const originalRead = remote.read.bind(remote);
+        let reads = 0;
+        remote.read = async (name) => {
+            const result = await originalRead(name);
+            reads += 1;
+            return reads > 1 && result.bytes ? { ...result, version: null } : result;
+        };
+        const write = vi.spyOn(remote, 'write');
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'correct horse', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+
+        expect(write).toHaveBeenCalledOnce();
+        expect(keyCache.current).toBeNull();
+        expect(localState.value).toEqual({ state: 'off', incompleteTransition: 'enable' });
+    });
+
     it('migrates data + bak + snapshot + attachment, verifies, then deletes plaintext', async () => {
         const remote = createFakeRemote({
             'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
@@ -222,6 +340,150 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         expect(text(decrypted)).toBe('{"tasks":[]}');
     });
 
+    it('authenticates an interrupted encrypted generation before a wrong passphrase can mutate attachments', async () => {
+        const material = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(7), FAST_KDF);
+        const encryptedDocument = await encryptSyncArtifact(utf8('{"tasks":[]}'), material);
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'data.json.enc': { bytes: encryptedDocument, kind: 'document' },
+            'attachments/a1.png': { bytes: utf8('PNGBYTES'), kind: 'attachment' },
+        });
+        const write = vi.spyOn(remote, 'write');
+        const remove = vi.spyOn(remote, 'remove');
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        const before = new Map([...remote.store].map(([name, bytes]) => [name, new Uint8Array(bytes)]));
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'typo',
+            remote,
+            keyCache,
+            localState,
+            undefined,
+            undefined,
+            FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(remove).not.toHaveBeenCalled();
+        expect(await keyCache.getKey()).toBeNull();
+        expect(localState.value).toBeNull();
+        expect([...remote.store]).toHaveLength(before.size);
+        for (const [name, bytes] of before) {
+            expect(remote.store.get(name)).toEqual(bytes);
+        }
+    });
+
+    it('authenticates attachment-only interrupted generations before mutating earlier plaintext attachments', async () => {
+        const material = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(11), FAST_KDF);
+        const encryptedAttachment = await encryptSyncArtifact(utf8('SEALED'), material);
+        const remote = createFakeRemote({
+            'attachments/a-plain.bin': { bytes: utf8('PLAIN'), kind: 'attachment' },
+            'attachments/z-sealed.bin': { bytes: encryptedAttachment, kind: 'attachment' },
+        });
+        const write = vi.spyOn(remote, 'write');
+        const remove = vi.spyOn(remote, 'remove');
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        const before = new Map([...remote.store].map(([name, bytes]) => [name, new Uint8Array(bytes)]));
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'typo',
+            remote,
+            keyCache,
+            localState,
+            undefined,
+            undefined,
+            FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(remove).not.toHaveBeenCalled();
+        expect(await keyCache.getKey()).toBeNull();
+        expect(localState.value).toBeNull();
+        for (const [name, bytes] of before) expect(remote.store.get(name)).toEqual(bytes);
+    });
+
+    it('revalidates an already-encrypted document generation before committing the local key', async () => {
+        const originalMaterial = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(13), FAST_KDF);
+        const peerMaterial = await deriveSyncKeyMaterial('peer passphrase', new Uint8Array(16).fill(17), FAST_KDF);
+        const remote = createFakeRemote({
+            'data.json.enc': {
+                bytes: await encryptSyncArtifact(utf8('{"tasks":[]}'), originalMaterial),
+                kind: 'document',
+            },
+        });
+        const originalRead = remote.read.bind(remote);
+        let encryptedDocumentReads = 0;
+        remote.read = async (name) => {
+            if (name === 'data.json.enc') {
+                encryptedDocumentReads += 1;
+                if (encryptedDocumentReads === 2) {
+                    remote.peerWrite(name, await encryptSyncArtifact(utf8('{"tasks":["peer"]}'), peerMaterial));
+                }
+            }
+            return originalRead(name);
+        };
+        const write = vi.spyOn(remote, 'write');
+        const remove = vi.spyOn(remote, 'remove');
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'correct horse',
+            remote,
+            keyCache,
+            localState,
+            undefined,
+            undefined,
+            FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(remove).not.toHaveBeenCalled();
+        expect(await keyCache.getKey()).toBeNull();
+        expect(localState.value).toBeNull();
+        await expect(decryptRemoteArtifactOrThrow(
+            remote.store.get('data.json.enc')!,
+            originalMaterial.key,
+        )).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+    });
+
+    it('converges mixed-salt encrypted documents to the authoritative base generation', async () => {
+        const baseMaterial = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(19), FAST_KDF);
+        const backupMaterial = await deriveSyncKeyMaterial('correct horse', new Uint8Array(16).fill(23), FAST_KDF);
+        const remote = createFakeRemote({
+            'data.json.enc': {
+                bytes: await encryptSyncArtifact(utf8('{"tasks":[]}'), baseMaterial),
+                kind: 'document',
+            },
+            'data.json.enc.bak': {
+                bytes: await encryptSyncArtifact(utf8('{"tasks":["old"]}'), backupMaterial),
+                kind: 'document',
+            },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+
+        await runEnableSyncEncryptionOverRemote(
+            'correct horse',
+            remote,
+            keyCache,
+            localState,
+            undefined,
+            undefined,
+            FAST_KDF,
+        );
+
+        const key = (await keyCache.getKey())!;
+        expect(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key)).toEqual(utf8('{"tasks":[]}'));
+        expect(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc.bak')!, key)).toEqual(utf8('{"tasks":["old"]}'));
+
+        await runDisableSyncEncryptionOverRemote(remote, keyCache, localState);
+        expect(text(remote.store.get('data.json')!)).toBe('{"tasks":[]}');
+        expect(text(remote.store.get('data.json.bak')!)).toBe('{"tasks":["old"]}');
+    });
+
     it('is resumable when the crash happens during the attachment phase, before any document is sealed (self-heals an abandoned salt)', async () => {
         const remote = createFakeRemote({
             'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
@@ -253,10 +515,10 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         const remote = createFakeRemote({ 'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' } });
         const originalWrite = remote.write.bind(remote);
         let calls = 0;
-        remote.write = async (name, bytes) => {
+        remote.write = async (name, bytes, expectedVersion) => {
             calls += 1;
             if (name === 'data.json.enc') throw new Error('simulated transport failure');
-            return originalWrite(name, bytes);
+            return originalWrite(name, bytes, expectedVersion);
         };
         const keyCache = createFakeKeyCache();
         const localState = createFakeLocalState();
@@ -265,11 +527,110 @@ describe('runEnableSyncEncryptionOverRemote', () => {
         expect(calls).toBe(1);
         expect(remote.store.has('data.json')).toBe(true); // plaintext untouched
         expect(remote.store.has('data.json.enc')).toBe(false);
+        expect(localState.value).toEqual({ state: 'off', incompleteTransition: 'enable' });
+    });
+
+    it('rejects plaintext stored under an encrypted document name before any enable write', async () => {
+        const remote = createFakeRemote({
+            'attachments/a-first.bin': { bytes: utf8('ATTACHMENT'), kind: 'attachment' },
+            'data.json.enc': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        const write = vi.spyOn(remote, 'write');
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(text(remote.store.get('attachments/a-first.bin')!)).toBe('ATTACHMENT');
         expect(localState.value).toBeNull();
+        expect(await keyCache.getKey()).toBeNull();
+    });
+
+    it('aborts on a peer attachment update, preserves peer bytes, and converges on retry', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a1.png': { bytes: utf8('ORIGINAL'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        const originalWrite = remote.write.bind(remote);
+        let injected = false;
+        remote.write = async (name, bytes, expectedVersion) => {
+            if (!injected && name === 'attachments/a1.png') {
+                injected = true;
+                remote.peerWrite(name, utf8('PEER'));
+            }
+            return originalWrite(name, bytes, expectedVersion);
+        };
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+        expect(text(remote.store.get('attachments/a1.png')!)).toBe('PEER');
+        expect(localState.value).toEqual({ state: 'off', incompleteTransition: 'enable' });
+        expect(await keyCache.getKey()).toBeNull();
+
+        remote.write = originalWrite;
+        await runEnableSyncEncryptionOverRemote('pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        expect(text(await decryptRemoteArtifactOrThrow(
+            remote.store.get('attachments/a1.png')!, (await keyCache.getKey())!,
+        ))).toBe('PEER');
+    });
+
+    it('does not commit enable when a new attachment appears after inventory', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a-first.bin': { bytes: utf8('FIRST'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        const originalWrite = remote.write.bind(remote);
+        let injected = false;
+        remote.write = async (name, bytes, expectedVersion) => {
+            await originalWrite(name, bytes, expectedVersion);
+            if (!injected) {
+                injected = true;
+                remote.peerWrite('attachments/late.bin', utf8('LATE SECRET'));
+            }
+        };
+
+        await expect(runEnableSyncEncryptionOverRemote(
+            'pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+
+        expect(text(remote.store.get('attachments/late.bin')!)).toBe('LATE SECRET');
+        expect(await keyCache.getKey()).toBeNull();
+        expect(localState.value?.incompleteTransition).toBe('enable');
     });
 });
 
 describe('runDisableSyncEncryptionOverRemote', () => {
+    it('preflights every listed version before decrypting an earlier attachment', async () => {
+        const remote = createFakeRemote({
+            'attachments/first.png': { bytes: utf8('FIRST'), kind: 'attachment' },
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const originalRead = remote.read.bind(remote);
+        remote.read = async (name) => {
+            const result = await originalRead(name);
+            return name === 'data.json.enc' && result.bytes ? { ...result, version: null } : result;
+        };
+        const write = vi.spyOn(remote, 'write');
+
+        await expect(runDisableSyncEncryptionOverRemote(remote, keyCache, localState))
+            .rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(localState.value?.state).toBe('enabled');
+        expect(await keyCache.getKey()).not.toBeNull();
+    });
+
     it('reverts every artifact back to plaintext and clears the cached key', async () => {
         const remote = createFakeRemote({
             'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
@@ -288,6 +649,81 @@ describe('runDisableSyncEncryptionOverRemote', () => {
         expect(localState.value).toBeNull();
     });
 
+    it('authenticates every encrypted generation before writing any plaintext', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a-old.bin': { bytes: utf8('OLD'), kind: 'attachment' },
+            'attachments/z-foreign.bin': { bytes: utf8('FOREIGN'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('old-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const foreignMaterial = await deriveSyncKeyMaterial('foreign-pw', new Uint8Array(16).fill(29), FAST_KDF);
+        remote.peerWrite(
+            'attachments/z-foreign.bin',
+            await encryptSyncArtifact(utf8('FOREIGN'), foreignMaterial),
+        );
+        const write = vi.spyOn(remote, 'write');
+
+        await expect(runDisableSyncEncryptionOverRemote(remote, keyCache, localState))
+            .rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(localState.value).toEqual(expect.objectContaining({ state: 'enabled' }));
+        expect(localState.value?.incompleteTransition).toBeUndefined();
+        expect(await keyCache.getKey()).not.toBeNull();
+    });
+
+    it('rejects plaintext stored under an encrypted document name before any disable write', async () => {
+        const remote = createFakeRemote({
+            'attachments/a-first.bin': { bytes: utf8('ATTACHMENT'), kind: 'attachment' },
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        remote.peerWrite('data.json.enc', utf8('{"tasks":[]}'));
+        const enabledState = structuredClone(localState.value);
+        const encryptedAttachment = new Uint8Array(remote.store.get('attachments/a-first.bin')!);
+        const write = vi.spyOn(remote, 'write');
+
+        await expect(runDisableSyncEncryptionOverRemote(remote, keyCache, localState))
+            .rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(remote.store.get('attachments/a-first.bin')).toEqual(encryptedAttachment);
+        expect(localState.value).toEqual(enabledState);
+        expect(await keyCache.getKey()).not.toBeNull();
+    });
+
+    it('preserves the retry key when disabled-state persistence fails', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const enabledState = localState.value!;
+        const writeState = localState.write.bind(localState);
+        let failDisabledStateWrite = true;
+        localState.write = async (state) => {
+            if (state === null && failDisabledStateWrite) throw new Error('simulated state persistence failure');
+            await writeState(state);
+        };
+
+        await expect(runDisableSyncEncryptionOverRemote(remote, keyCache, localState))
+            .rejects.toThrow('simulated state persistence failure');
+
+        expect(text(remote.store.get('data.json')!)).toBe('{"tasks":[]}');
+        expect(localState.value).toEqual({ ...enabledState, incompleteTransition: 'disable' });
+        expect(await keyCache.getKey()).not.toBeNull();
+
+        failDisabledStateWrite = false;
+        await runDisableSyncEncryptionOverRemote(remote, keyCache, localState);
+        expect(localState.value).toBeNull();
+        expect(await keyCache.getKey()).toBeNull();
+    });
+
     it('throws if no key is cached and touches nothing', async () => {
         const remote = createFakeRemote({ 'data.json.enc': { bytes: utf8('whatever'), kind: 'document' } });
         const keyCache = createFakeKeyCache();
@@ -295,9 +731,150 @@ describe('runDisableSyncEncryptionOverRemote', () => {
         await expect(runDisableSyncEncryptionOverRemote(remote, keyCache, localState)).rejects.toThrow();
         expect(remote.store.has('data.json.enc')).toBe(true);
     });
+
+    it('aborts before clearing local key/state when a peer updates an artifact', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a1.png': { bytes: utf8('ORIGINAL'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const originalWrite = remote.write.bind(remote);
+        const peerMaterial = await deriveSyncKeyMaterial('pw', hexToBytesForTest(localState.value!.discoveredSalt!), FAST_KDF);
+        const peerBytes = await encryptSyncArtifact(utf8('PEER'), peerMaterial);
+        let injected = false;
+        remote.write = async (name, bytes, expectedVersion) => {
+            if (!injected && name === 'attachments/a1.png') {
+                injected = true;
+                remote.peerWrite(name, peerBytes);
+            }
+            return originalWrite(name, bytes, expectedVersion);
+        };
+
+        await expect(runDisableSyncEncryptionOverRemote(remote, keyCache, localState))
+            .rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+        expect(remote.store.get('attachments/a1.png')).toEqual(peerBytes);
+        expect(localState.value?.state).toBe('enabled');
+        expect(await keyCache.getKey()).not.toBeNull();
+    });
+
+    it('does not clear the key when a new attachment appears after disable inventory', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a-first.bin': { bytes: utf8('FIRST'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const key = new Uint8Array((await keyCache.getKey())!);
+        const material = {
+            key,
+            salt: hexToBytesForTest(localState.value!.discoveredSalt!),
+            params: FAST_KDF,
+        };
+        const lateCiphertext = await encryptSyncArtifact(utf8('LATE SECRET'), material);
+        const originalWrite = remote.write.bind(remote);
+        let injected = false;
+        remote.write = async (name, bytes, expectedVersion) => {
+            await originalWrite(name, bytes, expectedVersion);
+            if (!injected) {
+                injected = true;
+                remote.peerWrite('attachments/late.bin', lateCiphertext);
+            }
+        };
+
+        await expect(runDisableSyncEncryptionOverRemote(remote, keyCache, localState))
+            .rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+
+        expect(remote.store.get('attachments/late.bin')).toEqual(lateCiphertext);
+        expect(await keyCache.getKey()).toEqual(key);
+        expect(localState.value?.incompleteTransition).toBe('disable');
+    });
 });
 
 describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
+    it('preflights every listed version before rewrapping an earlier attachment', async () => {
+        const remote = createFakeRemote({
+            'attachments/first.png': { bytes: utf8('FIRST'), kind: 'attachment' },
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('old-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const originalRead = remote.read.bind(remote);
+        remote.read = async (name) => {
+            const result = await originalRead(name);
+            return name === 'data.json.enc' && result.bytes ? { ...result, version: null } : result;
+        };
+        const write = vi.spyOn(remote, 'write');
+
+        await expect(runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'new-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(localState.value?.state).toBe('enabled');
+        expect(await keyCache.getKey()).not.toBeNull();
+    });
+
+    it('authenticates the full interrupted rotation before rewrapping an early old-key artifact', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a-old.bin': { bytes: utf8('OLD'), kind: 'attachment' },
+            'attachments/z-abandoned.bin': { bytes: utf8('ABANDONED'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('old-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const abandonedMaterial = await deriveSyncKeyMaterial('intended-next', new Uint8Array(16).fill(31), FAST_KDF);
+        remote.peerWrite(
+            'attachments/z-abandoned.bin',
+            await encryptSyncArtifact(utf8('ABANDONED'), abandonedMaterial),
+        );
+        const write = vi.spyOn(remote, 'write');
+
+        await expect(runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'typo-next', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionTerminalError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(localState.value?.incompleteTransition).toBeUndefined();
+
+        write.mockRestore();
+        await runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'intended-next', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        );
+        const finalKey = (await keyCache.getKey())!;
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a-old.bin')!, finalKey))).toBe('OLD');
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/z-abandoned.bin')!, finalKey))).toBe('ABANDONED');
+    });
+
+    it('refuses rotation while an interrupted disable left a plaintext document generation', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a.bin': { bytes: utf8('ATTACHMENT'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('old-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        remote.peerWrite('data.json', utf8('{"tasks":[{"id":"exposed"}]}'));
+        const oldKey = new Uint8Array((await keyCache.getKey())!);
+        const enabledState = structuredClone(localState.value);
+        const encryptedDocument = new Uint8Array(remote.store.get('data.json.enc')!);
+        const write = vi.spyOn(remote, 'write');
+
+        await expect(runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'new-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+
+        expect(write).not.toHaveBeenCalled();
+        expect(remote.store.get('data.json.enc')).toEqual(encryptedDocument);
+        expect(text(remote.store.get('data.json')!)).toContain('exposed');
+        expect(await keyCache.getKey()).toEqual(oldKey);
+        expect(localState.value).toEqual(enabledState);
+    });
+
     it('re-encrypts every artifact under a fresh salt derived from the new passphrase', async () => {
         const remote = createFakeRemote({
             'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
@@ -335,6 +912,175 @@ describe('runChangeSyncEncryptionPassphraseOverRemote', () => {
         const key = (await keyCache.getKey())!;
         expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a1.png')!, key))).toBe('PNGBYTES');
         expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key))).toBe('{"tasks":[]}');
+    });
+
+    it('keeps the old local key/state and peer bytes when rotation loses its generation', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a1.png': { bytes: utf8('ORIGINAL'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('old-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const oldKey = new Uint8Array((await keyCache.getKey())!);
+        const oldState = structuredClone(localState.value);
+        const peerBytes = await encryptSyncArtifact(utf8('PEER'), {
+            key: oldKey,
+            salt: hexToBytesForTest(localState.value!.discoveredSalt!),
+            params: FAST_KDF,
+        });
+        const originalWrite = remote.write.bind(remote);
+        let injected = false;
+        remote.write = async (name, bytes, expectedVersion) => {
+            if (!injected && name === 'attachments/a1.png') {
+                injected = true;
+                remote.peerWrite(name, peerBytes);
+            }
+            return originalWrite(name, bytes, expectedVersion);
+        };
+
+        await expect(runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'new-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+        expect(remote.store.get('attachments/a1.png')).toEqual(peerBytes);
+        expect(localState.value).toEqual({
+            ...oldState,
+            incompleteTransition: 'change-passphrase',
+        });
+        expect(await keyCache.getKey()).toEqual(oldKey);
+    });
+
+    it('restores the old key after final state failure and retries the completed rotation', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a.bin': { bytes: utf8('ATTACHMENT'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('old-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const oldKey = new Uint8Array((await keyCache.getKey())!);
+        const oldState = structuredClone(localState.value)!;
+        const writeState = localState.write.bind(localState);
+        let failFinalStateWrite = true;
+        localState.write = async (state) => {
+            const isNewEnabledState = state?.state === 'enabled'
+                && !state.incompleteTransition
+                && state.discoveredSalt !== oldState.discoveredSalt;
+            if (isNewEnabledState && failFinalStateWrite) {
+                throw new Error('simulated final state persistence failure');
+            }
+            await writeState(state);
+        };
+
+        await expect(runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'new-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toThrow('simulated final state persistence failure');
+
+        expect(await keyCache.getKey()).toEqual(oldKey);
+        expect(localState.value).toEqual({ ...oldState, incompleteTransition: 'change-passphrase' });
+
+        failFinalStateWrite = false;
+        await runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'new-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        );
+        const finalKey = (await keyCache.getKey())!;
+        expect(finalKey).not.toEqual(oldKey);
+        expect(localState.value?.state).toBe('enabled');
+        expect(localState.value?.incompleteTransition).toBeUndefined();
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, finalKey)))
+            .toBe('{"tasks":[]}');
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a.bin')!, finalKey)))
+            .toBe('ATTACHMENT');
+    });
+
+    it('retries from the persisted candidate key when final state and key rollback both fail', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a.bin': { bytes: utf8('ATTACHMENT'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('old-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const oldKey = new Uint8Array((await keyCache.getKey())!);
+        const oldState = structuredClone(localState.value)!;
+        const writeState = localState.write.bind(localState);
+        let failFinalStateWrite = true;
+        localState.write = async (state) => {
+            const isNewEnabledState = state?.state === 'enabled'
+                && !state.incompleteTransition
+                && state.discoveredSalt !== oldState.discoveredSalt;
+            if (isNewEnabledState && failFinalStateWrite) {
+                throw new Error('simulated final state persistence failure');
+            }
+            await writeState(state);
+        };
+        const setKey = keyCache.setKey.bind(keyCache);
+        let candidateInstalled = false;
+        keyCache.setKey = async (key) => {
+            if (!candidateInstalled) {
+                candidateInstalled = true;
+                await setKey(key);
+                return;
+            }
+            throw new Error('simulated key rollback failure');
+        };
+
+        await expect(runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'new-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toThrow('key rollback failed');
+
+        const persistedCandidateKey = new Uint8Array((await keyCache.getKey())!);
+        expect(persistedCandidateKey).not.toEqual(oldKey);
+        expect(localState.value).toEqual({ ...oldState, incompleteTransition: 'change-passphrase' });
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, persistedCandidateKey)))
+            .toBe('{"tasks":[]}');
+
+        keyCache.setKey = setKey;
+        failFinalStateWrite = false;
+        await runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'new-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        );
+        const finalKey = (await keyCache.getKey())!;
+        expect(localState.value?.state).toBe('enabled');
+        expect(localState.value?.incompleteTransition).toBeUndefined();
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, finalKey)))
+            .toBe('{"tasks":[]}');
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('attachments/a.bin')!, finalKey)))
+            .toBe('ATTACHMENT');
+    });
+
+    it('does not commit a new key when an attachment appears after rotation inventory', async () => {
+        const remote = createFakeRemote({
+            'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' },
+            'attachments/a-first.bin': { bytes: utf8('FIRST'), kind: 'attachment' },
+        });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('old-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        const oldKey = new Uint8Array((await keyCache.getKey())!);
+        const oldMaterial = {
+            key: oldKey,
+            salt: hexToBytesForTest(localState.value!.discoveredSalt!),
+            params: FAST_KDF,
+        };
+        const lateCiphertext = await encryptSyncArtifact(utf8('LATE SECRET'), oldMaterial);
+        const originalWrite = remote.write.bind(remote);
+        let injected = false;
+        remote.write = async (name, bytes, expectedVersion) => {
+            await originalWrite(name, bytes, expectedVersion);
+            if (!injected) {
+                injected = true;
+                remote.peerWrite('attachments/late.bin', lateCiphertext);
+            }
+        };
+
+        await expect(runChangeSyncEncryptionPassphraseOverRemote(
+            'old-pw', 'new-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+
+        expect(remote.store.get('attachments/late.bin')).toEqual(lateCiphertext);
+        expect(await keyCache.getKey()).toEqual(oldKey);
+        expect(localState.value?.incompleteTransition).toBe('change-passphrase');
     });
 });
 
@@ -399,6 +1145,64 @@ describe('remote-encrypted-no-key discovery and passphrase provisioning', () => 
         expect(result).toBe('wrong-passphrase');
         expect(await keyCache.getKey()).toBeNull();
         expect(remote.store).toEqual(before);
+    });
+
+    it('retries passphrase validation when the encrypted base generation changes', async () => {
+        const remote = createFakeRemote({ 'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' } });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('right-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        await keyCache.clearKey();
+        const peerMaterial = await deriveSyncKeyMaterial('right-pw', new Uint8Array(16).fill(37), FAST_KDF);
+        const originalRead = remote.read.bind(remote);
+        let reads = 0;
+        remote.read = async (name) => {
+            if (name === 'data.json.enc') {
+                reads += 1;
+                if (reads === 2) {
+                    remote.peerWrite(name, await encryptSyncArtifact(utf8('{"tasks":["peer"]}'), peerMaterial));
+                }
+            }
+            return originalRead(name);
+        };
+
+        await expect(runProvideSyncEncryptionPassphraseOverRemote(
+            'right-pw', 'data.json', remote, keyCache, localState,
+        )).resolves.toBe('ok');
+
+        const key = (await keyCache.getKey())!;
+        expect(text(await decryptRemoteArtifactOrThrow(remote.store.get('data.json.enc')!, key))).toBe('{"tasks":["peer"]}');
+        expect(localState.value?.discoveredSalt).toBe(bytesToHexForTest(peerMaterial.salt));
+    });
+
+    it('does not cache a key when the encrypted base keeps changing during validation', async () => {
+        const remote = createFakeRemote({ 'data.json': { bytes: utf8('{"tasks":[]}'), kind: 'document' } });
+        const keyCache = createFakeKeyCache();
+        const localState = createFakeLocalState();
+        await runEnableSyncEncryptionOverRemote('right-pw', remote, keyCache, localState, undefined, undefined, FAST_KDF);
+        await keyCache.clearKey();
+        const beforeState = localState.value;
+        const originalRead = remote.read.bind(remote);
+        let reads = 0;
+        remote.read = async (name) => {
+            if (name === 'data.json.enc') {
+                reads += 1;
+                if (reads % 2 === 0) {
+                    const material = await deriveSyncKeyMaterial(
+                        'right-pw', new Uint8Array(16).fill(40 + reads), FAST_KDF,
+                    );
+                    remote.peerWrite(name, await encryptSyncArtifact(utf8(`{"tasks":[${reads}]}`), material));
+                }
+            }
+            return originalRead(name);
+        };
+
+        await expect(runProvideSyncEncryptionPassphraseOverRemote(
+            'right-pw', 'data.json', remote, keyCache, localState,
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+
+        expect(await keyCache.getKey()).toBeNull();
+        expect(localState.value).toEqual(beforeState);
     });
 
     it('correct passphrase caches the key and clears the no-key state', async () => {

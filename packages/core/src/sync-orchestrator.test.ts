@@ -125,26 +125,48 @@ describe('sync orchestrator', () => {
         }
     });
 
-    it('lets a direct run during the follow-up delay absorb the queued cycle', async () => {
+    it('honors a provider-derived minimum delay requested by the running cycle', async () => {
+        vi.useFakeTimers();
+        try {
+            const calls: number[] = [];
+            const orchestrator = createSyncOrchestrator<undefined, number>({
+                runCycle: async (_arg, { requestFollowUpAfter }) => {
+                    calls.push(calls.length + 1);
+                    if (calls.length === 1) requestFollowUpAfter(5_000);
+                    return calls.length;
+                },
+            });
+
+            await orchestrator.run(undefined);
+            await vi.advanceTimersByTimeAsync(4_999);
+            expect(calls).toHaveLength(1);
+            await vi.advanceTimersByTimeAsync(1);
+            expect(calls).toHaveLength(2);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('lets a direct manual run replace the delayed background request', async () => {
         vi.useFakeTimers();
         try {
             const calls: Array<string | undefined> = [];
             const orchestrator = createSyncOrchestrator<string | undefined, number>({
                 getFollowUpDelayMs: () => 5_000,
-                runCycle: async (arg, { requestFollowUp }) => {
+                runCycle: async (arg, { requestFollowUpAfter }) => {
                     calls.push(arg);
                     if (calls.length === 1) {
-                        requestFollowUp();
+                        requestFollowUpAfter(5_000, 'background');
                     }
                     return calls.length;
                 },
             });
 
-            await orchestrator.run('first');
+            await orchestrator.run('background');
             expect(calls).toHaveLength(1);
 
             await orchestrator.run('manual');
-            expect(calls).toHaveLength(2);
+            expect(calls).toEqual(['background', 'manual']);
 
             await vi.advanceTimersByTimeAsync(10_000);
             expect(calls).toHaveLength(2);

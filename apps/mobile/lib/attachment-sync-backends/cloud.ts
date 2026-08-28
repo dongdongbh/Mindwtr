@@ -1,47 +1,61 @@
-import type { AppData } from '@mindwtr/core';
 import {
   applyAttachmentPatches,
-  cloudDeleteFile,
+  applyAttachmentContentStat,
   cloudGetFile,
   cloudPutFile,
+  computeSha256Hex,
   isAbortError,
+  validateAttachmentHash,
   validateAttachmentForUpload,
+  type AppData,
   type Attachment,
+  type AttachmentDownloadExpectation,
+  type LocalFileStat,
 } from '@mindwtr/core';
 import { logAttachmentWarn } from '../attachment-sync-utils';
+import { getMobileCloudRequestOptions } from '../webdav-request-options';
 import {
   buildCloudKey,
   canUploadAttachmentFrom,
   collectAttachments,
   DEFAULT_CONTENT_TYPE,
   extractExtension,
-  fileExists,
-  getAttachmentByteSize,
   getAttachmentLocalStatus,
   getAttachmentsDir,
+  getLocalAttachmentPresence,
   isHttpAttachmentUri,
-  markAttachmentUnrecoverable,
   readAttachmentBytesForUpload,
   reportProgress,
   toArrayBuffer,
-  validateAttachmentHash,
-  writeBytesSafely,
   type CloudConfig,
 } from '../attachment-sync-utils';
-import { migrateAttachmentsLocallyBeforeSync, uploadCloudFileWithFileSystem } from './common';
+import {
+  migrateAttachmentsLocallyBeforeSync,
+  checkBespokeAttachmentRemoteWinner,
+  createMobileAttachmentUploadSnapshot,
+  installAttachmentDownloadBytes,
+  prepareBespokeAttachmentContentCandidate,
+  refreshBespokeAttachmentDownloadedContentStat,
+  uploadCloudFileWithFileSystem,
+} from './common';
 
 export type CloudAttachmentSyncOptions = {
   activationProbe?: boolean;
   assertCurrent?: () => void;
+  assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
+  phase?: 'prepare' | 'post-merge';
   signal?: AbortSignal;
 };
+
+const CLOUD_REMOTE_MUTATION_REQUEST_HORIZON_MS = 35_000;
 
 type PendingCloudUploadMutation = {
   attachment: Attachment;
   cloudKey: string;
+  fileHash: string;
+  stat: LocalFileStat;
   fileSize?: number;
   totalBytes: number;
-  uploadUrl: string;
 };
 
 const createAbortError = (): Error => {
@@ -78,21 +92,7 @@ export const syncCloudAttachments = async (
   };
 
   const pendingUploadMutations: PendingCloudUploadMutation[] = [];
-
-  const cleanupUploadedCloudFile = async (uploadUrl: string, attachmentId: string) => {
-    try {
-      await cloudDeleteFile(uploadUrl, { token: cloudConfig.token });
-    } catch (deleteError) {
-      logAttachmentWarn(`Failed to clean up aborted attachment upload ${attachmentId}`, deleteError);
-    }
-  };
-
-  const cleanupPendingUploadMutations = async () => {
-    for (const pending of pendingUploadMutations) {
-      await cleanupUploadedCloudFile(pending.uploadUrl, pending.attachment.id);
-    }
-    pendingUploadMutations.length = 0;
-  };
+  const cloudRequestOptions = getMobileCloudRequestOptions(cloudConfig.allowInsecureHttp);
 
   for (const original of attachmentsById.values()) {
     if (original.kind !== 'file') continue;
@@ -103,67 +103,173 @@ export const syncCloudAttachments = async (
     const uri = attachment.uri || '';
     const isHttp = isHttpAttachmentUri(uri);
     const hasLocalPath = Boolean(uri) && !isHttp;
-    const existsLocally = hasLocalPath ? await fileExists(uri) : false;
-    const nextStatus = getAttachmentLocalStatus(uri, existsLocally);
+    const localPresence = hasLocalPath
+      ? await getLocalAttachmentPresence(uri)
+      : 'confirmed-not-found';
+    if (localPresence === 'unreadable') continue;
+    const existsLocally = localPresence === 'present';
+    // This provider cannot bind its recovery GET and replacement PUT to one
+    // remote generation. Preserve the pending identity until local bytes return
+    // (or a later merge supersedes it) instead of risking a stale overwrite.
+    if (
+      options.phase !== 'prepare'
+      && attachment.pendingContentUpload === true
+      && !existsLocally
+    ) continue;
+    const nextStatus = getAttachmentLocalStatus(uri, localPresence);
     if (attachment.localStatus !== nextStatus) {
       attachment.localStatus = nextStatus;
       recordPatch(attachment);
     }
 
-    if (options.activationProbe && existsLocally && attachment.cloudKey) {
-      attachment.cloudKey = undefined;
-      recordPatch(attachment);
+    const mayUploadLocalFile = hasLocalPath
+      && existsLocally
+      && !isHttp
+      && canUploadAttachmentFrom(uri);
+    if (options.phase === 'prepare' && attachment.cloudKey && mayUploadLocalFile) {
+      if (await prepareBespokeAttachmentContentCandidate(attachment, uri)) {
+        recordPatch(attachment);
+      }
     }
 
-    // Activation proof for a JOINING device: an attachment uploaded by another
-    // device has a cloudKey but no local file here — this backend normally
-    // fetches attachments on demand, so without a download leg the probe's
-    // "every attachment proven available" assert could never pass and the
-    // configuration could never activate (the desktop cloud backend and the
-    // mobile WebDAV/Dropbox backends download through the shared lifecycle;
-    // this hand-rolled loop had upload only). Steady-state cycles keep the
-    // on-demand behavior — this runs during the activation probe alone.
-    if (options.activationProbe && attachment.cloudKey && !existsLocally && attachmentsDir) {
+    let remoteWinnerExpectation: AttachmentDownloadExpectation | undefined;
+    if (
+      !options.activationProbe
+      && options.phase === 'post-merge'
+      && attachment.cloudKey
+      && mayUploadLocalFile
+      && attachment.pendingContentUpload !== true
+    ) {
+      const contentCheck = await checkBespokeAttachmentRemoteWinner(attachment, uri);
+      if (contentCheck.metadataChanged) recordPatch(attachment);
+      if (contentCheck.kind === 'local-edit-race') {
+        logAttachmentWarn(`Skipped remote attachment replacement after a local edit race (${attachment.id})`);
+      } else if (contentCheck.kind === 'download') {
+        remoteWinnerExpectation = contentCheck.expectation;
+      }
+    }
+
+    if (
+      options.activationProbe
+      && options.phase !== 'prepare'
+      && attachment.cloudKey
+      && !existsLocally
+      && !isHttp
+      && attachmentsDir
+    ) {
       try {
         assertNotAborted(options.signal);
-        const cloudKey = attachment.cloudKey;
         reportProgress(attachment.id, 'download', 0, attachment.size ?? 0, 'active');
-        const fileData = await cloudGetFile(`${baseSyncUrl}/${cloudKey}`, {
-          token: cloudConfig.token,
-          ...(options.signal ? { signal: options.signal } : {}),
-        });
-        const bytes = new Uint8Array(fileData);
+        const data = await cloudGetFile(
+          `${baseSyncUrl}/${attachment.cloudKey}`,
+          options.signal
+            ? { ...cloudRequestOptions, token: cloudConfig.token, signal: options.signal }
+            : { ...cloudRequestOptions, token: cloudConfig.token },
+        );
+        const bytes = new Uint8Array(data);
         await validateAttachmentHash(attachment, bytes);
-        const filename = cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.title)}`;
+        const fileHash = await computeSha256Hex(bytes);
+        if (!fileHash) throw new Error('Attachment download hash is unavailable');
+        const filename = attachment.cloudKey.split('/').pop()
+          || `${attachment.id}${extractExtension(attachment.title)}`;
         const targetUri = `${attachmentsDir}${filename}`;
-        await writeBytesSafely(targetUri, bytes);
+        assertNotAborted(options.signal);
+        const installed = await installAttachmentDownloadBytes(
+          attachment,
+          attachmentsDir,
+          targetUri,
+          bytes,
+          { kind: 'absent' },
+          options.signal,
+        );
+        if (!installed) {
+          reportProgress(
+            attachment.id,
+            'download',
+            0,
+            attachment.size ?? 0,
+            'failed',
+            'Local attachment changed during download',
+          );
+          logAttachmentWarn(`Skipped candidate attachment download after a native conflict (${attachment.id})`);
+          continue;
+        }
         attachment.uri = targetUri;
+        attachment.fileHash = attachment.fileHash || fileHash;
         attachment.localStatus = 'available';
         recordPatch(attachment);
         reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
-        continue;
       } catch (error) {
-        if (isAbortLikeError(error, options.signal)) {
-          await cleanupPendingUploadMutations();
-          throw error;
-        }
+        if (isAbortLikeError(error, options.signal)) throw error;
         reportProgress(
           attachment.id,
           'download',
           0,
           attachment.size ?? 0,
           'failed',
-          error instanceof Error ? error.message : String(error)
+          error instanceof Error ? error.message : String(error),
         );
-        logAttachmentWarn(`Failed to download attachment ${attachment.id} during activation`, error);
+        logAttachmentWarn(`Failed to prove candidate attachment ${attachment.id}`, error);
       }
+      continue;
+    }
+
+    // Self-hosted Cloud deliberately keeps missing remote attachments on-demand.
+    // A stale file that is already present is different: merged metadata selected
+    // the remote generation, so converge it through the same native present-CAS
+    // installer used by the shared lifecycle rather than uploading stale bytes.
+    if (remoteWinnerExpectation && attachmentsDir && attachment.cloudKey) {
+      try {
+        assertNotAborted(options.signal);
+        reportProgress(attachment.id, 'download', 0, attachment.size ?? 0, 'active');
+        const data = await cloudGetFile(
+          `${baseSyncUrl}/${attachment.cloudKey}`,
+          options.signal
+            ? { ...cloudRequestOptions, token: cloudConfig.token, signal: options.signal }
+            : { ...cloudRequestOptions, token: cloudConfig.token },
+        );
+        const bytes = new Uint8Array(data);
+        await validateAttachmentHash(attachment, bytes);
+        assertNotAborted(options.signal);
+        const installed = await installAttachmentDownloadBytes(
+          attachment,
+          attachmentsDir,
+          uri,
+          bytes,
+          remoteWinnerExpectation,
+          options.signal,
+        );
+        if (!installed) {
+          logAttachmentWarn(`Skipped remote attachment replacement after a native conflict (${attachment.id})`);
+          continue;
+        }
+        attachment.localStatus = 'available';
+        await refreshBespokeAttachmentDownloadedContentStat(attachment, uri);
+        recordPatch(attachment);
+        reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
+      } catch (error) {
+        if (isAbortLikeError(error, options.signal)) throw error;
+        reportProgress(
+          attachment.id,
+          'download',
+          0,
+          attachment.size ?? 0,
+          'failed',
+          error instanceof Error ? error.message : String(error),
+        );
+        logAttachmentWarn(`Failed to download remote attachment winner ${attachment.id}`, error);
+      }
+      continue;
     }
 
     // SEC-07: same containment the shared lifecycle applies via `canUploadFrom`.
-    if (!attachment.cloudKey && hasLocalPath && existsLocally && !isHttp && canUploadAttachmentFrom(uri)) {
-      let localReadFailed = false;
+    if (
+      options.phase !== 'prepare'
+      && (!attachment.cloudKey || attachment.pendingContentUpload === true)
+      && mayUploadLocalFile
+    ) {
       let shouldPropagateError = false;
-      let uploadUrlForCleanup: string | null = null;
+      let snapshot: Awaited<ReturnType<typeof createMobileAttachmentUploadSnapshot>> = null;
       try {
         assertNotAborted(options.signal);
         try {
@@ -172,17 +278,15 @@ export const syncCloudAttachments = async (
           shouldPropagateError = true;
           throw error;
         }
-        let fileSize = await getAttachmentByteSize(attachment, uri);
-        let fileData: Uint8Array | null = null;
-        if (!Number.isFinite(fileSize ?? NaN)) {
-          const readResult = await readAttachmentBytesForUpload(uri);
-          if (readResult.readFailed) {
-            localReadFailed = true;
-            throw readResult.error;
-          }
-          fileData = readResult.data;
-          fileSize = fileData.byteLength;
+        snapshot = await createMobileAttachmentUploadSnapshot(uri, attachment);
+        if (!snapshot) continue;
+        if (
+          attachment.pendingContentUpload === true
+          && snapshot.fileHash !== attachment.fileHash?.trim().toLowerCase()
+        ) {
+          continue;
         }
+        const fileSize = snapshot.stat.size;
 
         const validation = await validateAttachmentForUpload(attachment, fileSize);
         if (!validation.valid) {
@@ -193,10 +297,15 @@ export const syncCloudAttachments = async (
         reportProgress(attachment.id, 'upload', 0, totalBytes, 'active');
         const cloudKey = buildCloudKey(attachment);
         const uploadUrl = `${baseSyncUrl}/${cloudKey}`;
-        uploadUrlForCleanup = uploadUrl;
+        try {
+          await options.assertRemoteMutationFenceHeld?.(CLOUD_REMOTE_MUTATION_REQUEST_HORIZON_MS);
+        } catch (error) {
+          shouldPropagateError = true;
+          throw error;
+        }
         const uploadedWithFileSystem = await uploadCloudFileWithFileSystem(
           uploadUrl,
-          uri,
+          snapshot.sourcePath,
           attachment.mimeType || DEFAULT_CONTENT_TYPE,
           cloudConfig.token,
           (loaded, total) => reportProgress(attachment.id, 'upload', loaded, total, 'active'),
@@ -205,23 +314,23 @@ export const syncCloudAttachments = async (
         );
         if (!uploadedWithFileSystem) {
           assertNotAborted(options.signal);
-          let uploadBytes = fileData;
-          if (!uploadBytes) {
-            const readResult = await readAttachmentBytesForUpload(uri);
-            if (readResult.readFailed) {
-              localReadFailed = true;
-              throw readResult.error;
-            }
-            uploadBytes = readResult.data;
-          }
+          const readResult = await readAttachmentBytesForUpload(snapshot.sourcePath);
+          if (readResult.readFailed) throw readResult.error;
+          const uploadBytes = readResult.data;
           const buffer = toArrayBuffer(uploadBytes);
+          try {
+            await options.assertRemoteMutationFenceHeld?.(CLOUD_REMOTE_MUTATION_REQUEST_HORIZON_MS);
+          } catch (error) {
+            shouldPropagateError = true;
+            throw error;
+          }
           await cloudPutFile(
             uploadUrl,
             buffer,
             attachment.mimeType || DEFAULT_CONTENT_TYPE,
             options.signal
-              ? { token: cloudConfig.token, signal: options.signal }
-              : { token: cloudConfig.token }
+              ? { ...cloudRequestOptions, token: cloudConfig.token, signal: options.signal }
+              : { ...cloudRequestOptions, token: cloudConfig.token }
           );
         }
         try {
@@ -233,27 +342,17 @@ export const syncCloudAttachments = async (
         pendingUploadMutations.push({
           attachment,
           cloudKey,
+          fileHash: snapshot.fileHash,
+          stat: snapshot.stat,
           fileSize: Number.isFinite(fileSize ?? NaN) ? Number(fileSize) : undefined,
           totalBytes,
-          uploadUrl,
         });
-        uploadUrlForCleanup = null;
       } catch (error) {
         if (shouldPropagateError || isAbortLikeError(error, options.signal)) {
-          if (uploadUrlForCleanup) {
-            await cleanupUploadedCloudFile(uploadUrlForCleanup, attachment.id);
-          }
-          await cleanupPendingUploadMutations();
+          // The deterministic target may have existed before this attempt. Leaving
+          // an unreferenced successful PUT for orphan cleanup is safe; deleting it
+          // here could erase another device's winning blob.
           throw error;
-        }
-        if (uploadUrlForCleanup && !localReadFailed) {
-          await cleanupUploadedCloudFile(uploadUrlForCleanup, attachment.id);
-        }
-        if (localReadFailed) {
-          if (markAttachmentUnrecoverable(attachment)) {
-            recordPatch(attachment);
-          }
-          logAttachmentWarn(`Attachment local file is unreadable; marking unrecoverable (${attachment.id})`, error);
         }
         reportProgress(
           attachment.id,
@@ -264,12 +363,20 @@ export const syncCloudAttachments = async (
           error instanceof Error ? error.message : String(error)
         );
         logAttachmentWarn(`Failed to upload attachment ${attachment.id}`, error);
+      } finally {
+        if (snapshot) {
+          await snapshot.dispose().catch((error) => {
+            logAttachmentWarn(`Failed to clean up attachment upload snapshot ${attachment.id}`, error);
+          });
+        }
       }
     }
   }
 
   for (const pending of pendingUploadMutations) {
     pending.attachment.cloudKey = pending.cloudKey;
+    pending.attachment.pendingContentUpload = undefined;
+    applyAttachmentContentStat(pending.attachment, pending.stat, pending.fileHash);
     if (!Number.isFinite(pending.attachment.size ?? NaN) && Number.isFinite(pending.fileSize ?? NaN)) {
       pending.attachment.size = Number(pending.fileSize);
     }

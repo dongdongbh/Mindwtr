@@ -8,7 +8,7 @@ import {
     getProjectChoiceState,
     normalizeClockTimeInput,
     openProcessInboxTask,
-    resolveFeatureFlags,
+    resolveProcessInboxPlan,
     selectProcessInboxCandidates,
     setTaskDraftField,
     type AppData,
@@ -18,7 +18,6 @@ import {
     type Task,
     type TaskDraft,
     type TaskDraftSetter,
-    type TaskEditorFieldId,
     type TimeEstimate,
 } from '@mindwtr/core';
 
@@ -29,7 +28,6 @@ import type {
 } from '../../InboxProcessingQuickPanel';
 import type { InboxProcessingScheduleFieldKey, InboxProcessingScheduleFieldsControls } from '../../InboxProcessingScheduleFields';
 import type { ProcessingStep } from '../../InboxProcessingWizard';
-import { DEFAULT_TASK_EDITOR_HIDDEN } from '../../Task/task-item-helpers';
 import { isTaskVisibleInArea, resolveAreaFilterSelection } from '@mindwtr/core';
 import {
     getDateFieldDraft,
@@ -95,54 +93,43 @@ export function useInboxProcessingState({
     const [reviewDate, setReviewDate] = useState('');
     const [reviewTime, setReviewTime] = useState('');
     const [reviewTimeDraft, setReviewTimeDraft] = useState('');
-
-    const inboxProcessing = settings?.gtd?.inboxProcessing ?? {};
-    const defaultScheduleTime = normalizeClockTimeInput(settings?.gtd?.defaultScheduleTime) || '';
-    const defaultProcessingMode = inboxProcessing.defaultMode === 'quick' ? 'quick' : 'guided';
-    const twoMinuteEnabled = inboxProcessing.twoMinuteEnabled !== false;
-    const twoMinuteFirst = inboxProcessing.twoMinuteFirst === true;
-    const projectFirst = inboxProcessing.projectFirst === true;
-    const contextStepEnabled = inboxProcessing.contextStepEnabled !== false;
-    const scheduleEnabled = inboxProcessing.scheduleEnabled === true;
-    const referenceEnabled = true;
-    const { priorities: prioritiesEnabled, timeEstimates: timeEstimatesEnabled } = resolveFeatureFlags(settings);
-    const defaultHiddenTaskEditorFields = useMemo(() => {
-        const featureHiddenFields = new Set<TaskEditorFieldId>();
-        if (!prioritiesEnabled) featureHiddenFields.add('priority');
-        if (!timeEstimatesEnabled) featureHiddenFields.add('timeEstimate');
-        return DEFAULT_TASK_EDITOR_HIDDEN.filter((fieldId) => !featureHiddenFields.has(fieldId));
-    }, [prioritiesEnabled, timeEstimatesEnabled]);
-    const hiddenTaskEditorFields = useMemo(() => {
-        const next = new Set(settings?.gtd?.taskEditor?.hidden ?? defaultHiddenTaskEditorFields);
-        if (!prioritiesEnabled) next.add('priority');
-        if (!timeEstimatesEnabled) next.add('timeEstimate');
-        return next;
-    }, [defaultHiddenTaskEditorFields, prioritiesEnabled, settings?.gtd?.taskEditor?.hidden, timeEstimatesEnabled]);
-    const showProjectField = !hiddenTaskEditorFields.has('project');
-    const showAreaField = !hiddenTaskEditorFields.has('area');
-    const showContextsField = !hiddenTaskEditorFields.has('contexts');
-    const showTagsField = !hiddenTaskEditorFields.has('tags');
-    const showPriorityField = prioritiesEnabled && !hiddenTaskEditorFields.has('priority');
-    const showEnergyLevelField = !hiddenTaskEditorFields.has('energyLevel');
-    const showAssignedToField = !hiddenTaskEditorFields.has('assignedTo');
-    const showTimeEstimateField = timeEstimatesEnabled && !hiddenTaskEditorFields.has('timeEstimate');
-    const showProjectStep = showProjectField || showAreaField;
-    const visibleScheduleFieldKeys = useMemo<InboxProcessingScheduleFieldKey[]>(() => {
-        if (!scheduleEnabled) return [];
-        const next: InboxProcessingScheduleFieldKey[] = [];
-        if (!hiddenTaskEditorFields.has('startTime')) next.push('start');
-        if (!hiddenTaskEditorFields.has('dueDate')) next.push('due');
-        if (!hiddenTaskEditorFields.has('reviewAt')) next.push('review');
-        return next;
-    }, [hiddenTaskEditorFields, scheduleEnabled]);
-    const showScheduleFields = visibleScheduleFieldKeys.length > 0;
-    const showOrganizationStep = (
-        (contextStepEnabled && (showContextsField || showTagsField))
-        || showPriorityField
-        || showEnergyLevelField
-        || showAssignedToField
-        || showTimeEstimateField
+    const [dirtyScheduleFieldKeys, setDirtyScheduleFieldKeys] = useState<ReadonlySet<InboxProcessingScheduleFieldKey>>(
+        () => new Set(),
     );
+
+    const defaultScheduleTime = normalizeClockTimeInput(settings?.gtd?.defaultScheduleTime) || '';
+    const processInboxPlan = useMemo(() => resolveProcessInboxPlan(settings), [settings]);
+    const {
+        defaultMode: defaultProcessingMode,
+        twoMinuteEnabled,
+        twoMinuteFirst,
+        projectFirst,
+        contextStepEnabled,
+        scheduleEnabled,
+        prioritiesEnabled,
+        timeEstimatesEnabled,
+        referenceEnabled,
+        showProjectStep,
+        showOrganizationStep,
+        showScheduleFields,
+    } = processInboxPlan;
+    const {
+        project: showProjectField,
+        area: showAreaField,
+        contexts: showContextsField,
+        tags: showTagsField,
+        priority: showPriorityField,
+        energyLevel: showEnergyLevelField,
+        assignedTo: showAssignedToField,
+        timeEstimate: showTimeEstimateField,
+    } = processInboxPlan.visibleFields;
+    const visibleScheduleFieldKeys = useMemo<InboxProcessingScheduleFieldKey[]>(() => (
+        processInboxPlan.visibleScheduleFields.map((field) => {
+            if (field === 'startTime') return 'start';
+            if (field === 'dueDate') return 'due';
+            return 'review';
+        })
+    ), [processInboxPlan.visibleScheduleFields]);
     const visibility = useMemo<InboxProcessingVisibility>(() => ({
         showProjectField,
         showAreaField,
@@ -251,6 +238,7 @@ export function useInboxProcessingState({
         setReviewDate('');
         setReviewTime('');
         setReviewTimeDraft('');
+        setDirtyScheduleFieldKeys(new Set());
     }, [defaultProcessingMode]);
 
     const hydrateProcessingTask = useCallback((
@@ -284,6 +272,7 @@ export function useInboxProcessingState({
         setReviewDate(reviewDraft.date);
         setReviewTime(reviewDraft.time);
         setReviewTimeDraft(reviewDraft.timeDraft);
+        setDirtyScheduleFieldKeys(new Set());
     }, []);
 
     const suggestedContexts = useMemo(
@@ -333,6 +322,13 @@ export function useInboxProcessingState({
         }
     }, [defaultScheduleTime]);
 
+    const markScheduleFieldDirty = useCallback((field: InboxProcessingScheduleFieldKey) => {
+        setDirtyScheduleFieldKeys((current) => {
+            if (current.has(field)) return current;
+            return new Set([...current, field]);
+        });
+    }, []);
+
     const handleScheduleTimeCommit = useCallback(() => {
         handleProcessingTimeCommit(scheduleTimeDraft, scheduleTime, setScheduleTimeDraft, setScheduleTime);
     }, [handleProcessingTimeCommit, scheduleTime, scheduleTimeDraft]);
@@ -346,49 +342,73 @@ export function useInboxProcessingState({
     }, [handleProcessingTimeCommit, reviewTime, reviewTimeDraft]);
 
     const handleScheduleDateChange = useCallback((value: string) => {
+        markScheduleFieldDirty('start');
         handleDateFieldChange(value, setScheduleDate, setScheduleTime, setScheduleTimeDraft, scheduleTime, scheduleTimeDraft);
-    }, [handleDateFieldChange, scheduleTime, scheduleTimeDraft]);
+    }, [handleDateFieldChange, markScheduleFieldDirty, scheduleTime, scheduleTimeDraft]);
 
     const handleDueDateChange = useCallback((value: string) => {
+        markScheduleFieldDirty('due');
         handleDateFieldChange(value, setDueDate, setDueTime, setDueTimeDraft, dueTime, dueTimeDraft);
-    }, [dueTime, dueTimeDraft, handleDateFieldChange]);
+    }, [dueTime, dueTimeDraft, handleDateFieldChange, markScheduleFieldDirty]);
 
     const handleReviewDateChange = useCallback((value: string) => {
+        markScheduleFieldDirty('review');
         handleDateFieldChange(value, setReviewDate, setReviewTime, setReviewTimeDraft, reviewTime, reviewTimeDraft);
-    }, [handleDateFieldChange, reviewTime, reviewTimeDraft]);
+    }, [handleDateFieldChange, markScheduleFieldDirty, reviewTime, reviewTimeDraft]);
 
     const clearScheduleDate = useCallback(() => {
+        markScheduleFieldDirty('start');
         setScheduleDate('');
         setScheduleTime('');
         setScheduleTimeDraft('');
-    }, []);
+    }, [markScheduleFieldDirty]);
 
     const clearDueDate = useCallback(() => {
+        markScheduleFieldDirty('due');
         setDueDate('');
         setDueTime('');
         setDueTimeDraft('');
-    }, []);
+    }, [markScheduleFieldDirty]);
 
     const clearReviewDate = useCallback(() => {
+        markScheduleFieldDirty('review');
         setReviewDate('');
         setReviewTime('');
         setReviewTimeDraft('');
-    }, []);
+    }, [markScheduleFieldDirty]);
 
     const setScheduleDateOnly = useCallback(() => {
+        markScheduleFieldDirty('start');
         setScheduleTime('');
         setScheduleTimeDraft('');
-    }, []);
+    }, [markScheduleFieldDirty]);
 
     const setDueDateOnly = useCallback(() => {
+        markScheduleFieldDirty('due');
         setDueTime('');
         setDueTimeDraft('');
-    }, []);
+    }, [markScheduleFieldDirty]);
 
     const setReviewDateOnly = useCallback(() => {
+        markScheduleFieldDirty('review');
         setReviewTime('');
         setReviewTimeDraft('');
-    }, []);
+    }, [markScheduleFieldDirty]);
+
+    const handleScheduleTimeDraftChange = useCallback((value: string) => {
+        markScheduleFieldDirty('start');
+        setScheduleTimeDraft(value);
+    }, [markScheduleFieldDirty]);
+
+    const handleDueTimeDraftChange = useCallback((value: string) => {
+        markScheduleFieldDirty('due');
+        setDueTimeDraft(value);
+    }, [markScheduleFieldDirty]);
+
+    const handleReviewTimeDraftChange = useCallback((value: string) => {
+        markScheduleFieldDirty('review');
+        setReviewTimeDraft(value);
+    }, [markScheduleFieldDirty]);
 
     const scheduleFields = useMemo<InboxProcessingScheduleFieldsControls>(() => ({
         start: {
@@ -396,7 +416,7 @@ export function useInboxProcessingState({
             timeDraft: scheduleTimeDraft,
             hasTime: Boolean(scheduleTime),
             onDateChange: handleScheduleDateChange,
-            onTimeDraftChange: setScheduleTimeDraft,
+            onTimeDraftChange: handleScheduleTimeDraftChange,
             onTimeCommit: handleScheduleTimeCommit,
             onClear: clearScheduleDate,
             onDateOnly: setScheduleDateOnly,
@@ -406,7 +426,7 @@ export function useInboxProcessingState({
             timeDraft: dueTimeDraft,
             hasTime: Boolean(dueTime),
             onDateChange: handleDueDateChange,
-            onTimeDraftChange: setDueTimeDraft,
+            onTimeDraftChange: handleDueTimeDraftChange,
             onTimeCommit: handleDueTimeCommit,
             onClear: clearDueDate,
             onDateOnly: setDueDateOnly,
@@ -416,7 +436,7 @@ export function useInboxProcessingState({
             timeDraft: reviewTimeDraft,
             hasTime: Boolean(reviewTime),
             onDateChange: handleReviewDateChange,
-            onTimeDraftChange: setReviewTimeDraft,
+            onTimeDraftChange: handleReviewTimeDraftChange,
             onTimeCommit: handleReviewTimeCommit,
             onClear: clearReviewDate,
             onDateOnly: setReviewDateOnly,
@@ -429,10 +449,13 @@ export function useInboxProcessingState({
         dueTime,
         dueTimeDraft,
         handleDueDateChange,
+        handleDueTimeDraftChange,
         handleDueTimeCommit,
         handleReviewDateChange,
+        handleReviewTimeDraftChange,
         handleReviewTimeCommit,
         handleScheduleDateChange,
+        handleScheduleTimeDraftChange,
         handleScheduleTimeCommit,
         reviewDate,
         reviewTime,
@@ -460,6 +483,7 @@ export function useInboxProcessingState({
     }, [draft.timeEstimate, settings?.gtd?.timeEstimatePresets]);
 
     return {
+        processInboxPlan,
         processingMode,
         setProcessingMode,
         processingSession,
@@ -527,6 +551,7 @@ export function useInboxProcessingState({
         reviewDate,
         reviewTime,
         reviewTimeDraft,
+        dirtyScheduleFieldKeys,
         setScheduleTimeDraft,
         setDueTimeDraft,
         setReviewTimeDraft,

@@ -59,6 +59,24 @@ describe('undoTaskCompletion', () => {
         expect(getTask('t2')?.isFocusedToday ?? false).toBe(false);
     });
 
+    it('removes the generated occurrence when undoing recurring completion', async () => {
+        const recurrence = { rule: 'daily', strategy: 'strict' } as const;
+        useTaskStore.setState({
+            _allTasks: [makeTask('recurring', { recurrence })],
+        });
+        await useTaskStore.getState().moveTask('recurring', 'done');
+        const generated = useTaskStore.getState()._allTasks.find((task) => task.id !== 'recurring');
+        expect(generated).toBeTruthy();
+
+        await undoTaskCompletion('recurring', 'next', false, {
+            restoreUpdates: { status: 'next', recurrence },
+        });
+
+        expect(getTask('recurring')?.status).toBe('next');
+        expect(getTask(generated!.id)?.deletedAt).toBeTruthy();
+        expect(useTaskStore.getState()._allTasks.filter((task) => !task.deletedAt)).toHaveLength(1);
+    });
+
     it('skips the star when the focus cap has been refilled meanwhile', async () => {
         useTaskStore.setState({
             _allTasks: [

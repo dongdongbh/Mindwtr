@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
     fetchWithTimeout,
+    fetchWithTimeoutAndConsume,
     isAllowedInsecureUrl,
     isConnectionAllowed,
     MAX_DOWNLOAD_BYTES,
@@ -178,6 +179,100 @@ describe('fetchWithTimeout', () => {
         )).rejects.toThrow('Sync cancelled');
     });
 
+    it('removes the caller abort listener after a completed request', async () => {
+        const controller = new AbortController();
+        const add = vi.spyOn(controller.signal, 'addEventListener');
+        const remove = vi.spyOn(controller.signal, 'removeEventListener');
+
+        await fetchWithTimeout(
+            'https://example.com/data.json',
+            { signal: controller.signal },
+            1_000,
+            async () => new Response(null, { status: 200 }),
+            'Request timed out',
+        );
+
+        expect(add).toHaveBeenCalledOnce();
+        expect(remove).toHaveBeenCalledWith('abort', add.mock.calls[0]?.[1]);
+    });
+
+    it('keeps timeout and cancellation active until the response body settles', async () => {
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({
+            cancel,
+        }));
+
+        await expect(fetchWithTimeoutAndConsume(
+            'https://example.com/data.json',
+            {},
+            1,
+            async () => response,
+            'Request timed out',
+            (res, signal) => readResponseBody(res, undefined, MAX_DOWNLOAD_BYTES, signal),
+        )).rejects.toThrow('Request timed out');
+
+        expect(cancel).toHaveBeenCalledOnce();
+    });
+
+    it('cancels an unlocked response body when the consumer rejects before reading it', async () => {
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }));
+
+        await expect(fetchWithTimeoutAndConsume(
+            'https://example.com/data.json',
+            {},
+            1_000,
+            async () => response,
+            'Request timed out',
+            async () => { throw new Error('HTTP 401'); },
+        )).rejects.toThrow('HTTP 401');
+
+        expect(cancel).toHaveBeenCalledOnce();
+        expect(response.bodyUsed).toBe(true);
+    });
+
+    it('cancels an unlocked response body when a status-only consumer returns normally', async () => {
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 404 });
+
+        await expect(fetchWithTimeoutAndConsume(
+            'https://example.com/missing.json',
+            {},
+            1_000,
+            async () => response,
+            'Request timed out',
+            async (res) => res.status === 404 ? null : 'unexpected',
+        )).resolves.toBeNull();
+
+        expect(cancel).toHaveBeenCalledOnce();
+        expect(response.bodyUsed).toBe(true);
+    });
+
+    it('keeps the caller abort listener until body consumption finishes, then removes it', async () => {
+        const controller = new AbortController();
+        const reason = new DOMException('Sync cancelled during download', 'AbortError');
+        const add = vi.spyOn(controller.signal, 'addEventListener');
+        const remove = vi.spyOn(controller.signal, 'removeEventListener');
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }));
+        const pending = fetchWithTimeoutAndConsume(
+            'https://example.com/data.json',
+            { signal: controller.signal },
+            1_000,
+            async () => response,
+            'Request timed out',
+            (res, signal) => readResponseBody(res, undefined, MAX_DOWNLOAD_BYTES, signal),
+        );
+
+        await vi.waitFor(() => expect(add).toHaveBeenCalledOnce());
+        expect(remove).not.toHaveBeenCalled();
+        controller.abort(reason);
+
+        await expect(pending).rejects.toThrow('Sync cancelled during download');
+        expect(cancel).toHaveBeenCalledOnce();
+        expect(remove).toHaveBeenCalledWith('abort', add.mock.calls[0]?.[1]);
+    });
+
     it('falls back to a cancellation message for non-Error abort reasons', async () => {
         const controller = new AbortController();
         controller.abort({ name: 'AbortError', message: 'Native cancellation' });
@@ -337,7 +432,7 @@ describe('readResponseBody', () => {
         const arrayBuffer = vi.fn(async () => new ArrayBuffer(0));
         const res = {
             headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
-            body: { getReader: () => ({ read, cancel }) },
+            body: { locked: false, cancel, getReader: () => ({ read, cancel }) },
             arrayBuffer,
         } as unknown as Response;
         return { res, read, cancel, arrayBuffer };
@@ -348,13 +443,14 @@ describe('readResponseBody', () => {
     });
 
     it('rejects a huge content-length before reading a single byte', async () => {
-        const { res, read, arrayBuffer } = streamingResponse([new Uint8Array([1, 2, 3])], {
+        const { res, read, cancel, arrayBuffer } = streamingResponse([new Uint8Array([1, 2, 3])], {
             'content-length': String(MAX_DOWNLOAD_BYTES + 1),
         });
         await expect(readResponseBody(res)).rejects.toBeInstanceOf(ResponseTooLargeError);
         await expect(readResponseBody(res)).rejects.toThrow(String(MAX_DOWNLOAD_BYTES));
         expect(read).not.toHaveBeenCalled();
         expect(arrayBuffer).not.toHaveBeenCalled();
+        expect(cancel).toHaveBeenCalled();
     });
 
     it('aborts a body that streams past the cap despite an honest-looking header', async () => {

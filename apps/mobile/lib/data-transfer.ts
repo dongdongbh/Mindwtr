@@ -11,6 +11,7 @@ import {
     countActiveRecords,
     createBackupFileName,
     flushPendingSave,
+    prepareRestoredBackupDataForSync,
     runDataTransferTransactionWithoutSnapshot,
     serializeBackupData,
     type AppData,
@@ -192,12 +193,12 @@ const mobileLog = { logInfo, logError };
 
 const runMobileDataTransferWithoutSnapshot = async (
     operation: string,
-    data: AppData
+    applyData: (currentData: AppData) => AppData
 ): Promise<void> => {
     await runDataTransferTransactionWithoutSnapshot({
         ...mobileDataTransferBoundaries(),
         operation,
-        apply: () => ({ data, result: undefined }),
+        apply: (currentData) => ({ data: applyData(currentData), result: undefined }),
     });
 };
 
@@ -410,7 +411,12 @@ export const restoreLocalDataSnapshot = async (snapshotName: string): Promise<vo
     }
 
     try {
-        await runMobileDataTransferWithoutSnapshot('restoreSnapshot', validation.data);
+        await runMobileDataTransferWithoutSnapshot(
+            'restoreSnapshot',
+            (currentData) => prepareRestoredBackupDataForSync(validation.data!, {
+                previousData: currentData,
+            }),
+        );
         void logInfo('Recovery snapshot restore complete', {
             scope: 'transfer',
             extra: {

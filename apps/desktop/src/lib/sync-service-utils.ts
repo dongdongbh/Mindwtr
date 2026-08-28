@@ -9,6 +9,7 @@ import {
     sleep,
     toStableJson,
     type Attachment,
+    type LocalAttachmentPresence,
     type SyncBackend,
 } from '@mindwtr/core';
 import { normalizeAttachmentPathForUrl } from './attachment-paths';
@@ -141,6 +142,7 @@ export const createLocalAttachmentFs = (
     warningMessage = 'Failed to check attachment file',
 ): {
     readLocalFile: (path: string, attachment: Pick<Attachment, 'id'>) => Promise<Uint8Array>;
+    localFilePresence: (path: string, attachment: Pick<Attachment, 'id'>) => Promise<LocalAttachmentPresence>;
     localFileExists: (path: string, attachment: Pick<Attachment, 'id'>) => Promise<boolean>;
     statLocalFile: (path: string, attachment: Pick<Attachment, 'id'>) => Promise<{ mtimeMs: number; size: number } | null>;
 } => {
@@ -184,27 +186,38 @@ export const createLocalAttachmentFs = (
         }
     };
 
+    const localFilePresence = async (
+        path: string,
+        attachment: Pick<Attachment, 'id'>,
+    ): Promise<LocalAttachmentPresence> => {
+        const candidates: Array<{ path: string; options?: { baseDir: any } }> = [
+            isWithinDataDir(path)
+                ? { path: toRelative(path), options: { baseDir: deps.dataBaseDir } }
+                : { path: normalizeAttachmentFsPath(path) },
+        ];
+        const fallback = managedFallbackPath(path, attachment);
+        if (fallback) candidates.push({ path: fallback });
+
+        let sawError = false;
+        for (const candidate of candidates) {
+            try {
+                const exists = candidate.options
+                    ? await deps.exists(candidate.path, candidate.options)
+                    : await deps.exists(candidate.path);
+                if (exists) return 'present';
+            } catch (error) {
+                sawError = true;
+                logSyncWarning(warningMessage, error);
+            }
+        }
+        return sawError ? 'unreadable' : 'confirmed-not-found';
+    };
+
+    // Compatibility for callers that do not make sync decisions from absence.
     const localFileExists = async (
         path: string,
         attachment: Pick<Attachment, 'id'>,
-    ): Promise<boolean> => {
-        try {
-            if (isWithinDataDir(path)) {
-                return await deps.exists(toRelative(path), { baseDir: deps.dataBaseDir });
-            }
-            if (await deps.exists(normalizeAttachmentFsPath(path))) return true;
-        } catch (error) {
-            logSyncWarning(warningMessage, error);
-        }
-        const fallback = managedFallbackPath(path, attachment);
-        if (!fallback) return false;
-        try {
-            return await deps.exists(fallback);
-        } catch (error) {
-            logSyncWarning(warningMessage, error);
-            return false;
-        }
-    };
+    ): Promise<boolean> => await localFilePresence(path, attachment) === 'present';
 
     const statLocalFile = async (
         path: string,
@@ -232,12 +245,16 @@ export const createLocalAttachmentFs = (
         }
     };
 
-    return { readLocalFile, localFileExists, statLocalFile };
+    return { readLocalFile, localFilePresence, localFileExists, statLocalFile };
 };
 
+const ATTACHMENT_TEMP_FILE_PREFIX = '.mindwtr-attachment-write-';
+
 const buildTempPath = (relativePath: string): string => {
-    const suffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-    return `${relativePath}.tmp-${suffix}`;
+    const separatorIndex = Math.max(relativePath.lastIndexOf('/'), relativePath.lastIndexOf('\\'));
+    const parent = separatorIndex >= 0 ? relativePath.slice(0, separatorIndex + 1) : '';
+    const suffix = `${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 14).padEnd(12, '0')}`;
+    return `${parent}${ATTACHMENT_TEMP_FILE_PREFIX}${suffix}.tmp`;
 };
 
 export const writeAttachmentFileSafely = async (
@@ -308,5 +325,5 @@ export const resolveFileBackendPath = async (
 };
 
 export const isTempAttachmentFile = (name: string): boolean => {
-    return name.includes('.tmp-') || name.endsWith('.tmp') || name.endsWith('.partial');
+    return /^\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/.test(name);
 };

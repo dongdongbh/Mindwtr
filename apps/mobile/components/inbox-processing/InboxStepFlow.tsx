@@ -17,6 +17,7 @@ import {
 import {
   formatTaskMarkedDoneMessage,
   formatTaskMovedMessage,
+  QUICK_DATE_PRESETS,
   tFallback,
   type TaskStatus,
 } from '@mindwtr/core';
@@ -47,6 +48,7 @@ type Step = 'actionable' | 'decisions' | 'someday' | 'later' | 'incubate' | 'two
 
 const STEP_TRANSITION_MS = 200;
 const STEP_TRANSITION_OFFSET = 24;
+const DATED_QUICK_DATE_PRESETS = QUICK_DATE_PRESETS.filter((preset) => preset !== 'no_date');
 
 function PrimaryButton({
   label,
@@ -105,6 +107,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
     actionabilityChoice,
     clearDecision,
     convertToProject,
+    createDecisionUndoReceipt,
     currentTask,
     executionChoice,
     handleNextTask,
@@ -113,13 +116,11 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
     handleProjectConversionStart,
     handleTwoMinYes,
     finalizeNextAction,
-    laterNoDateSelected,
     pendingStartDate,
     pendingStartDateOnly,
     projectFirst,
     setActionabilityChoice,
     setExecutionChoice,
-    setLaterNoDateSelected,
     setPendingStartDate,
     setPendingStartDateOnly,
     setShowStartDatePicker,
@@ -132,7 +133,8 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
     toggleAdvancedOptions,
     twoMinuteChoice,
     twoMinuteEnabled,
-    undoLastDecision,
+    twoMinuteFirst,
+    undoDecision,
   } = controller;
   const { showToast } = useToast();
   const filledButton = useFilledButtonColors();
@@ -152,14 +154,23 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
   // Quick mode answers the whole tree in one tap, so it shares every terminal
   // step and only replaces the entry screen with a flat row of decisions.
   const quick = mode === 'quick';
-  const entryStep: Step = quick ? 'decisions' : 'actionable';
+  const entryStep: Step = quick
+    ? 'decisions'
+    : twoMinuteEnabled && twoMinuteFirst ? 'twoMinute' : 'actionable';
   const step: Step = (() => {
     if (actionabilityChoice === 'someday') return 'someday';
     if (actionabilityChoice === 'later') return 'later';
     if (actionabilityChoice === 'incubate') return 'incubate';
-    if (actionabilityChoice !== 'actionable') return entryStep;
-    if (twoMinuteEnabled && twoMinuteChoice === null) return quick ? entryStep : 'twoMinute';
-    if (executionChoice === null) return quick ? entryStep : 'execution';
+    if (quick) {
+      if (actionabilityChoice !== 'actionable') return 'decisions';
+      if (twoMinuteEnabled && twoMinuteChoice === null) return 'decisions';
+      if (executionChoice === null) return 'decisions';
+    } else {
+      if (twoMinuteEnabled && twoMinuteFirst && twoMinuteChoice === null) return 'twoMinute';
+      if (actionabilityChoice !== 'actionable') return 'actionable';
+      if (twoMinuteEnabled && !twoMinuteFirst && twoMinuteChoice === null) return 'twoMinute';
+      if (executionChoice === null) return 'execution';
+    }
     if (executionChoice === 'delegate') return 'waiting';
     if (showProjectField && !oneActionAnswered) return 'oneAction';
     return 'file';
@@ -187,6 +198,10 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
 
   const commit = useCallback(async (committed: Committed, run: () => Promise<boolean>) => {
     if (submittingRef.current) return;
+    const undoReceipt = createDecisionUndoReceipt(
+      committed === 'trash' ? 'discarded' : committed === 'done' ? 'completed' : 'filed',
+    );
+    if (!undoReceipt) return;
     // Same title the write commits (prepareProcessingEdits), not the raw
     // capture — refining the title mid-step must show up in the Undo toast.
     const title = controller.processingTitle.trim() || currentTask?.title || '';
@@ -210,10 +225,10 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
       message,
       tone: 'info',
       actionLabel: tFallback(t, 'common.undo', 'Undo'),
-      onAction: () => { void undoLastDecision(); },
+      onAction: () => { void undoDecision(undoReceipt); },
       durationMs: 5200,
     });
-  }, [controller.processingTitle, currentTask?.title, showToast, t, undoLastDecision]);
+  }, [controller.processingTitle, createDecisionUndoReceipt, currentTask?.title, showToast, t, undoDecision]);
 
   const goBack = useCallback(() => {
     if (quick) {
@@ -230,12 +245,16 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
       clearDecision('execution');
       return;
     }
-    if (step === 'execution' && twoMinuteEnabled) {
+    if (step === 'execution' && twoMinuteEnabled && !twoMinuteFirst) {
+      clearDecision('twoMinute');
+      return;
+    }
+    if (step === 'actionable' && twoMinuteEnabled && twoMinuteFirst) {
       clearDecision('twoMinute');
       return;
     }
     clearDecision('actionability');
-  }, [clearDecision, handleProjectConversionCancel, oneActionAnswered, quick, step, twoMinuteEnabled]);
+  }, [clearDecision, handleProjectConversionCancel, oneActionAnswered, quick, step, twoMinuteEnabled, twoMinuteFirst]);
 
   /** Quick mode: answer the whole tree at once and land on the follow-up (if any). */
   const chooseQuick = useCallback((destination: 'next' | 'project' | 'later' | 'delegate') => {
@@ -395,10 +414,6 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
     </View>
   );
 
-  const chooseSomeday = () => {
-    setActionabilityChoice('someday');
-  };
-
   const renderStep = () => {
     switch (step) {
       // Quick mode: every destination on one screen. Terminal ones commit on
@@ -445,7 +460,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
                 icon={Cloud}
                 tc={tc}
                 label={t('inbox.someday')}
-                onPress={chooseSomeday}
+                onPress={() => setActionabilityChoice('someday')}
               />
               <SecondaryButton
                 icon={Hourglass}
@@ -484,9 +499,6 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
               onPress={() => setActionabilityChoice('actionable')}
             />
             <View style={styles.stepSecondaryRow}>
-              {/* Deferring an action you have already decided on is an
-                  actionable outcome; incubating is the not-actionable one that
-                  comes back to this pass on a date (#1089). */}
               <SecondaryButton
                 icon={Clock3}
                 tc={tc}
@@ -494,16 +506,16 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
                 onPress={() => setActionabilityChoice('later')}
               />
               <SecondaryButton
+                icon={Cloud}
+                tc={tc}
+                label={t('inbox.someday')}
+                onPress={() => setActionabilityChoice('someday')}
+              />
+              <SecondaryButton
                 icon={Hourglass}
                 tc={tc}
                 label={tFallback(t, 'process.incubate', 'Incubate')}
                 onPress={() => setActionabilityChoice('incubate')}
-              />
-              <SecondaryButton
-                icon={Cloud}
-                tc={tc}
-                label={t('inbox.someday')}
-                onPress={chooseSomeday}
               />
               <SecondaryButton
                 icon={BookOpen}
@@ -604,17 +616,15 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
               t={t}
               label={t('taskEdit.startDateLabel')}
               value={pendingStartDate}
-              selectedPreset={laterNoDateSelected ? 'no_date' : null}
+              quickDatePresets={DATED_QUICK_DATE_PRESETS}
               onOpen={() => setShowStartDatePicker(true)}
               onClear={() => {
                 setPendingStartDate(null);
                 setPendingStartDateOnly(false);
-                setLaterNoDateSelected(false);
               }}
-              onQuickDateSelect={(date, preset) => {
+              onQuickDateSelect={(date) => {
                 setPendingStartDate(date);
                 setPendingStartDateOnly(false);
-                setLaterNoDateSelected(preset === 'no_date' ? !laterNoDateSelected : false);
               }}
               dateOnly={pendingStartDateOnly}
               onDateOnly={() => setPendingStartDateOnly(true)}
@@ -782,7 +792,6 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
               onSelect: (date) => {
                 setPendingStartDate(date);
                 setPendingStartDateOnly(false);
-                setLaterNoDateSelected(false);
               },
             },
             {

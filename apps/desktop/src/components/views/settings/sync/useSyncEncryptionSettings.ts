@@ -1,11 +1,24 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { generateDicewarePassphrase, type SyncBackend, type SyncEncryptionTransitionProgress } from '@mindwtr/core';
+import {
+    generateDicewarePassphrase,
+    isSyncEncryptionRemoteVersionUnavailableError,
+    type SyncBackend,
+    type SyncEncryptionTransitionProgress,
+} from '@mindwtr/core';
 
 import { logError } from '../../../../lib/app-log';
-import { isSyncEncryptionFailure } from '../../../../lib/sync-encryption-service';
+import {
+    isSyncEncryptionCleanupDeferredError,
+    isSyncEncryptionFailure,
+} from '../../../../lib/sync-encryption-service';
 import { SyncService } from '../../../../lib/sync-service';
-import type { CloudProvider, SyncEncryptionController, SyncEncryptionErrorKind } from './types';
+import type {
+    CloudProvider,
+    SyncEncryptionController,
+    SyncEncryptionErrorKind,
+    SyncEncryptionWarningKind,
+} from './types';
 
 // Encryption covers the backends Mindwtr writes whole blobs to. Self-hosted cloud
 // and CloudKit hold structured server-side state instead, so phase 2's API rejects
@@ -24,6 +37,7 @@ export const classifyFailure = (error: unknown, terminal: SyncEncryptionErrorKin
     const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
     if (message.includes('SYNC_ENCRYPTION_WRONG_PASSPHRASE')) return 'wrong-passphrase';
     if (message.includes('SYNC_ENCRYPTION_BACKEND_REQUIRED')) return 'backend-required';
+    if (isSyncEncryptionRemoteVersionUnavailableError(error)) return 'transition-incomplete';
     return isSyncEncryptionFailure(error) ? terminal : 'generic';
 };
 
@@ -39,16 +53,21 @@ export function useSyncEncryptionSettings(
     // misleading generic error (#1001).
     const pendingFirstSync = !isEncryptionCapableBackend(persistedSyncBackend, persistedCloudProvider);
     const [state, setState] = useState<SyncEncryptionController['state']>(null);
+    const [stateUnavailable, setStateUnavailable] = useState(false);
     const [busy, setBusy] = useState(false);
     const [progress, setProgress] = useState<SyncEncryptionTransitionProgress | null>(null);
     const [error, setError] = useState<SyncEncryptionErrorKind | null>(null);
+    const [warning, setWarning] = useState<SyncEncryptionWarningKind | null>(null);
 
     // A status read that failed says nothing about the folder; reporting 'off'
     // would offer "Enable encryption" for a folder that may already be encrypted.
-    // null renders the section empty until a later read succeeds.
+    // null is paired with stateUnavailable so the section can offer a safe retry
+    // without guessing that encryption is off.
     const readState = useCallback(async (): Promise<SyncEncryptionController['state']> => {
         try {
-            return (await SyncService.getSyncEncryptionStatus()).state;
+            const status = await SyncService.getSyncEncryptionStatus();
+            if (status.incompleteTransition) setError('transition-incomplete');
+            return status.state;
         } catch (failure) {
             void logError(failure, { scope: 'sync-encryption', step: 'status' });
             return null;
@@ -58,11 +77,15 @@ export function useSyncEncryptionSettings(
     useEffect(() => {
         if (!supported) {
             setState(null);
+            setStateUnavailable(false);
             return;
         }
         let cancelled = false;
         void readState().then((next) => {
-            if (!cancelled) setState(next);
+            if (!cancelled) {
+                setState(next);
+                setStateUnavailable(next === null);
+            }
         });
         return () => {
             cancelled = true;
@@ -75,6 +98,7 @@ export function useSyncEncryptionSettings(
     ): Promise<boolean> => {
         setBusy(true);
         setError(null);
+        setWarning(null);
         setProgress(null);
         let succeeded = false;
         try {
@@ -82,11 +106,18 @@ export function useSyncEncryptionSettings(
             succeeded = true;
         } catch (failure) {
             void logError(failure, { scope: 'sync-encryption', step: 'transition' });
-            setError(classifyFailure(failure, terminal));
+            if (isSyncEncryptionCleanupDeferredError(failure)) {
+                succeeded = true;
+                setWarning('cleanup-deferred');
+            } else {
+                setError(classifyFailure(failure, terminal));
+            }
         }
         // Whether it finished or not, the device's state may have moved: every
         // transition is resumable, so a half-done run still has to be reflected.
-        setState(await readState());
+        const nextState = await readState();
+        setState(nextState);
+        setStateUnavailable(nextState === null);
         setProgress(null);
         setBusy(false);
         return succeeded;
@@ -110,15 +141,24 @@ export function useSyncEncryptionSettings(
     const unlock = useCallback(async (passphrase: string): Promise<boolean> => {
         setBusy(true);
         setError(null);
+        setWarning(null);
         let accepted = false;
         try {
             accepted = (await SyncService.provideSyncEncryptionPassphrase(passphrase)) === 'ok';
             if (!accepted) setError('wrong-passphrase');
         } catch (failure) {
             void logError(failure, { scope: 'sync-encryption', step: 'unlock' });
-            setError(classifyFailure(failure, 'wrong-passphrase'));
+            if (isSyncEncryptionCleanupDeferredError(failure)) {
+                accepted = failure.outcome === 'ok';
+                if (accepted) setWarning('cleanup-deferred');
+                else setError('wrong-passphrase');
+            } else {
+                setError(classifyFailure(failure, 'wrong-passphrase'));
+            }
         }
-        setState(await readState());
+        const nextState = await readState();
+        setState(nextState);
+        setStateUnavailable(nextState === null);
         setBusy(false);
         return accepted;
     }, [readState]);
@@ -129,17 +169,31 @@ export function useSyncEncryptionSettings(
         } catch (failure) {
             void logError(failure, { scope: 'sync-encryption', step: 'decline' });
         }
-        setState(await readState());
+        const nextState = await readState();
+        setState(nextState);
+        setStateUnavailable(nextState === null);
+    }, [readState]);
+
+    const retryState = useCallback(async () => {
+        setBusy(true);
+        const nextState = await readState();
+        setState(nextState);
+        setStateUnavailable(nextState === null);
+        setBusy(false);
     }, [readState]);
 
     return {
         state,
+        stateUnavailable,
         supported,
         pendingFirstSync,
         busy,
         progress,
         error,
+        warning,
         clearError: useCallback(() => setError(null), []),
+        clearWarning: useCallback(() => setWarning(null), []),
+        retryState,
         generatePassphrase: useCallback(() => generateDicewarePassphrase(), []),
         enable,
         disable,

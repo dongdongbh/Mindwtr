@@ -9,6 +9,7 @@ import {
     getWeeklyReviewBuckets,
     getWeeklyReviewSummary,
     partitionByReviewDate,
+    parseStoredReviewStepSession,
     resolveReviewStepSession,
 } from './review-utils';
 import type { Area, Project, Task } from './types';
@@ -612,5 +613,59 @@ describe('resolveReviewStepSession', () => {
             nextStep: null,
             progress: 100,
         });
+    });
+});
+
+describe('parseStoredReviewStepSession', () => {
+    const dailySteps = new Set(['today', 'inbox', 'waiting', 'focus', 'completed'] as const);
+    const weeklySteps = new Set(['inbox', 'stale', 'calendar', 'waiting', 'contexts', 'projects', 'someday', 'completed'] as const);
+
+    it('accepts a daily checkpoint only during its local calendar day', () => {
+        const startedAt = new Date(2026, 2, 8, 8, 30);
+        const serialized = JSON.stringify({ step: 'waiting', startedAt: startedAt.toISOString() });
+
+        expect(parseStoredReviewStepSession(serialized, dailySteps, {
+            cadence: 'daily',
+            now: new Date(2026, 2, 8, 20),
+        })).toEqual({ step: 'waiting', startedAt: startedAt.toISOString() });
+        expect(parseStoredReviewStepSession(serialized, dailySteps, {
+            cadence: 'daily',
+            now: new Date(2026, 2, 9, 8, 30),
+        })).toBeNull();
+    });
+
+    it('uses the configured local week start for the weekly review window', () => {
+        const startedAt = new Date(2026, 2, 1, 15);
+        const sundaySession = JSON.stringify({ step: 'projects', startedAt: startedAt.toISOString() });
+
+        expect(parseStoredReviewStepSession(sundaySession, weeklySteps, {
+            cadence: 'weekly',
+            now: new Date(2026, 2, 1, 20),
+            weekStart: 'monday',
+        })).toEqual({ step: 'projects', startedAt: startedAt.toISOString() });
+        expect(parseStoredReviewStepSession(sundaySession, weeklySteps, {
+            cadence: 'weekly',
+            now: new Date(2026, 2, 2, 8),
+            weekStart: 'monday',
+        })).toBeNull();
+        expect(parseStoredReviewStepSession(sundaySession, weeklySteps, {
+            cadence: 'weekly',
+            now: new Date(2026, 2, 2, 8),
+            weekStart: 'sunday',
+        })).toEqual({ step: 'projects', startedAt: startedAt.toISOString() });
+    });
+
+    it('ignores malformed, unknown-step, and future checkpoints', () => {
+        expect(parseStoredReviewStepSession('not json', dailySteps, { cadence: 'daily' })).toBeNull();
+        expect(parseStoredReviewStepSession(
+            JSON.stringify({ step: 'projects', startedAt: '2026-03-08T08:30:00.000Z' }),
+            dailySteps,
+            { cadence: 'daily', now: new Date('2026-03-08T09:00:00.000Z') },
+        )).toBeNull();
+        expect(parseStoredReviewStepSession(
+            JSON.stringify({ step: 'today', startedAt: '2026-03-08T10:00:00.000Z' }),
+            dailySteps,
+            { cadence: 'daily', now: new Date('2026-03-08T09:00:00.000Z') },
+        )).toBeNull();
     });
 });

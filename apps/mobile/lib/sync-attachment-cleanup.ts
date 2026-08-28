@@ -2,16 +2,22 @@ import {
   AppData,
   cloudDeleteFile,
   decodeUriSafe,
+  getErrorStatus,
+  isSyncRemoteMutationFenceError,
+  isWebdavRemoteWriteConflictError,
+  normalizeStrongWebdavEtag,
   runAttachmentCleanupLifecycle,
   sanitizeAttachmentUriForSyncMerge,
-  webdavDeleteFile,
+  webdavDeleteFileVersioned,
+  webdavHeadFile,
   type CloudProvider,
 } from '@mindwtr/core';
 import { getBaseSyncUrl, getCloudBaseUrl } from './attachment-sync';
 import { ATTACHMENTS_DIR_NAME } from './attachment-sync-utils';
 import * as FileSystem from './file-system';
-import { getFileSyncBaseDir, type SyncBackend } from './sync-service-utils';
+import { type SyncBackend } from './sync-service-utils';
 import { getMobileCloudRequestOptions, getMobileWebDavRequestOptions } from './webdav-request-options';
+import { DropboxConflictError } from './dropbox-sync';
 
 const ATTACHMENT_CLEANUP_BATCH_LIMIT = 25;
 
@@ -34,9 +40,9 @@ type MobileAttachmentCleanupOptions = {
   webdavConfig: MobileWebDavCleanupConfig | null;
   cloudConfig: MobileCloudCleanupConfig | null;
   cloudProvider: CloudProvider;
-  fileSyncPath: string | null;
   fetcher: typeof fetch;
   ensureLocalSnapshotFresh: () => void;
+  assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;
   deleteDropboxAttachment: (
     cloudKey: string,
     ensureBeforeProviderDelete: () => void
@@ -90,23 +96,33 @@ export const runMobileAttachmentCleanup = async (
     && options.cloudProvider === 'selfhosted'
     && Boolean(options.cloudConfig?.url);
   const isDropboxBackend = options.backend === 'cloud' && options.cloudProvider === 'dropbox';
-  const fileBaseDir = options.backend === 'file'
-    && options.fileSyncPath
-    && !options.fileSyncPath.startsWith('content://')
-    ? getFileSyncBaseDir(options.fileSyncPath)
-    : null;
   const canAttemptRemoteDelete = Boolean(
     isWebdavBackend
     || isCloudBackend
     || isDropboxBackend
-    || fileBaseDir
   );
   const deleteRemoteAttachment = canAttemptRemoteDelete
     ? async (target: { cloudKey: string }) => {
       if (isWebdavBackend && options.webdavConfig) {
         const baseSyncUrl = getBaseSyncUrl(options.webdavConfig.url);
+        const targetUrl = baseSyncUrl + '/' + target.cloudKey;
+        const metadata = await webdavHeadFile(targetUrl, {
+          ...getMobileWebDavRequestOptions(options.webdavConfig.allowInsecureHttp),
+          username: options.webdavConfig.username,
+          password: options.webdavConfig.password,
+          timeoutMs: 30_000,
+          fetcher: options.fetcher,
+        });
+        if (!metadata.exists) {
+          const missing = new Error('WebDAV attachment is already missing');
+          (missing as Error & { status?: number }).status = 404;
+          throw missing;
+        }
+        const etag = normalizeStrongWebdavEtag(metadata.etag);
+        if (!etag) throw new Error('WebDAV attachment version is unavailable; refusing an unconditional delete');
         options.ensureLocalSnapshotFresh();
-        await webdavDeleteFile(baseSyncUrl + '/' + target.cloudKey, {
+        await options.assertRemoteMutationFenceHeld?.(35_000);
+        await webdavDeleteFileVersioned(targetUrl, etag, {
           ...getMobileWebDavRequestOptions(options.webdavConfig.allowInsecureHttp),
           username: options.webdavConfig.username,
           password: options.webdavConfig.password,
@@ -128,9 +144,6 @@ export const runMobileAttachmentCleanup = async (
           target.cloudKey,
           options.ensureLocalSnapshotFresh,
         );
-      } else if (fileBaseDir) {
-        options.ensureLocalSnapshotFresh();
-        await FileSystem.deleteAsync(fileBaseDir + '/' + target.cloudKey, { idempotent: true });
       }
     }
     : undefined;
@@ -146,13 +159,22 @@ export const runMobileAttachmentCleanup = async (
       options.ensureLocalSnapshotFresh,
     ),
     deleteRemoteAttachment,
-    isRemoteMissingError: options.isRemoteMissingError,
+    // File Sync folders are replicated independently. Without a distributed
+    // GC tombstone, another peer can reselect any existing generation before
+    // its document CAS, so cleanup removes metadata only and retains bytes.
+    shouldRetainRemoteAttachment: options.backend === 'file' ? () => true : undefined,
+    isRemoteMissingError: (error) => options.isRemoteMissingError(error) || getErrorStatus(error) === 404,
     onRemoteAttachmentMissing: (target) => {
       options.logSyncInfo('Remote attachment already missing during cleanup', {
         cloudKey: target.cloudKey,
       });
     },
     onRemoteDeleteError: (_target, error) => {
+      if (
+        isSyncRemoteMutationFenceError(error)
+        || isWebdavRemoteWriteConflictError(error)
+        || error instanceof DropboxConflictError
+      ) throw error;
       options.logSyncWarning('Failed to delete remote attachment', error);
     },
     onBatchLimitReached: ({ limit, total }) => {

@@ -24,6 +24,7 @@ const QUICK_DATE_LABELS: Record<QuickDatePreset, { key: string; fallback: string
 type QuickDateChipsProps = {
   t: (key: string) => string;
   tc: ThemeColors;
+  accessibilityLabelPrefix?: string;
   selectedDate?: Date | null;
   selectedPreset?: QuickDatePreset | null;
   onSelect: (date: Date | null, preset: QuickDatePreset) => void;
@@ -38,6 +39,7 @@ type QuickDateChipsProps = {
 export function QuickDateChips({
   t,
   tc,
+  accessibilityLabelPrefix,
   selectedDate,
   selectedPreset,
   onSelect,
@@ -63,7 +65,7 @@ export function QuickDateChips({
             key={preset}
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
-            accessibilityLabel={label}
+            accessibilityLabel={accessibilityLabelPrefix ? `${accessibilityLabelPrefix}: ${label}` : label}
             // Tapping the active chip clears the date (replaces the standalone "No date" chip).
             onPress={() => onSelect(active ? null : getQuickDate(preset, now), preset)}
             style={[

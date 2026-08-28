@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { mapSqliteTaskRow, taskToSqliteRow } from './sqlite-adapter';
+import { toAttachments } from './entity-sync-schema';
+import { findPendingAttachmentUploads } from './sync-helpers';
 import { TASK_SQLITE_COLUMNS, TASK_SYNC_SCHEMA_FIXTURE } from './task-sync-schema';
 import type { Task, Project, Section, Area, Person } from './types';
 import {
@@ -114,5 +116,69 @@ describe('SQLite row codec round-trip', () => {
         const row = toRow(sparseFixture);
         expect(row).toHaveLength(columns.length);
         expect(fromRow(zipRow(columns, row))).toEqual(sparseFixture);
+    });
+
+    it.each([
+        {
+            name: 'task',
+            columns: TASK_SQLITE_COLUMNS,
+            toRow: taskToSqliteRow,
+            fromRow: mapSqliteTaskRow,
+            fixture: sparseTask,
+        },
+        {
+            name: 'project',
+            columns: PROJECT_SQLITE_COLUMNS,
+            toRow: projectToSqliteRow,
+            fromRow: projectFromSqliteRow,
+            fixture: sparseProject,
+        },
+    ])('$name: preserves the durable local attachment-upload retry marker', ({ name, columns, toRow, fromRow, fixture }) => {
+        const attachment = {
+            id: 'pending-replacement',
+            kind: 'file' as const,
+            title: 'replacement.txt',
+            uri: '/managed/pending-replacement.txt',
+            cloudKey: 'attachments/pending-replacement.txt',
+            fileHash: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            contentRev: 2,
+            contentMtimeMs: 2000,
+            contentSize: 20,
+            localStatus: 'available' as const,
+            pendingContentUpload: true as const,
+            createdAt: ISO,
+            updatedAt: ISO,
+        };
+        const entity = { ...fixture, attachments: [attachment] };
+        const reloaded = fromRow(zipRow(columns, toRow(entity)));
+
+        expect(reloaded.attachments?.[0]?.pendingContentUpload).toBe(true);
+        if (name === 'task') {
+            expect(findPendingAttachmentUploads({
+                tasks: [reloaded as Task],
+                projects: [],
+                sections: [],
+                areas: [],
+                settings: {},
+            })).toEqual([
+                expect.objectContaining({
+                    attachmentId: attachment.id,
+                    reason: 'content-replacement',
+                }),
+            ]);
+        }
+    });
+
+    it('accepts only literal true for the local retry marker', () => {
+        const base = {
+            id: 'attachment',
+            kind: 'file',
+            title: 'attachment.txt',
+            uri: '/managed/attachment.txt',
+        };
+        expect(toAttachments([{ ...base, pendingContentUpload: true }])?.[0]?.pendingContentUpload).toBe(true);
+        for (const invalid of [false, 1, 'true', {}, []]) {
+            expect(toAttachments([{ ...base, pendingContentUpload: invalid }])?.[0]?.pendingContentUpload).toBeUndefined();
+        }
     });
 });

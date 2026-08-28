@@ -4,7 +4,10 @@ import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppData } from '@mindwtr/core';
 import {
+    CLOUDKIT_ATTACHMENT_NOT_FOUND_CODE,
+    CloudKitAttachmentNotFoundError,
     ensureCloudKitReady,
+    fetchCloudKitAttachmentAsset,
     readRemoteCloudKit,
     writeRemoteCloudKit,
 } from './cloudkit-sync';
@@ -13,6 +16,10 @@ import { CLOUDKIT_CHANGE_TOKEN_KEY } from './sync-constants';
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const swiftMapperSource = readFileSync(
     resolve(currentDir, '../modules/cloudkit-sync/ios/CloudKitRecordMapper.swift'),
+    'utf8',
+);
+const swiftModuleSource = readFileSync(
+    resolve(currentDir, '../modules/cloudkit-sync/ios/CloudKitSyncModule.swift'),
     'utf8',
 );
 const macosBridgeSource = readFileSync(
@@ -41,6 +48,7 @@ const {
         deleteRecords: vi.fn(),
         ensureSubscription: vi.fn(async () => undefined),
         ensureZone: vi.fn(async () => undefined),
+        fetchAttachmentAsset: vi.fn(),
         fetchAllRecords: vi.fn(),
         fetchChanges: vi.fn(),
         getAccountStatus: vi.fn(async () => 'available'),
@@ -69,6 +77,10 @@ vi.mock('./app-log', () => ({
 const createPendingPromise = <T,>() => new Promise<T>(() => undefined);
 
 describe('CloudKit native field specs', () => {
+    it('keeps the native and TypeScript terminal attachment code aligned', () => {
+        expect(swiftModuleSource).toContain(`"${CLOUDKIT_ATTACHMENT_NOT_FOUND_CODE}"`);
+    });
+
     it('maps project purgedAt in Swift and macOS CloudKit mappers', () => {
         const swiftProjectFields = extractSourceBlock(
             swiftMapperSource,
@@ -137,6 +149,7 @@ describe('cloudkit-sync abort handling', () => {
         cloudKitSync.ensureSubscription.mockResolvedValue(undefined);
         cloudKitSync.ensureZone.mockReset();
         cloudKitSync.ensureZone.mockResolvedValue(undefined);
+        cloudKitSync.fetchAttachmentAsset.mockReset();
         cloudKitSync.fetchAllRecords.mockReset();
         cloudKitSync.fetchAllRecords.mockResolvedValue([]);
         cloudKitSync.fetchChanges.mockReset();
@@ -194,6 +207,37 @@ describe('cloudkit-sync abort handling', () => {
         await expect(ensureCloudKitReady({ signal: controller.signal })).rejects.toThrow('Already cancelled');
         expect(cloudKitSync.ensureZone).not.toHaveBeenCalled();
         expect(cloudKitSync.ensureSubscription).not.toHaveBeenCalled();
+    });
+
+    it('normalizes the stable native attachment absence code without message matching', async () => {
+        const nativeError = Object.assign(new Error('native localized text'), {
+            code: CLOUDKIT_ATTACHMENT_NOT_FOUND_CODE,
+        });
+        cloudKitSync.fetchAttachmentAsset.mockRejectedValue(nativeError);
+
+        let thrown: unknown;
+        try {
+            await fetchCloudKitAttachmentAsset('record-1', 'file://scratch');
+        } catch (error) {
+            thrown = error;
+        }
+
+        expect(thrown).toBeInstanceOf(CloudKitAttachmentNotFoundError);
+        expect(thrown).toMatchObject({
+            code: CLOUDKIT_ATTACHMENT_NOT_FOUND_CODE,
+            message: 'native localized text',
+            cause: nativeError,
+        });
+    });
+
+    it('preserves transient and legacy untyped CloudKit failures', async () => {
+        for (const error of [
+            Object.assign(new Error('network unavailable'), { code: 'ERR_UNEXPECTED' }),
+            Object.assign(new Error('legacy native error'), { code: 1002 }),
+        ]) {
+            cloudKitSync.fetchAttachmentAsset.mockRejectedValueOnce(error);
+            await expect(fetchCloudKitAttachmentAsset('record-1', 'file://scratch')).rejects.toBe(error);
+        }
     });
 });
 

@@ -1,13 +1,16 @@
 import React from 'react';
 import { Alert, Platform } from 'react-native';
-import type { Attachment, Task } from '@mindwtr/core';
 import {
     DEFAULT_PROJECT_COLOR,
     buildTaskUpdatesFromSpeechResult,
     findSelectableProjectByTitleAndArea,
     generateUUID,
     normalizeLinkAttachmentInput,
+    planAttachmentDraftSettlement,
     translateWithFallback,
+    type Attachment,
+    type AttachmentDraftSettlementInput,
+    type Task,
     useTaskStore,
     validateAttachmentForUpload,
 } from '@mindwtr/core';
@@ -20,7 +23,18 @@ import * as Sharing from 'expo-sharing';
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Paths } from 'expo-file-system';
 
-import { ensureAttachmentAvailable, persistAttachmentLocally } from '../../lib/attachment-sync';
+import {
+    deleteManagedAttachmentFile,
+    persistAttachmentLocally,
+} from '../../lib/attachment-sync';
+import {
+    ensureAttachmentAvailableDetailed,
+    getAttachmentAvailabilityPatch,
+    getAttachmentDownloadIdentity,
+    getAttachmentUnrecoverablePatch,
+    hasAttachmentDownloadIdentity,
+    type AttachmentAvailabilityOutcome,
+} from '../../lib/attachment-sync-availability';
 import { loadAIKey } from '../../lib/ai-config';
 import { tryOpenWithAndroidViewer } from '../../lib/open-file-externally';
 import { ensureWhisperModelPathForConfigAsync, processAudioCapture, resolveSpeechToTextRuntimeSettings } from '../../lib/speech-to-text';
@@ -66,6 +80,13 @@ export function useTaskEditAttachments({
     t,
     visible,
 }: UseTaskEditAttachmentsParams) {
+    const attachmentsRef = React.useRef(attachments);
+    attachmentsRef.current = attachments;
+    const settleDraftAttachments = React.useCallback((input: AttachmentDraftSettlementInput) => {
+        for (const candidate of planAttachmentDraftSettlement(input)) {
+            void deleteManagedAttachmentFile(candidate.attachment);
+        }
+    }, []);
     const [linkModalVisible, setLinkModalVisible] = React.useState(false);
     const [audioModalVisible, setAudioModalVisible] = React.useState(false);
     const [imagePreviewAttachment, setImagePreviewAttachment] = React.useState<Attachment | null>(null);
@@ -486,41 +507,93 @@ export function useTaskEditAttachments({
         }
     }, [audioAttachment, audioTranscribing, closeAudioModal, resolveText, setDraftField, taskId, unloadAudio]);
 
-    const updateAttachmentState = React.useCallback((nextAttachment: Attachment) => {
+    const currentAttachmentForIdentity = React.useCallback((
+        attachmentId: string,
+        identity: string,
+    ): Attachment | null => {
+        const currentDraftAttachment = attachmentsRef.current.find((item) => item.id === attachmentId);
+        if (!hasAttachmentDownloadIdentity(currentDraftAttachment, identity)) return null;
+        if (taskId && currentDraftAttachment.cloudKey) {
+            const currentTask = useTaskStore.getState()._allTasks.find((item) => item.id === taskId);
+            const currentStoredAttachment = currentTask?.attachments?.find((item) => item.id === attachmentId);
+            if (!hasAttachmentDownloadIdentity(currentStoredAttachment, identity)) return null;
+        }
+        return currentDraftAttachment;
+    }, [taskId]);
+
+    const updateAttachmentStateIfCurrent = React.useCallback((
+        attachmentId: string,
+        identity: string,
+        patch: Partial<Attachment>,
+    ): Attachment | null => {
+        const currentAttachment = currentAttachmentForIdentity(attachmentId, identity);
+        if (!currentAttachment) return null;
+        const nextAttachment = { ...currentAttachment, ...patch };
         setAttachments((current) => {
+            const latestAttachment = (current || []).find((item) => item.id === attachmentId);
+            if (!hasAttachmentDownloadIdentity(latestAttachment, identity)) return current;
             const nextAttachments = (current || []).map((item) =>
-                item.id === nextAttachment.id ? { ...item, ...nextAttachment } : item
+                item.id === attachmentId ? { ...item, ...patch } : item
             );
             return nextAttachments;
         }, false);
-    }, [setAttachments]);
+        return nextAttachment;
+    }, [currentAttachmentForIdentity, setAttachments]);
 
-    const resolveAttachment = React.useCallback(async (attachment: Attachment): Promise<Attachment | null> => {
-        if (attachment.kind !== 'file') return attachment;
+    type TaskAttachmentResolution = AttachmentAvailabilityOutcome | { status: 'stale' };
+
+    const resolveAttachment = React.useCallback(async (attachment: Attachment): Promise<TaskAttachmentResolution> => {
+        if (attachment.kind !== 'file') return { status: 'available', attachment };
+        const identity = getAttachmentDownloadIdentity(attachment);
+        if (!currentAttachmentForIdentity(attachment.id, identity)) return { status: 'stale' };
         const shouldDownload = attachment.cloudKey && (attachment.localStatus === 'missing' || !attachment.uri);
         if (shouldDownload && attachment.localStatus !== 'downloading') {
-            updateAttachmentState({ ...attachment, localStatus: 'downloading' });
+            updateAttachmentStateIfCurrent(attachment.id, identity, { localStatus: 'downloading' });
         }
-        const resolved = await ensureAttachmentAvailable(attachment);
-        if (resolved) {
-            if (resolved.uri !== attachment.uri || resolved.localStatus !== attachment.localStatus) {
-                updateAttachmentState(resolved);
-            }
-            return resolved;
+        const outcome = await ensureAttachmentAvailableDetailed(attachment);
+        if (outcome.status === 'available') {
+            const currentAttachment = currentAttachmentForIdentity(attachment.id, identity);
+            if (!currentAttachment) return { status: 'stale' };
+            const resolved = updateAttachmentStateIfCurrent(
+                attachment.id,
+                identity,
+                getAttachmentAvailabilityPatch(currentAttachment, outcome.attachment),
+            );
+            return resolved
+                ? { status: 'available', attachment: resolved }
+                : { status: 'stale' };
+        }
+        if (outcome.status === 'unrecoverable') {
+            const resolved = updateAttachmentStateIfCurrent(
+                attachment.id,
+                identity,
+                getAttachmentUnrecoverablePatch(outcome.attachment),
+            );
+            return resolved
+                ? { status: 'unrecoverable', attachment: resolved }
+                : { status: 'stale' };
         }
         if (shouldDownload) {
-            updateAttachmentState({ ...attachment, localStatus: 'missing' });
+            const restored = updateAttachmentStateIfCurrent(attachment.id, identity, { localStatus: 'missing' });
+            if (!restored) return { status: 'stale' };
         }
-        return null;
-    }, [updateAttachmentState]);
+        return outcome;
+    }, [currentAttachmentForIdentity, updateAttachmentStateIfCurrent]);
+
+    const showAttachmentResolutionError = React.useCallback((resolution: TaskAttachmentResolution) => {
+        if (resolution.status === 'stale' || resolution.status === 'available') return;
+        const message = resolution.status === 'generation-conflict'
+            ? t('attachments.downloadConflict')
+            : resolution.status === 'unrecoverable'
+                ? t('attachments.unrecoverable')
+                : t('attachments.missing');
+        Alert.alert(t('attachments.title'), message);
+    }, [t]);
 
     const downloadAttachment = React.useCallback(async (attachment: Attachment) => {
-        const resolved = await resolveAttachment(attachment);
-        if (!resolved) {
-            const message = attachment.kind === 'file' ? t('attachments.missing') : t('attachments.fileNotSupported');
-            Alert.alert(t('attachments.title'), message);
-        }
-    }, [resolveAttachment, t]);
+        const resolution = await resolveAttachment(attachment);
+        showAttachmentResolutionError(resolution);
+    }, [resolveAttachment, showAttachmentResolutionError]);
 
     const isImageAttachment = React.useCallback((attachment: Attachment) => {
         const mime = attachment.mimeType?.toLowerCase();
@@ -529,12 +602,12 @@ export function useTaskEditAttachments({
     }, []);
 
     const openAttachment = React.useCallback(async (attachment: Attachment) => {
-        const resolved = await resolveAttachment(attachment);
-        if (!resolved) {
-            const message = attachment.kind === 'file' ? t('attachments.missing') : t('attachments.fileNotSupported');
-            Alert.alert(t('attachments.title'), message);
+        const resolution = await resolveAttachment(attachment);
+        if (resolution.status !== 'available') {
+            showAttachmentResolutionError(resolution);
             return;
         }
+        const resolved = resolution.attachment;
         if (resolved.kind === 'link') {
             Linking.openURL(resolved.uri).catch((error) => logTaskError('Failed to open attachment URL', error));
             return;
@@ -559,7 +632,7 @@ export function useTaskEditAttachments({
         } else {
             Linking.openURL(resolved.uri).catch((error) => logTaskError('Failed to open attachment URL', error));
         }
-    }, [isAudioAttachment, isImageAttachment, openAudioAttachment, resolveAttachment, t]);
+    }, [isAudioAttachment, isImageAttachment, openAudioAttachment, resolveAttachment, showAttachmentResolutionError]);
 
     const removeAttachment = React.useCallback((id: string) => {
         const now = new Date().toISOString();
@@ -619,6 +692,7 @@ export function useTaskEditAttachments({
         setLinkInput,
         setLinkInputTouched,
         setLinkModalVisible,
+        settleDraftAttachments,
         toggleAudioPlayback,
         visibleAttachments,
     };

@@ -241,8 +241,14 @@ function SyncSettingsView({
                 return t('settings.syncFailureMisconfigured');
             case 'conflict':
                 return t('settings.syncFailureConflict');
+            case 'encryptionState':
+                return t('settings.syncEncryptionStateUnavailable');
             case 'encryption':
                 return t('settings.syncFailureEncryption');
+            case 'fileLockUnavailable':
+                return t('settings.syncFileLockUnavailable');
+            case 'fileGenerationCorrupt':
+                return t('settings.syncFileGenerationCorrupt');
             default:
                 return t('settings.syncFailureGeneric');
         }
@@ -662,7 +668,11 @@ function SyncSettingsView({
             conflictLines={conflictLines}
             historyContent={renderSyncHistory()}
             lastSyncAt={settings.lastSyncAt}
-            lastSyncError={settings.lastSyncError}
+            lastSyncError={classifySyncFailure(settings.lastSyncError) === 'fileLockUnavailable'
+                ? t('settings.syncFileLockUnavailable')
+                : classifySyncFailure(settings.lastSyncError) === 'fileGenerationCorrupt'
+                    ? t('settings.syncFileGenerationCorrupt')
+                    : settings.lastSyncError}
             lastSyncStatus={settings.lastSyncStatus}
             maxClockSkewLabel={maxClockSkewMs > 0 ? formatClockSkew(maxClockSkewMs) : undefined}
             showLastSyncStats={showLastSyncStats}

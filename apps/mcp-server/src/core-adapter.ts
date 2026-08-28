@@ -1,5 +1,6 @@
 import type { Area, Person, Project, Section, Task } from './queries.js';
 import { ensureMindwtrDbPath, type DbOptions } from './db.js';
+import { withMcpWriteLock } from './db-write-lock.js';
 import { NotFoundError, ValidationError } from './errors.js';
 
 type CoreStore = {
@@ -41,7 +42,10 @@ type CoreModule = {
   runWithImmediateSaveTracking: <T>(operation: () => Promise<T>) => Promise<{ result: T; saveCount: number }>;
   createSerializedAsyncQueue: () => SerializedAsyncQueue;
   useTaskStore: CoreStore;
-  SqliteAdapter: new (client: unknown) => { ensureSchema: () => Promise<void> };
+  SqliteAdapter: new (
+    client: unknown,
+    options?: { rejectConcurrentWrites?: boolean },
+  ) => { ensureSchema: () => Promise<void> };
 };
 
 type SerializedAsyncQueue = {
@@ -208,38 +212,47 @@ type PersistenceContractService = Pick<
   'addTask' | 'updateTask' | 'completeTask' | 'deleteTask' | 'restoreTask' | 'updateProject'
 >;
 
-export const createCorePersistenceService = (core: CoreModule): PersistenceContractService => {
+export type WriteTransactionRunner = <T>(operation: () => Promise<T>) => Promise<T>;
+
+const runDirectly: WriteTransactionRunner = (operation) => operation();
+
+export const createCorePersistenceService = (
+  core: CoreModule,
+  runWriteTransaction: WriteTransactionRunner = runDirectly,
+): PersistenceContractService => {
   const writeTask = async (
     action: string,
     mutate: (state: ReturnType<CoreStore['getState']>) => Promise<CoreActionResult>,
     findTask: () => Task | undefined,
     notFoundMessage: string,
   ): Promise<TaskWriteResult> => {
-    const initialState = core.useTaskStore.getState();
-    try {
-      await initialState.fetchData();
-    } catch (error) {
-      throw toStorageError(error);
-    }
+    return runWriteTransaction(async () => {
+      const initialState = core.useTaskStore.getState();
+      try {
+        await initialState.fetchData();
+      } catch (error) {
+        throw toStorageError(error);
+      }
 
-    let tracked: { result: CoreActionResult; saveCount: number };
-    try {
-      const state = core.useTaskStore.getState();
-      tracked = await core.runWithImmediateSaveTracking(() => mutate(state));
-    } catch (error) {
-      throw toStorageError(error);
-    }
-    ensureActionSucceeded(action, tracked.result, action !== 'create task');
+      let tracked: { result: CoreActionResult; saveCount: number };
+      try {
+        const state = core.useTaskStore.getState();
+        tracked = await core.runWithImmediateSaveTracking(() => mutate(state));
+      } catch (error) {
+        throw toStorageError(error);
+      }
+      ensureActionSucceeded(action, tracked.result, action !== 'create task');
 
-    const task = findTask();
-    if (!task) throw new NotFoundError(notFoundMessage);
-    try {
-      await core.flushPendingSave();
-      return task;
-    } catch (error) {
-      if (tracked.saveCount === 0) throw toStorageError(error);
-      return { ...task, storageWarning: getTaskStorageWarning(error) };
-    }
+      const task = findTask();
+      if (!task) throw new NotFoundError(notFoundMessage);
+      try {
+        await core.flushPendingSave();
+        return task;
+      } catch (error) {
+        if (tracked.saveCount === 0) throw toStorageError(error);
+        return { ...task, storageWarning: getTaskStorageWarning(error) };
+      }
+    });
   };
 
   return {
@@ -279,7 +292,7 @@ export const createCorePersistenceService = (core: CoreModule): PersistenceContr
       () => core.useTaskStore.getState()._allTasks.find((task) => task.id === id),
       `Task not found after restore: ${id}`,
     ),
-    updateProject: async ({ id, updates }) => {
+    updateProject: async ({ id, updates }) => runWriteTransaction(async () => {
       const state = core.useTaskStore.getState();
       await state.fetchData();
       ensureActionSucceeded('update project', await state.updateProject(id, updates));
@@ -287,7 +300,7 @@ export const createCorePersistenceService = (core: CoreModule): PersistenceContr
       const updated = core.useTaskStore.getState()._allProjects.find((project) => project.id === id);
       if (!updated) throw new NotFoundError(`Project not found after update: ${id}`);
       return updated as Project;
-    },
+    }),
   };
 };
 
@@ -331,126 +344,129 @@ const ensureCoreReady = async (options: DbOptions) => {
       // Preflight for older DBs missing orderNum column.
       await ensureOrderNumColumn('tasks');
       await ensureOrderNumColumn('projects');
-      const sqliteAdapter = new core.SqliteAdapter(client);
+      const sqliteAdapter = new core.SqliteAdapter(client, { rejectConcurrentWrites: !coreReadonly });
       await sqliteAdapter.ensureSchema();
       core.setStorageAdapter(sqliteAdapter);
       await core.useTaskStore.getState().fetchData();
+      const runWriteTransaction: WriteTransactionRunner = coreReadonly
+        ? runDirectly
+        : (operation) => withMcpWriteLock(resolvedPath, operation);
 
       coreService = {
-      ...createCorePersistenceService(core),
-      addProject: async ({ title, color, props }) => {
-        const state = core.useTaskStore.getState();
-        await state.fetchData();
-        const created = await state.addProject(title, color, props);
-        if (!created) throwCreateFailed('Failed to create project.');
-        await flushCoreSave(core);
-        const saved = core.useTaskStore.getState()._allProjects.find((project) => project.id === created.id);
-        if (!saved) throw new NotFoundError(`Project not found after create: ${created.id}`);
-        return saved as Project;
-      },
-    deleteProject: async (id) => {
-      const state = core.useTaskStore.getState();
-      await state.fetchData();
-      ensureActionSucceeded('delete project', await state.deleteProject(id));
-      await flushCoreSave(core);
-      const updated = core.useTaskStore.getState()._allProjects.find((project) => project.id === id);
-      if (!updated) throw new NotFoundError(`Project not found after delete: ${id}`);
-      return updated as Project;
-    },
-    addSection: async ({ projectId, title, props }) => {
-      const state = core.useTaskStore.getState();
-      await state.fetchData();
-      const created = await state.addSection(projectId, title, props);
-      if (!created) throwCreateFailed('Failed to create section.');
-      await flushCoreSave(core);
-      const saved = core.useTaskStore.getState()._allSections.find((section) => section.id === created.id);
-      if (!saved) throw new NotFoundError(`Section not found after create: ${created.id}`);
-      return saved as Section;
-    },
-    updateSection: async ({ id, updates }) => {
-      const state = core.useTaskStore.getState();
-      await state.fetchData();
-      ensureActionSucceeded('update section', await state.updateSection(id, updates));
-      await flushCoreSave(core);
-      const updated = core.useTaskStore.getState()._allSections.find((section) => section.id === id);
-      if (!updated) throw new NotFoundError(`Section not found after update: ${id}`);
-      return updated as Section;
-    },
-    deleteSection: async (id) => {
-      const state = core.useTaskStore.getState();
-      await state.fetchData();
-      ensureActionSucceeded('delete section', await state.deleteSection(id));
-      await flushCoreSave(core);
-      const updated = core.useTaskStore.getState()._allSections.find((section) => section.id === id);
-      if (!updated) throw new NotFoundError(`Section not found after delete: ${id}`);
-      return updated as Section;
-    },
-    addArea: async ({ name, props }) => {
-        const state = core.useTaskStore.getState();
-        await state.fetchData();
-        const created = await state.addArea(name, props);
-        if (!created) throwCreateFailed('Failed to create area.');
-        await flushCoreSave(core);
-        const saved = core.useTaskStore.getState()._allAreas.find((area) => area.id === created.id);
-        if (!saved) throw new NotFoundError(`Area not found after create: ${created.id}`);
-        return saved as Area;
-      },
-      updateArea: async ({ id, updates }) => {
-        const state = core.useTaskStore.getState();
-        await state.fetchData();
-        ensureActionSucceeded('update area', await state.updateArea(id, updates));
-        await flushCoreSave(core);
-        const updated = core.useTaskStore.getState()._allAreas.find((area) => area.id === id);
-        if (!updated) throw new NotFoundError(`Area not found after update: ${id}`);
-        return updated as Area;
-      },
-      deleteArea: async (id) => {
-        const state = core.useTaskStore.getState();
-        await state.fetchData();
-        ensureActionSucceeded('delete area', await state.deleteArea(id));
-        await flushCoreSave(core);
-        const updated = core.useTaskStore.getState()._allAreas.find((area) => area.id === id);
-        if (!updated) throw new NotFoundError(`Area not found after delete: ${id}`);
-        return updated as Area;
-      },
-      addPerson: async ({ name, props }) => {
-        const state = core.useTaskStore.getState();
-        await state.fetchData();
-        const created = await state.addPerson(name, props);
-        if (!created) throwCreateFailed('Failed to create person.');
-        await flushCoreSave(core);
-        const saved = core.useTaskStore.getState()._allPeople.find((person) => person.id === created.id);
-        if (!saved) throw new NotFoundError(`Person not found after create: ${created.id}`);
-        return saved as Person;
-      },
-      updatePerson: async ({ id, updates }) => {
-        const state = core.useTaskStore.getState();
-        await state.fetchData();
-        ensureActionSucceeded('update person', await state.updatePerson(id, updates));
-        await flushCoreSave(core);
-        const updated = core.useTaskStore.getState()._allPeople.find((person) => person.id === id);
-        if (!updated) throw new NotFoundError(`Person not found after update: ${id}`);
-        return updated as Person;
-      },
-      renamePerson: async ({ id, name, updateTasks }) => {
-        const state = core.useTaskStore.getState();
-        await state.fetchData();
-        ensureActionSucceeded('rename person', await state.renamePerson(id, name, { updateTasks }));
-        await flushCoreSave(core);
-        const updated = core.useTaskStore.getState()._allPeople.find((person) => person.id === id);
-        if (!updated) throw new NotFoundError(`Person not found after rename: ${id}`);
-        return updated as Person;
-      },
-      deletePerson: async (id) => {
-        const state = core.useTaskStore.getState();
-        await state.fetchData();
-        ensureActionSucceeded('delete person', await state.deletePerson(id));
-        await flushCoreSave(core);
-        const updated = core.useTaskStore.getState()._allPeople.find((person) => person.id === id);
-        if (!updated) throw new NotFoundError(`Person not found after delete: ${id}`);
-        return updated as Person;
-      },
-    };
+        ...createCorePersistenceService(core, runWriteTransaction),
+        addProject: async ({ title, color, props }) => runWriteTransaction(async () => {
+          const state = core.useTaskStore.getState();
+          await state.fetchData();
+          const created = await state.addProject(title, color, props);
+          if (!created) throwCreateFailed('Failed to create project.');
+          await flushCoreSave(core);
+          const saved = core.useTaskStore.getState()._allProjects.find((project) => project.id === created.id);
+          if (!saved) throw new NotFoundError(`Project not found after create: ${created.id}`);
+          return saved as Project;
+        }),
+        deleteProject: async (id) => runWriteTransaction(async () => {
+          const state = core.useTaskStore.getState();
+          await state.fetchData();
+          ensureActionSucceeded('delete project', await state.deleteProject(id));
+          await flushCoreSave(core);
+          const updated = core.useTaskStore.getState()._allProjects.find((project) => project.id === id);
+          if (!updated) throw new NotFoundError(`Project not found after delete: ${id}`);
+          return updated as Project;
+        }),
+        addSection: async ({ projectId, title, props }) => runWriteTransaction(async () => {
+          const state = core.useTaskStore.getState();
+          await state.fetchData();
+          const created = await state.addSection(projectId, title, props);
+          if (!created) throwCreateFailed('Failed to create section.');
+          await flushCoreSave(core);
+          const saved = core.useTaskStore.getState()._allSections.find((section) => section.id === created.id);
+          if (!saved) throw new NotFoundError(`Section not found after create: ${created.id}`);
+          return saved as Section;
+        }),
+        updateSection: async ({ id, updates }) => runWriteTransaction(async () => {
+          const state = core.useTaskStore.getState();
+          await state.fetchData();
+          ensureActionSucceeded('update section', await state.updateSection(id, updates));
+          await flushCoreSave(core);
+          const updated = core.useTaskStore.getState()._allSections.find((section) => section.id === id);
+          if (!updated) throw new NotFoundError(`Section not found after update: ${id}`);
+          return updated as Section;
+        }),
+        deleteSection: async (id) => runWriteTransaction(async () => {
+          const state = core.useTaskStore.getState();
+          await state.fetchData();
+          ensureActionSucceeded('delete section', await state.deleteSection(id));
+          await flushCoreSave(core);
+          const updated = core.useTaskStore.getState()._allSections.find((section) => section.id === id);
+          if (!updated) throw new NotFoundError(`Section not found after delete: ${id}`);
+          return updated as Section;
+        }),
+        addArea: async ({ name, props }) => runWriteTransaction(async () => {
+          const state = core.useTaskStore.getState();
+          await state.fetchData();
+          const created = await state.addArea(name, props);
+          if (!created) throwCreateFailed('Failed to create area.');
+          await flushCoreSave(core);
+          const saved = core.useTaskStore.getState()._allAreas.find((area) => area.id === created.id);
+          if (!saved) throw new NotFoundError(`Area not found after create: ${created.id}`);
+          return saved as Area;
+        }),
+        updateArea: async ({ id, updates }) => runWriteTransaction(async () => {
+          const state = core.useTaskStore.getState();
+          await state.fetchData();
+          ensureActionSucceeded('update area', await state.updateArea(id, updates));
+          await flushCoreSave(core);
+          const updated = core.useTaskStore.getState()._allAreas.find((area) => area.id === id);
+          if (!updated) throw new NotFoundError(`Area not found after update: ${id}`);
+          return updated as Area;
+        }),
+        deleteArea: async (id) => runWriteTransaction(async () => {
+          const state = core.useTaskStore.getState();
+          await state.fetchData();
+          ensureActionSucceeded('delete area', await state.deleteArea(id));
+          await flushCoreSave(core);
+          const updated = core.useTaskStore.getState()._allAreas.find((area) => area.id === id);
+          if (!updated) throw new NotFoundError(`Area not found after delete: ${id}`);
+          return updated as Area;
+        }),
+        addPerson: async ({ name, props }) => runWriteTransaction(async () => {
+          const state = core.useTaskStore.getState();
+          await state.fetchData();
+          const created = await state.addPerson(name, props);
+          if (!created) throwCreateFailed('Failed to create person.');
+          await flushCoreSave(core);
+          const saved = core.useTaskStore.getState()._allPeople.find((person) => person.id === created.id);
+          if (!saved) throw new NotFoundError(`Person not found after create: ${created.id}`);
+          return saved as Person;
+        }),
+        updatePerson: async ({ id, updates }) => runWriteTransaction(async () => {
+          const state = core.useTaskStore.getState();
+          await state.fetchData();
+          ensureActionSucceeded('update person', await state.updatePerson(id, updates));
+          await flushCoreSave(core);
+          const updated = core.useTaskStore.getState()._allPeople.find((person) => person.id === id);
+          if (!updated) throw new NotFoundError(`Person not found after update: ${id}`);
+          return updated as Person;
+        }),
+        renamePerson: async ({ id, name, updateTasks }) => runWriteTransaction(async () => {
+          const state = core.useTaskStore.getState();
+          await state.fetchData();
+          ensureActionSucceeded('rename person', await state.renamePerson(id, name, { updateTasks }));
+          await flushCoreSave(core);
+          const updated = core.useTaskStore.getState()._allPeople.find((person) => person.id === id);
+          if (!updated) throw new NotFoundError(`Person not found after rename: ${id}`);
+          return updated as Person;
+        }),
+        deletePerson: async (id) => runWriteTransaction(async () => {
+          const state = core.useTaskStore.getState();
+          await state.fetchData();
+          ensureActionSucceeded('delete person', await state.deletePerson(id));
+          await flushCoreSave(core);
+          const updated = core.useTaskStore.getState()._allPeople.find((person) => person.id === id);
+          if (!updated) throw new NotFoundError(`Person not found after delete: ${id}`);
+          return updated as Person;
+        }),
+      };
       closeClient = null;
     } finally {
       closeClient?.();

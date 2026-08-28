@@ -16,20 +16,25 @@
 // Everything here is byte-level. The MWENC1 container is binary, so the text APIs the
 // plaintext path uses (`readAsStringAsync` UTF-8, `ExpoFile.text()`) would mangle it.
 
-import { Directory as ExpoDirectory, File as ExpoFile } from 'expo-file-system';
+import { File as ExpoFile } from 'expo-file-system';
 import {
     ATTACHMENTS_DIR_NAME,
+    computeSha256Hex,
     inspectSyncArtifact,
     LEGACY_SYNC_FILE_NAME,
     SYNC_FILE_NAME,
     sleep,
+    SyncEncryptionRemoteConflictError,
     type SyncEncryptionRemoteEntry,
+    type SyncEncryptionRemoteInventory,
     type SyncEncryptionRemotePort,
+    type SyncEncryptionRemoteRead,
 } from '@mindwtr/core';
 
 import { logWarn } from './app-log';
 import { base64ToBytes, bytesToBase64 } from './attachment-sync-utils';
 import * as FileSystem from './file-system';
+import { renameSafTransitionDocument } from './sync-file-transition-cas';
 
 const StorageAccessFramework = FileSystem.StorageAccessFramework;
 
@@ -74,8 +79,12 @@ export const readSyncArtifactBytes = async (uri: string): Promise<Uint8Array | n
             if (!info.exists) return null;
             const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
             return base64 ? base64ToBytes(base64) : new Uint8Array(0);
-        } catch {
-            if (isSaf(uri)) return null; // SAF has no exists() — an unreadable doc is an absent one.
+        } catch (fallbackError) {
+            // A failed SAF read is absence only when the explicit info probe above confirms
+            // `exists: false`. If both read ladders fail, propagate that provider error:
+            // treating an unreadable opposite encryption generation as missing can license
+            // an ordinary sync write beside (or over) peer bytes.
+            if (isSaf(uri)) throw fallbackError;
             throw error;
         }
     }
@@ -146,7 +155,24 @@ const writeArtifactPayload = async (uri: string, payload: Uint8Array): Promise<v
     }
 };
 
-export const writeSyncArtifactBytes = async (uri: string, bytes: Uint8Array): Promise<void> => {
+export const writeSyncArtifactBytes = async (
+    uri: string,
+    bytes: Uint8Array,
+    options: { createOnly?: boolean } = {},
+): Promise<void> => {
+    if (options.createOnly) {
+        if (isSaf(uri)) throw new Error('SAF create-only writes must create through the directory handle');
+        const file = new ExpoFile(uri);
+        try {
+            file.create({ intermediates: true, overwrite: false });
+        } catch (error) {
+            const info = await FileSystem.getInfoAsync(uri).catch(() => ({ exists: false }));
+            if (info.exists) throw new SyncEncryptionRemoteConflictError(`${uri} was created by another writer`);
+            throw error;
+        }
+        file.write(bytes);
+        return;
+    }
     const isSealed = inspectSyncArtifact(bytes).kind === 'encrypted';
     if (isSealed) {
         // Ciphertext: pad up to the previous length instead of shrinking. Safe forever —
@@ -194,28 +220,51 @@ export const deleteSyncArtifact = async (uri: string): Promise<void> => {
 type DirectoryHandle = {
     /** leaf name -> uri, for entries that already exist. */
     entries: Map<string, string>;
+    /** Re-enumerates the provider and replaces `entries`; listing failures are terminal. */
+    refresh(): Promise<void>;
     resolve(name: string, options: { createIfMissing: boolean; mimeType?: string }): Promise<string | null>;
+    listExact(name: string): Promise<string[]>;
+    createNew(name: string, mimeType?: string): Promise<string>;
+    rename(uri: string, name: string): Promise<string>;
 };
 
 const openSafDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
     const entries = new Map<string, string>();
-    if (StorageAccessFramework?.readDirectoryAsync) {
-        try {
-            for (const entry of await StorageAccessFramework.readDirectoryAsync(dirUri)) {
-                const name = getLeafName(entry);
-                if (name && !entries.has(name)) entries.set(name, entry);
-            }
-        } catch (error) {
-            void logWarn('Failed to list SAF sync directory', {
-                scope: 'sync',
-                extra: { error: error instanceof Error ? error.message : String(error) },
-            });
+    const refresh = async (): Promise<void> => {
+        if (!StorageAccessFramework?.readDirectoryAsync) {
+            throw new Error('This Android build cannot enumerate SAF transition files.');
         }
-    }
+        const next = new Map<string, string>();
+        for (const entry of await StorageAccessFramework.readDirectoryAsync(dirUri)) {
+            const name = getLeafName(entry);
+            if (name && !next.has(name)) next.set(name, entry);
+        }
+        entries.clear();
+        for (const [name, uri] of next) entries.set(name, uri);
+    };
+    await refresh();
+    const listExact = async (name: string): Promise<string[]> => {
+        if (!StorageAccessFramework?.readDirectoryAsync) return [];
+        const matches = (await StorageAccessFramework.readDirectoryAsync(dirUri))
+            .filter((entry) => getLeafName(entry) === name);
+        if (matches.length === 1) entries.set(name, matches[0]);
+        else entries.delete(name);
+        return matches;
+    };
     return {
         entries,
+        refresh,
         resolve: async (name, options) => {
-            const existing = entries.get(name);
+            let existing = entries.get(name);
+            if (!existing && StorageAccessFramework?.readDirectoryAsync) {
+                for (const entry of await StorageAccessFramework.readDirectoryAsync(dirUri)) {
+                    if (getLeafName(entry) === name) {
+                        existing = entry;
+                        entries.set(name, entry);
+                        break;
+                    }
+                }
+            }
             if (existing) return existing;
             if (!options.createIfMissing || !StorageAccessFramework?.createFileAsync) return null;
             const created = await StorageAccessFramework.createFileAsync(
@@ -239,29 +288,112 @@ const openSafDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
             entries.set(name, created);
             return created;
         },
+        listExact,
+        createNew: async (name, mimeType = DEFAULT_ARTIFACT_MIME) => {
+            if (!StorageAccessFramework?.createFileAsync) {
+                throw new Error('This Android build cannot create SAF transition files.');
+            }
+            const created = await StorageAccessFramework.createFileAsync(dirUri, name, mimeType);
+            if (!created || getLeafName(created) !== name) {
+                if (created) await deleteSyncArtifact(created).catch(() => undefined);
+                throw new SyncEncryptionRemoteConflictError(`${name} was created or renamed by another writer`);
+            }
+            const matches = await listExact(name);
+            if (matches.length !== 1 || matches[0] !== created) {
+                await deleteSyncArtifact(created).catch(() => undefined);
+                throw new SyncEncryptionRemoteConflictError(`${name} was created by another writer`);
+            }
+            entries.set(name, created);
+            return created;
+        },
+        rename: async (uri, name) => {
+            const previousName = getLeafName(uri);
+            let renamed: { uri: string; name: string };
+            try {
+                renamed = await renameSafTransitionDocument(uri, name);
+            } catch (error) {
+                if ((await listExact(name)).length > 0) {
+                    throw new SyncEncryptionRemoteConflictError(`${name} was created by another writer`);
+                }
+                throw error;
+            }
+            entries.delete(previousName);
+            entries.set(name, renamed.uri);
+            return renamed.uri;
+        },
     };
 };
 
 const openPathDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
     const normalized = dirUri.endsWith('/') ? dirUri : `${dirUri}/`;
     const entries = new Map<string, string>();
-    try {
+    const refresh = async (): Promise<void> => {
+        const next = new Map<string, string>();
         for (const name of await FileSystem.readDirectoryAsync(normalized)) {
-            entries.set(name, `${normalized}${name}`);
+            next.set(name, `${normalized}${name}`);
         }
-    } catch {
-        // A missing attachments/ directory is normal; an unreadable sync dir surfaces on
-        // the first read/write instead.
-    }
+        entries.clear();
+        for (const [name, uri] of next) entries.set(name, uri);
+    };
+    await refresh();
+    const listExact = async (name: string): Promise<string[]> => {
+        const candidate = `${normalized}${name}`;
+        const info = await FileSystem.getInfoAsync(candidate).catch(() => ({ exists: false }));
+        if (info.exists) {
+            entries.set(name, candidate);
+            return [candidate];
+        }
+        entries.delete(name);
+        return [];
+    };
     return {
         entries,
+        refresh,
         resolve: async (name, options) => {
-            const existing = entries.get(name);
+            let existing = entries.get(name);
+            if (!existing) {
+                const candidate = `${normalized}${name}`;
+                const info = await FileSystem.getInfoAsync(candidate).catch(() => ({ exists: false }));
+                if (info.exists) {
+                    existing = candidate;
+                    entries.set(name, candidate);
+                }
+            }
             if (existing) return existing;
             if (!options.createIfMissing) return null;
             const uri = `${normalized}${name}`;
             entries.set(name, uri);
             return uri;
+        },
+        listExact,
+        createNew: async (name) => {
+            const uri = `${normalized}${name}`;
+            const file = new ExpoFile(uri);
+            try {
+                file.create({ intermediates: true, overwrite: false });
+            } catch (error) {
+                if ((await FileSystem.getInfoAsync(uri).catch(() => ({ exists: false }))).exists) {
+                    throw new SyncEncryptionRemoteConflictError(`${name} was created by another writer`);
+                }
+                throw error;
+            }
+            entries.set(name, uri);
+            return uri;
+        },
+        rename: async (uri, name) => {
+            const file = new ExpoFile(uri);
+            const previousName = getLeafName(uri);
+            try {
+                file.rename(name);
+            } catch (error) {
+                if ((await listExact(name)).length > 0) {
+                    throw new SyncEncryptionRemoteConflictError(`${name} was created by another writer`);
+                }
+                throw error;
+            }
+            entries.delete(previousName);
+            entries.set(name, file.uri);
+            return file.uri;
         },
     };
 };
@@ -269,14 +401,37 @@ const openPathDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
 const openDirectory = (dirUri: string): Promise<DirectoryHandle> =>
     isSaf(dirUri) ? openSafDirectory(dirUri) : openPathDirectory(dirUri);
 
+/** Native File Sync recovery also retains dated seed backups at the sync root. They are
+ *  authoritative document generations, not attachments: transitions rename them between the
+ *  `.json` and `.json.enc` names just like Rust does. Match Rust's case-insensitive contract
+ *  while preserving the provider's exact leaf for IO. */
+const isSeedBackupDocumentName = (name: string): boolean => {
+    const lower = name.toLowerCase();
+    return (lower.startsWith('mindwtr-backup-') || lower.startsWith('data-backup-'))
+        && (lower.endsWith('.json') || lower.endsWith('.json.enc'));
+};
+
 /** Document artifacts a mobile File Sync folder can hold. Mobile writes `data.json` and
- *  `data.json.bak`; the legacy name and desktop's `.enc` counterparts are included so a
- *  transition migrates (and a disable restores) everything a mixed desktop/mobile folder
- *  actually contains. */
+ *  `data.json.bak`; the legacy name, native seed backups, and desktop's `.enc` counterparts
+ *  are included so a transition migrates (and a disable restores) everything a mixed
+ *  desktop/mobile folder actually contains. */
 const isSyncDocumentName = (name: string): boolean => {
     const base = name.replace(/\.enc(\.bak|\.tmp|\.previous)?$/, '').replace(/\.(bak|tmp|previous)$/, '');
-    return base === SYNC_FILE_NAME || base === LEGACY_SYNC_FILE_NAME;
+    return base === SYNC_FILE_NAME || base === LEGACY_SYNC_FILE_NAME || isSeedBackupDocumentName(name);
 };
+
+const FIXED_SYNC_DOCUMENT_NAMES = [
+    SYNC_FILE_NAME,
+    `${SYNC_FILE_NAME}.enc`,
+    `${SYNC_FILE_NAME}.bak`,
+    `${SYNC_FILE_NAME}.enc.bak`,
+    `${SYNC_FILE_NAME}.bak.previous`,
+    `${SYNC_FILE_NAME}.enc.bak.previous`,
+    `${SYNC_FILE_NAME}.previous`,
+    `${SYNC_FILE_NAME}.enc.previous`,
+    LEGACY_SYNC_FILE_NAME,
+    `${LEGACY_SYNC_FILE_NAME}.enc`,
+] as const;
 
 export type FileSyncEncryptionTarget = {
     /** The directory holding data.json — SAF tree/document URI or a `file://` dir. */
@@ -320,12 +475,7 @@ export const resolveFileSyncEncryptionTarget = async (syncFileUri: string): Prom
         : normalized;
     if (!dirUri) return null;
     const attachmentsDirUri = `${dirUri}/${ATTACHMENTS_DIR_NAME}`;
-    let hasAttachments = false;
-    try {
-        hasAttachments = new ExpoDirectory(attachmentsDirUri).exists;
-    } catch {
-        hasAttachments = false;
-    }
+    const hasAttachments = (await openPathDirectory(dirUri)).entries.has(ATTACHMENTS_DIR_NAME);
     return { dirUri, attachmentsDirUri: hasAttachments ? attachmentsDirUri : null };
 };
 
@@ -350,26 +500,82 @@ export const resolveSyncArtifactSiblingUri = async (
 };
 
 const ATTACHMENT_PREFIX = `${ATTACHMENTS_DIR_NAME}/`;
+const DESKTOP_TRANSITION_STAGE_DIR_PREFIX = '.mindwtr-encryption-stage-';
+const DESKTOP_TRANSITION_QUARANTINE_DIR_PREFIX = '.mindwtr-encryption-quarantine-';
+const DESKTOP_RECOVERY_ENTRY_PREFIX = '.mindwtr-desktop-recovery-entry-';
+// Keep provider-facing scratch names bounded. Attachment names can be arbitrarily long,
+// and prefixing the canonical leaf made otherwise-valid transitions exceed SAF/provider
+// display-name limits. The timestamp/counter/random tuple remains collision-resistant
+// without inheriting user-controlled leaf length.
+const TRANSITION_SCRATCH_MARKER = '.mindwtr-et-';
+const ATTACHMENT_INSTALLER_LOCK_NAME = '.mindwtr-attachment-installer.lock';
+// Android and iOS derive this 32-hex identifier from the first half of the
+// SHA-256 of the native install target path. Keep this shape aligned with both
+// native AttachmentFileInstaller implementations: a retained artifact must
+// stop an encryption transition before any shared-folder mutation.
+const ATTACHMENT_INSTALLER_RECOVERY_ARTIFACT = /^\.mindwtr-install-[a-f0-9]{32}\.(?:journal|candidate|quarantine)$/;
+let transitionScratchCounter = 0;
+
+export type FileSyncTransitionMutationPoint = 'before-quarantine' | 'before-install' | 'before-remove-commit';
+export type FileSyncTransitionInventoryPoint = 'after-document-snapshot';
+export type FileSyncTransitionTestHooks = {
+    onMutationPoint?: (point: FileSyncTransitionMutationPoint, name: string) => void | Promise<void>;
+    onInventoryPoint?: (point: FileSyncTransitionInventoryPoint) => void | Promise<void>;
+};
+
+const transitionScratchName = (kind: 'stage' | 'quarantine'): string => {
+    transitionScratchCounter += 1;
+    const kindCode = kind === 'stage' ? 's' : 'q';
+    const nonce = Math.random().toString(36).slice(2, 10);
+    return `${TRANSITION_SCRATCH_MARKER}${kindCode}-${Date.now().toString(36)}-${transitionScratchCounter.toString(36)}-${nonce}`;
+};
+
+const isTransitionScratchName = (name: string): boolean => name.includes(TRANSITION_SCRATCH_MARKER);
+const isDesktopTransitionRecoveryDir = (name: string): boolean =>
+    name.startsWith(DESKTOP_TRANSITION_STAGE_DIR_PREFIX)
+    || name.startsWith(DESKTOP_TRANSITION_QUARANTINE_DIR_PREFIX);
+
+type ArtifactLocation = { directory: DirectoryHandle; leaf: string; mimeType: string };
 
 /**
  * Adapts a File Sync folder to core's generic transition port. Entry names are relative
  * to the sync root: `data.json`, `data.json.enc.bak`, `attachments/<id>.png`.
  *
- * ponytail: directory listings are captured once when the port is created and refreshed
- * only through this port's own writes — a transition is an explicit, exclusive
- * maintenance operation, so a concurrent external writer is out of scope here the same
- * way it is for the WebDAV/Dropbox ports.
+ * Transition mutations refresh the exact target name, then atomically rename the
+ * displaced generation into a same-directory quarantine before inspecting it. A racing
+ * peer therefore causes a conflict without being overwritten or deleted; staged and
+ * quarantined generations remain available for retry/recovery.
  */
 export const createFileSyncEncryptionRemotePort = async (
     syncFileUri: string,
+    testHooks: FileSyncTransitionTestHooks = {},
 ): Promise<SyncEncryptionRemotePort | null> => {
     const target = await resolveFileSyncEncryptionTarget(syncFileUri);
     if (!target) return null;
 
     const documents = await openDirectory(target.dirUri);
     const attachments = target.attachmentsDirUri ? await openDirectory(target.attachmentsDirUri) : null;
+    const desktopRecoveryLocations = new Map<string, ArtifactLocation>();
+
+    const collectDesktopRecoveryDirectory = async (dirUri: string): Promise<void> => {
+        const directory = await openDirectory(dirUri);
+        for (const [leaf, uri] of directory.entries) {
+            if (isDesktopTransitionRecoveryDir(leaf)) {
+                await collectDesktopRecoveryDirectory(uri);
+                continue;
+            }
+            const name = `${DESKTOP_RECOVERY_ENTRY_PREFIX}${desktopRecoveryLocations.size}`;
+            desktopRecoveryLocations.set(name, {
+                directory,
+                leaf,
+                mimeType: leaf.endsWith('.json') ? 'application/json' : DEFAULT_ARTIFACT_MIME,
+            });
+        }
+    };
 
     const locate = async (name: string, createIfMissing: boolean): Promise<string | null> => {
+        const recovery = desktopRecoveryLocations.get(name);
+        if (recovery) return recovery.directory.resolve(recovery.leaf, { createIfMissing: false });
         if (name.startsWith(ATTACHMENT_PREFIX)) {
             // Attachments are rewritten in place under their existing names (cloudKey is
             // identity-keyed and immutable), so a missing one is never created here.
@@ -381,37 +587,253 @@ export const createFileSyncEncryptionRemotePort = async (
         });
     };
 
-    return {
-        list: async (): Promise<SyncEncryptionRemoteEntry[]> => {
-            const entries: SyncEncryptionRemoteEntry[] = [];
-            for (const name of documents.entries.keys()) {
-                if (isSyncDocumentName(name)) entries.push({ name, kind: 'document' });
+    const locationFor = (name: string): ArtifactLocation | null => {
+        const recovery = desktopRecoveryLocations.get(name);
+        if (recovery) return recovery;
+        if (name.startsWith(ATTACHMENT_PREFIX)) {
+            if (!attachments) return null;
+            return {
+                directory: attachments,
+                leaf: name.slice(ATTACHMENT_PREFIX.length),
+                mimeType: DEFAULT_ARTIFACT_MIME,
+            };
+        }
+        return {
+            directory: documents,
+            leaf: name,
+            mimeType: name.endsWith('.json') ? 'application/json' : DEFAULT_ARTIFACT_MIME,
+        };
+    };
+
+    const versionFor = async (bytes: Uint8Array): Promise<string> => {
+        const digest = await computeSha256Hex(bytes);
+        if (!digest) throw new Error('sync encryption file transition requires SHA-256 support');
+        return `sha256:${digest}:length=${bytes.length}`;
+    };
+
+    const read = async (name: string) => {
+        const uri = await locate(name, false);
+        if (!uri) return { bytes: null, version: null };
+        const bytes = await readSyncArtifactBytes(uri);
+        if (!bytes) throw new Error(`sync encryption: failed to read existing artifact ${name}`);
+        return { bytes, version: await versionFor(bytes) };
+    };
+
+    const documentEntries = (): SyncEncryptionRemoteEntry[] => {
+        const names = new Set<string>(FIXED_SYNC_DOCUMENT_NAMES);
+        for (const name of documents.entries.keys()) {
+            if (isSyncDocumentName(name)) names.add(name);
+        }
+        return Array.from(names)
+            .sort((left, right) => left.localeCompare(right))
+            .map((name) => ({ name, kind: 'document' }));
+    };
+
+    const nonDocumentEntries = async (): Promise<SyncEncryptionRemoteEntry[]> => {
+        const entries: SyncEncryptionRemoteEntry[] = [];
+        desktopRecoveryLocations.clear();
+        for (const [name, uri] of documents.entries) {
+            if (ATTACHMENT_INSTALLER_RECOVERY_ARTIFACT.test(name)) {
+                throw new SyncEncryptionRemoteConflictError(
+                    'File Sync attachment publication recovery must finish before encryption transition',
+                );
             }
-            if (attachments) {
-                for (const name of attachments.entries.keys()) {
-                    entries.push({ name: `${ATTACHMENT_PREFIX}${name}`, kind: 'attachment' });
+            if (isDesktopTransitionRecoveryDir(name)) {
+                await collectDesktopRecoveryDirectory(uri);
+            } else if (isTransitionScratchName(name)) {
+                entries.push({ name, kind: 'attachment' });
+            }
+        }
+        if (attachments) {
+            await attachments.refresh();
+            for (const [name, uri] of attachments.entries) {
+                if (name === ATTACHMENT_INSTALLER_LOCK_NAME) continue;
+                if (ATTACHMENT_INSTALLER_RECOVERY_ARTIFACT.test(name)) {
+                    throw new SyncEncryptionRemoteConflictError(
+                        'File Sync attachment publication recovery must finish before encryption transition',
+                    );
+                }
+                if (isDesktopTransitionRecoveryDir(name)) {
+                    await collectDesktopRecoveryDirectory(uri);
+                    continue;
+                }
+                entries.push({ name: `${ATTACHMENT_PREFIX}${name}`, kind: 'attachment' });
+            }
+        }
+        for (const name of desktopRecoveryLocations.keys()) {
+            entries.push({ name, kind: 'attachment' });
+        }
+        return entries.sort((left, right) => left.name.localeCompare(right.name));
+    };
+
+    const readListedEntry = async (name: string): Promise<SyncEncryptionRemoteRead> => {
+        const current = await read(name);
+        if (!current.bytes || !current.version) {
+            throw new SyncEncryptionRemoteConflictError(`${name} disappeared during sync encryption inventory`);
+        }
+        return current;
+    };
+
+    const captureInventory = async (): Promise<SyncEncryptionRemoteInventory> => {
+        // Read/fingerprint the document generation first, then enumerate attachments. A peer
+        // generation that arrives before this read has its attachment included by the fresh
+        // listing below; one that arrives after it changes the final document fingerprint and
+        // aborts before core can mutate anything.
+        await documents.refresh();
+        const initialDocuments = documentEntries();
+        const snapshot = new Map<string, SyncEncryptionRemoteRead>();
+        for (const entry of initialDocuments) {
+            snapshot.set(entry.name, await read(entry.name));
+        }
+        await testHooks.onInventoryPoint?.('after-document-snapshot');
+
+        const remaining = await nonDocumentEntries();
+        for (const entry of remaining) {
+            snapshot.set(entry.name, await readListedEntry(entry.name));
+        }
+
+        await documents.refresh();
+        const confirmedDocuments = documentEntries();
+        if (
+            confirmedDocuments.length !== initialDocuments.length
+            || confirmedDocuments.some((entry, index) => entry.name !== initialDocuments[index]?.name)
+        ) {
+            throw new SyncEncryptionRemoteConflictError('sync document inventory changed during encryption transition');
+        }
+        for (const entry of initialDocuments) {
+            const current = await read(entry.name);
+            if (current.version !== snapshot.get(entry.name)?.version) {
+                throw new SyncEncryptionRemoteConflictError(`${entry.name} changed during sync encryption inventory`);
+            }
+        }
+        return { entries: [...initialDocuments, ...remaining], snapshot };
+    };
+
+    const restoreDisplacedGeneration = async (
+        location: { directory: DirectoryHandle; leaf: string; mimeType: string },
+        displaced: Uint8Array,
+    ): Promise<void> => {
+        // Never rename quarantine back onto the canonical name: providers may replace a
+        // peer that appeared after displacement. Exclusive create-and-copy restores the
+        // exact generation when the name is still free; any collision/failure leaves the
+        // authoritative bytes in quarantine for recovery.
+        try {
+            const restoredUri = await location.directory.createNew(location.leaf, location.mimeType);
+            await writeSyncArtifactBytes(restoredUri, displaced);
+            const canonical = await location.directory.listExact(location.leaf);
+            const restored = await readSyncArtifactBytes(restoredUri);
+            if (
+                canonical.length !== 1
+                || canonical[0] !== restoredUri
+                || !restored
+                || await versionFor(restored) !== await versionFor(displaced)
+            ) {
+                return;
+            }
+        } catch {
+            // The transition returns a conflict below. Suppressing restoration errors is
+            // intentional: deleting or replacing either generation would be less safe.
+        }
+    };
+
+    return {
+        list: async (): Promise<SyncEncryptionRemoteEntry[]> => (await captureInventory()).entries,
+        captureInventory,
+        read,
+        write: async (name, bytes, expectedVersion) => {
+            const current = await read(name);
+            if (current.version !== expectedVersion) {
+                throw new SyncEncryptionRemoteConflictError(`${name} changed during sync encryption transition`);
+            }
+            const location = locationFor(name);
+            if (!location) throw new Error(`sync encryption: cannot create ${name} in the sync folder`);
+            const stageName = transitionScratchName('stage');
+            const stageUri = await location.directory.createNew(stageName, location.mimeType);
+            await writeSyncArtifactBytes(stageUri, bytes);
+            const stagedBytes = await readSyncArtifactBytes(stageUri);
+            if (!stagedBytes || await versionFor(stagedBytes) !== await versionFor(bytes)) {
+                throw new SyncEncryptionRemoteConflictError(`${name} could not be verified after transition staging`);
+            }
+
+            let quarantineUri: string | null = null;
+            let quarantineName: string | null = null;
+            if (expectedVersion !== null) {
+                await testHooks.onMutationPoint?.('before-quarantine', name);
+                const exact = await location.directory.listExact(location.leaf);
+                if (exact.length !== 1) {
+                    throw new SyncEncryptionRemoteConflictError(`${name} changed during sync encryption transition`);
+                }
+                quarantineName = transitionScratchName('quarantine');
+                quarantineUri = await location.directory.rename(exact[0], quarantineName);
+                const displaced = await readSyncArtifactBytes(quarantineUri);
+                if (!displaced || await versionFor(displaced) !== expectedVersion) {
+                    if (displaced) await restoreDisplacedGeneration(location, displaced);
+                    throw new SyncEncryptionRemoteConflictError(`${name} changed during sync encryption transition`);
                 }
             }
-            return entries;
+
+            await testHooks.onMutationPoint?.('before-install', name);
+            // Final install is an exclusive create, not a rename. Android DocumentsProviders
+            // may alter rename names to resolve collisions and filesystem rename commonly
+            // replaces an existing target. createNew verifies the exact canonical name and
+            // therefore fails closed when a peer creates it after quarantine/staging.
+            const installedUri = await location.directory.createNew(location.leaf, location.mimeType);
+            await writeSyncArtifactBytes(installedUri, stagedBytes);
+            const canonical = await location.directory.listExact(location.leaf);
+            if (canonical.length !== 1 || canonical[0] !== installedUri) {
+                throw new SyncEncryptionRemoteConflictError(`${name} was created by another writer`);
+            }
+            const written = await readSyncArtifactBytes(installedUri);
+            if (!written || await versionFor(written) !== await versionFor(bytes)) {
+                throw new SyncEncryptionRemoteConflictError(`${name} could not be verified after transition write`);
+            }
+            if (quarantineUri) {
+                const retained = await readSyncArtifactBytes(quarantineUri);
+                if (!retained || await versionFor(retained) !== expectedVersion) {
+                    throw new SyncEncryptionRemoteConflictError(`${name} quarantine changed during sync encryption transition`);
+                }
+            }
+            await deleteSyncArtifact(stageUri);
+            location.directory.entries.delete(stageName);
+            if (quarantineUri && quarantineName) {
+                await deleteSyncArtifact(quarantineUri);
+                location.directory.entries.delete(quarantineName);
+            }
         },
-        read: async (name) => {
-            const uri = await locate(name, false);
-            if (!uri) return null;
-            return readSyncArtifactBytes(uri);
-        },
-        write: async (name, bytes) => {
-            const uri = await locate(name, true);
-            if (!uri) throw new Error(`sync encryption: cannot create ${name} in the sync folder`);
-            await writeSyncArtifactBytes(uri, bytes);
-        },
-        remove: async (name) => {
-            const uri = await locate(name, false);
-            if (!uri) return;
-            await deleteSyncArtifact(uri);
-            if (name.startsWith(ATTACHMENT_PREFIX)) attachments?.entries.delete(name.slice(ATTACHMENT_PREFIX.length));
-            else documents.entries.delete(name);
+        remove: async (name, expectedVersion) => {
+            const current = await read(name);
+            if (current.version !== expectedVersion) {
+                throw new SyncEncryptionRemoteConflictError(`${name} changed during sync encryption transition`);
+            }
+            const location = locationFor(name);
+            if (!location) throw new SyncEncryptionRemoteConflictError(`${name} disappeared during sync encryption transition`);
+            await testHooks.onMutationPoint?.('before-quarantine', name);
+            const exact = await location.directory.listExact(location.leaf);
+            if (exact.length !== 1) throw new SyncEncryptionRemoteConflictError(`${name} changed during sync encryption transition`);
+            const quarantineName = transitionScratchName('quarantine');
+            const quarantineUri = await location.directory.rename(exact[0], quarantineName);
+            const displaced = await readSyncArtifactBytes(quarantineUri);
+            if (!displaced || await versionFor(displaced) !== expectedVersion) {
+                if (displaced) await restoreDisplacedGeneration(location, displaced);
+                throw new SyncEncryptionRemoteConflictError(`${name} changed during sync encryption transition`);
+            }
+            await testHooks.onMutationPoint?.('before-remove-commit', name);
+            if ((await location.directory.listExact(location.leaf)).length !== 0) {
+                throw new SyncEncryptionRemoteConflictError(`${name} was recreated by another writer`);
+            }
+            const retained = await readSyncArtifactBytes(quarantineUri);
+            if (!retained || await versionFor(retained) !== expectedVersion) {
+                throw new SyncEncryptionRemoteConflictError(`${name} quarantine changed during sync encryption transition`);
+            }
+            await deleteSyncArtifact(quarantineUri);
+            location.directory.entries.delete(quarantineName);
+            location.directory.entries.delete(location.leaf);
         },
     };
 };
 
-export const __storageFileEncryptionTestUtils = { getLeafName, isSyncDocumentName };
+export const __storageFileEncryptionTestUtils = {
+    getLeafName,
+    isSeedBackupDocumentName,
+    isSyncDocumentName,
+};

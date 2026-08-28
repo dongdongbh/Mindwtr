@@ -471,7 +471,7 @@ describe('TaskEditModal', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
-  it('can save from the discard confirmation', () => {
+  it('can save from the discard confirmation', async () => {
     const onClose = vi.fn();
     const onSave = vi.fn();
     let tree: renderer.ReactTestRenderer;
@@ -509,15 +509,15 @@ describe('TaskEditModal', () => {
 
     const buttons = (alertSpy.mock.calls[0]?.[2] ?? []) as { text?: string; onPress?: () => void }[];
 
-    act(() => {
-      buttons[2]?.onPress?.();
+    await act(async () => {
+      await buttons[2]?.onPress?.();
     });
 
     expect(onSave).toHaveBeenCalledWith('t1', expect.objectContaining({ title: 'Changed task' }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps quick-add-looking text literal when saving an existing task title', () => {
+  it('keeps quick-add-looking text literal when saving an existing task title', async () => {
     const onClose = vi.fn();
     const onSave = vi.fn();
     let tree: renderer.ReactTestRenderer;
@@ -551,8 +551,8 @@ describe('TaskEditModal', () => {
       typeof node.props.onDone === 'function'
       && typeof node.props.onDelete === 'function'
     );
-    act(() => {
-      header.props.onDone();
+    await act(async () => {
+      await header.props.onDone();
     });
 
     expect(onSave).toHaveBeenCalledWith('t1', expect.objectContaining({
@@ -565,7 +565,7 @@ describe('TaskEditModal', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('saves clearing a project and moving the task to an area in one edit', () => {
+  it('saves clearing a project and moving the task to an area in one edit', async () => {
     const onClose = vi.fn();
     const onSave = vi.fn();
     let tree: renderer.ReactTestRenderer;
@@ -603,8 +603,8 @@ describe('TaskEditModal', () => {
       typeof node.props.onDone === 'function'
       && typeof node.props.onDelete === 'function'
     );
-    act(() => {
-      header.props.onDone();
+    await act(async () => {
+      await header.props.onDone();
     });
 
     expect(onSave).toHaveBeenCalledWith('t1', expect.objectContaining({
@@ -668,7 +668,7 @@ describe('TaskEditModal', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the project area when clearing a task project', () => {
+  it('keeps the project area when clearing a task project', async () => {
     const onClose = vi.fn();
     const onSave = vi.fn();
     let tree: renderer.ReactTestRenderer;
@@ -712,8 +712,8 @@ describe('TaskEditModal', () => {
       typeof node.props.onDone === 'function'
       && typeof node.props.onDelete === 'function'
     );
-    act(() => {
-      header.props.onDone();
+    await act(async () => {
+      await header.props.onDone();
     });
 
     expect(onSave).toHaveBeenCalledWith('t1', expect.objectContaining({
@@ -724,7 +724,7 @@ describe('TaskEditModal', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('does not overwrite an explicit task area when clearing a task project', () => {
+  it('does not overwrite an explicit task area when clearing a task project', async () => {
     const onClose = vi.fn();
     const onSave = vi.fn();
     let tree: renderer.ReactTestRenderer;
@@ -769,8 +769,8 @@ describe('TaskEditModal', () => {
       typeof node.props.onDone === 'function'
       && typeof node.props.onDelete === 'function'
     );
-    act(() => {
-      header.props.onDone();
+    await act(async () => {
+      await header.props.onDone();
     });
 
     expect(onSave).toHaveBeenCalledWith('t1', expect.objectContaining({
@@ -782,7 +782,7 @@ describe('TaskEditModal', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('does not prompt after reopening a task that was just saved', () => {
+  it('does not prompt after reopening a task that was just saved', async () => {
     const onClose = vi.fn();
     const onSave = vi.fn();
     const initialTask = {
@@ -825,8 +825,8 @@ describe('TaskEditModal', () => {
     });
 
     const buttons = (alertSpy.mock.calls[0]?.[2] ?? []) as { text?: string; onPress?: () => void }[];
-    act(() => {
-      buttons[2]?.onPress?.();
+    await act(async () => {
+      await buttons[2]?.onPress?.();
     });
 
     expect(onSave).toHaveBeenCalledWith('t1', expect.objectContaining({ title: 'Changed task' }));
@@ -1179,6 +1179,23 @@ describe('TaskEditModal', () => {
       });
       expect(tree.root.findByType(TaskEditCustomRecurrenceModal).props.customMode).toBe('date');
       expect(tree.root.findByType(TaskEditCustomRecurrenceModal).props.customMonthDays).toEqual([1, 16]);
+    });
+
+    it('round-trips a mixed last-day and numbered-day rule', async () => {
+      const { tree, fieldProps } = await openEditor({
+        rule: 'monthly',
+        strategy: 'strict',
+        byMonthDay: [-1, 15],
+        rrule: 'FREQ=MONTHLY;BYMONTHDAY=-1,15',
+      });
+
+      const modal = tree.root.findByType(TaskEditCustomRecurrenceModal);
+      expect(modal.props.customMode).toBe('date');
+      expect(modal.props.customMonthDays).toEqual([-1, 15]);
+
+      pressChip(tree, 'common.save');
+
+      expect(fieldProps().recurrenceRRuleValue).toBe('FREQ=MONTHLY;BYMONTHDAY=-1,15');
     });
 
     it('keeps the last selected month day when its chip is tapped again', async () => {

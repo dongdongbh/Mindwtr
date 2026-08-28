@@ -26,6 +26,7 @@ const fileSystemMock = vi.hoisted(() => {
     },
     getInfoAsync: vi.fn().mockResolvedValue({ exists: false }),
     readAsStringAsync: vi.fn(),
+    readDirectoryAsync: vi.fn(),
     writeAsStringAsync: vi.fn(),
     copyAsync: vi.fn(),
     deleteAsync: vi.fn(),
@@ -128,6 +129,8 @@ describe('storage-file sync writes', () => {
     vi.clearAllMocks();
     fileSystemMock.__setStoredText('');
     expoFilesMock.clear();
+    fileSystemMock.StorageAccessFramework.readDirectoryAsync.mockResolvedValue([]);
+    fileSystemMock.readDirectoryAsync.mockResolvedValue([]);
   });
 
   it('pads shorter SAF writes so stale bytes cannot corrupt data.json', async () => {
@@ -190,6 +193,14 @@ describe('storage-file sync writes', () => {
     expect(JSON.parse(fileSystemMock.__getStoredText())).toEqual(nextData);
   }, 10_000);
 
+  it('fails closed when the encrypted-sibling discovery listing is unavailable', async () => {
+    fileSystemMock.StorageAccessFramework.readDirectoryAsync.mockRejectedValue(
+      new Error('provider listing denied')
+    );
+
+    await expect(readSyncFile(syncFileUri)).rejects.toThrow('provider listing denied');
+  }, 10_000);
+
   it('completes Android folder setup when the test-file content write fails after creation', async () => {
     const treeUri = 'content://com.chiller3.rsaf.documents/tree/remote%3AStaleCheck';
     const dataUri = `${treeUri}/document/remote%3AStaleCheck%2Fdata.json`;
@@ -216,6 +227,8 @@ describe('iOS sync file bookmarks', () => {
     vi.clearAllMocks();
     fileSystemMock.__setStoredText('');
     expoFilesMock.clear();
+    fileSystemMock.StorageAccessFramework.readDirectoryAsync.mockResolvedValue([]);
+    fileSystemMock.readDirectoryAsync.mockResolvedValue([]);
     bookmarkMocks.supportsBookmarkedSyncFileIO.mockReturnValue(false);
     bookmarkMocks.createSyncPathBookmark.mockResolvedValue(null);
     (Platform as { OS: string }).OS = 'ios';

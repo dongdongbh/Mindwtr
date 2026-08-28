@@ -218,7 +218,10 @@ export const TaskItem = memo(function TaskItem({
         editLinkAttachment,
         removeAttachment,
         openAttachment,
+        beginAttachmentSave,
+        cancelAttachmentSaveBeforeStoreUpdate,
         resetAttachmentState,
+        settlePersistedAttachmentSave,
     } = attachments;
     const {
         draft,
@@ -704,6 +707,9 @@ export const TaskItem = memo(function TaskItem({
         t,
         task,
         updateTask,
+        beginAttachmentSave,
+        cancelAttachmentSaveBeforeStoreUpdate,
+        settlePersistedAttachmentSave,
     });
 
     const project = currentProject;

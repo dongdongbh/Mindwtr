@@ -244,6 +244,69 @@ describe('mobile data transfer', () => {
     }
   });
 
+  it('re-authors restored snapshots above current revisions and carries current-only tombstones', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-09T12:34:05.123Z'));
+    try {
+      const snapshotName = 'data.2026-08-08T12-00-00.000.snapshot.json';
+      const task = {
+        id: 'restored-task',
+        title: 'Restored task',
+        status: 'next' as const,
+        tags: [],
+        contexts: [],
+        createdAt: '2026-08-01T00:00:00.000Z',
+        updatedAt: '2026-08-01T00:00:00.000Z',
+      };
+      const snapshot: AppData = {
+        ...emptyData,
+        tasks: [{ ...task, rev: 1, revBy: 'snapshot-device' }],
+      };
+      const current: AppData = {
+        ...emptyData,
+        tasks: [
+          {
+            ...task,
+            rev: 10,
+            revBy: 'current-device',
+            deletedAt: '2026-08-08T00:00:00.000Z',
+          },
+          {
+            ...task,
+            id: 'current-only-task',
+            title: 'Current only',
+            rev: 7,
+            revBy: 'current-device',
+          },
+        ],
+      };
+      fileSystemMocks.fileContents.set(
+        `file://document/snapshots/${snapshotName}`,
+        JSON.stringify(snapshot),
+      );
+      storageMocks.getData.mockResolvedValue(current);
+
+      await restoreLocalDataSnapshot(snapshotName);
+
+      const saved = storageMocks.saveData.mock.calls[0]?.[0] as AppData;
+      const restoredTask = saved.tasks.find((item) => item.id === task.id);
+      expect(restoredTask).toMatchObject({
+        title: 'Restored task',
+        rev: 11,
+        revBy: 'backup-restore',
+      });
+      expect(restoredTask?.deletedAt).toBeUndefined();
+      expect(saved.tasks.find((item) => item.id === 'current-only-task')).toMatchObject({
+        rev: 8,
+        revBy: 'backup-restore',
+        deletedAt: '2026-08-09T12:34:05.123Z',
+      });
+      expect(saved.settings.pendingRemoteWriteAt).toBe('2026-08-09T12:34:05.123Z');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not write a recovery snapshot from a stale local read', async () => {
     storageMocks.getData.mockImplementation(async () => {
       storeStateRef.current = {

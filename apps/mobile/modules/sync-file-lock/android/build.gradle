@@ -1,0 +1,30 @@
+apply plugin: 'com.android.library'
+
+def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
+
+apply from: expoModulesCorePlugin
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useDefaultAndroidSdkVersions()
+
+android {
+  namespace "tech.dongdongbh.mindwtr.syncfilelock"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+    externalNativeBuild {
+      cmake {
+        cppFlags "-std=c++17 -Wall -Wextra -Werror"
+      }
+    }
+  }
+  externalNativeBuild {
+    cmake {
+      path "src/main/cpp/CMakeLists.txt"
+    }
+  }
+}
+
+dependencies {
+  testImplementation 'junit:junit:4.13.2'
+}

@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createCorePersistenceService } from './core-adapter.js';
+import { createCorePersistenceService, type WriteTransactionRunner } from './core-adapter.js';
 
 const iso = '2026-07-22T00:00:00.000Z';
 
 const createHarness = (adapter: {
   saveTask: (task: Record<string, unknown>) => Promise<void>;
   saveData: () => Promise<void>;
-}) => {
+}, runWriteTransaction?: WriteTransactionRunner) => {
   let trackedSaves: Set<Promise<void>> | null = null;
   const task = {
     id: 'task-1',
@@ -64,10 +64,37 @@ const createHarness = (adapter: {
       }
     },
   };
-  return { service: createCorePersistenceService(core), state };
+  return { service: createCorePersistenceService(core, runWriteTransaction), state };
 };
 
 describe('MCP core write persistence contract', () => {
+  test('keeps reload, mutation, and flush inside the write transaction', async () => {
+    const events: string[] = [];
+    const runWriteTransaction: WriteTransactionRunner = async (operation) => {
+      events.push('lock:enter');
+      try {
+        return await operation();
+      } finally {
+        events.push('lock:exit');
+      }
+    };
+    const { service, state } = createHarness({
+      saveTask: async () => { events.push('save:task'); },
+      saveData: async () => { events.push('save:flush'); },
+    }, runWriteTransaction);
+    state.fetchData = async () => { events.push('reload'); };
+
+    await service.updateTask({ id: 'task-1', updates: { title: 'Updated' } });
+
+    expect(events).toEqual([
+      'lock:enter',
+      'reload',
+      'save:task',
+      'save:flush',
+      'lock:exit',
+    ]);
+  });
+
   test('returns confirmed task writes with corruption guidance while project writes fail', async () => {
     const storageError = new Error('database disk image is malformed');
     const { service } = createHarness({

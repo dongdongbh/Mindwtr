@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Platform } from 'react-native';
+import { SyncRemoteMutationFenceLostError } from '@mindwtr/core';
 
 import * as syncServiceModule from './sync-service';
 
@@ -68,6 +69,7 @@ const dropboxSyncMocks = vi.hoisted(() => ({
 
 const storageFileMocks = vi.hoisted(() => ({
   readSyncFile: vi.fn(),
+  readSyncFileVersioned: vi.fn(),
   resolveSyncFileUri: vi.fn(),
   writeSyncFile: vi.fn(),
 }));
@@ -94,6 +96,9 @@ const storeStateRef = vi.hoisted(() => ({
 }));
 
 const coreMocks = vi.hoisted(() => ({
+  acquireSyncRemoteMutationFence: vi.fn(),
+  createDropboxSyncRemoteMutationFencePort: vi.fn(),
+  createWebdavSyncRemoteMutationFencePort: vi.fn(),
   webdavGetJson: vi.fn(),
   webdavHeadFile: vi.fn(),
   webdavPutJson: vi.fn(),
@@ -185,6 +190,7 @@ vi.mock('./dropbox-sync', () => ({
 
 vi.mock('./storage-file', () => ({
   readSyncFile: storageFileMocks.readSyncFile,
+  readSyncFileVersioned: storageFileMocks.readSyncFileVersioned,
   resolveSyncFileUri: storageFileMocks.resolveSyncFileUri,
   writeSyncFile: storageFileMocks.writeSyncFile,
 }));
@@ -205,6 +211,9 @@ vi.mock('@mindwtr/core', async () => {
   const actual = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
   return {
     ...actual,
+    acquireSyncRemoteMutationFence: coreMocks.acquireSyncRemoteMutationFence,
+    createDropboxSyncRemoteMutationFencePort: coreMocks.createDropboxSyncRemoteMutationFencePort,
+    createWebdavSyncRemoteMutationFencePort: coreMocks.createWebdavSyncRemoteMutationFencePort,
     webdavGetJson: coreMocks.webdavGetJson,
     webdavHeadFile: coreMocks.webdavHeadFile,
     webdavPutJson: coreMocks.webdavPutJson,
@@ -256,7 +265,13 @@ describe('mobile Dropbox sync transient retry', () => {
 
     storageMocks.getData.mockResolvedValue(emptyData);
     storageMocks.saveData.mockResolvedValue(undefined);
-    storageFileMocks.readSyncFile.mockResolvedValue(null);
+  storageFileMocks.readSyncFile.mockResolvedValue(null);
+  storageFileMocks.readSyncFileVersioned.mockResolvedValue({
+    data: emptyData,
+    fingerprint: 'file:v1:absent',
+    source: 'empty',
+    needsRepair: true,
+  });
     storageFileMocks.resolveSyncFileUri.mockImplementation(async (uri: string) => uri);
     storageFileMocks.writeSyncFile.mockResolvedValue(undefined);
     syncPathBookmarkMocks.resolveSyncPathBookmark.mockResolvedValue(null);
@@ -297,6 +312,13 @@ describe('mobile Dropbox sync transient retry', () => {
     logMocks.logSyncError.mockResolvedValue(null);
 
     coreMocks.flushPendingSave.mockResolvedValue(undefined);
+    coreMocks.createWebdavSyncRemoteMutationFencePort.mockReturnValue({ provider: 'webdav-fence-port' });
+    coreMocks.createDropboxSyncRemoteMutationFencePort.mockReturnValue({ provider: 'dropbox-fence-port' });
+    coreMocks.acquireSyncRemoteMutationFence.mockResolvedValue({
+      assertHeld: vi.fn().mockResolvedValue(undefined),
+      renew: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn().mockResolvedValue(undefined),
+    });
     // Delay-free withRetry that honors maxAttempts/shouldRetry/onRetry, so the
     // tests exercise the real retry policy without sleeping through backoff.
     coreMocks.withRetry.mockImplementation(async (
@@ -352,6 +374,52 @@ describe('mobile Dropbox sync transient retry', () => {
     );
   });
 
+  it('enables steady-state attachment content checks for Dropbox', async () => {
+    dropboxSyncMocks.downloadDropboxAppData.mockResolvedValue({ data: emptyData, rev: 'rev-1' });
+
+    const result = await syncServiceModule.performMobileSync();
+
+    expect(result.success).toBe(true);
+    expect(attachmentSyncMocks.hasPendingAttachmentSyncWork).toHaveBeenCalledWith(
+      expect.anything(),
+      { contentCheckEnabled: true },
+    );
+  });
+
+  it('stops a Dropbox activation document retry when the lease is replaced', async () => {
+      const assertHeld = vi.fn(async () => {
+        if (dropboxSyncMocks.uploadDropboxAppData.mock.calls.length >= 1) {
+          throw new SyncRemoteMutationFenceLostError();
+        }
+      });
+      coreMocks.acquireSyncRemoteMutationFence.mockResolvedValue({
+        assertHeld,
+        renew: vi.fn().mockResolvedValue(undefined),
+        retryAfterMs: () => 0,
+        release: vi.fn().mockResolvedValue(undefined),
+      });
+      dropboxSyncMocks.uploadDropboxAppData
+        .mockRejectedValueOnce(new TypeError('Network request failed'))
+        .mockResolvedValue({ rev: 'must-not-write' });
+      attachmentSyncMocks.hasPendingAttachmentSyncWork.mockResolvedValue(true);
+      const changedData = { ...emptyData, settings: { theme: 'dark' } };
+      coreMocks.performSyncCycle.mockImplementationOnce(async (io: any) => {
+        await io.readLocal();
+        await io.readRemote();
+        await io.writeRemote(changedData);
+        return { status: 'success', stats: emptyStats, data: changedData };
+      });
+
+      const result = await syncServiceModule.performMobileSync(undefined, {
+        activationProbe: true,
+        manual: true,
+      });
+
+      expect(dropboxSyncMocks.uploadDropboxAppData).toHaveBeenCalledTimes(1);
+      expect(assertHeld).toHaveBeenCalledWith(35_000);
+      expect(result).not.toEqual({ success: true, stats: emptyStats });
+  });
+
   it('stops after bounded retries and records the underlying error in the offline skip log', async () => {
     dropboxSyncMocks.downloadDropboxAppData.mockRejectedValue(new TypeError('Network request failed'));
 
@@ -403,15 +471,28 @@ describe('mobile Dropbox sync transient retry', () => {
     });
 
     expect(result.success).toBe(true);
+    expect(coreMocks.createDropboxSyncRemoteMutationFencePort).toHaveBeenCalledWith(
+      'candidate-access-token',
+      expect.any(Function),
+      expect.objectContaining({ timeoutMs: 30_000 }),
+    );
+    expect(coreMocks.acquireSyncRemoteMutationFence).toHaveBeenCalledWith(
+      { provider: 'dropbox-fence-port' },
+      { ownerId: 'mindwtr-mobile', purpose: 'ordinary-sync' },
+    );
     expect(dropboxSyncMocks.downloadDropboxAppData).toHaveBeenNthCalledWith(
       1,
       'candidate-access-token',
       expect.any(Function),
+      {},
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(dropboxSyncMocks.downloadDropboxAppData).toHaveBeenNthCalledWith(
       2,
       'candidate-refreshed-token',
       expect.any(Function),
+      {},
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(dropboxAuthMocks.getValidDropboxAccessTokenForTokens).toHaveBeenCalledWith(
       'test-app-key',

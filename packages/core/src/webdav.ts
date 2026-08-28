@@ -2,7 +2,9 @@ import {
     DEFAULT_TIMEOUT_MS,
     assertConnectionAllowed,
     createProgressStream,
+    discardResponseBody,
     fetchWithTimeout,
+    fetchWithTimeoutAndConsume,
     MAX_ERROR_BODY_BYTES,
     MAX_DOWNLOAD_BYTES,
     MAX_SYNC_DOCUMENT_BYTES,
@@ -12,8 +14,15 @@ import {
     toUint8Array,
 } from './http-utils';
 import { logWarn } from './logger';
-import { decryptRemoteArtifactOrThrow, detectForeignSaltArtifact, isPlaintextSyncArtifact, syncEncryptedArtifactName } from './sync-encryption';
-import { encryptSyncArtifact, inspectSyncArtifact, type SyncCryptoPrimitives, type SyncKeyMaterial } from './sync-crypto';
+import {
+    decryptRemoteArtifactOrThrow,
+    detectForeignSaltArtifact,
+    isPlaintextSyncArtifact,
+    SyncEncryptionTerminalError,
+    SyncEncryptionRemoteVersionUnavailableError,
+    syncEncryptedArtifactName,
+} from './sync-encryption';
+import { encryptSyncArtifact, inspectSyncArtifact, SyncCryptoUnsupportedError, type SyncCryptoPrimitives, type SyncKeyMaterial } from './sync-crypto';
 
 export interface WebDavOptions {
     /** Download ceiling for this call. Defaults to the per-attachment cap; the sync
@@ -39,6 +48,64 @@ export type RemoteFileMetadata = {
 };
 
 export type RemoteJsonWriteResult = RemoteFileMetadata;
+
+export type WebDavDocumentVersion = {
+    exists: boolean;
+    /** A syntactically valid strong ETag, or null when the server did not supply one. */
+    strongEtag: string | null;
+};
+
+export const WEBDAV_REMOTE_WRITE_CONFLICT = 'WEBDAV_REMOTE_WRITE_CONFLICT';
+
+export class WebDavRemoteWriteConflictError extends Error {
+    readonly status: number;
+
+    constructor(status: number) {
+        super(`${WEBDAV_REMOTE_WRITE_CONFLICT}: WebDAV document changed before replacement (${status})`);
+        this.name = 'WebDavRemoteWriteConflictError';
+        this.status = status;
+    }
+}
+
+export const isWebdavRemoteWriteConflictError = (error: unknown): boolean => (
+    error instanceof WebDavRemoteWriteConflictError
+    || (error instanceof Error ? error.message : String(error ?? '')).includes(WEBDAV_REMOTE_WRITE_CONFLICT)
+);
+
+const WEBDAV_VERSION_MARKER = 'mindwtr-webdav-version';
+
+class WebDavSyncDocumentReadError extends Error {
+    constructor(message: string, readonly documentVersion: WebDavDocumentVersion) {
+        super(message);
+        this.name = 'WebDavSyncDocumentReadError';
+    }
+}
+
+/** Accept only RFC-style strong entity tags. Weak, unquoted, empty, or control-bearing
+ * values are not safe compare-and-swap validators. */
+export const normalizeStrongWebdavEtag = (raw: string | null | undefined): string | null => {
+    const value = raw?.trim() ?? '';
+    if (value.length < 2 || /^W\//i.test(value) || value[0] !== '"' || value[value.length - 1] !== '"') {
+        return null;
+    }
+    const opaque = value.slice(1, -1);
+    for (const char of opaque) {
+        const code = char.charCodeAt(0);
+        if (char === '"' || code < 0x21 || code === 0x7f) return null;
+    }
+    return value;
+};
+
+/** Native WebDAV appends the same marker to invalid-JSON errors so the renderer can
+ * preserve the GET validator before the shared repair path catches the error. */
+export const getWebdavDocumentVersionFromError = (error: unknown): WebDavDocumentVersion | null => {
+    if (error instanceof WebDavSyncDocumentReadError) return error.documentVersion;
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    const match = new RegExp(`\\[${WEBDAV_VERSION_MARKER}:(missing|existing)(?::(none|"[^"]*"))?\\]`).exec(message);
+    if (!match) return null;
+    if (match[1] === 'missing') return { exists: false, strongEtag: null };
+    return { exists: true, strongEtag: normalizeStrongWebdavEtag(match[2] === 'none' ? null : match[2]) };
+};
 
 const MAX_WEBDAV_MKCOL_DEPTH = 32;
 
@@ -245,12 +312,16 @@ const createWebdavCollection = async (
     options: WebDavOptions,
 ): Promise<Response> => {
     const fetcher = options.fetcher ?? fetch;
-    return fetchWithTimeout(
+    return fetchWithTimeoutAndConsume(
         normalizeWebdavCollectionUrl(url),
         { method: 'MKCOL', headers: buildHeaders(options) },
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         WEBDAV_TIMEOUT_ERROR,
+        async (response, signal) => {
+            await discardResponseBody(response, signal);
+            return response;
+        },
     );
 };
 
@@ -259,7 +330,7 @@ const webdavCollectionExists = async (
     options: WebDavOptions,
 ): Promise<boolean> => {
     const fetcher = options.fetcher ?? fetch;
-    const res = await fetchWithTimeout(
+    return await fetchWithTimeoutAndConsume(
         normalizeWebdavCollectionUrl(url),
         {
             method: 'PROPFIND',
@@ -271,13 +342,20 @@ const webdavCollectionExists = async (
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         WEBDAV_TIMEOUT_ERROR,
+        async (res, signal) => {
+            if (res.status === 404) {
+                await discardResponseBody(res, signal);
+                return false;
+            }
+            if (res.ok || res.status === 405) {
+                await discardResponseBody(res, signal);
+                return true;
+            }
+            const error = new Error(`WebDAV PROPFIND failed (${res.status})`);
+            (error as { status?: number }).status = res.status;
+            throw error;
+        },
     );
-
-    if (res.status === 404) return false;
-    if (res.ok || res.status === 405) return true;
-    const error = new Error(`WebDAV PROPFIND failed (${res.status})`);
-    (error as { status?: number }).status = res.status;
-    throw error;
 };
 
 const probeWebdavCollectionExists = async (
@@ -362,29 +440,7 @@ const ensureWebdavParentCollections = async (
     await ensureWebdavCollectionExists(parentUrl, options);
 };
 
-export async function webdavGetJson<T>(
-    url: string,
-    options: WebDavOptions = {}
-): Promise<T | null> {
-    assertWebdavUrl(url, options);
-    const fetcher = options.fetcher ?? fetch;
-    const res = await fetchWithTimeout(
-        url,
-        buildReadRequestInit(options, 'GET'),
-        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-        fetcher,
-        WEBDAV_TIMEOUT_ERROR,
-    );
-
-    if (res.status === 404) return null;
-    if (!res.ok) {
-        const text = await readResponseText(res, MAX_ERROR_BODY_BYTES).catch(() => '');
-        const error = new Error(`WebDAV GET failed (${res.status}): ${text || res.statusText}`);
-        (error as { status?: number }).status = res.status;
-        throw error;
-    }
-
-    const text = await readResponseText(res, options.maxBytes ?? MAX_SYNC_DOCUMENT_BYTES);
+const parseOptionalWebdavJson = <T>(text: string): T | null => {
     const normalizedBody = text.startsWith(UTF8_BOM) ? text.slice(1).trim() : text.trim();
     if (!normalizedBody) return null;
     try {
@@ -392,6 +448,33 @@ export async function webdavGetJson<T>(
     } catch (error) {
         throw new Error(`WebDAV GET failed: invalid JSON (${(error as Error).message})`);
     }
+};
+
+export async function webdavGetJson<T>(
+    url: string,
+    options: WebDavOptions = {}
+): Promise<T | null> {
+    assertWebdavUrl(url, options);
+    const fetcher = options.fetcher ?? fetch;
+    return await fetchWithTimeoutAndConsume(
+        url,
+        buildReadRequestInit(options, 'GET'),
+        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        fetcher,
+        WEBDAV_TIMEOUT_ERROR,
+        async (res, signal) => {
+            if (res.status === 404) return null;
+            if (!res.ok) {
+                const text = await readResponseText(res, MAX_ERROR_BODY_BYTES, signal).catch(() => '');
+                const error = new Error(`WebDAV GET failed (${res.status}): ${text || res.statusText}`);
+                (error as { status?: number }).status = res.status;
+                throw error;
+            }
+
+            const text = await readResponseText(res, options.maxBytes ?? MAX_SYNC_DOCUMENT_BYTES, signal);
+            return parseOptionalWebdavJson<T>(text);
+        },
+    );
 }
 
 export async function webdavPutJson(
@@ -406,7 +489,7 @@ export async function webdavPutJson(
     headers[WEBDAV_AUTOMKCOL_HEADER] = headers[WEBDAV_AUTOMKCOL_HEADER] || '1';
 
     const payload = JSON.stringify(data, null, 2);
-    const sendPut = async (): Promise<Response> => fetchWithTimeout(
+    const sendPut = async (): Promise<WebDavPutResponse> => fetchWebdavPutAndConsumeError(
         url,
         {
             method: 'PUT',
@@ -414,9 +497,8 @@ export async function webdavPutJson(
             body: payload,
             signal: options.signal,
         },
-        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
-        WEBDAV_TIMEOUT_ERROR,
+        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     );
 
     let res = await sendPut();
@@ -426,8 +508,14 @@ export async function webdavPutJson(
     }
 
     if (!res.ok) {
-        const text = await readResponseText(res, MAX_ERROR_BODY_BYTES).catch(() => '');
-        const error = new Error(`WebDAV PUT failed (${res.status}): ${text || res.statusText}`);
+        const isConditionalWrite = Object.keys(headers).some((name) => {
+            const normalized = name.toLowerCase();
+            return normalized === 'if-match' || normalized === 'if-none-match';
+        });
+        if (isConditionalWrite && (res.status === 409 || res.status === 412)) {
+            throw new WebDavRemoteWriteConflictError(res.status);
+        }
+        const error = new Error(`WebDAV PUT failed (${res.status}): ${res.errorText || res.statusText}`);
         (error as { status?: number }).status = res.status;
         throw error;
     }
@@ -437,16 +525,93 @@ export async function webdavPutJson(
     });
 }
 
-/** Like webdavGetFile, but a 404 resolves to `null` instead of throwing — the common
- *  "nothing there yet" shape the sync-document helpers below need to branch on. */
-async function webdavGetFileOrNull(url: string, options: WebDavOptions): Promise<Uint8Array | null> {
-    try {
-        return new Uint8Array(await webdavGetFile(url, { ...options, maxBytes: MAX_SYNC_DOCUMENT_BYTES }));
-    } catch (err) {
-        if ((err as { status?: number } | null)?.status === 404) return null;
-        throw err;
-    }
+type WebDavVersionedBytes = WebDavDocumentVersion & { bytes: Uint8Array | null };
+
+type WebDavPutResponse = {
+    ok: boolean;
+    status: number;
+    statusText: string;
+    headers: Headers;
+    errorText: string;
+};
+
+const fetchWebdavPutAndConsumeError = async (
+    url: string,
+    init: RequestInit,
+    fetcher: typeof fetch,
+    timeoutMs: number,
+): Promise<WebDavPutResponse> => fetchWithTimeoutAndConsume(
+    url,
+    init,
+    timeoutMs,
+    fetcher,
+    WEBDAV_TIMEOUT_ERROR,
+    async (response, signal) => {
+        const errorText = response.ok
+            ? (await discardResponseBody(response, signal), '')
+            : await readResponseText(response, MAX_ERROR_BODY_BYTES, signal).catch((error) => {
+                if (signal?.aborted) throw error;
+                return '';
+            });
+        return {
+            ok: response.ok,
+            status: response.status,
+            statusText: response.statusText,
+            headers: response.headers,
+            errorText,
+        };
+    },
+);
+
+/** One GET supplies both document bytes and the strong validator governing the later PUT. */
+async function webdavGetVersionedBytesOrNull(
+    url: string,
+    options: WebDavOptions,
+): Promise<WebDavVersionedBytes> {
+    assertWebdavUrl(url, options);
+    const fetcher = options.fetcher ?? fetch;
+    return await fetchWithTimeoutAndConsume(
+        url,
+        buildReadRequestInit(options, 'GET'),
+        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        fetcher,
+        WEBDAV_TIMEOUT_ERROR,
+        async (res, signal) => {
+            if (res.status === 404) return { bytes: null, exists: false, strongEtag: null };
+            if (!res.ok) {
+                const text = await readResponseText(res, MAX_ERROR_BODY_BYTES, signal).catch(() => '');
+                const error = new Error(`WebDAV GET failed (${res.status}): ${text || res.statusText}`);
+                (error as { status?: number }).status = res.status;
+                throw error;
+            }
+            return {
+                bytes: new Uint8Array(await readResponseBody(res, undefined, MAX_SYNC_DOCUMENT_BYTES, signal)),
+                exists: true,
+                strongEtag: normalizeStrongWebdavEtag(res.headers.get('etag')),
+            };
+        },
+    );
 }
+
+const withWebdavDocumentWriteCondition = (
+    options: WebDavOptions,
+    expectedEtag: string | null,
+): WebDavOptions => {
+    const headers = Object.fromEntries(
+        Object.entries(options.headers ?? {}).filter(([name]) => {
+            const normalized = name.toLowerCase();
+            return normalized !== 'if-match' && normalized !== 'if-none-match';
+        }),
+    );
+    if (expectedEtag === null) {
+        headers['If-None-Match'] = '*';
+    } else {
+        const strongEtag = normalizeStrongWebdavEtag(expectedEtag);
+        if (!strongEtag) throw new Error('WebDAV replacement requires a valid strong ETag');
+        headers['If-Match'] = strongEtag;
+    }
+    return { ...options, headers };
+};
 
 async function putWebdavBytes(
     url: string,
@@ -459,12 +624,11 @@ async function putWebdavBytes(
     headers['Content-Type'] = 'application/octet-stream';
     headers[WEBDAV_AUTOMKCOL_HEADER] = headers[WEBDAV_AUTOMKCOL_HEADER] || '1';
     const body = new Uint8Array(bytes);
-    const sendPut = async (): Promise<Response> => fetchWithTimeout(
+    const sendPut = async (): Promise<WebDavPutResponse> => fetchWebdavPutAndConsumeError(
         url,
         { method: 'PUT', headers, body, signal: options.signal },
-        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
-        WEBDAV_TIMEOUT_ERROR,
+        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     );
     let res = await sendPut();
     if (!res.ok && (res.status === 404 || res.status === 409)) {
@@ -472,8 +636,10 @@ async function putWebdavBytes(
         res = await sendPut();
     }
     if (!res.ok) {
-        const text = await readResponseText(res, MAX_ERROR_BODY_BYTES).catch(() => '');
-        const error = new Error(`WebDAV PUT failed (${res.status}): ${text || res.statusText}`);
+        if (res.status === 409 || res.status === 412) {
+            throw new WebDavRemoteWriteConflictError(res.status);
+        }
+        const error = new Error(`WebDAV PUT failed (${res.status}): ${res.errorText || res.statusText}`);
         (error as { status?: number }).status = res.status;
         throw error;
     }
@@ -490,9 +656,12 @@ export type WebDavSyncDataOptions = WebDavOptions & {
      *  same URL, same request shape, same errors (backward-compat invariant #1). */
     material?: SyncKeyMaterial;
     cryptoPrims?: SyncCryptoPrimitives;
+    /** null creates only if absent; a strong ETag replaces only that exact generation.
+     * Required by webdavPutSyncDocument and ignored by reads. */
+    expectedEtag?: string | null;
 };
 
-export type WebDavSyncDataResult<T> =
+export type WebDavSyncDataResult<T> = WebDavDocumentVersion & (
     | { state: 'data'; data: T | null }
     /** The remote has a valid `.enc` (or, defensively, plain-named ciphertext) artifact
      *  this call has no key for. Callers persist this via
@@ -504,7 +673,12 @@ export type WebDavSyncDataResult<T> =
      *  sync-encryption.ts's markRemotePlaintextDiscovered and abort the cycle — merging would
      *  fork the folder, and writing plaintext would let whoever removed the ciphertext strip
      *  encryption from every device. */
-    | { state: 'remote-plaintext' };
+    | { state: 'remote-plaintext' }
+);
+
+const unexpectedWebdavArtifact = (message: string): never => {
+    throw new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError(message));
+};
 
 /**
  * Encryption-aware sync-document read. `url` is always the PLAIN document URL — this
@@ -523,48 +697,101 @@ export async function webdavGetSyncDocument<T>(
     url: string,
     options: WebDavSyncDataOptions = {},
 ): Promise<WebDavSyncDataResult<T>> {
-    const { material, cryptoPrims, ...webdavOptions } = options;
+    const { material, cryptoPrims, expectedEtag: _expectedEtag, ...webdavOptions } = options;
     if (material) {
-        const bytes = await webdavGetFileOrNull(syncEncryptedArtifactName(url), webdavOptions);
-        if (!bytes) {
+        const remote = await webdavGetVersionedBytesOrNull(syncEncryptedArtifactName(url), webdavOptions);
+        if (!remote.bytes) {
             // Mirror of the off-state probe below, in the other direction, and gated the same
             // way: only the "nothing at my name" shape pays for it, so a healthy encrypted
             // install never reaches it.
-            const plain = await webdavGetFileOrNull(url, webdavOptions).catch(() => null);
-            return isPlaintextSyncArtifact(plain) ? { state: 'remote-plaintext' } : { state: 'data', data: null };
+            const plain = await webdavGetVersionedBytesOrNull(url, webdavOptions);
+            if (isPlaintextSyncArtifact(plain.bytes)) {
+                return { state: 'remote-plaintext', exists: true, strongEtag: plain.strongEtag };
+            }
+            if (plain.bytes?.some((byte) => byte > 0x20)) {
+                return unexpectedWebdavArtifact(
+                    'Ciphertext or an unsupported artifact was found at the plaintext WebDAV artifact name',
+                );
+            }
+            return { state: 'data', data: null, exists: false, strongEtag: null };
         }
         // Sealed under another salt = this device's key is for a different encryption
         // generation; report it as a no-key discovery (which can prompt for the passphrase)
         // instead of decrypting into a dead-end Auth failure.
-        const foreign = detectForeignSaltArtifact(bytes, material);
-        if (foreign) return { state: 'encrypted-no-key', salt: foreign.salt, params: foreign.params };
-        const plaintext = await decryptRemoteArtifactOrThrow(bytes, material.key, cryptoPrims);
-        return { state: 'data', data: JSON.parse(new TextDecoder().decode(plaintext)) as T };
+        const foreign = detectForeignSaltArtifact(remote.bytes, material);
+        if (foreign) return { state: 'encrypted-no-key', salt: foreign.salt, params: foreign.params, exists: true, strongEtag: remote.strongEtag };
+        const plaintext = await decryptRemoteArtifactOrThrow(remote.bytes, material.key, cryptoPrims);
+        try {
+            return {
+                state: 'data',
+                data: JSON.parse(new TextDecoder().decode(plaintext)) as T,
+                exists: true,
+                strongEtag: remote.strongEtag,
+            };
+        } catch (error) {
+            throw new WebDavSyncDocumentReadError(
+                `WebDAV GET failed: invalid JSON (${(error as Error).message})`,
+                { exists: true, strongEtag: remote.strongEtag },
+            );
+        }
     }
 
-    let data: T | null;
-    try {
-        data = await webdavGetJson<T>(url, webdavOptions);
-    } catch (err) {
-        const bytes = await webdavGetFileOrNull(url, webdavOptions).catch(() => null);
-        if (bytes) {
-            const inspected = inspectSyncArtifact(bytes);
-            if (inspected.kind === 'encrypted') {
-                return { state: 'encrypted-no-key', salt: inspected.salt, params: inspected.params };
+    const remote = await webdavGetVersionedBytesOrNull(url, webdavOptions);
+    if (remote.bytes) {
+        const inspected = inspectSyncArtifact(remote.bytes);
+        if (inspected.kind === 'encrypted') {
+            return {
+                state: 'encrypted-no-key',
+                salt: inspected.salt,
+                params: inspected.params,
+                exists: true,
+                strongEtag: remote.strongEtag,
+            };
+        }
+        if (inspected.kind === 'unsupported') {
+            return unexpectedWebdavArtifact(inspected.reason);
+        }
+        const text = new TextDecoder().decode(remote.bytes);
+        const normalizedBody = text.startsWith(UTF8_BOM) ? text.slice(1).trim() : text.trim();
+        if (normalizedBody) {
+            try {
+                return {
+                    state: 'data',
+                    data: JSON.parse(normalizedBody) as T,
+                    exists: true,
+                    strongEtag: remote.strongEtag,
+                };
+            } catch (error) {
+                throw new WebDavSyncDocumentReadError(
+                    `WebDAV GET failed: invalid JSON (${(error as Error).message})`,
+                    { exists: true, strongEtag: remote.strongEtag },
+                );
             }
         }
-        throw err;
     }
-    if (data !== null) return { state: 'data', data };
 
-    const encBytes = await webdavGetFileOrNull(syncEncryptedArtifactName(url), webdavOptions).catch(() => null);
-    if (encBytes) {
-        const inspected = inspectSyncArtifact(encBytes);
+    const encrypted = await webdavGetVersionedBytesOrNull(syncEncryptedArtifactName(url), webdavOptions);
+    if (encrypted.bytes) {
+        const inspected = inspectSyncArtifact(encrypted.bytes);
         if (inspected.kind === 'encrypted') {
-            return { state: 'encrypted-no-key', salt: inspected.salt, params: inspected.params };
+            return {
+                state: 'encrypted-no-key',
+                salt: inspected.salt,
+                params: inspected.params,
+                exists: true,
+                strongEtag: encrypted.strongEtag,
+            };
+        }
+        if (inspected.kind === 'unsupported') {
+            return unexpectedWebdavArtifact(inspected.reason);
+        }
+        if (encrypted.bytes.some((byte) => byte > 0x20)) {
+            return unexpectedWebdavArtifact(
+                'Plaintext was found at the encrypted WebDAV artifact name',
+            );
         }
     }
-    return { state: 'data', data: null };
+    return { state: 'data', data: null, exists: remote.exists, strongEtag: remote.strongEtag };
 }
 
 export async function webdavPutSyncDocument(
@@ -572,13 +799,17 @@ export async function webdavPutSyncDocument(
     data: unknown,
     options: WebDavSyncDataOptions = {},
 ): Promise<RemoteJsonWriteResult> {
-    const { material, cryptoPrims, ...webdavOptions } = options;
+    if (!Object.prototype.hasOwnProperty.call(options, 'expectedEtag')) {
+        throw new Error('WebDAV sync-document write requires an expected ETag or an explicit create condition');
+    }
+    const { material, cryptoPrims, expectedEtag = null, ...webdavOptions } = options;
+    const conditionalOptions = withWebdavDocumentWriteCondition(webdavOptions, expectedEtag);
     if (!material) {
-        return webdavPutJson(url, data, webdavOptions);
+        return webdavPutJson(url, data, conditionalOptions);
     }
     const plaintext = new TextEncoder().encode(JSON.stringify(data, null, 2));
     const sealed = await encryptSyncArtifact(plaintext, material, cryptoPrims);
-    return putWebdavBytes(syncEncryptedArtifactName(url), sealed, webdavOptions);
+    return putWebdavBytes(syncEncryptedArtifactName(url), sealed, conditionalOptions);
 }
 
 export async function webdavMakeDirectory(
@@ -617,12 +848,16 @@ export async function webdavPutFile(
     };
     const sendPut = async (): Promise<Response> => {
         const { headers, body } = buildRequest();
-        return fetchWithTimeout(
+        return fetchWithTimeoutAndConsume(
             url,
             { method: 'PUT', headers, body, signal: options.signal },
             options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
             fetcher,
             WEBDAV_TIMEOUT_ERROR,
+            async (response, signal) => {
+                await discardResponseBody(response, signal);
+                return response;
+            },
         );
     };
 
@@ -635,6 +870,216 @@ export async function webdavPutFile(
     if (!res.ok) {
         const error = new Error(`WebDAV File PUT failed (${res.status})`);
         (error as { status?: number }).status = res.status;
+        throw error;
+    }
+}
+
+/** Versioned byte read for encryption transitions. The strong ETag comes from the same
+ * GET response as the bytes; an existing response without one is returned explicitly so
+ * the transition can refuse an unsafe mutation. */
+export async function webdavGetFileVersionedWithServerTime(
+    url: string,
+    options: WebDavOptions = {},
+): Promise<{ bytes: Uint8Array | null; version: string | null; serverNowMs: number | null }> {
+    assertWebdavUrl(url, options);
+    const fetcher = options.fetcher ?? fetch;
+    return await fetchWithTimeoutAndConsume(
+        url,
+        buildReadRequestInit(options, 'GET'),
+        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        fetcher,
+        WEBDAV_TIMEOUT_ERROR,
+        async (res, signal) => {
+            const parsedServerNow = Date.parse(res.headers.get('date') ?? '');
+            const serverNowMs = Number.isFinite(parsedServerNow) ? parsedServerNow : null;
+            if (res.status === 404) return { bytes: null, version: null, serverNowMs };
+            if (!res.ok) {
+                const error = new Error(`WebDAV File GET failed (${res.status})`);
+                (error as { status?: number }).status = res.status;
+                throw error;
+            }
+            return {
+                bytes: new Uint8Array(await readResponseBody(
+                    res,
+                    options.onProgress,
+                    options.maxBytes ?? MAX_DOWNLOAD_BYTES,
+                    signal,
+                )),
+                version: normalizeStrongWebdavEtag(res.headers.get('etag')),
+                serverNowMs,
+            };
+        },
+    );
+}
+
+/** Compatibility shape for transition callers that only need bytes + strong generation. */
+export async function webdavGetFileVersioned(
+    url: string,
+    options: WebDavOptions = {},
+): Promise<{ bytes: Uint8Array | null; version: string | null }> {
+    const { bytes, version } = await webdavGetFileVersionedWithServerTime(url, options);
+    return { bytes, version };
+}
+
+const webdavStrongEtagProbeUrl = (documentUrl: string): string => {
+    const parsed = new URL(documentUrl);
+    const probeId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    parsed.pathname = `${parsed.pathname}.mindwtr-etag-probe-${probeId}`;
+    return parsed.toString();
+};
+
+const requireWebdavConditionalConflict = async (
+    operation: () => Promise<void>,
+    capability: string,
+): Promise<void> => {
+    try {
+        await operation();
+    } catch (error) {
+        if (isWebdavRemoteWriteConflictError(error)) return;
+        throw error;
+    }
+    throw new SyncEncryptionRemoteVersionUnavailableError(capability);
+};
+
+const webdavProbeBytesEqual = (left: Uint8Array | null, right: Uint8Array): boolean => {
+    if (!left || left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index += 1) {
+        if (left[index] !== right[index]) return false;
+    }
+    return true;
+};
+
+const assertWebdavConditionalWriteSupport = async (
+    documentUrl: string,
+    options: WebDavOptions,
+): Promise<void> => {
+    const probeUrl = webdavStrongEtagProbeUrl(documentUrl);
+    const initialBytes = new TextEncoder().encode('mindwtr strong-etag capability probe v1');
+    const replacementBytes = new TextEncoder().encode('mindwtr strong-etag capability probe v2');
+    const staleBytes = new TextEncoder().encode('mindwtr stale conditional-write probe');
+    let created = false;
+    let hasSafeProbeVersion = false;
+
+    try {
+        await webdavPutFileVersioned(
+            probeUrl,
+            initialBytes,
+            'application/octet-stream',
+            null,
+            options,
+        );
+        created = true;
+        const initial = await webdavGetFileVersioned(probeUrl, options);
+        if (!webdavProbeBytesEqual(initial.bytes, initialBytes) || !initial.version) {
+            throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV capability probe');
+        }
+        const initialVersion = initial.version;
+        hasSafeProbeVersion = true;
+
+        await requireWebdavConditionalConflict(
+            () => webdavPutFileVersioned(
+                probeUrl,
+                replacementBytes,
+                'application/octet-stream',
+                null,
+                options,
+            ),
+            'WebDAV If-None-Match enforcement',
+        );
+
+        await webdavPutFileVersioned(
+            probeUrl,
+            replacementBytes,
+            'application/octet-stream',
+            initialVersion,
+            options,
+        );
+        const replacement = await webdavGetFileVersioned(probeUrl, options);
+        if (
+            !webdavProbeBytesEqual(replacement.bytes, replacementBytes)
+            || !replacement.version
+            || replacement.version === initialVersion
+        ) {
+            throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV If-Match replacement');
+        }
+
+        await requireWebdavConditionalConflict(
+            () => webdavPutFileVersioned(
+                probeUrl,
+                staleBytes,
+                'application/octet-stream',
+                initialVersion,
+                options,
+            ),
+            'WebDAV stale If-Match enforcement',
+        );
+
+        await requireWebdavConditionalConflict(
+            () => webdavDeleteFileVersioned(probeUrl, initialVersion, options),
+            'WebDAV stale If-Match delete enforcement',
+        );
+        const retained = await webdavGetFileVersioned(probeUrl, options);
+        if (
+            !webdavProbeBytesEqual(retained.bytes, replacementBytes)
+            || retained.version !== replacement.version
+        ) {
+            throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV conditional delete retention');
+        }
+        await webdavDeleteFileVersioned(probeUrl, retained.version, options);
+        created = false;
+    } finally {
+        if (created && hasSafeProbeVersion) {
+            // Cleanup is never unconditional. Reread because a server that ignored one of
+            // the deliberate conflicts may have advanced the unique probe generation.
+            const latest = await webdavGetFileVersioned(probeUrl, options).catch(() => null);
+            if (latest?.bytes && latest.version) {
+                await webdavDeleteFileVersioned(probeUrl, latest.version, options).catch(() => undefined);
+            }
+        }
+    }
+};
+
+/** Preflights the generation contract required by ordinary WebDAV sync and encryption
+ * transitions. An existing document must carry a strong ETag. A unique probe then proves
+ * create-only, stale-replacement, and stale-delete conditions are enforced, not merely accepted as headers.
+ * Cleanup rereads and conditionally deletes the probe; it never issues an unguarded delete. */
+export async function assertWebdavStrongEtagSupport(
+    documentUrl: string,
+    options: WebDavOptions = {},
+): Promise<void> {
+    const documentOptions = {
+        ...options,
+        maxBytes: options.maxBytes ?? MAX_SYNC_DOCUMENT_BYTES,
+    };
+    const current = await webdavGetFileVersioned(documentUrl, documentOptions);
+    if (current.bytes !== null) {
+        if (!current.version) throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV data.json');
+        // Preserve the previous Test Connection contract: the exact GET that proves a
+        // strong generation must also prove that every non-empty data.json body is JSON.
+        // Empty/whitespace-only bodies remain accepted, including after a UTF-8 BOM.
+        parseOptionalWebdavJson(new TextDecoder().decode(current.bytes));
+    }
+    await assertWebdavConditionalWriteSupport(documentUrl, documentOptions);
+}
+
+/** CAS byte write used only by encryption transitions. `null` is create-only. */
+export async function webdavPutFileVersioned(
+    url: string,
+    data: ArrayBuffer | Uint8Array | Blob,
+    contentType: string,
+    expectedEtag: string | null,
+    options: WebDavOptions = {},
+): Promise<void> {
+    try {
+        await webdavPutFile(
+            url,
+            data,
+            contentType,
+            withWebdavDocumentWriteCondition(options, expectedEtag),
+        );
+    } catch (error) {
+        const status = (error as { status?: number } | null)?.status;
+        if (status === 409 || status === 412) throw new WebDavRemoteWriteConflictError(status);
         throw error;
     }
 }
@@ -704,21 +1149,22 @@ export async function webdavGetFile(
 ): Promise<ArrayBuffer> {
     assertWebdavUrl(url, options);
     const fetcher = options.fetcher ?? fetch;
-    const res = await fetchWithTimeout(
+    return await fetchWithTimeoutAndConsume(
         url,
         buildReadRequestInit(options, 'GET'),
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         WEBDAV_TIMEOUT_ERROR,
+        async (res, signal) => {
+            if (!res.ok) {
+                const error = new Error(`WebDAV File GET failed (${res.status})`);
+                (error as { status?: number }).status = res.status;
+                throw error;
+            }
+
+            return await readResponseBody(res, options.onProgress, options.maxBytes ?? MAX_DOWNLOAD_BYTES, signal);
+        },
     );
-
-    if (!res.ok) {
-        const error = new Error(`WebDAV File GET failed (${res.status})`);
-        (error as { status?: number }).status = res.status;
-        throw error;
-    }
-
-    return await readResponseBody(res, options.onProgress, options.maxBytes ?? MAX_DOWNLOAD_BYTES);
 }
 
 export async function webdavDeleteFile(
@@ -727,15 +1173,44 @@ export async function webdavDeleteFile(
 ): Promise<void> {
     assertWebdavUrl(url, options);
     const fetcher = options.fetcher ?? fetch;
-    const res = await fetchWithTimeout(
+    await fetchWithTimeoutAndConsume(
         url,
         { method: 'DELETE', headers: buildHeaders(options) },
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         fetcher,
         WEBDAV_TIMEOUT_ERROR,
+        async (res, signal) => {
+            if (!res.ok && res.status !== 404) throw new Error(`WebDAV DELETE failed (${res.status})`);
+            await discardResponseBody(res, signal);
+        },
     );
+}
 
-    if (!res.ok && res.status !== 404) {
-        throw new Error(`WebDAV DELETE failed (${res.status})`);
-    }
+/** Conditional delete for an artifact whose strong ETag was captured by the transition
+ * read. Missing or changed targets are conflicts, never idempotent success. */
+export async function webdavDeleteFileVersioned(
+    url: string,
+    expectedEtag: string,
+    options: WebDavOptions = {},
+): Promise<void> {
+    assertWebdavUrl(url, options);
+    const strongEtag = normalizeStrongWebdavEtag(expectedEtag);
+    if (!strongEtag) throw new Error('WebDAV conditional delete requires a valid strong ETag');
+    const fetcher = options.fetcher ?? fetch;
+    const headers = buildHeaders(options);
+    headers['If-Match'] = strongEtag;
+    await fetchWithTimeoutAndConsume(
+        url,
+        { method: 'DELETE', headers },
+        options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        fetcher,
+        WEBDAV_TIMEOUT_ERROR,
+        async (res, signal) => {
+            if (res.status === 404 || res.status === 409 || res.status === 412) {
+                throw new WebDavRemoteWriteConflictError(res.status);
+            }
+            if (!res.ok) throw new Error(`WebDAV DELETE failed (${res.status})`);
+            await discardResponseBody(res, signal);
+        },
+    );
 }

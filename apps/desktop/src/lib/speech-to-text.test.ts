@@ -220,7 +220,7 @@ describe('processAudioCapture openai transcription against a custom base URL', (
         fetchMock.mockReset();
         fetchMock.mockResolvedValue({
             ok: true,
-            json: async () => ({ text: 'hello from whisperx' }),
+            text: async () => JSON.stringify({ text: 'hello from whisperx' }),
         });
         vi.stubGlobal('fetch', fetchMock);
     });

@@ -1,6 +1,7 @@
 export {
     buildCloudKey,
     cleanupAttachmentTempFiles,
+    deleteManagedAttachmentFile,
     ATTACHMENT_LOCAL_MIGRATION_MAX_PER_SYNC,
     getBaseSyncUrl,
     getCloudBaseUrl,

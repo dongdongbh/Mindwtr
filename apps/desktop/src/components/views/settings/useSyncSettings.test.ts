@@ -156,6 +156,7 @@ describe('useSyncSettings cloud token validation', () => {
         vi.spyOn(SyncService, 'rollbackDropboxCredentials').mockResolvedValue(undefined);
         vi.spyOn(SyncService, 'disconnectDropbox').mockResolvedValue(undefined);
         vi.spyOn(SyncService, 'testDropboxConnection').mockResolvedValue(undefined);
+        vi.spyOn(SyncService, 'testWebDavConnection').mockResolvedValue(undefined);
         vi.spyOn(SyncService, 'testSyncPath').mockResolvedValue(undefined);
         vi.spyOn(SyncService, 'listDataSnapshots').mockResolvedValue([]);
         vi.spyOn(SyncService, 'subscribeSyncStatus').mockImplementation(() => () => {});
@@ -332,6 +333,46 @@ describe('useSyncSettings cloud token validation', () => {
         expect(showToast).toHaveBeenCalledWith('Folder test passed.', 'success');
         expect(result.current.syncPageProps.isTestingSyncPath).toBe(false);
     });
+
+    it.each(['success', 'failure'] as const)(
+        'ignores a stale folder-test %s after the selected path changes',
+        async (outcome) => {
+            let resolveProbe!: () => void;
+            let rejectProbe!: (error: Error) => void;
+            vi.mocked(SyncService.testSyncPath).mockReturnValueOnce(new Promise<void>((resolve, reject) => {
+                resolveProbe = resolve;
+                rejectProbe = reject;
+            }));
+            const showToast = vi.fn();
+            useUiStore.setState({ showToast } as never);
+            const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
+            await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+            act(() => result.current.syncPageProps.onSyncPathChange('/sync/folder-a'));
+
+            let testPromise!: Promise<void>;
+            act(() => {
+                testPromise = result.current.syncPageProps.onTestSyncPath();
+            });
+            await waitFor(() => {
+                expect(SyncService.testSyncPath).toHaveBeenCalledWith('/sync/folder-a');
+                expect(result.current.syncPageProps.isTestingSyncPath).toBe(true);
+            });
+
+            act(() => result.current.syncPageProps.onSyncPathChange('/sync/folder-b'));
+            expect(result.current.syncPageProps.syncPath).toBe('/sync/folder-b');
+
+            await act(async () => {
+                if (outcome === 'success') resolveProbe();
+                else rejectProbe(new Error('Folder A is unavailable'));
+                await testPromise;
+            });
+
+            expect(result.current.syncPageProps.syncPath).toBe('/sync/folder-b');
+            expect(result.current.syncPageProps.syncError).toBeNull();
+            expect(result.current.syncPageProps.isTestingSyncPath).toBe(false);
+            expect(showToast).not.toHaveBeenCalled();
+        },
+    );
 
     it('shows the native folder-probe stage when testing fails', async () => {
         const stageError = 'Could not finalize a file in this folder: rename refused';
@@ -535,6 +576,8 @@ describe('useSyncSettings cloud token validation', () => {
         ['requeue', { success: true, skipped: 'requeued' as const }],
     ])('preserves the proven backend on %s', async (_label, syncResult) => {
         vi.mocked(SyncService.performSync).mockResolvedValueOnce(syncResult);
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
         const showSaved = vi.fn();
         const { result } = setup(showSaved);
         await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
@@ -563,6 +606,244 @@ describe('useSyncSettings cloud token validation', () => {
         expect(SyncService.setSyncBackend).not.toHaveBeenCalled();
         expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
         expect(showSaved).not.toHaveBeenCalled();
+        if (_label === 'requeue') {
+            expect(showToast).toHaveBeenCalledWith(
+                'Mindwtr found new changes while testing this sync setup. Run Sync Now again.',
+                'info',
+            );
+            expect(showToast).not.toHaveBeenCalledWith(
+                'Local changes arrived during sync. A retry was queued automatically.',
+                expect.anything(),
+            );
+        }
+    });
+
+    it('waits without activating when a compatible peer owns the candidate sync location', async () => {
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: true,
+            skipped: 'remoteFenceBusy',
+            remoteFenceDeferred: 'busy',
+            retryAfterMs: 30_000,
+        });
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        act(() => {
+            void result.current.syncPageProps.onSetSyncBackend('cloud');
+            result.current.syncPageProps.onCloudUrlChange('https://example.com');
+            result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
+        });
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
+        expect(showToast).toHaveBeenCalledWith(
+            'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
+            'info',
+            6000,
+        );
+    });
+
+    it('waits without activating when another operation owns the candidate File Sync lock', async () => {
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: true,
+            skipped: 'fileSyncLockBusy',
+            fileSyncLockDeferred: 'busy',
+            retryAfterMs: 5_000,
+        });
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        act(() => {
+            void result.current.syncPageProps.onSetSyncBackend('file');
+            result.current.syncPageProps.onSyncPathChange('/tmp/mindwtr-sync');
+        });
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
+        expect(showToast).toHaveBeenCalledWith(
+            'Another Mindwtr operation is using File Sync. Wait for it to finish, then try Sync Now again.',
+            'info',
+            6000,
+        );
+    });
+
+    it('rejects File Sync activation with actionable size guidance and keeps the proven backend', async () => {
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: false,
+            fileAttachmentUploadBlocked: 'too-large',
+        });
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        act(() => {
+            void result.current.syncPageProps.onSetSyncBackend('file');
+            result.current.syncPageProps.onSyncPathChange('/tmp/mindwtr-sync');
+        });
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
+        expect(showToast).toHaveBeenCalledWith(
+            'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
+            'error',
+            6000,
+        );
+    });
+
+    it('commits a cleanup-deferred File Sync activation and warns without suggesting a retry', async () => {
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.mocked(SyncService.performSync)
+            .mockResolvedValueOnce({ success: true, fileSyncLockDeferred: 'cleanup' });
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        act(() => {
+            void result.current.syncPageProps.onSetSyncBackend('file');
+            result.current.syncPageProps.onSyncPathChange('/tmp/mindwtr-sync');
+        });
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.commitProvenSyncConfiguration).toHaveBeenCalledWith(
+            expect.objectContaining({ backend: 'file', syncPath: '/tmp/mindwtr-sync' }),
+        );
+        expect(SyncService.performSync).toHaveBeenCalledTimes(1);
+        expect(showToast).toHaveBeenCalledWith(
+            'Sync completed, but Mindwtr could not release the File Sync lock. Restart Mindwtr before syncing again. No retry is needed.',
+            'info',
+            6000,
+        );
+    });
+
+    it('commits a cleanup-deferred activation and reports completed cleanup instead of failure', async () => {
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: true,
+            remoteFenceDeferred: 'cleanup',
+            retryAfterMs: 30_000,
+        });
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        act(() => {
+            void result.current.syncPageProps.onSetSyncBackend('cloud');
+            result.current.syncPageProps.onCloudUrlChange('https://example.com');
+            result.current.syncPageProps.onCloudTokenChange('a'.repeat(24));
+        });
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.commitProvenSyncConfiguration).toHaveBeenCalledWith(
+            expect.objectContaining({ backend: 'cloud', cloudProvider: 'selfhosted' }),
+        );
+        expect(SyncService.performSync).toHaveBeenCalledTimes(1);
+        expect(showToast).toHaveBeenCalledWith(
+            'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
+            'info',
+            6000,
+        );
+        expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining('did not complete'), 'error');
+    });
+
+    it('requires WebDAV conditional-write capability before candidate activation', async () => {
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.mocked(SyncService.testWebDavConnection).mockRejectedValueOnce(
+            new Error('SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE: WebDAV conditional writes are not enforced'),
+        );
+        const { result } = setup();
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+
+        act(() => {
+            void result.current.syncPageProps.onSetSyncBackend('webdav');
+            result.current.syncPageProps.onWebdavUrlChange('https://dav.example.com/mindwtr/');
+            result.current.syncPageProps.onWebdavUsernameChange('alice');
+            result.current.syncPageProps.onWebdavPasswordChange('secret');
+        });
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.testWebDavConnection).toHaveBeenCalledWith({
+            allowInsecureHttp: false,
+            hasPassword: false,
+            password: 'secret',
+            url: 'https://dav.example.com/mindwtr/',
+            username: 'alice',
+        });
+        expect(SyncService.performSync).not.toHaveBeenCalled();
+        expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
+        expect(showToast).toHaveBeenCalledWith(
+            'This WebDAV server does not provide or enforce safe version checks (strong ETags and conditional writes), so Mindwtr cannot safely sync or change encryption. Use a compatible WebDAV provider, File Sync, or Dropbox.',
+            'error',
+        );
+    });
+
+    it('shows backend compatibility recovery for an unchanged legacy WebDAV target', async () => {
+        const backendIncompatibleMessage = 'Use a compatible provider, File Sync, or Dropbox.';
+        languageMocks.t.mockImplementation((key: string) => (
+            key === 'settings.syncEncryptionErrorBackendIncompatible'
+                ? backendIncompatibleMessage
+                : key
+        ));
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        vi.spyOn(SyncService, 'getPersistedSyncConfigurationSnapshot').mockResolvedValue({
+            backend: 'webdav',
+            syncPath: '',
+            webdav: {
+                url: 'https://dav.example.com/mindwtr/',
+                username: 'alice',
+                password: 'secret',
+                passwordAuthority: 'known',
+                hasPassword: true,
+                allowInsecureHttp: false,
+                allowWeakFingerprint: false,
+            },
+            cloudProvider: 'selfhosted',
+            cloud: {
+                url: '',
+                token: '',
+                tokenAuthority: 'known',
+                rememberToken: false,
+                allowInsecureHttp: false,
+            },
+        });
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: false,
+            error: 'SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE: conditional writes are not enforced',
+        });
+
+        const { result } = setup();
+        await waitFor(() => expect(result.current.syncPageProps.syncBackend).toBe('webdav'));
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(SyncService.testWebDavConnection).not.toHaveBeenCalled();
+        expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
+        expect(SyncService.performSync).toHaveBeenCalledWith({
+            manual: true,
+            ignorePendingRemoteWriteBackoff: false,
+        });
+        expect(showToast).toHaveBeenCalledWith(backendIncompatibleMessage, 'error');
     });
 
     it('activates the configuration when the probe finds an encrypted remote it has no key for (#1001)', async () => {
@@ -1132,6 +1413,107 @@ describe('useSyncSettings cloud token validation', () => {
         expect(SyncService.setCloudConfig).not.toHaveBeenCalled();
         expect(SyncService.setSyncBackend).not.toHaveBeenCalled();
         expect(SyncService.commitProvenSyncConfiguration).not.toHaveBeenCalled();
+    });
+
+    it('shows attachment recovery guidance instead of success for an already proven backend', async () => {
+        vi.mocked(SyncService.getSyncBackend).mockResolvedValue('cloud');
+        vi.mocked(SyncService.getCloudProvider).mockResolvedValue('selfhosted');
+        vi.mocked(SyncService.getCloudConfig).mockResolvedValue({
+            url: 'https://example.com',
+            token: 'a'.repeat(24),
+            rememberToken: false,
+            allowInsecureHttp: false,
+        });
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: true,
+            attachmentWriteDeferred: true,
+        });
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        const { result } = setup();
+        await waitFor(() => expect(result.current.syncPageProps.syncBackend).toBe('cloud'));
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(showToast).toHaveBeenCalledWith(
+            'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
+            'info',
+            6000,
+        );
+        expect(showToast).not.toHaveBeenCalledWith('Sync completed', 'success');
+    });
+
+    it('shows actionable File Sync size guidance instead of success for an already proven backend', async () => {
+        vi.mocked(SyncService.getSyncBackend).mockResolvedValue('file');
+        vi.mocked(SyncService.getSyncPath).mockResolvedValue('/tmp/mindwtr-sync');
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            success: true,
+            fileAttachmentUploadBlocked: 'too-large',
+        });
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        const { result } = setup();
+        await waitFor(() => expect(result.current.syncPageProps.syncBackend).toBe('file'));
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(showToast).toHaveBeenCalledWith(
+            'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
+            'info',
+            6000,
+        );
+        expect(showToast).not.toHaveBeenCalledWith('Sync completed', 'success');
+    });
+
+    it.each([
+        {
+            outcome: 'failed',
+            result: { success: false, error: 'Document sync failed.' },
+        },
+        {
+            outcome: 'deferred',
+            result: {
+                success: true,
+                remoteWriteDeferred: true,
+                error: 'Remote write failed. Retrying in the background.',
+            },
+        },
+    ])('prioritizes a $outcome document sync result over attachment guidance', async ({ result: syncResult }) => {
+        vi.mocked(SyncService.getSyncBackend).mockResolvedValue('cloud');
+        vi.mocked(SyncService.getCloudProvider).mockResolvedValue('selfhosted');
+        vi.mocked(SyncService.getCloudConfig).mockResolvedValue({
+            url: 'https://example.com',
+            token: 'a'.repeat(24),
+            rememberToken: false,
+            allowInsecureHttp: false,
+        });
+        vi.mocked(SyncService.performSync).mockResolvedValueOnce({
+            ...syncResult,
+            fileAttachmentUploadBlocked: 'too-large',
+        });
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        const { result } = setup();
+        await waitFor(() => expect(result.current.syncPageProps.syncBackend).toBe('cloud'));
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(showToast).toHaveBeenCalledWith(
+            'Sync did not complete. Your previous sync settings are still active.',
+            'error',
+        );
+        expect(showToast).not.toHaveBeenCalledWith(
+            'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
+            'info',
+            6000,
+        );
+        expect(showToast).not.toHaveBeenCalledWith('Sync completed', 'success');
     });
 
     it('promotes a same-provider Dropbox reconnect only after the staged proof succeeds', async () => {

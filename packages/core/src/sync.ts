@@ -877,13 +877,14 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
             winner: Attachment,
             localAttachment: Attachment,
             incomingAttachment: Attachment,
-        ): Pick<Attachment, 'fileHash' | 'contentRev' | 'contentMtimeMs' | 'contentSize'> => {
+        ): Pick<Attachment, 'fileHash' | 'contentRev' | 'contentMtimeMs' | 'contentSize' | 'pendingContentUpload'> => {
             if (winner.deletedAt) {
                 return {
                     fileHash: winner.fileHash,
                     contentRev: winner.contentRev,
                     contentMtimeMs: winner.contentMtimeMs,
                     contentSize: winner.contentSize,
+                    pendingContentUpload: undefined,
                 };
             }
             const localRev = localAttachment.contentRev ?? 0;
@@ -891,11 +892,24 @@ export function mergeAppDataWithStats(local: AppData, incoming: AppData, options
             const contentSource = localRev === incomingRev
                 ? winner
                 : (localRev > incomingRev ? localAttachment : incomingAttachment);
+            const fileHash = contentSource.fileHash || localAttachment.fileHash || incomingAttachment.fileHash;
+            const contentRev = contentSource.contentRev;
+            const normalizedLocalFileHash = localAttachment.fileHash?.trim().toLowerCase();
+            const normalizedResolvedFileHash = fileHash?.trim().toLowerCase();
+            // `pendingContentUpload` is device-local retry state, never an LWW
+            // field. Preserve this device's marker whenever merge kept the exact
+            // local content identity, even if an otherwise-identical remote record
+            // won the attachment-level tie after its local-only fields were stripped.
+            const localPendingIdentitySurvived = localAttachment.pendingContentUpload === true
+                && (contentRev ?? 0) === localRev
+                && Boolean(normalizedLocalFileHash)
+                && normalizedResolvedFileHash === normalizedLocalFileHash;
             return {
-                fileHash: contentSource.fileHash || localAttachment.fileHash || incomingAttachment.fileHash,
-                contentRev: contentSource.contentRev,
+                fileHash,
+                contentRev,
                 contentMtimeMs: contentSource.contentMtimeMs,
                 contentSize: contentSource.contentSize,
+                pendingContentUpload: localPendingIdentitySurvived ? true : undefined,
             };
         };
 

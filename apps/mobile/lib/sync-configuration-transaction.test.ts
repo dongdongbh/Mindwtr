@@ -87,6 +87,7 @@ const createHarness = (
             secrets.delete(key);
         },
         getDropboxTokens: async () => dropboxTokens,
+        getIncompleteSyncEncryptionTransition: async () => null,
         getSecret: async (key) => secrets.get(key) ?? null,
         multiGet: async (keys) => keys.map((key) => [key, storage.get(key) ?? null] as const),
         multiSet: async (entries) => {
@@ -137,6 +138,18 @@ const createHarness = (
 };
 
 describe('commitProvenMobileSyncConfiguration', () => {
+    it('blocks destination changes while an encryption transition journal exists', async () => {
+        const harness = createHarness({ [SYNC_BACKEND_KEY]: 'webdav' });
+        harness.dependencies.getIncompleteSyncEncryptionTransition = async () => 'enable';
+
+        await expect(commitProvenMobileSyncConfiguration({
+            backend: 'off',
+        }, harness.dependencies)).rejects.toThrow('SYNC_ENCRYPTION_TRANSITION_INCOMPLETE');
+
+        expect(harness.events).toEqual([]);
+        expect(harness.storage.get(SYNC_BACKEND_KEY)).toBe('webdav');
+    });
+
     it('disables an active same-backend configuration before changing its transport', async () => {
         const harness = createHarness({
             [SYNC_BACKEND_KEY]: 'webdav',

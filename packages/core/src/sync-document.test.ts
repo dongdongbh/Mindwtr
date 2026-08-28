@@ -74,6 +74,101 @@ describe('Sync document lifecycle', () => {
         }
     });
 
+    it('strips device-local file state from remote attachments without applying outbound tombstones', () => {
+        const data = createData();
+        const fileAttachment = {
+            id: 'file-1',
+            kind: 'file' as const,
+            title: 'notes.txt',
+            uri: '/device/private/notes.txt',
+            cloudKey: 'attachments/file-1.txt',
+            fileHash: 'a'.repeat(64),
+            contentRev: 3,
+            contentMtimeMs: 1234,
+            contentSize: 42,
+            pendingContentUpload: true,
+            localStatus: 'available' as const,
+            createdAt: NOW,
+            updatedAt: NOW,
+        };
+        const missingWithoutCloudKey = {
+            ...fileAttachment,
+            id: 'file-2',
+            uri: '/device/private/missing.txt',
+            cloudKey: undefined,
+            localStatus: 'missing' as const,
+        };
+        const linkAttachment = {
+            id: 'link-1',
+            kind: 'link' as const,
+            title: 'Reference',
+            uri: 'https://example.com/reference',
+            createdAt: NOW,
+            updatedAt: NOW,
+        };
+        data.tasks[0].attachments = [fileAttachment, linkAttachment];
+        data.projects = [{
+            id: 'project-1',
+            title: 'Project',
+            status: 'active',
+            createdAt: NOW,
+            updatedAt: NOW,
+            attachments: [missingWithoutCloudKey],
+        }];
+
+        const parsed = parseSyncDocument(data, 'remote');
+        expect(parsed.ok).toBe(true);
+        if (!parsed.ok) throw new Error('Expected the remote document to parse');
+
+        expect(parsed.data.tasks[0].attachments).toEqual([{
+            id: fileAttachment.id,
+            kind: fileAttachment.kind,
+            title: fileAttachment.title,
+            uri: '',
+            cloudKey: fileAttachment.cloudKey,
+            fileHash: fileAttachment.fileHash,
+            contentRev: fileAttachment.contentRev,
+            createdAt: NOW,
+            updatedAt: NOW,
+        }, linkAttachment]);
+        expect(parsed.data.projects[0].attachments?.[0]).toEqual({
+            id: missingWithoutCloudKey.id,
+            kind: missingWithoutCloudKey.kind,
+            title: missingWithoutCloudKey.title,
+            uri: '',
+            cloudKey: undefined,
+            fileHash: missingWithoutCloudKey.fileHash,
+            contentRev: missingWithoutCloudKey.contentRev,
+            createdAt: NOW,
+            updatedAt: NOW,
+        });
+        expect(parsed.data.projects[0].attachments?.[0]?.deletedAt).toBeUndefined();
+    });
+
+    it('preserves device-local attachment state when parsing local persistence', () => {
+        const data = createData();
+        const attachment = {
+            id: 'pending-file',
+            kind: 'file' as const,
+            title: 'pending.txt',
+            uri: '/managed/pending.txt',
+            cloudKey: 'attachments/pending-file.txt',
+            fileHash: 'b'.repeat(64),
+            contentRev: 2,
+            contentMtimeMs: 4321,
+            contentSize: 24,
+            pendingContentUpload: true,
+            localStatus: 'available' as const,
+            createdAt: NOW,
+            updatedAt: NOW,
+        };
+        data.tasks[0].attachments = [attachment];
+
+        const parsed = parseSyncDocument(data, 'local');
+
+        expect(parsed).toEqual({ ok: true, data });
+    });
+
     it('uses the same remote shape for equality and fingerprints', () => {
         const left = createData();
         left.settings.lastSyncAt = NOW;

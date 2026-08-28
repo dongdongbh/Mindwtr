@@ -4,6 +4,7 @@ import type { FastSyncState } from './sync-fast-sync';
 import type { CloudProvider } from './sync-client-helpers';
 import type { SyncBackend } from './sync-service-utils';
 import type { buildMergeSummaryLog } from './sync-log-utils';
+import type { SyncRemoteMutationFenceLease } from './sync-remote-fence';
 
 /**
  * ADR 0014 — shared sync orchestration ports.
@@ -16,7 +17,7 @@ import type { buildMergeSummaryLog } from './sync-log-utils';
  * transports, platform storage, and UI notification behind these ports.
  */
 
-export type SyncRunSkipReason = 'offline' | 'requeued' | 'unchanged' | 'pendingRemoteWriteBackoff' | 'disabled';
+export type SyncRunSkipReason = 'offline' | 'requeued' | 'unchanged' | 'pendingRemoteWriteBackoff' | 'remoteFenceBusy' | 'fileSyncLockBusy' | 'disabled';
 
 export type SyncRunResult = {
     success: boolean;
@@ -32,6 +33,28 @@ export type SyncRunResult = {
      *  flag lets manual-sync UI avoid reporting a plain success while the
      *  sidebar still shows `lastSyncStatus: 'error'`. */
     remoteWriteDeferred?: boolean;
+    /** The document sync completed, but at least one attachment still has
+     *  durable content-upload work. No automatic retry is implied: callers
+     *  should suppress plain-success UI and offer recovery guidance. */
+    attachmentWriteDeferred?: boolean;
+    /** File Sync could not admit a local attachment into its bounded buffered
+     * upload path. Local bytes and durable attachment metadata are unchanged;
+     * callers should surface actionable guidance without scheduling a retry. */
+    fileAttachmentUploadBlocked?: 'too-large';
+    /** A compatible peer currently owns the mutation fence, or this run could
+     *  not conditionally remove its own lease. Suppresses plain-success UI. */
+    remoteFenceDeferred?: 'busy' | 'cleanup';
+    /** A local File Sync writer owns the safe folder lock, or a completed run
+     * could not release that lock. Busy is a no-write deferral; cleanup is a
+     * committed run that requires an app restart before the next attempt. */
+    fileSyncLockDeferred?: 'busy' | 'cleanup';
+    /** Safe exclusive locking could not be established for this File Sync location. */
+    fileSyncLockUnavailable?: boolean;
+    /** A File Sync attachment target remained corrupt through bounded recovery.
+     * Terminal until the user removes the damaged generation or changes folder. */
+    fileGenerationCorrupt?: boolean;
+    /** Provider-time-derived lower bound before the deferred retry is useful. */
+    retryAfterMs?: number;
 };
 
 /** Transport metadata from one remote write. Adapters normalize backend-specific
@@ -61,12 +84,19 @@ export class SyncRemoteWriteConflict extends Error {
  * lives in the machine — implementations do transport only.
  */
 export interface SyncBackendIO {
+    /** Acquire the backend's compatible-client remote mutation lease. Returns
+     *  null for backends that do not expose the shared WebDAV/Dropbox fence. */
+    acquireRemoteMutationFence?(): Promise<SyncRemoteMutationFenceLease | null>;
     /** Transport read of the remote sync document; null/undefined when missing.
      *  WebDAV implementations should let invalid-JSON errors propagate — the
      *  machine maps them to the treat-as-missing repair-write path. */
     readRemote(): Promise<AppData | null | undefined>;
-    /** Transport write of the already-sanitized payload. */
-    writeRemote(sanitized: AppData): Promise<SyncRemoteWriteOutcome>;
+    /** Transport write of the already-sanitized payload. The optional guard
+     * must run immediately before every provider retry that can mutate. */
+    writeRemote(
+        sanitized: AppData,
+        assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>,
+    ): Promise<SyncRemoteWriteOutcome>;
     /** True when a transport read recovered from a fallback representation and
      *  the canonical remote must be rewritten even if its content is aligned. */
     requiresRemoteRepair?(): boolean;
@@ -201,6 +231,9 @@ export type SyncRunAttachmentPhase = 'prepare' | 'post-merge';
 export type SyncRunAttachmentHelpers = {
     /** Abort (requeue) when local data changed mid-pass. */
     ensureLocalSnapshotFresh(): void;
+    /** Revalidate/renew the compatible-client lease at the final provider
+     *  mutation boundary, after any throttle wait or retry delay. */
+    assertRemoteMutationFenceHeld?(minRemainingMs?: number): Promise<void>;
     /** Candidate transports must prove attachment bytes before activation. */
     activationProbe: boolean;
     /**
@@ -223,6 +256,7 @@ export type SyncRunAttachmentCleanupContext = {
      *  cycle synced to allow the desktop covered-snapshot acceptance. */
     ensureLocalSnapshotFresh(expectedData?: AppData): void;
     ensureNetworkStillAvailable(): Promise<void>;
+    assertRemoteMutationFenceHeld(minRemainingMs?: number): Promise<void>;
 };
 
 export type SyncRunErrorStatusDetails = {
@@ -257,6 +291,11 @@ export interface SyncRunPlatformHooks {
     setupCycle(context: { setStep(step: string): void }): Promise<SyncRunCycleSetup>;
     /** Queue a follow-up sync cycle with the current cycle's options. */
     requestFollowUp(): void;
+    /** Queue no earlier than a provider-time-derived delay (remote lease
+     *  contention/cleanup). Implementations may let an explicit user run win. */
+    requestFollowUpAfter?(delayMs: number): void;
+    /** Queue the one bounded retry allowed after local File Sync contention. Omission disables automatic retry. */
+    requestFileSyncLockBusyFollowUpAfter?(delayMs: number, nextAttempt: number): void;
     /** Throw when the platform knows the network is gone (remote backends
      *  only; implementations self-gate on their backend). The machine calls
      *  this before remote reads/writes/fingerprints and network-backend
@@ -337,6 +376,8 @@ export type SyncRunOptions = {
      *  external-calendar, fast-state, follow-up, and finalize side effects.
      *  Settings can commit the candidate only after this succeeds. */
     activationProbe?: boolean;
+    /** Internal retry budget carried only by a File Sync contention follow-up. */
+    fileSyncLockBusyRetryAttempt?: number;
     /** First durable cycle after activating a candidate transport: retry now
      *  instead of inheriting the previous backend's retry deadline, and adopt
      *  attachment keys from the candidate document just proven on that

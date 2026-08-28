@@ -3,6 +3,8 @@ import {
     runAfterStoreWriteLock,
     runDataTransferTransactionWithoutSnapshot,
     runSerializedSyncDocumentOperation,
+    SyncEncryptionRemoteVersionUnavailableError,
+    SyncFileLockBusyError,
     SyncRemoteWriteConflict,
     type AppData,
     type Attachment,
@@ -29,6 +31,7 @@ import {
     WEBDAV_USERNAME_KEY,
 } from './sync-service-config';
 import { useUiStore } from '../store/ui-store';
+import { WEBDAV_CAPABILITY_PROOF_STORAGE_KEY } from './webdav-capability-proof';
 
 const markLocalWriteMock = vi.hoisted(() => vi.fn());
 const markLocalSqliteWriteMock = vi.hoisted(() => vi.fn());
@@ -223,9 +226,15 @@ describe('sync-service test utils', () => {
         });
         const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
             if (command === 'get_sync_backend') return 'file';
+            if (command === 'acquire_file_sync_lease') return 'external-resolution-lease';
             if (command === 'read_sync_file') {
+                expect(args?.leaseToken).toBe('external-resolution-lease');
                 events.push('resolution:read-external');
                 return externalData;
+            }
+            if (command === 'release_file_sync_lease') {
+                expect(args?.token).toBe('external-resolution-lease');
+                return undefined;
             }
             if (command === 'save_data') {
                 events.push('resolution:save-external');
@@ -288,12 +297,18 @@ describe('sync-service test utils', () => {
         const externalData = emptyAppData();
         const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
             if (command === 'get_sync_backend') return 'file';
+            if (command === 'acquire_file_sync_lease') return 'external-resolution-lease';
             if (command === 'read_sync_file') {
+                expect(args?.leaseToken).toBe('external-resolution-lease');
                 events.push('resolution:read:start');
                 markExternalReadStarted();
                 await externalReadBarrier;
                 events.push('resolution:read:end');
                 return externalData;
+            }
+            if (command === 'release_file_sync_lease') {
+                expect(args?.token).toBe('external-resolution-lease');
+                return undefined;
             }
             if (command === 'save_data') {
                 events.push('resolution:persist');
@@ -346,13 +361,23 @@ describe('sync-service test utils', () => {
         const resolutionFlushStarted = new Promise<void>((resolve) => {
             markResolutionFlushStarted = resolve;
         });
-        const invoke = vi.fn(async (command: string) => {
+        const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
             if (command === 'get_sync_backend') return 'file';
+            if (command === 'acquire_file_sync_lease') {
+                events.push('resolution:lease:acquire');
+                return 'lease-token';
+            }
+            if (command === 'release_file_sync_lease') {
+                expect(args?.token).toBe('lease-token');
+                events.push('resolution:lease:release');
+                return undefined;
+            }
             if (command === 'get_data') {
                 events.push('resolution:read-local');
                 return currentData;
             }
             if (command === 'write_sync_file') {
+                expect(args?.leaseToken).toBe('lease-token');
                 events.push('resolution:write-sync-file');
                 return true;
             }
@@ -394,9 +419,11 @@ describe('sync-service test utils', () => {
                 'transfer:persist:start',
                 'transfer:persist:end',
                 'transfer:refresh',
+                'resolution:lease:acquire',
                 'resolution:flush',
                 'resolution:read-local',
                 'resolution:write-sync-file',
+                'resolution:lease:release',
                 'follow-up:sync',
             ]);
         } finally {
@@ -461,6 +488,53 @@ describe('sync-service test utils', () => {
 });
 
 describe('SyncService testability hooks', () => {
+    const createTestWebdavCapabilityFetch = (documentBody: string | null = '{}') => {
+        let probeBytes: Uint8Array | null = null;
+        let probeVersion = 0;
+        const methods: string[] = [];
+        const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input);
+            const method = init?.method ?? 'GET';
+            const headers = new Headers(init?.headers);
+            methods.push(method);
+            if (!url.includes('.mindwtr-etag-probe-')) {
+                if (method !== 'GET') throw new Error(`unexpected document ${method}`);
+                if (documentBody === null) return new Response(null, { status: 404 });
+                return new Response(documentBody, { status: 200, headers: { etag: '"document-v1"' } });
+            }
+            if (method === 'GET') {
+                if (!probeBytes) return new Response(null, { status: 404 });
+                return new Response(probeBytes.slice().buffer, {
+                    status: 200,
+                    headers: { etag: `"probe-v${probeVersion}"` },
+                });
+            }
+            if (method === 'PUT') {
+                const body = init?.body;
+                if (!(body instanceof Uint8Array)) throw new Error('expected byte-array probe body');
+                const currentEtag = probeBytes ? `"probe-v${probeVersion}"` : null;
+                if (probeBytes && headers.get('if-none-match') === '*') {
+                    return new Response(null, { status: 412 });
+                }
+                if (probeBytes && headers.has('if-match') && headers.get('if-match') !== currentEtag) {
+                    return new Response(null, { status: 412 });
+                }
+                probeBytes = new Uint8Array(body);
+                probeVersion += 1;
+                return new Response(null, { status: currentEtag ? 204 : 201 });
+            }
+            if (method === 'DELETE') {
+                if (!probeBytes || headers.get('if-match') !== `"probe-v${probeVersion}"`) {
+                    return new Response(null, { status: 412 });
+                }
+                probeBytes = null;
+                return new Response(null, { status: 204 });
+            }
+            throw new Error(`unexpected ${method}`);
+        });
+        return { fetchSpy, methods };
+    };
+
     it('retains one opaque Dropbox credential handle until its matching recovery completes', () => {
         const listener = vi.fn();
         const unsubscribe = SyncService.subscribePendingDropboxCredentialHandleForSession(listener);
@@ -556,6 +630,48 @@ describe('SyncService testability hooks', () => {
 
         expect(backend).toBe('cloud');
         expect(invoke).toHaveBeenCalledWith('get_sync_backend', undefined);
+    });
+
+    it('proves a legacy persisted WebDAV backend before any sync-document IO', async () => {
+        localStorage.setItem(SYNC_BACKEND_KEY, 'webdav');
+        localStorage.setItem(WEBDAV_URL_KEY, 'https://sync.example.com');
+        localStorage.setItem(WEBDAV_USERNAME_KEY, 'alice');
+        localStorage.setItem(WEBDAV_ALLOW_INSECURE_HTTP_KEY, 'false');
+        sessionStorage.setItem(WEBDAV_PASSWORD_KEY, 'secret');
+        const performSyncCycleMock = vi.fn();
+        const capabilityProbe = vi.spyOn(SyncService as any, 'probeWebDavStrongEtagSupport')
+            .mockRejectedValue(
+                new Error('SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE: conditional writes unavailable'),
+            );
+        __syncServiceTestUtils.setDependenciesForTests({
+            isTauriRuntime: () => false,
+            flushPendingSave: vi.fn(async () => undefined),
+            getInMemoryAppDataSnapshot: () => emptyAppData(),
+            getStoreState: () => ({
+                fetchData: vi.fn(async () => undefined),
+                lastDataChangeAt: 0,
+                settings: {},
+                setError: vi.fn(),
+                updateSettings: vi.fn(async () => undefined),
+            }) as any,
+            performSyncCycle: performSyncCycleMock as any,
+        });
+
+        try {
+            await expect(SyncService.performSync({ manual: true })).resolves.toMatchObject({
+                success: false,
+                error: expect.stringContaining('conditional writes unavailable'),
+            });
+            expect(capabilityProbe).toHaveBeenCalledWith(expect.objectContaining({
+                url: 'https://sync.example.com',
+                username: 'alice',
+                password: 'secret',
+            }));
+            expect(performSyncCycleMock).not.toHaveBeenCalled();
+            expect(localStorage.getItem(WEBDAV_CAPABILITY_PROOF_STORAGE_KEY)).toBeNull();
+        } finally {
+            capabilityProbe.mockRestore();
+        }
     });
 
     it('persists the cloud provider natively with exact readback before retiring legacy renderer state', async () => {
@@ -2649,10 +2765,7 @@ describe('SyncService testability hooks', () => {
     });
 
     it('tests WebDAV connectivity against the normalized data.json URL', async () => {
-        const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response('{}', {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-        }));
+        const { fetchSpy } = createTestWebdavCapabilityFetch();
         __syncServiceTestUtils.setDependenciesForTests({
             getTauriFetch: async () => fetchSpy as unknown as typeof fetch,
         });
@@ -2663,7 +2776,7 @@ describe('SyncService testability hooks', () => {
             password: 'secret',
         });
 
-        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(fetchSpy).toHaveBeenCalledTimes(10);
         const firstCall = fetchSpy.mock.calls[0];
         expect(firstCall).toBeDefined();
         if (!firstCall) {
@@ -2673,11 +2786,65 @@ describe('SyncService testability hooks', () => {
         expect(firstCall[1]).toMatchObject({ method: 'GET' });
     });
 
-    it('reuses the stored WebDAV password when settings only expose hasPassword', async () => {
-        const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response('{}', {
+    it('preflights an empty WebDAV location by rereading a create-only probe', async () => {
+        const { fetchSpy, methods } = createTestWebdavCapabilityFetch(null);
+        __syncServiceTestUtils.setDependenciesForTests({
+            getTauriFetch: async () => fetchSpy as unknown as typeof fetch,
+        });
+
+        await SyncService.testWebDavConnection({
+            url: 'https://example.com/remote.php/dav/files/user/mindwtr',
+            username: 'alice',
+            password: 'secret',
+        });
+
+        expect(methods).toEqual(['GET', 'PUT', 'GET', 'PUT', 'PUT', 'GET', 'PUT', 'DELETE', 'GET', 'DELETE']);
+        expect(new Headers(fetchSpy.mock.calls[1]?.[1]?.headers).get('if-none-match')).toBe('*');
+        expect(new Headers(fetchSpy.mock.calls[3]?.[1]?.headers).get('if-none-match')).toBe('*');
+        expect(new Headers(fetchSpy.mock.calls[6]?.[1]?.headers).get('if-match')).toBe('"probe-v1"');
+        expect(new Headers(fetchSpy.mock.calls[7]?.[1]?.headers).get('if-match')).toBe('"probe-v1"');
+        expect(new Headers(fetchSpy.mock.calls[9]?.[1]?.headers).get('if-match')).toBe('"probe-v2"');
+    });
+
+    it.each([
+        ['missing', undefined],
+        ['weak', 'W/"v1"'],
+    ] as const)('rejects ordinary WebDAV setup when data.json has a %s ETag', async (_case, etag) => {
+        const fetchSpy = vi.fn(async () => new Response('{}', {
             status: 200,
-            headers: { 'Content-Type': 'application/json' },
+            headers: etag ? { etag } : undefined,
         }));
+        __syncServiceTestUtils.setDependenciesForTests({
+            getTauriFetch: async () => fetchSpy as unknown as typeof fetch,
+        });
+
+        await expect(SyncService.testWebDavConnection({
+            url: 'https://example.com/remote.php/dav/files/user/mindwtr',
+            username: 'alice',
+            password: 'secret',
+        })).rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+        expect(fetchSpy).toHaveBeenCalledOnce();
+    });
+
+    it('rejects an HTML/login response with 200 and a strong ETag during WebDAV setup', async () => {
+        const fetchSpy = vi.fn(async () => new Response('<html>Sign in</html>', {
+            status: 200,
+            headers: { etag: '"login-v1"' },
+        }));
+        __syncServiceTestUtils.setDependenciesForTests({
+            getTauriFetch: async () => fetchSpy as unknown as typeof fetch,
+        });
+
+        await expect(SyncService.testWebDavConnection({
+            url: 'https://example.com/remote.php/dav/files/user/mindwtr',
+            username: 'alice',
+            password: 'secret',
+        })).rejects.toThrow('WebDAV GET failed: invalid JSON');
+        expect(fetchSpy).toHaveBeenCalledOnce();
+    });
+
+    it('reuses the stored WebDAV password when settings only expose hasPassword', async () => {
+        const { fetchSpy } = createTestWebdavCapabilityFetch();
         const invoke = vi.fn(async (command: string) => {
             if (command === 'get_webdav_password') return 'stored-secret';
             throw new Error(`unexpected command: ${command}`);
@@ -2707,10 +2874,7 @@ describe('SyncService testability hooks', () => {
     });
 
     it('falls back to the stored WebDAV password when the form field is empty after a restart (#899)', async () => {
-        const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response('{}', {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-        }));
+        const { fetchSpy } = createTestWebdavCapabilityFetch();
         const invoke = vi.fn(async (command: string) => {
             if (command === 'get_webdav_password') return 'stored-secret';
             throw new Error(`unexpected command: ${command}`);
@@ -2767,10 +2931,16 @@ describe('SyncService testability hooks', () => {
     it('finalizes the sync file ignore window when external keep-local writes fail', async () => {
         const getMonotonicNowSpy = vi.spyOn(SyncService as any, 'getMonotonicNow');
         getMonotonicNowSpy.mockReturnValue(9_000);
-        const invoke = vi.fn(async (command: string) => {
+        const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
             if (command === 'get_sync_backend') return 'file';
             if (command === 'save_data') return undefined;
+            if (command === 'acquire_file_sync_lease') return 'lease-token';
+            if (command === 'release_file_sync_lease') {
+                expect(args?.token).toBe('lease-token');
+                return undefined;
+            }
             if (command === 'write_sync_file') {
+                expect(args?.leaseToken).toBe('lease-token');
                 throw new Error('disk full');
             }
             throw new Error(`unexpected command: ${command}`);
@@ -2847,14 +3017,53 @@ describe('SyncService testability hooks', () => {
         expect(operation).toHaveBeenCalledTimes(1);
     });
 
+    it('does not swallow a lifecycle abort during the browser Dropbox read fallback', async () => {
+        const requestAbortController = new AbortController();
+        const nativeFetch = vi.fn(async () => new Response('', {
+            status: 200,
+            headers: { 'dropbox-api-result': '{"rev":"native-rev"}' },
+        })) as typeof fetch;
+        const cancelBody = vi.fn();
+        const browserFetch = vi.fn(async () => new Response(new ReadableStream({
+            pull: () => new Promise<void>(() => undefined),
+            cancel: cancelBody,
+        }), {
+            status: 200,
+            headers: { 'dropbox-api-result': '{"rev":"browser-rev"}' },
+        })) as typeof fetch;
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = browserFetch;
+        __syncServiceTestUtils.setDependenciesForTests({
+            getTauriFetch: async () => nativeFetch,
+        });
+
+        try {
+            const download = (SyncService as any).downloadDropboxWithFallback(
+                { requestAbortController },
+                'dropbox-token',
+            );
+            await waitForAssertion(() => expect(browserFetch).toHaveBeenCalledOnce());
+
+            requestAbortController.abort(new DOMException('Sync cycle cancelled', 'AbortError'));
+
+            await expect(download).rejects.toMatchObject({ name: 'AbortError' });
+            expect(browserFetch).toHaveBeenCalledOnce();
+            expect(cancelBody).toHaveBeenCalledOnce();
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
     it('maps a native file fingerprint mismatch to a shared remote-write conflict', async () => {
         const remote = emptyAppData();
         const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
             if (command === 'read_sync_file_versioned') {
+                expect(args?.leaseToken).toBe('cycle-lease');
                 return { data: remote, fingerprint: 'file:v1:sha256=initial' };
             }
             if (command === 'write_sync_file') {
                 expect(args?.expectedFingerprint).toBe('file:v1:sha256=initial');
+                expect(args?.leaseToken).toBe('cycle-lease');
                 throw new Error('SYNC_FILE_WRITE_CONFLICT');
             }
             throw new Error(`unexpected command: ${command}`);
@@ -2877,6 +3086,7 @@ describe('SyncService testability hooks', () => {
             cachedDropboxAccessToken: null,
             syncPath: '/tmp/mindwtr-sync',
             fileBaseDir: '/tmp/mindwtr-sync',
+            fileSyncLeaseToken: 'cycle-lease',
         });
 
         await expect(io.readRemote()).resolves.toBe(remote);
@@ -2904,6 +3114,207 @@ describe('SyncService orchestration', () => {
             return count;
         }, 0)
     );
+
+    it('normalizes a native busy File Sync lease into a neutral deferred result', async () => {
+        __syncServiceTestUtils.setDependenciesForTests({
+            flushPendingSave: vi.fn(async () => undefined),
+            getStoreState: () => ({
+                fetchData: vi.fn(async () => undefined),
+                lastDataChangeAt: 0,
+                settings: {},
+                setError: vi.fn(),
+                updateSettings: vi.fn(async () => undefined),
+            }) as any,
+            invoke: vi.fn(async (command: string) => {
+                if (command === 'acquire_file_sync_lease') {
+                    throw new Error('SYNC_FILE_LOCK_BUSY: lock held by another process');
+                }
+                throw new Error(`unexpected command: ${command}`);
+            }) as any,
+            isTauriRuntime: () => false,
+        });
+
+        const result = await SyncService.performSync({
+            manual: true,
+            configOverride: { backend: 'file', syncPath: '/tmp/mindwtr-sync/data.json' },
+        });
+
+        expect(result).toMatchObject({
+            success: true,
+            skipped: 'fileSyncLockBusy',
+            fileSyncLockDeferred: 'busy',
+        });
+        expect(result.error).toBeUndefined();
+        expect(SyncService.getSyncStatus()).toMatchObject({
+            inFlight: false,
+            lastResult: null,
+            lastResultAt: null,
+        });
+    });
+
+    it('returns an actionable failure when the native File Sync lease is unavailable', async () => {
+        __syncServiceTestUtils.setDependenciesForTests({
+            flushPendingSave: vi.fn(async () => undefined),
+            getStoreState: () => ({
+                fetchData: vi.fn(async () => undefined),
+                lastDataChangeAt: 0,
+                settings: {},
+                setError: vi.fn(),
+                updateSettings: vi.fn(async () => undefined),
+            }) as any,
+            invoke: vi.fn(async (command: string) => {
+                if (command === 'acquire_file_sync_lease') {
+                    throw new Error('SYNC_FILE_LOCK_UNAVAILABLE: platform lease API failed');
+                }
+                throw new Error(`unexpected command: ${command}`);
+            }) as any,
+            isTauriRuntime: () => false,
+        });
+
+        const result = await SyncService.performSync({
+            manual: true,
+            configOverride: { backend: 'file', syncPath: '/tmp/mindwtr-sync/data.json' },
+        });
+
+        expect(result).toMatchObject({ success: false, fileSyncLockUnavailable: true });
+        expect(result.error).toContain('Safe File Sync locking is unavailable');
+    });
+
+    it('normalizes the native lock-open failure into localized File Sync recovery', async () => {
+        __syncServiceTestUtils.setDependenciesForTests({
+            flushPendingSave: vi.fn(async () => undefined),
+            getStoreState: () => ({
+                fetchData: vi.fn(async () => undefined),
+                lastDataChangeAt: 0,
+                settings: {},
+                setError: vi.fn(),
+                updateSettings: vi.fn(async () => undefined),
+            }) as any,
+            invoke: vi.fn(async (command: string) => {
+                if (command === 'acquire_file_sync_lease') {
+                    throw new Error('Failed to open sync lock: permission denied');
+                }
+                throw new Error(`unexpected command: ${command}`);
+            }) as any,
+            isTauriRuntime: () => false,
+        });
+
+        await expect(SyncService.performSync({
+            manual: true,
+            configOverride: { backend: 'file', syncPath: '/tmp/mindwtr-sync/data.json' },
+        })).resolves.toMatchObject({
+            success: false,
+            fileSyncLockUnavailable: true,
+            error: expect.stringContaining('Safe File Sync locking is unavailable'),
+        });
+    });
+
+    it('keeps a completed desktop File Sync cycle successful when lease release is deferred', async () => {
+        const setupSpy = vi.spyOn(SyncService as any, 'setupDesktopCycle').mockImplementation(async (context: any) => {
+            context.backend = 'file';
+            context.fileSyncLeaseToken = 'cycle-lease';
+            return {
+                kind: 'ready',
+                backend: 'file',
+                cloudProvider: 'selfhosted',
+                fastSyncScope: null,
+                io: {
+                    readRemote: vi.fn(async () => null),
+                    writeRemote: vi.fn(async () => undefined),
+                },
+            };
+        });
+        try {
+            __syncServiceTestUtils.setDependenciesForTests({
+                flushPendingSave: vi.fn(async () => undefined),
+                getStoreState: () => ({
+                    fetchData: vi.fn(async () => undefined),
+                    lastDataChangeAt: 0,
+                    settings: {},
+                    setError: vi.fn(),
+                    updateSettings: vi.fn(async () => undefined),
+                }) as any,
+                applySyncedDataToStore: vi.fn(),
+                performSyncCycle: vi.fn(async () => ({
+                    data: { tasks: [], projects: [], sections: [], areas: [], settings: {} },
+                    status: 'success',
+                    stats: { tasks: {}, projects: {}, sections: {}, areas: {} },
+                })) as any,
+                invoke: vi.fn(async (command: string) => {
+                    if (command === 'release_file_sync_lease') {
+                        throw new Error('SYNC_FILE_LOCK_UNAVAILABLE: release failed');
+                    }
+                    throw new Error(`unexpected command: ${command}`);
+                }) as any,
+                isTauriRuntime: () => false,
+            });
+
+            const result = await SyncService.performSync({ manual: true });
+
+            expect(result).toMatchObject({ success: true, fileSyncLockDeferred: 'cleanup' });
+        } finally {
+            setupSpy.mockRestore();
+        }
+    });
+
+    it('restores the File Sync contention retry budget after an ordinary follow-up', async () => {
+        let setupAttempt = 0;
+        const setupSpy = vi.spyOn(SyncService as any, 'setupDesktopCycle').mockImplementation(async () => {
+            setupAttempt += 1;
+            if (setupAttempt === 1 || setupAttempt === 3) {
+                throw new SyncFileLockBusyError(5);
+            }
+            return {
+                kind: 'ready',
+                backend: 'file',
+                cloudProvider: 'selfhosted',
+                fastSyncScope: null,
+                io: {
+                    readRemote: vi.fn(async () => null),
+                    writeRemote: vi.fn(async () => ({
+                        serverMergedRemoteData: setupAttempt === 2,
+                    })),
+                },
+            };
+        });
+        try {
+            __syncServiceTestUtils.setDependenciesForTests({
+                flushPendingSave: vi.fn(async () => undefined),
+                getStoreState: () => ({
+                    fetchData: vi.fn(async () => undefined),
+                    lastDataChangeAt: 0,
+                    settings: {},
+                    setError: vi.fn(),
+                    updateSettings: vi.fn(async () => undefined),
+                }) as any,
+                getInMemoryAppDataSnapshot: () => emptyAppData(),
+                applySyncedDataToStore: vi.fn(),
+                performSyncCycle: vi.fn(async (io: any) => {
+                    const local = await io.readLocal();
+                    await io.writeRemote(local);
+                    return {
+                        data: local,
+                        status: 'success',
+                        stats: { tasks: {}, projects: {}, sections: {}, areas: {} },
+                    };
+                }) as any,
+                isTauriRuntime: () => false,
+            });
+
+            await expect(SyncService.performSync({ manual: true })).resolves.toMatchObject({
+                success: true,
+                fileSyncLockDeferred: 'busy',
+            });
+
+            await waitForAssertion(() => expect(setupSpy).toHaveBeenCalledTimes(4));
+            await waitForAssertion(() => expect(SyncService.getSyncStatus()).toMatchObject({
+                inFlight: false,
+                queued: false,
+            }));
+        } finally {
+            setupSpy.mockRestore();
+        }
+    });
 
     it('re-runs a queued sync cycle after the in-flight sync finishes', async () => {
         const firstRun = createDeferred();
@@ -3277,20 +3688,32 @@ describe('SyncService orchestration', () => {
             }),
             setError: vi.fn(),
         };
-        const setupSpy = vi.spyOn(SyncService as any, 'setupDesktopCycle').mockImplementation(async () => ({
-            kind: 'ready',
-            backend: 'file',
-            cloudProvider: 'selfhosted',
-            fastSyncScope: null,
-            io: {
-                readRemote: vi.fn(async () => null),
-                writeRemote: vi.fn(async () => undefined),
-            },
-        }));
+        const setupSpy = vi.spyOn(SyncService as any, 'setupDesktopCycle').mockImplementation(async (context: any) => {
+            context.backend = 'file';
+            context.fileSyncLeaseToken = 'cycle-lease';
+            return {
+                kind: 'ready',
+                backend: 'file',
+                cloudProvider: 'selfhosted',
+                fastSyncScope: null,
+                io: {
+                    readRemote: vi.fn(async () => null),
+                    writeRemote: vi.fn(async () => undefined),
+                },
+            };
+        });
 
         try {
             __syncServiceTestUtils.setDependenciesForTests({
                 flushPendingSave: vi.fn(async () => undefined),
+                invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+                    if (command === 'release_file_sync_lease') {
+                        expect(args?.token).toBe('cycle-lease');
+                        callOrder.push('releaseFileSyncLease');
+                        return undefined;
+                    }
+                    throw new Error(`unexpected command: ${command}`);
+                }) as any,
                 getStoreState: () => storeState as any,
                 applySyncedDataToStore: vi.fn(() => {
                     callOrder.push('applySyncedDataToStore');
@@ -3316,7 +3739,7 @@ describe('SyncService orchestration', () => {
             const result = await SyncService.performSync();
 
             expect(result.success).toBe(true);
-            expect(callOrder).toEqual(['applySyncedDataToStore']);
+            expect(callOrder).toEqual(['applySyncedDataToStore', 'releaseFileSyncLease']);
             expect(storeState.fetchData).not.toHaveBeenCalled();
             expect(storeState.updateSettings).not.toHaveBeenCalled();
         } finally {

@@ -33,6 +33,7 @@ describe('createLocalAttachmentFs managed-dir fallback', () => {
         });
 
         const attachment = { id: 'a1' };
+        expect(await fs.localFilePresence(STALE_URI, attachment)).toBe('present');
         expect(await fs.localFileExists(STALE_URI, attachment)).toBe(true);
         expect(await fs.readLocalFile(STALE_URI, attachment)).toBe(bytes);
     });
@@ -48,6 +49,7 @@ describe('createLocalAttachmentFs managed-dir fallback', () => {
         });
 
         const attachment = { id: 'report' };
+        expect(await fs.localFilePresence('/home/demo/report.pdf', attachment)).toBe('confirmed-not-found');
         expect(await fs.localFileExists('/home/demo/report.pdf', attachment)).toBe(false);
         await expect(fs.readLocalFile('/home/demo/report.pdf', attachment)).rejects.toThrow();
     });
@@ -96,6 +98,38 @@ describe('createLocalAttachmentFs managed-dir fallback', () => {
         await expect(fs.readLocalFile(STALE_URI, { id: 'different-id' })).rejects.toThrow();
         expect(exists).not.toHaveBeenCalledWith(MANAGED_FILE);
     });
+
+    it('uses a successful managed fallback after the recorded-path probe errors', async () => {
+        const exists = vi.fn(async (path: string) => {
+            if (path === STALE_URI) throw new Error('portable path unavailable');
+            return path === MANAGED_FILE;
+        });
+        const fs = createLocalAttachmentFs(vi.fn(), {
+            baseDataDir: BASE_DATA_DIR,
+            dataBaseDir: 'data',
+            exists,
+            readFile: vi.fn(),
+            managedAttachmentsDir: MANAGED_DIR,
+        });
+
+        await expect(fs.localFilePresence(STALE_URI, { id: 'a1' })).resolves.toBe('present');
+    });
+
+    it('reports unreadable when any candidate errors and no fallback proves presence', async () => {
+        const exists = vi.fn(async (path: string) => {
+            if (path === MANAGED_FILE) throw new Error('managed storage denied');
+            return false;
+        });
+        const fs = createLocalAttachmentFs(vi.fn(), {
+            baseDataDir: BASE_DATA_DIR,
+            dataBaseDir: 'data',
+            exists,
+            readFile: vi.fn(),
+            managedAttachmentsDir: MANAGED_DIR,
+        });
+
+        await expect(fs.localFilePresence(STALE_URI, { id: 'a1' })).resolves.toBe('unreadable');
+    });
 });
 
 describe('resolveFileBackendPath', () => {
@@ -138,7 +172,9 @@ describe('writeFileSafelyAbsolute', () => {
 
         expect(files.get(target)).toEqual(new Uint8Array([1, 2, 3]));
         // The first writeFile call landed on a temp path, not the target.
-        expect(writeFile.mock.calls[0]?.[0]).not.toBe(target);
+        expect(writeFile.mock.calls[0]?.[0]).toMatch(
+            /^\/managed\/attachments\/\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/,
+        );
     });
 
     it('a failed temp write leaves the previously-downloaded file completely untouched', async () => {

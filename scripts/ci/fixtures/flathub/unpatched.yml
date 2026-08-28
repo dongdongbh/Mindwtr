@@ -1,0 +1,25 @@
+app-id: tech.dongdongbh.mindwtr
+finish-args:
+  - --socket=wayland
+  - --share=network
+  - --talk-name=org.tech_dongdongbh_mindwtr.SingleInstance
+build-options:
+  env:
+    - VITE_ANALYTICS_HEARTBEAT_URL=https://old.example/
+    - VITE_DROPBOX_APP_KEY=old-key
+modules:
+  - name: helper
+    buildsystem: simple
+  - name: mindwtr
+    buildsystem: simple
+    build-commands:
+      - |
+        if requested_spec.startswith(("file:", "workspace:", "git+", "github:", "http:", "https:", "link:", "npm:")):
+            continue
+        locked = packages.get(f"node_modules/{dependency_name}")
+    sources:
+      - type: patch
+        path: appstream-homepage.patch
+      - type: git
+        url: https://github.com/dongdongbh/Mindwtr.git
+        commit: 0123456789abcdef0123456789abcdef01234567

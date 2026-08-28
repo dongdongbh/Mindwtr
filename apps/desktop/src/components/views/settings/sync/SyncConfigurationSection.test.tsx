@@ -136,6 +136,7 @@ describe('SyncConfigurationSection', () => {
         fireEvent.click(getByRole('button', { name: 'Test folder' }));
 
         expect(onTestSyncPath).toHaveBeenCalledTimes(1);
+        expect(getByRole('textbox', { name: 'Folder' })).toHaveValue('/run/user/1000/doc/portal-id/Sync');
         expect(getByText(baseProps.t.portalPathNote)).toBeInTheDocument();
 
         rerender(

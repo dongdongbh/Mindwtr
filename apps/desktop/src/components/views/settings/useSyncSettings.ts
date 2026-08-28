@@ -18,6 +18,8 @@ import {
     getBackupSourceFileDiagnostic,
     getInMemoryAppDataSnapshot,
     isConnectionAllowed,
+    isSyncFileLockUnavailableError,
+    isSyncEncryptionRemoteVersionUnavailableError,
     isValidCloudSyncToken,
     safeFormatDate,
     SYNC_LOCAL_INSECURE_URL_OPTIONS,
@@ -528,17 +530,20 @@ export const useSyncSettings = ({
     const handleTestSyncPath = useCallback(async () => {
         const path = syncPath.trim();
         if (!path || !isTauri) return;
+        const testGeneration = syncConfigurationGeneration.current;
         setIsTestingSyncPath(true);
         setSyncError(null);
         try {
             await SyncService.testSyncPath(path);
+            if (syncConfigurationGeneration.current !== testGeneration) return;
             showToast(resolveText('settings.folderTestSucceeded', 'Folder test passed.'), 'success');
         } catch (error) {
+            void logError(error, { scope: 'sync', step: 'testSyncPath' });
+            if (syncConfigurationGeneration.current !== testGeneration) return;
             const message = toErrorMessage(
                 error,
                 resolveText('settings.feedback.actionFailed', "Couldn't complete this action. Try again."),
             );
-            void logError(error, { scope: 'sync', step: 'testSyncPath' });
             setSyncError(message);
             showToast(message, 'error');
         } finally {
@@ -723,7 +728,12 @@ export const useSyncSettings = ({
             setSyncError(null);
             showToast(resolveText('settings.syncMobile.webdavEndpointIsReachable', 'WebDAV endpoint is reachable.'), 'success');
         } catch (error) {
-            const message = resolveText('settings.syncMobile.connectionFailed', 'Connection failed');
+            const message = isSyncEncryptionRemoteVersionUnavailableError(error)
+                ? resolveText(
+                    'settings.syncEncryptionErrorBackendIncompatible',
+                    'This WebDAV server does not provide or enforce safe version checks (strong ETags and conditional writes), so Mindwtr cannot safely sync or change encryption. Use a compatible WebDAV provider, File Sync, or Dropbox.',
+                )
+                : resolveText('settings.syncMobile.connectionFailed', 'Connection failed');
             void logError(error, { scope: 'sync', step: 'testWebDavConnection' });
             setWebdavTestState('error');
             setSyncError(message);
@@ -973,11 +983,46 @@ export const useSyncSettings = ({
     const handleSync = useCallback(async () => {
         const activationGeneration = syncConfigurationGeneration.current;
         const activationCredentialHandle = dropboxCredentialHandleRef.current;
+        let activationCleanupDeferred: 'remote' | 'file' | null = null;
         const resolveCapturedCredential = async () => {
             if (!activationCredentialHandle) return;
             await discardDropboxCredential(activationCredentialHandle, {
                 refreshDurableConnection: true,
             });
+        };
+        const showRemoteFenceFeedback = (deferred: 'busy' | 'cleanup') => {
+            const message = deferred === 'busy'
+                ? resolveText(
+                    'settings.syncRemoteBusy',
+                    'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
+                )
+                : resolveText(
+                    'settings.syncRemoteCleanupDeferred',
+                    'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
+                );
+            showToast(message, 'info', 6000);
+        };
+        const showFileSyncLockFeedback = (
+            outcome: 'busy' | 'cleanup' | 'unavailable',
+            activationBusy = false,
+        ) => {
+            const message = outcome === 'busy'
+                ? resolveText(
+                    activationBusy ? 'settings.syncFileLockActivationBusy' : 'settings.syncFileLockBusy',
+                    activationBusy
+                        ? 'Another Mindwtr operation is using File Sync. Wait for it to finish, then try Sync Now again.'
+                        : 'Another Mindwtr operation is using File Sync. Wait for it to finish; Mindwtr will retry automatically.',
+                )
+                : outcome === 'cleanup'
+                    ? resolveText(
+                        'settings.syncFileLockCleanupDeferred',
+                        'Sync completed, but Mindwtr could not release the File Sync lock. Restart Mindwtr before syncing again. No retry is needed.',
+                    )
+                    : resolveText(
+                        'settings.syncFileLockUnavailable',
+                        'Mindwtr cannot safely lock this File Sync location. Re-select the folder, restart or update Mindwtr, or use WebDAV.',
+                    );
+            showToast(message, outcome === 'unavailable' ? 'error' : 'info', 6000);
         };
         addBreadcrumb('sync:manual');
         try {
@@ -1059,8 +1104,11 @@ export const useSyncSettings = ({
                 || (
                     configOverride.backend === 'cloud'
                     && configOverride.cloudProvider !== persistedCloudProvider
-                );
+            );
             if (needsActivationProbe) {
+                if (configOverride.backend === 'webdav' && configOverride.webdav) {
+                    await SyncService.testWebDavConnection(configOverride.webdav);
+                }
                 const probeResult = await SyncService.performSync({
                     activationProbe: true,
                     configOverride,
@@ -1071,11 +1119,51 @@ export const useSyncSettings = ({
                         await resolveCapturedCredential();
                     }
                     showToast(resolveText(
-                        'settings.syncQueuedBody',
-                        'Local changes arrived during sync. A retry was queued automatically.',
+                        'settings.syncActivationRequeuedBody',
+                        'Mindwtr found new changes while testing this sync setup. Run Sync Now again.',
                     ), 'info');
                     return;
                 }
+                if (probeResult.success && probeResult.remoteFenceDeferred === 'busy') {
+                    if (configOverride.dropboxCredentialHandle) {
+                        await resolveCapturedCredential();
+                    }
+                    showRemoteFenceFeedback('busy');
+                    return;
+                }
+                if (probeResult.success && probeResult.fileSyncLockDeferred === 'busy') {
+                    if (configOverride.dropboxCredentialHandle) {
+                        await resolveCapturedCredential();
+                    }
+                    showFileSyncLockFeedback('busy', true);
+                    return;
+                }
+                if (probeResult.fileSyncLockUnavailable) {
+                    if (configOverride.dropboxCredentialHandle) {
+                        await resolveCapturedCredential();
+                    }
+                    showFileSyncLockFeedback('unavailable');
+                    return;
+                }
+                if (probeResult.fileAttachmentUploadBlocked === 'too-large') {
+                    if (configOverride.dropboxCredentialHandle) {
+                        await resolveCapturedCredential();
+                    }
+                    showToast(resolveText(
+                        'settings.syncFileAttachmentTooLarge',
+                        'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
+                    ), 'error', 6000);
+                    return;
+                }
+                const probeRemoteCleanupDeferred = probeResult.success
+                    && probeResult.remoteFenceDeferred === 'cleanup';
+                const probeFileCleanupDeferred = probeResult.success
+                    && probeResult.fileSyncLockDeferred === 'cleanup';
+                activationCleanupDeferred = probeFileCleanupDeferred
+                    ? 'file'
+                    : probeRemoteCleanupDeferred
+                        ? 'remote'
+                        : null;
                 if (
                     !probeResult.success
                     && classifySyncEncryptionFailure(probeResult.error) === 'remote-encrypted-no-key'
@@ -1107,6 +1195,8 @@ export const useSyncSettings = ({
                 if (
                     !probeResult.success
                     || probeResult.remoteWriteDeferred
+                    || (probeResult.remoteFenceDeferred && !probeRemoteCleanupDeferred)
+                    || (probeResult.fileSyncLockDeferred && !probeFileCleanupDeferred)
                     || probeResult.skipped === 'offline'
                     || probeResult.skipped === 'pendingRemoteWriteBackoff'
                 ) {
@@ -1138,6 +1228,11 @@ export const useSyncSettings = ({
                     activationGeneration,
                 );
                 if (!committedCurrentConfiguration) return;
+                if (activationCleanupDeferred) {
+                    if (activationCleanupDeferred === 'file') showFileSyncLockFeedback('cleanup');
+                    else showRemoteFenceFeedback('cleanup');
+                    return;
+                }
             }
 
             const result = await SyncService.performSync({
@@ -1149,12 +1244,48 @@ export const useSyncSettings = ({
                     'settings.syncQueuedBody',
                     'Local changes arrived during sync. A retry was queued automatically.',
                 ), 'info');
+            } else if (result.success && result.fileSyncLockDeferred) {
+                showFileSyncLockFeedback(
+                    activationCleanupDeferred === 'file' ? 'cleanup' : result.fileSyncLockDeferred,
+                );
+            } else if (result.fileSyncLockUnavailable) {
+                showFileSyncLockFeedback('unavailable');
+            } else if (
+                result.success
+                && !result.remoteWriteDeferred
+                && result.fileAttachmentUploadBlocked === 'too-large'
+            ) {
+                showToast(resolveText(
+                    'settings.syncFileAttachmentTooLarge',
+                    'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
+                ), 'info', 6000);
+            } else if (result.success && result.remoteFenceDeferred) {
+                showRemoteFenceFeedback(activationCleanupDeferred === 'remote' ? 'cleanup' : result.remoteFenceDeferred);
+            } else if (
+                result.success
+                && result.attachmentWriteDeferred
+                && !result.remoteWriteDeferred
+            ) {
+                if (activationCleanupDeferred) {
+                    if (activationCleanupDeferred === 'file') showFileSyncLockFeedback('cleanup');
+                    else showRemoteFenceFeedback('cleanup');
+                    return;
+                }
+                showToast(resolveText(
+                    'settings.syncAttachmentWriteDeferred',
+                    'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
+                ), 'info', 6000);
             } else if (
                 result.success
                 && !result.remoteWriteDeferred
                 && result.skipped !== 'offline'
                 && result.skipped !== 'pendingRemoteWriteBackoff'
             ) {
+                if (activationCleanupDeferred) {
+                    if (activationCleanupDeferred === 'file') showFileSyncLockFeedback('cleanup');
+                    else showRemoteFenceFeedback('cleanup');
+                    return;
+                }
                 const mergeSummary = summarizeMergeStats(result.stats);
                 const maxClockSkewMs = mergeSummary.maxClockSkewMs;
                 const timestampAdjustments = mergeSummary.timestampAdjustments;
@@ -1187,10 +1318,16 @@ export const useSyncSettings = ({
                 if (result.error) {
                     void logError(new Error(result.error), { scope: 'sync', step: 'performResult' });
                 }
-                showToast(resolveText(
-                    'settings.sync.incomplete',
-                    'Sync did not complete. Your previous sync settings are still active.',
-                ), 'error');
+                const message = isSyncEncryptionRemoteVersionUnavailableError(result.error)
+                    ? resolveText(
+                        'settings.syncEncryptionErrorBackendIncompatible',
+                        'This WebDAV server does not provide or enforce safe version checks (strong ETags and conditional writes), so Mindwtr cannot safely sync or change encryption. Use a compatible WebDAV provider, File Sync, or Dropbox.',
+                    )
+                    : resolveText(
+                        'settings.sync.incomplete',
+                        'Sync did not complete. Your previous sync settings are still active.',
+                    );
+                showToast(message, 'error');
             }
         } catch (error) {
             if (activationCredentialHandle) {
@@ -1200,7 +1337,12 @@ export const useSyncSettings = ({
             const fallback = resolveText('settings.lastSyncError', 'Sync failed');
             const message = error instanceof SyncPathConfigurationError
                 ? error.message
-                : fallback;
+                : isSyncEncryptionRemoteVersionUnavailableError(error)
+                  ? resolveText(
+                        'settings.syncEncryptionErrorBackendIncompatible',
+                        'This WebDAV server does not provide or enforce safe version checks (strong ETags and conditional writes), so Mindwtr cannot safely sync or change encryption. Use a compatible WebDAV provider, File Sync, or Dropbox.',
+                    )
+                  : fallback;
             setSyncError(message);
             showToast(message, 'error');
         }
@@ -1863,7 +2005,12 @@ export const useSyncSettings = ({
             lastSyncStats,
             lastSyncHistory: settings?.lastSyncHistory ?? [],
             conflictCount: summarizeMergeStats(lastSyncStats).conflicts,
-            lastSyncError: settings?.lastSyncError,
+            lastSyncError: isSyncFileLockUnavailableError(settings?.lastSyncError)
+                ? resolveText(
+                    'settings.syncFileLockUnavailable',
+                    'Mindwtr cannot safely lock this File Sync location. Re-select the folder, restart or update Mindwtr, or use WebDAV.',
+                )
+                : settings?.lastSyncError,
             snapshots,
             isLoadingSnapshots,
             isRestoringSnapshot,

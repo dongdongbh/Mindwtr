@@ -68,6 +68,9 @@ export function InboxProjectSection({
   if (!show) return null;
 
   const areaOptions = Array.from(areaById.values());
+  const areaLabel = t('taskEdit.areaLabel');
+  const projectLabel = t('taskEdit.projectLabel');
+  const optionLabel = (field: string, value: string) => `${field}: ${value}`;
 
   const renderAreaPicker = () => {
     if (!showAreaField || selectedProjectId) return null;
@@ -81,6 +84,7 @@ export function InboxProjectSection({
         {currentArea && (
           <TouchableOpacity
             accessibilityRole="button"
+            accessibilityLabel={optionLabel(areaLabel, currentArea.name)}
             style={[
               styles.projectChip,
               { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.tint },
@@ -94,6 +98,8 @@ export function InboxProjectSection({
         )}
         <View style={styles.projectListContainer}>
           <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={optionLabel(areaLabel, t('projects.noArea'))}
             style={[
               styles.projectChip,
               noAreaSelected
@@ -112,6 +118,8 @@ export function InboxProjectSection({
             return (
               <TouchableOpacity
                 key={area.id}
+                accessibilityRole="button"
+                accessibilityLabel={optionLabel(areaLabel, area.name)}
                 style={[
                   styles.projectChip,
                   isSelected
@@ -138,6 +146,7 @@ export function InboxProjectSection({
       {showProjectField && currentProject && (
         <TouchableOpacity
           accessibilityRole="button"
+          accessibilityLabel={optionLabel(projectLabel, currentProject.title)}
           style={[
             styles.projectChip,
             { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.tint },
@@ -155,6 +164,7 @@ export function InboxProjectSection({
             <TextInput
               value={projectSearch}
               onChangeText={setProjectSearch}
+              accessibilityLabel={t('projects.search')}
               placeholder={t('projects.addPlaceholder')}
               placeholderTextColor={tc.secondaryText}
               style={[styles.projectSearchInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
@@ -163,6 +173,8 @@ export function InboxProjectSection({
             />
             {!hasExactProjectMatch && projectSearch.trim() && (
               <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel={optionLabel(t('projects.create'), projectSearch.trim())}
                 style={[styles.createProjectButton, { backgroundColor: filledButton.backgroundColor }]}
                 onPress={handleCreateProjectEarly}
               >
@@ -172,6 +184,8 @@ export function InboxProjectSection({
           </View>
           <View style={styles.projectListContainer}>
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={optionLabel(projectLabel, t('inbox.noProject'))}
               style={[
                 styles.projectChip,
                 noProjectSelected
@@ -191,6 +205,8 @@ export function InboxProjectSection({
               return (
                 <TouchableOpacity
                   key={project.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={optionLabel(projectLabel, project.title)}
                   style={[
                     styles.projectChip,
                     isSelected
@@ -290,6 +306,8 @@ export function InboxProjectSection({
           </TouchableOpacity>
         </View>
         <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={t('process.createProject')}
           style={[styles.createProjectButton, styles.projectConversionSubmit, { backgroundColor: filledButton.backgroundColor }]}
           onPress={handleConvertToProject}
         >

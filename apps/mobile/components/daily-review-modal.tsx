@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, FlatList, Modal, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,11 +14,13 @@ import {
     shallow,
     isDueForReview,
     normalizeFocusTaskLimit,
+    parseStoredReviewStepSession,
     resolveReviewStepSession,
     safeFormatDate,
     safeParseDate,
     tFallback,
     type ExternalCalendarEvent,
+    type StoredReviewStepSession,
     type Task,
     type TaskStatus,
 } from '@mindwtr/core';
@@ -42,6 +45,8 @@ type DailyReviewStepDefinition = {
     title: string;
     description: string;
 };
+const DAILY_REVIEW_STEP_STORAGE_KEY = 'mindwtr:dailyReview:currentStep';
+const DAILY_REVIEW_STEPS = new Set<DailyReviewStep>(['today', 'focus', 'inbox', 'waiting', 'completed']);
 
 type RenderTaskListOptions = {
     showFocusToggle?: boolean;
@@ -71,7 +76,18 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
     const filledButton = useFilledButtonColors();
     const insets = useSafeAreaInsets();
 
-    const [currentStep, setCurrentStep] = useState<DailyReviewStep>('today');
+    const [reviewSession, setReviewSession] = useState<StoredReviewStepSession<DailyReviewStep>>(() => ({
+        step: 'today',
+        startedAt: new Date().toISOString(),
+    }));
+    const [sessionHydrated, setSessionHydrated] = useState(false);
+    const sessionTouchedRef = useRef(false);
+    const sessionWriteRef = useRef<Promise<void>>(Promise.resolve());
+    const currentStep = reviewSession.step;
+    const setCurrentStep = useCallback((step: DailyReviewStep) => {
+        sessionTouchedRef.current = true;
+        setReviewSession((session) => ({ ...session, step }));
+    }, []);
     const [editingTask, setEditingTask] = useState<Task | null>(null);
     const [isTaskModalVisible, setIsTaskModalVisible] = useState(false);
     const [showInboxProcessing, setShowInboxProcessing] = useState(false);
@@ -79,6 +95,33 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
     const [externalLoading, setExternalLoading] = useState(false);
     const [externalError, setExternalError] = useState<string | null>(null);
     const [calendarExpanded, setCalendarExpanded] = useState(true);
+
+    useEffect(() => {
+        let cancelled = false;
+        void AsyncStorage.getItem(DAILY_REVIEW_STEP_STORAGE_KEY)
+            .then((stored) => {
+                if (cancelled) return;
+                const restored = parseStoredReviewStepSession(stored, DAILY_REVIEW_STEPS, {
+                    cadence: 'daily',
+                });
+                if (restored && !sessionTouchedRef.current) setReviewSession(restored);
+            })
+            .catch(() => undefined)
+            .finally(() => {
+                if (!cancelled) setSessionHydrated(true);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!sessionHydrated) return;
+        const serialized = JSON.stringify(reviewSession);
+        sessionWriteRef.current = sessionWriteRef.current
+            .then(() => AsyncStorage.setItem(DAILY_REVIEW_STEP_STORAGE_KEY, serialized))
+            .catch(() => undefined);
+    }, [reviewSession, sessionHydrated]);
 
     const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy);
     const includeFocusStep = settings.gtd?.dailyReview?.includeFocusStep !== false;
@@ -197,7 +240,9 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
     const displayedStepDefinition = activeSteps[safeActiveStepIndex];
 
     useEffect(() => {
-        if (currentStep !== displayedStep) setCurrentStep(displayedStep);
+        if (currentStep !== displayedStep) {
+            setReviewSession((session) => ({ ...session, step: displayedStep }));
+        }
     }, [currentStep, displayedStep]);
 
     const next = () => {
@@ -207,6 +252,15 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
     const back = () => {
         if (previousStepId) setCurrentStep(previousStepId);
     };
+
+    const finishReview = useCallback(async () => {
+        try {
+            await sessionWriteRef.current;
+            await AsyncStorage.removeItem(DAILY_REVIEW_STEP_STORAGE_KEY);
+        } finally {
+            onClose();
+        }
+    }, [onClose]);
 
     const openTask = useCallback((task: Task) => {
         setEditingTask(task);
@@ -486,7 +540,7 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                     <View style={styles.centerContent}>
                         <CheckCircle2 size={56} color={tc.tint} strokeWidth={1.5} style={styles.bigIcon} />
                         <Text style={[styles.description, { color: tc.secondaryText }]}>{t('dailyReview.completeDesc')}</Text>
-                        <TouchableOpacity style={[styles.primaryButton, { backgroundColor: filledButton.backgroundColor }]} onPress={onClose}>
+                        <TouchableOpacity style={[styles.primaryButton, { backgroundColor: filledButton.backgroundColor }]} onPress={finishReview}>
                             <Text style={[styles.primaryButtonText, { color: filledButton.textColor ?? tc.onTint }]}>{t('review.finish')}</Text>
                         </TouchableOpacity>
                     </View>
@@ -541,8 +595,9 @@ function DailyReviewFlow({ onClose }: { onClose: () => void }) {
                     >
                         <TouchableOpacity
                             onPress={back}
-                            disabled={activeStepIndex <= 0}
-                            style={[styles.footerButton, { backgroundColor: tc.filterBg, opacity: activeStepIndex <= 0 ? 0.5 : 1 }]}
+                            disabled={!previousStepId}
+                            accessibilityState={{ disabled: !previousStepId }}
+                            style={[styles.footerButton, { backgroundColor: tc.filterBg, opacity: previousStepId ? 1 : 0.5 }]}
                         >
                             <Text style={[styles.footerButtonText, { color: tc.text }]}>{t('review.back')}</Text>
                         </TouchableOpacity>
@@ -592,7 +647,7 @@ export function DailyReviewModal({ visible, onClose }: DailyReviewModalProps) {
             allowSwipeDismissal
             onRequestClose={onClose}
         >
-            <DailyReviewFlow onClose={onClose} />
+            {visible ? <DailyReviewFlow onClose={onClose} /> : null}
             <ToastViewport />
         </Modal>
     );

@@ -10,6 +10,7 @@ import {
     expandCalendarRecurringTaskSetInRange,
     createProjectedRecurringTask,
     formatRecurrenceLabel,
+    getRecurrenceRRuleValue,
     getProjectedRecurringTaskCalendarDate,
     getProjectedRecurringTaskId,
     getRecurringTaskPreviewDate,
@@ -159,6 +160,35 @@ describe('recurrence', () => {
         const parsed = parseRRuleString(rrule);
         expect(parsed.rule).toBe('yearly');
         expect(parsed.interval).toBe(2);
+    });
+
+    describe('getRecurrenceRRuleValue', () => {
+        it('returns no rule for absent and legacy string recurrence values', () => {
+            expect(getRecurrenceRRuleValue(undefined)).toBe('');
+            expect(getRecurrenceRRuleValue('daily')).toBe('');
+        });
+
+        it('preserves an existing RRULE verbatim', () => {
+            expect(getRecurrenceRRuleValue({
+                rule: 'weekly',
+                byDay: ['MO'],
+                rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=WE;X-CUSTOM=value',
+            })).toBe('FREQ=WEEKLY;INTERVAL=2;BYDAY=WE;X-CUSTOM=value');
+        });
+
+        it('serializes recurrence metadata through the canonical RRULE builder', () => {
+            expect(getRecurrenceRRuleValue({ rule: 'daily' })).toBe('FREQ=DAILY');
+            expect(getRecurrenceRRuleValue({
+                rule: 'weekly',
+                byDay: ['WE', 'MO'],
+                count: 5,
+                until: '2026-09-30',
+            })).toBe('FREQ=WEEKLY;BYDAY=MO,WE;COUNT=5;UNTIL=20260930');
+            expect(getRecurrenceRRuleValue({
+                rule: 'monthly',
+                byMonthDay: [15, -1],
+            })).toBe('FREQ=MONTHLY;BYMONTHDAY=-1,15');
+        });
     });
 
     it('normalizes legacy recurrence values to object form', () => {
@@ -901,7 +931,7 @@ describe('recurrence', () => {
         expect(typeof next?.recurrence === 'object' ? next.recurrence.rrule : undefined).toBe('FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH;WKST=SU');
     });
 
-    it('advances startTime by monthly BYDAY interval when interval is greater than 1', () => {
+    it('preserves the start lead for monthly BYDAY recurrence', () => {
         const task: Task = {
             id: 't5b',
             title: 'Every two months on 2nd Thursday',
@@ -916,14 +946,10 @@ describe('recurrence', () => {
         };
 
         const next = createNextRecurringTask(task, '2025-01-09T12:00:00.000Z', 'done');
-        // The task was completed on its due date, so the due anchor lands on the
-        // next occurrence of the rule. The start date is off the BYDAY grid, so
-        // its own advance snaps it onto January's 2nd Thursday -- the same
-        // "check the current month first" step the sibling interval test pins
-        // for dueDate. It used to read 2025-03-13 because the past-completion
-        // push re-derived startTime alone from the completion instant.
+        // The due date identifies the occurrence. The start keeps its original
+        // eight-day lead instead of snapping independently onto the BYDAY grid.
         expect(next?.dueDate).toBe('2025-03-13');
-        expect(next?.startTime).toBe('2025-01-09');
+        expect(next?.startTime).toBe('2025-03-05');
     });
 
     it('uses current month for monthly BYDAY and preserves time', () => {
@@ -1614,7 +1640,7 @@ describe('recurrence', () => {
         expect(projected?.dueDate).toBe(spawned?.dueDate);
     });
 
-    it('advances a fluid start+due pair independently from each field\'s own future date, preserving spacing and time-of-day', () => {
+    it('projects a fluid start+due pair from one due-led occurrence', () => {
         const task: Task = {
             id: 't-projected-fluid-start-due',
             title: 'Prep and ship report',
@@ -1642,6 +1668,78 @@ describe('recurrence', () => {
         const originalSpacingMs = new Date(task.dueDate as string).getTime() - new Date(task.startTime as string).getTime();
         const projectedSpacingMs = new Date(projected?.dueDate as string).getTime() - new Date(projected?.startTime as string).getTime();
         expect(projectedSpacingMs).toBe(originalSpacingMs);
+    });
+
+    it.each([
+        {
+            label: 'strict date-only',
+            strategy: 'strict' as const,
+            startTime: '2026-06-01',
+            dueDate: '2026-06-03',
+            reviewAt: '2026-06-04',
+            completedAt: '2026-06-03T18:00:00.000Z',
+            expected: ['2026-06-14', '2026-06-16', '2026-06-17'],
+        },
+        {
+            label: 'fluid date-only',
+            strategy: 'fluid' as const,
+            startTime: '2026-06-01',
+            dueDate: '2026-06-03',
+            reviewAt: '2026-06-04',
+            completedAt: '2026-06-10T12:00:00.000Z',
+            expected: ['2026-06-14', '2026-06-16', '2026-06-17'],
+        },
+        {
+            label: 'strict datetime',
+            strategy: 'strict' as const,
+            startTime: '2026-06-01T09:00',
+            dueDate: '2026-06-03T17:00',
+            reviewAt: '2026-06-04T18:00',
+            completedAt: '2026-06-03T18:00:00.000Z',
+            expected: ['2026-06-14T09:00', '2026-06-16T17:00', '2026-06-17T18:00'],
+        },
+        {
+            label: 'fluid datetime',
+            strategy: 'fluid' as const,
+            startTime: '2026-06-01T09:00',
+            dueDate: '2026-06-03T17:00',
+            reviewAt: '2026-06-04T18:00',
+            completedAt: '2026-06-10T12:00:00.000Z',
+            expected: ['2026-06-14T09:00', '2026-06-16T12:00:00.000Z', '2026-06-17T18:00'],
+        },
+    ])('keeps a multi-day monthly occurrence coherent for $label', ({
+        strategy,
+        startTime,
+        dueDate,
+        reviewAt,
+        completedAt,
+        expected,
+    }) => {
+        const task: Task = {
+            id: `coherent-${strategy}-${startTime}`,
+            title: 'Prepare, deliver, review',
+            status: 'next',
+            tags: [],
+            contexts: [],
+            startTime,
+            dueDate,
+            reviewAt,
+            recurrence: {
+                rule: 'monthly',
+                strategy,
+                byMonthDay: [1, 16],
+                rrule: 'FREQ=MONTHLY;BYMONTHDAY=1,16',
+            },
+            showFutureRecurrence: true,
+            createdAt: '2026-06-01T00:00:00.000Z',
+            updatedAt: '2026-06-01T00:00:00.000Z',
+        };
+
+        const spawned = createNextRecurringTask(task, completedAt, 'done');
+        const projected = createProjectedRecurringTask(task, completedAt);
+
+        expect([spawned?.startTime, spawned?.dueDate, spawned?.reviewAt]).toEqual(expected);
+        expect([projected?.startTime, projected?.dueDate, projected?.reviewAt]).toEqual(expected);
     });
 
     it('sweeps fluid schedule/rule/timing combinations, projecting strictly past the field\'s own date when future-dated', () => {
@@ -2525,7 +2623,7 @@ describe('createNextRecurringTask late completion coherence', () => {
         expect(next?.dueDate).toBeUndefined();
     });
 
-    it('keeps fluid start and due on the same completion-anchored occurrence', () => {
+    it('keeps fluid start and due spacing around the completion-anchored due date', () => {
         const next = createNextRecurringTask(
             buildTask({
                 startTime: '2026-08-10',
@@ -2536,9 +2634,9 @@ describe('createNextRecurringTask late completion coherence', () => {
             'done',
         );
 
-        // Fluid re-bases every field on the completion instant, so the fields
-        // collapse onto one day; it can never produce start > due.
-        expect(next?.startTime).toBe('2026-08-16');
+        // Fluid re-bases the due anchor on completion, while the sibling start
+        // keeps its original two-day lead.
+        expect(next?.startTime).toBe('2026-08-14');
         expect(next?.dueDate).toBe('2026-08-16');
     });
 });

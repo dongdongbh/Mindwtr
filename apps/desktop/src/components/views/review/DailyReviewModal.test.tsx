@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetForTests, useTaskStore, type Task } from '@mindwtr/core';
 
@@ -100,14 +100,19 @@ describe('DailyReviewGuideModal', () => {
         expect(screen.queryByRole('button', { name: /next/i })).not.toBeInTheDocument();
     });
 
-    it('persists the current step across modal remounts and clears it when finished', async () => {
+    it('persists the current step across modal remounts and clears it when finished', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 1, 15, 10, 30, 0));
         useTaskStore.setState({
             _allTasks: [makeTask({ id: 'inbox-1', title: 'Inbox task', status: 'inbox' })],
         });
 
         const { unmount } = render(<DailyReviewGuideModal onClose={vi.fn()} />);
 
-        await waitFor(() => expect(window.localStorage.getItem(storageKey)).toBe('inbox'));
+        expect(JSON.parse(window.localStorage.getItem(storageKey) ?? '{}')).toEqual({
+            step: 'inbox',
+            startedAt: new Date(2026, 1, 15, 10, 30, 0).toISOString(),
+        });
 
         unmount();
         render(<DailyReviewGuideModal onClose={vi.fn()} />);
@@ -119,8 +124,13 @@ describe('DailyReviewGuideModal', () => {
         expect(window.localStorage.getItem(storageKey)).toBeNull();
     });
 
-    it('does not restore a completed step when new daily review work appears', async () => {
-        window.localStorage.setItem(storageKey, 'completed');
+    it('ignores an expired completed checkpoint when new daily review work appears', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 1, 15, 10, 30, 0));
+        window.localStorage.setItem(storageKey, JSON.stringify({
+            step: 'completed',
+            startedAt: new Date(2026, 1, 14, 10, 30, 0).toISOString(),
+        }));
         useTaskStore.setState({
             _allTasks: [makeTask({ id: 'inbox-1', title: 'Inbox task', status: 'inbox' })],
         });
@@ -128,7 +138,24 @@ describe('DailyReviewGuideModal', () => {
         render(<DailyReviewGuideModal onClose={vi.fn()} />);
 
         expect(screen.getByRole('heading', { level: 1, name: /process inbox/i })).toBeInTheDocument();
-        await waitFor(() => expect(window.localStorage.getItem(storageKey)).toBe('inbox'));
+        expect(JSON.parse(window.localStorage.getItem(storageKey) ?? '{}')).toEqual({
+            step: 'inbox',
+            startedAt: new Date(2026, 1, 15, 10, 30, 0).toISOString(),
+        });
+    });
+
+    it('disables Back on the first active step and preserves the checkpoint when closed', () => {
+        useTaskStore.setState({
+            _allTasks: [makeTask({ id: 'inbox-1', title: 'Inbox task', status: 'inbox' })],
+        });
+        const onClose = vi.fn();
+
+        render(<DailyReviewGuideModal onClose={onClose} />);
+
+        expect(screen.getByRole('button', { name: 'Back' })).toBeDisabled();
+        fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+        expect(onClose).toHaveBeenCalledTimes(1);
+        expect(JSON.parse(window.localStorage.getItem(storageKey) ?? '{}')).toEqual(expect.objectContaining({ step: 'inbox' }));
     });
 
     it('reviews Waiting For before choosing todays focus so unblocked items can be promoted', () => {

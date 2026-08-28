@@ -17,7 +17,9 @@ import {
     SYNC_FILE_NAME,
     syncEncryptedArtifactName,
     SyncEncryptionRemotePlaintextError,
+    SyncEncryptionRemoteConflictError,
     SyncEncryptionTerminalError,
+    type FileSyncReadResult,
     type SyncKeyMaterial,
 } from '@mindwtr/core';
 import { Platform } from 'react-native';
@@ -29,6 +31,7 @@ import {
     syncEncryptionLocalState,
 } from './sync-encryption-state';
 import {
+    createFileSyncEncryptionRemotePort,
     readSyncArtifactBytes,
     resolveSyncArtifactSiblingUri,
     writeSyncArtifactBytes,
@@ -51,6 +54,7 @@ interface PickResult extends AppData {
 }
 
 const BACKUP_FILE_NAME = 'data.json.bak';
+export const FILE_SYNC_ABSENT_FINGERPRINT = 'file:v1:absent';
 const READONLY_FOLDER_MESSAGE = 'Selected folder is read-only. Please choose a writable folder or make it available offline.';
 const ICLOUD_EVICTED_MESSAGE =
     'Sync file has been offloaded by iCloud Optimize Storage. ' +
@@ -581,6 +585,9 @@ export interface SyncFileAccessOptions {
      * switches to raw bytes.
      */
     material?: SyncKeyMaterial | null;
+    /** Raw generation returned by `readSyncFileVersioned`. Presence opts the write into
+     * atomic quarantine/create-new CAS; the explicit absent sentinel means create-only. */
+    expectedFingerprint?: string;
 }
 
 const getUriLeafName = (uri: string): string => {
@@ -607,14 +614,13 @@ const discoverEncryptedSyncFolder = async (
     plainBytes: Uint8Array | null,
 ): Promise<boolean> => {
     const candidates: (Uint8Array | null)[] = [plainBytes];
-    try {
-        const encUri = await resolveSyncArtifactSiblingUri(resolvedUri, encryptedLeafNameFor(resolvedUri), {
-            createIfMissing: false,
-        });
-        if (encUri) candidates.push(await readSyncArtifactBytes(encUri));
-    } catch {
-        // A folder we cannot list is simply a folder with no discoverable `.enc` sibling.
-    }
+    // Discovery is a safety check, not a best-effort enhancement. If the folder cannot
+    // be enumerated or the sibling cannot be read, propagate the provider error: treating
+    // "unreadable" as "absent" would license a fresh plaintext repair beside ciphertext.
+    const encUri = await resolveSyncArtifactSiblingUri(resolvedUri, encryptedLeafNameFor(resolvedUri), {
+        createIfMissing: false,
+    });
+    if (encUri) candidates.push(await readSyncArtifactBytes(encUri));
     for (const bytes of candidates) {
         if (!bytes || bytes.length === 0) continue;
         const inspected = inspectSyncArtifact(bytes);
@@ -641,7 +647,10 @@ const readEncryptedSyncFile = async (
         // the `.enc` artifact is gone and the plaintext original is back. Never "no data" —
         // that would merge this device's store into a fresh plaintext generation and fork the
         // folder, and this device never follows the remote down to plaintext on its own.
-        const plain = await readSyncArtifactBytes(resolvedUri).catch(() => null);
+        // A provider failure here is not proof that the plaintext generation is absent.
+        // Propagate it so the keyed cycle cannot recreate `.enc` from local data while a
+        // peer-restored plaintext document is merely unreadable.
+        const plain = await readSyncArtifactBytes(resolvedUri);
         if (isPlaintextSyncArtifact(plain)) {
             markRemotePlaintextDiscovered(syncEncryptionLocalState);
             await flushSyncEncryptionLocalState();
@@ -774,6 +783,134 @@ export const readSyncFile = async (fileUri: string, options?: SyncFileAccessOpti
     }
 };
 
+const emptyRemoteAppData = (): AppData => ({
+    tasks: [],
+    projects: [],
+    sections: [],
+    areas: [],
+    people: [],
+    settings: {},
+});
+
+/** Reads the primary document bytes and their version through the same File transition
+ * port ordinary writes use. Recovery still delegates to the established reader, but the
+ * returned version always describes the primary generation that an atomic repair must
+ * replace (or the explicit absence it must create into). */
+export const readSyncFileVersioned = async (
+    fileUri: string,
+    options?: SyncFileAccessOptions,
+): Promise<FileSyncReadResult> => {
+    const material = options?.material ?? null;
+    const resolvedUri = await resolveSyncFileUri(fileUri, { createIfMissing: false });
+    const remote = await createFileSyncEncryptionRemotePort(resolvedUri);
+    if (!remote) throw new Error('Unable to open the selected sync folder for a versioned read');
+    const name = material ? encryptedLeafNameFor(resolvedUri) : getUriLeafName(resolvedUri);
+    const snapshot = await remote.read(name);
+
+    if (snapshot.bytes) {
+        if (!snapshot.version) throw new Error('File Sync did not return a version for an existing document');
+        if (material) {
+            const foreign = detectForeignSaltArtifact(snapshot.bytes, material);
+            if (foreign) {
+                markRemoteEncryptionDiscovered(syncEncryptionLocalState, foreign);
+                await flushSyncEncryptionLocalState();
+                throw new SyncEncryptionNoKeyError();
+            }
+            const plaintext = await decryptRemoteArtifactOrThrow(
+                snapshot.bytes,
+                material.key,
+                mobileSyncCryptoPrimitives,
+            );
+            return {
+                data: parseAppData(new TextDecoder().decode(plaintext)),
+                fingerprint: snapshot.version,
+                source: 'primary',
+            };
+        }
+        if (inspectSyncArtifact(snapshot.bytes).kind === 'plaintext') {
+            try {
+                return {
+                    data: parseAppData(new TextDecoder().decode(snapshot.bytes)),
+                    fingerprint: snapshot.version,
+                    source: 'primary',
+                };
+            } catch {
+                // Keep the existing backup/invalid-JSON recovery behavior below. The raw
+                // primary version remains the CAS target for any subsequent repair.
+            }
+        }
+    }
+
+    const recovered = await readSyncFile(fileUri, options);
+    return {
+        data: recovered ?? emptyRemoteAppData(),
+        fingerprint: snapshot.version ?? FILE_SYNC_ABSENT_FINGERPRINT,
+        source: recovered ? 'recovery' : 'empty',
+        // Every fallback means the canonical generation is absent, empty, invalid, or
+        // was bypassed for recovery. Force one CAS-protected repair even when the
+        // recovered/default data is semantically identical to local state.
+        needsRepair: true,
+    };
+};
+
+const writeSyncFileVersioned = async (
+    resolvedUri: string,
+    content: string,
+    material: SyncKeyMaterial | null,
+    expectedFingerprint: string,
+): Promise<void> => {
+    const remote = await createFileSyncEncryptionRemotePort(resolvedUri);
+    if (!remote) throw new Error('Unable to open the selected sync folder for an atomic write');
+    const name = material ? encryptedLeafNameFor(resolvedUri) : getUriLeafName(resolvedUri);
+    const expectedVersion = expectedFingerprint === FILE_SYNC_ABSENT_FINGERPRINT
+        ? null
+        : expectedFingerprint;
+    const current = await remote.read(name);
+    if (current.version !== expectedVersion) {
+        throw new SyncEncryptionRemoteConflictError(`${name} changed before the File Sync write`);
+    }
+
+    // Preserve the previous verified generation through the same best-effort backup policy
+    // as the legacy writer. The authoritative write below remains atomic even if this copy
+    // is unsupported or races; a backup failure never licenses an unconditional overwrite.
+    if (current.bytes && (material || !resolvedUri.startsWith('content://'))) {
+        try {
+            const backupName = material ? syncEncryptedArtifactName(BACKUP_FILE_NAME) : BACKUP_FILE_NAME;
+            const backupUri = await resolveSyncArtifactSiblingUri(resolvedUri, backupName, {
+                createIfMissing: true,
+            });
+            if (backupUri) await writeSyncArtifactBytes(backupUri, current.bytes);
+        } catch (error) {
+            void logWarn('File Sync backup rotation failed; continuing with the atomic write', {
+                scope: 'sync',
+                extra: { error: error instanceof Error ? error.message : String(error) },
+            });
+        }
+    }
+
+    const payload = material
+        ? await encryptSyncArtifact(
+            new TextEncoder().encode(content),
+            material,
+            mobileSyncCryptoPrimitives,
+        )
+        : new TextEncoder().encode(content);
+    await remote.write(name, payload, expectedVersion);
+
+    const written = await remote.read(name);
+    if (!written.bytes) throw new Error('Sync file write verification failed: file is empty after write.');
+    if (material) {
+        const plaintext = await decryptRemoteArtifactOrThrow(
+            written.bytes,
+            material.key,
+            mobileSyncCryptoPrimitives,
+        );
+        parseAppData(new TextDecoder().decode(plaintext));
+    } else {
+        parseAppData(new TextDecoder().decode(written.bytes));
+    }
+};
+
 /**
  * Encrypted write. Mirrors the Rust backup-rotation gate (decision #4): the `.bak`
  * rotation is gated on the CURRENT artifact decrypting successfully, so bytes we cannot
@@ -834,6 +971,10 @@ export const writeSyncFile = async (fileUri: string, data: AppData, options?: Sy
         const resolvedUri = await resolveSyncFileUri(fileUri, { createIfMissing: true });
 
         const material = options?.material ?? null;
+        if (options?.expectedFingerprint !== undefined) {
+            await writeSyncFileVersioned(resolvedUri, content, material, options.expectedFingerprint);
+            return;
+        }
         if (material) {
             await writeEncryptedSyncFile(resolvedUri, content, material);
             return;

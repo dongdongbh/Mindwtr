@@ -1,10 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LocalSyncAbort, type AppData } from '@mindwtr/core';
 
+import * as AttachmentSyncUtils from './attachment-sync-utils';
 import * as FileSystem from './file-system';
 import { runMobileAttachmentCleanup } from './sync-attachment-cleanup';
 
 const now = '2026-01-01T00:00:00.000Z';
+const h1 = '1'.repeat(64);
+const h2 = '2'.repeat(64);
+const h1CloudKey = `attachments/live-attachment.${h1}.pdf`;
+const h2CloudKey = `attachments/live-attachment.${h2}.pdf`;
 
 const buildData = (): AppData => ({
   tasks: [
@@ -64,7 +69,6 @@ const buildCleanupOptions = (appData: AppData) => ({
   webdavConfig: null,
   cloudConfig: null,
   cloudProvider: 'selfhosted' as const,
-  fileSyncPath: '/sync/mindwtr.json',
   fetcher: vi.fn() as unknown as typeof fetch,
   ensureLocalSnapshotFresh: vi.fn(),
   deleteDropboxAttachment: vi.fn(async () => undefined),
@@ -76,6 +80,24 @@ const buildCleanupOptions = (appData: AppData) => ({
 const buildOrphanOnlyData = (): AppData => {
   const data = buildData();
   data.tasks = [data.tasks[0]];
+  return data;
+};
+
+const buildSafGenerationCleanupData = (): AppData => {
+  const data = buildData();
+  const liveTask = data.tasks[1];
+  const liveAttachment = liveTask.attachments?.[0];
+  if (!liveAttachment) throw new Error('Test attachment unavailable');
+  liveAttachment.cloudKey = h2CloudKey;
+  data.tasks = [liveTask];
+  data.settings = {
+    attachments: {
+      pendingRemoteDeletes: [
+        { cloudKey: h1CloudKey, title: 'shared.pdf', attempts: 0 },
+        { cloudKey: h2CloudKey, title: 'shared.pdf', attempts: 0 },
+      ],
+    },
+  };
   return data;
 };
 
@@ -193,5 +215,39 @@ describe('runMobileAttachmentCleanup', () => {
     })).rejects.toBeInstanceOf(LocalSyncAbort);
 
     expect(deleteAsync).not.toHaveBeenCalled();
+  });
+
+  it('retains File and SAF generations without enumerating the shared folder', async () => {
+    const data = buildSafGenerationCleanupData();
+    const resolveFileSyncDir = vi.spyOn(AttachmentSyncUtils, 'resolveFileSyncDir');
+    const inspectDirectory = vi.spyOn(AttachmentSyncUtils, 'inspectSafDirectoryEntriesByName');
+    const deleteAsync = vi.spyOn(FileSystem, 'deleteAsync').mockResolvedValue(undefined);
+
+    const result = await runMobileAttachmentCleanup(buildCleanupOptions(data));
+
+    expect(resolveFileSyncDir).not.toHaveBeenCalled();
+    expect(inspectDirectory).not.toHaveBeenCalled();
+    expect(deleteAsync).not.toHaveBeenCalled();
+    expect(result.appData.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
+    expect(result.appData.tasks[0].attachments?.[0]?.cloudKey).toBe(h2CloudKey);
+  });
+
+  it('performs zero SAF enumerations for a full retained cleanup batch', async () => {
+    const data = buildData();
+    data.tasks = [];
+    data.settings.attachments = {
+      pendingRemoteDeletes: Array.from({ length: 25 }, (_, index) => ({
+        cloudKey: `attachments/a${index}.${String(index).padStart(64, '0')}.pdf`,
+        attempts: index % 3,
+      })),
+    };
+    const inspectDirectory = vi.spyOn(AttachmentSyncUtils, 'inspectSafDirectoryEntriesByName');
+    const deleteAsync = vi.spyOn(FileSystem, 'deleteAsync').mockResolvedValue(undefined);
+
+    const result = await runMobileAttachmentCleanup(buildCleanupOptions(data));
+
+    expect(inspectDirectory).not.toHaveBeenCalled();
+    expect(deleteAsync).not.toHaveBeenCalled();
+    expect(result.appData.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
   });
 });

@@ -39,9 +39,11 @@ use time::OffsetDateTime;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 mod audio;
+mod attachment_installer;
 mod autostart;
 mod config;
 mod email_capture;
+mod file_sync_attachment_publication;
 mod install;
 mod linux_calendar;
 mod local_api;
@@ -62,6 +64,7 @@ use audio::{
     download_parakeet_model, download_whisper_model, start_audio_recording, stop_audio_recording,
     transcribe_parakeet, transcribe_whisper, AudioRecorderState,
 };
+use attachment_installer::install_attachment_download;
 use autostart::{get_launch_at_startup_enabled, set_launch_at_startup_enabled};
 use config::{
     check_obsidian_vault_marker, expand_obsidian_vault_scope, get_ai_key, get_cloud_config,
@@ -112,15 +115,17 @@ use storage::{
     save_data, save_task, search_fts, upsert_calendar_sync_entry,
 };
 use sync::{
-    clear_sync_path, cloud_get_json, cloud_put_json, connect_dropbox,
+    acquire_file_sync_lease, clear_sync_path, cloud_get_json, cloud_put_json, connect_dropbox,
     discard_staged_dropbox_credentials, disconnect_dropbox, finalize_staged_dropbox_credentials,
     get_dropbox_access_token, get_dropbox_redirect_uri, get_sync_path, is_dropbox_connected,
     promote_staged_dropbox_credentials, read_sync_file, read_sync_file_versioned,
     recover_dropbox_credentials_before_sync_configuration, recover_dropbox_credentials_on_startup,
-    rollback_staged_dropbox_credentials, set_sync_path, sync_fs_create_dir, sync_fs_exists,
-    sync_fs_remove_file, sync_fs_rename, sync_fs_stat, webdav_get_json, webdav_put_json,
-    test_sync_path, write_sync_file,
-    DropboxStagedCredentialState, DropboxStartupRecoveryOutcome,
+    release_file_sync_lease, release_file_sync_leases_for_window,
+    rollback_staged_dropbox_credentials, set_sync_path, sync_fs_abandon_attachment_generation,
+    sync_fs_create_dir, sync_fs_exists, sync_fs_publish_attachment_generation, sync_fs_remove_file,
+    sync_fs_rename, sync_fs_reserve_attachment_generation, sync_fs_stat, test_sync_path,
+    webdav_get_json, webdav_put_json, write_sync_file, DropboxStagedCredentialState,
+    DropboxStartupRecoveryOutcome, FileSyncLeaseState,
 };
 use sync::{
     change_sync_encryption_passphrase, disable_sync_encryption, enable_sync_encryption,
@@ -130,7 +135,7 @@ use sync_encryption::{
     clear_sync_encryption_key_material, derive_sync_encryption_key,
     get_sync_encryption_key_material, get_sync_encryption_status,
     mark_sync_encryption_remote_discovered, mark_sync_encryption_remote_plaintext,
-    set_sync_encryption_key_material,
+    mark_sync_encryption_transition_incomplete, set_sync_encryption_key_material,
 };
 use ui::{
     acknowledge_close_request, apply_global_quick_add_shortcut, consume_quick_add_pending,
@@ -1175,6 +1180,7 @@ pub fn run() {
         .manage(MainWindowReveal::default())
         .manage(LocalApiServerState::default())
         .manage(DropboxStagedCredentialState::default())
+        .manage(FileSyncLeaseState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
@@ -1225,6 +1231,18 @@ pub fn run() {
         });
     builder
         .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                let lease_state = window.app_handle().state::<FileSyncLeaseState>();
+                if let Err(error) =
+                    release_file_sync_leases_for_window(&lease_state, window.label())
+                {
+                    log::warn!(
+                        "Failed to release File Sync leases for destroyed window {}: {error}",
+                        window.label()
+                    );
+                }
+                return;
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 if window.label() == QUICK_ADD_WINDOW_LABEL {
@@ -1668,6 +1686,7 @@ pub fn run() {
             derive_sync_encryption_key,
             mark_sync_encryption_remote_discovered,
             mark_sync_encryption_remote_plaintext,
+            mark_sync_encryption_transition_incomplete,
             enable_sync_encryption,
             disable_sync_encryption,
             change_sync_encryption_passphrase,
@@ -1713,11 +1732,17 @@ pub fn run() {
             read_sync_file,
             read_sync_file_versioned,
             write_sync_file,
+            acquire_file_sync_lease,
+            release_file_sync_lease,
             sync_fs_exists,
             sync_fs_create_dir,
             sync_fs_remove_file,
             sync_fs_rename,
             sync_fs_stat,
+            sync_fs_reserve_attachment_generation,
+            sync_fs_publish_attachment_generation,
+            sync_fs_abandon_attachment_generation,
+            install_attachment_download,
             set_tray_visible,
             set_tray_tooltip,
             set_macos_activation_policy,

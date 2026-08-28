@@ -128,6 +128,18 @@ describe('mobile sync-service test utils', () => {
     expect(classifySyncFailure("Sync file is not writable. Re-select the sync folder in Settings -> Sync, then sync again.")).toBe('permission');
   });
 
+  it('classifies unavailable File Sync locking separately for localized recovery guidance', () => {
+    expect(classifySyncFailure(
+      'Safe File Sync locking is unavailable for this location. Re-select the sync folder, restart Mindwtr, or use WebDAV.',
+    )).toBe('fileLockUnavailable');
+  });
+
+  it('classifies terminal File Sync generation corruption separately from retryable failures', () => {
+    expect(classifySyncFailure(
+      'SYNC_FILE_GENERATION_CORRUPT: File Sync attachment generation remains corrupt after bounded retries',
+    )).toBe('fileGenerationCorrupt');
+  });
+
   it('classifies rate-limited, misconfigured, and conflict sync failures', () => {
     expect(classifySyncFailure('WebDAV rate limited. Sync paused briefly; try again in about a minute.')).toBe('rateLimited');
     expect(classifySyncFailure('WebDAV folder URL is not configured. Save WebDAV settings first.')).toBe('misconfigured');

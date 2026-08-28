@@ -3,9 +3,18 @@ import { readFileSync } from "node:fs";
 
 test("native CI generates clean projects and compiles Android and iOS sources", () => {
   const workflow = readFileSync(".github/workflows/native-platform-ci.yml", "utf8");
+  const androidJob = workflow.match(
+    /\n  android-native:\n([\s\S]*?)(?=\n  [a-z][a-z-]+:\n|$)/,
+  )?.[1];
+  const iosJob = workflow.match(
+    /\n  ios-native:\n([\s\S]*?)(?=\n  [a-z][a-z-]+:\n|$)/,
+  )?.[1];
 
   expect(workflow).toContain('apps/mobile/modules/**/android/**');
   expect(workflow).toContain('apps/mobile/modules/**/ios/**');
+  expect(
+    workflow.match(/- "apps\/mobile\/modules\/\*\*\/expo-module\.config\.json"/g),
+  ).toHaveLength(2);
   // The maintained iOS sources live outside the gitignored generated ios/
   // project, so the triggers must name them directly or edits skip CI.
   expect(workflow.match(/- "apps\/mobile\/ios-app-intents\/\*\*"/g)).toHaveLength(2);
@@ -13,6 +22,12 @@ test("native CI generates clean projects and compiles Android and iOS sources", 
   expect(workflow.match(/- "scripts\/ci\/setup-ruby\.sh"/g)).toHaveLength(2);
   expect(workflow).toContain("ios: ${{ steps.filter.outputs.ios }}");
   expect(workflow).toMatch(/apps\/mobile\/ios-app-intents\/\*\|apps\/mobile\/widgets-ios\/\*\|[^\n]*scripts\/ci\/setup-ruby\.sh\|/);
+  expect(workflow).toMatch(
+    /apps\/mobile\/modules\/\*\/android\/\*\|apps\/mobile\/modules\/\*\/expo-module\.config\.json\|/,
+  );
+  expect(workflow).toMatch(
+    /apps\/mobile\/modules\/\*\/ios\/\*\|apps\/mobile\/modules\/\*\/expo-module\.config\.json\|/,
+  );
   // The generated projects are gitignored; filters on them never match a
   // committed diff and only feign coverage.
   expect(workflow).not.toContain("apps/mobile/ios/**");
@@ -21,15 +36,198 @@ test("native CI generates clean projects and compiles Android and iOS sources", 
   expect(workflow).toContain("Generate Android native project");
   expect(workflow).toMatch(/prebuild \\\n\s+--clean \\\n\s+--platform android/);
   expect(workflow).toContain(":app:compileDebugKotlin");
+  expect(androidJob).toContain("name: Run Android compatibility-lock process regression");
+  expect(androidJob).toContain("file_compat_lock_test.cpp");
+  expect(androidJob).toContain("name: Run Android exact-directory retirement regression");
+  expect(androidJob).toContain("exact_directory_retirement.cpp");
+  expect(androidJob).toContain("exact_directory_retirement_test.cpp");
+  expect(androidJob).toContain(":attachment-file-installer:assembleDebug");
+  expect(androidJob).toContain(":sync-file-lock:assembleDebug");
+  expect(androidJob).toContain("name: Verify packaged Android lock JNI symbols");
+  expect(androidJob).toContain("jni/arm64-v8a/libsync-file-lock.so");
+  expect(androidJob).toContain(
+    "Java_tech_dongdongbh_mindwtr_syncfilelock_StableRootLockNative_tryLock",
+  );
+  expect(androidJob).toContain(
+    "Java_tech_dongdongbh_mindwtr_syncfilelock_StableRootLockNative_tryOfdLock",
+  );
+  expect(androidJob).toContain("name: Verify packaged Android attachment JNI symbols");
+  expect(androidJob).toContain("jni/arm64-v8a/libattachment-file-installer.so");
+  expect(androidJob).toContain(
+    "Java_tech_dongdongbh_mindwtr_attachmentfileinstaller_ExactAttachmentPublisherNative_publishRelativeNoReplace",
+  );
+  expect(androidJob).toContain(
+    "Java_tech_dongdongbh_mindwtr_attachmentfileinstaller_ExactAttachmentPublisherNative_retireEmptyDirectoryIfIdentity",
+  );
+  expect(androidJob).toContain(
+    "Java_tech_dongdongbh_mindwtr_attachmentfileinstaller_ExactAttachmentPublisherNative_retireReservedPrivateStage",
+  );
+  expect(androidJob).toContain("name: Run Android native recovery tests");
+  expect(androidJob).toContain(":attachment-file-installer:testDebugUnitTest");
+  expect(androidJob).toContain(":sync-file-lock:testDebugUnitTest");
 
   expect(workflow).toContain("name: iOS Swift compile");
   expect(workflow).toContain("gem install cocoapods --version 1.16.2 --no-document");
   expect(workflow).toMatch(/prebuild \\\n\s+--clean \\\n\s+--platform ios/);
   expect(workflow).toContain("-sdk iphonesimulator");
   expect(workflow).toContain("CODE_SIGNING_ALLOWED=NO");
+  expect(iosJob).toContain("name: Run attachment installer Swift recovery tests");
+  expect(iosJob).toContain(
+    "swift test --package-path apps/mobile/modules/attachment-file-installer/ios",
+  );
+  expect(iosJob).toContain("name: Run File Sync stable-lock Swift tests");
+  expect(iosJob).toContain(
+    "swift test --package-path apps/mobile/modules/sync-file-lock/ios",
+  );
+  expect(iosJob).toContain("name: Run CloudKit attachment error classifier tests");
+  expect(iosJob).toContain(
+    "swift test --package-path apps/mobile/modules/cloudkit-sync",
+  );
+  expect(
+    workflow.match(/- "apps\/mobile\/modules\/cloudkit-sync\/Package\.swift"/g),
+  ).toHaveLength(2);
+  expect(
+    workflow.match(/- "apps\/mobile\/modules\/cloudkit-sync\/tests\/\*\*"/g),
+  ).toHaveLength(2);
+  expect(workflow).toMatch(
+    /apps\/mobile\/modules\/cloudkit-sync\/Package\.swift\|apps\/mobile\/modules\/cloudkit-sync\/tests\/\*\|/,
+  );
 });
 
-test("desktop Rust pull requests run a stable Windows cargo check", () => {
+test("attachment installer native CI collects the recovery suites", () => {
+  const androidTests = readFileSync(
+    "apps/mobile/modules/attachment-file-installer/android/src/test/java/tech/dongdongbh/mindwtr/attachmentfileinstaller/AttachmentFileInstallerCoreTest.kt",
+    "utf8",
+  );
+  const androidPublisher = readFileSync(
+    "apps/mobile/modules/attachment-file-installer/android/src/main/cpp/exact_attachment_publisher.cpp",
+    "utf8",
+  );
+  const androidDirectoryRetirement = readFileSync(
+    "apps/mobile/modules/attachment-file-installer/android/src/main/cpp/exact_directory_retirement.cpp",
+    "utf8",
+  );
+  const androidDirectoryRetirementTests = readFileSync(
+    "apps/mobile/modules/attachment-file-installer/android/src/test/cpp/exact_directory_retirement_test.cpp",
+    "utf8",
+  );
+  const swiftPackage = readFileSync(
+    "apps/mobile/modules/attachment-file-installer/ios/Package.swift",
+    "utf8",
+  );
+  const swiftTests = readFileSync(
+    "apps/mobile/modules/attachment-file-installer/ios/Tests/AttachmentFileInstallerEngineTests.swift",
+    "utf8",
+  );
+  const cloudKitSwiftPackage = readFileSync(
+    "apps/mobile/modules/cloudkit-sync/Package.swift",
+    "utf8",
+  );
+  const cloudKitSwiftTests = readFileSync(
+    "apps/mobile/modules/cloudkit-sync/tests/CloudKitAttachmentErrorClassifierTests.swift",
+    "utf8",
+  );
+
+  expect(androidTests.match(/^\s*@Test$/gm)).toHaveLength(35);
+  expect(androidTests).toContain(
+    "unclaimedPrivateRetirementIsRecoveredFromItsDurableReservation",
+  );
+  expect(androidPublisher).toContain("fstatat(private_fd, \"stage\"");
+  expect(androidPublisher).toContain("SYS_renameat2");
+  expect(androidPublisher).toContain("RENAME_NOREPLACE");
+  expect(androidPublisher).toContain("error == EINVAL");
+  expect(androidPublisher).toContain(
+    "static_assert(!rename_noreplace_needs_exact_handle_fallback(EEXIST))",
+  );
+  expect(androidPublisher).toContain("AT_SYMLINK_FOLLOW");
+  expect(androidDirectoryRetirement).toContain("DirectoryRetirementResult::kMissing");
+  expect(androidDirectoryRetirement).toContain("kBeforeFinalIdentityCheck");
+  expect(androidDirectoryRetirement).toContain("kAfterRetirementBeforeParentSync");
+  expect(androidDirectoryRetirement).toContain(
+    'std::string(directory_name) + ".retiring"',
+  );
+  expect(androidDirectoryRetirementTests).toContain("preserves_a_peer_swapped_in_before_quarantine");
+  expect(androidDirectoryRetirementTests).toContain(
+    "preserves_a_peer_swapped_in_before_final_identity_check",
+  );
+  expect(androidDirectoryRetirementTests).toContain("resumes_after_crash_with_expected_quarantine");
+  expect(androidDirectoryRetirementTests).toContain("confirms_missing_after_crash_before_parent_sync");
+  expect(androidDirectoryRetirementTests).toContain("preserves_peer_after_crash_before_restore_sync");
+  expect(androidDirectoryRetirementTests).toContain("rejects_a_rebound_parent");
+  expect(androidDirectoryRetirementTests).toContain("preserves_a_preexisting_peer_quarantine");
+  expect(androidDirectoryRetirementTests).toContain("retires_an_unclaimed_reserved_stage");
+  expect(androidDirectoryRetirementTests).toContain("resumes_an_unclaimed_reserved_quarantine");
+  expect(androidDirectoryRetirementTests).toContain("retains_the_open_parent_across_path_rebind");
+  expect(swiftPackage).toContain(".testTarget(");
+  expect(swiftTests).toContain("testAbsentGenerationUsesCreateNoReplace");
+  expect(swiftTests).toContain("testPresentGenerationReplacesOnlyMatchingTargetAndPreservesIt");
+  expect(swiftTests).toContain("testInitialJournalCrashRecoversUntouchedTargetAndRetries");
+  expect(swiftTests).toContain("testLinkBeforeUnlinkCrashRecoversBothNamesAndRetries");
+  expect(swiftTests).toContain("testLateWriterMutatesRetainedOldInodeWithoutTouchingInstalledGeneration");
+  expect(swiftTests).toContain("testImmutablePublisherCreatesNoSharedInstallerRecoveryArtifacts");
+  expect(swiftTests).toContain("testImmutablePublisherPreservesOwnedStageAndPeerTargetOnCollision");
+  expect(swiftTests).toContain("testImmutablePublisherRejectsVerifiedStageNameSwap");
+  expect(swiftTests).toContain("testPreparedPrivateStageRecoveryRemovesOnlyRecordedInode");
+  expect(swiftTests).toContain("testOwnedStageRecoveryDeletesOnlyRecordedInodeAndDigest");
+  expect(swiftTests).toContain("testOwnedStageRecoveryPreservesReplacementInodeWithSameDigest");
+  expect(swiftTests).toContain("testOwnedStageRecoveryRejectsReplacedAttachmentRoot");
+  expect(cloudKitSwiftPackage).toContain("CloudKitAttachmentErrorClassifierTests");
+  expect(cloudKitSwiftPackage).toContain('.testTarget(');
+  expect(cloudKitSwiftTests).toContain("testClassifiesMindwtrRecordAndAssetAbsenceAsTerminal");
+  expect(cloudKitSwiftTests).toContain("testClassifiesCloudKitUnknownItemAsTerminal");
+  expect(cloudKitSwiftTests).toContain("testPreservesTransientAndUnrelatedErrors");
+});
+
+test("File Sync lock native CI collects stable-authority suites", () => {
+  const androidTests = readFileSync(
+    "apps/mobile/modules/sync-file-lock/android/src/test/java/tech/dongdongbh/mindwtr/syncfilelock/SyncFileLockModuleTest.kt",
+    "utf8",
+  );
+  const androidStableLock = readFileSync(
+    "apps/mobile/modules/sync-file-lock/android/src/main/cpp/stable_root_lock.cpp",
+    "utf8",
+  );
+  const androidCompatibilityLock = readFileSync(
+    "apps/mobile/modules/sync-file-lock/android/src/main/cpp/file_compat_lock.cpp",
+    "utf8",
+  );
+  const androidCompatibilityLockTest = readFileSync(
+    "apps/mobile/modules/sync-file-lock/android/src/test/cpp/file_compat_lock_test.cpp",
+    "utf8",
+  );
+  const swiftPackage = readFileSync(
+    "apps/mobile/modules/sync-file-lock/ios/Package.swift",
+    "utf8",
+  );
+  const swiftTests = readFileSync(
+    "apps/mobile/modules/sync-file-lock/ios/Tests/SyncFileLockEngineTests.swift",
+    "utf8",
+  );
+  const swiftEngine = readFileSync(
+    "apps/mobile/modules/sync-file-lock/ios/SyncFileLockModule.swift",
+    "utf8",
+  );
+
+  expect(androidTests.match(/^\s*@Test$/gm)).toHaveLength(7);
+  expect(androidTests).toContain("safUsesPrivateStableAuthorityWithoutOpeningProviderDirectory");
+  expect(androidTests).toContain("replacedLegacyLockCannotCreateSecondCurrentVersionOwner");
+  expect(androidStableLock).toContain("flock(fd, LOCK_EX | LOCK_NB)");
+  expect(androidStableLock).toContain("flock(fd, LOCK_UN)");
+  expect(androidCompatibilityLock).toContain("F_OFD_SETLK");
+  expect(androidCompatibilityLockTest).toContain("F_SETLK");
+  expect(androidCompatibilityLockTest).toContain("fork()");
+  expect(androidCompatibilityLockTest).toContain("validation_fd = open");
+  expect(androidCompatibilityLockTest).toContain("legacy lock unexpectedly acquired after revalidation");
+  expect(swiftPackage).toContain(".testTarget(");
+  expect(swiftEngine).toContain("private var destroyed = false");
+  expect(swiftEngine).toContain("guard !destroyed else");
+  expect(swiftTests).toContain("testDrainRejectsAcquireCompletingAfterTeardown");
+  expect(swiftTests).toContain("reachedRegistration");
+  expect(swiftTests).toContain("testRootAuthorityBlocksReplacementLockOwner");
+  expect(swiftTests).toContain("testSymlinkLockFailsClosedWithoutTouchingPeer");
+});
+
+test("desktop Rust pull requests check and test the native library on Windows", () => {
   const workflow = readFileSync(".github/workflows/native-platform-ci.yml", "utf8");
   const windowsJob = workflow.match(
     /\n  windows-rust:\n([\s\S]*?)(?=\n  [a-z][a-z-]+:\n|$)/,
@@ -53,6 +251,10 @@ test("desktop Rust pull requests run a stable Windows cargo check", () => {
   expect(windowsJob).toContain(
     "run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml",
   );
+  expect(windowsJob).toContain("name: Run Windows native library tests");
+  expect(windowsJob).toContain(
+    "run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib",
+  );
 });
 
 test("macOS native CI links the release Rust and Swift bridges", () => {
@@ -67,4 +269,7 @@ test("macOS native CI links the release Rust and Swift bridges", () => {
     "run: cargo build --release --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib",
   );
   expect(macosJob).toContain('MACOSX_DEPLOYMENT_TARGET: "10.15"');
+  expect(workflow.match(/- "scripts\/ci\/test-build-macos-widget\.sh"/g)).toHaveLength(2);
+  expect(macosJob).toContain("name: Exercise macOS widget packaging and signing order");
+  expect(macosJob).toContain("run: bash scripts/ci/test-build-macos-widget.sh");
 });

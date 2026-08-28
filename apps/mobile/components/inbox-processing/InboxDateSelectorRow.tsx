@@ -11,6 +11,7 @@ type Props = {
   label: string;
   value: Date | null;
   selectedPreset?: QuickDatePreset | null;
+  quickDatePresets?: readonly QuickDatePreset[];
   onOpen: () => void;
   onClear: () => void;
   onQuickDateSelect?: (date: Date | null, preset: QuickDatePreset) => void;
@@ -29,6 +30,7 @@ export function InboxDateSelectorRow({
   label,
   value,
   selectedPreset,
+  quickDatePresets,
   onOpen,
   onClear,
   onQuickDateSelect,
@@ -41,20 +43,31 @@ export function InboxDateSelectorRow({
   clearLabel,
   tc,
 }: Props) {
+  const displayValue = value ? safeFormatDate(value.toISOString(), 'P') : notSetLabel;
+  const describeAction = (action: string) => `${label}: ${action}`;
+  const dateModeAction = dateOnly
+    ? `${t('settings.gtdMobile.defaultScheduleTime')}: ${defaultScheduleTime}`
+    : dateOnlyLabel;
+
   return (
     <View style={styles.startDateRow}>
       <Text style={[styles.tokenSectionTitle, { color: tc.secondaryText }]}>{label}</Text>
       <View style={styles.startDateActions}>
         <TouchableOpacity
+          accessibilityLabel={label}
+          accessibilityRole="button"
+          accessibilityValue={{ text: displayValue }}
           style={[styles.startDateButton, { borderColor: tc.border, backgroundColor: tc.cardBg }]}
           onPress={onOpen}
         >
           <Text style={[styles.startDateButtonText, { color: tc.text }]}>
-            {value ? safeFormatDate(value.toISOString(), 'P') : notSetLabel}
+            {displayValue}
           </Text>
         </TouchableOpacity>
         {value && (
           <TouchableOpacity
+            accessibilityLabel={describeAction(clearLabel)}
+            accessibilityRole="button"
             style={[styles.startDateClear, { borderColor: tc.border }]}
             onPress={onClear}
           >
@@ -63,6 +76,8 @@ export function InboxDateSelectorRow({
         )}
         {value && defaultScheduleTime && onDateOnly && onUseDefaultTime && (
           <TouchableOpacity
+            accessibilityLabel={describeAction(dateModeAction)}
+            accessibilityRole="button"
             style={[styles.startDateClear, { borderColor: tc.border }]}
             onPress={dateOnly ? onUseDefaultTime : onDateOnly}
           >
@@ -76,8 +91,10 @@ export function InboxDateSelectorRow({
         <QuickDateChips
           t={t}
           tc={tc}
+          accessibilityLabelPrefix={label}
           selectedDate={value}
           selectedPreset={selectedPreset}
+          presets={quickDatePresets}
           onSelect={(date, preset) => onQuickDateSelect(date, preset)}
         />
       ) : null}

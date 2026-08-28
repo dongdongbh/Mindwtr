@@ -118,8 +118,23 @@ describe('dropbox-sync', () => {
         expect((requestInit?.headers as Record<string, string>)['Content-Type']).toBe('application/octet-stream');
     });
 
-    it('treats delete 409 as success', async () => {
+    it('treats an explicit path-not-found delete 409 as success', async () => {
         const fetcher = async () => buildResponse(409, '{"error_summary":"path_lookup/not_found/.."}');
         await expect(deleteDropboxFile('token', '/attachments/a.bin', fetcher as typeof fetch)).resolves.toBeUndefined();
+    });
+
+    it('does not treat an unrelated delete 409 as missing', async () => {
+        const fetcher = async () => buildResponse(409, '{"error":{ ".tag":"too_many_write_operations"}}');
+        await expect(deleteDropboxFile('token', '/attachments/a.bin', fetcher as typeof fetch))
+            .rejects.toThrow('Dropbox file delete failed: HTTP 409');
+    });
+
+    it('does not classify an unrelated download 409 as file-not-found', async () => {
+        const fetcher = async () => buildResponse(409, '{"error":{ ".tag":"too_many_write_operations"}}');
+        const error = await downloadDropboxFile('token', '/attachments/a.bin', fetcher as typeof fetch)
+            .catch((caught: unknown) => caught);
+        expect(error).toBeInstanceOf(Error);
+        expect(error).not.toBeInstanceOf(DropboxFileNotFoundError);
+        expect((error as Error).message).toBe('Dropbox file download failed: HTTP 409');
     });
 });

@@ -1,11 +1,11 @@
 
 import {
+    assertWebdavStrongEtagSupport,
     AppData,
     AppSettings,
     Attachment,
     useTaskStore,
     MergeStats,
-    webdavGetJson,
     webdavGetSyncDocument,
     type SyncEncryptionRemotePort,
     type SyncEncryptionStatus,
@@ -15,7 +15,9 @@ import {
     syncEncryptedArtifactName,
     SyncCryptoUnsupportedError,
     SyncEncryptionRemotePlaintextError,
+    SyncEncryptionRemoteVersionUnavailableError,
     SyncEncryptionTerminalError,
+    SyncEncryptionTransitionIncompleteError,
     buildCloudCalendarFeedUrl,
     cloudGetJson,
     cloudHeadJson,
@@ -26,11 +28,15 @@ import {
     performSyncCycle,
     normalizeAppData,
     normalizeWebdavUrl,
+    normalizeStrongWebdavEtag,
     normalizeCloudUrl,
     runDataTransferTransactionWithoutSnapshot,
     runSerializedSyncDocumentOperation,
     runSerializedSyncDocumentWriteOperation,
     createSyncBackendIO,
+    acquireSyncRemoteMutationFence,
+    createDropboxSyncRemoteMutationFencePort,
+    createWebdavSyncRemoteMutationFencePort,
     runSharedSyncCycle,
     SyncRemoteWriteConflict,
     sanitizeAppDataForRemote,
@@ -55,6 +61,7 @@ import {
     createSyncOrchestrator,
     createSerializedAsyncQueue,
     formatSyncErrorMessage,
+    normalizeSyncFileLockError,
     getInMemoryAppDataSnapshot,
     createAbortableFetch,
     ensureFreshLocalSyncSnapshot,
@@ -62,6 +69,7 @@ import {
     resolveI18nText,
     LEGACY_SYNC_FILE_NAME,
     SYNC_FILE_NAME,
+    SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS,
     type CloudCalendarFeed,
     type CloudJsonWriteResult,
     type CloudProvider,
@@ -72,6 +80,7 @@ import {
     type SyncRunCycleSetup,
     type SyncRunResult,
     type SyncTransport,
+    type WebdavSyncReadResult,
 } from '@mindwtr/core';
 import { isTauriRuntime } from './runtime';
 import { getTauriHttpFetch } from './tauri-http';
@@ -139,6 +148,10 @@ import {
     getAttachmentValidationFailureAttempts,
     handleAttachmentValidationFailure,
 } from './sync-attachment-validation';
+import {
+    ensureWebdavCapabilityProof,
+    rememberWebdavCapabilityProof,
+} from './webdav-capability-proof';
 import type { SyncBackend } from './sync-service-utils';
 import type { DropboxDownloadResult } from '@mindwtr/core';
 import {
@@ -319,6 +332,16 @@ const resolveSyncText = (key: string, fallback: string): string => resolveI18nTe
  *  carry the wording until its locale keys land. */
 const resolveSyncFailureMessage = (rawError: string | undefined): string => {
     switch (classifySyncEncryptionFailure(rawError)) {
+        case 'local-state-unavailable':
+            return resolveSyncText(
+                'settings.syncEncryptionStateUnavailable',
+                'Sync is paused because this device could not read its local encryption state. Restart Mindwtr and try again. If the problem continues, keep sync paused and contact support before changing this sync setup.',
+            );
+        case 'transition-incomplete':
+            return resolveSyncText(
+                'settings.syncEncryptionErrorTransitionIncomplete',
+                'This encryption change may be incomplete. Sync remains paused. Retry the same encryption action before changing or disconnecting this sync location.',
+            );
         case 'remote-plaintext':
             return resolveSyncText(
                 'settings.syncEncryptionRemotePlaintext',
@@ -418,6 +441,22 @@ const readLocalDataForSync = async (): Promise<AppData> => {
 async function invokeSyncNative<T>(command: string, args?: Record<string, unknown>): Promise<T> {
     return syncServiceDependencies.invoke<T>(command, args);
 }
+
+const acquireFileSyncLease = async (path?: string): Promise<string> => {
+    try {
+        return await invokeSyncNative('acquire_file_sync_lease', path ? { path } : undefined);
+    } catch (error) {
+        throw normalizeSyncFileLockError(error);
+    }
+};
+
+const releaseFileSyncLease = async (token: string): Promise<void> => {
+    try {
+        await invokeSyncNative('release_file_sync_lease', { token });
+    } catch (error) {
+        throw normalizeSyncFileLockError(error);
+    }
+};
 
 type LocalDataSaveOptions = {
     baseline?: AppData;
@@ -595,7 +634,6 @@ const getAttachmentCleanupDeps = (
         credentialHandle: dropboxCredentialHandle ?? undefined,
     }),
     getDropboxAppKey: () => SyncService.getDropboxAppKey(),
-    getSyncPath: () => SyncService.getSyncPath(),
     getTauriFetch,
     getWebDavConfig: () => SyncService.getWebDavConfig(),
     isTauriRuntimeEnv,
@@ -665,6 +703,8 @@ type SyncRunOptions = {
     /** Isolated candidate transport proof. The shared machine keeps merged
      *  local writes in memory and suppresses durable/finalization side effects. */
     activationProbe?: boolean;
+    /** Internal marker for the single automatic File Sync contention retry. */
+    fileSyncLockBusyRetryAttempt?: number;
     /** The candidate was just activated; do not inherit the previous
      *  transport's retry deadline on this first durable cycle. */
     ignorePendingRemoteWriteBackoff?: boolean;
@@ -687,6 +727,7 @@ type DesktopSyncCycleContext = {
     cachedDropboxAccessToken: string | null;
     syncPath: string;
     fileBaseDir: string;
+    fileSyncLeaseToken: string | null;
 };
 
 const createDesktopSyncCycleContext = (): DesktopSyncCycleContext => ({
@@ -703,6 +744,7 @@ const createDesktopSyncCycleContext = (): DesktopSyncCycleContext => ({
     cachedDropboxAccessToken: null,
     syncPath: '',
     fileBaseDir: '',
+    fileSyncLeaseToken: null,
 });
 
 const createFetchWithAbortForContext = async (context: DesktopSyncCycleContext): Promise<typeof fetch> => {
@@ -836,10 +878,21 @@ export class SyncService {
         SyncService.syncOrchestrator.requestFollowUp();
     }
 
+    private static requestQueuedSyncRunAfter(delayMs: number, nextOptions?: SyncRunOptions) {
+        if (nextOptions) SyncService.queuedSyncOptions = nextOptions;
+        const queuedOptions = SyncService.queuedSyncOptions ?? nextOptions;
+        logSyncInfo('Sync trace deferred follow-up requested', {
+            delayMs: String(Math.max(0, Math.ceil(delayMs))),
+            hasQueuedOptions: String(Boolean(queuedOptions)),
+        });
+        SyncService.syncOrchestrator.requestFollowUpAfter(delayMs, queuedOptions);
+    }
+
     private static areSyncRunOptionsEquivalent(left?: SyncRunOptions | null, right?: SyncRunOptions | null): boolean {
         return (left?.backendOverride ?? undefined) === (right?.backendOverride ?? undefined)
             && (left?.configOverride ?? undefined) === (right?.configOverride ?? undefined)
             && (left?.activationProbe ?? false) === (right?.activationProbe ?? false)
+            && (left?.fileSyncLockBusyRetryAttempt ?? 0) === (right?.fileSyncLockBusyRetryAttempt ?? 0)
             && (left?.ignorePendingRemoteWriteBackoff ?? false)
                 === (right?.ignorePendingRemoteWriteBackoff ?? false);
     }
@@ -1552,7 +1605,7 @@ export class SyncService {
         return writeWebDavConfig(config, getSyncConfigDeps());
     }
 
-    static async testWebDavConnection(config: { url: string; username?: string; password?: string; hasPassword?: boolean; allowInsecureHttp?: boolean }): Promise<void> {
+    private static async probeWebDavStrongEtagSupport(config: { url: string; username?: string; password?: string; hasPassword?: boolean; allowInsecureHttp?: boolean }): Promise<void> {
         const normalizedUrl = normalizeWebdavUrl(config.url.trim());
         if (!normalizedUrl) {
             throw new Error('WebDAV URL not configured');
@@ -1569,7 +1622,7 @@ export class SyncService {
             hasPassword: config.hasPassword,
         });
         try {
-            await webdavGetJson<unknown>(normalizedUrl, {
+            await assertWebdavStrongEtagSupport(normalizedUrl, {
                 allowInsecureHttp: config.allowInsecureHttp,
                 username: config.username?.trim(),
                 password,
@@ -1580,6 +1633,11 @@ export class SyncService {
             logSyncWarning('WebDAV connection test failed', error);
             throw error;
         }
+    }
+
+    static async testWebDavConnection(config: { url: string; username?: string; password?: string; hasPassword?: boolean; allowInsecureHttp?: boolean }): Promise<void> {
+        await SyncService.probeWebDavStrongEtagSupport(config);
+        rememberWebdavCapabilityProof(config);
     }
 
     static async getCloudConfig(options?: { silent?: boolean }): Promise<CloudConfig> {
@@ -1633,6 +1691,12 @@ export class SyncService {
         let result: SyncConfigurationCommitResult;
         try {
             result = await runSyncRestoreExclusive(async () => {
+                const encryptionStatus = await readSyncEncryptionStatus();
+                if (encryptionStatus.incompleteTransition) {
+                    throw new SyncEncryptionTransitionIncompleteError(
+                        encryptionStatus.incompleteTransition,
+                    );
+                }
                 const committed = await commitProvenSyncConfigurationTransaction(config, {
                     recoverDropboxCredentialsBeforeConfiguration: () => (
                         SyncService.recoverDropboxCredentialsBeforeConfigurationMutation()
@@ -1987,6 +2051,12 @@ export class SyncService {
             return { kind: 'disabled' };
         }
 
+        const encryptionStatus = await readSyncEncryptionStatus();
+        if (encryptionStatus.incompleteTransition) {
+            if (!options.manual && !options.activationProbe) return { kind: 'disabled' };
+            throw new SyncEncryptionTransitionIncompleteError(encryptionStatus.incompleteTransition);
+        }
+
         if (
             (context.backend === 'cloud' || context.backend === 'webdav' || context.backend === 'cloudkit')
             && typeof window !== 'undefined'
@@ -2023,6 +2093,12 @@ export class SyncService {
         context.webdavConfig = context.backend === 'webdav'
             ? configOverride?.webdav ?? await SyncService.getWebDavConfig()
             : null;
+        if (context.webdavConfig) {
+            await ensureWebdavCapabilityProof(
+                context.webdavConfig,
+                () => SyncService.probeWebDavStrongEtagSupport(context.webdavConfig!),
+            );
+        }
         context.cloudProvider = context.backend === 'cloud'
             ? configOverride?.cloudProvider ?? await SyncService.getCloudProvider()
             : 'selfhosted';
@@ -2044,6 +2120,12 @@ export class SyncService {
         context.fileBaseDir = context.backend === 'file'
             ? getFileSyncDir(context.syncPath, SYNC_FILE_NAME, LEGACY_SYNC_FILE_NAME)
             : '';
+        if (context.backend === 'file') {
+            // This is the same persistent `.mindwtr.lock` OS lease used by
+            // native enable/change/disable transitions. It covers attachment
+            // mutations, document CAS, and final local persistence as one unit.
+            context.fileSyncLeaseToken = await acquireFileSyncLease(context.syncPath);
+        }
 
         // CloudKit setup: ensure zone and subscription exist before syncing.
         if (context.backend === 'cloudkit') {
@@ -2086,6 +2168,33 @@ export class SyncService {
         const ctx = SyncService.createBackendContext(context);
 
         const transport: SyncTransport = {
+            acquireWebdavRemoteMutationFence: async () => {
+                const webdavConfig = context.webdavConfig;
+                if (!webdavConfig?.url) throw new Error('WebDAV URL not configured');
+                const password = await resolveWebdavPassword(webdavConfig);
+                const fetcher = await createFetchWithAbortForContext(context);
+                return acquireSyncRemoteMutationFence(
+                    createWebdavSyncRemoteMutationFencePort(
+                        normalizeWebdavUrl(webdavConfig.url),
+                        {
+                            allowInsecureHttp: webdavConfig.allowInsecureHttp,
+                            username: webdavConfig.username,
+                            password,
+                            fetcher,
+                        },
+                    ),
+                    { ownerId: 'mindwtr-desktop', purpose: 'ordinary-sync' },
+                );
+            },
+            acquireDropboxRemoteMutationFence: async (token) => {
+                const fetcher = await createFetchWithAbortForContext(context);
+                return acquireSyncRemoteMutationFence(
+                    createDropboxSyncRemoteMutationFencePort(token, fetcher, {
+                        signal: context.requestAbortController.signal,
+                    }),
+                    { ownerId: 'mindwtr-desktop', purpose: 'ordinary-sync' },
+                );
+            },
             webdavGet: async () => {
                 // Error context must carry the file URL the request targets,
                 // not the configured base folder — a folder-only url field
@@ -2095,16 +2204,15 @@ export class SyncService {
                 // A "missing" remote on a folder that other devices populate
                 // means the app is reading the wrong URL or the server hid
                 // the file; make it visible in shared logs (#898).
-                const logMissingRemote = (data: AppData | null | undefined): AppData | null => {
-                    if (data == null) {
+                const logMissingRemote = (remote: WebdavSyncReadResult): WebdavSyncReadResult => {
+                    if (remote.data == null) {
                         logSyncInfo('WebDAV remote read returned no data', { url: normalizedUrl });
-                        return null;
                     }
-                    return data;
+                    return remote;
                 };
                 if (isTauriRuntimeEnv() && !context.usesConfigOverride) {
                     return logMissingRemote(await withRetry(
-                        () => invokeSyncNative<AppData>('webdav_get_json'),
+                        () => invokeSyncNative<WebdavSyncReadResult>('webdav_get_json'),
                         WEBDAV_READ_RETRY_OPTIONS,
                     ));
                 }
@@ -2118,12 +2226,18 @@ export class SyncService {
                         username: webdavConfig.username,
                         password,
                         fetcher,
+                        signal: context.requestAbortController.signal,
                         material,
                         cryptoPrims: desktopSyncCryptoPrimitives,
                     }),
                     WEBDAV_READ_RETRY_OPTIONS,
                 );
                 if (result.state === 'encrypted-no-key') {
+                    if (!normalizeStrongWebdavEtag(result.strongEtag)) {
+                        throw new SyncEncryptionRemoteVersionUnavailableError(
+                            'WebDAV encrypted sync document',
+                        );
+                    }
                     await markRemoteSyncEncryptionDiscovered({ salt: result.salt, params: result.params });
                     // Carries the Rust-mirrored sentinel so string-form classification
                     // (classifySyncEncryptionFailure on a probe result's error text)
@@ -2136,11 +2250,19 @@ export class SyncService {
                     await markRemoteSyncEncryptionPlaintext();
                     throw new SyncEncryptionRemotePlaintextError('the WebDAV remote is no longer encrypted');
                 }
-                return logMissingRemote(result.data);
+                return logMissingRemote({
+                    data: result.data,
+                    exists: result.exists,
+                    strongEtag: result.strongEtag,
+                });
             },
-            webdavPut: async (sanitized) => {
+            webdavPut: async (sanitized, expectedEtag, assertRemoteMutationFenceHeld) => {
                 if (isTauriRuntimeEnv() && !context.usesConfigOverride) {
-                    return invokeSyncNative<RemoteJsonWriteResult | boolean>('webdav_put_json', { data: sanitized });
+                    await assertRemoteMutationFenceHeld?.(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
+                    return invokeSyncNative<RemoteJsonWriteResult | boolean>('webdav_put_json', {
+                        data: sanitized,
+                        expectedEtag,
+                    });
                 }
                 const config = context.webdavConfig ?? await SyncService.getWebDavConfig();
                 const normalizedUrl = normalizeWebdavUrl(config.url);
@@ -2148,13 +2270,16 @@ export class SyncService {
                 const password = await resolveWebdavPassword(config);
                 const fetcher = await createFetchWithAbortForContext(context);
                 const material = (await getSyncEncryptionMaterial()) ?? undefined;
+                await assertRemoteMutationFenceHeld?.(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
                 return webdavPutSyncDocument(normalizedUrl, sanitized, {
                     allowInsecureHttp: config.allowInsecureHttp,
                     username: config.username,
                     password,
                     fetcher,
+                    signal: context.requestAbortController.signal,
                     material,
                     cryptoPrims: desktopSyncCryptoPrimitives,
+                    expectedEtag,
                 });
             },
             webdavHead: async () => {
@@ -2172,6 +2297,7 @@ export class SyncService {
                     username: webdavConfig.username,
                     password,
                     fetcher,
+                    signal: context.requestAbortController.signal,
                 });
             },
             cloudGet: async () => {
@@ -2183,6 +2309,7 @@ export class SyncService {
                     allowInsecureHttp: context.cloudConfig!.allowInsecureHttp,
                     token: context.cloudConfig!.token,
                     fetcher,
+                    signal: context.requestAbortController.signal,
                 });
             },
             cloudPut: async (sanitized) => {
@@ -2197,6 +2324,7 @@ export class SyncService {
                     allowInsecureHttp: config.allowInsecureHttp,
                     token: config.token,
                     fetcher,
+                    signal: context.requestAbortController.signal,
                 });
             },
             cloudHead: async () => {
@@ -2205,15 +2333,24 @@ export class SyncService {
                     allowInsecureHttp: context.cloudConfig!.allowInsecureHttp,
                     token: context.cloudConfig!.token,
                     fetcher,
+                    signal: context.requestAbortController.signal,
                 });
             },
             fileRead: async () => {
                 if (!isTauriRuntimeEnv()) {
                     throw new Error('File sync is not available in the web app.');
                 }
-                return invokeSyncNative<FileSyncReadResult>('read_sync_file_versioned', context.usesConfigOverride
-                    ? { path: context.syncPath }
-                    : undefined);
+                if (!context.fileSyncLeaseToken) {
+                    throw new Error('File Sync read requires an active folder lease.');
+                }
+                const args = {
+                    ...(context.usesConfigOverride ? { path: context.syncPath } : {}),
+                    leaseToken: context.fileSyncLeaseToken,
+                };
+                return invokeSyncNative<FileSyncReadResult>(
+                    'read_sync_file_versioned',
+                    args,
+                );
             },
             fileWrite: async (sanitized, expectedFingerprint) => {
                 await SyncService.markSyncWrite(sanitized);
@@ -2222,6 +2359,7 @@ export class SyncService {
                         data: sanitized,
                         ...(expectedFingerprint ? { expectedFingerprint } : {}),
                         ...(context.usesConfigOverride ? { path: context.syncPath } : {}),
+                        ...(context.fileSyncLeaseToken ? { leaseToken: context.fileSyncLeaseToken } : {}),
                     });
                 } catch (error) {
                     const message = error instanceof Error ? error.message : String(error);
@@ -2239,21 +2377,29 @@ export class SyncService {
                 () => resolveDropboxAccessTokenForContext(context, forceRefresh)
             ),
             dropboxDownload: (token) => SyncService.downloadDropboxWithFallback(context, token),
-            dropboxUpload: async (token, sanitized, expectedRev) => {
+            dropboxUpload: async (token, sanitized, expectedRev, assertRemoteMutationFenceHeld) => {
                 const fetcher = await createFetchWithAbortForContext(context);
                 const material = (await getSyncEncryptionMaterial()) ?? undefined;
                 return SyncService.runDropboxTransientRetry(
-                    () => uploadDropboxAppData(token, sanitized, expectedRev, fetcher, {
-                        material,
-                        cryptoPrims: desktopSyncCryptoPrimitives,
-                    })
+                    async () => {
+                        await assertRemoteMutationFenceHeld?.(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
+                        return uploadDropboxAppData(token, sanitized, expectedRev, fetcher, {
+                            material,
+                            cryptoPrims: desktopSyncCryptoPrimitives,
+                        }, { signal: context.requestAbortController.signal });
+                    }
                 );
             },
             dropboxMetadata: async (token) => {
                 const fetcher = await createFetchWithAbortForContext(context);
                 const material = (await getSyncEncryptionMaterial()) ?? undefined;
                 return SyncService.runDropboxTransientRetry(
-                    () => getDropboxAppDataMetadata(token, fetcher, { material })
+                    () => getDropboxAppDataMetadata(
+                        token,
+                        fetcher,
+                        { material },
+                        { signal: context.requestAbortController.signal },
+                    )
                 );
             },
             syncWebdavAttachments: async (data, helpers) => {
@@ -2270,6 +2416,7 @@ export class SyncService {
                 context.fileBaseDir,
                 attachmentBackendDeps,
                 helpers,
+                context.fileSyncLeaseToken ?? undefined,
             ),
             syncCloudAttachments: async (data, helpers) => {
                 const baseUrl = getCloudBaseUrl(context.cloudConfig!.url);
@@ -2328,14 +2475,24 @@ export class SyncService {
         if (!nativeFetch) {
             return settle(
                 await SyncService.runDropboxTransientRetry(() =>
-                    downloadDropboxAppData(token, browserFetcher, crypto)
+                    downloadDropboxAppData(
+                        token,
+                        browserFetcher,
+                        crypto,
+                        { signal: context.requestAbortController.signal },
+                    )
                 )
             );
         }
 
         const nativeFetcher = createAbortableFetch(nativeFetch, { baseSignal: context.requestAbortController.signal });
         const nativeRemote = await settle(
-            await SyncService.runDropboxTransientRetry(() => downloadDropboxAppData(token, nativeFetcher, crypto))
+            await SyncService.runDropboxTransientRetry(() => downloadDropboxAppData(
+                token,
+                nativeFetcher,
+                crypto,
+                { signal: context.requestAbortController.signal },
+            ))
         );
         if (nativeRemote.data !== null) {
             return nativeRemote;
@@ -2345,7 +2502,12 @@ export class SyncService {
         try {
             const browserRemote = await settle(
                 await SyncService.runDropboxTransientRetry(() =>
-                    downloadDropboxAppData(token, browserFetcher, crypto)
+                    downloadDropboxAppData(
+                        token,
+                        browserFetcher,
+                        crypto,
+                        { signal: context.requestAbortController.signal },
+                    )
                 )
             );
             if (browserRemote.data !== null) {
@@ -2354,7 +2516,12 @@ export class SyncService {
             }
             return nativeRemote;
         } catch (error) {
-            if (isSyncEncryptionFailure(error)) throw error;
+            // A lifecycle abort is terminal for this cycle. Treating it like a browser-only
+            // fallback failure would turn a cancelled read into an empty remote and let the
+            // sync machine continue until a later operation happened to notice cancellation.
+            if (context.requestAbortController.signal.aborted || isSyncEncryptionFailure(error)) {
+                throw error;
+            }
             logSyncWarning('Dropbox browser fetch fallback failed', error);
             return nativeRemote;
         }
@@ -2390,15 +2557,20 @@ export class SyncService {
 
             if (resolution === 'keep-local') {
                 await runSyncDocumentExclusive(async () => {
-                    await syncServiceDependencies.flushPendingSave();
-                    const localData = await injectExternalCalendars(await readLocalDataForSync());
-                    const sanitized = sanitizeAppDataForRemote(localData);
-                    await SyncService.markSyncWrite(sanitized);
+                    const leaseToken = await acquireFileSyncLease();
                     try {
-                        await invokeSyncNative('write_sync_file', { data: sanitized });
-                    } catch (error) {
-                        SyncService.finalizeSyncWriteIgnoreWindow();
-                        throw error;
+                        await syncServiceDependencies.flushPendingSave();
+                        const localData = await injectExternalCalendars(await readLocalDataForSync());
+                        const sanitized = sanitizeAppDataForRemote(localData);
+                        await SyncService.markSyncWrite(sanitized);
+                        try {
+                            await invokeSyncNative('write_sync_file', { data: sanitized, leaseToken });
+                        } catch (error) {
+                            SyncService.finalizeSyncWriteIgnoreWindow();
+                            throw error;
+                        }
+                    } finally {
+                        await releaseFileSyncLease(leaseToken);
                     }
                 });
                 return await SyncService.performSync();
@@ -2406,29 +2578,37 @@ export class SyncService {
 
             return await runSyncDocumentWriteExclusive(async () => {
                 await syncServiceDependencies.flushPendingSave();
-                const externalData = normalizeAppData(await invokeSyncNative<AppData>('read_sync_file'));
-                await persistLocalDataForSync(externalData, { mode: 'exact' });
-                await getStoreState().fetchData({ silent: true });
-                const now = new Date().toISOString();
-                const nextHistory = appendSyncHistory(getStoreState().settings, {
-                    at: now,
-                    status: 'success',
-                    backend: 'file',
-                    type: 'pull',
-                    conflicts: 0,
-                    conflictIds: [],
-                    maxClockSkewMs: 0,
-                    timestampAdjustments: 0,
-                    details: 'external_override',
-                });
-                const persisted = await SyncService.persistSuccessfulSyncStatus('success', now, nextHistory);
-                if (!persisted) {
-                    throw new Error('Failed to persist sync status');
+                const leaseToken = await acquireFileSyncLease();
+                try {
+                    const externalData = normalizeAppData(await invokeSyncNative<AppData>(
+                        'read_sync_file',
+                        { leaseToken },
+                    ));
+                    await persistLocalDataForSync(externalData, { mode: 'exact' });
+                    await getStoreState().fetchData({ silent: true });
+                    const now = new Date().toISOString();
+                    const nextHistory = appendSyncHistory(getStoreState().settings, {
+                        at: now,
+                        status: 'success',
+                        backend: 'file',
+                        type: 'pull',
+                        conflicts: 0,
+                        conflictIds: [],
+                        maxClockSkewMs: 0,
+                        timestampAdjustments: 0,
+                        details: 'external_override',
+                    });
+                    const persisted = await SyncService.persistSuccessfulSyncStatus('success', now, nextHistory);
+                    if (!persisted) {
+                        throw new Error('Failed to persist sync status');
+                    }
+                    if (pendingChange?.incomingHash) {
+                        SyncService.lastObservedHash = pendingChange.incomingHash;
+                    }
+                    return { success: true };
+                } finally {
+                    await releaseFileSyncLease(leaseToken);
                 }
-                if (pendingChange?.incomingHash) {
-                    SyncService.lastObservedHash = pendingChange.incomingHash;
-                }
-                return { success: true };
             });
         } catch (error) {
             SyncService.setPendingExternalSyncChange(pendingChange);
@@ -2445,7 +2625,14 @@ export class SyncService {
         if (!hasSyncFile) return;
 
         try {
-            const syncData = await invokeSyncNative<AppData>('read_sync_file');
+            const leaseToken = await acquireFileSyncLease();
+            const syncData = await (async () => {
+                try {
+                    return await invokeSyncNative<AppData>('read_sync_file', { leaseToken });
+                } finally {
+                    await releaseFileSyncLease(leaseToken);
+                }
+            })();
             const normalized = normalizeAppData(syncData);
             const hash = await hashString(toStableJson(normalized));
             if (hash === SyncService.lastWrittenHash) {
@@ -2572,28 +2759,45 @@ export class SyncService {
 
     static async cleanupAttachmentsNow(): Promise<void> {
         if (!isTauriRuntimeEnv()) return;
+        const backend = await SyncService.getSyncBackend();
+        const cloudProvider = backend === 'cloud' ? await SyncService.getCloudProvider() : null;
+        if (backend === 'webdav' || (backend === 'cloud' && cloudProvider === 'dropbox')) {
+            // These providers share the compatible-client mutation fence. Route
+            // the manual button through the ordinary sync machine so cleanup
+            // cannot become an unfenced writer outside the normal lease/CAS path.
+            const result = await SyncService.performSync({
+                manual: true,
+                ignorePendingRemoteWriteBackoff: true,
+            });
+            if (!result.success) throw new Error(result.error || 'Attachment cleanup sync failed');
+            return;
+        }
         await runSyncDocumentExclusive(async () => {
-            await syncServiceDependencies.flushPendingSave();
-            const localSnapshotChangeAt = getStoreState().lastDataChangeAt;
-            const ensureLocalSnapshotFresh = () => {
-                ensureFreshLocalSyncSnapshot({
-                    localSnapshotChangeAt,
-                    getCurrentChangeAt: () => getStoreState().lastDataChangeAt,
-                    requestFollowUp: () => SyncService.requestQueuedSyncRun(),
-                });
-            };
-            const backend = await SyncService.getSyncBackend();
-            const data = await invokeSyncNative<AppData>('get_data');
-            ensureLocalSnapshotFresh();
-            const cleaned = await cleanupOrphanedAttachments(
-                data,
-                backend,
-                getAttachmentCleanupDeps(),
-                { ensureLocalSnapshotFresh },
-            );
-            ensureLocalSnapshotFresh();
-            await persistLocalDataForSync(cleaned, { baseline: data });
-            await getStoreState().fetchData({ silent: true });
+            const leaseToken = backend === 'file' ? await acquireFileSyncLease() : null;
+            try {
+                await syncServiceDependencies.flushPendingSave();
+                const localSnapshotChangeAt = getStoreState().lastDataChangeAt;
+                const ensureLocalSnapshotFresh = () => {
+                    ensureFreshLocalSyncSnapshot({
+                        localSnapshotChangeAt,
+                        getCurrentChangeAt: () => getStoreState().lastDataChangeAt,
+                        requestFollowUp: () => SyncService.requestQueuedSyncRun(),
+                    });
+                };
+                const data = await invokeSyncNative<AppData>('get_data');
+                ensureLocalSnapshotFresh();
+                const cleaned = await cleanupOrphanedAttachments(
+                    data,
+                    backend,
+                    getAttachmentCleanupDeps(),
+                    { ensureLocalSnapshotFresh },
+                );
+                ensureLocalSnapshotFresh();
+                await persistLocalDataForSync(cleaned, { baseline: data });
+                await getStoreState().fetchData({ silent: true });
+            } finally {
+                if (leaseToken) await releaseFileSyncLease(leaseToken);
+            }
         });
     }
 
@@ -2697,11 +2901,13 @@ export class SyncService {
         await yieldToRenderer();
 
         let result: SyncRunResult;
+        let fileSyncLockCleanupDeferred = false;
         try {
             result = await runSharedSyncCycle({
                 options: {
                     manual: options.manual,
                     activationProbe: options.activationProbe,
+                    fileSyncLockBusyRetryAttempt: options.fileSyncLockBusyRetryAttempt,
                     ignorePendingRemoteWriteBackoff: options.ignorePendingRemoteWriteBackoff,
                 },
                 storage: {
@@ -2753,7 +2959,20 @@ export class SyncService {
                 },
                 hooks: {
                     setupCycle: (setupContext) => SyncService.setupDesktopCycle(context, options, setupContext.setStep),
-                    requestFollowUp: () => SyncService.requestQueuedSyncRun(options, false),
+                    requestFollowUp: () => SyncService.requestQueuedSyncRun({
+                        ...options,
+                        fileSyncLockBusyRetryAttempt: 0,
+                    }, false),
+                    requestFollowUpAfter: (delayMs) => SyncService.requestQueuedSyncRunAfter(delayMs, {
+                        ...options,
+                        fileSyncLockBusyRetryAttempt: 0,
+                    }),
+                    requestFileSyncLockBusyFollowUpAfter: (delayMs, nextAttempt) => (
+                        SyncService.requestQueuedSyncRunAfter(delayMs, {
+                            ...options,
+                            fileSyncLockBusyRetryAttempt: nextAttempt,
+                        })
+                    ),
                     ensureNetworkStillAvailable: () => {
                         if (context.backend !== 'cloud' && context.backend !== 'webdav' && context.backend !== 'cloudkit') return;
                         if (
@@ -2768,22 +2987,27 @@ export class SyncService {
                     cleanupAttachmentTempFiles: () => cleanupAttachmentTempFiles(getAttachmentCleanupDeps()),
                     shouldRunAttachmentPhase: async (data) => hasAttachmentSyncWork(data),
                     runAttachmentCleanup: async (data, cleanupContext) => {
+                        cleanupContext.setStep('attachments_cleanup');
+                        await yieldToRenderer();
+                        cleanupContext.ensureLocalSnapshotFresh(data);
+                        await cleanupContext.ensureNetworkStillAvailable();
+                        const ensureLocalSnapshotFresh = () => cleanupContext.ensureLocalSnapshotFresh(data);
+                        const cleanupDeps = getAttachmentCleanupDeps(context.dropboxCredentialHandle);
                         const orphanedAttachments = findOrphanedAttachments(data);
                         const deletedAttachments = findDeletedAttachmentsForFileCleanup(data);
                         const pendingRemoteDeletes = data.settings.attachments?.pendingRemoteDeletes ?? [];
                         if (orphanedAttachments.length === 0 && deletedAttachments.length === 0 && pendingRemoteDeletes.length === 0) {
                             return null;
                         }
-                        cleanupContext.setStep('attachments_cleanup');
-                        await yieldToRenderer();
                         cleanupContext.ensureLocalSnapshotFresh(data);
-                        await cleanupContext.ensureNetworkStillAvailable();
-                        const ensureLocalSnapshotFresh = () => cleanupContext.ensureLocalSnapshotFresh(data);
                         const cleanedData = await cleanupOrphanedAttachments(
                             data,
                             context.backend,
-                            getAttachmentCleanupDeps(context.dropboxCredentialHandle),
-                            { ensureLocalSnapshotFresh },
+                            cleanupDeps,
+                            {
+                                ensureLocalSnapshotFresh,
+                                assertRemoteMutationFenceHeld: cleanupContext.assertRemoteMutationFenceHeld,
+                            },
                         );
                         return {
                             data: cleanedData,
@@ -2829,6 +3053,19 @@ export class SyncService {
             });
         } finally {
             context.requestAbortController.abort();
+            if (context.fileSyncLeaseToken) {
+                const token = context.fileSyncLeaseToken;
+                context.fileSyncLeaseToken = null;
+                try {
+                    await releaseFileSyncLease(token);
+                } catch (error) {
+                    fileSyncLockCleanupDeferred = true;
+                    // The native process still owns the handle if release
+                    // failed; surface this loudly rather than pretending the
+                    // folder is available for another mutation cycle.
+                    logSyncWarning('Failed to release File Sync lease', error);
+                }
+            }
             try {
                 const releaseNetworkListener = context.removeNetworkListener as (() => void) | null;
                 if (typeof releaseNetworkListener === 'function') {
@@ -2840,8 +3077,13 @@ export class SyncService {
             }
             SyncService.finalizeSyncWriteIgnoreWindow();
         }
+        if (result.success && fileSyncLockCleanupDeferred) {
+            result = { ...result, fileSyncLockDeferred: 'cleanup' };
+        }
         const skippedRequeue = result.skipped === 'requeued';
-        if (!options.activationProbe && !skippedRequeue) {
+        const skippedDeferredBusy = result.remoteFenceDeferred === 'busy'
+            || result.fileSyncLockDeferred === 'busy';
+        if (!options.activationProbe && !skippedRequeue && !skippedDeferredBusy) {
             SyncService.finalizeAttachmentWarningState(
                 { hadAttachmentWarning: result.hadAttachmentWarning === true },
                 result
@@ -2850,12 +3092,12 @@ export class SyncService {
         SyncService.updateSyncStatus({
             inFlight: false,
             step: null,
-            lastResult: options.activationProbe || skippedRequeue
+            lastResult: options.activationProbe || skippedRequeue || skippedDeferredBusy
                 ? SyncService.syncStatus.lastResult
                 : result.success
                     ? 'success'
                     : 'error',
-            lastResultAt: options.activationProbe || skippedRequeue
+            lastResultAt: options.activationProbe || skippedRequeue || skippedDeferredBusy
                 ? SyncService.syncStatus.lastResultAt
                 : new Date().toISOString(),
         });

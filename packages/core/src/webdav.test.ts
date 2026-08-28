@@ -1,7 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
-import { __webdavTestUtils, webdavGetFile, webdavGetJson, webdavHeadFile, webdavPutFile, webdavPutJson } from './webdav';
+import {
+    __webdavTestUtils,
+    assertWebdavStrongEtagSupport,
+    webdavDeleteFile,
+    webdavDeleteFileVersioned,
+    webdavGetFile,
+    webdavGetFileVersioned,
+    webdavGetJson,
+    webdavHeadFile,
+    webdavPutFile,
+    webdavPutFileVersioned,
+    webdavPutJson,
+} from './webdav';
 import { MAX_DOWNLOAD_BYTES, MAX_ERROR_BODY_BYTES, ResponseTooLargeError } from './http-utils';
 import { consoleLogger, setLogger, type LogPayload } from './logger';
+import { SyncEncryptionRemoteVersionUnavailableError } from './sync-encryption';
 
 const makeResponse = (overrides: Partial<Response> & { status: number; ok: boolean }): Response => ({
     statusText: '',
@@ -11,6 +24,78 @@ const makeResponse = (overrides: Partial<Response> & { status: number; ok: boole
     text: async () => '',
     ...overrides,
 }) as Response;
+
+const createWebdavCapabilityFetcher = (
+    documentUrl: string,
+    options: {
+        documentBody?: string;
+        ignoreCreateOnly?: boolean;
+        ignoreStaleDelete?: boolean;
+        ignoreStaleMatch?: boolean;
+        rejectCurrentDelete?: boolean;
+    } = {},
+) => {
+    const requests: { method: string; url: string; headers: Headers }[] = [];
+    let probeUrl = '';
+    let probeBytes: Uint8Array | null = null;
+    let probeVersion = 0;
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+        const headers = new Headers(init?.headers);
+        requests.push({ method, url, headers });
+
+        if (url === documentUrl && method === 'GET') {
+            if (options.documentBody === undefined) return new Response(null, { status: 404 });
+            return new Response(options.documentBody, { status: 200, headers: { etag: '"document-v1"' } });
+        }
+        probeUrl ||= url;
+        if (url !== probeUrl) throw new Error(`unexpected probe URL ${url}`);
+
+        if (method === 'GET') {
+            if (!probeBytes) return new Response(null, { status: 404 });
+            return new Response(probeBytes, {
+                status: 200,
+                headers: { etag: `"probe-v${probeVersion}"` },
+            });
+        }
+        if (method === 'PUT') {
+            const body = init?.body;
+            if (!(body instanceof Uint8Array)) throw new Error('expected a byte-array probe body');
+            const ifNoneMatch = headers.get('if-none-match');
+            const ifMatch = headers.get('if-match');
+            const currentEtag = probeBytes ? `"probe-v${probeVersion}"` : null;
+            if (probeBytes && ifNoneMatch === '*' && !options.ignoreCreateOnly) {
+                return new Response(null, { status: 412 });
+            }
+            if (
+                probeBytes
+                && ifMatch
+                && ifMatch !== currentEtag
+                && !options.ignoreStaleMatch
+            ) {
+                return new Response(null, { status: 412 });
+            }
+            probeBytes = new Uint8Array(body);
+            probeVersion += 1;
+            return new Response(null, { status: currentEtag ? 204 : 201 });
+        }
+        if (method === 'DELETE') {
+            const currentEtag = probeBytes ? `"probe-v${probeVersion}"` : null;
+            const ifMatch = headers.get('if-match');
+            if (!probeBytes || (ifMatch !== currentEtag && !options.ignoreStaleDelete)) {
+                return new Response(null, { status: 412 });
+            }
+            if (ifMatch === currentEtag && options.rejectCurrentDelete) {
+                return new Response(null, { status: 405 });
+            }
+            probeBytes = null;
+            return new Response(null, { status: 204 });
+        }
+        throw new Error(`unexpected ${method}`);
+    }) as unknown as typeof fetch;
+    return { fetcher, getProbeUrl: () => probeUrl, requests };
+};
 
 describe('webdav http helpers', () => {
     it('allows HTTP for private IP targets', async () => {
@@ -429,6 +514,18 @@ describe('webdav http helpers', () => {
         ).rejects.toThrow('WebDAV PUT failed (409): Conflict');
     });
 
+    it('times out and cancels a stalled JSON PUT error body after response headers', async () => {
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 500 });
+
+        await expect(webdavPutJson(
+            'https://example.com/mindwtr/data.json',
+            { ok: true },
+            { fetcher: async () => response, timeoutMs: 1 },
+        )).rejects.toThrow('WebDAV request timed out');
+        expect(cancel).toHaveBeenCalledOnce();
+    }, 100);
+
     it('caps parent MKCOL creation depth for pathological nested paths', async () => {
         const nestedSegments = Array.from({ length: 40 }, (_, index) => `level-${index + 1}`).join('/');
         const url = `https://example.com/remote.php/dav/files/user/mindwtr/${nestedSegments}/data.json`;
@@ -482,6 +579,206 @@ describe('webdavGetFile download cap', () => {
         });
         expect(Array.from(new Uint8Array(buffer))).toEqual([4, 5, 6]);
         expect(onProgress.mock.calls).toEqual([[2, 3], [3, 3]]);
+    });
+
+    it('times out and cancels a download body that stalls after headers', async () => {
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 200 });
+
+        await expect(webdavGetFile('https://example.com/dav/a.bin', {
+            fetcher: async () => response,
+            timeoutMs: 1,
+        })).rejects.toThrow('WebDAV request timed out');
+        expect(cancel).toHaveBeenCalledOnce();
+    }, 100);
+});
+
+describe('versioned WebDAV transition byte operations', () => {
+    it('returns bytes and the strong ETag from one GET, and distinguishes missing', async () => {
+        const found = await webdavGetFileVersioned('https://example.com/dav/a.bin', {
+            fetcher: async () => new Response(new Uint8Array([1, 2]), {
+                status: 200,
+                headers: { etag: '"v1"' },
+            }),
+        });
+        expect(found).toEqual({ bytes: new Uint8Array([1, 2]), version: '"v1"' });
+
+        await expect(webdavGetFileVersioned('https://example.com/dav/a.bin', {
+            fetcher: async () => new Response(null, { status: 404 }),
+        })).resolves.toEqual({ bytes: null, version: null });
+    });
+
+    it.each([
+        ['missing', null],
+        ['weak', 'W/"v1"'],
+    ])('returns existing bytes with no safe version for a %s ETag', async (_case, etag) => {
+        await expect(webdavGetFileVersioned('https://example.com/dav/a.bin', {
+            fetcher: async () => new Response(new Uint8Array([1, 2]), {
+                status: 200,
+                headers: etag ? { etag } : undefined,
+            }),
+        })).resolves.toEqual({ bytes: new Uint8Array([1, 2]), version: null });
+    });
+
+    it('preserves create-only headers across MKCOL retry', async () => {
+        const putHeaders: Headers[] = [];
+        let putCount = 0;
+        const fetcher = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+            const method = init?.method ?? 'GET';
+            if (method === 'PUT') {
+                putHeaders.push(new Headers(init?.headers));
+                putCount += 1;
+                return new Response(null, { status: putCount === 1 ? 409 : 201 });
+            }
+            if (method === 'MKCOL') return new Response(null, { status: 201 });
+            throw new Error(`unexpected ${method}`);
+        }) as unknown as typeof fetch;
+
+        await webdavPutFileVersioned(
+            'https://example.com/dav/a.bin', new Uint8Array([1]), 'application/octet-stream', null, { fetcher },
+        );
+        expect(putHeaders).toHaveLength(2);
+        expect(putHeaders.every((headers) => headers.get('if-none-match') === '*')).toBe(true);
+    });
+
+    it('uses If-Match for delete and maps a stale generation to conflict', async () => {
+        const fetcher = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+            expect(new Headers(init?.headers).get('if-match')).toBe('"v1"');
+            return new Response(null, { status: 412 });
+        }) as unknown as typeof fetch;
+
+        await expect(webdavDeleteFileVersioned(
+            'https://example.com/dav/a.bin', '"v1"', { fetcher },
+        )).rejects.toThrow('WEBDAV_REMOTE_WRITE_CONFLICT');
+    });
+
+    it.each([
+        ['PUT', (fetcher: typeof fetch) => webdavPutFile(
+            'https://example.com/dav/a.bin', new Uint8Array([1]), 'application/octet-stream',
+            { fetcher, timeoutMs: 1 },
+        )],
+        ['DELETE', (fetcher: typeof fetch) => webdavDeleteFile(
+            'https://example.com/dav/a.bin', { fetcher, timeoutMs: 1 },
+        )],
+    ])('times out and cancels a stalled successful %s response body', async (_kind, request) => {
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 200 });
+
+        await expect(request(async () => response)).rejects.toThrow('WebDAV request timed out');
+        expect(cancel).toHaveBeenCalledOnce();
+    }, 100);
+
+    it('preflights an empty remote with enforced create-only and stale replacement conditions', async () => {
+        const documentUrl = 'https://example.com/dav/data.json';
+        const { fetcher, getProbeUrl, requests } = createWebdavCapabilityFetcher(documentUrl);
+
+        await assertWebdavStrongEtagSupport(documentUrl, { fetcher });
+
+        expect(requests.map(({ method }) => method)).toEqual([
+            'GET', 'PUT', 'GET', 'PUT', 'PUT', 'GET', 'PUT', 'DELETE', 'GET', 'DELETE',
+        ]);
+        expect(requests[1]?.headers.get('if-none-match')).toBe('*');
+        expect(requests[3]?.headers.get('if-none-match')).toBe('*');
+        expect(requests[4]?.headers.get('if-match')).toBe('"probe-v1"');
+        expect(requests[6]?.headers.get('if-match')).toBe('"probe-v1"');
+        expect(requests[7]?.headers.get('if-match')).toBe('"probe-v1"');
+        expect(requests[9]?.headers.get('if-match')).toBe('"probe-v2"');
+        expect(getProbeUrl()).toContain('data.json.mindwtr-etag-probe-');
+    });
+
+    it.each([
+        ['empty', ''],
+        ['whitespace-only', ' \n\t'],
+        ['BOM plus whitespace', '\uFEFF \n\t'],
+        ['BOM-prefixed JSON', '\uFEFF \n {"tasks":[]} \n'],
+    ])('accepts an existing strong-ETag document with a %s body', async (_case, body) => {
+        const documentUrl = 'https://example.com/dav/data.json';
+        const { fetcher } = createWebdavCapabilityFetcher(documentUrl, { documentBody: body });
+
+        await expect(assertWebdavStrongEtagSupport(
+            documentUrl,
+            { fetcher },
+        )).resolves.toBeUndefined();
+    });
+
+    it.each([
+        ['create-only', { ignoreCreateOnly: true }],
+        ['stale replacement', { ignoreStaleMatch: true }],
+    ] as const)('rejects a server that ignores the %s condition', async (_case, behavior) => {
+        const documentUrl = 'https://example.com/dav/data.json';
+        const { fetcher, requests } = createWebdavCapabilityFetcher(documentUrl, behavior);
+
+        await expect(assertWebdavStrongEtagSupport(documentUrl, { fetcher }))
+            .rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+        expect(requests.some(({ method }) => method === 'DELETE')).toBe(true);
+    });
+
+    it('rejects a server that ignores stale conditional deletes', async () => {
+        const documentUrl = 'https://example.com/dav/data.json';
+        const { fetcher } = createWebdavCapabilityFetcher(documentUrl, { ignoreStaleDelete: true });
+
+        await expect(assertWebdavStrongEtagSupport(documentUrl, { fetcher }))
+            .rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+    });
+
+    it('rejects a server that cannot conditionally delete the current probe generation', async () => {
+        const documentUrl = 'https://example.com/dav/data.json';
+        const { fetcher } = createWebdavCapabilityFetcher(documentUrl, { rejectCurrentDelete: true });
+
+        await expect(assertWebdavStrongEtagSupport(documentUrl, { fetcher }))
+            .rejects.toThrow('WebDAV DELETE failed (405)');
+    });
+
+    it('rejects a 200 HTML/login body even when that response has a strong ETag', async () => {
+        const fetcher = vi.fn(async () => new Response('<html>Sign in</html>', {
+            status: 200,
+            headers: { etag: '"login-v1"' },
+        })) as unknown as typeof fetch;
+
+        await expect(assertWebdavStrongEtagSupport(
+            'https://example.com/dav/data.json',
+            { fetcher },
+        )).rejects.toThrow('WebDAV GET failed: invalid JSON');
+        expect(fetcher).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+        ['missing', null],
+        ['weak', 'W/"v1"'],
+    ])('rejects an existing document with a %s ETag before any write', async (_case, etag) => {
+        const fetcher = vi.fn(async () => new Response(new Uint8Array([1]), {
+            status: 200,
+            headers: etag ? { etag } : undefined,
+        })) as unknown as typeof fetch;
+
+        await expect(assertWebdavStrongEtagSupport(
+            'https://example.com/dav/data.json',
+            { fetcher },
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+        expect(fetcher).toHaveBeenCalledOnce();
+    });
+
+    it('does not issue an unguarded cleanup when the created probe rereads with a weak ETag', async () => {
+        const methods: string[] = [];
+        const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+            const method = init?.method ?? 'GET';
+            methods.push(method);
+            if (String(input).endsWith('/data.json')) return new Response(null, { status: 404 });
+            if (method === 'PUT') return new Response(null, { status: 201 });
+            if (method === 'GET') {
+                return new Response(new Uint8Array([1]), {
+                    status: 200,
+                    headers: { etag: 'W/"probe-v1"' },
+                });
+            }
+            throw new Error(`unexpected unsafe ${method}`);
+        }) as unknown as typeof fetch;
+
+        await expect(assertWebdavStrongEtagSupport(
+            'https://example.com/dav/data.json',
+            { fetcher },
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+        expect(methods).toEqual(['GET', 'PUT', 'GET']);
     });
 });
 

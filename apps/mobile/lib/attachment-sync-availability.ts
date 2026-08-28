@@ -1,7 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from './file-system';
 import type { Attachment } from '@mindwtr/core';
-import { cloudGetFile, webdavGetFile, withRetry } from '@mindwtr/core';
+import {
+  cloudGetFile,
+  computeSha256Hex,
+  isSha256Hex,
+  markAttachmentUnrecoverable,
+  parseCloudKitAttachmentKey,
+  validateAttachmentHash,
+  webdavGetFile,
+  withRetry,
+} from '@mindwtr/core';
 import { downloadDropboxFile } from './dropbox-sync';
 import {
   CLOUD_PROVIDER_KEY,
@@ -9,40 +17,179 @@ import {
   SYNC_PATH_KEY,
 } from './sync-constants';
 import {
-  base64ToBytes,
   CLOUD_PROVIDER_DROPBOX,
-  copyFileSafely,
   ensureAttachmentStoredLocally,
   extractExtension,
-  fileExists,
   findSafEntry,
   getAttachmentsDir,
   getBaseSyncUrl,
   getCloudBaseUrl,
   getDropboxClientId,
-  isContentAttachmentUri,
+  getLocalAttachmentPresence,
   isHttpAttachmentUri,
   loadCloudConfig,
   loadWebDavConfig,
   logAttachmentWarn,
+  readFileAsBytes,
   reportProgress,
   resolveFileSyncDir,
   runDropboxAuthorized,
-  StorageAccessFramework,
-  validateAttachmentHash,
   writeBytesSafely,
 } from './attachment-sync-utils';
 import { getMobileCloudRequestOptions, getMobileWebDavRequestOptions } from './webdav-request-options';
-import { openAttachmentBytesFromDownload } from './attachment-sync-backends/common';
-import { readSyncArtifactBytes } from './storage-file-encryption';
+import {
+  createAttachmentDownloadStagePath,
+  copyAttachmentDownloadToStage,
+  deleteAttachmentDownloadStageBestEffort,
+  installAttachmentDownloadBytes,
+  installStagedAttachmentDownload,
+  openAttachmentBytesFromDownload,
+  readAttachmentDownloadStageBytes,
+} from './attachment-sync-backends/common';
+import {
+  fetchCloudKitAttachmentAsset,
+  isCloudKitAttachmentNotFoundError,
+} from './cloudkit-sync';
 import { getSyncEncryptionMaterial } from './sync-encryption-state';
 
-const downloadLocks = new Map<string, Promise<Attachment | null>>();
+export type AttachmentAvailabilityOutcome =
+  | { status: 'available'; attachment: Attachment }
+  | { status: 'generation-conflict' }
+  | { status: 'unrecoverable'; attachment: Attachment }
+  | { status: 'unavailable' };
+
+const GENERATION_CONFLICT = Symbol('attachment-generation-conflict');
+type InternalUnrecoverableOutcome = {
+  availabilityStatus: 'unrecoverable';
+  attachment: Attachment;
+};
+type InternalAvailabilityOutcome =
+  | Attachment
+  | InternalUnrecoverableOutcome
+  | null
+  | typeof GENERATION_CONFLICT;
+
+/** A download may only be shared while it represents the same immutable remote bytes. */
+export const getAttachmentDownloadIdentity = (attachment: Attachment): string => JSON.stringify([
+  attachment.id,
+  attachment.cloudKey ?? null,
+  attachment.fileHash ?? null,
+  attachment.contentRev ?? 0,
+]);
+
+export const hasAttachmentDownloadIdentity = (
+  attachment: Attachment | undefined,
+  identity: string,
+): attachment is Attachment => Boolean(attachment && getAttachmentDownloadIdentity(attachment) === identity);
+
+/** Descriptive metadata belongs to the current document. A completed download may
+ * only publish device-local availability and fill a previously absent verified hash. */
+export const getAttachmentAvailabilityPatch = (
+  current: Attachment,
+  resolved: Attachment,
+): Partial<Attachment> => ({
+  uri: resolved.uri,
+  localStatus: resolved.localStatus,
+  ...(!current.fileHash && resolved.fileHash ? { fileHash: resolved.fileHash } : {}),
+});
+
+/** Terminal remote absence may clear only lifecycle fields. Descriptive metadata remains
+ * owned by the latest document selected by the caller's download-identity guard. */
+export const getAttachmentUnrecoverablePatch = (
+  resolved: Attachment,
+): Partial<Attachment> => ({
+  cloudKey: resolved.cloudKey,
+  fileHash: resolved.fileHash,
+  localStatus: resolved.localStatus,
+  deletedAt: resolved.deletedAt,
+  updatedAt: resolved.updatedAt,
+});
+
+const downloadLocks = new Map<string, Promise<AttachmentAvailabilityOutcome>>();
+
+/** A managed target left by a prior attempt is usable only when its bytes prove
+ * they are the current remote generation. Without a remote hash there is no safe
+ * way to distinguish a crash retry from a stale generation that won the absent CAS. */
+const resolveMatchingManagedTarget = async (
+  attachment: Attachment,
+  targetUri: string,
+): Promise<InternalAvailabilityOutcome> => {
+  if (!isSha256Hex(attachment.fileHash)) return GENERATION_CONFLICT;
+  try {
+    await validateAttachmentHash(attachment, await readFileAsBytes(targetUri));
+    return { ...attachment, uri: targetUri, localStatus: 'available' };
+  } catch (error) {
+    logAttachmentWarn(`Managed attachment ${attachment.id} does not match the requested generation`, error);
+    return GENERATION_CONFLICT;
+  }
+};
+
+/**
+ * Publish an on-demand download only while the managed target is still absent.
+ * The native installer owns the scratch generation once invoked; a false result
+ * is a late local create and already records centralized failed progress.
+ */
+const installMissingAttachmentBytes = async (
+  attachment: Attachment,
+  attachmentsDir: string,
+  targetUri: string,
+  bytes: Uint8Array,
+): Promise<InternalAvailabilityOutcome> => {
+  const installed = await installAttachmentDownloadBytes(
+    attachment,
+    attachmentsDir,
+    targetUri,
+    bytes,
+    { kind: 'absent' },
+  );
+  if (!installed) return GENERATION_CONFLICT;
+  return { ...attachment, uri: targetUri, localStatus: 'available' };
+};
+
+const installMissingAttachmentStage = async (
+  attachment: Attachment,
+  stagedPath: string,
+  targetUri: string,
+  material: Awaited<ReturnType<typeof getSyncEncryptionMaterial>>,
+): Promise<InternalAvailabilityOutcome> => {
+  let installHelperOwnsStage = false;
+  try {
+    let expectedStagedHash = !material && isSha256Hex(attachment.fileHash)
+      ? attachment.fileHash.toLowerCase()
+      : null;
+    if (!expectedStagedHash) {
+      const wireBytes = await readAttachmentDownloadStageBytes(stagedPath);
+      const plaintextBytes = await openAttachmentBytesFromDownload(wireBytes, material);
+      const plaintextHash = await computeSha256Hex(plaintextBytes);
+      if (!plaintextHash) throw new Error('Attachment download hash is unavailable');
+      await validateAttachmentHash(attachment, plaintextBytes);
+      if (plaintextBytes !== wireBytes) {
+        await writeBytesSafely(stagedPath, plaintextBytes);
+      }
+      expectedStagedHash = plaintextHash;
+    }
+    installHelperOwnsStage = true;
+    const installed = await installStagedAttachmentDownload({
+      attachment,
+      stagedPath,
+      targetPath: targetUri,
+      expectation: { kind: 'absent' },
+      expectedStagedHash,
+    });
+    if (!installed) return GENERATION_CONFLICT;
+    return { ...attachment, uri: targetUri, localStatus: 'available' };
+  } catch (error) {
+    if (!installHelperOwnsStage) {
+      await deleteAttachmentDownloadStageBestEffort(stagedPath);
+    }
+    throw error;
+  }
+};
 
 const ensureFileAttachmentAvailable = async (
   attachment: Attachment,
   syncPath: string
-): Promise<Attachment | null> => {
+): Promise<InternalAvailabilityOutcome> => {
   const syncDir = await resolveFileSyncDir(syncPath);
   if (!syncDir) return null;
   if (!attachment.cloudKey) return null;
@@ -50,58 +197,122 @@ const ensureFileAttachmentAvailable = async (
   if (!attachmentsDir) return null;
   const filename = attachment.cloudKey.split('/').pop() || `${attachment.id}${extractExtension(attachment.title)}`;
   const targetUri = `${attachmentsDir}${filename}`;
-  const existing = await fileExists(targetUri);
-  if (existing) {
-    return { ...attachment, uri: targetUri, localStatus: 'available' };
+  const targetPresence = await getLocalAttachmentPresence(targetUri);
+  if (targetPresence === 'unreadable') return null;
+  if (targetPresence === 'present') {
+    return resolveMatchingManagedTarget(attachment, targetUri);
   }
 
+  let stagedPath: string | null = null;
+  let installerOwnsStage = false;
   try {
     // #1056: the local attachments directory always holds plaintext, so an encrypted
     // sync folder's bytes are opened on the way in. `null` material keeps the
-    // byte-for-byte pre-feature behavior, including the plain `copyFileSafely` fast
-    // path. Inside the try: S3 — an `enabled`-but-no-key device throws instead of
+    // byte-for-byte pre-feature behavior. Inside the try: S3 — an enabled-but-no-key
+    // device throws instead of
     // returning `null`, and that must fail this fetch closed (logged, `null` result),
-    // never fall through to the plaintext `copyFileSafely` path as if encryption were off.
+    // never fall through to a plaintext path as if encryption were off.
     const material = await getSyncEncryptionMaterial();
+    let sourceUri: string;
     if (syncDir.type === 'file') {
-      const sourceUri = `${syncDir.attachmentsDirUri}${filename}`;
-      const exists = await fileExists(sourceUri);
-      if (!exists) return null;
-      if (!material) {
-        await copyFileSafely(sourceUri, targetUri);
-        return { ...attachment, uri: targetUri, localStatus: 'available' };
-      }
-      const sourceBytes = await readSyncArtifactBytes(sourceUri);
-      if (!sourceBytes) return null;
-      await writeBytesSafely(targetUri, await openAttachmentBytesFromDownload(sourceBytes, material));
-      return { ...attachment, uri: targetUri, localStatus: 'available' };
+      sourceUri = `${syncDir.attachmentsDirUri}${filename}`;
+      const sourcePresence = await getLocalAttachmentPresence(sourceUri);
+      if (sourcePresence !== 'present') return null;
+    } else {
+      const entry = await findSafEntry(syncDir.attachmentsDirUri, filename);
+      if (!entry) return null;
+      sourceUri = entry;
     }
-    const entry = await findSafEntry(syncDir.attachmentsDirUri, filename);
-    if (!entry || !StorageAccessFramework?.readAsStringAsync) return null;
-    const base64 = await StorageAccessFramework.readAsStringAsync(entry, { encoding: FileSystem.EncodingType.Base64 });
-    await writeBytesSafely(targetUri, await openAttachmentBytesFromDownload(base64ToBytes(base64), material));
-    return { ...attachment, uri: targetUri, localStatus: 'available' };
+    stagedPath = await copyAttachmentDownloadToStage(attachment, attachmentsDir, sourceUri);
+    installerOwnsStage = true;
+    return await installMissingAttachmentStage(attachment, stagedPath, targetUri, material);
   } catch (error) {
-    logAttachmentWarn(`Failed to copy attachment ${attachment.id} from sync folder`, error);
+    if (stagedPath && !installerOwnsStage) {
+      await deleteAttachmentDownloadStageBestEffort(stagedPath);
+    }
+    logAttachmentWarn(`Failed to make attachment ${attachment.id} available from sync folder`, error);
     return null;
   }
 };
 
-const ensureAttachmentAvailableInternal = async (attachment: Attachment): Promise<Attachment | null> => {
-  if (attachment.kind !== 'file') return attachment;
-  const localAttachment = { ...attachment };
-  if (await ensureAttachmentStoredLocally(localAttachment)) {
-    return localAttachment;
+const ensureCloudKitAttachmentAvailable = async (
+  attachment: Attachment,
+): Promise<InternalAvailabilityOutcome> => {
+  const recordName = parseCloudKitAttachmentKey(attachment.cloudKey);
+  if (!recordName) return null;
+  const attachmentsDir = await getAttachmentsDir();
+  if (!attachmentsDir) return null;
+  const extension = extractExtension(attachment.title) || extractExtension(attachment.uri);
+  const targetUri = `${attachmentsDir}${attachment.id}${extension}`;
+  const targetPresence = await getLocalAttachmentPresence(targetUri);
+  if (targetPresence === 'unreadable') return null;
+  if (targetPresence === 'present') {
+    return resolveMatchingManagedTarget(attachment, targetUri);
   }
 
+  const stagedUri = createAttachmentDownloadStagePath(attachmentsDir, attachment);
+  let installerOwnsStage = false;
+  try {
+    reportProgress(attachment.id, 'download', 0, attachment.size ?? 0, 'active');
+    await fetchCloudKitAttachmentAsset(recordName, stagedUri);
+    installerOwnsStage = true;
+    const installed = await installStagedAttachmentDownload({
+      attachment,
+      stagedPath: stagedUri,
+      targetPath: targetUri,
+      expectation: { kind: 'absent' },
+    });
+    if (!installed) return GENERATION_CONFLICT;
+    reportProgress(
+      attachment.id,
+      'download',
+      attachment.size ?? 0,
+      attachment.size ?? 0,
+      'completed',
+    );
+    return { ...attachment, uri: targetUri, localStatus: 'available' };
+  } catch (error) {
+    if (!installerOwnsStage) {
+      await deleteAttachmentDownloadStageBestEffort(stagedUri);
+    }
+    const terminalNotFound = isCloudKitAttachmentNotFoundError(error);
+    reportProgress(
+      attachment.id,
+      'download',
+      0,
+      attachment.size ?? 0,
+      'failed',
+      terminalNotFound
+        ? 'Attachment is no longer available'
+        : error instanceof Error ? error.message : String(error),
+    );
+    if (terminalNotFound) {
+      markAttachmentUnrecoverable(attachment);
+      logAttachmentWarn(`CloudKit attachment ${attachment.id} is no longer available`, error);
+      return { availabilityStatus: 'unrecoverable', attachment };
+    }
+    logAttachmentWarn(`Failed to download CloudKit attachment ${attachment.id}`, error);
+    return null;
+  }
+};
+
+const ensureAttachmentAvailableInternal = async (
+  attachment: Attachment,
+): Promise<InternalAvailabilityOutcome> => {
+  if (attachment.kind !== 'file') return attachment;
+  const localAttachment = { ...attachment };
   const uri = localAttachment.uri || '';
-  if (uri && (isHttpAttachmentUri(uri) || isContentAttachmentUri(uri))) {
+  if (uri && isHttpAttachmentUri(uri)) {
     return { ...localAttachment, localStatus: 'available' };
   }
 
   if (uri) {
-    const exists = await fileExists(uri);
-    if (exists) {
+    const sourcePresence = await getLocalAttachmentPresence(uri);
+    if (sourcePresence === 'unreadable') return null;
+    if (sourcePresence === 'present') {
+      if (await ensureAttachmentStoredLocally(localAttachment)) {
+        return localAttachment;
+      }
       return { ...localAttachment, localStatus: 'available' };
     }
   }
@@ -116,14 +327,19 @@ const ensureAttachmentAvailableInternal = async (attachment: Attachment): Promis
     return null;
   }
 
+  if (backend === 'cloudkit') {
+    return ensureCloudKitAttachmentAvailable(localAttachment);
+  }
+
   if (backend === 'cloud' && localAttachment.cloudKey) {
     const attachmentsDir = await getAttachmentsDir();
     if (!attachmentsDir) return null;
     const filename = localAttachment.cloudKey.split('/').pop() || `${localAttachment.id}${extractExtension(localAttachment.title)}`;
     const targetUri = `${attachmentsDir}${filename}`;
-    const existing = await fileExists(targetUri);
-    if (existing) {
-      return { ...localAttachment, uri: targetUri, localStatus: 'available' };
+    const targetPresence = await getLocalAttachmentPresence(targetUri);
+    if (targetPresence === 'unreadable') return null;
+    if (targetPresence === 'present') {
+      return resolveMatchingManagedTarget(localAttachment, targetUri);
     }
     const cloudProvider = ((await AsyncStorage.getItem(CLOUD_PROVIDER_KEY)) || '').trim();
     if (cloudProvider === CLOUD_PROVIDER_DROPBOX) {
@@ -138,10 +354,16 @@ const ensureAttachmentAvailableInternal = async (attachment: Attachment): Promis
           data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as ArrayBuffer),
           await getSyncEncryptionMaterial(),
         );
-        await validateAttachmentHash(localAttachment, bytes);
-        await writeBytesSafely(targetUri, bytes);
+        const installedAttachment = await installMissingAttachmentBytes(
+          localAttachment,
+          attachmentsDir,
+          targetUri,
+          bytes,
+        );
+        if (installedAttachment === GENERATION_CONFLICT) return GENERATION_CONFLICT;
+        if (!installedAttachment) return null;
         reportProgress(localAttachment.id, 'download', bytes.length, bytes.length, 'completed');
-        return { ...localAttachment, uri: targetUri, localStatus: 'available' };
+        return installedAttachment;
       } catch (error) {
         reportProgress(
           localAttachment.id,
@@ -170,10 +392,16 @@ const ensureAttachmentAvailableInternal = async (attachment: Attachment): Promis
         data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as ArrayBuffer),
         await getSyncEncryptionMaterial(),
       );
-      await validateAttachmentHash(localAttachment, bytes);
-      await writeBytesSafely(targetUri, bytes);
+      const installedAttachment = await installMissingAttachmentBytes(
+        localAttachment,
+        attachmentsDir,
+        targetUri,
+        bytes,
+      );
+      if (installedAttachment === GENERATION_CONFLICT) return GENERATION_CONFLICT;
+      if (!installedAttachment) return null;
       reportProgress(localAttachment.id, 'download', bytes.length, bytes.length, 'completed');
-      return { ...localAttachment, uri: targetUri, localStatus: 'available' };
+      return installedAttachment;
     } catch (error) {
       reportProgress(
         localAttachment.id,
@@ -196,9 +424,10 @@ const ensureAttachmentAvailableInternal = async (attachment: Attachment): Promis
     if (!attachmentsDir) return null;
     const filename = localAttachment.cloudKey.split('/').pop() || `${localAttachment.id}${extractExtension(localAttachment.title)}`;
     const targetUri = `${attachmentsDir}${filename}`;
-    const existing = await fileExists(targetUri);
-    if (existing) {
-      return { ...localAttachment, uri: targetUri, localStatus: 'available' };
+    const targetPresence = await getLocalAttachmentPresence(targetUri);
+    if (targetPresence === 'unreadable') return null;
+    if (targetPresence === 'present') {
+      return resolveMatchingManagedTarget(localAttachment, targetUri);
     }
     try {
       const data = await withRetry(() =>
@@ -213,10 +442,16 @@ const ensureAttachmentAvailableInternal = async (attachment: Attachment): Promis
         data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as ArrayBuffer),
         await getSyncEncryptionMaterial(),
       );
-      await validateAttachmentHash(localAttachment, bytes);
-      await writeBytesSafely(targetUri, bytes);
+      const installedAttachment = await installMissingAttachmentBytes(
+        localAttachment,
+        attachmentsDir,
+        targetUri,
+        bytes,
+      );
+      if (installedAttachment === GENERATION_CONFLICT) return GENERATION_CONFLICT;
+      if (!installedAttachment) return null;
       reportProgress(localAttachment.id, 'download', bytes.length, bytes.length, 'completed');
-      return { ...localAttachment, uri: targetUri, localStatus: 'available' };
+      return installedAttachment;
     } catch (error) {
       reportProgress(
         localAttachment.id,
@@ -234,15 +469,31 @@ const ensureAttachmentAvailableInternal = async (attachment: Attachment): Promis
   return null;
 };
 
-export const ensureAttachmentAvailable = async (attachment: Attachment): Promise<Attachment | null> => {
-  if (attachment.kind !== 'file') return attachment;
-  const existing = downloadLocks.get(attachment.id);
+export const ensureAttachmentAvailableDetailed = async (
+  attachment: Attachment,
+): Promise<AttachmentAvailabilityOutcome> => {
+  if (attachment.kind !== 'file') return { status: 'available', attachment };
+  const identity = getAttachmentDownloadIdentity(attachment);
+  const existing = downloadLocks.get(identity);
   if (existing) return existing;
-  const downloadPromise = ensureAttachmentAvailableInternal(attachment);
-  downloadLocks.set(attachment.id, downloadPromise);
+  const downloadPromise = ensureAttachmentAvailableInternal(attachment).then((result): AttachmentAvailabilityOutcome => {
+    if (result === GENERATION_CONFLICT) return { status: 'generation-conflict' };
+    if (!result) return { status: 'unavailable' };
+    if ('availabilityStatus' in result) {
+      return { status: 'unrecoverable', attachment: result.attachment };
+    }
+    return { status: 'available', attachment: result };
+  });
+  downloadLocks.set(identity, downloadPromise);
   try {
     return await downloadPromise;
   } finally {
-    downloadLocks.delete(attachment.id);
+    downloadLocks.delete(identity);
   }
+};
+
+/** Compatibility wrapper for existing non-UI callers. Detailed callers retain conflicts. */
+export const ensureAttachmentAvailable = async (attachment: Attachment): Promise<Attachment | null> => {
+  const outcome = await ensureAttachmentAvailableDetailed(attachment);
+  return outcome.status === 'available' ? outcome.attachment : null;
 };

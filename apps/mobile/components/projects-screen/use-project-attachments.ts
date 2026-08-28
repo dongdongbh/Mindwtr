@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert } from 'react-native';
 import {
   Attachment,
   generateUUID,
   normalizeLinkAttachmentInput,
   Project,
+  useTaskStore,
   validateAttachmentForUpload,
 } from '@mindwtr/core';
 import * as DocumentPicker from 'expo-document-picker';
@@ -12,7 +13,15 @@ import * as Linking from 'expo-linking';
 import * as Sharing from 'expo-sharing';
 
 import { resolveAttachmentValidationMessage } from './projects-screen.utils';
-import { ensureAttachmentAvailable, persistAttachmentLocally } from '../../lib/attachment-sync';
+import { persistAttachmentLocally } from '../../lib/attachment-sync';
+import {
+  ensureAttachmentAvailableDetailed,
+  getAttachmentAvailabilityPatch,
+  getAttachmentDownloadIdentity,
+  getAttachmentUnrecoverablePatch,
+  hasAttachmentDownloadIdentity,
+  type AttachmentAvailabilityOutcome,
+} from '../../lib/attachment-sync-availability';
 import { logWarn } from '../../lib/app-log';
 import { tryOpenWithAndroidViewer } from '../../lib/open-file-externally';
 
@@ -31,18 +40,111 @@ export function useProjectAttachments({
   t,
   logProjectError,
 }: UseProjectAttachmentsParams) {
+  const selectedProjectRef = React.useRef(selectedProject);
+  selectedProjectRef.current = selectedProject;
   const [linkModalVisible, setLinkModalVisible] = useState(false);
   const [imagePreviewAttachment, setImagePreviewAttachment] = useState<Attachment | null>(null);
   const [linkInput, setLinkInput] = useState('');
 
-  const updateAttachmentStatus = useCallback((
-    attachments: Attachment[],
-    id: string,
-    status: Attachment['localStatus']
-  ): Attachment[] =>
-    attachments.map((item): Attachment =>
-      item.id === id ? { ...item, localStatus: status } : item
-    ), []);
+  const currentProjectAttachmentForIdentity = useCallback((
+    projectId: string,
+    attachmentId: string,
+    identity: string,
+  ): { project: Project; attachment: Attachment } | null => {
+    const selected = selectedProjectRef.current;
+    if (!selected || selected.id !== projectId) return null;
+    const selectedAttachment = selected.attachments?.find((item) => item.id === attachmentId);
+    if (!hasAttachmentDownloadIdentity(selectedAttachment, identity)) return null;
+    if (!selectedAttachment.cloudKey) return { project: selected, attachment: selectedAttachment };
+
+    const currentProject = useTaskStore.getState()._allProjects.find((item) => item.id === projectId);
+    const currentAttachment = currentProject?.attachments?.find((item) => item.id === attachmentId);
+    if (!currentProject || !hasAttachmentDownloadIdentity(currentAttachment, identity)) return null;
+    return { project: currentProject, attachment: currentAttachment };
+  }, []);
+
+  const updateProjectAttachmentIfCurrent = useCallback((
+    projectId: string,
+    attachmentId: string,
+    identity: string,
+    patch: Partial<Attachment>,
+  ): Attachment | null => {
+    const current = currentProjectAttachmentForIdentity(projectId, attachmentId, identity);
+    if (!current) return null;
+    const nextAttachment = { ...current.attachment, ...patch };
+    const nextAttachments = (current.project.attachments || []).map((item): Attachment =>
+      item.id === attachmentId ? { ...item, ...patch } : item
+    );
+    updateProject(projectId, { attachments: nextAttachments });
+    const selected = selectedProjectRef.current;
+    const selectedAttachment = selected?.attachments?.find((item) => item.id === attachmentId);
+    if (selected?.id === projectId && hasAttachmentDownloadIdentity(selectedAttachment, identity)) {
+      setSelectedProject({ ...current.project, attachments: nextAttachments });
+    }
+    return nextAttachment;
+  }, [currentProjectAttachmentForIdentity, setSelectedProject, updateProject]);
+
+  type ProjectAttachmentResolution = AttachmentAvailabilityOutcome | { status: 'stale' };
+
+  const resolveProjectAttachment = useCallback(async (
+    projectId: string,
+    attachment: Attachment,
+  ): Promise<ProjectAttachmentResolution> => {
+    if (attachment.kind !== 'file') return { status: 'available', attachment };
+    const identity = getAttachmentDownloadIdentity(attachment);
+    if (!currentProjectAttachmentForIdentity(projectId, attachment.id, identity)) return { status: 'stale' };
+    const shouldDownload = Boolean(
+      attachment.cloudKey && (attachment.localStatus === 'missing' || !attachment.uri)
+    );
+    if (shouldDownload && attachment.localStatus !== 'downloading') {
+      updateProjectAttachmentIfCurrent(projectId, attachment.id, identity, { localStatus: 'downloading' });
+    }
+    const outcome = await ensureAttachmentAvailableDetailed(attachment);
+    if (outcome.status === 'available') {
+      const current = currentProjectAttachmentForIdentity(projectId, attachment.id, identity);
+      if (!current) return { status: 'stale' };
+      const resolved = updateProjectAttachmentIfCurrent(
+        projectId,
+        attachment.id,
+        identity,
+        getAttachmentAvailabilityPatch(current.attachment, outcome.attachment),
+      );
+      return resolved
+        ? { status: 'available', attachment: resolved }
+        : { status: 'stale' };
+    }
+    if (outcome.status === 'unrecoverable') {
+      const resolved = updateProjectAttachmentIfCurrent(
+        projectId,
+        attachment.id,
+        identity,
+        getAttachmentUnrecoverablePatch(outcome.attachment),
+      );
+      return resolved
+        ? { status: 'unrecoverable', attachment: resolved }
+        : { status: 'stale' };
+    }
+    if (shouldDownload) {
+      const restored = updateProjectAttachmentIfCurrent(
+        projectId,
+        attachment.id,
+        identity,
+        { localStatus: 'missing' },
+      );
+      if (!restored) return { status: 'stale' };
+    }
+    return outcome;
+  }, [currentProjectAttachmentForIdentity, updateProjectAttachmentIfCurrent]);
+
+  const showAttachmentResolutionError = useCallback((resolution: ProjectAttachmentResolution) => {
+    if (resolution.status === 'available' || resolution.status === 'stale') return;
+    const message = resolution.status === 'generation-conflict'
+      ? t('attachments.downloadConflict')
+      : resolution.status === 'unrecoverable'
+        ? t('attachments.unrecoverable')
+        : t('attachments.missing');
+    Alert.alert(t('attachments.title'), message);
+  }, [t]);
 
   const isImageAttachment = useCallback((attachment: Attachment) => {
     const mime = attachment.mimeType?.toLowerCase();
@@ -51,43 +153,13 @@ export function useProjectAttachments({
   }, []);
 
   const openAttachment = useCallback(async (attachment: Attachment) => {
-    const shouldDownload = attachment.kind === 'file'
-      && attachment.cloudKey
-      && (attachment.localStatus === 'missing' || !attachment.uri);
-    if (shouldDownload && selectedProject) {
-      const next = updateAttachmentStatus(
-        selectedProject.attachments || [],
-        attachment.id,
-        'downloading'
-      );
-      updateProject(selectedProject.id, { attachments: next });
-      setSelectedProject({ ...selectedProject, attachments: next });
-    }
-
-    const resolved = await ensureAttachmentAvailable(attachment);
-    if (!resolved) {
-      if (shouldDownload && selectedProject) {
-        const next = updateAttachmentStatus(
-          selectedProject.attachments || [],
-          attachment.id,
-          'missing'
-        );
-        updateProject(selectedProject.id, { attachments: next });
-        setSelectedProject({ ...selectedProject, attachments: next });
-      }
-      const message = attachment.kind === 'file' ? t('attachments.missing') : t('attachments.fileNotSupported');
-      Alert.alert(t('attachments.title'), message);
+    if (!selectedProject) return;
+    const resolution = await resolveProjectAttachment(selectedProject.id, attachment);
+    if (resolution.status !== 'available') {
+      showAttachmentResolutionError(resolution);
       return;
     }
-    if (resolved.uri !== attachment.uri || resolved.localStatus !== attachment.localStatus) {
-      const next = (selectedProject?.attachments || []).map((item): Attachment =>
-        item.id === resolved.id ? { ...item, ...resolved } : item
-      );
-      if (selectedProject) {
-        updateProject(selectedProject.id, { attachments: next });
-        setSelectedProject({ ...selectedProject, attachments: next });
-      }
-    }
+    const resolved = resolution.attachment;
 
     if (resolved.kind === 'link') {
       Linking.openURL(resolved.uri).catch((error) => logProjectError('Failed to open attachment URL', error));
@@ -113,7 +185,7 @@ export function useProjectAttachments({
     } else {
       Linking.openURL(resolved.uri).catch((error) => logProjectError('Failed to open attachment URL', error));
     }
-  }, [isImageAttachment, logProjectError, selectedProject, setSelectedProject, t, updateAttachmentStatus, updateProject]);
+  }, [isImageAttachment, logProjectError, resolveProjectAttachment, selectedProject, showAttachmentResolutionError]);
 
   useEffect(() => {
     if (!selectedProject) {
@@ -123,40 +195,9 @@ export function useProjectAttachments({
 
   const downloadAttachment = useCallback(async (attachment: Attachment) => {
     if (!selectedProject) return;
-    const shouldDownload = attachment.kind === 'file'
-      && attachment.cloudKey
-      && (attachment.localStatus === 'missing' || !attachment.uri);
-    if (shouldDownload) {
-      const next = updateAttachmentStatus(
-        selectedProject.attachments || [],
-        attachment.id,
-        'downloading'
-      );
-      updateProject(selectedProject.id, { attachments: next });
-      setSelectedProject({ ...selectedProject, attachments: next });
-    }
-
-    const resolved = await ensureAttachmentAvailable(attachment);
-    if (!resolved) {
-      const next = updateAttachmentStatus(
-        selectedProject.attachments || [],
-        attachment.id,
-        'missing'
-      );
-      updateProject(selectedProject.id, { attachments: next });
-      setSelectedProject({ ...selectedProject, attachments: next });
-      const message = attachment.kind === 'file' ? t('attachments.missing') : t('attachments.fileNotSupported');
-      Alert.alert(t('attachments.title'), message);
-      return;
-    }
-    if (resolved.uri !== attachment.uri || resolved.localStatus !== attachment.localStatus) {
-      const next = (selectedProject.attachments || []).map((item): Attachment =>
-        item.id === resolved.id ? { ...item, ...resolved } : item
-      );
-      updateProject(selectedProject.id, { attachments: next });
-      setSelectedProject({ ...selectedProject, attachments: next });
-    }
-  }, [selectedProject, setSelectedProject, t, updateAttachmentStatus, updateProject]);
+    const resolution = await resolveProjectAttachment(selectedProject.id, attachment);
+    showAttachmentResolutionError(resolution);
+  }, [resolveProjectAttachment, selectedProject, showAttachmentResolutionError]);
 
   const addProjectFileAttachment = useCallback(async () => {
     if (!selectedProject) return;

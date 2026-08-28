@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Attachment, DEFAULT_PROJECT_COLOR, buildTaskUpdatesFromSpeechResult, findSelectableProjectByTitleAndArea, generateUUID, normalizeLinkAttachmentInput, translateWithFallback, useTaskStore, type Task } from '@mindwtr/core';
+import { Attachment, DEFAULT_PROJECT_COLOR, areDraftAttachmentsDirty, buildTaskUpdatesFromSpeechResult, findSelectableProjectByTitleAndArea, generateUUID, normalizeLinkAttachmentInput, planAttachmentDraftSettlement, translateWithFallback, useTaskStore, type Task } from '@mindwtr/core';
 import { dataDir } from '@tauri-apps/api/path';
 import { BaseDirectory, readFile, readTextFile } from '@tauri-apps/plugin-fs';
 import { importDroppedFileAttachment, importPickedFileAttachment } from '../../lib/attachment-import';
@@ -29,8 +29,8 @@ type UseTaskItemAttachmentsProps = {
 // attachments dir immediately, but the attachment *record* only lives in
 // editor-local state until Save — cancelling (or reopening the editor)
 // discards records added since the last save and orphans their files.
-// Delete only what's provably ours: a `kind: 'file'` attachment whose uri
-// sits inside the managed attachments dir. Never touch `kind: 'link'`
+// Delete only what's provably ours: a `kind: 'file'` attachment whose uri is
+// the attachment-id-named copy inside the managed attachments dir. Never touch `kind: 'link'`
 // (points at the user's own file) or a uri outside that dir (legacy
 // path-referencing attachments). Best-effort — failures are logged, never
 // thrown, so they can't block the reset.
@@ -47,7 +47,11 @@ const deleteOrphanedAttachmentFiles = async (orphaned: Attachment[]): Promise<vo
             // directory that merely shares the prefix (e.g. `attachments-old/`)
             // — require the path separator so only files actually inside the
             // managed dir are "provably ours" to delete.
-            if (!normalizeAttachmentPathForUrl(attachment.uri).startsWith(managedDirPrefix)) continue;
+            const normalizedUri = normalizeAttachmentPathForUrl(attachment.uri);
+            if (!normalizedUri.startsWith(managedDirPrefix)) continue;
+            const fileName = normalizedUri.slice(managedDirPrefix.length).split(/[?#]/, 1)[0];
+            if (!fileName || fileName.includes('/')) continue;
+            if (fileName !== attachment.id && !fileName.startsWith(`${attachment.id}.`)) continue;
             try {
                 await remove(attachment.uri);
             } catch (error) {
@@ -72,12 +76,14 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
     // setEditAttachments updater, which would run the orphan-file delete twice.
     const editAttachmentsRef = useRef(editAttachments);
     editAttachmentsRef.current = editAttachments;
+    const baselineAttachmentsRef = useRef<Attachment[]>(task.attachments || []);
+    // Once an attachment-bearing task update reaches the optimistic store, both
+    // the old persisted file and the new draft file may still be needed until
+    // SQLite confirms the write. A failed durability barrier deliberately keeps
+    // this guard raised: leaking a managed copy is recoverable; deleting the only
+    // bytes referenced by either snapshot is not.
+    const attachmentSaveAwaitingDurabilityRef = useRef(false);
     const [attachmentError, setAttachmentError] = useState<string | null>(null);
-    // Pre-conversion snapshots of file attachments edited into link pointers
-    // (#913/#1001): once the task saves with the record as a pointer, the old
-    // managed copy is provably orphaned and gets cleaned up. Captured outside
-    // the setState updater on purpose — StrictMode double-invokes updaters.
-    const convertedFileAttachmentsRef = useRef<Attachment[]>([]);
     const [audioAttachment, setAudioAttachment] = useState<Attachment | null>(null);
     const [audioSource, setAudioSource] = useState<string | null>(null);
     const [audioError, setAudioError] = useState<string | null>(null);
@@ -467,15 +473,6 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         if (!normalized.uri) return false;
         const now = new Date().toISOString();
         if (editingLinkAttachmentId) {
-            const previous = editAttachmentsRef.current.find(
-                (attachment) => attachment.id === editingLinkAttachmentId
-            );
-            if (previous && previous.kind === 'file' && previous.uri !== normalized.uri) {
-                convertedFileAttachmentsRef.current = [
-                    ...convertedFileAttachmentsRef.current.filter((a) => a.id !== previous.id),
-                    previous,
-                ];
-            }
             setEditAttachments((prev) => prev.map((attachment) => (
                 attachment.id === editingLinkAttachmentId
                     ? {
@@ -536,28 +533,51 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         );
     }, []);
 
+    const settleAttachmentFiles = useCallback((committedAttachments: Attachment[]) => {
+        const removable = planAttachmentDraftSettlement({
+            baselineAttachments: baselineAttachmentsRef.current,
+            draftAttachments: editAttachmentsRef.current,
+            committedAttachments,
+        }).map((candidate) => candidate.attachment);
+        if (removable.length > 0) void deleteOrphanedAttachmentFiles(removable);
+        baselineAttachmentsRef.current = committedAttachments;
+    }, []);
+
+    const beginAttachmentSave = useCallback(() => {
+        const attachmentsChanged = areDraftAttachmentsDirty(
+            editAttachmentsRef.current,
+            { ...task, attachments: baselineAttachmentsRef.current },
+        );
+        attachmentSaveAwaitingDurabilityRef.current = attachmentsChanged;
+        return attachmentsChanged;
+    }, [task]);
+
+    const cancelAttachmentSaveBeforeStoreUpdate = useCallback(() => {
+        attachmentSaveAwaitingDurabilityRef.current = false;
+    }, []);
+
+    const settlePersistedAttachmentSave = useCallback((committedAttachments: Attachment[]) => {
+        settleAttachmentFiles(committedAttachments);
+        attachmentSaveAwaitingDurabilityRef.current = false;
+    }, [settleAttachmentFiles]);
+
+    useEffect(() => () => {
+        if (attachmentSaveAwaitingDurabilityRef.current) return;
+        settleAttachmentFiles(baselineAttachmentsRef.current);
+    }, [settleAttachmentFiles]);
+
     const resetAttachmentState = useCallback((attachments: Attachment[] | undefined) => {
         const nextList = attachments || [];
-        const nextIds = new Set(nextList.map((a) => a.id));
-        const orphaned = editAttachmentsRef.current.filter((a) => !nextIds.has(a.id));
-        // A record edited from file to link pointer persisted only if the
-        // incoming (saved) list carries the conversion — a cancel hands back
-        // the original file record and the managed copy must survive.
-        const nextById = new Map(nextList.map((a) => [a.id, a]));
-        const converted = convertedFileAttachmentsRef.current.filter((old) => {
-            const next = nextById.get(old.id);
-            return next?.kind === 'link' && next.uri !== old.uri;
-        });
-        convertedFileAttachmentsRef.current = [];
-        const removable = [...orphaned, ...converted];
-        if (removable.length > 0) void deleteOrphanedAttachmentFiles(removable);
+        if (!attachmentSaveAwaitingDurabilityRef.current) {
+            settleAttachmentFiles(nextList);
+        }
         setEditAttachments(nextList);
         setAttachmentError(null);
         closeLinkPrompt();
         closeAudio();
         closeImage();
         closeText();
-    }, [closeAudio, closeImage, closeLinkPrompt, closeText]);
+    }, [closeAudio, closeImage, closeLinkPrompt, closeText, settleAttachmentFiles]);
 
     return {
         editAttachments,
@@ -578,7 +598,10 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         handleAddLinkAttachment,
         removeAttachment,
         openAttachment,
+        beginAttachmentSave,
+        cancelAttachmentSaveBeforeStoreUpdate,
         resetAttachmentState,
+        settlePersistedAttachmentSave,
         audioAttachment,
         audioSource,
         audioError,

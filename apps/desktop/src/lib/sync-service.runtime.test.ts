@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { computeStableValueFingerprint, computeSyncPayloadFingerprint, type AppData } from '@mindwtr/core';
+import { rememberWebdavCapabilityProof } from './webdav-capability-proof';
 
 type MockStoreState = {
     _allTasks: AppData['tasks'];
@@ -57,6 +58,7 @@ const localData: AppData = {
     people: [],
     settings: {},
 };
+const LOCAL_ATTACHMENT_HASH = '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81';
 
 const buildResponse = (
     status: number,
@@ -84,7 +86,142 @@ const buildResponse = (
     },
 } as unknown as Response);
 
+const REMOTE_FENCE_NAME = '.mindwtr-sync-fence-v1.json';
+const REMOTE_FENCE_SERVER_DATE = 'Wed, 26 Aug 2026 12:00:00 GMT';
+
+/** Adds the compatible-client fence protocol to a provider fixture while
+ * leaving ordinary document/attachment behavior with the focused test. */
+const withRemoteMutationFence = (
+    delegate: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+) => {
+    let bytes: Uint8Array | null = null;
+    let version = 0;
+    const currentVersion = () => `fence-v${version}`;
+    const bodyBytes = (body: BodyInit | null | undefined): Uint8Array => {
+        if (body instanceof Uint8Array) return new Uint8Array(body);
+        if (body instanceof ArrayBuffer) return new Uint8Array(body);
+        throw new Error('expected byte-array fence body');
+    };
+
+    return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+        const headers = new Headers(init?.headers);
+        const apiArg = headers.get('Dropbox-API-Arg');
+        const dropboxArg = apiArg ? JSON.parse(apiArg) as {
+            path?: string;
+            mode?: { '.tag'?: string; update?: string };
+        } : null;
+        const deleteArg = url.endsWith('/delete_v2') && typeof init?.body === 'string'
+            ? JSON.parse(init.body) as { path?: string; parent_rev?: string }
+            : null;
+        const isWebdavFence = url.includes(REMOTE_FENCE_NAME);
+        const isDropboxFence = dropboxArg?.path === `/${REMOTE_FENCE_NAME}`
+            || deleteArg?.path === `/${REMOTE_FENCE_NAME}`;
+
+        if (!isDropboxFence && url.endsWith('/get_metadata') && typeof init?.body === 'string') {
+            const metadataArg = JSON.parse(init.body) as { path?: string };
+            if (metadataArg.path?.startsWith('/attachments/')) {
+                return buildResponse(409, JSON.stringify({
+                    error_summary: 'path/not_found/...',
+                    error: { '.tag': 'path', path: { '.tag': 'not_found' } },
+                }));
+            }
+        }
+
+        if (!isWebdavFence && !isDropboxFence) return delegate(input, init);
+
+        if (method === 'GET' || url.endsWith('/download')) {
+            if (!bytes) {
+                return isDropboxFence
+                    ? buildResponse(409, '{"error_summary":"path/not_found/"}', { date: REMOTE_FENCE_SERVER_DATE })
+                    : buildResponse(404, '', { date: REMOTE_FENCE_SERVER_DATE });
+            }
+            return buildResponse(200, new TextDecoder().decode(bytes), {
+                date: REMOTE_FENCE_SERVER_DATE,
+                ...(isDropboxFence
+                    ? { 'dropbox-api-result': JSON.stringify({ rev: currentVersion() }) }
+                    : { etag: `"${currentVersion()}"` }),
+            });
+        }
+
+        if (method === 'PUT' || url.endsWith('/upload')) {
+            const expected = isDropboxFence
+                ? dropboxArg?.mode?.['.tag'] === 'update' ? dropboxArg.mode.update : null
+                : headers.get('if-match')?.replace(/^"|"$/g, '') ?? null;
+            const createOnly = isDropboxFence
+                ? dropboxArg?.mode?.['.tag'] === 'add'
+                : headers.get('if-none-match') === '*';
+            if ((bytes && createOnly) || (bytes && expected !== currentVersion()) || (!bytes && expected)) {
+                return buildResponse(isDropboxFence ? 409 : 412, '', { date: REMOTE_FENCE_SERVER_DATE });
+            }
+            bytes = bodyBytes(init?.body);
+            version += 1;
+            return buildResponse(isDropboxFence ? 200 : 201, JSON.stringify({ rev: currentVersion() }), {
+                date: REMOTE_FENCE_SERVER_DATE,
+            });
+        }
+
+        if (method === 'DELETE' || url.endsWith('/delete_v2')) {
+            const expected = isDropboxFence
+                ? deleteArg?.parent_rev
+                : headers.get('if-match')?.replace(/^"|"$/g, '');
+            if (!bytes || expected !== currentVersion()) {
+                return buildResponse(isDropboxFence ? 409 : 412, '', { date: REMOTE_FENCE_SERVER_DATE });
+            }
+            bytes = null;
+            return buildResponse(204, '', { date: REMOTE_FENCE_SERVER_DATE });
+        }
+
+        throw new Error(`unexpected fence ${method}`);
+    });
+};
+
+const createRuntimeWebdavCapabilityFetch = (documentBody: string) => {
+    let probeBytes: Uint8Array | null = null;
+    let probeVersion = 0;
+    return withRemoteMutationFence(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+        const headers = new Headers(init?.headers);
+        if (!url.includes('.mindwtr-etag-probe-')) {
+            if (method === 'PUT') return buildResponse(200, '', { etag: '"pending-write"' });
+            if (method !== 'GET') throw new Error(`unexpected document ${method}`);
+            return buildResponse(200, documentBody, { etag: '"pending-read"' });
+        }
+        if (method === 'GET') {
+            if (!probeBytes) return buildResponse(404, '');
+            return buildResponse(
+                200,
+                new TextDecoder().decode(probeBytes),
+                { etag: `"probe-v${probeVersion}"` },
+            );
+        }
+        if (method === 'PUT') {
+            const body = init?.body;
+            if (!(body instanceof Uint8Array)) throw new Error('expected byte-array probe body');
+            const currentEtag = probeBytes ? `"probe-v${probeVersion}"` : null;
+            if (probeBytes && headers.get('if-none-match') === '*') return buildResponse(412, '');
+            if (probeBytes && headers.has('if-match') && headers.get('if-match') !== currentEtag) {
+                return buildResponse(412, '');
+            }
+            probeBytes = new Uint8Array(body);
+            probeVersion += 1;
+            return buildResponse(currentEtag ? 204 : 201, '');
+        }
+        if (method === 'DELETE') {
+            if (!probeBytes || headers.get('if-match') !== `"probe-v${probeVersion}"`) {
+                return buildResponse(412, '');
+            }
+            probeBytes = null;
+            return buildResponse(204, '');
+        }
+        throw new Error(`unexpected ${method}`);
+    });
+};
+
 const invokeMock = vi.hoisted(() => vi.fn());
+const invokeWithFileSyncLeaseMock = vi.hoisted(() => vi.fn());
 const markLocalWriteMock = vi.hoisted(() => vi.fn());
 const markLocalSqliteWriteMock = vi.hoisted(() => vi.fn());
 const flushPendingSaveMock = vi.hoisted(() => vi.fn());
@@ -104,6 +241,7 @@ const fsMocks = vi.hoisted(() => ({
     BaseDirectory: { Data: 'data' },
     exists: vi.fn(),
     mkdir: vi.fn(),
+    open: vi.fn(),
     readFile: vi.fn(),
     writeFile: vi.fn(),
     writeTextFile: vi.fn(),
@@ -118,13 +256,18 @@ const fsMocks = vi.hoisted(() => ({
 // The sync folder's exists/mkdir/remove/rename go through async Rust commands,
 // not the fs plugin's main-thread ones (#1037).
 const syncFsMocks = vi.hoisted(() => ({
+    abandonAttachmentGeneration: vi.fn(),
     exists: vi.fn(),
     mkdir: vi.fn(),
+    publishAttachmentGeneration: vi.fn(),
+    reserveAttachmentGeneration: vi.fn(),
     remove: vi.fn(),
     rename: vi.fn(),
+    stat: vi.fn(),
 }));
 const pathMocks = vi.hoisted(() => ({
     dataDir: vi.fn(),
+    dirname: vi.fn(),
     join: vi.fn(),
 }));
 const storeStateRef = vi.hoisted(() => ({
@@ -209,6 +352,24 @@ describe('desktop sync-service runtime', () => {
 
         fsMocks.exists.mockImplementation(async (path: string) => path === 'mindwtr/attachments/doc.txt');
         fsMocks.mkdir.mockResolvedValue(undefined);
+        fsMocks.open.mockImplementation(async (_path: string, options?: { write?: boolean }) => {
+            if (options?.write) {
+                return {
+                    write: vi.fn(async (bytes: Uint8Array) => bytes.byteLength),
+                    close: vi.fn().mockResolvedValue(undefined),
+                };
+            }
+            let finished = false;
+            return {
+                read: vi.fn(async (buffer: Uint8Array) => {
+                    if (finished) return null;
+                    buffer.set([1, 2, 3]);
+                    finished = true;
+                    return 3;
+                }),
+                close: vi.fn().mockResolvedValue(undefined),
+            };
+        });
         fsMocks.readFile.mockResolvedValue(new Uint8Array([1, 2, 3]));
         fsMocks.writeFile.mockResolvedValue(undefined);
         fsMocks.writeTextFile.mockResolvedValue(undefined);
@@ -217,9 +378,27 @@ describe('desktop sync-service runtime', () => {
         fsMocks.readDir.mockResolvedValue([]);
         syncFsMocks.exists.mockImplementation(async (path: string) => path === 'mindwtr/attachments/doc.txt');
         syncFsMocks.mkdir.mockResolvedValue(undefined);
+        syncFsMocks.abandonAttachmentGeneration.mockResolvedValue(undefined);
+        syncFsMocks.publishAttachmentGeneration.mockResolvedValue({ status: 'published' });
+        syncFsMocks.reserveAttachmentGeneration.mockImplementation(async (
+            _leaseToken: string,
+            targetPath: string,
+        ) => {
+            const separatorIndex = Math.max(targetPath.lastIndexOf('/'), targetPath.lastIndexOf('\\'));
+            const separator = targetPath.includes('\\') ? '\\' : '/';
+            return {
+                operationId: 'runtime-publication-1',
+                scratchPath: `${targetPath.slice(0, separatorIndex)}${separator}.mindwtr-attachment-generation-runtime-publication-1.tmp`,
+            };
+        });
         syncFsMocks.rename.mockResolvedValue(undefined);
         syncFsMocks.remove.mockResolvedValue(undefined);
+        syncFsMocks.stat.mockResolvedValue({
+            mtimeMs: new Date('2026-01-01T00:00:00.000Z').getTime(),
+            size: 3,
+        });
         pathMocks.dataDir.mockResolvedValue('/data');
+        pathMocks.dirname.mockImplementation(async (path: string) => path.replace(/[\\/][^\\/]+$/, ''));
         pathMocks.join.mockImplementation(async (...parts: string[]) => parts.join('/'));
 
         invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
@@ -230,6 +409,13 @@ describe('desktop sync-service runtime', () => {
             if (command === 'save_data') return undefined;
             throw new Error(`Unexpected command: ${command} ${JSON.stringify(args)}`);
         });
+        invokeWithFileSyncLeaseMock.mockImplementation(
+            async (command: string, args?: Record<string, unknown>) => {
+                if (command === 'acquire_file_sync_lease') return 'runtime-file-sync-lease';
+                if (command === 'release_file_sync_lease') return undefined;
+                return invokeMock(command, args);
+            },
+        );
 
         performSyncCycleMock.mockImplementation(async (io: {
             readLocal: () => Promise<AppData>;
@@ -247,7 +433,10 @@ describe('desktop sync-service runtime', () => {
         syncServiceModule.__syncServiceTestUtils.resetDependenciesForTests();
         syncServiceModule.__syncServiceTestUtils.setDependenciesForTests({
             isTauriRuntime: () => true,
-            invoke: invokeMock as unknown as <T>(command: string, args?: Record<string, unknown>) => Promise<T>,
+            invoke: invokeWithFileSyncLeaseMock as unknown as <T>(
+                command: string,
+                args?: Record<string, unknown>,
+            ) => Promise<T>,
             getStoreState: useTaskStoreGetStateMock as typeof useTaskStoreGetStateMock,
             flushPendingSave: flushPendingSaveMock as typeof flushPendingSaveMock,
             performSyncCycle: performSyncCycleMock as typeof performSyncCycleMock,
@@ -268,12 +457,18 @@ describe('desktop sync-service runtime', () => {
         });
     }, 30_000);
 
-    it('persists pre-synced attachment metadata when local changes abort the sync', async () => {
+    it('does not publish deferred attachment metadata when local changes abort before post-merge', async () => {
         const syncServiceModule = await syncServiceModulePromise;
 
         const result = await syncServiceModule.SyncService.performSync();
 
         expect(result).toEqual({ success: true, skipped: 'requeued' });
+        expect(invokeWithFileSyncLeaseMock).toHaveBeenCalledWith('acquire_file_sync_lease', {
+            path: '/sync/data.json',
+        });
+        expect(invokeWithFileSyncLeaseMock).toHaveBeenCalledWith('release_file_sync_lease', {
+            token: 'runtime-file-sync-lease',
+        });
         expect(markLocalWriteMock).toHaveBeenCalledTimes(1);
         expect(markLocalSqliteWriteMock).toHaveBeenCalledTimes(2);
         expect(invokeMock).toHaveBeenCalledWith('save_data', {
@@ -292,14 +487,17 @@ describe('desktop sync-service runtime', () => {
                         attachments: [
                             expect.objectContaining({
                                 id: 'att-1',
-                                cloudKey: 'attachments/att-1.txt',
+                                cloudKey: undefined,
                                 localStatus: 'available',
+                                pendingContentUpload: undefined,
                             }),
                         ],
                     }),
                 ],
             }),
         });
+        expect(fsMocks.writeFile).not.toHaveBeenCalled();
+        expect(syncFsMocks.rename).not.toHaveBeenCalled();
     });
 
     it('treats pending remote write backoff as a skipped sync', async () => {
@@ -611,12 +809,7 @@ describe('desktop sync-service runtime', () => {
             people: [],
             settings: {},
         };
-        const httpFetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-            if (init?.method === 'PUT') {
-                return buildResponse(200, '', { etag: '"pending-write"' });
-            }
-            return buildResponse(200, JSON.stringify(pendingRemote), { etag: '"pending-read"' });
-        });
+        const httpFetchMock = createRuntimeWebdavCapabilityFetch(JSON.stringify(pendingRemote));
         invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
             if (command === 'create_data_snapshot') return undefined;
             if (command === 'get_data') return structuredClone(pendingRemote);
@@ -655,6 +848,12 @@ describe('desktop sync-service runtime', () => {
         });
 
         expect(result).toEqual({ success: true, stats: emptyStats });
+        expect(httpFetchMock.mock.calls.some(([input, init]) => (
+            String(input).includes(REMOTE_FENCE_NAME) && init?.method === 'PUT'
+        ))).toBe(true);
+        expect(httpFetchMock.mock.calls.some(([input, init]) => (
+            String(input).includes(REMOTE_FENCE_NAME) && init?.method === 'DELETE'
+        ))).toBe(true);
         expect(invokeMock).not.toHaveBeenCalledWith('get_sync_backend', undefined);
         expect(invokeMock).not.toHaveBeenCalledWith('get_webdav_config', undefined);
         expect(invokeMock).not.toHaveBeenCalledWith('webdav_get_json', undefined);
@@ -695,7 +894,7 @@ describe('desktop sync-service runtime', () => {
             people: [],
             settings: {},
         };
-        const httpFetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const httpFetchMock = withRemoteMutationFence(async (_input: RequestInfo | URL, init?: RequestInit) => {
             if (init?.method === 'PUT') throw new Error('candidate remote write failed');
             return buildResponse(200, JSON.stringify(pendingRemote), { etag: '"pending-read"' });
         });
@@ -828,9 +1027,10 @@ describe('desktop sync-service runtime', () => {
         expect(hasPayloadTraceLog()).toBe(true);
     });
 
-    it('preserves attachment pre-sync mutations when local edits land during file attachment sync', async () => {
+    it('preserves local edits that land before a deferred file attachment upload', async () => {
         const syncServiceModule = await syncServiceModulePromise;
 
+        fsMocks.stat.mockResolvedValue({ mtime: new Date('2026-01-01T00:00:00.000Z'), size: 3 });
         performSyncCycleMock.mockResolvedValue({
             status: 'success',
             stats: emptyStats,
@@ -854,36 +1054,63 @@ describe('desktop sync-service runtime', () => {
         const result = await syncServiceModule.SyncService.performSync();
 
         expect(result).toEqual({ success: true, skipped: 'requeued' });
-        expect(performSyncCycleMock).not.toHaveBeenCalled();
+        expect(performSyncCycleMock).toHaveBeenCalledOnce();
+        expect(fsMocks.readFile).toHaveBeenCalledWith('mindwtr/attachments/doc.txt', { baseDir: 'data' });
+        expect(fsMocks.open).toHaveBeenCalledWith(
+            expect.stringMatching(/^\/sync\/attachments\/\.mindwtr-attachment-generation-.*\.tmp$/),
+            { write: true, createNew: true },
+        );
+        expect(syncFsMocks.reserveAttachmentGeneration).toHaveBeenCalledWith(
+            'runtime-file-sync-lease',
+            `/sync/attachments/att-1.${LOCAL_ATTACHMENT_HASH}.txt`,
+            3,
+            LOCAL_ATTACHMENT_HASH,
+        );
+        expect(syncFsMocks.publishAttachmentGeneration).toHaveBeenCalledWith(
+            'runtime-file-sync-lease',
+            'runtime-publication-1',
+        );
         expect(invokeMock).toHaveBeenCalledWith('save_data', {
             baselineEntities: {
                 settings: {},
                 tasks: [expect.objectContaining({
                     id: 'task-1',
+                    title: 'Task',
                     attachments: [expect.objectContaining({ id: 'att-1' })],
                 })],
                 observedEntityIds: entityIds(['task-1']),
             },
             data: expect.objectContaining({
-                tasks: [
-                    expect.objectContaining({
-                        id: 'task-1',
-                        title: 'Edited during attachment sync',
-                        attachments: [
-                            expect.objectContaining({
-                                id: 'att-1',
-                                cloudKey: 'attachments/att-1.txt',
-                                localStatus: 'available',
-                            }),
-                        ],
-                    }),
-                ],
+                tasks: [expect.objectContaining({
+                    id: 'task-1',
+                    title: 'Edited during attachment sync',
+                    attachments: [expect.objectContaining({
+                        id: 'att-1',
+                        cloudKey: undefined,
+                        localStatus: 'available',
+                    })],
+                })],
             }),
+        });
+        expect(storeStateRef.current._allTasks[0]).toMatchObject({
+            id: 'task-1',
+            title: 'Edited during attachment sync',
+            attachments: [expect.objectContaining({
+                id: 'att-1',
+                cloudKey: undefined,
+            })],
         });
     });
 
     it('splits file backend cloud keys into native path segments for Windows sync folders', async () => {
         const syncServiceModule = await syncServiceModulePromise;
+
+        fsMocks.stat.mockResolvedValue({ mtime: new Date('2026-01-01T00:00:00.000Z'), size: 3 });
+        performSyncCycleMock.mockResolvedValue({
+            status: 'success',
+            stats: emptyStats,
+            data: structuredClone(localData),
+        });
 
         invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
             if (command === 'get_sync_backend') return 'file';
@@ -897,19 +1124,30 @@ describe('desktop sync-service runtime', () => {
             if (parts.slice(1).some((part) => part.includes('/'))) {
                 throw new Error(`Invalid Windows path segment: ${parts.join(' | ')}`);
             }
-            return `\\\\?\\${parts.join('\\')}`;
+            const joined = parts.join('\\');
+            return joined.startsWith('\\\\?\\') ? joined : `\\\\?\\${joined}`;
         });
 
         const result = await syncServiceModule.SyncService.performSync();
 
-        expect(result).toEqual({ success: true, skipped: 'requeued' });
-        expect(fsMocks.writeFile).toHaveBeenCalledWith(
-            expect.stringMatching(/^\\\\\?\\C:\\Users\\Pjuter\\Documents\\Mindwtr_sync\\attachments\\att-1\.txt\.tmp-/),
-            expect.any(Uint8Array),
+        expect(result).toMatchObject({ success: true });
+        expect(result).not.toHaveProperty('skipped');
+        expect(performSyncCycleMock).toHaveBeenCalledOnce();
+        expect(fsMocks.open).toHaveBeenCalledWith(
+            expect.stringMatching(
+                /^\\\\\?\\C:\\Users\\Pjuter\\Documents\\Mindwtr_sync\\attachments\\\.mindwtr-attachment-generation-.*\.tmp$/,
+            ),
+            { write: true, createNew: true },
         );
-        expect(syncFsMocks.rename).toHaveBeenCalledWith(
-            expect.stringMatching(/^\\\\\?\\C:\\Users\\Pjuter\\Documents\\Mindwtr_sync\\attachments\\att-1\.txt\.tmp-/),
-            '\\\\?\\C:\\Users\\Pjuter\\Documents\\Mindwtr_sync\\attachments\\att-1.txt',
+        expect(syncFsMocks.reserveAttachmentGeneration).toHaveBeenCalledWith(
+            'runtime-file-sync-lease',
+            `\\\\?\\C:\\Users\\Pjuter\\Documents\\Mindwtr_sync\\attachments\\att-1.${LOCAL_ATTACHMENT_HASH}.txt`,
+            3,
+            LOCAL_ATTACHMENT_HASH,
+        );
+        expect(syncFsMocks.publishAttachmentGeneration).toHaveBeenCalledWith(
+            'runtime-file-sync-lease',
+            'runtime-publication-1',
         );
     });
 
@@ -1181,6 +1419,11 @@ describe('desktop sync-service runtime', () => {
             if (command === 'save_data') return undefined;
             throw new Error(`Unexpected command: ${command} ${JSON.stringify(args)}`);
         });
+        rememberWebdavCapabilityProof({
+            url: 'https://sync.example.com/data.json',
+            username: 'user',
+            allowInsecureHttp: false,
+        });
         syncServiceModule.__syncServiceTestUtils.setDependenciesForTests({
             getTauriFetch: async () => headFetchMock as unknown as typeof fetch,
         });
@@ -1232,7 +1475,7 @@ describe('desktop sync-service runtime', () => {
             url: 'https://sync.example.com/data.json',
             username: 'user',
         });
-        const headFetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const headFetchMock = withRemoteMutationFence(async (input: RequestInfo | URL, init?: RequestInit) => {
             expect(String(input)).toBe('https://sync.example.com/data.json');
             expect(init?.method).toBe('HEAD');
             return buildResponse(200, '', { etag: '"new"', 'content-length': '2' });
@@ -1266,9 +1509,20 @@ describe('desktop sync-service runtime', () => {
                 };
             }
             if (command === 'get_data') return structuredClone(syncedData);
-            if (command === 'webdav_get_json') return structuredClone(remoteChangedData);
+            if (command === 'webdav_get_json') {
+                return {
+                    data: structuredClone(remoteChangedData),
+                    exists: true,
+                    strongEtag: '"remote-v2"',
+                };
+            }
             if (command === 'save_data') return undefined;
             throw new Error(`Unexpected command: ${command} ${JSON.stringify(args)}`);
+        });
+        rememberWebdavCapabilityProof({
+            url: 'https://sync.example.com/data.json',
+            username: 'user',
+            allowInsecureHttp: false,
         });
         syncServiceModule.__syncServiceTestUtils.setDependenciesForTests({
             getTauriFetch: async () => headFetchMock as unknown as typeof fetch,
@@ -1296,7 +1550,8 @@ describe('desktop sync-service runtime', () => {
 
     it('proves a first Dropbox connection with attachments using only the staged credential handle', async () => {
         const syncServiceModule = await syncServiceModulePromise;
-        const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        fsMocks.stat.mockResolvedValue({ mtime: new Date('2026-01-01T00:00:00.000Z'), size: 3 });
+        const fetchMock = withRemoteMutationFence(async (input: RequestInfo | URL, init?: RequestInit) => {
             const url = String(input);
             if (url === 'https://content.dropboxapi.com/2/files/upload') {
                 expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer first-connect-token');
@@ -1371,6 +1626,9 @@ describe('desktop sync-service runtime', () => {
             });
 
             expect(result).toEqual(expect.objectContaining({ success: true }));
+            expect(fetchMock.mock.calls.some(([, init]) => (
+                new Headers(init?.headers).get('Dropbox-API-Arg')?.includes(REMOTE_FENCE_NAME)
+            ))).toBe(true);
             const tokenCalls = invokeMock.mock.calls.filter(([command]) => (
                 command === 'get_dropbox_access_token'
             ));
@@ -1385,9 +1643,10 @@ describe('desktop sync-service runtime', () => {
 
     it('never falls back to the old Dropbox account while refreshing reconnect attachment credentials', async () => {
         const syncServiceModule = await syncServiceModulePromise;
+        fsMocks.stat.mockResolvedValue({ mtime: new Date('2026-01-01T00:00:00.000Z'), size: 3 });
         let attachmentUploadAttempts = 0;
         const authorizationHeaders: string[] = [];
-        const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const fetchMock = withRemoteMutationFence(async (input: RequestInfo | URL, init?: RequestInit) => {
             const url = String(input);
             const authorization = new Headers(init?.headers).get('Authorization') ?? '';
             authorizationHeaders.push(authorization);
@@ -1487,7 +1746,7 @@ describe('desktop sync-service runtime', () => {
             settings: {},
         };
         let downloadAttempts = 0;
-        const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const fetchMock = withRemoteMutationFence(async (input: RequestInfo | URL) => {
             if (String(input) !== 'https://content.dropboxapi.com/2/files/download') {
                 throw new Error(`Unexpected Dropbox fetch input: ${String(input)}`);
             }
@@ -1582,7 +1841,7 @@ describe('desktop sync-service runtime', () => {
             areas: [],
             settings: {},
         };
-        const nativeFetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const nativeFetchMock = withRemoteMutationFence(async (input: RequestInfo | URL) => {
             if (String(input) === 'https://content.dropboxapi.com/2/files/download') {
                 return buildResponse(200, '', { 'dropbox-api-result': '{"rev":"rev-native"}' });
             }
@@ -1634,7 +1893,11 @@ describe('desktop sync-service runtime', () => {
             const result = await syncServiceModule.SyncService.performSync();
 
             expect(result).toEqual({ success: true, stats: emptyStats });
-            expect(nativeFetchMock).toHaveBeenCalledTimes(1);
+            const nativeDocumentCalls = nativeFetchMock.mock.calls.filter(([, init]) => {
+                const apiArg = new Headers(init?.headers).get('Dropbox-API-Arg');
+                return apiArg?.includes('"path":"/data.json"');
+            });
+            expect(nativeDocumentCalls).toHaveLength(1);
             expect(browserFetchMock).toHaveBeenCalledTimes(1);
             expect(logInfoMock).toHaveBeenCalledWith(
                 'Retrying Dropbox remote read with browser fetch fallback',

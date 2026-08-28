@@ -4,6 +4,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DailyReviewScreen } from './daily-review-modal';
 
+const { mockStorageGetItem, mockStorageRemoveItem, mockStorageSetItem } = vi.hoisted(() => ({
+    mockStorageGetItem: vi.fn(),
+    mockStorageRemoveItem: vi.fn(),
+    mockStorageSetItem: vi.fn(),
+}));
+
+vi.mock('@react-native-async-storage/async-storage', () => ({
+    default: {
+        getItem: mockStorageGetItem,
+        removeItem: mockStorageRemoveItem,
+        setItem: mockStorageSetItem,
+    },
+}));
+
 const makeTask = (overrides: Record<string, unknown> = {}) => ({
     id: 'task-1',
     title: 'Today task',
@@ -198,6 +212,9 @@ describe('DailyReviewScreen', () => {
         storeState.tasks = [makeTask({ dueDate: '2026-07-15' })];
         storeState.updateTask.mockReset();
         storeState.deleteTask.mockReset();
+        mockStorageGetItem.mockReset().mockResolvedValue(null);
+        mockStorageRemoveItem.mockReset().mockResolvedValue(undefined);
+        mockStorageSetItem.mockReset().mockResolvedValue(undefined);
     });
 
     afterEach(() => {
@@ -218,6 +235,98 @@ describe('DailyReviewScreen', () => {
         expect(scroll.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem')).toHaveLength(1);
         expect(scroll.findAllByProps({ testID: 'daily-review-footer' })).toHaveLength(0);
         expect(tree.root.findAllByProps({ testID: 'daily-review-footer' }).length).toBeGreaterThan(0);
+    });
+
+    it('resumes a valid checkpoint, disables Back on the first step, and clears only on Finish', async () => {
+        storeState.tasks = [makeTask({
+            id: 'waiting-1',
+            title: 'Waiting task',
+            status: 'waiting',
+            dueDate: undefined,
+        })];
+        mockStorageGetItem.mockResolvedValue(JSON.stringify({
+            step: 'waiting',
+            startedAt: new Date('2026-07-15T08:00:00.000Z').toISOString(),
+        }));
+        const onClose = vi.fn();
+
+        let tree!: ReturnType<typeof create>;
+        await act(async () => {
+            tree = create(<DailyReviewScreen onClose={onClose} />);
+            await Promise.resolve();
+        });
+
+        expect(tree.root.findAll((node) => node.props?.children === 'Waiting For').length).toBeGreaterThan(0);
+        const backLabel = tree.root.find((node) => node.props?.children === 'Back');
+        expect(backLabel.parent?.props.disabled).toBe(true);
+
+        const closeButton = tree.root.findByProps({ accessibilityLabel: 'Close' });
+        await act(async () => {
+            closeButton.props.onPress();
+        });
+        expect(onClose).toHaveBeenCalledTimes(1);
+        expect(mockStorageRemoveItem).not.toHaveBeenCalled();
+
+        const nextLabel = tree.root.find((node) => node.props?.children === 'Next Step');
+        await act(async () => {
+            nextLabel.parent?.props.onPress();
+        });
+        const finishLabel = tree.root.find((node) => node.props?.children === 'Finish');
+        await act(async () => {
+            await finishLabel.parent?.props.onPress();
+        });
+        expect(mockStorageRemoveItem).toHaveBeenCalledWith('mindwtr:dailyReview:currentStep');
+    });
+
+    it('restores a later active checkpoint after canonicalizing an empty initial step', async () => {
+        storeState.tasks = [
+            makeTask({ id: 'inbox-1', status: 'inbox', dueDate: undefined }),
+            makeTask({ id: 'waiting-1', status: 'waiting', dueDate: undefined }),
+        ];
+        mockStorageGetItem.mockResolvedValue(JSON.stringify({
+            step: 'waiting',
+            startedAt: new Date('2026-07-15T08:00:00.000Z').toISOString(),
+        }));
+
+        let tree!: ReturnType<typeof create>;
+        await act(async () => {
+            tree = create(<DailyReviewScreen onClose={vi.fn()} />);
+            await Promise.resolve();
+        });
+
+        expect(tree.root.findAll((node) => node.props?.children === 'Waiting For').length).toBeGreaterThan(0);
+    });
+
+    it('does not let delayed resume hydration overwrite an immediate step choice', async () => {
+        storeState.tasks = [
+            makeTask({ id: 'today-1', dueDate: '2026-07-15' }),
+            makeTask({ id: 'inbox-1', status: 'inbox', dueDate: undefined }),
+            makeTask({ id: 'waiting-1', status: 'waiting', dueDate: undefined }),
+        ];
+        let resolveStored!: (value: string | null) => void;
+        mockStorageGetItem.mockReturnValue(new Promise((resolve) => {
+            resolveStored = resolve;
+        }));
+
+        let tree!: ReturnType<typeof create>;
+        await act(async () => {
+            tree = create(<DailyReviewScreen onClose={vi.fn()} />);
+        });
+        const nextLabel = tree.root.find((node) => node.props?.children === 'Next Step');
+        await act(async () => {
+            nextLabel.parent?.props.onPress();
+        });
+        expect(tree.root.findAll((node) => node.props?.children === 'Inbox').length).toBeGreaterThan(0);
+
+        await act(async () => {
+            resolveStored(JSON.stringify({
+                step: 'waiting',
+                startedAt: new Date('2026-07-15T08:00:00.000Z').toISOString(),
+            }));
+            await Promise.resolve();
+        });
+
+        expect(tree.root.findAll((node) => node.props?.children === 'Inbox').length).toBeGreaterThan(0);
     });
 
     it('renders Follow up today as a compact action inside its waiting task card', async () => {

@@ -1,22 +1,37 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { SyncCryptoAuthError, SyncEncryptionTerminalError, type SyncBackend } from '@mindwtr/core';
+import {
+    SyncCryptoAuthError,
+    SyncEncryptionRemoteVersionUnavailableError,
+    SyncEncryptionTerminalError,
+    type SyncBackend,
+} from '@mindwtr/core';
 
 import { getEnglishSettingsLabels } from '../labels';
+import { SyncEncryptionCleanupDeferredError } from '../../../../lib/sync-encryption-service';
+import { SyncService } from '../../../../lib/sync-service';
 import { SyncEncryptionSection } from './SyncEncryptionSection';
-import { classifyFailure, isEncryptionCapableBackend } from './useSyncEncryptionSettings';
+import {
+    classifyFailure,
+    isEncryptionCapableBackend,
+    useSyncEncryptionSettings,
+} from './useSyncEncryptionSettings';
 import type { SyncEncryptionController } from './types';
 
 const t = getEnglishSettingsLabels();
 
 const controller = (overrides: Partial<SyncEncryptionController> = {}): SyncEncryptionController => ({
     state: 'off',
+    stateUnavailable: false,
     supported: true,
     pendingFirstSync: false,
     busy: false,
     progress: null,
     error: null,
+    warning: null,
     clearError: vi.fn(),
+    clearWarning: vi.fn(),
+    retryState: vi.fn(async () => undefined),
     generatePassphrase: vi.fn(() => 'gerbil unpaved trombone cameo hazily wrongdoer'),
     enable: vi.fn(async () => true),
     disable: vi.fn(async () => true),
@@ -63,6 +78,15 @@ describe('SyncEncryptionSection', () => {
             <SyncEncryptionSection t={t} encryption={controller({ state: null })} />,
         );
         expect(container).toBeEmptyDOMElement();
+    });
+
+    it('shows a retryable recovery state when local encryption status is unavailable', () => {
+        const encryption = controller({ state: null, stateUnavailable: true });
+        render(<SyncEncryptionSection t={t} encryption={encryption} />);
+
+        expect(screen.getByRole('alert')).toHaveTextContent(t.syncEncryptionStateUnavailable);
+        fireEvent.click(screen.getByRole('button', { name: t.syncEncryptionRetry }));
+        expect(encryption.retryState).toHaveBeenCalledOnce();
     });
 
     it('shows both warnings before anything can be enabled', () => {
@@ -179,6 +203,23 @@ describe('SyncEncryptionSection', () => {
         expect(screen.getByText(t.syncEncryptionErrorRotationFirst)).toBeTruthy();
     });
 
+    it('explains how to resume a transition whose remote version could not be verified', () => {
+        render(<SyncEncryptionSection t={t} encryption={controller({ state: 'enabled', error: 'transition-incomplete' })} />);
+        expect(screen.getByText(t.syncEncryptionErrorTransitionIncomplete)).toBeTruthy();
+    });
+
+    it('shows committed cleanup deferral as a non-retry status warning', () => {
+        render(
+            <SyncEncryptionSection
+                t={t}
+                encryption={controller({ state: 'enabled', warning: 'cleanup-deferred' })}
+            />,
+        );
+
+        expect(screen.getByRole('status')).toHaveTextContent(t.syncEncryptionCleanupDeferred);
+        expect(screen.queryByRole('alert')).toBeNull();
+    });
+
     it('shows transition progress while a transition runs', () => {
         render(
             <SyncEncryptionSection
@@ -246,12 +287,46 @@ describe('SyncEncryptionSection', () => {
     });
 });
 
+describe('useSyncEncryptionSettings cleanup outcome', () => {
+    it('refreshes and reports success when the transition committed but lock cleanup was deferred', async () => {
+        const status = vi.spyOn(SyncService, 'getSyncEncryptionStatus')
+            .mockResolvedValueOnce({ state: 'off' })
+            .mockResolvedValue({ state: 'enabled', kdfParams: { mKib: 64, t: 1, p: 1 } });
+        const cleanupError = new SyncEncryptionCleanupDeferredError(undefined, new Error('release failed'), 12_000);
+        const enable = vi.spyOn(SyncService, 'enableSyncEncryption').mockRejectedValueOnce(cleanupError);
+        const { result, unmount } = renderHook(() => useSyncEncryptionSettings(
+            'webdav',
+            'selfhosted',
+            'webdav',
+            'selfhosted',
+        ));
+        await waitFor(() => expect(result.current.state).toBe('off'));
+
+        let succeeded = false;
+        await act(async () => {
+            succeeded = await result.current.enable('correct horse battery');
+        });
+
+        expect(succeeded).toBe(true);
+        expect(result.current.state).toBe('enabled');
+        expect(result.current.warning).toBe('cleanup-deferred');
+        expect(result.current.error).toBeNull();
+        enable.mockRestore();
+        status.mockRestore();
+        unmount();
+    });
+});
+
 describe('classifyFailure', () => {
     // Only the explicit verify sentinel may blame the passphrase: by the time a
     // rotation fails, the current passphrase has already been proven (#1056).
     it('blames the passphrase only on the verify sentinel, not on rotation failures', () => {
         expect(classifyFailure(new Error('SYNC_ENCRYPTION_WRONG_PASSPHRASE'), 'generic')).toBe('wrong-passphrase');
         expect(classifyFailure(new Error('SYNC_ENCRYPTION_BACKEND_REQUIRED'), 'generic')).toBe('backend-required');
+        expect(classifyFailure(
+            new SyncEncryptionRemoteVersionUnavailableError('data.json has no strong ETag'),
+            'generic',
+        )).toBe('transition-incomplete');
         expect(
             classifyFailure(new SyncEncryptionTerminalError(new SyncCryptoAuthError()), 'generic'),
         ).toBe('generic');

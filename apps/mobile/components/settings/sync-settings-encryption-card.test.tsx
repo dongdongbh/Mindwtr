@@ -3,7 +3,7 @@ import renderer, { act } from 'react-test-renderer';
 import { Text, TextInput, TouchableOpacity } from 'react-native';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AppData } from '@mindwtr/core';
+import { SyncEncryptionRemoteVersionUnavailableError, type AppData } from '@mindwtr/core';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 
 type EncryptionState = 'off' | 'enabled' | 'remote-encrypted-no-key' | 'remote-plaintext';
@@ -22,6 +22,9 @@ const encryptionMocks = vi.hoisted(() => ({
   isSyncEncryptionBackendPending: vi.fn(async (): Promise<boolean> => false),
   provideSyncEncryptionPassphrase: vi.fn(
     async (_passphrase: string): Promise<'ok' | 'wrong-passphrase'> => 'ok',
+  ),
+  isSyncEncryptionCleanupDeferredError: (error: unknown) => (
+    error instanceof Error && error.name === 'SyncEncryptionCleanupDeferredError'
   ),
 }));
 
@@ -237,6 +240,71 @@ describe('SyncEncryptionCard', () => {
     expect(texts(tree)).toContain('settings.syncEncryptionErrorRotationFirst');
   });
 
+  it('explains how to resume a transition whose remote version could not be verified', async () => {
+    encryptionMocks.getSyncEncryptionStatus.mockResolvedValue({ state: 'enabled' });
+    encryptionMocks.disableSyncEncryption.mockRejectedValueOnce(
+      new SyncEncryptionRemoteVersionUnavailableError('data.json has no strong ETag'),
+    );
+    const tree = await renderCard();
+
+    await press(tree, 'settings.syncEncryptionDisable');
+    await press(tree, 'settings.syncEncryptionDisable');
+
+    const error = findText(tree, 'settings.syncEncryptionErrorTransitionIncomplete');
+    expect(error?.props.accessibilityRole).toBe('alert');
+    expect(error?.props.accessibilityLiveRegion).toBe('assertive');
+    expect(texts(tree)).not.toContain('settings.syncEncryptionErrorRotationFirst');
+  });
+
+  it('closes a committed transition and shows a non-retry cleanup warning', async () => {
+    encryptionMocks.getSyncEncryptionStatus
+      .mockResolvedValueOnce({ state: 'off' })
+      .mockResolvedValue({ state: 'enabled' });
+    const cleanupError = Object.assign(new Error('SYNC_ENCRYPTION_COMMITTED_CLEANUP_DEFERRED'), {
+      name: 'SyncEncryptionCleanupDeferredError',
+      outcome: undefined,
+      cleanupCause: new Error('release failed'),
+      retryAfterMs: 12_000,
+    });
+    encryptionMocks.enableSyncEncryption.mockRejectedValueOnce(cleanupError);
+    const tree = await renderCard();
+
+    await press(tree, 'settings.syncEncryptionEnable');
+    await typeInto(tree, 'settings.syncEncryptionPassphrase', 'correct horse battery');
+    await typeInto(tree, 'settings.syncEncryptionPassphraseConfirm', 'correct horse battery');
+    await press(tree, 'settings.syncEncryptionEnable');
+
+    const warning = findText(tree, 'settings.syncEncryptionCleanupDeferred');
+    expect(warning?.props.accessibilityRole).not.toBe('alert');
+    expect(warning?.props.accessibilityLiveRegion).toBe('polite');
+    expect(texts(tree)).not.toContain('settings.syncEncryptionErrorGeneric');
+    expect(inputLabels(tree)).not.toContain('settings.syncEncryptionPassphrase');
+  });
+
+  it('closes committed File Sync encryption and tells the user to restart instead of retrying it', async () => {
+    encryptionMocks.getSyncEncryptionStatus
+      .mockResolvedValueOnce({ state: 'off' })
+      .mockResolvedValue({ state: 'enabled' });
+    const cleanupError = Object.assign(new Error('SYNC_ENCRYPTION_COMMITTED_CLEANUP_DEFERRED'), {
+      name: 'SyncEncryptionCleanupDeferredError',
+      outcome: undefined,
+      cleanupCause: new Error('File Sync release failed'),
+      cleanupKind: 'file-lock',
+      retryAfterMs: 0,
+    });
+    encryptionMocks.enableSyncEncryption.mockRejectedValueOnce(cleanupError);
+    const tree = await renderCard();
+
+    await press(tree, 'settings.syncEncryptionEnable');
+    await typeInto(tree, 'settings.syncEncryptionPassphrase', 'correct horse battery');
+    await typeInto(tree, 'settings.syncEncryptionPassphraseConfirm', 'correct horse battery');
+    await press(tree, 'settings.syncEncryptionEnable');
+
+    expect(texts(tree)).toContain('settings.syncEncryptionFileCleanupDeferred');
+    expect(texts(tree)).not.toContain('settings.syncEncryptionErrorGeneric');
+    expect(inputLabels(tree)).not.toContain('settings.syncEncryptionPassphrase');
+  });
+
   it('re-prompts inline when the entered passphrase is wrong', async () => {
     encryptionMocks.getSyncEncryptionStatus.mockResolvedValue({ state: 'remote-encrypted-no-key' });
     encryptionMocks.provideSyncEncryptionPassphrase.mockResolvedValue('wrong-passphrase');
@@ -248,7 +316,9 @@ describe('SyncEncryptionCard', () => {
     await press(tree, 'settings.syncEncryptionUnlock');
 
     expect(encryptionMocks.provideSyncEncryptionPassphrase).toHaveBeenCalledWith('not the right one');
-    expect(texts(tree)).toContain('settings.syncEncryptionErrorWrongPassphrase');
+    const error = findText(tree, 'settings.syncEncryptionErrorWrongPassphrase');
+    expect(error?.props.accessibilityRole).toBe('alert');
+    expect(error?.props.accessibilityLiveRegion).toBe('assertive');
     // Still open for another attempt, and nothing suggests the data is damaged.
     expect(inputLabels(tree)).toContain('settings.syncEncryptionPassphrase');
   });
@@ -291,12 +361,18 @@ describe('SyncEncryptionCard', () => {
     });
   });
 
-  it('renders nothing when the status read fails rather than claiming encryption is off', async () => {
+  it('shows recovery and retries when the status read fails without claiming encryption is off', async () => {
     // 'off' offers "Enable encryption" — for a location that may already be
     // encrypted, that is the one answer a failed read must not give.
-    encryptionMocks.getSyncEncryptionStatus.mockRejectedValue(new Error('keyring unavailable'));
+    encryptionMocks.getSyncEncryptionStatus
+      .mockRejectedValueOnce(new Error('keyring unavailable'))
+      .mockResolvedValue({ state: 'off' });
     const tree = await renderCard();
-    expect(tree.root.findAllByType(Text)).toHaveLength(0);
+    expect(texts(tree)).toContain('settings.syncEncryptionStateUnavailable');
+    expect(texts(tree)).not.toContain('settings.syncEncryptionEnable');
+
+    await press(tree, 'settings.syncEncryptionRetry');
+    expect(texts(tree)).toContain('settings.syncEncryptionEnable');
   });
 
   it('draws warnings and errors from the theme tokens, not hardcoded hexes', async () => {
@@ -313,7 +389,8 @@ describe('SyncEncryptionCard', () => {
     const error = findText(tree, 'settings.syncEncryptionErrorMismatch');
     expect(flatStyle(error?.props.style).color).toBe(tc.danger);
     // Errors arrive without focus moving, so they have to be announced.
-    expect(error?.props.accessibilityLiveRegion).toBe('polite');
+    expect(error?.props.accessibilityRole).toBe('alert');
+    expect(error?.props.accessibilityLiveRegion).toBe('assertive');
   });
 
   it('announces the passphrase reveal as a switch', async () => {

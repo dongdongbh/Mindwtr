@@ -258,7 +258,14 @@ export function AgendaView() {
         shallow
     );
     const getDerivedState = useTaskStore((state) => state.getDerivedState);
-    const { activeTasksByStatus, projectMap, sequentialProjectIds, sequentialWithinSectionProjectIds, tasksById } = getDerivedState();
+    const {
+        activeTasksByStatus,
+        focusedCount,
+        projectMap,
+        sequentialProjectIds,
+        sequentialWithinSectionProjectIds,
+        tasksById,
+    } = getDerivedState();
     const { t } = useLanguage();
     const { requestConfirmation, confirmModal } = useConfirmDialog();
     const localDayKey = useLocalDayKey();
@@ -821,7 +828,6 @@ export function AgendaView() {
     const getProjectDeadlineLabel = useCallback((taskId: string) => (
         getProjectDeadlineBoostLabel(sections.projectDeadlineBoosts.get(taskId), resolveText)
     ), [resolveText, sections.projectDeadlineBoosts]);
-    const focusedCount = focusedTasks.length;
     const { top3Tasks, remainingCount } = useMemo(() => {
         const byId = new Map<string, Task>();
         [...sections.schedule, ...sections.reviewDue, ...sections.nextActions].forEach((task) => {

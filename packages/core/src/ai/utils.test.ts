@@ -1,5 +1,25 @@
 import { describe, expect, it, vi } from 'vitest';
-import { filterReviewSuggestionsToKnownIds, parseJson } from './utils';
+import { fetchTextWithTimeout, filterReviewSuggestionsToKnownIds, parseJson } from './utils';
+
+describe('fetchTextWithTimeout', () => {
+    it('keeps the caller abort listener through body consumption and removes it afterwards', async () => {
+        const controller = new AbortController();
+        const add = vi.spyOn(controller.signal, 'addEventListener');
+        const remove = vi.spyOn(controller.signal, 'removeEventListener');
+
+        await expect(fetchTextWithTimeout(
+            'https://example.com/models',
+            {},
+            1_000,
+            'Models',
+            controller.signal,
+            async () => new Response('{"data":[]}'),
+        )).resolves.toMatchObject({ bodyText: '{"data":[]}' });
+
+        expect(add).toHaveBeenCalledOnce();
+        expect(remove).toHaveBeenCalledWith('abort', add.mock.calls[0]?.[1]);
+    });
+});
 
 describe('parseJson', () => {
     it('extracts valid JSON from surrounding model text', () => {

@@ -23,7 +23,7 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
     const [mismatch, setMismatch] = useState(false);
     const [generated, setGenerated] = useState(false);
 
-    const { busy, error, progress, state, supported } = encryption;
+    const { busy, error, progress, state, supported, warning } = encryption;
 
     const closeFlow = () => {
         setFlow('none');
@@ -38,6 +38,7 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
 
     const openFlow = (next: Flow) => {
         closeFlow();
+        encryption.clearWarning();
         setFlow(next);
     };
 
@@ -72,7 +73,34 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
 
     // Rendered after the hooks so the component's hook order never depends on the
     // backend: `supported` flips whenever the user changes the sync backend.
-    if (!supported || state === null) return null;
+    if (!supported) return null;
+    if (state === null) {
+        if (!encryption.stateUnavailable) return null;
+        return (
+            <section className="space-y-3">
+                <h2 data-settings-key="syncEncryption" className="text-lg font-semibold flex items-center gap-2">
+                    <Lock className="w-5 h-5" />
+                    {t.syncEncryption}
+                </h2>
+                <div className="bg-card border border-border rounded-lg p-6 space-y-4">
+                    <p role="alert" className="text-sm text-destructive">
+                        {t.syncEncryptionStateUnavailable}
+                    </p>
+                    <div className="flex justify-end">
+                        <button
+                            type="button"
+                            onClick={() => void encryption.retryState()}
+                            disabled={busy}
+                            aria-busy={busy}
+                            className={PRIMARY_BUTTON_CLS}
+                        >
+                            {t.syncEncryptionRetry}
+                        </button>
+                    </div>
+                </div>
+            </section>
+        );
+    }
 
     const errorMessage = mismatch
         ? t.syncEncryptionErrorMismatch
@@ -82,12 +110,17 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
                 ? t.syncEncryptionErrorRotationFirst
                 : error === 'backend-required'
                     ? t.syncEncryptionErrorBackendRequired
-                    : error === 'generic'
-                        ? t.syncEncryptionErrorGeneric
-                        : null;
+                    : error === 'transition-incomplete'
+                        ? t.syncEncryptionErrorTransitionIncomplete
+                        : error === 'generic'
+                            ? t.syncEncryptionErrorGeneric
+                            : null;
 
     const progressLabel = progress
         ? `${progress.phase === 'attachments' ? t.syncEncryptionProgressAttachments : t.syncEncryptionProgressDocuments} ${progress.completed} / ${progress.total}`
+        : null;
+    const warningMessage = warning === 'cleanup-deferred'
+        ? t.syncEncryptionCleanupDeferred
         : null;
 
     const passphraseInput = (
@@ -274,6 +307,7 @@ export function SyncEncryptionSection({ encryption, t }: SyncEncryptionSectionPr
                 )}
 
                 {progressLabel && <p className="text-sm text-muted-foreground" role="status">{progressLabel}</p>}
+                {warningMessage && <p className="text-sm text-warning" role="status">{warningMessage}</p>}
                 {errorMessage && <p className="text-sm text-destructive" role="alert">{errorMessage}</p>}
             </div>
         </section>

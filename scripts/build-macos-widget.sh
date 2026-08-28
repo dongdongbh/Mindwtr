@@ -25,6 +25,7 @@ HOST_EXECUTABLE_NAME="mindwtr"
 WIDGET_BUNDLE_ID="tech.dongdongbh.mindwtr.MindwtrWidgets"
 WIDGET_EXECUTABLE_NAME="MindwtrWidgets"
 APP_GROUP_PLACEHOLDER="__MINDWTR_MACOS_APP_GROUP__"
+PLIST_BUDDY="${PLIST_BUDDY:-/usr/libexec/PlistBuddy}"
 
 if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
     echo "::error::build-macos-widget.sh: missing or invalid app bundle path: '${APP_PATH}'"
@@ -83,16 +84,17 @@ echo "Assembling ${WIDGET_EXECUTABLE_NAME}.appex..."
 cp "$WIDGET_SRC_DIR/Info.plist" "$APPEX_DIR/Contents/Info.plist"
 cp "$WIDGET_SRC_DIR/Entitlements.widget.plist" "$WORKDIR/Entitlements.widget.plist"
 
-# `sed -i ''` (BSD/macOS sed) matches the runner's toolchain; this script only
-# ever runs on macOS.
-sed -i '' "s/${APP_GROUP_PLACEHOLDER}/${APP_GROUP}/g" "$APPEX_DIR/Contents/Info.plist"
-sed -i '' "s/${APP_GROUP_PLACEHOLDER}/${APP_GROUP}/g" "$WORKDIR/Entitlements.widget.plist"
+# A backup suffix works with both BSD and GNU sed, which keeps the packaging
+# path hermetically testable on non-macOS CI hosts too.
+sed -i.bak "s/${APP_GROUP_PLACEHOLDER}/${APP_GROUP}/g" "$APPEX_DIR/Contents/Info.plist"
+sed -i.bak "s/${APP_GROUP_PLACEHOLDER}/${APP_GROUP}/g" "$WORKDIR/Entitlements.widget.plist"
+rm -f "$APPEX_DIR/Contents/Info.plist.bak" "$WORKDIR/Entitlements.widget.plist.bak"
 
-APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Contents/Info.plist")"
-APP_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Contents/Info.plist" 2>/dev/null || echo "$APP_VERSION")"
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${APP_VERSION}" "$APPEX_DIR/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${APP_BUILD}" "$APPEX_DIR/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${WIDGET_BUNDLE_ID}" "$APPEX_DIR/Contents/Info.plist"
+APP_VERSION="$($PLIST_BUDDY -c 'Print :CFBundleShortVersionString' "$APP_PATH/Contents/Info.plist")"
+APP_BUILD="$($PLIST_BUDDY -c 'Print :CFBundleVersion' "$APP_PATH/Contents/Info.plist" 2>/dev/null || echo "$APP_VERSION")"
+$PLIST_BUDDY -c "Set :CFBundleShortVersionString ${APP_VERSION}" "$APPEX_DIR/Contents/Info.plist"
+$PLIST_BUDDY -c "Set :CFBundleVersion ${APP_BUILD}" "$APPEX_DIR/Contents/Info.plist"
+$PLIST_BUDDY -c "Set :CFBundleIdentifier ${WIDGET_BUNDLE_ID}" "$APPEX_DIR/Contents/Info.plist"
 
 echo "Signing ${WIDGET_EXECUTABLE_NAME}.appex with its own entitlements..."
 codesign --force --options runtime --timestamp \

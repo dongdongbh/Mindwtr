@@ -108,6 +108,16 @@ describe('resolveProcessInboxWorkflowEvent', () => {
         });
     });
 
+    it('writes clarified fields without changing status when a candidate is skipped', () => {
+        expect(resolveProcessInboxWorkflowEvent({
+            type: 'skip',
+            fields: { contexts: ['@office'], assignedTo: '  Alice  ' },
+        })).toEqual({
+            type: 'update',
+            updates: { contexts: ['@office'], assignedTo: 'Alice' },
+        });
+    });
+
     it('advances only after the task write succeeds', async () => {
         const candidates = [{ id: 'task-1' }, { id: 'task-2' }];
         const session = startProcessInboxSession(candidates);
@@ -139,6 +149,27 @@ describe('resolveProcessInboxWorkflowEvent', () => {
         );
 
         expect(committed.session.currentTaskId).toBe('task-2');
+    });
+
+    it('records a successful skip so the candidate is not revisited', async () => {
+        const candidates = [{ id: 'task-1' }, { id: 'task-2' }];
+        const session = startProcessInboxSession(candidates);
+        const committed = await commitProcessInboxWorkflowEvent(
+            session,
+            candidates,
+            { type: 'skip', fields: { tags: ['#later'] } },
+            {
+                deleteTask: async () => ({ success: true }),
+                updateTask: async (_taskId, updates) => {
+                    expect(updates).toEqual({ tags: ['#later'], title: 'Clarified title' });
+                    return { success: true };
+                },
+            },
+            { taskUpdates: { title: 'Clarified title' } },
+        );
+
+        expect(committed.session.currentTaskId).toBe('task-2');
+        expect(committed.session.skippedTaskIds).toEqual(new Set(['task-1']));
     });
 });
 
@@ -180,6 +211,16 @@ describe('withParsedProcessInboxFields', () => {
 
     it('leaves a discard alone — trashing writes nothing for a token to land on', () => {
         expect(withParsedProcessInboxFields({ type: 'discard' }, parsed)).toEqual({ type: 'discard' });
+    });
+
+    it('folds parsed tokens into a skip without changing task status', () => {
+        expect(withParsedProcessInboxFields(
+            { type: 'skip', fields: { contexts: ['@office'] } },
+            parsed,
+        )).toMatchObject({
+            type: 'skip',
+            fields: { contexts: ['@office', '@phone'], tags: ['#urgent'] },
+        });
     });
 });
 

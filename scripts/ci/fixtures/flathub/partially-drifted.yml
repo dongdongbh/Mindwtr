@@ -1,0 +1,41 @@
+app-id: tech.dongdongbh.mindwtr
+finish-args:
+  - --socket=wayland
+build-options:
+  env:
+    - VITE_ANALYTICS_HEARTBEAT_URL=https://old.example/
+modules:
+  - name: mindwtr
+    buildsystem: simple
+    build-commands:
+      - |
+        locked = packages.get(f"node_modules/{dependency_name}")
+        if requested_spec.startswith("workspace:"):
+            locked_resolved = locked.get("resolved") if isinstance(locked, dict) else None
+            if (
+                not isinstance(locked, dict)
+                or locked.get("link") is not True
+                or not isinstance(locked_resolved, str)
+                or Path(locked_resolved).is_absolute()
+            ):
+                raise SystemExit(
+                    f"Expected a relative package-lock link for workspace dependency {dependency_name}"
+                )
+            checkout_root = Path.cwd().resolve()
+            dependency_path = (package_path.parent / locked_resolved).resolve()
+            if dependency_path != checkout_root and checkout_root not in dependency_path.parents:
+                raise SystemExit(
+                    f"Workspace dependency {dependency_name} resolves outside the source checkout"
+                )
+            local_spec = f"file:{locked_resolved}"
+            section[dependency_name] = local_spec
+            synced_specs.append(
+                f"{section_name}:{dependency_name}:{requested_spec}->{local_spec}"
+            )
+            continue
+        if requested_spec.startswith(("file:", "git+", "github:", "http:", "https:", "link:", "npm:")):
+            continue
+    sources:
+      - type: git
+        url: https://github.com/dongdongbh/Mindwtr.git
+        commit: 0123456789abcdef0123456789abcdef01234567

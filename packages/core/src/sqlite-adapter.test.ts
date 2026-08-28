@@ -1,10 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createRequire } from 'node:module';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { SqliteAdapter, type SqliteClient } from './sqlite-adapter';
 import { consoleLogger, setLogger, type LogPayload } from './logger';
 import { SQLITE_BASE_SCHEMA, SQLITE_FTS_SCHEMA } from './sqlite-schema';
-import type { AppData } from './types';
+import type { AppData, Task } from './types';
 import { prepareRestoredBackupDataForSync } from './backup-transfer';
 
 const require = createRequire(import.meta.url);
@@ -103,19 +106,34 @@ const createClient = (db: Database): SqliteClient => ({
 
 describeSqlite('SqliteAdapter', () => {
     let db: Database;
+    let databaseDir: string;
+    let databasePath: string;
+    let additionalConnections: Database[];
     let adapter: SqliteAdapter;
 
     beforeEach(() => {
         if (!RuntimeDatabase) {
             throw new Error('No compatible sqlite runtime available for tests');
         }
-        db = new RuntimeDatabase(':memory:');
+        databaseDir = mkdtempSync(join(tmpdir(), 'mindwtr-sqlite-adapter-'));
+        databasePath = join(databaseDir, 'mindwtr.db');
+        additionalConnections = [];
+        db = new RuntimeDatabase(databasePath);
         adapter = new SqliteAdapter(createClient(db));
     });
 
     afterEach(() => {
+        additionalConnections.forEach((connection) => connection.close());
         db.close();
+        rmSync(databaseDir, { recursive: true, force: true });
     });
+
+    const createAdditionalConnection = (): Database => {
+        if (!RuntimeDatabase) throw new Error('No compatible sqlite runtime available for tests');
+        const connection = new RuntimeDatabase(databasePath);
+        additionalConnections.push(connection);
+        return connection;
+    };
 
     it('round-trips tasks, projects, areas, people, and settings', async () => {
         const now = new Date().toISOString();
@@ -614,6 +632,276 @@ describeSqlite('SqliteAdapter', () => {
             { id: 'task-concurrent' },
             { id: 'task-original' },
         ]);
+    });
+
+    it('rejects a guarded snapshot write after another connection changes settings', async () => {
+        const now = '2026-07-21T08:00:00.000Z';
+        await adapter.saveData({
+            tasks: [],
+            projects: [],
+            sections: [],
+            areas: [],
+            people: [],
+            settings: { theme: 'light' },
+        });
+        const automationAdapter = new SqliteAdapter(createClient(db), { rejectConcurrentWrites: true });
+        const staleSnapshot = await automationAdapter.getData();
+        const desktopAdapter = new SqliteAdapter(createClient(createAdditionalConnection()));
+        const desktopSnapshot = await desktopAdapter.getData();
+        await desktopAdapter.saveData({
+            ...desktopSnapshot,
+            settings: { ...desktopSnapshot.settings, theme: 'dark' },
+        });
+
+        await expect(automationAdapter.saveData({
+            ...staleSnapshot,
+            projects: [{
+                id: 'project-mcp',
+                title: 'Automation project',
+                status: 'active',
+                color: '#2563EB',
+                order: 0,
+                tagIds: [],
+                createdAt: now,
+                updatedAt: now,
+                rev: 1,
+                revBy: 'mcp',
+            }],
+        })).rejects.toThrow('SQLITE_BUSY: database changed after the automation snapshot was loaded (external commit)');
+
+        const afterConflict = await desktopAdapter.getData();
+        expect(afterConflict.settings.theme).toBe('dark');
+        expect(afterConflict.projects).toEqual([]);
+
+        const refreshed = await automationAdapter.getData();
+        await automationAdapter.saveData({
+            ...refreshed,
+            projects: [{
+                id: 'project-mcp',
+                title: 'Automation project',
+                status: 'active',
+                color: '#2563EB',
+                order: 0,
+                tagIds: [],
+                createdAt: now,
+                updatedAt: now,
+                rev: 1,
+                revBy: 'mcp',
+            }],
+        });
+        const afterRetry = await automationAdapter.getData();
+        expect(afterRetry.settings.theme).toBe('dark');
+        expect(afterRetry.projects.map((project) => project.id)).toEqual(['project-mcp']);
+    });
+
+    it('rejects a guarded equal-revision task write after another connection advances it', async () => {
+        const task: Task = {
+            id: 'task-race',
+            title: 'Original',
+            status: 'next',
+            tags: [],
+            contexts: [],
+            createdAt: '2026-07-21T08:00:00.000Z',
+            updatedAt: '2026-07-21T08:00:00.000Z',
+            rev: 1,
+            revBy: 'seed',
+        };
+        await adapter.saveData({
+            tasks: [task],
+            projects: [],
+            sections: [],
+            areas: [],
+            people: [],
+            settings: {},
+        });
+        const automationAdapter = new SqliteAdapter(createClient(db), { rejectConcurrentWrites: true });
+        const staleSnapshot = await automationAdapter.getData();
+        const desktopAdapter = new SqliteAdapter(createClient(createAdditionalConnection()));
+        await desktopAdapter.saveTask({
+            ...task,
+            title: 'Desktop edit',
+            updatedAt: '2026-07-21T08:01:00.000Z',
+            rev: 2,
+            revBy: 'desktop',
+        });
+
+        await expect(automationAdapter.saveTask({
+            ...staleSnapshot.tasks[0],
+            title: 'MCP edit',
+            updatedAt: '2026-07-21T08:02:00.000Z',
+            rev: 2,
+            revBy: 'mcp',
+        })).rejects.toThrow('SQLITE_BUSY: database changed after the automation snapshot was loaded (external commit)');
+
+        expect((await desktopAdapter.getData()).tasks[0]).toMatchObject({
+            title: 'Desktop edit',
+            rev: 2,
+            revBy: 'desktop',
+        });
+    });
+
+    it('rejects a guarded full save after same-metadata content changes following saveTask', async () => {
+        const timestamp = '2026-07-21T08:00:00.000Z';
+        const original: Task = {
+            id: 'task-same-metadata-race',
+            title: 'Original',
+            status: 'next',
+            tags: [],
+            contexts: [],
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            rev: 1,
+            revBy: 'shared-device',
+        };
+        await adapter.saveData({
+            tasks: [original],
+            projects: [],
+            sections: [],
+            areas: [],
+            people: [],
+            settings: {},
+        });
+
+        const automationAdapter = new SqliteAdapter(createClient(db), { rejectConcurrentWrites: true });
+        const automationSnapshot = await automationAdapter.getData();
+        const automationTask: Task = {
+            ...automationSnapshot.tasks[0],
+            title: 'Automation edit',
+            updatedAt: timestamp,
+            rev: 2,
+            revBy: 'shared-device',
+        };
+        await automationAdapter.saveTask(automationTask);
+
+        const desktopAdapter = new SqliteAdapter(createClient(createAdditionalConnection()));
+        await desktopAdapter.saveTask({
+            ...automationTask,
+            title: 'Desktop edit',
+        });
+
+        await expect(automationAdapter.saveData({
+            ...automationSnapshot,
+            tasks: [automationTask],
+            projects: [{
+                id: 'project-blocked-by-race',
+                title: 'Must not be written',
+                status: 'active',
+                color: '#2563EB',
+                order: 0,
+                tagIds: [],
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                rev: 1,
+                revBy: 'shared-device',
+            }],
+        })).rejects.toThrow('SQLITE_BUSY: database changed after the automation snapshot was loaded (external commit)');
+
+        const afterConflict = await desktopAdapter.getData();
+        expect(afterConflict.tasks[0]).toMatchObject({
+            title: 'Desktop edit',
+            rev: 2,
+            revBy: 'shared-device',
+        });
+        expect(afterConflict.projects).toEqual([]);
+    });
+
+    it('retries a guarded load when another connection commits during the snapshot read', async () => {
+        const timestamp = '2026-07-21T08:00:00.000Z';
+        await adapter.saveData({
+            tasks: [{
+                id: 'task-load-race',
+                title: 'Before concurrent edit',
+                status: 'next',
+                tags: [],
+                contexts: [],
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                rev: 1,
+                revBy: 'seed',
+            }],
+            projects: [],
+            sections: [],
+            areas: [],
+            people: [],
+            settings: {},
+        });
+        const externalDb = createAdditionalConnection();
+        const baseClient = createClient(db);
+        let epochReads = 0;
+        const guardedClient: SqliteClient = {
+            ...baseClient,
+            get: async <T = Record<string, unknown>>(sql: string, params: unknown[] = []) => {
+                if (sql === 'PRAGMA data_version') {
+                    epochReads += 1;
+                    if (epochReads === 2) {
+                        runSql(
+                            externalDb,
+                            'UPDATE tasks SET title = ?, rev = ?, updatedAt = ? WHERE id = ?',
+                            ['Concurrent edit', 2, timestamp, 'task-load-race'],
+                        );
+                    }
+                }
+                return baseClient.get<T>(sql, params);
+            },
+        };
+
+        const guardedAdapter = new SqliteAdapter(guardedClient, { rejectConcurrentWrites: true });
+        const loaded = await guardedAdapter.getData();
+
+        expect(epochReads).toBe(4);
+        expect(loaded.tasks[0]).toMatchObject({ title: 'Concurrent edit', rev: 2 });
+    });
+
+    it('uses an O(1) epoch check for a guarded one-row write in a 10k-task store', async () => {
+        const timestamp = '2026-07-21T08:00:00.000Z';
+        const tasks: Task[] = Array.from({ length: 10_000 }, (_, index) => ({
+            id: `task-guard-scale-${index}`,
+            title: `Task ${index}`,
+            description: 'x'.repeat(200),
+            status: 'next',
+            tags: [],
+            contexts: [],
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            rev: 1,
+            revBy: 'seed',
+        }));
+        await adapter.saveData({
+            tasks,
+            projects: [],
+            sections: [],
+            areas: [],
+            people: [],
+            settings: {},
+        });
+        const observedSql: string[] = [];
+        const baseClient = createClient(db);
+        const recordingClient: SqliteClient = {
+            ...baseClient,
+            all: async <T = Record<string, unknown>>(sql: string, params: unknown[] = []) => {
+                observedSql.push(sql);
+                return baseClient.all<T>(sql, params);
+            },
+            get: async <T = Record<string, unknown>>(sql: string, params: unknown[] = []) => {
+                observedSql.push(sql);
+                return baseClient.get<T>(sql, params);
+            },
+        };
+        const guardedAdapter = new SqliteAdapter(recordingClient, { rejectConcurrentWrites: true });
+        const snapshot = await guardedAdapter.getData();
+        observedSql.length = 0;
+
+        await guardedAdapter.saveTask({
+            ...snapshot.tasks[5_000],
+            title: 'One changed task',
+            rev: 2,
+        });
+
+        const fullEntityScans = observedSql.filter((sql) => (
+            /^SELECT rowid as _rowid, \* FROM (tasks|projects|sections|areas|people|saved_filters)\s*$/.test(sql)
+        ));
+        expect(fullEntityScans).toEqual([]);
+        expect(observedSql.filter((sql) => sql === 'PRAGMA data_version')).toHaveLength(1);
     });
 
     it('uses the observed row version when pruning after another adapter advances it', async () => {

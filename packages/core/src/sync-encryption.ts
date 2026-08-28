@@ -32,6 +32,7 @@ import {
  *  and the user's remedy (disabling encryption here too) needs it — and differs only in what
  *  status reports and in that sync is terminal until the user acts. */
 export type SyncEncryptionState = 'off' | 'enabled' | 'remote-encrypted-no-key' | 'remote-plaintext';
+export type SyncEncryptionTransitionKind = 'enable' | 'disable' | 'change-passphrase';
 
 /** The states in which this device owns a usable key. Every material/key resolver must treat
  *  them alike: dropping to "off" for `remote-plaintext` is precisely the silent downgrade
@@ -41,6 +42,7 @@ export const SYNC_ENCRYPTION_KEYED_STATES: readonly SyncEncryptionState[] = ['en
 export type SyncEncryptionStatus = {
     state: SyncEncryptionState;
     kdfParams?: SyncCryptoKdfParams;
+    incompleteTransition?: SyncEncryptionTransitionKind;
 };
 
 /** Device-local, never-synced persisted shape. Salt/params are not secret (they live in
@@ -50,12 +52,51 @@ export type SyncEncryptionLocalState = {
     state: SyncEncryptionState;
     discoveredSalt?: string; // hex
     discoveredParams?: SyncCryptoKdfParams;
+    incompleteTransition?: SyncEncryptionTransitionKind;
 };
 
 export type SyncEncryptionLocalStatePort = {
     read(): SyncEncryptionLocalState | null;
     /** `null` clears back to the implicit 'off' default. */
-    write(state: SyncEncryptionLocalState | null): void;
+    write(state: SyncEncryptionLocalState | null): void | Promise<void>;
+};
+
+export const SYNC_ENCRYPTION_TRANSITION_INCOMPLETE = 'SYNC_ENCRYPTION_TRANSITION_INCOMPLETE';
+
+export class SyncEncryptionTransitionIncompleteError extends Error {
+    constructor(kind: SyncEncryptionTransitionKind) {
+        super(`${SYNC_ENCRYPTION_TRANSITION_INCOMPLETE}: retry the ${kind} sync encryption transition before syncing or changing the sync location`);
+        this.name = 'SyncEncryptionTransitionIncompleteError';
+    }
+}
+
+const requireMatchingIncompleteTransition = (
+    localState: SyncEncryptionLocalStatePort,
+    kind: SyncEncryptionTransitionKind,
+): SyncEncryptionLocalState | null => {
+    const current = localState.read();
+    if (current?.incompleteTransition && current.incompleteTransition !== kind) {
+        throw new SyncEncryptionTransitionIncompleteError(current.incompleteTransition);
+    }
+    return current;
+};
+
+const beginSyncEncryptionTransition = async (
+    localState: SyncEncryptionLocalStatePort,
+    kind: SyncEncryptionTransitionKind,
+): Promise<void> => {
+    const current = requireMatchingIncompleteTransition(localState, kind);
+    await localState.write({
+        ...(current ?? { state: 'off' as const }),
+        incompleteTransition: kind,
+    });
+};
+
+export const assertNoIncompleteSyncEncryptionTransition = (
+    localState: SyncEncryptionLocalStatePort,
+): void => {
+    const kind = localState.read()?.incompleteTransition;
+    if (kind) throw new SyncEncryptionTransitionIncompleteError(kind);
 };
 
 /** Secret key cache — OS keyring on desktop (via Tauri commands), expo-secure-store on
@@ -75,17 +116,65 @@ export type SyncEncryptionRemoteEntryKind = 'document' | 'attachment';
  * identity-keyed and immutable-once-uploaded). */
 export type SyncEncryptionRemoteEntry = { name: string; kind: SyncEncryptionRemoteEntryKind };
 
+/** Opaque backend generation captured by the same operation that returned `bytes`.
+ * WebDAV uses a strong ETag, Dropbox a file rev, and File Sync a content fingerprint.
+ * `null` is reserved for a confirmed-missing artifact and therefore means create-only. */
+export type SyncEncryptionRemoteRead = {
+    bytes: Uint8Array | null;
+    version: string | null;
+};
+
+/** One coherent remote inventory. Blob adapters derive `entries` from the document bytes in
+ * `snapshot`; core then reuses those exact document generations for every later CAS instead
+ * of listing from one generation and silently preflighting a newer one. */
+export type SyncEncryptionRemoteInventory = {
+    entries: SyncEncryptionRemoteEntry[];
+    snapshot: ReadonlyMap<string, SyncEncryptionRemoteRead>;
+};
+
+/** Raised when a transition observes that another writer changed an artifact after the
+ * transition read it. The transition must stop before committing its device-local key/state. */
+export class SyncEncryptionRemoteConflictError extends Error {
+    constructor(message = 'sync encryption remote artifact changed during transition') {
+        super(message);
+        this.name = 'SyncEncryptionRemoteConflictError';
+    }
+}
+
+export const SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE = 'SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE';
+
+/** Existing remote bytes without an atomic backend generation cannot be mutated safely.
+ * WebDAV reaches this when a server omits ETag or returns only a weak validator. */
+export class SyncEncryptionRemoteVersionUnavailableError extends Error {
+    constructor(name: string) {
+        super(`${SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE}: ${name} has no safe backend version`);
+        this.name = 'SyncEncryptionRemoteVersionUnavailableError';
+    }
+}
+
+export const isSyncEncryptionRemoteVersionUnavailableError = (error: unknown): boolean => (
+    error instanceof SyncEncryptionRemoteVersionUnavailableError
+    || (error instanceof Error ? error.message : String(error ?? ''))
+        .includes(SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE)
+);
+
 /** Generic remote-blob port for the transition orchestration below. WebDAV and Dropbox
  * each implement this with their existing get/put/list primitives (see webdav.ts /
  * dropbox.ts) — this is the ADR 0014 shared-logic seam: one transition implementation,
  * two thin backend adapters, reused by both desktop and mobile. */
 export type SyncEncryptionRemotePort = {
     list(): Promise<SyncEncryptionRemoteEntry[]>;
-    read(name: string): Promise<Uint8Array | null>;
-    write(name: string, bytes: Uint8Array): Promise<void>;
+    /** Blob backends can bind their derived worklist to the document reads that
+     * produced it. File backends retain the `list` + `read` fallback because they enumerate
+     * the storage provider directly. The passphrase is only for decoding an interrupted
+     * transition's authoritative document; it is never persisted by the port. */
+    captureInventory?(recoveryPassphrase?: string): Promise<SyncEncryptionRemoteInventory>;
+    read(name: string): Promise<SyncEncryptionRemoteRead>;
+    /** `null` is create-only; a value replaces only the generation returned by `read`. */
+    write(name: string, bytes: Uint8Array, expectedVersion: string | null): Promise<void>;
     /** Only ever called on a plaintext original after its `.enc` counterpart has been
      *  written AND read back and verified — never on speculation. */
-    remove(name: string): Promise<void>;
+    remove(name: string, expectedVersion: string): Promise<void>;
 };
 
 export type SyncEncryptionTransitionProgress = { phase: 'attachments' | 'documents'; completed: number; total: number };
@@ -247,6 +336,111 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
     return true;
 }
 
+const requireExistingRemoteVersion = (name: string, read: SyncEncryptionRemoteRead): string => {
+    if (!read.bytes) throw new SyncEncryptionRemoteConflictError(`${name} disappeared during sync encryption transition`);
+    if (!read.version) {
+        throw new SyncEncryptionRemoteVersionUnavailableError(name);
+    }
+    return read.version;
+};
+
+/** Capture every listed generation before the first transition write. Blob ports can seed
+ * the snapshot with the exact document reads used to derive their attachment worklist; the
+ * fallback preserves File Sync's direct-listing contract. Every uncaptured entry is read once,
+ * and every captured/read generation becomes the CAS snapshot used by the mutation pass. */
+const captureRemoteEntryVersions = async (
+    remote: SyncEncryptionRemotePort,
+    recoveryPassphrase?: string,
+): Promise<{ entries: SyncEncryptionRemoteEntry[]; snapshot: Map<string, SyncEncryptionRemoteRead> }> => {
+    const captured = remote.captureInventory
+        ? await remote.captureInventory(recoveryPassphrase)
+        : { entries: await remote.list(), snapshot: new Map<string, SyncEncryptionRemoteRead>() };
+    const { entries } = captured;
+    const snapshot = new Map<string, SyncEncryptionRemoteRead>(captured.snapshot);
+    for (const entry of entries) {
+        const current = snapshot.has(entry.name)
+            ? snapshot.get(entry.name)!
+            : await remote.read(entry.name);
+        if (current.bytes) requireExistingRemoteVersion(entry.name, current);
+        snapshot.set(entry.name, current);
+    }
+    return { entries, snapshot };
+};
+
+const snapshotRemoteRead = (
+    snapshot: Map<string, SyncEncryptionRemoteRead>,
+    name: string,
+): SyncEncryptionRemoteRead => snapshot.get(name) ?? { bytes: null, version: null };
+
+const verifyRemoteBytes = async (
+    remote: SyncEncryptionRemotePort,
+    name: string,
+    verify: (bytes: Uint8Array) => Promise<void> | void,
+): Promise<SyncEncryptionRemoteRead> => {
+    const written = await remote.read(name);
+    if (!written.bytes) throw new Error(`sync encryption transition: failed to read back ${name}`);
+    if (!written.version) {
+        throw new SyncEncryptionRemoteVersionUnavailableError(name);
+    }
+    await verify(written.bytes);
+    return written;
+};
+
+const remoteReadsEqual = (left: SyncEncryptionRemoteRead, right: SyncEncryptionRemoteRead): boolean => (
+    left.version === right.version
+    && (left.bytes === null
+        ? right.bytes === null
+        : right.bytes !== null && bytesEqual(left.bytes, right.bytes))
+);
+
+/** Revalidate the complete managed inventory the transition is about to make authoritative on
+ * this device. Mutating calls update `expected` with their verified post-write state; entries
+ * that required no work keep their captured version. The final authoritative list also catches
+ * a peer-created attachment or document name that did not exist in the captured inventory. */
+const revalidateRemoteInventory = async (
+    remote: SyncEncryptionRemotePort,
+    expected: Map<string, SyncEncryptionRemoteRead>,
+    expectedKinds: Map<string, SyncEncryptionRemoteEntryKind>,
+    documentPosture: 'encrypted' | 'plaintext',
+): Promise<void> => {
+    for (const [name, kind] of expectedKinds) {
+        const expectedRead = snapshotRemoteRead(expected, name);
+        if (kind !== 'document' || !expectedRead.bytes) continue;
+        const encryptedName = name.includes('.enc');
+        if ((documentPosture === 'encrypted') !== encryptedName) {
+            throw new SyncEncryptionRemoteConflictError(
+                `${name} violates the ${documentPosture} sync encryption document posture`,
+            );
+        }
+    }
+
+    const currentEntries = await remote.list();
+    const currentReads = new Map<string, SyncEncryptionRemoteRead>();
+    for (const entry of currentEntries) {
+        const current = await remote.read(entry.name);
+        currentReads.set(entry.name, current);
+        if (!expected.has(entry.name) && current.bytes) {
+            throw new SyncEncryptionRemoteConflictError(
+                `${entry.name} appeared during sync encryption transition`,
+            );
+        }
+        const expectedKind = expectedKinds.get(entry.name);
+        if (current.bytes && expectedKind && expectedKind !== entry.kind) {
+            throw new SyncEncryptionRemoteConflictError(
+                `${entry.name} changed kind during sync encryption transition`,
+            );
+        }
+    }
+
+    for (const name of expected.keys()) {
+        const before = snapshotRemoteRead(expected, name);
+        const current = currentReads.get(name) ?? await remote.read(name);
+        if (!remoteReadsEqual(before, current)) {
+            throw new SyncEncryptionRemoteConflictError(`${name} changed before sync encryption state commit`);
+        }
+    }
+};
+
 /** ASCII space — the byte a non-truncating write pads a shrinking artifact with (see
  * `padBytesForNonTruncatingOverwrite` on mobile and the MWENC1 header comment for the
  * ciphertext-domain equivalent). */
@@ -273,8 +467,14 @@ function bytesMatchWithTrailingPadding(actual: Uint8Array, expected: Uint8Array)
 
 export function getSyncEncryptionStatusFromLocalState(localState: SyncEncryptionLocalStatePort): SyncEncryptionStatus {
     const persisted = localState.read();
-    if (!persisted || persisted.state === 'off') return { state: 'off' };
-    return { state: persisted.state, kdfParams: persisted.discoveredParams };
+    if (!persisted || persisted.state === 'off') {
+        return { state: 'off', incompleteTransition: persisted?.incompleteTransition };
+    }
+    return {
+        state: persisted.state,
+        kdfParams: persisted.discoveredParams,
+        incompleteTransition: persisted.incompleteTransition,
+    };
 }
 
 /** Called from a read seam (webdav.ts / dropbox.ts) the moment it discovers ciphertext
@@ -345,12 +545,13 @@ export async function runEnableSyncEncryptionLocalOnly(
     kdfParams: SyncCryptoKdfParams = SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
 ): Promise<EnableRemoteEncryptionResult> {
     const current = localState.read();
+    if (current?.incompleteTransition) throw new SyncEncryptionTransitionIncompleteError(current.incompleteTransition);
     if (current && current.state !== 'off') {
         throw new Error(`sync encryption local-only enable requires the off state, found ${current.state}`);
     }
     const material = await deriveSyncKeyMaterial(passphrase, prims.randomBytes(16), kdfParams, prims);
     await keyCache.setKey(material.key);
-    localState.write({
+    await localState.write({
         state: 'enabled',
         discoveredSalt: bytesToHex(material.salt),
         discoveredParams: material.params,
@@ -368,8 +569,9 @@ export async function runDisableSyncEncryptionLocalOnly(
     keyCache: SyncEncryptionKeyCachePort,
     localState: SyncEncryptionLocalStatePort,
 ): Promise<void> {
+    assertNoIncompleteSyncEncryptionTransition(localState);
+    await localState.write(null);
     await keyCache.clearKey();
-    localState.write(null);
 }
 
 /**
@@ -398,47 +600,14 @@ export async function runEnableSyncEncryptionOverRemote(
     // only affects newly written artifacts; tests inject cheap params to stay under timeouts.
     kdfParams: SyncCryptoKdfParams = SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
 ): Promise<EnableRemoteEncryptionResult> {
-    const entries = await remote.list();
+    const { entries, snapshot } = await captureRemoteEntryVersions(remote, passphrase);
 
-    // Resume: if a previous partial run already produced an `.enc` document, its header
-    // salt/params are authoritative — reuse them so this run doesn't derive a second key
-    // under a fresh salt and orphan what the first run wrote.
-    let material: SyncKeyMaterial | null = null;
-    for (const entry of entries) {
-        if (entry.kind !== 'document' || !entry.name.includes('.enc')) continue;
-        const bytes = await remote.read(entry.name);
-        if (!bytes) continue;
-        const inspected = inspectSyncArtifact(bytes);
-        if (inspected.kind === 'encrypted') {
-            material = await deriveSyncKeyMaterial(passphrase, inspected.salt, inspected.params, prims);
-            break;
-        }
-    }
-    if (!material) {
-        const salt = prims.randomBytes(16);
-        material = await deriveSyncKeyMaterial(passphrase, salt, kdfParams, prims);
-    }
-
-    const isBaseDocument = (name: string) => !KNOWN_ARTIFACT_SUFFIXES.some((s) => name.endsWith(s));
-    const attachments = entries.filter((e) => e.kind === 'attachment');
-    const documents = entries
-        .filter((e) => e.kind === 'document' && !e.name.includes('.enc'))
-        .sort((a, b) => Number(isBaseDocument(a.name)) - Number(isBaseDocument(b.name)));
-
-    const total = attachments.length + documents.length;
-    let completed = 0;
-    const report = (phase: SyncEncryptionTransitionProgress['phase']) => onProgress?.({ phase, completed, total });
-
-    // Resume self-heal: attachments never rename, so an attachment already sealed by an
-    // earlier, interrupted enable() attempt can exist BEFORE any `.enc` document does —
-    // the salt-recovery scan above only looks at documents and would miss it, causing
-    // this run to derive a fresh salt and then wrongly treat that attachment as "already
-    // migrated" (it decrypts under neither the fresh key nor gets re-keyed). Recovering
-    // the abandoned salt from the artifact's OWN header (same passphrase, re-derive)
-    // fixes this without costing the common fresh-enable path anything extra — it only
-    // triggers when an attachment is already ciphertext under a key that isn't the one
-    // this run picked. Cached per salt so a batch of attachments from the same abandoned
-    // attempt only pays the Argon2id cost once.
+    // Authenticate every encrypted generation before the first transition write. A partial
+    // enable can leave only encrypted attachments (no `.enc` document yet), or several
+    // abandoned salts after repeated interruptions. Merely inspecting a public header is not
+    // proof of the passphrase: derive once per salt and open every encrypted artifact now, so
+    // a later encrypted attachment/document cannot reveal a typo after an earlier plaintext
+    // attachment has already been rewritten.
     const recoveredMaterialBySalt = new Map<string, SyncKeyMaterial>();
     const recoverMaterialForSalt = async (salt: Uint8Array, params: SyncCryptoKdfParams): Promise<SyncKeyMaterial> => {
         const cacheKey = bytesToHex(salt);
@@ -449,35 +618,136 @@ export async function runEnableSyncEncryptionOverRemote(
         return recovered;
     };
 
+    // Resume: an `.enc` document is authoritative when present. If the interruption happened
+    // earlier, the first encrypted attachment supplies the generation instead. Reusing either
+    // avoids inventing a fresh salt and needlessly rewrapping the partial generation.
+    const isBaseEncryptedDocument = (name: string) =>
+        !KNOWN_ARTIFACT_SUFFIXES.some((suffix) => name.endsWith(`.enc${suffix}`));
+    let baseDocumentMaterial: SyncKeyMaterial | null = null;
+    let documentMaterial: SyncKeyMaterial | null = null;
+    let attachmentMaterial: SyncKeyMaterial | null = null;
+    for (const entry of entries) {
+        const { bytes } = snapshotRemoteRead(snapshot, entry.name);
+        if (!bytes) continue;
+        const inspected = inspectSyncArtifact(bytes);
+        if (inspected.kind === 'unsupported') throw unsupportedArtifact(entry.name, inspected.reason);
+        if (entry.kind === 'document' && entry.name.includes('.enc') && inspected.kind !== 'encrypted') {
+            throw new SyncEncryptionTerminalError(
+                new SyncCryptoUnsupportedError(`${entry.name} is not a valid MWENC1 container`),
+            );
+        }
+        if (inspected.kind !== 'encrypted') continue;
+        const candidate = await recoverMaterialForSalt(inspected.salt, inspected.params);
+        await decryptRemoteArtifactOrThrow(bytes, candidate.key, prims);
+        if (!attachmentMaterial && entry.kind === 'attachment') attachmentMaterial = candidate;
+        if (entry.kind === 'document' && entry.name.includes('.enc')) {
+            documentMaterial ??= candidate;
+            if (isBaseEncryptedDocument(entry.name)) baseDocumentMaterial ??= candidate;
+        }
+    }
+    let material = baseDocumentMaterial ?? documentMaterial ?? attachmentMaterial;
+    if (!material) {
+        const salt = prims.randomBytes(16);
+        material = await deriveSyncKeyMaterial(passphrase, salt, kdfParams, prims);
+    }
+
+    const isBaseDocument = (name: string) => !KNOWN_ARTIFACT_SUFFIXES.some((s) => name.endsWith(s));
+    const attachments = entries.filter((e) => e.kind === 'attachment');
+    const encryptedDocuments = entries
+        .filter((entry) => entry.kind === 'document' && entry.name.includes('.enc'))
+        .sort((a, b) => Number(isBaseEncryptedDocument(a.name)) - Number(isBaseEncryptedDocument(b.name)));
+    const documents = entries
+        .filter((e) => e.kind === 'document' && !e.name.includes('.enc'))
+        .sort((a, b) => Number(isBaseDocument(a.name)) - Number(isBaseDocument(b.name)));
+    const expectedKinds = new Map(entries.map((entry) => [entry.name, entry.kind] as const));
+
+    const total = attachments.length + encryptedDocuments.length + documents.length;
+    let completed = 0;
+    const report = (phase: SyncEncryptionTransitionProgress['phase']) => onProgress?.({ phase, completed, total });
+
+    let transitionJournalStarted = false;
+    const ensureTransitionJournal = async (): Promise<void> => {
+        if (transitionJournalStarted) return;
+        await beginSyncEncryptionTransition(localState, 'enable');
+        transitionJournalStarted = true;
+    };
+
     for (const entry of attachments) {
         report('attachments');
-        const bytes = await remote.read(entry.name);
-        if (bytes) {
+        const current = snapshotRemoteRead(snapshot, entry.name);
+        if (current.bytes) {
+            const version = requireExistingRemoteVersion(entry.name, current);
+            const bytes = current.bytes;
             const inspected = inspectSyncArtifact(bytes);
             if (inspected.kind === 'unsupported') throw unsupportedArtifact(entry.name, inspected.reason);
             if (inspected.kind === 'plaintext') {
                 const sealed = await encryptSyncArtifact(bytes, material, prims);
-                await remote.write(entry.name, sealed);
-                const verify = await remote.read(entry.name);
-                if (!verify) throw new Error(`sync encryption enable: failed to read back ${entry.name}`);
-                await decryptRemoteArtifactOrThrow(verify, material.key, prims);
+                await ensureTransitionJournal();
+                await remote.write(entry.name, sealed, version);
+                const verified = await verifyRemoteBytes(remote, entry.name, async (verify) => {
+                    const plain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
+                    if (!bytesEqual(plain, bytes)) {
+                        throw new SyncEncryptionRemoteConflictError(`${entry.name} changed during sync encryption enable verification`);
+                    }
+                });
+                snapshot.set(entry.name, verified);
             } else if (!(await triesDecrypt(bytes, material.key, prims))) {
                 const oldMaterial = await recoverMaterialForSalt(inspected.salt, inspected.params);
                 const plain = await decryptRemoteArtifactOrThrow(bytes, oldMaterial.key, prims);
                 const sealed = await encryptSyncArtifact(plain, material, prims);
-                await remote.write(entry.name, sealed);
-                const verify = await remote.read(entry.name);
-                if (!verify) throw new Error(`sync encryption enable: failed to read back ${entry.name}`);
-                await decryptRemoteArtifactOrThrow(verify, material.key, prims);
+                await ensureTransitionJournal();
+                await remote.write(entry.name, sealed, version);
+                const verified = await verifyRemoteBytes(remote, entry.name, async (verify) => {
+                    const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
+                    if (!bytesEqual(verifiedPlain, plain)) {
+                        throw new SyncEncryptionRemoteConflictError(`${entry.name} changed during sync encryption enable verification`);
+                    }
+                });
+                snapshot.set(entry.name, verified);
             }
+        }
+        completed += 1;
+    }
+
+    // A resumed enable may contain several authenticated salts (for example a base document
+    // from one interrupted attempt and a backup from another). The selected base generation
+    // is what this device will cache, so converge every other encrypted document to it before
+    // processing/removing plaintext counterparts.
+    for (const entry of encryptedDocuments) {
+        report('documents');
+        const current = snapshotRemoteRead(snapshot, entry.name);
+        if (current.bytes && !(await triesDecrypt(current.bytes, material.key, prims))) {
+            const version = requireExistingRemoteVersion(entry.name, current);
+            const inspected = inspectSyncArtifact(current.bytes);
+            if (inspected.kind !== 'encrypted') {
+                throw new SyncEncryptionTerminalError(
+                    new SyncCryptoUnsupportedError(`${entry.name} is not a valid MWENC1 container`),
+                );
+            }
+            const oldMaterial = await recoverMaterialForSalt(inspected.salt, inspected.params);
+            const plain = await decryptRemoteArtifactOrThrow(current.bytes, oldMaterial.key, prims);
+            const sealed = await encryptSyncArtifact(plain, material, prims);
+            await ensureTransitionJournal();
+            await remote.write(entry.name, sealed, version);
+            const verified = await verifyRemoteBytes(remote, entry.name, async (verify) => {
+                const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
+                if (!bytesEqual(verifiedPlain, plain)) {
+                    throw new SyncEncryptionRemoteConflictError(
+                        `${entry.name} changed during sync encryption enable convergence`,
+                    );
+                }
+            });
+            snapshot.set(entry.name, verified);
         }
         completed += 1;
     }
 
     for (const entry of documents) {
         report('documents');
-        const bytes = await remote.read(entry.name);
-        if (bytes) {
+        const current = snapshotRemoteRead(snapshot, entry.name);
+        if (current.bytes) {
+            const sourceVersion = requireExistingRemoteVersion(entry.name, current);
+            const bytes = current.bytes;
             const inspected = inspectSyncArtifact(bytes);
             if (inspected.kind === 'unsupported') throw unsupportedArtifact(entry.name, inspected.reason);
             // Ciphertext under a PLAIN name is a peer's in-flight generation, not ours (this
@@ -486,18 +756,36 @@ export async function runEnableSyncEncryptionOverRemote(
             if (inspected.kind === 'plaintext') {
                 const encName = syncEncryptedArtifactName(entry.name);
                 const sealed = await encryptSyncArtifact(bytes, material, prims);
-                await remote.write(encName, sealed);
-                const verify = await remote.read(encName);
-                if (!verify) throw new Error(`sync encryption enable: failed to read back ${encName}`);
-                await decryptRemoteArtifactOrThrow(verify, material.key, prims);
-                await remote.remove(entry.name);
+                const target = snapshotRemoteRead(snapshot, encName);
+                if (target.bytes) {
+                    requireExistingRemoteVersion(encName, target);
+                    const targetPlain = await decryptRemoteArtifactOrThrow(target.bytes, material.key, prims);
+                    if (!bytesEqual(targetPlain, bytes)) {
+                        throw new SyncEncryptionRemoteConflictError(`${encName} conflicts with the plaintext generation`);
+                    }
+                } else {
+                    await ensureTransitionJournal();
+                    await remote.write(encName, sealed, null);
+                    const verified = await verifyRemoteBytes(remote, encName, async (verify) => {
+                        const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, material.key, prims);
+                        if (!bytesEqual(verifiedPlain, bytes)) {
+                            throw new SyncEncryptionRemoteConflictError(`${encName} changed during sync encryption enable verification`);
+                        }
+                    });
+                    snapshot.set(encName, verified);
+                    expectedKinds.set(encName, 'document');
+                }
+                await ensureTransitionJournal();
+                await remote.remove(entry.name, sourceVersion);
+                snapshot.set(entry.name, { bytes: null, version: null });
             }
         }
         completed += 1;
     }
 
+    await revalidateRemoteInventory(remote, snapshot, expectedKinds, 'encrypted');
     await keyCache.setKey(material.key);
-    localState.write({
+    await localState.write({
         state: 'enabled',
         discoveredSalt: bytesToHex(material.salt),
         discoveredParams: material.params,
@@ -518,30 +806,66 @@ export async function runDisableSyncEncryptionOverRemote(
     const key = await keyCache.getKey();
     if (!key) throw new Error('sync encryption disable requires a cached key');
 
-    const entries = await remote.list();
+    const { entries, snapshot } = await captureRemoteEntryVersions(remote);
     const isBaseEncDocument = (name: string) => !KNOWN_ARTIFACT_SUFFIXES.some((s) => name.endsWith(`.enc${s}`));
     const attachments = entries.filter((e) => e.kind === 'attachment');
     const encDocuments = entries
         .filter((e) => e.kind === 'document' && e.name.includes('.enc'))
         .sort((a, b) => Number(isBaseEncDocument(a.name)) - Number(isBaseEncDocument(b.name)));
+    const expectedKinds = new Map(entries.map((entry) => [entry.name, entry.kind] as const));
+
+    // Build the complete decrypt plan before starting the journal or writing an early
+    // artifact. A folder containing a later foreign/abandoned generation must fail with every
+    // byte untouched; otherwise Disable can strand a plaintext prefix plus ciphertext suffix
+    // under a `disable` journal that blocks the required passphrase-change recovery.
+    const plaintextByName = new Map<string, Uint8Array>();
+    for (const entry of [...attachments, ...encDocuments]) {
+        const current = snapshotRemoteRead(snapshot, entry.name);
+        if (!current.bytes) continue;
+        const inspected = inspectSyncArtifact(current.bytes);
+        if (inspected.kind === 'unsupported') throw unsupportedArtifact(entry.name, inspected.reason);
+        if (entry.kind === 'document' && entry.name.includes('.enc') && inspected.kind !== 'encrypted') {
+            throw new SyncEncryptionTerminalError(
+                new SyncCryptoUnsupportedError(`${entry.name} is not a valid MWENC1 container`),
+            );
+        }
+        if (inspected.kind === 'encrypted') {
+            plaintextByName.set(
+                entry.name,
+                await decryptRemoteArtifactOrThrow(current.bytes, key, prims),
+            );
+        }
+    }
 
     const total = attachments.length + encDocuments.length;
     let completed = 0;
     const report = (phase: SyncEncryptionTransitionProgress['phase']) => onProgress?.({ phase, completed, total });
 
+    let transitionJournalStarted = false;
+    const ensureTransitionJournal = async (): Promise<void> => {
+        if (transitionJournalStarted) return;
+        await beginSyncEncryptionTransition(localState, 'disable');
+        transitionJournalStarted = true;
+    };
+
     for (const entry of attachments) {
         report('attachments');
-        const bytes = await remote.read(entry.name);
-        if (bytes) {
+        const current = snapshotRemoteRead(snapshot, entry.name);
+        if (current.bytes) {
+            const version = requireExistingRemoteVersion(entry.name, current);
+            const bytes = current.bytes;
             const inspected = inspectSyncArtifact(bytes);
             if (inspected.kind === 'unsupported') throw unsupportedArtifact(entry.name, inspected.reason);
             if (inspected.kind === 'encrypted') {
-                const plain = await decryptRemoteArtifactOrThrow(bytes, key, prims);
-                await remote.write(entry.name, plain);
-                const verify = await remote.read(entry.name);
-                if (!verify || !bytesMatchWithTrailingPadding(verify, plain)) {
-                    throw new Error(`sync encryption disable: failed to verify ${entry.name} after write`);
-                }
+                const plain = plaintextByName.get(entry.name)!;
+                await ensureTransitionJournal();
+                await remote.write(entry.name, plain, version);
+                const verified = await verifyRemoteBytes(remote, entry.name, (verify) => {
+                    if (!bytesMatchWithTrailingPadding(verify, plain)) {
+                        throw new SyncEncryptionRemoteConflictError(`${entry.name} changed during sync encryption disable verification`);
+                    }
+                });
+                snapshot.set(entry.name, verified);
             }
         }
         // ponytail: an attachment already lacking MWENC1 magic is treated as "already
@@ -556,22 +880,38 @@ export async function runDisableSyncEncryptionOverRemote(
 
     for (const entry of encDocuments) {
         report('documents');
-        const bytes = await remote.read(entry.name);
-        if (bytes) {
-            const plain = await decryptRemoteArtifactOrThrow(bytes, key, prims);
+        const current = snapshotRemoteRead(snapshot, entry.name);
+        if (current.bytes) {
+            const sourceVersion = requireExistingRemoteVersion(entry.name, current);
+            const plain = plaintextByName.get(entry.name)!;
             const plainName = syncPlaintextArtifactName(entry.name);
-            await remote.write(plainName, plain);
-            const verify = await remote.read(plainName);
-            if (!verify || !bytesMatchWithTrailingPadding(verify, plain)) {
-                throw new Error(`sync encryption disable: failed to verify ${plainName} after write`);
+            const target = snapshotRemoteRead(snapshot, plainName);
+            if (target.bytes) {
+                requireExistingRemoteVersion(plainName, target);
+                if (!bytesMatchWithTrailingPadding(target.bytes, plain)) {
+                    throw new SyncEncryptionRemoteConflictError(`${plainName} conflicts with the encrypted generation`);
+                }
+            } else {
+                await ensureTransitionJournal();
+                await remote.write(plainName, plain, null);
+                const verified = await verifyRemoteBytes(remote, plainName, (verify) => {
+                    if (!bytesMatchWithTrailingPadding(verify, plain)) {
+                        throw new SyncEncryptionRemoteConflictError(`${plainName} changed during sync encryption disable verification`);
+                    }
+                });
+                snapshot.set(plainName, verified);
+                expectedKinds.set(plainName, 'document');
             }
-            await remote.remove(entry.name);
+            await ensureTransitionJournal();
+            await remote.remove(entry.name, sourceVersion);
+            snapshot.set(entry.name, { bytes: null, version: null });
         }
         completed += 1;
     }
 
+    await revalidateRemoteInventory(remote, snapshot, expectedKinds, 'plaintext');
+    await localState.write(null);
     await keyCache.clearKey();
-    localState.write(null);
 }
 
 /** Passphrase change: decrypt-with-old, re-encrypt-with-new, under a fresh salt, over
@@ -602,17 +942,39 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
             persisted.discoveredParams,
             prims,
         );
-        if (!bytesEqual(claimedOldMaterial.key, oldKey)) {
+        if (!bytesEqual(claimedOldMaterial.key, oldKey)
+            && persisted.incompleteTransition !== 'change-passphrase') {
             throw new Error('sync encryption passphrase change: current passphrase does not match');
         }
+        // A failed final state commit can durably install the candidate key and then fail
+        // to restore the predecessor (keyring/SecureStore is a separate persistence domain).
+        // The durable change-passphrase journal proves that the original current passphrase
+        // was accepted before remote mutation began. In that one recovery state, allow the
+        // cached candidate key to enter the full all-generation authentication plan below;
+        // without the journal the same mismatch remains a hard wrong-passphrase failure.
     }
 
     const isBaseEncDocument = (name: string) => !KNOWN_ARTIFACT_SUFFIXES.some((s) => name.endsWith(`.enc${s}`));
-    const entries = await remote.list();
+    const { entries, snapshot } = await captureRemoteEntryVersions(remote, nextPassphrase);
     const attachments = entries.filter((e) => e.kind === 'attachment');
     const encDocuments = entries
         .filter((e) => e.kind === 'document' && e.name.includes('.enc'))
         .sort((a, b) => Number(isBaseEncDocument(a.name)) - Number(isBaseEncDocument(b.name)));
+    const expectedKinds = new Map(entries.map((entry) => [entry.name, entry.kind] as const));
+
+    // A plaintext-named document means another device left an interrupted disable (or is
+    // actively disabling). Rotation must not report success while that exposed generation
+    // remains beside the ciphertext: the user must finish/retry the disable or enable
+    // transition that owns the rename first. Fixed-name inventories include confirmed-missing
+    // plaintext counterparts, so only a generation with bytes is rejected here.
+    for (const entry of entries) {
+        if (entry.kind !== 'document' || entry.name.includes('.enc')) continue;
+        if (snapshotRemoteRead(snapshot, entry.name).bytes) {
+            throw new SyncEncryptionRemoteConflictError(
+                `${entry.name} is a plaintext generation; finish its encryption transition before changing the passphrase`,
+            );
+        }
+    }
 
     const newSalt = prims.randomBytes(16);
     const newMaterial = await deriveSyncKeyMaterial(nextPassphrase, newSalt, kdfParams, prims);
@@ -620,6 +982,13 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
     const total = attachments.length + encDocuments.length;
     let completed = 0;
     const report = (phase: SyncEncryptionTransitionProgress['phase']) => onProgress?.({ phase, completed, total });
+
+    let transitionJournalStarted = false;
+    const ensureTransitionJournal = async (): Promise<void> => {
+        if (transitionJournalStarted) return;
+        await beginSyncEncryptionTransition(localState, 'change-passphrase');
+        transitionJournalStarted = true;
+    };
 
     // Resume self-heal, same reasoning as runEnableSyncEncryptionOverRemote's attachment
     // loop: an artifact left over from an earlier, interrupted passphrase-change attempt
@@ -637,26 +1006,52 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
         return recovered;
     };
 
-    const rewrap = async (name: string): Promise<void> => {
-        const bytes = await remote.read(name);
-        if (!bytes) return;
-        if (await triesDecrypt(bytes, newMaterial.key, prims)) return; // already migrated (resume)
-        let plain: Uint8Array;
-        if (await triesDecrypt(bytes, oldKey, prims)) {
-            plain = await decryptRemoteArtifactOrThrow(bytes, oldKey, prims);
-        } else {
-            const inspected = inspectSyncArtifact(bytes);
-            if (inspected.kind !== 'encrypted') {
-                throw new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError(`${name} is not a valid MWENC1 container`));
-            }
-            const recoveredMaterial = await recoverMaterialForSalt(inspected.salt, inspected.params);
-            plain = await decryptRemoteArtifactOrThrow(bytes, recoveredMaterial.key, prims);
+    // Authenticate and decrypt the entire fixed inventory before the first write. Retrying an
+    // interrupted O→A rotation as O→B must not rewrite an early O artifact under B and only
+    // then discover a later A artifact that B cannot open. The plan also avoids repeating the
+    // expensive decrypt/KDF work in the mutation pass.
+    const rewrapPlan = new Map<string, Uint8Array | null>();
+    for (const entry of [...attachments, ...encDocuments]) {
+        const current = snapshotRemoteRead(snapshot, entry.name);
+        if (!current.bytes) continue;
+        const bytes = current.bytes;
+        if (await triesDecrypt(bytes, newMaterial.key, prims)) {
+            rewrapPlan.set(entry.name, null);
+            continue;
         }
+        if (await triesDecrypt(bytes, oldKey, prims)) {
+            rewrapPlan.set(entry.name, await decryptRemoteArtifactOrThrow(bytes, oldKey, prims));
+            continue;
+        }
+        const inspected = inspectSyncArtifact(bytes);
+        if (inspected.kind !== 'encrypted') {
+            throw new SyncEncryptionTerminalError(
+                new SyncCryptoUnsupportedError(`${entry.name} is not a valid MWENC1 container`),
+            );
+        }
+        const recoveredMaterial = await recoverMaterialForSalt(inspected.salt, inspected.params);
+        rewrapPlan.set(
+            entry.name,
+            await decryptRemoteArtifactOrThrow(bytes, recoveredMaterial.key, prims),
+        );
+    }
+
+    const rewrap = async (name: string): Promise<void> => {
+        const current = snapshotRemoteRead(snapshot, name);
+        if (!current.bytes) return;
+        const version = requireExistingRemoteVersion(name, current);
+        const plain = rewrapPlan.get(name);
+        if (!plain) return; // absent or already migrated under this run's new material
         const sealed = await encryptSyncArtifact(plain, newMaterial, prims);
-        await remote.write(name, sealed);
-        const verify = await remote.read(name);
-        if (!verify) throw new Error(`sync encryption passphrase change: failed to read back ${name}`);
-        await decryptRemoteArtifactOrThrow(verify, newMaterial.key, prims);
+        await ensureTransitionJournal();
+        await remote.write(name, sealed, version);
+        const verified = await verifyRemoteBytes(remote, name, async (verify) => {
+            const verifiedPlain = await decryptRemoteArtifactOrThrow(verify, newMaterial.key, prims);
+            if (!bytesEqual(verifiedPlain, plain)) {
+                throw new SyncEncryptionRemoteConflictError(`${name} changed during sync encryption passphrase verification`);
+            }
+        });
+        snapshot.set(name, verified);
     };
 
     for (const entry of attachments) {
@@ -670,12 +1065,33 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
         completed += 1;
     }
 
+    await revalidateRemoteInventory(remote, snapshot, expectedKinds, 'encrypted');
     await keyCache.setKey(newMaterial.key);
-    localState.write({
-        state: 'enabled',
-        discoveredSalt: bytesToHex(newMaterial.salt),
-        discoveredParams: newMaterial.params,
-    });
+    try {
+        await localState.write({
+            state: 'enabled',
+            discoveredSalt: bytesToHex(newMaterial.salt),
+            discoveredParams: newMaterial.params,
+        });
+    } catch (stateError) {
+        // The remote is already fully under `newMaterial`, but the durable journal still
+        // describes a retry from `oldKey`. Restore that key so the same current/next inputs
+        // can authenticate the journal and converge the remote generation on retry. Mobile
+        // SecureStore and the desktop keyring are separate from their state stores, so this
+        // compensating write is the atomicity boundary available to the shared port contract.
+        try {
+            await keyCache.setKey(oldKey);
+        } catch (rollbackError) {
+            const stateMessage = stateError instanceof Error ? stateError.message : String(stateError);
+            const rollbackMessage = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+            const combined = new Error(
+                `sync encryption passphrase state commit failed (${stateMessage}); key rollback failed (${rollbackMessage})`,
+            );
+            (combined as Error & { cause?: unknown }).cause = stateError;
+            throw combined;
+        }
+        throw stateError;
+    }
 }
 
 /** Validates a passphrase against the remote's current `.enc` base document (never
@@ -690,33 +1106,52 @@ export async function runProvideSyncEncryptionPassphraseOverRemote(
     localState: SyncEncryptionLocalStatePort,
     prims: SyncCryptoPrimitives = defaultSyncCryptoPrimitives,
 ): Promise<'ok' | 'wrong-passphrase'> {
+    assertNoIncompleteSyncEncryptionTransition(localState);
     const encName = syncEncryptedArtifactName(baseDocumentPlainName);
-    const bytes = await remote.read(encName);
-    if (!bytes) {
-        throw new Error(`sync encryption: no encrypted remote artifact found at ${encName}`);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        const captured = await remote.read(encName);
+        const bytes = captured.bytes;
+        if (!bytes) {
+            throw new Error(`sync encryption: no encrypted remote artifact found at ${encName}`);
+        }
+        requireExistingRemoteVersion(encName, captured);
+        const inspected = inspectSyncArtifact(bytes);
+        if (inspected.kind !== 'encrypted') {
+            throw new SyncEncryptionTerminalError(
+                inspected.kind === 'unsupported'
+                    ? new SyncCryptoUnsupportedError(inspected.reason)
+                    : new SyncCryptoUnsupportedError(`${encName} is not a valid MWENC1 container`),
+            );
+        }
+        const material = await deriveSyncKeyMaterial(passphrase, inspected.salt, inspected.params, prims);
+        let wrongPassphrase = false;
+        try {
+            await decryptSyncArtifact(bytes, material.key, prims);
+        } catch (err) {
+            if (err instanceof SyncCryptoAuthError) wrongPassphrase = true;
+            else throw err;
+        }
+
+        // Authentication can be expensive enough for a peer to rotate the generation while
+        // it runs. Retry once on a changed snapshot so a passphrase valid for the new current
+        // generation is not rejected because we authenticated the stale one; never persist a
+        // key unless the exact bytes/version remain authoritative.
+        const current = await remote.read(encName);
+        if (!remoteReadsEqual(captured, current)) {
+            if (attempt === 0) continue;
+            throw new SyncEncryptionRemoteConflictError(`${encName} changed during passphrase validation`);
+        }
+        if (wrongPassphrase) return 'wrong-passphrase';
+
+        await keyCache.setKey(material.key);
+        await localState.write({
+            state: 'enabled',
+            discoveredSalt: bytesToHex(material.salt),
+            discoveredParams: material.params,
+        });
+        return 'ok';
     }
-    const inspected = inspectSyncArtifact(bytes);
-    if (inspected.kind !== 'encrypted') {
-        throw new SyncEncryptionTerminalError(
-            inspected.kind === 'unsupported'
-                ? new SyncCryptoUnsupportedError(inspected.reason)
-                : new SyncCryptoUnsupportedError(`${encName} is not a valid MWENC1 container`),
-        );
-    }
-    const material = await deriveSyncKeyMaterial(passphrase, inspected.salt, inspected.params, prims);
-    try {
-        await decryptSyncArtifact(bytes, material.key, prims);
-    } catch (err) {
-        if (err instanceof SyncCryptoAuthError) return 'wrong-passphrase';
-        throw err;
-    }
-    await keyCache.setKey(material.key);
-    localState.write({
-        state: 'enabled',
-        discoveredSalt: bytesToHex(material.salt),
-        discoveredParams: material.params,
-    });
-    return 'ok';
+    throw new SyncEncryptionRemoteConflictError(`${encName} changed during passphrase validation`);
 }
 
 export const __syncEncryptionTestUtils = { bytesToHex, hexToBytes, bytesEqual };

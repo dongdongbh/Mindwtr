@@ -1,5 +1,6 @@
 import type { AppData, Attachment, PendingRemoteAttachmentDelete } from './types';
 import { normalizePendingRemoteDeletes } from './attachment-transfer';
+import { isFileSyncGenerationCloudKey } from './attachment-paths';
 import { getErrorStatus } from './sync-runtime-utils';
 import { sanitizeAttachmentCloudKeyForSyncMerge } from './sync-normalization';
 
@@ -69,10 +70,18 @@ function findPurgedParentAttachmentIds(appData: AppData): Set<string> {
  * don't burn the attempt budget in minutes.
  */
 export function hasFreshAttachmentCleanupWork(appData: AppData): boolean {
-    const pendingCloudKeys = new Set(
-        normalizePendingRemoteDeletes(appData.settings.attachments?.pendingRemoteDeletes)
-            .map((entry) => entry.cloudKey),
-    );
+    const pendingRemoteDeletes = normalizePendingRemoteDeletes(appData.settings.attachments?.pendingRemoteDeletes);
+    // Drain an attempt-zero digest-qualified entry left by versions that used
+    // pendingRemoteDeletes as a File publication journal. Current File cleanup
+    // retains the shared-folder bytes and clears only local bookkeeping.
+    if (
+        pendingRemoteDeletes.some(
+            (entry) => isFileSyncGenerationCloudKey(entry.cloudKey) && (entry.attempts ?? 0) === 0,
+        )
+    ) {
+        return true;
+    }
+    const pendingCloudKeys = new Set(pendingRemoteDeletes.map((entry) => entry.cloudKey));
     const hasWork = (attachments: readonly Attachment[] | undefined, parentPurged: boolean): boolean => {
         if (!attachments?.length) return false;
         if (parentPurged) return true;
@@ -126,6 +135,13 @@ export type AttachmentCleanupLifecycleOptions = {
     deleteLocalAttachment: (attachment: Attachment) => Promise<void>;
     deleteRemoteAttachment?: AttachmentCleanupRemoteDelete;
     resolveRemoteDeleteAttachment?: () => Promise<AttachmentCleanupRemoteDelete | undefined>;
+    /**
+     * Treat the remote object as intentionally retained while clearing local
+     * cleanup bookkeeping. File Sync uses this for immutable generations:
+     * without a distributed GC tombstone, a peer can reselect any existing
+     * generation between its existence check and document CAS.
+     */
+    shouldRetainRemoteAttachment?: (target: AttachmentCleanupRemoteTarget) => boolean;
     now?: () => string;
     maxAttachmentTargets?: number;
     beforeEachAttachment?: () => void | Promise<void>;
@@ -154,12 +170,16 @@ const isLocalSyncAbortError = (error: unknown): boolean => (
 export function normalizeAttachmentCleanupUri(uri?: string): string | undefined {
     if (!uri) return undefined;
     if (/^https?:\/\//i.test(uri) || uri.startsWith('content://')) return undefined;
-    const path = uri.replace(/^file:\/\//i, '').replace(/\\/g, '/');
+    let path = uri.replace(/^file:\/\//i, '').replace(/\\/g, '/');
+    // A canonical Windows file URI spells C:\ as file:///C:/; strip the URI's
+    // extra root slash before applying Windows' case-insensitive identity.
+    if (/^\/[a-z]:\//i.test(path)) path = path.slice(1);
     try {
-        return decodeURIComponent(path);
+        path = decodeURIComponent(path);
     } catch {
-        return path;
+        // Keep the undecoded spelling; malformed user paths must not abort GC.
     }
+    return /^[a-z]:\//i.test(path) ? path.toLowerCase() : path;
 }
 
 export function findLiveAttachmentResourceReferences(appData: AppData): LiveAttachmentResourceReferences {
@@ -341,7 +361,7 @@ export async function runAttachmentCleanupLifecycle(
     const maxAttachmentTargets = typeof requestedLimit === 'number' && Number.isFinite(requestedLimit)
         ? Math.max(0, Math.floor(requestedLimit))
         : Number.POSITIVE_INFINITY;
-    const reachedBatchLimit = cleanupTargets.size > maxAttachmentTargets;
+    let reachedBatchLimit = cleanupTargets.size > maxAttachmentTargets;
     const orphanedIds = new Set(orphanedAttachments.map((attachment) => attachment.id));
     const purgedParentAttachmentIds = findPurgedParentAttachmentIds(options.appData);
     const processedOrphanedIds = new Set<string>();
@@ -382,14 +402,36 @@ export async function runAttachmentCleanupLifecycle(
 
     const lastCleanupAt = (options.now ?? (() => new Date().toISOString()))();
     const nextPendingRemoteDeletesByCloudKey = new Map<string, PendingRemoteAttachmentDelete>();
+    const remoteTargetsInBatch = Array.from(remoteCleanupTargets.values()).slice(0, maxAttachmentTargets);
+    const remoteDeleteTargetCount = remoteTargetsInBatch
+        .filter((target) => !options.shouldRetainRemoteAttachment?.(target))
+        .length;
+    if (remoteCleanupTargets.size > maxAttachmentTargets) reachedBatchLimit = true;
     const deleteRemoteAttachment = options.deleteRemoteAttachment
         ?? (
-            remoteCleanupTargets.size > 0
+            remoteDeleteTargetCount > 0 && maxAttachmentTargets > 0
                 ? await options.resolveRemoteDeleteAttachment?.()
                 : undefined
         );
+    let processedRemoteTargetCount = 0;
     for (const target of remoteCleanupTargets.values()) {
         const previous = previousPendingByCloudKey.get(target.cloudKey);
+        if (processedRemoteTargetCount >= maxAttachmentTargets) {
+            nextPendingRemoteDeletesByCloudKey.set(target.cloudKey, {
+                cloudKey: target.cloudKey,
+                title: target.title,
+                attempts: previous?.attempts ?? 0,
+                lastErrorAt: previous?.lastErrorAt,
+            });
+            continue;
+        }
+        processedRemoteTargetCount += 1;
+        if (options.shouldRetainRemoteAttachment?.(target)) {
+            // Clearing the tombstone's cloudKey and any legacy pending entry is
+            // safe; deleting the immutable File Sync object is not.
+            clearedCloudKeys.add(target.cloudKey);
+            continue;
+        }
         if (!deleteRemoteAttachment) {
             nextPendingRemoteDeletesByCloudKey.set(target.cloudKey, {
                 cloudKey: target.cloudKey,
@@ -427,7 +469,7 @@ export async function runAttachmentCleanupLifecycle(
     if (reachedBatchLimit && Number.isFinite(maxAttachmentTargets)) {
         options.onBatchLimitReached?.({
             limit: maxAttachmentTargets,
-            total: cleanupTargets.size,
+            total: Math.max(cleanupTargets.size, remoteCleanupTargets.size),
         });
     }
 

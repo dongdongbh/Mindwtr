@@ -12,7 +12,14 @@ import type {
     AIRequestOptions,
 } from '../types';
 import { buildBreakdownPrompt, buildClarifyPrompt, buildCopilotPrompt, buildReviewAnalysisPrompt } from '../prompts';
-import { fetchWithTimeout, normalizeTags, normalizeTimeEstimate, parseJson, rateLimit } from '../utils';
+import {
+    fetchTextWithTimeout,
+    normalizeTags,
+    normalizeTimeEstimate,
+    parseJson,
+    rateLimit,
+    type BufferedAIResponse,
+} from '../utils';
 import { isBreakdownResponse, isClarifyResponse, isCopilotResponse, isReviewAnalysisResponse } from '../validators';
 import { sleep } from '../../async-utils';
 import { resolveAnthropicModel } from '../catalog';
@@ -45,7 +52,7 @@ function isAdaptiveThinkingModel(model: string): boolean {
 const resolveTimeoutMs = (value?: number) =>
     typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : DEFAULT_TIMEOUT_MS;
 
-async function buildAnthropicError(response: Response, usingOfficialAnthropic: boolean): Promise<Error> {
+async function buildAnthropicError(response: BufferedAIResponse, usingOfficialAnthropic: boolean): Promise<Error> {
     const status = response.status;
     let message = '';
     let type = '';
@@ -53,11 +60,7 @@ async function buildAnthropicError(response: Response, usingOfficialAnthropic: b
     // The request id is the handle Anthropic support and logs key off; prefer the
     // response header (present even when the body isn't JSON) and fall back to the body.
     let requestId = response.headers.get('request-id') ?? '';
-    try {
-        raw = await response.text();
-    } catch {
-        raw = '';
-    }
+    raw = response.bodyText;
     if (raw) {
         try {
             const data = JSON.parse(raw) as { error?: { message?: string; type?: string }; request_id?: string };
@@ -162,10 +165,10 @@ async function requestAnthropic(
 
     await rateLimit('anthropic');
 
-    let response: Response | null = null;
+    let response: BufferedAIResponse | null = null;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
         try {
-            response = await fetchWithTimeout(
+            response = await fetchTextWithTimeout(
                 url,
                 {
                     method: 'POST',
@@ -207,7 +210,7 @@ async function requestAnthropic(
         throw new Error('Anthropic request failed to start.');
     }
 
-    const result = await response.json() as {
+    const result = JSON.parse(response.bodyText) as {
         content?: Array<{ type?: string; text?: string }>;
     };
 

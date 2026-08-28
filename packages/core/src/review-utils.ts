@@ -3,7 +3,7 @@ import { addDays, format } from 'date-fns';
 import type { ReviewSnapshotItem } from './ai/types';
 import type { ExternalCalendarEvent } from './ics';
 import type { Area, Project, Task, TaskSortBy } from './types';
-import { hasTimeComponent, isDueForReview, safeParseDate, safeParseDueDate } from './date';
+import { getWeekStartsOnIndex, hasTimeComponent, isDueForReview, safeParseDate, safeParseDueDate } from './date';
 import {
     isTaskVisibleInArea,
     type AreaFilterSelection,
@@ -615,6 +615,62 @@ export type ReviewStepSession<Step extends ReviewStepFlags> = {
     nextStep: Step['id'] | null;
     previousStep: Step['id'] | null;
 };
+
+export type StoredReviewStepSession<Step extends ReviewStepId = ReviewStepId> = {
+    step: Step;
+    startedAt: string;
+};
+
+export type ReviewSessionCadence = 'daily' | 'weekly';
+
+function getLocalReviewWindowStart(
+    date: Date,
+    cadence: ReviewSessionCadence,
+    weekStart?: string | null,
+): number {
+    const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    if (cadence === 'weekly') {
+        const daysSinceWeekStart = (start.getDay() - getWeekStartsOnIndex(weekStart) + 7) % 7;
+        start.setDate(start.getDate() - daysSinceWeekStart);
+    }
+    return start.getTime();
+}
+
+/**
+ * Parses a device-local Review checkpoint and rejects malformed, future, or
+ * expired values. Daily checkpoints share a local date; weekly checkpoints
+ * share the local calendar week selected by the user's week-start setting.
+ */
+export function parseStoredReviewStepSession<Step extends ReviewStepId>(
+    serialized: string | null | undefined,
+    validSteps: ReadonlySet<Step>,
+    options: {
+        cadence: ReviewSessionCadence;
+        now?: Date;
+        weekStart?: string | null;
+    },
+): StoredReviewStepSession<Step> | null {
+    if (!serialized) return null;
+    let value: unknown;
+    try {
+        value = JSON.parse(serialized);
+    } catch {
+        return null;
+    }
+    if (!value || typeof value !== 'object') return null;
+    const candidate = value as Record<string, unknown>;
+    if (typeof candidate.step !== 'string' || !validSteps.has(candidate.step as Step)) return null;
+    if (typeof candidate.startedAt !== 'string') return null;
+
+    const startedAt = new Date(candidate.startedAt);
+    const now = options.now ?? new Date();
+    if (!Number.isFinite(startedAt.getTime()) || startedAt.getTime() > now.getTime()) return null;
+    if (getLocalReviewWindowStart(startedAt, options.cadence, options.weekStart)
+        !== getLocalReviewWindowStart(now, options.cadence, options.weekStart)) {
+        return null;
+    }
+    return { step: candidate.step as Step, startedAt: candidate.startedAt };
+}
 
 /** Resolves skipped steps, progress, and navigation for either review flow. */
 export function resolveReviewStepSession<Step extends ReviewStepFlags>(

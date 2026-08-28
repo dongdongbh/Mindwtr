@@ -236,6 +236,24 @@ describe('fetchProviderModels: timeout', () => {
         await vi.advanceTimersByTimeAsync(5000);
         await assertion;
     });
+
+    it.each([
+        ['successful', 200],
+        ['error', 500],
+    ])('keeps the timeout active through a stalled %s model-list body', async (_kind, status) => {
+        const cancel = vi.fn();
+        const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status });
+        const pending = fetchProviderModels('openai', {
+            fetchImpl: async () => response,
+            apiKey: 'sk-test',
+            timeoutMs: 5_000,
+        });
+        const assertion = expect(pending).rejects.toThrow('OpenAI models request timed out');
+
+        await vi.advanceTimersByTimeAsync(5_000);
+        await assertion;
+        expect(cancel).toHaveBeenCalledOnce();
+    });
 });
 
 describe('fetchProviderModelsCached', () => {

@@ -2,6 +2,7 @@ import type { AppData, Attachment, AttachmentSettings } from '@mindwtr/core';
 import {
     applyAttachmentPatches,
     buildCloudKitAttachmentKey,
+    markAttachmentUnrecoverable,
     parseCloudKitAttachmentKey,
     validateAttachmentForUpload,
     withAttachmentSettingsPatch,
@@ -9,6 +10,7 @@ import {
 import {
     deleteCloudKitAttachmentAssets,
     fetchCloudKitAttachmentAsset,
+    isCloudKitAttachmentNotFoundError,
     saveCloudKitAttachmentAsset,
     type CloudKitAttachmentMetadata,
 } from '../cloudkit-sync';
@@ -16,7 +18,7 @@ import {
     collectAttachments,
     computeAttachmentFileHash,
     extractExtension,
-    fileExists,
+    getLocalAttachmentPresence,
     getAttachmentByteSize,
     getAttachmentsDir,
     isContentAttachmentUri,
@@ -25,13 +27,16 @@ import {
     readFileAsBytes,
     reportProgress,
     statAttachmentFile,
-    validateAttachmentHash,
     writeBytesSafely,
 } from '../attachment-sync-utils';
 import {
     assertAttachmentSyncNotAborted,
+    createAttachmentDownloadStagePath,
+    deleteAttachmentDownloadStageBestEffort,
+    installStagedAttachmentDownload,
     isAttachmentSyncAbortError,
     migrateAttachmentsLocallyBeforeSync,
+    resolveAttachmentDownloadTargetPath,
     runMobileAttachmentLifecycle,
 } from './common';
 
@@ -112,10 +117,11 @@ const buildMetadata = (
 });
 
 const applyFetchedMetadata = (attachment: Attachment, metadata: CloudKitAttachmentMetadata): void => {
-    if (metadata.title) attachment.title = metadata.title;
-    if (metadata.mimeType) attachment.mimeType = metadata.mimeType;
+    // The merged sync document owns descriptive metadata. CloudKit asset metadata
+    // can lag behind title-only or MIME-only document edits because those edits do
+    // not upload a new byte generation. Only the byte-derived size is authoritative
+    // after fetching the asset; the installer has already recorded its exact hash.
     if (Number.isFinite(metadata.size ?? NaN)) attachment.size = metadata.size;
-    if (metadata.fileHash) attachment.fileHash = metadata.fileHash;
 };
 
 /** The next `settings.attachments` value once the flushed keys are dropped, or `undefined`
@@ -167,8 +173,9 @@ export const syncCloudKitAttachments = async (
 
     const { patches } = await runMobileAttachmentLifecycle({
         attachmentsById,
-        localFileExists: fileExists,
-        forceUploadExistingLocal: options.activationProbe === true,
+        getLocalFilePresence: getLocalAttachmentPresence,
+        deferUploads: options.phase === 'prepare',
+        allowPendingRemoteRecovery: false,
         getLocalFileStat: (path) => statAttachmentFile(path),
         computeLocalFileHash: (path) => computeAttachmentFileHash(path),
         contentChangePhase: options.phase,
@@ -176,7 +183,7 @@ export const syncCloudKitAttachments = async (
         // A cloudKey written by a different backend before a provider switch isn't a valid
         // CloudKit record key, so CloudKit must still treat the attachment as needing upload.
         hasCloudCopy: (attachment) => Boolean(parseCloudKitAttachmentKey(attachment.cloudKey)),
-        onUpload: async (attachment, localPath) => {
+        onUpload: async (attachment, localPath, snapshot) => {
             const owned = ownerByAttachmentId.get(attachment.id);
             if (!owned) return false;
             // A local content:// → managed-file migration must survive an upload
@@ -199,7 +206,11 @@ export const syncCloudKitAttachments = async (
                 await saveCloudKitAttachmentAsset(
                     attachment.id,
                     assetFile.uri,
-                    buildMetadata(attachment, owned, assetFile.size),
+                    buildMetadata(
+                        { ...attachment, fileHash: snapshot?.fileHash ?? attachment.fileHash },
+                        owned,
+                        assetFile.size,
+                    ),
                     { signal },
                 );
                 attachment.cloudKey = buildCloudKitAttachmentKey(attachment.id);
@@ -226,22 +237,55 @@ export const syncCloudKitAttachments = async (
             // onUpload's own catch above handles everything except the fatal (abort) case,
             // which it rethrows — that never reaches here. Required by the lifecycle's contract.
         },
-        onDownload: async (attachment) => {
+        onDownload: async (attachment, expectation) => {
             const recordName = parseCloudKitAttachmentKey(attachment.cloudKey);
             if (!recordName) return false;
+            let stagedUri: string | null = null;
+            let installerOwnsStage = false;
             try {
-                const targetUri = buildTargetUri(attachmentsDir, attachment);
+                const targetUri = resolveAttachmentDownloadTargetPath(
+                    attachment,
+                    buildTargetUri(attachmentsDir, attachment),
+                    expectation,
+                );
+                stagedUri = createAttachmentDownloadStagePath(attachmentsDir, attachment);
                 reportProgress(attachment.id, 'download', 0, attachment.size ?? 0, 'active');
-                const metadata = await fetchCloudKitAttachmentAsset(recordName, targetUri, { signal });
+                const metadata = await fetchCloudKitAttachmentAsset(recordName, stagedUri, { signal });
+                // From this point the helper owns cleanup: it removes the stage
+                // only before native installation begins and preserves it after.
+                installerOwnsStage = true;
+                const installed = await installStagedAttachmentDownload({
+                    attachment,
+                    stagedPath: stagedUri,
+                    targetPath: targetUri,
+                    expectation,
+                    signal,
+                });
+                if (!installed) return false;
                 const bytes = await readFileAsBytes(targetUri);
-                await validateAttachmentHash(attachment, bytes);
                 attachment.uri = targetUri;
                 attachment.localStatus = 'available';
                 applyFetchedMetadata(attachment, metadata);
                 reportProgress(attachment.id, 'download', bytes.length, bytes.length, 'completed');
                 return true;
             } catch (error) {
+                if (stagedUri && !installerOwnsStage) {
+                    await deleteAttachmentDownloadStageBestEffort(stagedUri);
+                }
                 if (isAttachmentSyncAbortError(error, signal)) throw error;
+                if (isCloudKitAttachmentNotFoundError(error)) {
+                    reportProgress(
+                        attachment.id,
+                        'download',
+                        0,
+                        attachment.size ?? 0,
+                        'failed',
+                        'Attachment is no longer available',
+                    );
+                    const mutated = markAttachmentUnrecoverable(attachment);
+                    logAttachmentWarn(`CloudKit attachment ${attachment.id} is no longer available`, error);
+                    return mutated;
+                }
                 reportProgress(
                     attachment.id,
                     'download',

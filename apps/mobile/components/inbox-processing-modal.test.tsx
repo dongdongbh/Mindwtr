@@ -8,6 +8,7 @@ import { InboxProcessingModal } from './inbox-processing-modal';
 const updateTask = vi.fn();
 const deleteTask = vi.fn();
 const restoreTask = vi.fn();
+const undoTaskCompletion = vi.hoisted(() => vi.fn());
 const addProject = vi.fn();
 const addTask = vi.fn();
 const asyncStorageMock = vi.hoisted(() => ({
@@ -249,6 +250,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
       ),
       { getState: () => storeState },
     ),
+    undoTaskCompletion,
     loadAIKey: vi.fn(),
   };
 });
@@ -336,6 +338,8 @@ describe('InboxProcessingModal', () => {
     deleteTask.mockResolvedValue({ success: true });
     restoreTask.mockReset();
     restoreTask.mockResolvedValue({ success: true });
+    undoTaskCompletion.mockReset();
+    undoTaskCompletion.mockResolvedValue(undefined);
     hapticsMock.notificationAsync.mockClear();
     asyncStorageMock.getItem.mockReset();
     asyncStorageMock.getItem.mockResolvedValue(null);
@@ -1212,6 +1216,86 @@ describe('InboxProcessingModal', () => {
       status: 'inbox',
       projectId: 'project-created',
     });
+    expect(addTask.mock.invocationCallOrder[0]).toBeLessThan(updateTask.mock.invocationCallOrder[0]);
+  });
+
+  it('retries only uncommitted project actions before moving the original Inbox task', async () => {
+    addProject.mockResolvedValue({
+      id: 'project-created',
+      title: 'Plan Launch',
+      color: '#3b82f6',
+      status: 'active',
+      order: 0,
+      tagIds: [],
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+    });
+    addTask
+      .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce({ success: false, error: 'Offline' })
+      .mockResolvedValueOnce({ success: true });
+    const onClose = vi.fn();
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={onClose} />);
+    });
+
+    const root = tree!.root;
+    walkToProjectConversion(root);
+    act(() => {
+      root.findByProps({ accessibilityLabel: 'projects.title' }).props.onChangeText('Plan Launch');
+      findPressableWithText(root, 'process.addAnotherAction').props.onPress();
+    });
+    act(() => {
+      findPressableWithText(root, 'process.addAnotherAction').props.onPress();
+    });
+
+    const findActionInputs = () => root.findAll((node) => (
+      typeof node.type === 'string'
+      && node.props.accessibilityLabel === 'process.nextAction'
+      && typeof node.props.onChangeText === 'function'
+    ));
+    act(() => {
+      findActionInputs()[0].props.onChangeText('Draft launch brief');
+    });
+    act(() => {
+      findActionInputs()[1].props.onChangeText('Book venue');
+    });
+    act(() => {
+      findActionInputs()[2].props.onChangeText('Send invitations');
+    });
+
+    await act(async () => {
+      findPressableWithText(root, 'process.createProject').props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(addTask.mock.calls.map(([title]) => title)).toEqual(['Book venue', 'Send invitations']);
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(findActionInputs().map((input) => input.props.value)).toEqual([
+      'Draft launch brief',
+      'Send invitations',
+    ]);
+
+    await act(async () => {
+      findPressableWithText(root, 'process.createProject').props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(addTask.mock.calls.map(([title]) => title)).toEqual([
+      'Book venue',
+      'Send invitations',
+      'Send invitations',
+    ]);
+    expect(updateTask).toHaveBeenCalledTimes(1);
+    expect(updateTask).toHaveBeenCalledWith('inbox-1', expect.objectContaining({
+      title: 'Draft launch brief',
+      status: 'next',
+      projectId: 'project-created',
+    }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('suggests existing contexts and tags while typing without a prefix', () => {
@@ -1526,7 +1610,7 @@ describe('InboxProcessingModal', () => {
     );
   });
 
-  it('moves Later items to next when No date is explicitly selected', async () => {
+  it('requires a start date before filing a Later item', async () => {
     const onClose = vi.fn();
     let tree: ReturnType<typeof create>;
 
@@ -1545,25 +1629,7 @@ describe('InboxProcessingModal', () => {
       laterButton.props.onPress();
     });
 
-    const noDateButton = findNodeWithText(root, 'No date').parent;
-
-    if (!noDateButton) {
-      throw new Error('No date button not found');
-    }
-
-    expect(noDateButton.props.accessibilityState?.selected).toBe(false);
-
-    act(() => {
-      noDateButton.props.onPress();
-    });
-
-    const selectedNoDateButton = findNodeWithText(root, 'No date').parent;
-
-    if (!selectedNoDateButton) {
-      throw new Error('No date button not found after selection');
-    }
-
-    expect(selectedNoDateButton.props.accessibilityState?.selected).toBe(true);
+    expect(findNodesWithText(root, 'No date')).toHaveLength(0);
 
     const nextTaskButton = findNodeWithText(root, 'File it').parent;
 
@@ -1575,18 +1641,13 @@ describe('InboxProcessingModal', () => {
       nextTaskButton.props.onPress();
     });
 
-    expect(updateTask).toHaveBeenCalledWith(
-      'inbox-1',
-      expect.objectContaining({
-        status: 'next',
-      })
-    );
-    expect(updateTask.mock.calls[0][1]).toHaveProperty('startTime', undefined);
     await flushAsyncActions();
-    expect(onClose).toHaveBeenCalled();
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(showToast.mock.calls.some(([options]) => options?.tone === 'warning')).toBe(true);
   });
 
-  it('advances to the next inbox item when Later No date is selected directly', async () => {
+  it('keeps the current inbox item active when Later has no date', async () => {
     storeState.tasks = [
       { ...baseInboxTask },
       {
@@ -1616,16 +1677,6 @@ describe('InboxProcessingModal', () => {
       laterButton.props.onPress();
     });
 
-    const noDateButton = findNodeWithText(root, 'No date').parent;
-
-    if (!noDateButton) {
-      throw new Error('No date button not found');
-    }
-
-    act(() => {
-      noDateButton.props.onPress();
-    });
-
     const nextTaskButton = findNodeWithText(root, 'File it').parent;
 
     if (!nextTaskButton) {
@@ -1636,20 +1687,12 @@ describe('InboxProcessingModal', () => {
       nextTaskButton.props.onPress();
     });
 
-    expect(updateTask).toHaveBeenCalledWith(
-      'inbox-1',
-      expect.objectContaining({
-        status: 'next',
-      })
-    );
-    expect(updateTask.mock.calls[0][1]).toHaveProperty('startTime', undefined);
     await flushAsyncActions();
+    expect(updateTask).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
     expect(root.findByProps({ placeholder: 'taskEdit.titleLabel', accessibilityLabel: 'taskEdit.titleLabel' }).props.value)
-      .toBe('Second inbox task');
-    // "No date" is a real answer, so nothing warns — the only toast is the
-    // Undo offered for the item that just moved.
-    expect(showToast.mock.calls.map(([options]) => options?.tone)).toEqual(['info']);
+      .toBe('Inbox task');
+    expect(showToast.mock.calls.some(([options]) => options?.tone === 'warning')).toBe(true);
   });
 
   it('saves the selected priority when the priority field is shown', async () => {
@@ -2149,6 +2192,37 @@ describe('InboxProcessingModal', () => {
       expect(updateTask.mock.calls[0][1]).toMatchObject({ status: 'reference' });
     });
 
+    it('restores metadata cleared by Reference when the decision is undone', async () => {
+      const recurrence = { rule: 'monthly', strategy: 'strict', byMonthDay: [15] };
+      storeState.tasks = [{
+        ...baseInboxTask,
+        startTime: '2026-09-14',
+        dueDate: '2026-09-15',
+        reviewAt: '2026-09-16',
+        recurrence,
+        priority: 'high',
+        timeEstimate: '30min',
+      }];
+      const root = await openFlow();
+
+      await pressAsync(root, 'nav.reference');
+      const toast = undoToast();
+      await act(async () => {
+        toast!.onAction();
+        await Promise.resolve();
+      });
+
+      expect(updateTask).toHaveBeenLastCalledWith('inbox-1', expect.objectContaining({
+        status: 'inbox',
+        startTime: '2026-09-14',
+        dueDate: '2026-09-15',
+        reviewAt: '2026-09-16',
+        recurrence,
+        priority: 'high',
+        timeEstimate: '30min',
+      }));
+    });
+
     it('trashes from the first question and offers to put it back', async () => {
       const root = await openFlow();
 
@@ -2187,7 +2261,72 @@ describe('InboxProcessingModal', () => {
         await Promise.resolve();
       });
 
-      expect(updateTask).toHaveBeenLastCalledWith('inbox-1', { status: 'inbox' });
+      expect(updateTask).toHaveBeenLastCalledWith('inbox-1', expect.objectContaining({ status: 'inbox' }));
+    });
+
+    it('binds each queued Undo toast to the decision that created it', async () => {
+      asyncStorageMock.getItem.mockResolvedValue('quick');
+      storeState.tasks = [
+        { ...baseInboxTask, id: 'inbox-a', title: 'First capture' },
+        { ...baseInboxTask, id: 'inbox-b', title: 'Second capture', createdAt: '2025-01-02T00:00:00.000Z' },
+      ];
+      const root = await openFlow();
+
+      await pressAsync(root, 'inbox.someday');
+      await pressAsync(root, 'File it');
+      const firstUndo = showToast.mock.calls
+        .map(([options]) => options)
+        .find((options) => options?.actionLabel === 'Undo' && options.message.includes('First capture'));
+
+      await pressAsync(root, 'inbox.someday');
+      await pressAsync(root, 'File it');
+      expect(showToast.mock.calls.some(([options]) => (
+        options?.actionLabel === 'Undo' && options.message.includes('Second capture')
+      ))).toBe(true);
+
+      await act(async () => {
+        firstUndo!.onAction();
+        await Promise.resolve();
+      });
+
+      expect(updateTask).toHaveBeenLastCalledWith(
+        'inbox-a',
+        expect.objectContaining({ status: 'inbox' }),
+      );
+      expect(updateTask).not.toHaveBeenCalledWith(
+        'inbox-b',
+        expect.objectContaining({ status: 'inbox' }),
+      );
+    });
+
+    it('uses recurrence-aware completion undo for a recurring two-minute item', async () => {
+      const recurringTask = {
+        ...baseInboxTask,
+        isFocusedToday: true,
+        recurrence: { rule: 'daily', strategy: 'strict' },
+      };
+      storeState.tasks = [recurringTask];
+      const root = await openFlow();
+
+      pressStep(root, 'inbox.yes');
+      await pressAsync(root, 'inbox.doneIt');
+      const toast = undoToast();
+      await act(async () => {
+        toast!.onAction();
+        await Promise.resolve();
+      });
+
+      expect(undoTaskCompletion).toHaveBeenCalledWith(
+        'inbox-1',
+        'inbox',
+        true,
+        expect.objectContaining({
+          restoreUpdates: expect.objectContaining({
+            status: 'inbox',
+            recurrence: recurringTask.recurrence,
+          }),
+        }),
+      );
     });
 
     it('marks completing an item with the app\'s success haptic', async () => {
@@ -2291,7 +2430,9 @@ describe('InboxProcessingModal', () => {
       expect(findNodesWithText(root, 'inbox.illDoIt').length).toBeGreaterThan(0);
       // The synced GTD settings document is never touched by a layout choice.
       expect(storeState.updateSettings).not.toHaveBeenCalled();
-      expect(root.findByProps({ accessibilityLabel: 'Guided', accessibilityRole: 'button' })).toBeTruthy();
+      const guidedAction = root.findByProps({ accessibilityLabel: 'Guided', accessibilityRole: 'button' });
+      expect(guidedAction).toBeTruthy();
+      expect(guidedAction.props.accessibilityState).toBeUndefined();
     });
 
     it('walks the guided tree by default', async () => {
@@ -2407,6 +2548,19 @@ describe('InboxProcessingModal', () => {
 
       expect(findNodesWithText(root, 'inbox.twoMinRule')).toHaveLength(0);
       expect(findNodesWithText(root, 'inbox.whoShouldDoIt').length).toBeGreaterThan(0);
+    });
+
+    it('starts with the two-minute question when the shared plan puts it first', async () => {
+      mockSettings.gtd.inboxProcessing = { twoMinuteFirst: true };
+      const root = await openFlow();
+
+      expect(findNodesWithText(root, 'inbox.twoMinRule').length).toBeGreaterThan(0);
+      expect(findNodesWithText(root, 'inbox.isActionable')).toHaveLength(0);
+
+      pressStep(root, 'inbox.takesLonger');
+
+      expect(findNodesWithText(root, 'inbox.isActionable').length).toBeGreaterThan(0);
+      expect(findNodesWithText(root, 'inbox.twoMinRule')).toHaveLength(0);
     });
 
     it('drops the context step from the terminal step when it is off', async () => {
@@ -2606,7 +2760,54 @@ describe('InboxProcessingModal', () => {
       }
     });
 
-    it('keeps the Later no-date and date-only controls in both modes', async () => {
+    it('names Area and Project controls and exposes their selected state', async () => {
+      storeState.projects = [workProject];
+      storeState.areas = [workArea];
+      storeState.tasks = [{ ...baseInboxTask }];
+      const root = await openMode('guided');
+      walkToFileStep(root);
+
+      expect(root.findByProps({
+        accessibilityRole: 'button',
+        accessibilityLabel: 'taskEdit.areaLabel: projects.noArea',
+      }).props.accessibilityState).toEqual({ selected: true });
+      expect(root.findByProps({
+        accessibilityRole: 'button',
+        accessibilityLabel: 'taskEdit.areaLabel: Work',
+      }).props.accessibilityState).toEqual({ selected: false });
+      expect(root.findByProps({
+        accessibilityLabel: 'projects.search',
+      }).props.placeholder).toBe('projects.addPlaceholder');
+      expect(root.findByProps({
+        accessibilityRole: 'button',
+        accessibilityLabel: 'taskEdit.projectLabel: inbox.noProject',
+      }).props.accessibilityState).toEqual({ selected: true });
+      expect(root.findByProps({
+        accessibilityRole: 'button',
+        accessibilityLabel: 'taskEdit.projectLabel: Work Project',
+      }).props.accessibilityState).toEqual({ selected: false });
+
+      act(() => {
+        root.findByProps({
+          accessibilityRole: 'button',
+          accessibilityLabel: 'taskEdit.projectLabel: Work Project',
+        }).props.onPress();
+      });
+      expect(root.findAllByProps({
+        accessibilityRole: 'button',
+        accessibilityLabel: 'taskEdit.projectLabel: Work Project',
+      }).every((option) => option.props.accessibilityState?.selected === true)).toBe(true);
+
+      storeState.tasks = [{ ...baseInboxTask }];
+      const conversionRoot = await openMode('guided');
+      walkToProjectConversion(conversionRoot);
+      expect(conversionRoot.findByProps({
+        accessibilityRole: 'button',
+        accessibilityLabel: 'process.createProject',
+      })).toBeTruthy();
+    });
+
+    it('keeps dated Later controls in both modes without an undated escape hatch', async () => {
       mockSettings.gtd.defaultScheduleTime = '09:00';
 
       for (const mode of ['guided', 'quick'] as const) {
@@ -2614,7 +2815,7 @@ describe('InboxProcessingModal', () => {
         const root = await openMode(mode);
         pressStep(root, 'Start later');
 
-        expect(findNodesWithText(root, 'No date').length).toBeGreaterThan(0);
+        expect(findNodesWithText(root, 'No date')).toHaveLength(0);
         expect(findNodesWithText(root, 'common.notSet').length).toBeGreaterThan(0);
         expect(findNodesWithText(root, 'File it').length).toBeGreaterThan(0);
       }

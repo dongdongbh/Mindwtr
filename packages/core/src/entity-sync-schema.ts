@@ -106,6 +106,7 @@ export const toAttachments = (value: unknown): Attachment[] | undefined => {
             localStatus: typeof item.localStatus === 'string' && allowedStatuses.has(item.localStatus as Attachment['localStatus'])
                 ? (item.localStatus as Attachment['localStatus'])
                 : undefined,
+            pendingContentUpload: item.pendingContentUpload === true ? true : undefined,
         }));
     return cleaned.length > 0 ? cleaned : undefined;
 };

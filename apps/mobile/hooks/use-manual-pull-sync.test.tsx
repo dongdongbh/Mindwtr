@@ -24,6 +24,13 @@ vi.mock('@/contexts/language-context', () => ({
         'settings.syncMobile.pleaseSetAWebdavUrlFirst': 'Please set a WebDAV URL first',
         'settings.syncQueued': 'Sync queued',
         'settings.syncQueuedBody': 'Local changes arrived during sync. A retry was queued automatically.',
+        'settings.syncAttachmentWriteDeferred': 'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
+        'settings.syncFileAttachmentTooLarge': 'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
+        'settings.syncRemoteBusy': 'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
+        'settings.syncRemoteCleanupDeferred': 'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
+        'settings.syncFileLockBusy': 'Another Mindwtr operation is using File Sync. Wait for it to finish; Mindwtr will retry automatically.',
+        'settings.syncFileLockCleanupDeferred': 'Sync completed, but Mindwtr could not release the File Sync lock. Restart Mindwtr before syncing again. No retry is needed.',
+        'settings.syncFileLockUnavailable': 'Mindwtr cannot safely lock this File Sync location. Re-select the folder, restart or update Mindwtr, or use WebDAV.',
         'settings.syncSkippedOffline': 'No internet connection. Sync skipped.',
         'settings.syncServerUnreachable': "Couldn't reach the sync server. Check that Mindwtr is allowed to use the network (cellular data, VPN, or firewall).",
       }[key] ?? key),
@@ -101,6 +108,7 @@ describe('useManualPullSync', () => {
     });
 
     expect(mocked.performMobileSync).toHaveBeenCalledTimes(1);
+    expect(mocked.performMobileSync).toHaveBeenCalledWith(undefined, { manual: true });
     expect(latest?.indicatorState).toBe('success');
     expect(latest?.refreshing).toBe(false);
     expect(mocked.showToast).not.toHaveBeenCalled();
@@ -224,6 +232,154 @@ describe('useManualPullSync', () => {
     expect(mocked.showToast).toHaveBeenCalledWith(expect.objectContaining({
       title: 'Sync failed',
       message: 'Remote write failed. Retrying in the background.',
+      tone: 'error',
+    }));
+  });
+
+  it('shows attachment recovery guidance without a green manual-sync result', async () => {
+    mocked.performMobileSync.mockResolvedValue({
+      success: true,
+      attachmentWriteDeferred: true,
+    });
+    renderHarness();
+
+    await act(async () => {
+      await latest?.onRefresh();
+    });
+
+    expect(latest?.indicatorState).toBe('idle');
+    expect(mocked.showToast).toHaveBeenCalledWith({
+      title: 'Notice',
+      message: 'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
+      tone: 'warning',
+      durationMs: 6000,
+    });
+  });
+
+  it('shows actionable File Sync size guidance without a green manual-sync result', async () => {
+    mocked.performMobileSync.mockResolvedValue({
+      success: true,
+      fileAttachmentUploadBlocked: 'too-large',
+    });
+    renderHarness();
+
+    await act(async () => {
+      await latest?.onRefresh();
+    });
+
+    expect(latest?.indicatorState).toBe('idle');
+    expect(mocked.showToast).toHaveBeenCalledWith({
+      title: 'Notice',
+      message: 'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
+      tone: 'warning',
+      durationMs: 6000,
+    });
+    expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+  });
+
+  it.each([
+    {
+      outcome: 'failed',
+      result: { success: false, error: 'Document sync failed.' },
+    },
+    {
+      outcome: 'deferred',
+      result: {
+        success: true,
+        remoteWriteDeferred: true,
+        error: 'Remote write failed. Retrying in the background.',
+      },
+    },
+  ])('prioritizes a $outcome document sync result over attachment guidance', async ({ result }) => {
+    mocked.performMobileSync.mockResolvedValue({
+      ...result,
+      attachmentWriteDeferred: true,
+    });
+    renderHarness();
+
+    await act(async () => {
+      await latest?.onRefresh();
+    });
+
+    expect(latest?.indicatorState).toBe('error');
+    expect(mocked.showToast).toHaveBeenCalledWith({
+      title: 'Sync failed',
+      message: result.error,
+      tone: 'error',
+      durationMs: 5200,
+    });
+    expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
+    }));
+  });
+
+  it.each([
+    {
+        deferred: 'busy' as const,
+        indicator: 'idle' as const,
+      message: 'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
+    },
+    {
+        deferred: 'cleanup' as const,
+        indicator: 'success' as const,
+      message: 'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
+    },
+  ])('explains a $deferred remote fence without blaming local edits', async ({ deferred, indicator, message }) => {
+    mocked.performMobileSync.mockResolvedValue({
+      success: true,
+      remoteFenceDeferred: deferred,
+    });
+    renderHarness();
+
+    await act(async () => {
+      await latest?.onRefresh();
+    });
+
+    expect(latest?.indicatorState).toBe(indicator);
+    expect(mocked.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Notice',
+      message,
+      tone: 'info',
+    }));
+    expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Local changes arrived during sync. A retry was queued automatically.',
+    }));
+  });
+
+  it.each([
+    {
+      deferred: 'busy' as const,
+      indicator: 'idle' as const,
+      message: 'Another Mindwtr operation is using File Sync. Wait for it to finish; Mindwtr will retry automatically.',
+    },
+    {
+      deferred: 'cleanup' as const,
+      indicator: 'success' as const,
+      message: 'Sync completed, but Mindwtr could not release the File Sync lock. Restart Mindwtr before syncing again. No retry is needed.',
+    },
+  ])('shows a $deferred File Sync outcome without false green feedback', async ({ deferred, indicator, message }) => {
+    mocked.performMobileSync.mockResolvedValue({ success: true, fileSyncLockDeferred: deferred });
+    renderHarness();
+
+    await act(async () => {
+      await latest?.onRefresh();
+    });
+
+    expect(latest?.indicatorState).toBe(indicator);
+    expect(mocked.showToast).toHaveBeenCalledWith(expect.objectContaining({ message, tone: 'info' }));
+  });
+
+  it('shows localized recovery guidance when safe File Sync locking is unavailable', async () => {
+    mocked.performMobileSync.mockResolvedValue({ success: false, fileSyncLockUnavailable: true });
+    renderHarness();
+
+    await act(async () => {
+      await latest?.onRefresh();
+    });
+
+    expect(latest?.indicatorState).toBe('error');
+    expect(mocked.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Mindwtr cannot safely lock this File Sync location. Re-select the folder, restart or update Mindwtr, or use WebDAV.',
       tone: 'error',
     }));
   });

@@ -118,6 +118,7 @@ Mindwtr is simple by default and powerful when you need it:
 - The full GTD loop, guided: capture, sort, do, review.
 - Focus view puts today's schedule and your next actions on one screen.
 - Your data lives on your device. Sync is optional, and you pick where: iCloud on Apple devices, Dropbox, a shared folder, your own server, or WebDAV.
+- WebDAV servers must return strong ETags and enforce conditional writes. During connection setup, Mindwtr verifies create-only writes, exact replacements, stale-write rejection, and conditional cleanup; providers that cannot prevent one device from overwriting another device’s generation are refused.
 - Projects with sections, areas, and manual task ordering for bigger plans.
 - Import tasks from your Obsidian notes, with links back to the source (desktop).
 - Optional AI helper: connect your own OpenAI, Gemini, or Claude account, or run a private AI on your own computer. Off by default.

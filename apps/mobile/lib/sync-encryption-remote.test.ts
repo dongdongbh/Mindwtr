@@ -29,9 +29,12 @@ import {
   deriveSyncKeyMaterial,
   encryptSyncArtifact,
   inspectSyncArtifact,
+  SyncEncryptionRemoteVersionUnavailableError,
   SyncEncryptionTerminalError,
+  runChangeSyncEncryptionPassphraseOverRemote,
   runDisableSyncEncryptionOverRemote,
   runEnableSyncEncryptionOverRemote,
+  SYNC_REMOTE_MUTATION_FENCE_NAME,
 } from '@mindwtr/core';
 import {
   openAttachmentBytesFromDownload,
@@ -50,7 +53,8 @@ import {
 import { __syncEncryptionServiceTestUtils } from './sync-encryption-service';
 import { __resetSecureSecretStoreForTests } from './secure-secret-store';
 import { classifySyncFailure } from './sync-service-utils';
-import { SyncEncryptionNoKeyError } from './sync-encryption-state';
+import { SyncEncryptionNoKeyError, SyncEncryptionStateUnavailableError } from './sync-encryption-state';
+import { forceRefreshDropboxAccessToken, getValidDropboxAccessToken } from './dropbox-auth';
 
 const nodeQuickCrypto: SyncCryptoNativeModule = {
   argon2: (_algorithm, params, callback) => {
@@ -81,6 +85,22 @@ const appData = (cloudKeys: string[]): AppData => ({
   ],
   projects: [], sections: [], areas: [], settings: {},
 } as unknown as AppData);
+
+const davResponseXml = (
+  href: string,
+  options: { collection?: boolean; status?: number } = {},
+): string => {
+  const status = options.status ?? 200;
+  return '<d:response>'
+    + `<d:href>${href}</d:href>`
+    + '<d:propstat><d:prop><d:resourcetype>'
+    + (options.collection ? '<d:collection/>' : '')
+    + `</d:resourcetype></d:prop><d:status>HTTP/1.1 ${status} ${status === 200 ? 'OK' : 'Error'}</d:status></d:propstat>`
+    + '</d:response>';
+};
+
+const davMultistatusXml = (...responses: string[]): string =>
+  `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">${responses.join('')}</d:multistatus>`;
 
 beforeEach(() => {
   asyncStorage.clear();
@@ -159,35 +179,377 @@ describe('transition entry derivation', () => {
     expect(entries).toHaveLength(4);
     expect(entries.every((e) => e.kind === 'document')).toBe(true);
   });
+
+  it('accepts only managed blob attachment keys from untrusted remote metadata', () => {
+    const entries = __syncEncryptionServiceTestUtils.buildTransitionEntries(appData([
+      '../victim',
+      'attachments/%2e%2e/victim',
+      '/absolute',
+      'https://evil.example/victim',
+      'data.json',
+      'cloudkit:asset',
+      'attachments/valid.bin',
+    ]));
+
+    expect(entries.filter((entry) => entry.kind === 'attachment').map((entry) => entry.name)).toEqual([
+      'attachments/valid.bin',
+    ]);
+  });
+});
+
+describe('WebDAV remote port error boundaries', () => {
+  const createPort = async () => {
+    asyncStorage.set('@mindwtr_webdav_url', 'https://dav.example.com/mindwtr');
+    return __syncEncryptionServiceTestUtils.createWebdavRemotePort(null);
+  };
+
+  const baseUrl = 'https://dav.example.com/mindwtr';
+  const collectionUrl = `${baseUrl}/attachments/`;
+
+  it('wires the platform PROPFIND request and Basic authentication', async () => {
+    const fetcher = vi.fn(async () => new Response(davMultistatusXml(
+      davResponseXml(collectionUrl, { collection: true }),
+    ), { status: 207 }));
+
+    await expect(__syncEncryptionServiceTestUtils.listWebdavAttachmentKeys(baseUrl, {
+      fetcher,
+      username: 'user',
+      password: 'pass',
+    })).resolves.toEqual([]);
+
+    expect(fetcher).toHaveBeenCalledWith(collectionUrl, expect.objectContaining({
+      method: 'PROPFIND',
+      headers: expect.objectContaining({ Depth: '1', Authorization: 'Basic dXNlcjpwYXNz' }),
+    }));
+  });
+
+  it.each([403, 404])('fails closed on an HTTP %s collection response', async (status) => {
+    const fetcher = vi.fn(async () => new Response(null, { status }));
+    await expect(__syncEncryptionServiceTestUtils.listWebdavAttachmentKeys(baseUrl, { fetcher }))
+      .rejects.toThrow(`PROPFIND failed (${status})`);
+  });
+
+  it('keeps the request deadline active while the PROPFIND response body stalls', async () => {
+    const cancel = vi.fn();
+    const fetcher = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">'));
+      },
+      cancel,
+    }), { status: 207, headers: { 'content-type': 'application/xml' } }));
+
+    await expect(__syncEncryptionServiceTestUtils.listWebdavAttachmentKeys(baseUrl, {
+      fetcher,
+      timeoutMs: 20,
+    })).rejects.toThrow('WebDAV attachment inventory timed out');
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not write any transition artifact when collection validation fails', async () => {
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      if (method === 'PROPFIND') return new Response(null, { status: 403 });
+      if (method !== 'GET') throw new Error('transition attempted a write');
+      if (url.endsWith('/data.json')) {
+        return new Response(new TextEncoder().encode(JSON.stringify(appData([]))), {
+          status: 200,
+          headers: { etag: '"v1"' },
+        });
+      }
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const port = await createPort();
+
+    await expect(runEnableSyncEncryptionOverRemote(
+      PASSPHRASE,
+      port,
+      syncEncryptionKeyCache,
+      syncEncryptionLocalState,
+      undefined,
+      mobileSyncCryptoPrimitives,
+      FAST_PARAMS,
+    )).rejects.toThrow('PROPFIND failed (403)');
+
+    expect(fetcher.mock.calls.every(([, init]) => ['GET', 'PROPFIND'].includes((init?.method ?? 'GET').toUpperCase())))
+      .toBe(true);
+    expect(syncEncryptionLocalState.read()).toBeNull();
+    await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
+  });
+
+  it('propagates a GET 401 instead of treating the artifact as absent', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 401 })));
+    const port = await createPort();
+
+    await expect(port.read('data.json')).rejects.toThrow('WebDAV File GET failed (401)');
+  });
+
+  it('rejects unmanaged artifact names before issuing a request', async () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    const port = await createPort();
+
+    expect(() => port.read('../victim')).toThrow('Invalid sync encryption remote artifact name');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('propagates a GET timeout instead of treating the artifact as absent', async () => {
+    const timeout = new Error('WebDAV request timed out');
+    vi.stubGlobal('fetch', vi.fn(async () => { throw timeout; }));
+    const port = await createPort();
+
+    await expect(port.read('data.json')).rejects.toBe(timeout);
+  });
+
+  it('treats an explicit GET 404 as absence but a conditional DELETE 404 as conflict', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 404 })));
+    const port = await createPort();
+
+    await expect(port.read('data.json')).resolves.toEqual({ bytes: null, version: null });
+    await expect(port.remove('data.json', '"v1"')).rejects.toThrow('WEBDAV_REMOTE_WRITE_CONFLICT');
+  });
+
+  it('propagates a DELETE 500 so the transition cannot commit', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 500 })));
+    const port = await createPort();
+
+    await expect(port.remove('data.json', '"v1"')).rejects.toThrow('WebDAV DELETE failed (500)');
+  });
+
+  it('round-trips an unreferenced attachment from the authoritative collection inventory', async () => {
+    const baseUrl = 'https://dav.example.com/mindwtr';
+    const remote = new Map<string, Uint8Array>([
+      ['data.json', new TextEncoder().encode(JSON.stringify(appData([])))],
+      ['attachments/orphan.bin', new Uint8Array([3, 1, 4, 1, 5])],
+    ]);
+    const revisions = new Map<string, number>(Array.from(remote.keys()).map((name) => [name, 1]));
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const key = url.startsWith(`${baseUrl}/`) ? url.slice(baseUrl.length + 1) : url;
+      if (method === 'PROPFIND') {
+        const responses = [
+          davResponseXml(`${baseUrl}/attachments/`, { collection: true }),
+          ...Array.from(remote.keys())
+            .filter((name) => name.startsWith('attachments/'))
+            .map((name) => davResponseXml(`${baseUrl}/${name}`)),
+        ];
+        return new Response(
+          davMultistatusXml(...responses),
+          { status: 207, headers: { 'content-type': 'application/xml' } },
+        );
+      }
+      if (method === 'GET') {
+        const bytes = remote.get(key);
+        if (!bytes) return new Response(null, { status: 404 });
+        return new Response(bytes.slice() as unknown as BodyInit, {
+          status: 200,
+          headers: { etag: `"v${revisions.get(key) ?? 1}"` },
+        });
+      }
+      if (method === 'PUT') {
+        const headers = new Headers(init?.headers);
+        const current = remote.has(key) ? `"v${revisions.get(key) ?? 1}"` : null;
+        if ((headers.get('if-none-match') === '*' && current)
+          || (headers.has('if-match') && headers.get('if-match') !== current)) {
+          return new Response(null, { status: 412 });
+        }
+        remote.set(key, new Uint8Array(await new Response(init?.body as BodyInit).arrayBuffer()));
+        revisions.set(key, (revisions.get(key) ?? 0) + 1);
+        return new Response(null, { status: 201 });
+      }
+      if (method === 'DELETE') {
+        const current = remote.has(key) ? `"v${revisions.get(key) ?? 1}"` : null;
+        if (!current || new Headers(init?.headers).get('if-match') !== current) {
+          return new Response(null, { status: 412 });
+        }
+        remote.delete(key);
+        revisions.delete(key);
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`unexpected WebDAV request ${method} ${url}`);
+    }));
+    const port = await createPort();
+
+    await runEnableSyncEncryptionOverRemote(
+      PASSPHRASE, port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    );
+    expect(inspectSyncArtifact(remote.get('attachments/orphan.bin')!).kind).toBe('encrypted');
+
+    await runChangeSyncEncryptionPassphraseOverRemote(
+      PASSPHRASE, 'next passphrase', port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    );
+    await runDisableSyncEncryptionOverRemote(
+      port, syncEncryptionKeyCache, syncEncryptionLocalState, undefined, mobileSyncCryptoPrimitives,
+    );
+    expect(remote.get('attachments/orphan.bin')).toEqual(new Uint8Array([3, 1, 4, 1, 5]));
+  }, 30_000);
+
+  it.each([
+    ['missing', undefined],
+    ['weak', 'W/"v1"'],
+  ] as const)('fails an end-to-end transition before writes for a %s ETag', async (_case, etag) => {
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'PROPFIND') {
+        return new Response(
+          davMultistatusXml(davResponseXml(url, { collection: true })),
+          { status: 207, headers: { 'content-type': 'application/xml' } },
+        );
+      }
+      if ((init?.method ?? 'GET') !== 'GET') throw new Error('transition attempted an unsafe write');
+      return new Response(new TextEncoder().encode('{"tasks":[]}'), {
+        status: 200,
+        headers: etag ? { etag } : undefined,
+      });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const port = await createPort();
+
+    await expect(runEnableSyncEncryptionOverRemote(
+      PASSPHRASE,
+      port,
+      syncEncryptionKeyCache,
+      syncEncryptionLocalState,
+      undefined,
+      mobileSyncCryptoPrimitives,
+      FAST_PARAMS,
+    )).rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+
+    expect(syncEncryptionLocalState.read()).toBeNull();
+    await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
+    expect(fetcher.mock.calls.every(([, init]) => ['GET', 'PROPFIND'].includes(init?.method ?? 'GET'))).toBe(true);
+  });
 });
 
 describe('Dropbox remote port + core transition round trip', () => {
   const remote = new Map<string, Uint8Array>();
+  const revisions = new Map<string, number>();
 
   const jsonResponse = (body: unknown, status = 200) =>
-    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json', date: 'Tue, 27 Aug 2026 12:00:00 GMT' },
+    });
 
   beforeEach(() => {
     remote.clear();
+    revisions.clear();
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/files/list_folder')) {
+        const entries = Array.from(remote.keys())
+          .filter((path) => path.startsWith('/attachments/'))
+          .map((path) => ({
+            '.tag': 'file',
+            name: path.slice('/attachments/'.length),
+            path_lower: path.toLowerCase(),
+            path_display: path,
+            rev: `rev${revisions.get(path) ?? 1}`,
+          }));
+        return jsonResponse({ entries, cursor: 'done', has_more: false });
+      }
       const arg = JSON.parse(String((init?.headers as Record<string, string>)?.['Dropbox-API-Arg'] ?? '{}'));
       const path = String(arg.path ?? '');
       if (url.includes('/files/download')) {
         const bytes = remote.get(path);
-        if (!bytes) return new Response(null, { status: 409 });
-        return new Response(new Uint8Array(bytes), { status: 200 });
+        if (!bytes) return jsonResponse({ error_summary: 'path/not_found/..' }, 409);
+        return new Response(new Uint8Array(bytes), {
+          status: 200,
+          headers: {
+            date: 'Tue, 27 Aug 2026 12:00:00 GMT',
+            'Dropbox-API-Result': JSON.stringify({ rev: `rev${revisions.get(path) ?? 1}` }),
+          },
+        });
       }
       if (url.includes('/files/upload')) {
+        const currentRev = remote.has(path) ? `rev${revisions.get(path) ?? 1}` : null;
+        const mode = arg.mode as { '.tag'?: string; update?: string } | undefined;
+        if ((mode?.['.tag'] === 'add' && currentRev)
+          || (mode?.['.tag'] === 'update' && mode.update !== currentRev)) {
+          return jsonResponse({ error_summary: 'path/conflict/file/..' }, 409);
+        }
         remote.set(path, new Uint8Array(await new Response(init?.body as BodyInit).arrayBuffer()));
-        return jsonResponse({ rev: 'rev1' });
+        const next = (revisions.get(path) ?? 0) + 1;
+        revisions.set(path, next);
+        return jsonResponse({ rev: `rev${next}` });
       }
       if (url.includes('/files/delete_v2')) {
         const body = JSON.parse(String(init?.body ?? '{}'));
-        remote.delete(String(body.path ?? ''));
+        const deletePath = String(body.path ?? '');
+        const currentRev = remote.has(deletePath) ? `rev${revisions.get(deletePath) ?? 1}` : null;
+        if (!currentRev || body.parent_rev !== currentRev) {
+          return jsonResponse({ error_summary: 'path_lookup/conflict/..' }, 409);
+        }
+        remote.delete(deletePath);
+        revisions.delete(deletePath);
         return jsonResponse({});
       }
       throw new Error(`unexpected fetch ${url}`);
     }));
+  });
+
+  it('refreshes authorization when attachment inventory returns HTTP 401', async () => {
+    vi.mocked(getValidDropboxAccessToken).mockResolvedValueOnce('expired-token');
+    vi.mocked(forceRefreshDropboxAccessToken).mockResolvedValueOnce('fresh-token');
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      if (!url.includes('/files/list_folder')) throw new Error(`unexpected fetch ${url}`);
+      const authorization = new Headers(init?.headers).get('authorization');
+      if (authorization === 'Bearer expired-token') return new Response(null, { status: 401 });
+      expect(authorization).toBe('Bearer fresh-token');
+      return jsonResponse({ entries: [], cursor: 'done', has_more: false });
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    const port = await __syncEncryptionServiceTestUtils.createDropboxRemotePort(null);
+    await expect(port.list()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'data.json', kind: 'document' }),
+    ]));
+    expect(forceRefreshDropboxAccessToken).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('validates path_lower while preserving the Dropbox file name casing', async () => {
+    const fetcher = vi.fn(async () => jsonResponse({
+      entries: [{
+        '.tag': 'file',
+        name: 'Photo.PNG',
+        path_lower: '/attachments/photo.png',
+        path_display: '/ATTACHMENTS/Photo.PNG',
+      }],
+      cursor: 'done',
+      has_more: false,
+    }));
+
+    await expect(__syncEncryptionServiceTestUtils.listDropboxAttachmentKeys('token', fetcher))
+      .resolves.toEqual(['attachments/Photo.PNG']);
+  });
+
+  it('fails closed when Dropbox path_lower and name identify different files', async () => {
+    const fetcher = vi.fn(async () => jsonResponse({
+      entries: [{
+        '.tag': 'file',
+        name: 'Other.bin',
+        path_lower: '/attachments/first.bin',
+        path_display: '/Attachments/Other.bin',
+      }],
+      cursor: 'done',
+      has_more: false,
+    }));
+
+    await expect(__syncEncryptionServiceTestUtils.listDropboxAttachmentKeys('token', fetcher))
+      .rejects.toThrow('file identity is inconsistent');
+  });
+
+  it('acquires and conditionally releases the shared Dropbox mutation fence', async () => {
+    const port = await __syncEncryptionServiceTestUtils.createDropboxRemotePort(null);
+    const acquire = port.acquireRemoteMutationFence;
+
+    expect(acquire).toBeTypeOf('function');
+    const lease = await acquire!();
+    expect(remote.has(`/${SYNC_REMOTE_MUTATION_FENCE_NAME}`)).toBe(true);
+    await lease.assertHeld();
+    await lease.release();
+    expect(remote.has(`/${SYNC_REMOTE_MUTATION_FENCE_NAME}`)).toBe(false);
   });
 
   it('encrypts and then restores documents and attachments over the wire', async () => {
@@ -219,6 +581,116 @@ describe('Dropbox remote port + core transition round trip', () => {
     await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
   }, 30_000);
 
+  it('migrates a peer-only attachment from the authoritative remote document through every transition', async () => {
+    const peerAttachmentName = 'attachments/peer-only.png';
+    const peerAttachmentBytes = new Uint8Array([9, 8, 7, 6]);
+    const remoteData = appData([peerAttachmentName]);
+    const staleLocalData = appData([]);
+    remote.set('/data.json', new TextEncoder().encode(JSON.stringify(remoteData)));
+    remote.set(`/${peerAttachmentName}`, peerAttachmentBytes);
+
+    const port = await __syncEncryptionServiceTestUtils.createDropboxRemotePort(staleLocalData);
+    await runEnableSyncEncryptionOverRemote(
+      PASSPHRASE, port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    );
+    expect(inspectSyncArtifact(remote.get(`/${peerAttachmentName}`)!).kind).toBe('encrypted');
+
+    await runChangeSyncEncryptionPassphraseOverRemote(
+      PASSPHRASE, 'the next passphrase', port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    );
+    const rotatedKey = await syncEncryptionKeyCache.getKey();
+    expect(rotatedKey).not.toBeNull();
+    await expect(decryptSyncArtifact(
+      remote.get(`/${peerAttachmentName}`)!, rotatedKey!, mobileSyncCryptoPrimitives,
+    )).resolves.toEqual(peerAttachmentBytes);
+
+    await runDisableSyncEncryptionOverRemote(
+      port, syncEncryptionKeyCache, syncEncryptionLocalState, undefined, mobileSyncCryptoPrimitives,
+    );
+    expect(remote.get(`/${peerAttachmentName}`)).toEqual(peerAttachmentBytes);
+  }, 30_000);
+
+  it('uses a backup-only document as the attachment authority through every transition', async () => {
+    const attachmentName = 'attachments/backup-only.png';
+    const attachmentBytes = new Uint8Array([2, 4, 6, 8]);
+    const backupData = appData([attachmentName]);
+    remote.set('/data.json.bak', new TextEncoder().encode(JSON.stringify(backupData)));
+    remote.set(`/${attachmentName}`, attachmentBytes);
+
+    const port = await __syncEncryptionServiceTestUtils.createDropboxRemotePort(appData([]));
+    await runEnableSyncEncryptionOverRemote(
+      PASSPHRASE, port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    );
+    expect(inspectSyncArtifact(remote.get('/data.json.enc.bak')!).kind).toBe('encrypted');
+    expect(inspectSyncArtifact(remote.get(`/${attachmentName}`)!).kind).toBe('encrypted');
+
+    await runChangeSyncEncryptionPassphraseOverRemote(
+      PASSPHRASE, 'the next passphrase', port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    );
+    const changedKey = await syncEncryptionKeyCache.getKey();
+    expect(changedKey).not.toBeNull();
+    await expect(decryptSyncArtifact(
+      remote.get(`/${attachmentName}`)!, changedKey!, mobileSyncCryptoPrimitives,
+    )).resolves.toEqual(attachmentBytes);
+
+    await runDisableSyncEncryptionOverRemote(
+      port, syncEncryptionKeyCache, syncEncryptionLocalState, undefined, mobileSyncCryptoPrimitives,
+    );
+    expect(JSON.parse(new TextDecoder().decode(remote.get('/data.json.bak')!))).toEqual(backupData);
+    expect(remote.get(`/${attachmentName}`)).toEqual(attachmentBytes);
+  }, 30_000);
+
+  it('unions attachment references from every readable current and backup document', async () => {
+    const documents = new Map<string, Uint8Array>([
+      ['data.json', new TextEncoder().encode(JSON.stringify(appData(['attachments/current.png'])))],
+      ['data.json.bak', new TextEncoder().encode(JSON.stringify(appData(['attachments/backup.png'])))],
+    ]);
+    const reads: string[] = [];
+    const inventory = await __syncEncryptionServiceTestUtils.captureTransitionInventory(
+      async (name: string) => {
+        reads.push(name);
+        const bytes = documents.get(name) ?? null;
+        return { bytes, version: bytes ? `version:${name}` : null };
+      },
+      async () => [],
+    );
+
+    expect(inventory.referencedAttachmentKeys).toEqual([
+      'attachments/backup.png',
+      'attachments/current.png',
+    ]);
+    expect(inventory.entries.filter((entry) => entry.kind === 'attachment').map((entry) => entry.name))
+      .toEqual(['attachments/backup.png', 'attachments/current.png']);
+    expect(reads).toEqual(expect.arrayContaining(['attachments/backup.png', 'attachments/current.png']));
+  });
+
+  it('migrates an unreferenced Dropbox attachment from the provider inventory', async () => {
+    const orphanName = '/attachments/orphan.bin';
+    const orphanBytes = new Uint8Array([8, 5, 3, 0, 9]);
+    remote.set('/data.json', new TextEncoder().encode(JSON.stringify(appData([]))));
+    remote.set(orphanName, orphanBytes);
+
+    const port = await __syncEncryptionServiceTestUtils.createDropboxRemotePort(appData([]));
+    await runEnableSyncEncryptionOverRemote(
+      PASSPHRASE, port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    );
+    expect(inspectSyncArtifact(remote.get(orphanName)!).kind).toBe('encrypted');
+
+    await runChangeSyncEncryptionPassphraseOverRemote(
+      PASSPHRASE, 'next passphrase', port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    );
+    await runDisableSyncEncryptionOverRemote(
+      port, syncEncryptionKeyCache, syncEncryptionLocalState, undefined, mobileSyncCryptoPrimitives,
+    );
+    expect(remote.get(orphanName)).toEqual(orphanBytes);
+  }, 30_000);
+
   it('re-running an interrupted enable is a no-op on already-sealed artifacts', async () => {
     const data = appData(['attachments/a0.png']);
     remote.set('/data.json', new TextEncoder().encode(JSON.stringify(data)));
@@ -242,6 +714,115 @@ describe('Dropbox remote port + core transition round trip', () => {
     expect(Buffer.from(remote.get('/data.json.enc')!).toString('base64')).toBe(sealedDoc);
     expect(Buffer.from(remote.get('/attachments/a0.png')!).toString('base64')).toBe(sealedAttachment);
   }, 30_000);
+
+  it('aborts before committing key/state on a Dropbox delete failure and resumes cleanly', async () => {
+    const data = appData([]);
+    remote.set('/data.json', new TextEncoder().encode(JSON.stringify(data)));
+    let failDelete = true;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/files/list_folder')) {
+        const entries = Array.from(remote.keys())
+          .filter((path) => path.startsWith('/attachments/'))
+          .map((path) => ({
+            '.tag': 'file',
+            name: path.slice('/attachments/'.length),
+            path_lower: path.toLowerCase(),
+            path_display: path,
+            rev: `rev${revisions.get(path) ?? 1}`,
+          }));
+        return jsonResponse({ entries, cursor: 'done', has_more: false });
+      }
+      const arg = JSON.parse(String((init?.headers as Record<string, string>)?.['Dropbox-API-Arg'] ?? '{}'));
+      const path = String(arg.path ?? '');
+      if (url.includes('/files/download')) {
+        const bytes = remote.get(path);
+        if (!bytes) return jsonResponse({ error_summary: 'path/not_found/..' }, 409);
+        return new Response(new Uint8Array(bytes), {
+          status: 200,
+          headers: { 'Dropbox-API-Result': JSON.stringify({ rev: `rev${revisions.get(path) ?? 1}` }) },
+        });
+      }
+      if (url.includes('/files/upload')) {
+        const currentRev = remote.has(path) ? `rev${revisions.get(path) ?? 1}` : null;
+        const mode = arg.mode as { '.tag'?: string; update?: string } | undefined;
+        if ((mode?.['.tag'] === 'add' && currentRev)
+          || (mode?.['.tag'] === 'update' && mode.update !== currentRev)) {
+          return jsonResponse({ error_summary: 'path/conflict/file/..' }, 409);
+        }
+        remote.set(path, new Uint8Array(await new Response(init?.body as BodyInit).arrayBuffer()));
+        const next = (revisions.get(path) ?? 0) + 1;
+        revisions.set(path, next);
+        return jsonResponse({ rev: `rev${next}` });
+      }
+      if (url.includes('/files/delete_v2')) {
+        if (failDelete) return jsonResponse({ error_summary: 'internal_error/..' }, 500);
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        const deletePath = String(body.path ?? '');
+        const currentRev = remote.has(deletePath) ? `rev${revisions.get(deletePath) ?? 1}` : null;
+        if (!currentRev || body.parent_rev !== currentRev) {
+          return jsonResponse({ error_summary: 'path_lookup/conflict/..' }, 409);
+        }
+        remote.delete(deletePath);
+        revisions.delete(deletePath);
+        return jsonResponse({});
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+
+    const port = await __syncEncryptionServiceTestUtils.createDropboxRemotePort(data);
+    await expect(runEnableSyncEncryptionOverRemote(
+      PASSPHRASE, port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    )).rejects.toThrow('Dropbox file delete failed: HTTP 500');
+    expect(syncEncryptionLocalState.read()).toEqual({
+      state: 'off',
+      incompleteTransition: 'enable',
+    });
+    await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
+    expect(remote.has('/data.json')).toBe(true);
+    expect(remote.has('/data.json.enc')).toBe(true);
+
+    failDelete = false;
+    await runEnableSyncEncryptionOverRemote(
+      PASSPHRASE, port, syncEncryptionKeyCache, syncEncryptionLocalState,
+      undefined, mobileSyncCryptoPrimitives, FAST_PARAMS,
+    );
+    expect(remote.has('/data.json')).toBe(false);
+    expect(syncEncryptionLocalState.read()?.state).toBe('enabled');
+    await expect(syncEncryptionKeyCache.getKey()).resolves.not.toBeNull();
+  });
+
+  it('treats explicit Dropbox not-found reads as absence and conditional deletes as conflicts', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/files/download')) {
+        return jsonResponse({
+          error: { '.tag': 'path', path: { '.tag': 'not_found' } },
+        }, 409);
+      }
+      if (url.includes('/files/delete_v2')) {
+        return jsonResponse({
+          error: { '.tag': 'path_lookup', path_lookup: { '.tag': 'not_found' } },
+        }, 409);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    const port = await __syncEncryptionServiceTestUtils.createDropboxRemotePort(null);
+
+    await expect(port.read('data.json')).resolves.toEqual({ bytes: null, version: null });
+    await expect(port.remove('data.json', 'rev1')).rejects.toThrow('Dropbox artifact changed');
+  });
+
+  it('propagates a non-not-found Dropbox delete conflict', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/files/delete_v2')) {
+        return jsonResponse({ error: { '.tag': 'too_many_write_operations' } }, 409);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    const port = await __syncEncryptionServiceTestUtils.createDropboxRemotePort(null);
+
+    await expect(port.remove('data.json', 'rev1')).rejects.toThrow('Dropbox artifact changed');
+  });
 });
 
 describe('classifySyncFailure', () => {
@@ -250,6 +831,7 @@ describe('classifySyncFailure', () => {
     expect(classifySyncFailure('SyncEncryptionTerminalError: wrong passphrase or corrupted data'))
       .toBe('encryption');
     expect(classifySyncFailure('unsupported MWENC1 format_version 9')).toBe('encryption');
+    expect(classifySyncFailure(new SyncEncryptionStateUnavailableError())).toBe('encryptionState');
   });
 
   it('leaves the existing classifications alone', () => {

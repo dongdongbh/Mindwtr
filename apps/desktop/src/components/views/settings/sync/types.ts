@@ -185,6 +185,11 @@ export type SettingsSyncLabels = {
     syncEncryptionErrorGeneric: string;
     syncEncryptionErrorRotationFirst: string;
     syncEncryptionErrorBackendRequired: string;
+    syncEncryptionErrorBackendIncompatible: string;
+    syncEncryptionErrorTransitionIncomplete: string;
+    syncEncryptionCleanupDeferred: string;
+    syncEncryptionStateUnavailable: string;
+    syncEncryptionRetry: string;
     syncEncryptionEnableBeforeFirstSyncHint: string;
     syncEncryptionProgressAttachments: string;
     syncEncryptionProgressDocuments: string;
@@ -207,7 +212,14 @@ export type CloudProvider = 'selfhosted' | 'dropbox';
 /** Which message the section shows after a failed transition. `rotation-first` is
  *  the one terminal case with a real remedy: an interrupted passphrase change left
  *  the sync location on two salts, and only re-running the change can heal it. */
-export type SyncEncryptionErrorKind = 'wrong-passphrase' | 'rotation-first' | 'backend-required' | 'generic';
+export type SyncEncryptionErrorKind =
+    | 'wrong-passphrase'
+    | 'rotation-first'
+    | 'backend-required'
+    | 'transition-incomplete'
+    | 'generic';
+
+export type SyncEncryptionWarningKind = 'cleanup-deferred';
 
 /**
  * Everything the Encryption section needs, as one object rather than a dozen flat
@@ -216,8 +228,9 @@ export type SyncEncryptionErrorKind = 'wrong-passphrase' | 'rotation-first' | 'b
  * close its form without re-reading state.
  */
 export type SyncEncryptionController = {
-    /** `null` while the first status read is in flight, or when the backend cannot encrypt. */
+    /** `null` while the first status read is in flight, unavailable, or the backend cannot encrypt. */
     state: SyncEncryptionState | null;
+    stateUnavailable: boolean;
     /** File, WebDAV and Dropbox only — see `isEncryptionCapableBackend`. */
     supported: boolean;
     /** True while no encryption-capable backend is durably active (e.g. a WebDAV config
@@ -227,7 +240,10 @@ export type SyncEncryptionController = {
     busy: boolean;
     progress: SyncEncryptionTransitionProgress | null;
     error: SyncEncryptionErrorKind | null;
+    warning: SyncEncryptionWarningKind | null;
     clearError: () => void;
+    clearWarning: () => void;
+    retryState: () => Promise<void>;
     generatePassphrase: () => string;
     enable: (passphrase: string) => Promise<boolean>;
     disable: () => Promise<boolean>;

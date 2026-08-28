@@ -13,6 +13,8 @@ const baseProps = {
         'recurrence.onLabel': 'On',
         'recurrence.onDayOfMonth': 'Day {day}',
         'recurrence.onNthWeekday': 'The {ordinal} {weekday}',
+        'recurrence.lastDay': 'Last day',
+        'recurrence.lastDayOfMonth': 'Last day of the month',
         'recurrence.ordinal.first': 'First',
         'recurrence.ordinal.second': 'Second',
         'recurrence.ordinal.third': 'Third',
@@ -87,5 +89,21 @@ describe('TaskItemRecurrenceModal', () => {
 
         fireEvent.click(screen.getByRole('button', { name: '16', pressed: true }));
         expect(onMonthDayToggle).toHaveBeenCalledWith(16);
+    });
+
+    it('offers the last day alongside numbered days for mixed monthly rules', () => {
+        const onMonthDayToggle = vi.fn();
+        render(
+            <TaskItemRecurrenceModal
+                {...baseProps}
+                customMonthDays={[-1, 15]}
+                onMonthDayToggle={onMonthDayToggle}
+            />,
+        );
+
+        expect(screen.getByRole('button', { name: 'Day 15 + Last day' })).toBeTruthy();
+        const lastDayToggle = screen.getByRole('button', { name: 'Last day of the month', pressed: true });
+        fireEvent.click(lastDayToggle);
+        expect(onMonthDayToggle).toHaveBeenCalledWith(-1);
     });
 });

@@ -63,6 +63,32 @@ type CloudKitOperationOptions = {
     signal?: AbortSignal;
 };
 
+export const CLOUDKIT_ATTACHMENT_NOT_FOUND_CODE = 'ERR_CLOUDKIT_ATTACHMENT_NOT_FOUND';
+
+export class CloudKitAttachmentNotFoundError extends Error {
+    readonly code = CLOUDKIT_ATTACHMENT_NOT_FOUND_CODE;
+
+    constructor(message = 'CloudKit attachment is no longer available', cause?: unknown) {
+        super(message);
+        this.name = 'CloudKitAttachmentNotFoundError';
+        if (cause !== undefined) {
+            (this as Error & { cause?: unknown }).cause = cause;
+        }
+    }
+}
+
+const getCloudKitErrorCode = (error: unknown): string | null => {
+    if (!error || typeof error !== 'object' || !('code' in error)) return null;
+    return typeof error.code === 'string' ? error.code : null;
+};
+
+export const isCloudKitAttachmentNotFoundError = (
+    error: unknown,
+): boolean => (
+    error instanceof CloudKitAttachmentNotFoundError
+    || getCloudKitErrorCode(error) === CLOUDKIT_ATTACHMENT_NOT_FOUND_CODE
+);
+
 export type CloudKitAttachmentMetadata = {
     recordName?: string;
     attachmentId: string;
@@ -367,11 +393,18 @@ export const fetchCloudKitAttachmentAsset = async (
 ): Promise<CloudKitAttachmentMetadata> => {
     if (!isCloudKitAvailable()) throw new Error('CloudKit is not available on platform');
     throwIfAborted(options.signal, 'CloudKit attachment download cancelled');
-    return runCloudKitOperation(
-        () => CloudKitSync!.fetchAttachmentAsset(recordName, targetPath),
-        options.signal,
-        'CloudKit attachment download cancelled',
-    );
+    try {
+        return await runCloudKitOperation(
+            () => CloudKitSync!.fetchAttachmentAsset(recordName, targetPath),
+            options.signal,
+            'CloudKit attachment download cancelled',
+        );
+    } catch (error) {
+        if (!isCloudKitAttachmentNotFoundError(error)) throw error;
+        if (error instanceof CloudKitAttachmentNotFoundError) throw error;
+        const message = error instanceof Error ? error.message : undefined;
+        throw new CloudKitAttachmentNotFoundError(message, error);
+    }
 };
 
 export const deleteCloudKitAttachmentAssets = async (

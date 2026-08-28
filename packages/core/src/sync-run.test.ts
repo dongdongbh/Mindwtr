@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { AppData, Task } from './types';
+import type { AppData, Project, Task } from './types';
 import type {
     SyncBackendIO,
     SyncRunNotifier,
@@ -14,10 +14,22 @@ import { SyncRemoteWriteConflict } from './sync-run-ports';
 import { normalizeRemoteWriteResult, runSharedSyncCycle } from './sync-run';
 import { normalizeAppData } from './sync-normalization';
 import { cloneAppData } from './sync-runtime-utils';
+import { toRemoteSyncDocument } from './sync-document';
 import type { FastSyncState } from './sync-fast-sync';
-import type { SyncBackend } from './sync-service-utils';
+import {
+    SyncFileGenerationCorruptError,
+    SyncFileLockBusyError,
+    SyncFileLockUnavailableError,
+    type SyncBackend,
+} from './sync-service-utils';
 import type { SyncCycleIO, SyncCycleResult } from './sync-types';
 import { performSyncCycle } from './sync';
+import {
+    SyncRemoteMutationFenceBusyError,
+    SyncRemoteMutationFenceLostError,
+    type SyncRemoteMutationFenceLease,
+} from './sync-remote-fence';
+import { AttachmentUploadTooLargeError } from './attachment-transfer';
 
 const NOW = new Date('2026-07-13T10:00:00.000Z');
 const STAMP = '2026-07-01T00:00:00.000Z';
@@ -37,6 +49,14 @@ const createData = (tasks: Task[] = [], settings: AppData['settings'] = {}): App
     areas: [],
     people: [],
     settings,
+});
+
+const createFenceLease = (overrides: Partial<SyncRemoteMutationFenceLease> = {}): SyncRemoteMutationFenceLease => ({
+    assertHeld: vi.fn().mockResolvedValue(undefined),
+    renew: vi.fn().mockResolvedValue(undefined),
+    release: vi.fn().mockResolvedValue(undefined),
+    retryAfterMs: vi.fn(() => 5_000),
+    ...overrides,
 });
 
 type HarnessConfig = {
@@ -138,6 +158,7 @@ const createHarness = (config: HarnessConfig = {}) => {
             fastSyncScope: config.fastSyncScope ?? null,
         })),
         requestFollowUp: vi.fn(),
+        requestFollowUpAfter: vi.fn(),
         formatErrorMessage: (error, backend) => `[${backend}] ${error instanceof Error ? error.message : String(error)}`,
         finalizeErrorStatus: vi.fn(async () => {}),
         finalizeSuccess: vi.fn(async () => {}),
@@ -155,11 +176,13 @@ const createHarness = (config: HarnessConfig = {}) => {
     const run = (options: {
         manual?: boolean;
         activationProbe?: boolean;
+        fileSyncLockBusyRetryAttempt?: number;
         ignorePendingRemoteWriteBackoff?: boolean;
     } = {}) => runSharedSyncCycle({
         options: {
             manual: config.manual ?? options.manual,
             activationProbe: config.activationProbe ?? options.activationProbe,
+            fileSyncLockBusyRetryAttempt: options.fileSyncLockBusyRetryAttempt,
             ignorePendingRemoteWriteBackoff: config.ignorePendingRemoteWriteBackoff
                 ?? options.ignorePendingRemoteWriteBackoff,
         },
@@ -288,6 +311,128 @@ describe('runSharedSyncCycle', () => {
         expect(harness.diagnostics).toEqual(expect.arrayContaining(['flush', 'merge-complete']));
     });
 
+    it('does not finalize-upload stale local bytes when newer remote attachment content wins', async () => {
+        const localTask = createTask('t-shared', 'Shared task');
+        localTask.attachments = [{
+            id: 'attachment-shared',
+            kind: 'file',
+            title: 'notes.txt',
+            uri: '/local/notes.txt',
+            cloudKey: 'attachments/notes.txt',
+            fileHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            contentRev: 1,
+            contentMtimeMs: 1000,
+            contentSize: 10,
+            localStatus: 'available',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const remoteTask = cloneAppData(createData([localTask])).tasks[0]!;
+        remoteTask.updatedAt = '2026-07-02T00:00:00.000Z';
+        remoteTask.attachments![0] = {
+            ...remoteTask.attachments![0]!,
+            uri: '',
+            fileHash: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+            contentRev: 3,
+            contentMtimeMs: undefined,
+            contentSize: undefined,
+            localStatus: 'missing',
+            updatedAt: '2026-07-02T00:00:00.000Z',
+        };
+        const seenPhases: string[] = [];
+        const syncAttachments = vi.fn(async (data: AppData, helpers: { phase?: string }) => {
+            seenPhases.push(helpers.phase ?? 'unknown');
+            if (helpers.phase !== 'prepare') return false;
+            const next = cloneAppData(data);
+            const attachment = next.tasks[0]?.attachments?.[0];
+            if (attachment) {
+                attachment.fileHash = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+                attachment.contentRev = 2;
+                attachment.contentMtimeMs = 2000;
+                attachment.contentSize = 20;
+                attachment.pendingContentUpload = true;
+            }
+            return next;
+        });
+        const { harness, io, run } = createHarness({
+            local: createData([localTask]),
+            remote: createData([remoteTask]),
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result.success).toBe(true);
+        expect(seenPhases).toEqual(['prepare', 'post-merge']);
+        expect(io.writeRemote).toHaveBeenCalledTimes(1);
+        expect(harness.remote?.tasks[0]?.attachments?.[0]).toMatchObject({
+            cloudKey: 'attachments/notes.txt',
+            fileHash: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+            contentRev: 3,
+        });
+        expect(harness.remote?.tasks[0]?.attachments?.[0]?.pendingContentUpload).toBeUndefined();
+    });
+
+    it('blocks a CloudKit document write while an existing blob replacement is pending', async () => {
+        const localTask = createTask('t-cloudkit-replacement', 'CloudKit replacement');
+        localTask.attachments = [{
+            id: 'attachment-cloudkit-replacement',
+            kind: 'file',
+            title: 'notes.txt',
+            uri: '/local/notes.txt',
+            cloudKey: 'cloudkit:notes',
+            fileHash: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            contentRev: 2,
+            contentMtimeMs: 2000,
+            contentSize: 20,
+            pendingContentUpload: true,
+            localStatus: 'available',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const local = createData([localTask]);
+        const { io, run } = createHarness({
+            local,
+            remote: toRemoteSyncDocument(cloneAppData(local)),
+            backend: 'cloudkit',
+            io: { syncAttachments: vi.fn(async () => false) },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: false,
+            error: expect.stringContaining('Attachment upload incomplete'),
+        });
+        expect(io.writeRemote).not.toHaveBeenCalled();
+    });
+
+    it('still permits CloudKit metadata for a local-only attachment with no cloud key', async () => {
+        const localTask = createTask('t-cloudkit-local-only', 'CloudKit local only');
+        localTask.attachments = [{
+            id: 'attachment-cloudkit-local-only',
+            kind: 'file',
+            title: 'notes.txt',
+            uri: '/local/notes.txt',
+            localStatus: 'available',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const local = createData([localTask]);
+        const { io, run } = createHarness({
+            local,
+            remote: cloneAppData(local),
+            backend: 'cloudkit',
+            io: { syncAttachments: vi.fn(async () => false) },
+        });
+
+        const result = await run();
+
+        expect(result.success).toBe(true);
+        expect(result.attachmentWriteDeferred).toBeFalsy();
+        expect(io.writeRemote).toHaveBeenCalledTimes(1);
+    });
+
     it('keeps candidate remote data out of durable local storage when an activation probe fails', async () => {
         const local = createData([createTask('t-local', 'Local task')]);
         const remote = createData([createTask('t-remote', 'Remote task')]);
@@ -321,7 +466,7 @@ describe('runSharedSyncCycle', () => {
                 expect.objectContaining({ id: 't-local' }),
                 expect.objectContaining({ id: 't-remote' }),
             ]),
-        }));
+        }), expect.any(Function));
         expect(harness.persisted.tasks.map((task) => task.id)).toEqual(['t-local']);
         expect(storage.persistLocal).not.toHaveBeenCalled();
         expect(injectExternalCalendars).not.toHaveBeenCalled();
@@ -351,6 +496,28 @@ describe('runSharedSyncCycle', () => {
         expect(hooks.requestFollowUp).not.toHaveBeenCalled();
         expect(hooks.finalizeSuccess).not.toHaveBeenCalled();
         expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
+    });
+
+    it('does not scan or delete File Sync generations after an activation CAS conflict', async () => {
+        const initialRemote = createData([createTask('t-remote', 'Initial remote')]);
+        const readRemote = vi.fn().mockResolvedValueOnce(cloneAppData(initialRemote));
+        const { storage, run } = createHarness({
+            activationProbe: true,
+            backend: 'file',
+            remote: initialRemote,
+            io: {
+                readRemote,
+                writeRemote: vi.fn(async () => {
+                    throw new SyncRemoteWriteConflict();
+                }),
+            },
+        });
+
+        const result = await run();
+
+        expect(result).toEqual({ success: true, skipped: 'requeued' });
+        expect(readRemote).toHaveBeenCalledTimes(1);
+        expect(storage.persistLocal).not.toHaveBeenCalled();
     });
 
     it('does not persist candidate attachment metadata when an activation probe requeues', async () => {
@@ -429,6 +596,7 @@ describe('runSharedSyncCycle', () => {
             expect(helpers.activationProbe).toBe(true);
             const attachment = data.tasks[0]?.attachments?.[0];
             expect(attachment?.localStatus).toBe('missing');
+            expect(attachment?.cloudKey).toBeUndefined();
             if (attachment) {
                 attachment.cloudKey = 'attachments/a.txt';
                 attachment.localStatus = 'available';
@@ -454,9 +622,67 @@ describe('runSharedSyncCycle', () => {
                     ]),
                 }),
             ]),
-        }));
+        }), expect.any(Function));
         expect(harness.persisted.tasks[0]?.attachments?.[0]?.cloudKey).toBe('cloudkit:a');
         expect(storage.persistLocal).not.toHaveBeenCalled();
+    });
+
+    it('marks a newer local content winner for upload while retaining the candidate key during activation', async () => {
+        const localTask = createTask('t-local-content-winner', 'Attached task');
+        localTask.attachments = [{
+            id: 'attachment-local-content-winner',
+            kind: 'file',
+            title: 'Notes',
+            uri: '/local/notes.txt',
+            cloudKey: 'cloudkit:old-backend',
+            fileHash: 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+            contentRev: 4,
+            contentMtimeMs: 4000,
+            contentSize: 40,
+            localStatus: 'available',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const remoteTask = cloneAppData(createData([localTask])).tasks[0]!;
+        remoteTask.attachments![0] = {
+            ...remoteTask.attachments![0]!,
+            uri: '',
+            cloudKey: 'attachments/candidate.txt',
+            fileHash: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+            contentRev: 3,
+            contentMtimeMs: undefined,
+            contentSize: undefined,
+            localStatus: 'missing',
+        };
+        const syncAttachments = vi.fn(async (data: AppData) => {
+            const attachment = data.tasks[0]?.attachments?.[0];
+            expect(attachment?.cloudKey).toBe('attachments/candidate.txt');
+            expect(attachment?.fileHash).toBe('dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd');
+            expect(attachment?.contentRev).toBe(4);
+            expect(attachment?.pendingContentUpload).toBe(true);
+            if (attachment) {
+                attachment.pendingContentUpload = undefined;
+                attachment.localStatus = 'available';
+            }
+            return data;
+        });
+        const { harness, io, run } = createHarness({
+            local: createData([localTask]),
+            remote: createData([remoteTask]),
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({ success: true });
+        expect(syncAttachments).toHaveBeenCalledTimes(1);
+        expect(harness.remote?.tasks[0]?.attachments?.[0]).toMatchObject({
+            cloudKey: 'attachments/candidate.txt',
+            fileHash: 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+            contentRev: 4,
+        });
+        expect(io.writeRemote).toHaveBeenCalledTimes(1);
     });
 
     it('keeps a candidate-proven attachment key when newer remote metadata points to a missing object', async () => {
@@ -484,6 +710,12 @@ describe('runSharedSyncCycle', () => {
         };
         const syncAttachments = vi.fn(async (data: AppData) => {
             const attachment = data.tasks[0]?.attachments?.[0];
+            // The key came from the candidate document just read. Keeping it is
+            // what prevents stale local bytes from replacing that remote winner;
+            // the old-backend key never reaches the candidate adapter.
+            expect(attachment?.cloudKey).toBe('attachments/missing-on-candidate.txt');
+            expect(attachment?.pendingContentUpload).toBeUndefined();
+            expect(attachment?.uri).toBe('');
             if (attachment) {
                 attachment.cloudKey = 'attachments/proven-on-candidate.txt';
                 attachment.localStatus = 'available';
@@ -741,6 +973,267 @@ describe('runSharedSyncCycle', () => {
         expect(harness.statusUpdates.at(-1)).toMatchObject({ lastSyncStatus: 'success' });
         expect(harness.uiErrors.at(-1)).toBeNull();
         expect(harness.infos.some((info) => info.message === 'Sync fast check found no changes')).toBe(true);
+    });
+
+    it('keeps a genuine unchanged fast-check lock-free', async () => {
+        const aligned = createData([createTask('t-aligned', 'Aligned task')]);
+        const acquireRemoteMutationFence = vi.fn().mockResolvedValue(createFenceLease());
+        const { run } = createHarness({
+            local: aligned,
+            remote: aligned,
+            fastSyncScope: 'scope-fence-fast-skip',
+            io: { acquireRemoteMutationFence },
+        });
+
+        expect((await run()).skipped).toBeUndefined();
+        expect(acquireRemoteMutationFence).toHaveBeenCalledTimes(1);
+
+        expect(await run()).toMatchObject({ success: true, skipped: 'unchanged' });
+        expect(acquireRemoteMutationFence).toHaveBeenCalledTimes(1);
+    });
+
+    it('holds the remote mutation fence from the authoritative read through finalization', async () => {
+        const callOrder: string[] = [];
+        const lease = createFenceLease({
+            assertHeld: vi.fn(async () => { callOrder.push('assert-held'); }),
+            release: vi.fn(async () => { callOrder.push('release'); }),
+        });
+        const bundle = createHarness({
+            remote: createData([createTask('t-remote', 'Remote task')]),
+            io: {
+                acquireRemoteMutationFence: vi.fn(async () => {
+                    callOrder.push('acquire');
+                    return lease;
+                }),
+                readRemote: vi.fn(async () => {
+                    callOrder.push('read-remote');
+                    return cloneAppData(bundle.harness.remote!);
+                }),
+                writeRemote: vi.fn(async () => {
+                    callOrder.push('write-remote');
+                }),
+            },
+            hooks: {
+                finalizeSuccess: vi.fn(async () => { callOrder.push('finalize'); }),
+            },
+        });
+
+        expect((await bundle.run()).success).toBe(true);
+        expect(callOrder.indexOf('acquire')).toBeLessThan(callOrder.indexOf('read-remote'));
+        expect(callOrder.indexOf('read-remote')).toBeLessThan(callOrder.indexOf('write-remote'));
+        expect(callOrder.indexOf('write-remote')).toBeLessThan(callOrder.indexOf('finalize'));
+        expect(callOrder.indexOf('finalize')).toBeLessThan(callOrder.indexOf('release'));
+        expect(lease.assertHeld).toHaveBeenCalled();
+    });
+
+    it('discards a read-check snapshot and rereads after acquiring the fence', async () => {
+        const staleRemote = createData([createTask('t-stale', 'Stale remote task')]);
+        const authoritativeRemote = createData([createTask('t-current', 'Current remote task')]);
+        const bundle = createHarness({
+            local: createData([createTask('t-local', 'Local task')]),
+            remote: staleRemote,
+            policy: { enableReadCheckSkip: true },
+            io: {
+                acquireRemoteMutationFence: vi.fn(async () => {
+                    bundle.harness.remote = cloneAppData(authoritativeRemote);
+                    return createFenceLease();
+                }),
+            },
+        });
+
+        expect((await bundle.run()).success).toBe(true);
+        expect(bundle.io.readRemote).toHaveBeenCalledTimes(2);
+        expect(bundle.harness.persisted.tasks.map((task) => task.id).sort()).toEqual(['t-current', 't-local']);
+        expect(bundle.harness.persisted.tasks.some((task) => task.id === 't-stale')).toBe(false);
+    });
+
+    it('defers a busy fence without recording an error or touching data', async () => {
+        const { io, storage, hooks, run } = createHarness({
+            io: {
+                acquireRemoteMutationFence: vi.fn(async () => {
+                    throw new SyncRemoteMutationFenceBusyError(5_000);
+                }),
+            },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: true,
+            skipped: 'remoteFenceBusy',
+            remoteFenceDeferred: 'busy',
+            retryAfterMs: 5_000,
+        });
+        expect(hooks.requestFollowUpAfter).toHaveBeenCalledWith(5_000);
+        expect(io.readRemote).not.toHaveBeenCalled();
+        expect(io.writeRemote).not.toHaveBeenCalled();
+        expect(storage.persistLocal).not.toHaveBeenCalled();
+        expect(hooks.finalizeSuccess).not.toHaveBeenCalled();
+        expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
+    });
+
+    it('defers a busy File Sync lock with a bounded follow-up and no persisted error', async () => {
+        const requestFileSyncLockBusyFollowUpAfter = vi.fn();
+        const { io, storage, hooks, run } = createHarness({
+            backend: 'file',
+            hooks: {
+                setupCycle: vi.fn(async () => {
+                    throw new SyncFileLockBusyError(5_000);
+                }),
+                requestFileSyncLockBusyFollowUpAfter,
+            },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: true,
+            skipped: 'fileSyncLockBusy',
+            fileSyncLockDeferred: 'busy',
+            retryAfterMs: 5_000,
+        });
+        expect(requestFileSyncLockBusyFollowUpAfter).toHaveBeenCalledWith(5_000, 1);
+        expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
+        expect(io.readRemote).not.toHaveBeenCalled();
+        expect(storage.persistLocal).not.toHaveBeenCalled();
+        expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
+    });
+
+    it('does not auto-retry File Sync contention when the platform omits the bounded-retry hook', async () => {
+        const { hooks, run } = createHarness({
+            backend: 'file',
+            hooks: {
+                setupCycle: vi.fn(async () => {
+                    throw new SyncFileLockBusyError(5_000);
+                }),
+            },
+        });
+
+        await expect(run()).resolves.toMatchObject({
+            success: true,
+            skipped: 'fileSyncLockBusy',
+            fileSyncLockDeferred: 'busy',
+        });
+        expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
+    });
+
+    it('does not retain a transient activation candidate when its File Sync lock is busy', async () => {
+        const { hooks, run } = createHarness({
+            backend: 'file',
+            activationProbe: true,
+            hooks: {
+                setupCycle: vi.fn(async () => {
+                    throw new SyncFileLockBusyError(5_000);
+                }),
+            },
+        });
+
+        await expect(run()).resolves.toMatchObject({
+            success: true,
+            skipped: 'fileSyncLockBusy',
+            fileSyncLockDeferred: 'busy',
+        });
+        expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
+    });
+
+    it('stops after one deferred File Sync lock retry while remaining neutral', async () => {
+        const { hooks, run } = createHarness({
+            backend: 'file',
+            hooks: {
+                setupCycle: vi.fn(async () => {
+                    throw new SyncFileLockBusyError(5_000);
+                }),
+            },
+        });
+
+        await expect(run({ fileSyncLockBusyRetryAttempt: 1 })).resolves.toMatchObject({
+            success: true,
+            skipped: 'fileSyncLockBusy',
+            fileSyncLockDeferred: 'busy',
+        });
+        expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
+    });
+
+    it('fails closed with an actionable outcome when safe File Sync locking is unavailable', async () => {
+        const { hooks, run } = createHarness({
+            backend: 'file',
+            hooks: {
+                setupCycle: vi.fn(async () => {
+                    throw new SyncFileLockUnavailableError();
+                }),
+            },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: false,
+            fileSyncLockUnavailable: true,
+        });
+        expect(result.error).toContain('Safe File Sync locking is unavailable');
+        expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
+        expect(hooks.finalizeErrorStatus).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([false, true])(
+        'returns terminal corrupt-generation guidance without scheduling a retry (activationProbe=%s)',
+        async (activationProbe) => {
+            const { hooks, run } = createHarness({
+                backend: 'file',
+                hooks: {
+                    setupCycle: vi.fn(async () => {
+                        throw new SyncFileGenerationCorruptError();
+                    }),
+                },
+            });
+
+            await expect(run({ activationProbe })).resolves.toMatchObject({
+                success: false,
+                fileGenerationCorrupt: true,
+            });
+            expect(hooks.requestFollowUp).not.toHaveBeenCalled();
+            expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
+            expect(hooks.finalizeErrorStatus).toHaveBeenCalledTimes(activationProbe ? 0 : 1);
+        },
+    );
+
+    it('marks a successful run cleanup-deferred when conditional fence release fails', async () => {
+        const lease = createFenceLease({
+            release: vi.fn().mockRejectedValue(new Error('Dropbox versioned file delete timed out')),
+            retryAfterMs: vi.fn(() => 12_345),
+        });
+        const { hooks, run } = createHarness({
+            io: { acquireRemoteMutationFence: vi.fn().mockResolvedValue(lease) },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: true,
+            remoteFenceDeferred: 'cleanup',
+            retryAfterMs: 12_345,
+        });
+        expect(hooks.requestFollowUpAfter).toHaveBeenCalledWith(12_345);
+        expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
+    });
+
+    it('does not downgrade fence loss during attachment pre-sync into a warning', async () => {
+        const lost = new SyncRemoteMutationFenceLostError();
+        const lease = createFenceLease({ assertHeld: vi.fn().mockRejectedValue(lost) });
+        const { io, storage, run } = createHarness({
+            io: {
+                acquireRemoteMutationFence: vi.fn().mockResolvedValue(lease),
+                syncAttachments: vi.fn().mockResolvedValue(false),
+            },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({ success: false });
+        expect(io.readRemote).not.toHaveBeenCalled();
+        expect(io.writeRemote).not.toHaveBeenCalled();
+        expect(storage.persistLocal).not.toHaveBeenCalled();
+        expect(result.hadAttachmentWarning).toBeUndefined();
     });
 
     it('does not record an unchanged fast sync when local data changes during the remote fingerprint read', async () => {
@@ -1004,6 +1497,146 @@ describe('runSharedSyncCycle', () => {
 
         expect(result.success).toBe(true);
         expect(result.remoteWriteDeferred).toBeFalsy();
+        expect(result.attachmentWriteDeferred).toBeFalsy();
+    });
+
+    it('reports durable attachment work without hiding synced task and project data or queuing retries', async () => {
+        const task = createTask('t-attachment-deferred', 'Task data still syncs');
+        task.attachments = [{
+            id: 'attachment-deferred',
+            kind: 'file',
+            title: 'notes.txt',
+            uri: '/local/notes.txt',
+            cloudKey: 'attachments/notes.txt',
+            fileHash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            contentRev: 1,
+            contentMtimeMs: 1000,
+            contentSize: 10,
+            localStatus: 'available',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const local = createData([task]);
+        local.projects = [{
+            id: 'p-attachment-deferred',
+            title: 'Project data still syncs',
+            status: 'active',
+            color: '#3b82f6',
+            order: 0,
+            tagIds: [],
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        } satisfies Project];
+        let attachmentPass = 0;
+        const syncAttachments = vi.fn(async (data: AppData) => {
+            attachmentPass += 1;
+            if (attachmentPass === 1) return data;
+            const next = cloneAppData(data);
+            const attachment = next.tasks[0]?.attachments?.[0];
+            if (attachment) {
+                attachment.pendingContentUpload = true;
+                attachment.localStatus = 'missing';
+            }
+            return next;
+        });
+        const { harness, hooks, run } = createHarness({
+            local,
+            remote: null,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result.success).toBe(true);
+        expect(result.attachmentWriteDeferred).toBe(true);
+        expect(syncAttachments).toHaveBeenCalledTimes(2);
+        expect(harness.remote?.tasks[0]?.title).toBe('Task data still syncs');
+        expect(harness.remote?.projects[0]?.title).toBe('Project data still syncs');
+        expect(harness.persisted.tasks[0]?.attachments?.[0]).toMatchObject({
+            pendingContentUpload: true,
+            localStatus: 'missing',
+        });
+        expect(hooks.requestFollowUp).not.toHaveBeenCalled();
+        expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
+    });
+
+    it('returns a neutral typed File Sync block for an oversized pending upload without retrying or changing metadata', async () => {
+        const task = createTask('t-oversized-file', 'Oversized attachment');
+        task.attachments = [{
+            id: 'attachment-oversized-file',
+            kind: 'file',
+            title: 'archive.zip',
+            uri: '/local/archive.zip',
+            cloudKey: 'attachments/archive.old.zip',
+            fileHash: 'ab'.repeat(32),
+            contentRev: 4,
+            contentMtimeMs: 1000,
+            contentSize: 42,
+            pendingContentUpload: true,
+            localStatus: 'available',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const local = createData([task]);
+        const syncAttachments = vi.fn(async () => {
+            throw new AttachmentUploadTooLargeError(101, 100);
+        });
+        const { harness, hooks, io, run } = createHarness({
+            local,
+            remote: cloneAppData(local),
+            backend: 'file',
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: true,
+            fileAttachmentUploadBlocked: 'too-large',
+        });
+        expect(result.hadAttachmentWarning).toBeUndefined();
+        expect(harness.persisted.tasks[0]?.attachments?.[0]).toEqual(local.tasks[0]?.attachments?.[0]);
+        expect(harness.remote?.tasks[0]?.attachments?.[0]).toEqual(local.tasks[0]?.attachments?.[0]);
+        expect(io.writeRemote).not.toHaveBeenCalled();
+        expect(hooks.requestFollowUp).not.toHaveBeenCalled();
+        expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
+        expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
+    });
+
+    it('fails a File Sync activation probe actionably when an attachment exceeds the buffered cap', async () => {
+        const task = createTask('t-oversized-activation', 'Oversized activation attachment');
+        task.attachments = [{
+            id: 'attachment-oversized-activation',
+            kind: 'file',
+            title: 'archive.zip',
+            uri: '/local/archive.zip',
+            localStatus: 'available',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const syncAttachments = vi.fn(async () => {
+            throw new AttachmentUploadTooLargeError(101, 100);
+        });
+        const { harness, hooks, io, storage, run } = createHarness({
+            local: createData([task]),
+            remote: null,
+            backend: 'file',
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result).toEqual({
+            success: false,
+            fileAttachmentUploadBlocked: 'too-large',
+        });
+        expect(io.writeRemote).not.toHaveBeenCalled();
+        expect(storage.persistLocal).not.toHaveBeenCalled();
+        expect(harness.persisted.tasks[0]?.attachments?.[0]).toEqual(task.attachments[0]);
+        expect(hooks.requestFollowUp).not.toHaveBeenCalled();
+        expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
+        expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
     });
 
     it('aborts to a requeued skip when local data changes mid-cycle', async () => {
@@ -1169,6 +1802,35 @@ describe('runSharedSyncCycle', () => {
         expect(second.skipped).toBe('unchanged');
         // Mobile order: the pre-sync ran again even though the cycle then skipped.
         expect(mobileAttachments.mock.calls.length).toBeGreaterThan(mobileCalls);
+    });
+
+    it('preserves an oversized File attachment block when mobile pre-sync is followed by an unchanged fast skip', async () => {
+        let attachmentIsOversized = false;
+        const syncAttachments = vi.fn(async () => {
+            if (attachmentIsOversized) {
+                throw new AttachmentUploadTooLargeError(101, 100);
+            }
+            return false;
+        });
+        const { hooks, run } = createHarness({
+            backend: 'file',
+            fastSyncScope: 'scope-file-oversized-fast-skip',
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: { syncAttachments },
+        });
+        expect((await run()).skipped).toBeUndefined();
+
+        attachmentIsOversized = true;
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: true,
+            skipped: 'unchanged',
+            fileAttachmentUploadBlocked: 'too-large',
+        });
+        expect(hooks.requestFollowUp).not.toHaveBeenCalled();
+        expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
+        expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
     });
 
     it('persists attachment pre-sync mutations when the cycle aborts before writing locally', async () => {
@@ -1354,6 +2016,24 @@ describe('runSharedSyncCycle', () => {
             invalidateFastSyncState: false,
         }));
         const { run } = createHarness({
+            local,
+            remote: createData([createTask('t-remote', 'Remote task')]),
+            hooks: { runAttachmentCleanup },
+        });
+
+        const result = await run();
+
+        expect(result.success).toBe(true);
+        expect(runAttachmentCleanup).not.toHaveBeenCalled();
+    });
+
+    it('keeps File Sync cleanup interval-gated when there is no tombstone work', async () => {
+        const local = createData([createTask('t-local', 'Local task')], {
+            attachments: { lastCleanupAt: new Date().toISOString() },
+        });
+        const runAttachmentCleanup = vi.fn(async () => null);
+        const { run } = createHarness({
+            backend: 'file',
             local,
             remote: createData([createTask('t-remote', 'Remote task')]),
             hooks: { runAttachmentCleanup },

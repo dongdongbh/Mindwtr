@@ -1,6 +1,11 @@
-import type { AppData } from './types';
+import type { AppData, Attachment } from './types';
 import type { CloudProvider } from './sync-client-helpers';
 import type { SyncBackend } from './sync-service-utils';
+import {
+    isSyncFileGenerationCorruptError,
+    SyncFileLockBusyError,
+    SyncFileLockUnavailableError,
+} from './sync-service-utils';
 import type { SyncCycleIO, SyncCycleResult, SyncHistoryEntry } from './sync-types';
 import type {
     SyncBackendIO,
@@ -19,8 +24,10 @@ import type {
 import { SyncRemoteWriteConflict } from './sync-run-ports';
 import { LocalSyncAbort, ensureFreshLocalSyncSnapshot, getInMemoryAppDataSnapshot, shouldRunAttachmentCleanup } from './sync-client-helpers';
 import { hasFreshAttachmentCleanupWork } from './attachment-cleanup';
+import { isAttachmentUploadTooLargeError } from './attachment-transfer';
 import { flushPendingSave, useTaskStore } from './store';
 import {
+    assertNoPendingAttachmentContentReplacements,
     assertNoPendingAttachmentUploads,
     computeSyncChangeFingerprint,
     findPendingAttachmentUploads,
@@ -43,6 +50,13 @@ import { buildMergeSummaryLog, buildPendingAttachmentUploadLogExtra } from './sy
 import { CLOCK_SKEW_THRESHOLD_MS } from './sync-types';
 import { appendSyncHistory, mergeAppData, performSyncCycle } from './sync';
 import { hasUncompactedPurgedTombstones } from './tombstone-compaction';
+import {
+    isSyncRemoteMutationFenceError,
+    SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS,
+    SyncRemoteMutationFenceBusyError,
+    SyncRemoteMutationFenceUnavailableError,
+    type SyncRemoteMutationFenceLease,
+} from './sync-remote-fence';
 
 /**
  * ADR 0014 — the platform-independent sync cycle state machine.
@@ -96,6 +110,7 @@ type SharedSyncRunState = {
     lastRemoteWriteMergedServerData: boolean;
     webdavRemoteCorrupted: boolean;
     hadAttachmentWarning: boolean;
+    fileAttachmentUploadBlocked: 'too-large' | null;
 };
 
 const DEFAULT_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -146,12 +161,50 @@ const visitLiveFileAttachments = (
     return count;
 };
 
-const prepareActivationAttachmentSnapshot = (data: AppData): { data: AppData; count: number } => {
+const mergedContentMustReplaceCandidateBlob = (
+    merged: Attachment,
+    candidate: Attachment,
+): boolean => {
+    const mergedRev = merged.contentRev ?? 0;
+    const candidateRev = candidate.contentRev ?? 0;
+    if (mergedRev !== candidateRev) return mergedRev > candidateRev;
+    if (!merged.fileHash || !candidate.fileHash) return false;
+    return merged.fileHash.toLowerCase() !== candidate.fileHash.toLowerCase();
+};
+
+const prepareActivationAttachmentSnapshot = (
+    data: AppData,
+    candidateRemoteData: AppData | null,
+): { data: AppData; count: number } => {
+    const candidateAttachments = new Map<string, Attachment>();
+    if (candidateRemoteData) {
+        visitLiveFileAttachments(candidateRemoteData, (attachment) => {
+            candidateAttachments.set(attachment.id, attachment);
+        });
+    }
     const candidate = cloneAppData(data);
     const count = visitLiveFileAttachments(candidate, (attachment) => {
-        // A candidate adapter must actively rediscover local presence. Leaving
-        // the old status intact would let a skipped/capped transfer look like
-        // proof that the candidate backend has the blob.
+        const candidateAttachment = candidateAttachments.get(attachment.id);
+        const mustReplaceCandidateBlob = Boolean(
+            candidateAttachment?.cloudKey
+            && mergedContentMustReplaceCandidateBlob(attachment, candidateAttachment),
+        );
+        // Only a key read from the candidate destination belongs to that
+        // destination. A local/previous-backend key is cleared so the adapter
+        // creates the missing candidate blob; a candidate key is preserved so
+        // stale local bytes can never replace an already-present remote winner.
+        // If the merged content identity instead came from the local snapshot,
+        // retain that destination key but explicitly require the adapter to
+        // replace its older blob before publishing the merged metadata.
+        attachment.cloudKey = candidateAttachment?.cloudKey;
+        attachment.pendingContentUpload = mustReplaceCandidateBlob ? true : undefined;
+        // A candidate-remote winner must be downloaded even when an unrelated
+        // local file exists at the merged uri. Clearing only this temporary clone's
+        // uri makes successful download the proof and prevents localStatus alone
+        // from turning a missing candidate object into a false positive.
+        if (candidateAttachment?.cloudKey && !mustReplaceCandidateBlob) {
+            attachment.uri = '';
+        }
         attachment.localStatus = 'missing';
     });
     return { data: candidate, count };
@@ -160,7 +213,11 @@ const prepareActivationAttachmentSnapshot = (data: AppData): { data: AppData; co
 const assertActivationAttachmentsProven = (data: AppData, expectedCount: number): void => {
     let provenCount = 0;
     visitLiveFileAttachments(data, (attachment) => {
-        if (!attachment.cloudKey || attachment.localStatus !== 'available') {
+        if (
+            !attachment.cloudKey
+            || attachment.localStatus !== 'available'
+            || attachment.pendingContentUpload === true
+        ) {
             throw new Error(`Candidate attachment proof failed for ${attachment.id}`);
         }
         provenCount += 1;
@@ -181,6 +238,7 @@ class SharedSyncRunMachine {
     private readonly cleanupIntervalMs: number;
     private readonly performSyncCycleImpl: (io: SyncCycleIO) => Promise<SyncCycleResult>;
     private io: SyncBackendIO | null = null;
+    private remoteMutationFence: SyncRemoteMutationFenceLease | null = null;
     private readonly state: SharedSyncRunState = {
         backend: 'off',
         cloudProvider: 'selfhosted',
@@ -196,6 +254,7 @@ class SharedSyncRunMachine {
         lastRemoteWriteMergedServerData: false,
         webdavRemoteCorrupted: false,
         hadAttachmentWarning: false,
+        fileAttachmentUploadBlocked: null,
     };
 
     constructor(ports: SyncRunPorts) {
@@ -211,14 +270,26 @@ class SharedSyncRunMachine {
     }
 
     async run(): Promise<SyncRunResult> {
-        let result: SyncRunResult;
+        let result!: SyncRunResult;
+        let cleanupRetryAfterMs: number | null = null;
         try {
-            result = await this.runPhases();
-        } catch (error) {
-            result = await this.handleRunError(error);
+            try {
+                result = await this.runPhases();
+            } catch (error) {
+                result = await this.handleRunError(error);
+            }
+        } finally {
+            cleanupRetryAfterMs = await this.releaseRemoteMutationFence();
+        }
+        if (cleanupRetryAfterMs !== null) {
+            result.remoteFenceDeferred = 'cleanup';
+            result.retryAfterMs = cleanupRetryAfterMs;
         }
         if (this.state.hadAttachmentWarning) {
             result.hadAttachmentWarning = true;
+        }
+        if (this.state.fileAttachmentUploadBlocked) {
+            result.fileAttachmentUploadBlocked = this.state.fileAttachmentUploadBlocked;
         }
         return result;
     }
@@ -289,14 +360,88 @@ class SharedSyncRunMachine {
         await this.hooks.ensureNetworkStillAvailable?.();
     }
 
+    /** Lazily acquire only when a run is about to enter a mutation-capable
+     *  path. A read-check performed before acquisition is advisory only: once
+     *  the fence is held, discard it and take the authoritative read again. */
+    private async ensureRemoteMutationFence(): Promise<void> {
+        if (this.remoteMutationFence) {
+            await this.runRemoteMutationFenceOperation(
+                'Remote sync mutation fence validation failed',
+                () => this.remoteMutationFence!.assertHeld(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS),
+            );
+            return;
+        }
+        const acquire = this.requireIo().acquireRemoteMutationFence;
+        if (!acquire) return;
+        const lease = await this.runRemoteMutationFenceOperation(
+            'Remote sync mutation fence acquisition failed',
+            acquire,
+        );
+        if (!lease) return;
+        this.remoteMutationFence = lease;
+        this.state.readCheckRemoteData = undefined;
+        this.state.remoteDataForCompare = null;
+    }
+
+    private async assertRemoteMutationFenceHeld(
+        minRemainingMs = SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS,
+    ): Promise<void> {
+        if (!this.remoteMutationFence) return;
+        await this.runRemoteMutationFenceOperation(
+            'Remote sync mutation fence validation failed',
+            () => this.remoteMutationFence!.assertHeld(minRemainingMs),
+        );
+    }
+
+    private async runRemoteMutationFenceOperation<T>(message: string, operation: () => Promise<T>): Promise<T> {
+        try {
+            return await operation();
+        } catch (error) {
+            if (isSyncRemoteMutationFenceError(error)) throw error;
+            const detail = error instanceof Error ? error.message : String(error);
+            throw new SyncRemoteMutationFenceUnavailableError(`${message}: ${detail}`);
+        }
+    }
+
+    private async releaseRemoteMutationFence(): Promise<number | null> {
+        const lease = this.remoteMutationFence;
+        this.remoteMutationFence = null;
+        if (!lease) return null;
+        try {
+            await lease.release();
+            return null;
+        } catch (error) {
+            // Release is conditional, so an error can never justify deleting
+            // whatever generation is now present. A crashed lease is bounded
+            // by its server-time expiry; request a later retry and surface the
+            // delayed availability without rewriting an otherwise valid run.
+            this.notifier.logWarning('Failed to release remote sync mutation fence', error);
+            const retryAfterMs = lease.retryAfterMs();
+            this.requestFollowUpAfter(retryAfterMs);
+            return retryAfterMs;
+        }
+    }
+
     private requestFollowUp(): void {
         if (this.options.activationProbe) return;
+        this.hooks.requestFollowUp();
+    }
+
+    private requestFollowUpAfter(delayMs: number): void {
+        if (this.options.activationProbe) return;
+        if (this.hooks.requestFollowUpAfter) {
+            this.hooks.requestFollowUpAfter(delayMs);
+            return;
+        }
         this.hooks.requestFollowUp();
     }
 
     private attachmentHelpers(phase: SyncRunAttachmentPhase) {
         return {
             ensureLocalSnapshotFresh: () => this.ensureLocalSnapshotFresh(),
+            assertRemoteMutationFenceHeld: (minRemainingMs?: number) => (
+                this.assertRemoteMutationFenceHeld(minRemainingMs)
+            ),
             activationProbe: this.options.activationProbe === true,
             phase,
         };
@@ -396,6 +541,7 @@ class SharedSyncRunMachine {
     }
 
     private async persistLocalDataWithTracking(data: AppData): Promise<AppData> {
+        await this.assertRemoteMutationFenceHeld();
         const persisted = await this.storage.persistLocal(data) ?? data;
         this.ensureLocalSnapshotFresh(persisted);
         if (this.storage.applyDataToStore) {
@@ -419,7 +565,10 @@ class SharedSyncRunMachine {
         await this.persistLocalDataWithTracking(reconciledData);
     }
 
-    private async readRemoteForCycle(): Promise<AppData | null> {
+    private async readRemoteForCycle(requireMutationFence = false): Promise<AppData | null> {
+        if (requireMutationFence) {
+            await this.ensureRemoteMutationFence();
+        }
         if (this.state.readCheckRemoteData !== undefined) {
             const data = this.state.readCheckRemoteData;
             this.state.readCheckRemoteData = undefined;
@@ -461,6 +610,8 @@ class SharedSyncRunMachine {
     }
 
     private async writeRemoteForCycle(data: AppData): Promise<void> {
+        await this.ensureRemoteMutationFence();
+        await this.assertRemoteMutationFenceHeld();
         await this.ensureNetwork();
         const state = this.state;
         state.lastRemoteWriteFingerprint = null;
@@ -468,8 +619,11 @@ class SharedSyncRunMachine {
         const pending = findPendingAttachmentUploads(data);
         if (this.backend === 'cloudkit') {
             // CloudKit keeps local-only file attachments; other backends refuse
-            // to publish metadata whose bytes have not been uploaded (P8).
+            // to publish metadata whose bytes have not been uploaded (P8). A
+            // replacement for an existing blob is different: publishing its new
+            // hash/revision before the bytes land would expose stale content.
             this.logPendingAttachmentUploads('CloudKit sync has local-only file attachments', 'cloudkit-write', pending);
+            assertNoPendingAttachmentContentReplacements(data);
         } else {
             this.logPendingAttachmentUploads('Remote write blocked by pending attachment uploads', 'remote-write', pending);
             assertNoPendingAttachmentUploads(data);
@@ -496,7 +650,11 @@ class SharedSyncRunMachine {
         }
         let outcome: SyncRemoteWriteOutcome;
         try {
-            outcome = await this.requireIo().writeRemote(remoteDocument);
+            await this.assertRemoteMutationFenceHeld(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
+            outcome = await this.requireIo().writeRemote(
+                remoteDocument,
+                (minRemainingMs) => this.assertRemoteMutationFenceHeld(minRemainingMs),
+            );
         } catch (error) {
             if (error instanceof SyncRemoteWriteConflict) {
                 // Another device wrote between readRemote and writeRemote; retry next cycle.
@@ -505,6 +663,7 @@ class SharedSyncRunMachine {
             }
             throw error;
         }
+        await this.assertRemoteMutationFenceHeld();
         const fingerprint = outcome && typeof outcome.fingerprint === 'string' && outcome.fingerprint.trim()
             ? outcome.fingerprint
             : null;
@@ -654,7 +813,9 @@ class SharedSyncRunMachine {
             if (isRemoteSyncBackend(this.backend)) {
                 await this.ensureNetwork();
             }
+            await this.ensureRemoteMutationFence();
             const result = await io.syncAttachments(localData, this.attachmentHelpers('prepare'));
+            await this.assertRemoteMutationFenceHeld();
             const mutated = result === true || (Boolean(result) && typeof result === 'object');
             const mutatedData = result && typeof result === 'object' ? result : localData;
             if (mutated) {
@@ -671,7 +832,12 @@ class SharedSyncRunMachine {
             });
         } catch (error) {
             if (error instanceof LocalSyncAbort) throw error;
+            if (isSyncRemoteMutationFenceError(error)) throw error;
             if (this.hooks.isCycleAborted?.()) throw error;
+            if (isAttachmentUploadTooLargeError(error)) {
+                this.state.fileAttachmentUploadBlocked = 'too-large';
+                return;
+            }
             this.state.hadAttachmentWarning = true;
             this.notifier.logWarning('Attachment pre-sync warning', error);
         }
@@ -681,7 +847,10 @@ class SharedSyncRunMachine {
      *  immediately before the merged document is written remotely. */
     private async prepareRemoteWriteData(data: AppData): Promise<AppData> {
         if (this.options.activationProbe) {
-            const activationSnapshot = prepareActivationAttachmentSnapshot(data);
+            const activationSnapshot = prepareActivationAttachmentSnapshot(
+                data,
+                this.state.remoteDataForCompare,
+            );
             if (activationSnapshot.count === 0) return data;
             const io = this.requireIo();
             if (!io.syncAttachments) {
@@ -692,10 +861,12 @@ class SharedSyncRunMachine {
             if (isRemoteSyncBackend(this.backend)) {
                 await this.ensureNetwork();
             }
+            await this.ensureRemoteMutationFence();
             const result = await io.syncAttachments(
                 activationSnapshot.data,
                 this.attachmentHelpers('post-merge'),
             );
+            await this.assertRemoteMutationFenceHeld();
             const provenData = result && typeof result === 'object'
                 ? result
                 : activationSnapshot.data;
@@ -722,7 +893,9 @@ class SharedSyncRunMachine {
         if (isRemoteSyncBackend(this.backend)) {
             await this.ensureNetwork();
         }
+        await this.ensureRemoteMutationFence();
         const result = await io.syncAttachments(data, this.attachmentHelpers('post-merge'));
+        await this.assertRemoteMutationFenceHeld();
         const nextData = result && typeof result === 'object' ? result : data;
         const remainingUploads = findPendingAttachmentUploads(nextData);
         this.notifier.logInfo('Attachment final sync done', {
@@ -758,11 +931,13 @@ class SharedSyncRunMachine {
             if (isRemoteSyncBackend(this.backend)) {
                 await this.ensureNetwork();
             }
+            await this.ensureRemoteMutationFence();
             // No defensive clone: the attachment backends are pure (they return a folded
             // document instead of writing to this one), so cloning a whole library here was
             // dead weight that also invalidated the storage layer's identity-keyed row cache
             // for every unchanged row (#766).
             const result = await io.syncAttachments(currentData, this.attachmentHelpers('post-merge'));
+            await this.assertRemoteMutationFenceHeld();
             const nextData = result && typeof result === 'object'
                 ? result
                 : result
@@ -783,6 +958,11 @@ class SharedSyncRunMachine {
             return currentData;
         } catch (error) {
             if (error instanceof LocalSyncAbort) throw error;
+            if (isSyncRemoteMutationFenceError(error)) throw error;
+            if (isAttachmentUploadTooLargeError(error)) {
+                this.state.fileAttachmentUploadBlocked = 'too-large';
+                return currentData;
+            }
             if (this.policy.postMergeAttachmentErrorPolicy === 'fail') throw error;
             this.state.hadAttachmentWarning = true;
             this.notifier.logWarning('Attachment sync warning', error);
@@ -808,7 +988,7 @@ class SharedSyncRunMachine {
                 return data;
             },
             readRemote: async () => {
-                const data = await this.readRemoteForCycle();
+                const data = await this.readRemoteForCycle(true);
                 this.notifier.tracePayload?.('read-remote', data, { backend: this.backend });
                 return data;
             },
@@ -925,11 +1105,16 @@ class SharedSyncRunMachine {
                 // local and sync folders until the daily pass (#1064).
                 || hasFreshAttachmentCleanupWork(mergedData)
             )) {
+            await this.ensureRemoteMutationFence();
             const cleanupResult = await this.hooks.runAttachmentCleanup(mergedData, {
                 setStep: (step) => this.setStep(step),
                 ensureLocalSnapshotFresh: (expectedData) => this.ensureLocalSnapshotFresh(expectedData),
                 ensureNetworkStillAvailable: () => this.ensureNetwork(),
+                assertRemoteMutationFenceHeld: (minRemainingMs?: number) => (
+                    this.assertRemoteMutationFenceHeld(minRemainingMs)
+                ),
             });
+            await this.assertRemoteMutationFenceHeld();
             // Cleanup may resolve credentials, remote targets, and provider IO
             // before returning. Recheck the pre-cleanup snapshot here so a
             // local edit made anywhere in that window is requeued instead of
@@ -951,24 +1136,63 @@ class SharedSyncRunMachine {
         this.setStep('refresh');
         await this.yieldToUi();
         this.ensureLocalSnapshotFresh(mergedData);
+        await this.assertRemoteMutationFenceHeld();
         await this.hooks.finalizeSuccess(mergedData, {
             status: syncResult.status,
             wroteLocal: this.state.wroteLocal,
             getLocalSnapshotChangeAt: () => this.state.localSnapshotChangeAt,
             acceptCoveredSnapshot: (expectedData) => this.acceptCoveredLocalSnapshot(expectedData),
         });
+        const attachmentWriteDeferred = findPendingAttachmentUploads(mergedData)
+            .some((pending) => pending.reason === 'content-replacement');
         if (mergedData.settings.pendingRemoteWriteRetryAt) {
             return {
                 success: true,
                 remoteWriteDeferred: true,
+                attachmentWriteDeferred: attachmentWriteDeferred || undefined,
+                fileAttachmentUploadBlocked: this.state.fileAttachmentUploadBlocked ?? undefined,
                 error: mergedData.settings.lastSyncError,
                 stats,
             };
         }
-        return { success: true, stats };
+        return {
+            success: true,
+            attachmentWriteDeferred: attachmentWriteDeferred || undefined,
+            fileAttachmentUploadBlocked: this.state.fileAttachmentUploadBlocked ?? undefined,
+            stats,
+        };
     }
 
     private async handleRunError(error: unknown): Promise<SyncRunResult> {
+        if (isAttachmentUploadTooLargeError(error)) {
+            return {
+                success: !this.options.activationProbe,
+                fileAttachmentUploadBlocked: 'too-large',
+            };
+        }
+        if (error instanceof SyncFileLockBusyError) {
+            const retryAttempt = this.options.fileSyncLockBusyRetryAttempt ?? 0;
+            if (!this.options.activationProbe && retryAttempt < 1) {
+                if (this.hooks.requestFileSyncLockBusyFollowUpAfter) {
+                    this.hooks.requestFileSyncLockBusyFollowUpAfter(error.retryAfterMs, retryAttempt + 1);
+                }
+            }
+            return {
+                success: true,
+                skipped: 'fileSyncLockBusy',
+                fileSyncLockDeferred: 'busy',
+                retryAfterMs: error.retryAfterMs,
+            };
+        }
+        if (error instanceof SyncRemoteMutationFenceBusyError) {
+            if (!this.options.activationProbe) this.requestFollowUpAfter(error.retryAfterMs);
+            return {
+                success: true,
+                skipped: 'remoteFenceBusy',
+                remoteFenceDeferred: 'busy',
+                retryAfterMs: error.retryAfterMs,
+            };
+        }
         const errorContext: SyncRunErrorContext = {
             step: this.state.step,
             getWroteLocal: () => this.state.wroteLocal,
@@ -1000,9 +1224,16 @@ class SharedSyncRunMachine {
         const afterResult = await this.hooks.handleRunErrorAfterRequeue?.(error, errorContext);
         if (afterResult) return afterResult;
 
+        const fileSyncLockUnavailable = error instanceof SyncFileLockUnavailableError;
+        const fileGenerationCorrupt = isSyncFileGenerationCorruptError(error);
         this.notifier.logWarning('Sync failed', error);
         if (this.options.activationProbe) {
-            return { success: false, error: this.hooks.formatErrorMessage(error, this.backend) };
+            return {
+                success: false,
+                error: this.hooks.formatErrorMessage(error, this.backend),
+                ...(fileSyncLockUnavailable ? { fileSyncLockUnavailable: true } : {}),
+                ...(fileGenerationCorrupt ? { fileGenerationCorrupt: true } : {}),
+            };
         }
         const now = this.nowIso();
         const safeMessage = this.hooks.formatErrorMessage(error, this.backend);
@@ -1042,7 +1273,12 @@ class SharedSyncRunMachine {
         } catch (persistError) {
             this.notifier.logWarning('Failed to persist sync error', persistError);
         }
-        return { success: false, error: finalErrorMessage };
+        return {
+            success: false,
+            error: finalErrorMessage,
+            ...(fileSyncLockUnavailable ? { fileSyncLockUnavailable: true } : {}),
+            ...(fileGenerationCorrupt ? { fileGenerationCorrupt: true } : {}),
+        };
     }
 }
 

@@ -63,6 +63,15 @@ export function TaskEditCustomRecurrenceModal({
         styles.statusText,
         { color: active ? tc.onTint : tc.secondaryText },
     ]);
+    const lastDayLabel = t('recurrence.lastDay');
+    const lastDayOfMonthLabel = t('recurrence.lastDayOfMonth');
+    const numberedMonthDays = customMonthDays.filter((day) => day !== -1);
+    const numberedDaysLabel = t('recurrence.onDayOfMonth').replace('{day}', numberedMonthDays.join(', '));
+    const monthDaysLabel = customMonthDays.includes(-1)
+        ? numberedMonthDays.length > 0
+            ? `${numberedDaysLabel} + ${lastDayLabel}`
+            : lastDayLabel
+        : numberedDaysLabel;
 
     return (
         <Modal
@@ -103,7 +112,7 @@ export function TaskEditCustomRecurrenceModal({
                                 onPress={() => setCustomMode('date')}
                             >
                                 <Text style={getStatusTextStyle(customMode === 'date')}>
-                                    {t('recurrence.onDayOfMonth').replace('{day}', customMonthDays.join(', '))}
+                                    {monthDaysLabel}
                                 </Text>
                             </TouchableOpacity>
                             <TouchableOpacity
@@ -111,7 +120,7 @@ export function TaskEditCustomRecurrenceModal({
                                 onPress={() => setCustomMode('lastDay')}
                             >
                                 <Text style={getStatusTextStyle(customMode === 'lastDay')}>
-                                    {t('recurrence.lastDay')}
+                                    {lastDayLabel}
                                 </Text>
                             </TouchableOpacity>
                             <TouchableOpacity
@@ -196,6 +205,32 @@ export function TaskEditCustomRecurrenceModal({
                                         </TouchableOpacity>
                                     );
                                 })}
+                                <TouchableOpacity
+                                    style={styles.monthDayCell}
+                                    onPress={() => toggleCustomMonthDay(-1)}
+                                    accessibilityRole="button"
+                                    accessibilityState={{ selected: customMonthDays.includes(-1) }}
+                                    accessibilityLabel={lastDayOfMonthLabel}
+                                >
+                                    <View
+                                        style={[
+                                            styles.monthDayButton,
+                                            {
+                                                borderColor: customMonthDays.includes(-1) ? tc.tint : tc.border,
+                                                backgroundColor: customMonthDays.includes(-1) ? tc.tint : tc.cardBg,
+                                            },
+                                        ]}
+                                    >
+                                        <Text
+                                            style={[
+                                                styles.weekdayButtonText,
+                                                { color: customMonthDays.includes(-1) ? tc.onTint : tc.text },
+                                            ]}
+                                        >
+                                            {t('recurrence.ordinal.last')}
+                                        </Text>
+                                    </View>
+                                </TouchableOpacity>
                             </View>
                         )}
                     </View>

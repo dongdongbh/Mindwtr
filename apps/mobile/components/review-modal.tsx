@@ -62,6 +62,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         aiSuggestions,
         applyAiSuggestions,
         calendarReviewItems,
+        canGoBack,
         closeEditModal,
         closeProjectTaskPrompt,
         contextReviewGroups,
@@ -883,7 +884,12 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
 
                     {currentStep !== 'completed' && (
                         <View style={[styles.footer, { borderTopColor: tc.border }]}>
-                            <TouchableOpacity style={styles.backButton} onPress={prevStep}>
+                            <TouchableOpacity
+                                style={[styles.backButton, { opacity: canGoBack ? 1 : 0.5 }]}
+                                onPress={prevStep}
+                                disabled={!canGoBack}
+                                accessibilityState={{ disabled: !canGoBack }}
+                            >
                                 <Text style={[styles.backButtonText, { color: tc.secondaryText }]}>← {labels.back}</Text>
                             </TouchableOpacity>
                             <TouchableOpacity style={[styles.primaryButton, { backgroundColor: filledButton.backgroundColor }]} onPress={nextStep}>

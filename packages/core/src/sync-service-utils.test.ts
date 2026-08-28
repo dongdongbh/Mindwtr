@@ -4,15 +4,32 @@ import {
     coerceSupportedSyncBackend,
     formatSyncErrorMessage,
     getFileSyncDir,
+    isSyncFileGenerationCorruptError,
     isLikelyOfflineSyncError,
     isRemoteSyncBackend,
     isSyncFilePath,
     normalizeSyncBackend,
     resolveSyncBackend,
     sanitizeSyncErrorMessage,
+    SyncFileGenerationCorruptError,
+    SYNC_FILE_GENERATION_CORRUPT_CODE,
 } from './sync-service-utils';
 
 describe('sync-service-utils', () => {
+    it('recognizes typed and serialized terminal File Sync generation corruption', () => {
+        const error = new SyncFileGenerationCorruptError();
+
+        expect(error.code).toBe(SYNC_FILE_GENERATION_CORRUPT_CODE);
+        expect(isSyncFileGenerationCorruptError(error)).toBe(true);
+        expect(isSyncFileGenerationCorruptError(
+            `Native bridge failed: ${SYNC_FILE_GENERATION_CORRUPT_CODE}`,
+        )).toBe(true);
+        expect(isSyncFileGenerationCorruptError(
+            'File Sync attachment generation remains corrupt after bounded retries',
+        )).toBe(true);
+        expect(isSyncFileGenerationCorruptError('File Sync lock is busy')).toBe(false);
+    });
+
     it('normalizes sync backend values', () => {
         expect(normalizeSyncBackend('file')).toBe('file');
         expect(normalizeSyncBackend('webdav')).toBe('webdav');

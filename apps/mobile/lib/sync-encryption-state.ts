@@ -27,6 +27,7 @@ import {
     type SyncEncryptionLocalState,
     type SyncEncryptionLocalStatePort,
     type SyncEncryptionStatus,
+    type SyncEncryptionTransitionKind,
     type SyncKeyMaterial,
 } from '@mindwtr/core';
 
@@ -68,6 +69,16 @@ export class SyncEncryptionKeyMissingError extends Error {
     }
 }
 
+/** The device-local encryption sidecar exists behind every backend. Until it can be
+ * read and validated, "encryption off" has not been established and plaintext writes
+ * are unsafe. */
+export class SyncEncryptionStateUnavailableError extends Error {
+    constructor(message = 'The local sync encryption state could not be read. Try again before syncing.') {
+        super(message);
+        this.name = 'SyncEncryptionStateUnavailableError';
+    }
+}
+
 let cachedLocalState: SyncEncryptionLocalState | null = null;
 let hydrated = false;
 
@@ -77,22 +88,32 @@ const isKdfParams = (value: unknown): value is SyncCryptoKdfParams => {
     return typeof mKib === 'number' && typeof t === 'number' && typeof p === 'number';
 };
 
-/** Anything unrecognized degrades to `null` (= implicit 'off'), never to a half-built
- *  state: a corrupt blob must not leave the device believing it holds a key. */
 const parseLocalState = (raw: string | null): SyncEncryptionLocalState | null => {
-    if (!raw) return null;
+    if (raw === null) return null;
     try {
         const parsed = JSON.parse(raw) as Partial<SyncEncryptionLocalState>;
+        const incompleteTransition = parsed?.incompleteTransition;
+        if (incompleteTransition !== undefined
+            && incompleteTransition !== 'enable'
+            && incompleteTransition !== 'disable'
+            && incompleteTransition !== 'change-passphrase') {
+            throw new SyncEncryptionStateUnavailableError();
+        }
         if (parsed?.state !== 'enabled'
             && parsed?.state !== 'remote-encrypted-no-key'
-            && parsed?.state !== 'remote-plaintext') return null;
+            && parsed?.state !== 'remote-plaintext'
+            && !(parsed?.state === 'off' && incompleteTransition)) {
+            throw new SyncEncryptionStateUnavailableError();
+        }
         return {
             state: parsed.state,
             discoveredSalt: typeof parsed.discoveredSalt === 'string' ? parsed.discoveredSalt : undefined,
             discoveredParams: isKdfParams(parsed.discoveredParams) ? parsed.discoveredParams : undefined,
+            incompleteTransition,
         };
-    } catch {
-        return null;
+    } catch (error) {
+        if (error instanceof SyncEncryptionStateUnavailableError) throw error;
+        throw new SyncEncryptionStateUnavailableError();
     }
 };
 
@@ -101,16 +122,27 @@ export const loadSyncEncryptionLocalState = async (): Promise<SyncEncryptionLoca
     try {
         cachedLocalState = parseLocalState(await AsyncStorage.getItem(SYNC_ENCRYPTION_STATE_KEY));
     } catch (error) {
-        // Treat an unreadable store as 'off' rather than throwing into the sync cycle;
-        // an encrypted remote will simply be re-discovered on the next read.
-        void logWarn('Failed to read sync encryption state; treating as off', {
+        void logWarn('Failed to read sync encryption state; stopping sync', {
             scope: 'sync',
             extra: { error: error instanceof Error ? error.message : String(error) },
         });
         cachedLocalState = null;
+        hydrated = false;
+        throw error instanceof SyncEncryptionStateUnavailableError
+            ? error
+            : new SyncEncryptionStateUnavailableError();
     }
     hydrated = true;
     return cachedLocalState;
+};
+
+/** Re-read the device-local sidecar after a compensated write failed. Recovery code must
+ * not make its next key decision from the optimistic cache: `write()` updates that cache
+ * before AsyncStorage acknowledges the durable value and restores it only after rejection. */
+export const reloadSyncEncryptionLocalStateForRecovery = async (): Promise<SyncEncryptionLocalState | null> => {
+    cachedLocalState = null;
+    hydrated = false;
+    return loadSyncEncryptionLocalState();
 };
 
 // Core's port shape is synchronous while AsyncStorage is not, so writes are queued behind this
@@ -118,6 +150,7 @@ export const loadSyncEncryptionLocalState = async (): Promise<SyncEncryptionLoca
 // pair. Without it a transition could return (and its caller report success) while the state
 // that survives a restart was still in flight, or had failed silently.
 let pendingLocalStateWrites: Promise<unknown> = Promise.resolve();
+let localStateWriteQueue: Promise<unknown> = Promise.resolve();
 
 export const flushSyncEncryptionLocalState = async (): Promise<void> => {
     await pendingLocalStateWrites;
@@ -126,18 +159,30 @@ export const flushSyncEncryptionLocalState = async (): Promise<void> => {
 export const syncEncryptionLocalState: SyncEncryptionLocalStatePort = {
     read: () => cachedLocalState,
     write: (state) => {
+        const previous = cachedLocalState;
         cachedLocalState = state;
         hydrated = true;
-        const persist = state === null
-            ? AsyncStorage.removeItem(SYNC_ENCRYPTION_STATE_KEY)
-            : AsyncStorage.setItem(SYNC_ENCRYPTION_STATE_KEY, JSON.stringify(state));
-        const settled = persist.catch((error: unknown) => {
-            void logWarn('Failed to persist sync encryption state', {
-                scope: 'sync',
-                extra: { error: error instanceof Error ? error.message : String(error) },
-            });
+        const queuedWrite = localStateWriteQueue.then(async () => {
+            try {
+                if (state === null) {
+                    await AsyncStorage.removeItem(SYNC_ENCRYPTION_STATE_KEY);
+                } else {
+                    await AsyncStorage.setItem(SYNC_ENCRYPTION_STATE_KEY, JSON.stringify(state));
+                }
+            } catch (error) {
+                if (cachedLocalState === state) cachedLocalState = previous;
+                void logWarn('Failed to persist sync encryption state', {
+                    scope: 'sync',
+                    extra: { error: error instanceof Error ? error.message : String(error) },
+                });
+                throw error;
+            }
         });
-        pendingLocalStateWrites = pendingLocalStateWrites.then(() => settled);
+        pendingLocalStateWrites = queuedWrite;
+        // Keep the serializer usable after a failed write while leaving the
+        // current write observable to flush/callers as a rejection.
+        localStateWriteQueue = queuedWrite.catch(() => undefined);
+        return queuedWrite;
     },
 };
 
@@ -191,9 +236,18 @@ export const getSyncEncryptionMaterial = async (): Promise<SyncKeyMaterial | nul
 
 export const getMobileSyncEncryptionStatus = async (): Promise<SyncEncryptionStatus> => {
     const state = await loadSyncEncryptionLocalState();
-    if (!state || state.state === 'off') return { state: 'off' };
-    return { state: state.state, kdfParams: state.discoveredParams };
+    if (!state || state.state === 'off') {
+        return { state: 'off', incompleteTransition: state?.incompleteTransition };
+    }
+    return {
+        state: state.state,
+        kdfParams: state.discoveredParams,
+        incompleteTransition: state.incompleteTransition,
+    };
 };
+
+export const getIncompleteSyncEncryptionTransition = async (): Promise<SyncEncryptionTransitionKind | null> =>
+    (await loadSyncEncryptionLocalState())?.incompleteTransition ?? null;
 
 /** True when this device must NOT auto-sync: the remote is encrypted and we have no key
  *  (pinned decision #5 — automatic and background sync stay off until the user supplies
@@ -203,12 +257,15 @@ export const getMobileSyncEncryptionStatus = async (): Promise<SyncEncryptionSta
  *  user acts (supply the passphrase / turn encryption off here), and both would corrupt the
  *  remote's generation if a background cycle went ahead. */
 export const isSyncEncryptionBlocked = async (): Promise<boolean> => {
-    const state = (await loadSyncEncryptionLocalState())?.state;
-    return state === 'remote-encrypted-no-key' || state === 'remote-plaintext';
+    const localState = await loadSyncEncryptionLocalState();
+    return Boolean(localState?.incompleteTransition)
+        || localState?.state === 'remote-encrypted-no-key'
+        || localState?.state === 'remote-plaintext';
 };
 
 export const __resetSyncEncryptionStateForTests = (): void => {
     cachedLocalState = null;
     hydrated = false;
     pendingLocalStateWrites = Promise.resolve();
+    localStateWriteQueue = Promise.resolve();
 };

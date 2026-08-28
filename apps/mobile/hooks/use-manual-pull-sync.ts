@@ -67,6 +67,11 @@ export function useManualPullSync() {
     }, PULL_SYNC_SETTLE_MS);
   }, [clearHideTimer]);
 
+  const finishDeferredIndicator = useCallback(() => {
+    clearHideTimer();
+    setIndicatorState('idle');
+  }, [clearHideTimer]);
+
   useEffect(() => clearHideTimer, [clearHideTimer]);
 
   const onRefresh = useCallback(async () => {
@@ -124,7 +129,106 @@ export function useManualPullSync() {
         return;
       }
 
-      if (!result.success || result.remoteWriteDeferred) {
+      if (
+        result.success
+        && !result.remoteWriteDeferred
+        && result.fileAttachmentUploadBlocked === 'too-large'
+      ) {
+        finishDeferredIndicator();
+        showToast({
+          title: tFallback(t, 'common.notice', 'Notice'),
+          message: tFallback(
+            t,
+            'settings.syncFileAttachmentTooLarge',
+            'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.'
+          ),
+          tone: 'warning',
+          durationMs: 6000,
+        });
+        return;
+      }
+
+      if (result.remoteWriteDeferred) {
+        throw new Error(result.error || tFallback(t, 'settings.lastSyncError', 'Sync failed'));
+      }
+
+      if (result.success && result.attachmentWriteDeferred) {
+        finishDeferredIndicator();
+        showToast({
+          title: tFallback(t, 'common.notice', 'Notice'),
+          message: tFallback(
+            t,
+            'settings.syncAttachmentWriteDeferred',
+            'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.'
+          ),
+          tone: 'warning',
+          durationMs: 6000,
+        });
+        return;
+      }
+
+      if (result.success && result.fileSyncLockDeferred) {
+        const cleanupDeferred = result.fileSyncLockDeferred === 'cleanup';
+        if (cleanupDeferred) finishIndicator('success');
+        else finishDeferredIndicator();
+        showToast({
+          title: tFallback(t, 'common.notice', 'Notice'),
+          message: cleanupDeferred
+            ? tFallback(
+              t,
+              'settings.syncFileLockCleanupDeferred',
+              'Sync completed, but Mindwtr could not release the File Sync lock. Restart Mindwtr before syncing again. No retry is needed.'
+            )
+            : tFallback(
+              t,
+              'settings.syncFileLockBusy',
+              'Another Mindwtr operation is using File Sync. Wait for it to finish; Mindwtr will retry automatically.'
+            ),
+          tone: 'info',
+          durationMs: 6000,
+        });
+        return;
+      }
+
+      if (result.fileSyncLockUnavailable) {
+        finishIndicator('error');
+        showToast({
+          title: tFallback(t, 'settings.lastSyncError', 'Sync failed'),
+          message: tFallback(
+            t,
+            'settings.syncFileLockUnavailable',
+            'Mindwtr cannot safely lock this File Sync location. Re-select the folder, restart or update Mindwtr, or use WebDAV.'
+          ),
+          tone: 'error',
+          durationMs: 6000,
+        });
+        return;
+      }
+
+      if (result.success && result.remoteFenceDeferred) {
+        const cleanupDeferred = result.remoteFenceDeferred === 'cleanup';
+        if (cleanupDeferred) finishIndicator('success');
+        else finishDeferredIndicator();
+        showToast({
+          title: tFallback(t, 'common.notice', 'Notice'),
+          message: cleanupDeferred
+            ? tFallback(
+              t,
+              'settings.syncRemoteCleanupDeferred',
+              'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.'
+            )
+            : tFallback(
+              t,
+              'settings.syncRemoteBusy',
+              'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.'
+            ),
+          tone: 'info',
+          durationMs: 6000,
+        });
+        return;
+      }
+
+      if (!result.success) {
         throw new Error(result.error || tFallback(t, 'settings.lastSyncError', 'Sync failed'));
       }
 
@@ -156,7 +260,7 @@ export function useManualPullSync() {
     } finally {
       runningRef.current = false;
     }
-  }, [clearHideTimer, finishIndicator, showToast, t]);
+  }, [clearHideTimer, finishDeferredIndicator, finishIndicator, showToast, t]);
 
   return {
     indicatorState,

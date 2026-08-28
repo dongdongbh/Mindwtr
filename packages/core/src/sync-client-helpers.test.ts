@@ -156,4 +156,39 @@ describe('sync-client-helpers', () => {
         await wrappedFetch('https://example.com');
         expect(baseFetch).toHaveBeenCalledTimes(1);
     });
+
+    it('keeps the fallback signal bridge active after response headers arrive', async () => {
+        const anyDescriptor = Object.getOwnPropertyDescriptor(AbortSignal, 'any');
+        Object.defineProperty(AbortSignal, 'any', {
+            configurable: true,
+            value: undefined,
+        });
+        try {
+            const baseController = new AbortController();
+            const requestController = new AbortController();
+            let requestSignal: AbortSignal | null = null;
+            const baseFetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+                requestSignal = init?.signal as AbortSignal;
+                return new Response(new ReadableStream({ pull: () => undefined }), { status: 200 });
+            }) as typeof fetch;
+            const wrappedFetch = createAbortableFetch(baseFetch, { baseSignal: baseController.signal });
+
+            const response = await wrappedFetch('https://example.com', {
+                signal: requestController.signal,
+            });
+            expect(response.body).not.toBeNull();
+            expect(requestSignal?.aborted).toBe(false);
+
+            baseController.abort(new DOMException('Sync cycle cancelled', 'AbortError'));
+
+            expect(requestSignal?.aborted).toBe(true);
+            expect(requestSignal?.reason).toMatchObject({ name: 'AbortError' });
+        } finally {
+            if (anyDescriptor) {
+                Object.defineProperty(AbortSignal, 'any', anyDescriptor);
+            } else {
+                Reflect.deleteProperty(AbortSignal, 'any');
+            }
+        }
+    });
 });

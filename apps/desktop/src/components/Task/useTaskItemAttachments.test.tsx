@@ -205,6 +205,22 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
         expect(result.current.editAttachments).toEqual(task.attachments || []);
     });
 
+    it('deletes a copied draft file when the editor component unmounts', async () => {
+        const file = new File(['hello'], 'notes.txt', { type: 'text/plain' });
+        const { result, unmount } = renderHook(() => useTaskItemAttachments({ task, t }));
+        await act(async () => {
+            await result.current.addDroppedFileAttachments([file]);
+        });
+        const addedUri = result.current.editAttachments[0].uri;
+
+        await act(async () => {
+            unmount();
+            await Promise.resolve();
+        });
+
+        expect(removeMock).toHaveBeenCalledWith(addedUri);
+    });
+
     it('removes the managed copy when a converted link persists, keeps it on cancel', async () => {
         // #913/#1001 follow-up: converting a pre-fix file-kind link to a
         // pointer must clean up the copy the app restored into data/attachments
@@ -274,6 +290,89 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
         expect(result.current.editAttachments).toEqual(taskWithAttachment.attachments);
     });
 
+    it('removes a managed file only after its soft-delete is saved', async () => {
+        const existingAttachment = {
+            id: 'existing-1',
+            kind: 'file' as const,
+            title: 'existing.txt',
+            uri: '/data/mindwtr/attachments/existing-1.txt',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        };
+        const taskWithAttachment = { ...task, attachments: [existingAttachment] };
+        const { result } = renderHook(() => useTaskItemAttachments({ task: taskWithAttachment, t }));
+
+        act(() => result.current.removeAttachment(existingAttachment.id));
+        const deleted = result.current.editAttachments[0];
+        await act(async () => {
+            result.current.resetAttachmentState(taskWithAttachment.attachments);
+            await Promise.resolve();
+        });
+        expect(removeMock).not.toHaveBeenCalled();
+
+        act(() => result.current.removeAttachment(existingAttachment.id));
+        const committedDelete = result.current.editAttachments[0];
+        expect(committedDelete.deletedAt).toBeTruthy();
+        await act(async () => {
+            result.current.resetAttachmentState([committedDelete]);
+            await Promise.resolve();
+        });
+        expect(removeMock).toHaveBeenCalledWith(existingAttachment.uri);
+        expect(deleted.deletedAt).toBeTruthy();
+    });
+
+    it('waits for durable persistence before deleting a baseline-owned file', async () => {
+        const existingAttachment = {
+            id: 'existing-1',
+            kind: 'file' as const,
+            title: 'existing.txt',
+            uri: '/data/mindwtr/attachments/existing-1.txt',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        };
+        const taskWithAttachment = { ...task, attachments: [existingAttachment] };
+        const { result } = renderHook(() => useTaskItemAttachments({ task: taskWithAttachment, t }));
+
+        act(() => result.current.removeAttachment(existingAttachment.id));
+        const committedDelete = result.current.editAttachments[0];
+        act(() => result.current.beginAttachmentSave());
+        await act(async () => {
+            result.current.resetAttachmentState([committedDelete]);
+            await Promise.resolve();
+        });
+        expect(removeMock).not.toHaveBeenCalled();
+
+        await act(async () => {
+            result.current.settlePersistedAttachmentSave([committedDelete]);
+            await Promise.resolve();
+        });
+        expect(removeMock).toHaveBeenCalledWith(existingAttachment.uri);
+    });
+
+    it('preserves draft and baseline files when a submitted save never becomes durable', async () => {
+        const existingAttachment = {
+            id: 'existing-1',
+            kind: 'file' as const,
+            title: 'existing.txt',
+            uri: '/data/mindwtr/attachments/existing-1.txt',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        };
+        const taskWithAttachment = { ...task, attachments: [existingAttachment] };
+        const { result, unmount } = renderHook(() => useTaskItemAttachments({ task: taskWithAttachment, t }));
+
+        act(() => result.current.removeAttachment(existingAttachment.id));
+        const optimisticDelete = result.current.editAttachments[0];
+        act(() => result.current.beginAttachmentSave());
+        act(() => result.current.resetAttachmentState([optimisticDelete]));
+        await act(async () => {
+            unmount();
+            await Promise.resolve();
+        });
+
+        expect(removeMock).not.toHaveBeenCalled();
+    });
+
     it('never removes an orphaned file in a sibling directory that merely shares the managed dir prefix', async () => {
         // e.g. `/data/mindwtr/attachments-old/x.pdf` — `startsWith('/data/mindwtr/attachments')`
         // would wrongly match this without a path-separator boundary.
@@ -293,6 +392,28 @@ describe('useTaskItemAttachments resetAttachmentState orphan cleanup', () => {
             // this session (e.g. imported/synced data), so cancelling treats
             // it as orphaned relative to the saved (empty) task.attachments.
             result.current.setEditAttachments([siblingAttachment]);
+        });
+
+        await act(async () => {
+            result.current.resetAttachmentState(task.attachments);
+            await Promise.resolve();
+        });
+
+        expect(removeMock).not.toHaveBeenCalled();
+    });
+
+    it('never removes a managed-directory file owned by another attachment id', async () => {
+        const mismatchedAttachment = {
+            id: 'draft-1',
+            kind: 'file' as const,
+            title: 'notes.txt',
+            uri: '/data/mindwtr/attachments/other-id.txt',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        };
+        const { result } = renderHook(() => useTaskItemAttachments({ task, t }));
+        act(() => {
+            result.current.setEditAttachments([mismatchedAttachment]);
         });
 
         await act(async () => {

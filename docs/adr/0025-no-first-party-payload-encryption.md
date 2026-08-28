@@ -104,25 +104,33 @@ remain excluded for the merge reasons above.
 
 ## Consequences
 
-Data at rest on a device is protected by the platform, and the app makes no
-encryption claim of its own — public replies say "the platform encrypts it",
-never "Mindwtr encrypts it". Users who need the server to be untrusted
-self-host it, or use a file-sync backend they encrypt themselves. The
-revision-aware server merge stays intact, which is what makes concurrent
-multi-device editing converge without losing edits.
+Device-at-rest protection remains the platform's responsibility. Mindwtr makes
+no claim that its local SQLite database is app-encrypted; public guidance must
+continue to point users to iOS/Android data protection or full-disk encryption
+on desktop.
 
-The cost is real: a hosted deployment's operator can read the document, and
-Mindwtr cannot advertise E2E encryption. Anyone whose threat model includes an
-untrusted server operator must self-host or encrypt the transport target
-themselves.
+The self-hosted cloud and CloudKit sync payloads remain readable by the service
+that merges them. Mindwtr must not describe those backends as end-to-end
+encrypted. Self-hosting changes who operates the service, but does not make the
+stored JSON cryptographically opaque to that operator.
+
+File Sync, WebDAV, and Dropbox are different: when the user enables sync
+encryption, Mindwtr encrypts the document and attachments before they leave the
+device using the user's passphrase. Product copy may describe that narrowly as
+user-passphrase or end-to-end encryption for those supported blob backends, but
+must not generalize the claim to local device storage or server-merged
+backends. Users must also be told that Mindwtr never receives or recovers the
+passphrase and that losing it makes the encrypted remote copies unreadable.
+
+The revision-aware server merge stays intact for server-merged backends, while
+encrypted blob backends continue to merge on trusted clients.
 
 ## What would reopen this
 
 - Sync moving to client-side merge (CRDT or equivalent, per ADR 0017), which
   removes the server's need to read the document and makes E2E compatible with
   multi-device convergence.
-- A contributed blob backend proving the encrypted-target path is maintainable,
-  which would make it worth documenting as a supported configuration — still
-  user-keyed, still not a first-party key-management promise.
+- Extending user-passphrase encryption to another backend whose storage can
+  remain opaque without weakening merge or recovery guarantees.
 - A first-party hosted service, which would change the operator trust boundary
   from "the user" to "us" and force the question again on different terms.

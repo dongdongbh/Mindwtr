@@ -25,7 +25,7 @@ import {
     type LucideIcon,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { shallow, useTaskStore, safeFormatDate, tFallback, isAllowedInsecureUrl, formatTaskMovedMessage } from '@mindwtr/core';
+import { shallow, useTaskStore, safeFormatDate, tFallback, isAllowedInsecureUrl, formatTaskMovedMessage, isSyncFileLockUnavailableError } from '@mindwtr/core';
 import type { StoreActionResult, TaskStatus } from '@mindwtr/core';
 import { showUndoToast } from '../lib/undo-registry';
 import { useLanguage } from '../contexts/language-context';
@@ -138,7 +138,14 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
     ), []);
     const lastSyncAt = settings?.lastSyncAt;
     const lastSyncStatus = settings?.lastSyncStatus;
-    const lastSyncError = settings?.lastSyncError?.trim();
+    const persistedLastSyncError = settings?.lastSyncError?.trim();
+    const lastSyncError = persistedLastSyncError && isSyncFileLockUnavailableError(persistedLastSyncError)
+        ? tFallback(
+            t,
+            'settings.syncFileLockUnavailable',
+            'Mindwtr cannot safely lock this File Sync location. Re-select the folder, restart or update Mindwtr, or use WebDAV.',
+        )
+        : persistedLastSyncError;
     const lastSyncStats = settings?.lastSyncStats;
 
     // Compute sync freshness bucket on a 60-second timer instead of every render
@@ -542,8 +549,54 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
             }
             if (result.skipped === 'requeued') {
                 showToast(tFallback(t, 'settings.syncRetryQueued', 'Local changes arrived during sync. Retry queued.'), 'info');
+            } else if (
+                result.success
+                && !result.remoteWriteDeferred
+                && result.fileAttachmentUploadBlocked === 'too-large'
+            ) {
+                showToast(tFallback(
+                    t,
+                    'settings.syncFileAttachmentTooLarge',
+                    'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
+                ), 'info', 6000);
             } else if (result.success && result.remoteWriteDeferred) {
                 showToast(result.error || settings?.lastSyncError || tFallback(t, 'settings.lastSyncError', 'Sync failed'), 'error');
+            } else if (result.success && result.attachmentWriteDeferred) {
+                showToast(tFallback(
+                    t,
+                    'settings.syncAttachmentWriteDeferred',
+                    'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
+                ), 'info', 6000);
+            } else if (result.success && result.fileSyncLockDeferred === 'busy') {
+                showToast(tFallback(
+                    t,
+                    'settings.syncFileLockBusy',
+                    'Another Mindwtr operation is using File Sync. Wait for it to finish; Mindwtr will retry automatically.',
+                ), 'info', 6000);
+            } else if (result.success && result.fileSyncLockDeferred === 'cleanup') {
+                showToast(tFallback(
+                    t,
+                    'settings.syncFileLockCleanupDeferred',
+                    'Sync completed, but Mindwtr could not release the File Sync lock. Restart Mindwtr before syncing again. No retry is needed.',
+                ), 'info', 6000);
+            } else if (result.fileSyncLockUnavailable) {
+                showToast(tFallback(
+                    t,
+                    'settings.syncFileLockUnavailable',
+                    'Mindwtr cannot safely lock this File Sync location. Re-select the folder, restart or update Mindwtr, or use WebDAV.',
+                ), 'error', 6000);
+            } else if (result.success && result.remoteFenceDeferred === 'busy') {
+                showToast(tFallback(
+                    t,
+                    'settings.syncRemoteBusy',
+                    'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
+                ), 'info', 6000);
+            } else if (result.success && result.remoteFenceDeferred === 'cleanup') {
+                showToast(tFallback(
+                    t,
+                    'settings.syncRemoteCleanupDeferred',
+                    'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
+                ), 'info', 6000);
             } else if (result.success) {
                 showToast(tFallback(t, 'settings.lastSyncSuccess', 'Sync completed'), 'success');
             } else {

@@ -67,6 +67,7 @@ describe('ReviewView', () => {
 
     beforeEach(() => {
         window.localStorage.removeItem('mindwtr:view:review:v1');
+        window.localStorage.removeItem('mindwtr:weeklyReview:currentStep');
         useTaskStore.setState(initialTaskState, true);
         useUiStore.setState(initialUiState, true);
         vi.mocked(fetchExternalCalendarEvents).mockClear();
@@ -304,23 +305,24 @@ describe('ReviewView', () => {
             updatedAt: '2026-01-01T00:00:00.000Z',
         });
         const updateProject = vi.fn(async () => ({ success: true }));
+        const responseText = vi.fn(async () => JSON.stringify({
+            choices: [{
+                message: {
+                    content: JSON.stringify({
+                        suggestions: [{
+                            id: 'project:project-1',
+                            action: 'someday',
+                            reason: 'No movement for a long time.',
+                        }],
+                    }),
+                },
+            }],
+        }));
         const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
             ok: true,
             status: 200,
-            json: async () => ({
-                choices: [{
-                    message: {
-                        content: JSON.stringify({
-                            suggestions: [{
-                                id: 'project:project-1',
-                                action: 'someday',
-                                reason: 'No movement for a long time.',
-                            }],
-                        }),
-                    },
-                }],
-            }),
-        } as Response);
+            text: responseText,
+        } as unknown as Response);
         useTaskStore.setState({
             projects: [project],
             _allProjects: [project],
@@ -348,6 +350,7 @@ describe('ReviewView', () => {
         fireEvent.click(getByRole('button', { name: 'Run analysis' }));
 
         await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+        await waitFor(() => expect(responseText).toHaveBeenCalledOnce());
         const projectSuggestion = await waitFor(() => (
             getByRole('button', { name: 'Stale Project: Move to Someday' })
         ));

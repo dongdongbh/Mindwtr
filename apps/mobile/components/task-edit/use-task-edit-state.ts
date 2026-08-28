@@ -1,5 +1,12 @@
 import React from 'react';
-import { type Attachment, type RecurrenceWeekday, type Task } from '@mindwtr/core';
+import {
+    areDraftAttachmentsDirty,
+    flushPendingSave,
+    type Attachment,
+    type AttachmentDraftSettlementInput,
+    type RecurrenceWeekday,
+    type Task,
+} from '@mindwtr/core';
 import {
     setTaskDraftField,
     type TaskDraft,
@@ -20,6 +27,7 @@ import {
 } from '../store-action-result';
 
 export type TaskEditTab = 'task' | 'view';
+const NOOP_ATTACHMENT_DRAFT_SETTLEMENT = () => {};
 
 export type SetTaskEditDraftValue<T> = (
     value: T | ((current: T) => T),
@@ -51,6 +59,7 @@ type UseTaskEditStateParams = {
     onSave: (taskId: string, updates: Partial<Task>) => unknown;
     onSaveError: (message?: string) => void;
     resetCopilotStateRef: React.MutableRefObject<() => void>;
+    settleAttachmentDraft?: (input: AttachmentDraftSettlementInput) => void;
     sections: { id: string; projectId?: string; deletedAt?: string | null }[];
     task: Task | null;
     tasks: Task[];
@@ -63,6 +72,7 @@ export function useTaskEditState({
     onSave,
     onSaveError,
     resetCopilotStateRef,
+    settleAttachmentDraft = NOOP_ATTACHMENT_DRAFT_SETTLEMENT,
     sections,
     task,
     tasks,
@@ -74,8 +84,12 @@ export function useTaskEditState({
     }, [task, tasks]);
 
     const [taskEditDraft, setTaskEditDraftState] = React.useState<TaskEditDraft | null>(null);
+    const taskEditDraftRef = React.useRef<TaskEditDraft | null>(null);
+    taskEditDraftRef.current = taskEditDraft;
     const isDirtyRef = React.useRef(false);
     const baseTaskRef = React.useRef<Task | null>(null);
+    const attachmentDraftSettledRef = React.useRef(true);
+    const attachmentSaveAwaitingDurabilityRef = React.useRef(false);
     const setDraftField = React.useCallback<SetTaskEditDraftField>((field, value, markDirty = true) => {
         if (markDirty) isDirtyRef.current = true;
         setTaskEditDraftState((current) => {
@@ -134,6 +148,30 @@ export function useTaskEditState({
         }
     }, []);
 
+    const settleCurrentAttachmentDraft = React.useCallback((committedAttachments?: readonly Attachment[]) => {
+        if (attachmentDraftSettledRef.current) return;
+        // A successful store action is still optimistic: its immediate SQLite
+        // write may be in flight. On a durability failure preserve every file
+        // that either the old snapshot or the retrying new snapshot can own.
+        if (attachmentSaveAwaitingDurabilityRef.current) return;
+        const baselineTask = baseTaskRef.current ?? liveTask;
+        const currentDraft = taskEditDraftRef.current;
+        if (baselineTask && currentDraft) {
+            settleAttachmentDraft({
+                baselineAttachments: baselineTask.attachments,
+                draftAttachments: currentDraft.attachments,
+                committedAttachments,
+            });
+        }
+        attachmentDraftSettledRef.current = true;
+    }, [liveTask, settleAttachmentDraft]);
+    const settleCurrentAttachmentDraftRef = React.useRef(settleCurrentAttachmentDraft);
+    settleCurrentAttachmentDraftRef.current = settleCurrentAttachmentDraft;
+
+    React.useEffect(() => () => {
+        settleCurrentAttachmentDraftRef.current(baseTaskRef.current?.attachments);
+    }, []);
+
     const writePatch = React.useCallback((taskId: string, updates: Partial<Task>): boolean | Promise<boolean> => {
         // This prop boundary intentionally retains its synchronous branch:
         // void-returning modal callbacks must close in the same tick.
@@ -157,7 +195,7 @@ export function useTaskEditState({
         return false;
     }, [onSave, onSaveError]);
 
-    const saveDraft = React.useCallback((): Promise<boolean> => {
+    const saveDraft = React.useCallback(async (): Promise<boolean> => {
         const currentTask = baseTaskRef.current ?? liveTask;
         if (!currentTask || !taskEditDraft) return Promise.resolve(false);
         clearPendingTextChanges();
@@ -181,32 +219,52 @@ export function useTaskEditState({
             title: titleDraftRef.current,
             description: descriptionDraftRef.current,
         });
+        const wasAwaitingDurability = attachmentSaveAwaitingDurabilityRef.current;
         if (updates && Object.keys(updates).length > 0) {
-            const saved = writePatch(currentTask.id, updates);
-            if (saved instanceof Promise) {
-                return saved.then((succeeded) => {
-                    if (!succeeded) return false;
-                    onClose();
-                    return true;
-                });
+            const attachmentSaveRequiresDurability = areDraftAttachmentsDirty(
+                saveDraftState.attachments,
+                currentTask,
+            );
+            attachmentSaveAwaitingDurabilityRef.current = wasAwaitingDurability
+                || attachmentSaveRequiresDurability;
+            const saved = await Promise.resolve(writePatch(currentTask.id, updates));
+            if (!saved) {
+                attachmentSaveAwaitingDurabilityRef.current = wasAwaitingDurability;
+                return false;
             }
-            if (!saved) return Promise.resolve(false);
         }
+        if (attachmentSaveAwaitingDurabilityRef.current) {
+            try {
+                await flushPendingSave();
+            } catch (error) {
+                onSaveError(getUnknownErrorMessage(error));
+                // Keep the guard raised. The store retains a retry snapshot, so
+                // neither the baseline bytes nor newly submitted bytes are yet
+                // safe to classify as orphaned.
+                return false;
+            }
+        }
+        attachmentSaveAwaitingDurabilityRef.current = false;
+        settleCurrentAttachmentDraft(saveDraftState.attachments ?? currentTask.attachments);
         onClose();
-        return Promise.resolve(true);
+        return true;
     }, [
         clearPendingTextChanges,
         liveTask,
         onClose,
+        onSaveError,
         sections,
+        settleCurrentAttachmentDraft,
         taskEditDraft,
         writePatch,
     ]);
 
     const discardDraft = React.useCallback(() => {
         clearPendingTextChanges();
+        const currentTask = baseTaskRef.current ?? liveTask;
+        settleCurrentAttachmentDraft(currentTask?.attachments);
         onClose();
-    }, [clearPendingTextChanges, onClose]);
+    }, [clearPendingTextChanges, liveTask, onClose, settleCurrentAttachmentDraft]);
 
     const hasPendingChanges = React.useCallback(() => {
         const currentTask = baseTaskRef.current ?? liveTask;
@@ -291,6 +349,8 @@ export function useTaskEditState({
 
     React.useEffect(() => {
         if (!visible) {
+            const currentTask = baseTaskRef.current ?? liveTask;
+            settleCurrentAttachmentDraft(currentTask?.attachments);
             setTaskEditDraftState(null);
             baseTaskRef.current = null;
             isDirtyRef.current = false;
@@ -317,9 +377,13 @@ export function useTaskEditState({
             const taskChanged = baseTaskRef.current?.id !== liveTask.id;
             const updatedChanged = baseTaskRef.current?.updatedAt !== liveTask.updatedAt;
             if (taskChanged || (!isDirtyRef.current && updatedChanged)) {
+                if (taskChanged) {
+                    settleCurrentAttachmentDraft(baseTaskRef.current?.attachments);
+                }
                 setCustomWeekdays(byDay);
                 setTaskEditDraftState(createTaskEditDraft(liveTask));
                 baseTaskRef.current = liveTask;
+                attachmentDraftSettledRef.current = false;
                 isDirtyRef.current = false;
                 setShowDescriptionPreview(false);
                 const nextTitle = String(liveTask.title ?? '');
@@ -359,7 +423,7 @@ export function useTaskEditState({
             setEditTab(resolveInitialTaskEditTab(defaultTab, null));
             setCustomWeekdays([]);
         }
-    }, [defaultTab, liveTask, resetCopilotStateRef, visible]);
+    }, [defaultTab, liveTask, resetCopilotStateRef, settleCurrentAttachmentDraft, visible]);
 
     React.useEffect(() => {
         if (!visible) {

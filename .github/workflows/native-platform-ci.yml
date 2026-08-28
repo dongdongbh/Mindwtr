@@ -8,10 +8,14 @@ on:
       - "apps/desktop/src-tauri/**"
       - "apps/desktop/widgets-macos/**"
       - "scripts/build-macos-widget.sh"
+      - "scripts/ci/test-build-macos-widget.sh"
       - "apps/mobile/modules/**/android/**"
+      - "apps/mobile/modules/**/expo-module.config.json"
       - "apps/mobile/ios-app-intents/**"
       - "apps/mobile/widgets-ios/**"
       - "apps/mobile/modules/**/ios/**"
+      - "apps/mobile/modules/cloudkit-sync/Package.swift"
+      - "apps/mobile/modules/cloudkit-sync/tests/**"
       - "apps/mobile/plugins/**"
       - "apps/mobile/app.config.ts"
       - "apps/mobile/app.json"
@@ -29,10 +33,14 @@ on:
       - "apps/desktop/src-tauri/**"
       - "apps/desktop/widgets-macos/**"
       - "scripts/build-macos-widget.sh"
+      - "scripts/ci/test-build-macos-widget.sh"
       - "apps/mobile/modules/**/android/**"
+      - "apps/mobile/modules/**/expo-module.config.json"
       - "apps/mobile/ios-app-intents/**"
       - "apps/mobile/widgets-ios/**"
       - "apps/mobile/modules/**/ios/**"
+      - "apps/mobile/modules/cloudkit-sync/Package.swift"
+      - "apps/mobile/modules/cloudkit-sync/tests/**"
       - "apps/mobile/plugins/**"
       - "apps/mobile/app.config.ts"
       - "apps/mobile/app.json"
@@ -97,7 +105,7 @@ jobs:
           windows=false
           while IFS= read -r path; do
             case "$path" in
-              apps/desktop/src-tauri/*|apps/desktop/widgets-macos/*|scripts/build-macos-widget.sh|packages/core/src/*|scripts/check-synced-field-parity.ts|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
+              apps/desktop/src-tauri/*|apps/desktop/widgets-macos/*|scripts/build-macos-widget.sh|scripts/ci/test-build-macos-widget.sh|packages/core/src/*|scripts/check-synced-field-parity.ts|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
                 macos=true
                 ;;
             esac
@@ -107,12 +115,12 @@ jobs:
                 ;;
             esac
             case "$path" in
-              apps/mobile/modules/*/android/*|apps/mobile/plugins/*|apps/mobile/app.config.ts|apps/mobile/app.json|apps/mobile/package.json|scripts/ci/setup-android-sdk.sh|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
+              apps/mobile/modules/*/android/*|apps/mobile/modules/*/expo-module.config.json|apps/mobile/plugins/*|apps/mobile/app.config.ts|apps/mobile/app.json|apps/mobile/package.json|scripts/ci/setup-android-sdk.sh|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
                 android=true
                 ;;
             esac
             case "$path" in
-              apps/mobile/ios-app-intents/*|apps/mobile/widgets-ios/*|apps/mobile/modules/*/ios/*|apps/mobile/plugins/*|apps/mobile/app.config.ts|apps/mobile/app.json|apps/mobile/package.json|scripts/ci/setup-ruby.sh|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
+              apps/mobile/ios-app-intents/*|apps/mobile/widgets-ios/*|apps/mobile/modules/*/ios/*|apps/mobile/modules/*/expo-module.config.json|apps/mobile/modules/cloudkit-sync/Package.swift|apps/mobile/modules/cloudkit-sync/tests/*|apps/mobile/plugins/*|apps/mobile/app.config.ts|apps/mobile/app.json|apps/mobile/package.json|scripts/ci/setup-ruby.sh|package.json|bun.lock|.github/workflows/native-platform-ci.yml)
                 ios=true
                 ;;
             esac
@@ -165,11 +173,14 @@ jobs:
             -application-extension \
             apps/desktop/widgets-macos/*.swift
 
+      - name: Exercise macOS widget packaging and signing order
+        run: bash scripts/ci/test-build-macos-widget.sh
+
   windows-rust:
     if: needs.changes.outputs.windows == 'true'
     needs: changes
     runs-on: windows-latest
-    name: Windows Rust check
+    name: Windows Rust check and tests
     timeout-minutes: 35
     steps:
       - name: Checkout code
@@ -185,6 +196,9 @@ jobs:
 
       - name: Check Windows Rust
         run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+
+      - name: Run Windows native library tests
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
 
   android-native:
     if: needs.changes.outputs.android == 'true'
@@ -226,6 +240,34 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Run Android compatibility-lock process regression
+        run: |
+          set -euo pipefail
+          c++ \
+            -std=c++17 \
+            -Wall \
+            -Wextra \
+            -Werror \
+            -I apps/mobile/modules/sync-file-lock/android/src/main/cpp \
+            apps/mobile/modules/sync-file-lock/android/src/main/cpp/file_compat_lock.cpp \
+            apps/mobile/modules/sync-file-lock/android/src/test/cpp/file_compat_lock_test.cpp \
+            -o "$RUNNER_TEMP/file-compat-lock-test"
+          "$RUNNER_TEMP/file-compat-lock-test"
+
+      - name: Run Android exact-directory retirement regression
+        run: |
+          set -euo pipefail
+          c++ \
+            -std=c++17 \
+            -Wall \
+            -Wextra \
+            -Werror \
+            -I apps/mobile/modules/attachment-file-installer/android/src/main/cpp \
+            apps/mobile/modules/attachment-file-installer/android/src/main/cpp/exact_directory_retirement.cpp \
+            apps/mobile/modules/attachment-file-installer/android/src/test/cpp/exact_directory_retirement_test.cpp \
+            -o "$RUNNER_TEMP/exact-directory-retirement-test"
+          "$RUNNER_TEMP/exact-directory-retirement-test"
+
       - name: Generate Android native project
         working-directory: apps/mobile
         env:
@@ -238,7 +280,7 @@ jobs:
             --platform android \
             --no-install
 
-      - name: Compile Android Java and Kotlin sources
+      - name: Compile Android Java, Kotlin, and JNI sources
         working-directory: apps/mobile/android
         env:
           CI: "1"
@@ -248,8 +290,49 @@ jobs:
           ./gradlew \
             :app:compileDebugKotlin \
             :app:compileDebugJavaWithJavac \
+            :attachment-file-installer:assembleDebug \
+            :sync-file-lock:assembleDebug \
             --no-daemon \
             -PreactNativeArchitectures=arm64-v8a
+
+      - name: Verify packaged Android lock JNI symbols
+        working-directory: apps/mobile/android
+        run: |
+          set -euo pipefail
+          LOCK_AAR="$(find ../modules/sync-file-lock/android/build/outputs/aar -name '*debug.aar' -print -quit)"
+          if [ -z "${LOCK_AAR:-}" ]; then
+            echo "::error::sync-file-lock debug AAR was not produced"
+            exit 1
+          fi
+          unzip -l "$LOCK_AAR" | grep -F 'jni/arm64-v8a/libsync-file-lock.so'
+          unzip -p "$LOCK_AAR" jni/arm64-v8a/libsync-file-lock.so > "$RUNNER_TEMP/libsync-file-lock.so"
+          readelf --dyn-syms --wide "$RUNNER_TEMP/libsync-file-lock.so" \
+            | grep -F 'Java_tech_dongdongbh_mindwtr_syncfilelock_StableRootLockNative_tryLock'
+          readelf --dyn-syms --wide "$RUNNER_TEMP/libsync-file-lock.so" \
+            | grep -F 'Java_tech_dongdongbh_mindwtr_syncfilelock_StableRootLockNative_tryOfdLock'
+
+      - name: Verify packaged Android attachment JNI symbols
+        working-directory: apps/mobile/android
+        run: |
+          set -euo pipefail
+          ATTACHMENT_AAR="$(find ../modules/attachment-file-installer/android/build/outputs/aar -name '*debug.aar' -print -quit)"
+          if [ -z "${ATTACHMENT_AAR:-}" ]; then
+            echo "::error::attachment-file-installer debug AAR was not produced"
+            exit 1
+          fi
+          unzip -l "$ATTACHMENT_AAR" | grep -F 'jni/arm64-v8a/libattachment-file-installer.so'
+          unzip -p "$ATTACHMENT_AAR" jni/arm64-v8a/libattachment-file-installer.so \
+            > "$RUNNER_TEMP/libattachment-file-installer.so"
+          readelf --dyn-syms --wide "$RUNNER_TEMP/libattachment-file-installer.so" \
+            | grep -F 'Java_tech_dongdongbh_mindwtr_attachmentfileinstaller_ExactAttachmentPublisherNative_publishRelativeNoReplace'
+          readelf --dyn-syms --wide "$RUNNER_TEMP/libattachment-file-installer.so" \
+            | grep -F 'Java_tech_dongdongbh_mindwtr_attachmentfileinstaller_ExactAttachmentPublisherNative_retireEmptyDirectoryIfIdentity'
+          readelf --dyn-syms --wide "$RUNNER_TEMP/libattachment-file-installer.so" \
+            | grep -F 'Java_tech_dongdongbh_mindwtr_attachmentfileinstaller_ExactAttachmentPublisherNative_retireReservedPrivateStage'
+
+      - name: Run Android native recovery tests
+        working-directory: apps/mobile/android
+        run: ./gradlew :attachment-file-installer:testDebugUnitTest :sync-file-lock:testDebugUnitTest --no-daemon
 
   ios-native:
     if: needs.changes.outputs.ios == 'true'
@@ -328,6 +411,15 @@ jobs:
           fi
 
           echo "Using iPhoneOS SDK ${IOS_SDK_VERSION}"
+
+      - name: Run attachment installer Swift recovery tests
+        run: swift test --package-path apps/mobile/modules/attachment-file-installer/ios
+
+      - name: Run File Sync stable-lock Swift tests
+        run: swift test --package-path apps/mobile/modules/sync-file-lock/ios
+
+      - name: Run CloudKit attachment error classifier tests
+        run: swift test --package-path apps/mobile/modules/cloudkit-sync
 
       - name: Generate iOS native project
         working-directory: apps/mobile

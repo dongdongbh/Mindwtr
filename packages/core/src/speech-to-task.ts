@@ -1,6 +1,6 @@
 import type { AudioCaptureMode, AudioFieldStrategy } from './ai/types';
 import { resolveGeminiModel } from './ai/catalog';
-import { fetchWithTimeout } from './ai/utils';
+import { fetchTextWithTimeout } from './ai/utils';
 import {
     openAITranscribeLanguageFieldName,
     resolveOpenAITranscribeEndpoint,
@@ -72,7 +72,7 @@ async function fetchSpeechJson(
     init: RequestInit,
     fetcher: typeof fetch,
 ): Promise<unknown> {
-    const response = await fetchWithTimeout(
+    const response = await fetchTextWithTimeout(
         url,
         init,
         SPEECH_REQUEST_TIMEOUT_MS,
@@ -81,10 +81,9 @@ async function fetchSpeechJson(
         fetcher,
     );
     if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `Request failed (${response.status})`);
+        throw new Error(response.bodyText || `Request failed (${response.status})`);
     }
-    return response.json() as Promise<unknown>;
+    return JSON.parse(response.bodyText) as unknown;
 }
 
 async function transcribeRemoteOpenAI(

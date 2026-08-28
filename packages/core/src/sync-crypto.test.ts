@@ -27,6 +27,7 @@ describe('sync-crypto MWENC1 format', () => {
         const material = await deriveSyncKeyMaterial('a fresh passphrase', salt, LIGHT);
         const plaintext = new TextEncoder().encode('round trip payload');
         const encrypted = await encryptSyncArtifact(plaintext, material);
+        expect(encrypted.byteLength).toBe(plaintext.byteLength + 70);
         const decrypted = await decryptSyncArtifact(encrypted, material.key);
         expect(decrypted).toEqual(plaintext);
 

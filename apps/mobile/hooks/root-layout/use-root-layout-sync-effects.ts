@@ -38,6 +38,8 @@ type SyncUiCopy = {
     syncIssueAuthMessage: string;
     syncIssueConflictMessage: string;
     syncIssueEncryptionMessage: string;
+    syncIssueEncryptionStateMessage: string;
+    syncIssueFileLockUnavailableMessage: string;
     syncIssueGenericMessage: string;
     syncIssueMisconfiguredMessage: string;
     syncIssuePermissionMessage: string;
@@ -83,6 +85,8 @@ const buildSyncUiCopy = (resolveText: ResolveText): SyncUiCopy => ({
     syncIssueMisconfiguredMessage: resolveText('settings.syncFailureMisconfigured', 'Finish configuring the selected sync backend in Settings → Sync.'),
     syncIssueConflictMessage: resolveText('settings.syncFailureConflict', 'Another device or backend reported a sync conflict. Retry after both sides finish syncing.'),
     syncIssueEncryptionMessage: resolveText('settings.syncFailureEncryption', 'This sync location is encrypted. Enter its passphrase in Settings → Sync to continue.'),
+    syncIssueEncryptionStateMessage: resolveText('settings.syncEncryptionStateUnavailable', 'Sync stopped because this device could not read its local encryption state. Restart Mindwtr and try again. If the problem continues, reconnect this sync location before syncing.'),
+    syncIssueFileLockUnavailableMessage: resolveText('settings.syncFileLockUnavailable', 'Mindwtr cannot safely lock this File Sync location. Re-select the folder, restart or update Mindwtr, or use WebDAV.'),
     notificationsDisabledTitle: resolveText('settings.notificationsDisabled', 'Notifications disabled'),
     notificationsDisabledMessage: resolveText('settings.notificationsDisabledMessage', 'Mindwtr can no longer schedule reminders until notification access is restored.'),
     openActionLabel: resolveText('common.open', 'Open'),
@@ -314,8 +318,12 @@ export function useRootLayoutSyncEffects({
                                 return uiCopy.syncIssueMisconfiguredMessage;
                             case 'conflict':
                                 return uiCopy.syncIssueConflictMessage;
+                            case 'encryptionState':
+                                return uiCopy.syncIssueEncryptionStateMessage;
                             case 'encryption':
                                 return uiCopy.syncIssueEncryptionMessage;
+                            case 'fileLockUnavailable':
+                                return uiCopy.syncIssueFileLockUnavailableMessage;
                             default:
                                 return uiCopy.syncIssueGenericMessage;
                         }

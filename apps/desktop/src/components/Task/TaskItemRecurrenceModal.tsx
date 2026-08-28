@@ -59,7 +59,15 @@ export function TaskItemRecurrenceModal({
                     : 'fourth';
     const ordinalLabel = t(`recurrence.ordinal.${ordinalKey}`);
     const weekdayLabel = weekdayLabels[customWeekday] ?? customWeekday;
-    const onDayLabel = t('recurrence.onDayOfMonth').replace('{day}', customMonthDays.join(', '));
+    const lastDayLabel = resolveText('recurrence.lastDay', 'Last day');
+    const lastDayOfMonthLabel = resolveText('recurrence.lastDayOfMonth', 'Last day of the month');
+    const numberedMonthDays = customMonthDays.filter((day) => day !== -1);
+    const numberedDaysLabel = t('recurrence.onDayOfMonth').replace('{day}', numberedMonthDays.join(', '));
+    const onDayLabel = customMonthDays.includes(-1)
+        ? numberedMonthDays.length > 0
+            ? `${numberedDaysLabel} + ${lastDayLabel}`
+            : lastDayLabel
+        : numberedDaysLabel;
     const onNthLabel = t('recurrence.onNthWeekday')
         .replace('{ordinal}', ordinalLabel)
         .replace('{weekday}', weekdayLabel);
@@ -114,7 +122,7 @@ export function TaskItemRecurrenceModal({
                                     : 'bg-transparent text-muted-foreground border-border hover:bg-accent'
                             )}
                         >
-                            {resolveText('recurrence.lastDay', 'Last day')}
+                            {lastDayLabel}
                         </button>
                         <button
                             type="button"
@@ -180,6 +188,20 @@ export function TaskItemRecurrenceModal({
                                     </button>
                                 );
                             })}
+                            <button
+                                type="button"
+                                aria-pressed={customMonthDays.includes(-1)}
+                                aria-label={lastDayOfMonthLabel}
+                                onClick={() => onMonthDayToggle(-1)}
+                                className={cn(
+                                    'col-span-2 text-[10px] px-2 py-1 rounded border transition-colors',
+                                    customMonthDays.includes(-1)
+                                        ? 'bg-primary text-primary-foreground border-primary'
+                                        : 'bg-transparent text-muted-foreground border-border hover:bg-accent'
+                                )}
+                            >
+                                {lastDayLabel}
+                            </button>
                         </div>
                     )}
                 </div>

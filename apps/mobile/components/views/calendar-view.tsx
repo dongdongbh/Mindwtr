@@ -3,7 +3,6 @@ import {
   type AccessibilityActionEvent,
   FlatList,
   type LayoutChangeEvent,
-  Modal,
   PanResponder,
   type PanResponderGestureState,
   Pressable,
@@ -15,7 +14,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { CALENDAR_TIME_ESTIMATE_OPTIONS, getCalendarDayOfMonth, getShortWeekdayLabels, getTaskCalendarOccurrenceDate, isProjectedRecurringTask, isTaskFinished, safeFormatDate, safeParseDate, type Task } from '@mindwtr/core';
+import { getCalendarDayOfMonth, getShortWeekdayLabels, getTaskCalendarOccurrenceDate, isProjectedRecurringTask, isTaskFinished, safeFormatDate, safeParseDate, type Task } from '@mindwtr/core';
 import { Gesture, GestureDetector, ScrollView } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue, withSequence, withSpring, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -32,6 +31,8 @@ import {
   type CalendarTimedLayoutInput,
 } from '@mindwtr/core/calendar-day-items';
 import { styles } from './calendar/calendar-view.styles';
+import { CalendarPeriodNavigation } from './calendar/calendar-period-navigation';
+import { CalendarTaskComposerModal } from './calendar/calendar-task-composer-modal';
 import {
   isAllDayScheduledTask,
   isTimedScheduledTask,
@@ -747,200 +748,32 @@ export function CalendarView() {
   );
 
   const renderCalendarComposer = () => (
-    <Modal
-      visible={Boolean(calendarComposer)}
-      transparent
-      animationType="fade"
-      onRequestClose={closeCalendarComposer}
-    >
-      <Pressable
-        style={composerKeyboardInset > 0
-          ? [styles.composerBackdrop, { paddingBottom: composerKeyboardInset }]
-          : styles.composerBackdrop}
-        onPress={closeCalendarComposer}
-      >
-        {calendarComposer && (
-          <View
-            style={[
-              styles.calendarComposer,
-              {
-                backgroundColor: tc.cardBg,
-                borderColor: tc.border,
-                paddingBottom: Math.max(18, insets.bottom + 14),
-              },
-            ]}
-            onTouchEnd={(event) => event.stopPropagation()}
-          >
-            <View style={styles.composerHeader}>
-              <View style={styles.taskItemMain}>
-                <Text style={[styles.composerTitle, { color: tc.text }]}>
-                  {tr('calendar.mobile.scheduleTask')}
-                </Text>
-                <Text style={[styles.composerDate, { color: tc.secondaryText }]}>
-                  {calendarComposer.date.toLocaleDateString(locale, { weekday: 'short', month: 'short', day: 'numeric' })}
-                </Text>
-              </View>
-              <Pressable onPress={closeCalendarComposer} style={styles.composerCloseButton}>
-                <Text style={[styles.composerCloseText, { color: tc.secondaryText }]}>×</Text>
-              </Pressable>
-            </View>
-
-            <View style={[styles.composerModeToggle, { backgroundColor: tc.inputBg, borderColor: tc.border }]}>
-              {[
-                { value: 'new' as const, label: tr('calendar.mobile.newTask') },
-                { value: 'existing' as const, label: tr('calendar.mobile.existingTask') },
-              ].map((option) => {
-                const active = calendarComposer.mode === option.value;
-                return (
-                  <Pressable
-                    key={option.value}
-                    onPress={() => setCalendarComposerMode(option.value)}
-                    style={[styles.composerModeButton, active && { backgroundColor: tc.tint }]}
-                  >
-                    <Text style={[styles.composerModeText, { color: active ? tc.onTint : tc.secondaryText }]}>
-                      {option.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            {calendarComposer.mode === 'new' ? (
-              <View style={styles.composerSection}>
-                <TextInput
-                  style={[styles.input, styles.composerInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-                  value={calendarComposer.title}
-                  onChangeText={setCalendarComposerTitle}
-                  placeholder={t('calendar.addTask')}
-                  placeholderTextColor={tc.secondaryText}
-                />
-                <Text style={[styles.composerHelp, { color: tc.secondaryText }]}>
-                  {t('quickAdd.help')}
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.composerSection}>
-                <TextInput
-                  style={[styles.input, styles.composerInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-                  value={calendarComposer.query}
-                  onChangeText={setCalendarComposerQuery}
-                  placeholder={t('calendar.schedulePlaceholder')}
-                  placeholderTextColor={tc.secondaryText}
-                />
-                <ScrollView style={styles.composerResults} keyboardShouldPersistTaps="handled">
-                  {calendarComposerCandidates.map((task) => {
-                    const selected = task.id === calendarComposer.selectedTaskId;
-                    return (
-                      <Pressable
-                        key={task.id}
-                        onPress={() => selectCalendarComposerTask(task)}
-                        style={[
-                          styles.composerResultItem,
-                          {
-                            backgroundColor: selected ? toRgba(tc.tint, isDark ? 0.28 : 0.14) : tc.inputBg,
-                            borderLeftColor: selected ? tc.tint : tc.border,
-                          },
-                        ]}
-                      >
-                        <Text style={[styles.taskItemTitle, { color: selected ? tc.tint : tc.text }]} numberOfLines={1}>
-                          {task.title}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                  {calendarComposerCandidates.length === 0 && (
-                    <Text style={[styles.noTasks, { color: tc.secondaryText }]}>
-                      {tr('calendar.mobile.noMatchingTasks')}
-                    </Text>
-                  )}
-                </ScrollView>
-                {calendarComposerSelectedTask && (
-                  <Text style={[styles.composerSelectedTask, { color: tc.tint, backgroundColor: toRgba(tc.tint, isDark ? 0.22 : 0.12) }]} numberOfLines={1}>
-                    {calendarComposerSelectedTask.title}
-                  </Text>
-                )}
-              </View>
-            )}
-
-            <View style={styles.composerTimeRow}>
-              <View style={styles.composerTimeField}>
-                <Text style={[styles.composerLabel, { color: tc.secondaryText }]}>{tr('taskEdit.start')}</Text>
-                <TextInput
-                  style={[styles.input, styles.composerTimeInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-                  value={calendarComposer.startTimeValue}
-                  onChangeText={setCalendarComposerStartTime}
-                  placeholder={composerStartTimePlaceholder}
-                  placeholderTextColor={tc.secondaryText}
-                  keyboardType="numbers-and-punctuation"
-                />
-              </View>
-              <View style={styles.composerTimeField}>
-                <Text style={[styles.composerLabel, { color: tc.secondaryText }]}>{tr('calendar.mobile.end')}</Text>
-                <TextInput
-                  style={[styles.input, styles.composerTimeInput, { backgroundColor: tc.inputBg, borderColor: tc.border, color: tc.text }]}
-                  value={calendarComposer.endTimeValue}
-                  onChangeText={setCalendarComposerEndTime}
-                  placeholder={composerEndTimePlaceholder}
-                  placeholderTextColor={tc.secondaryText}
-                  keyboardType="numbers-and-punctuation"
-                />
-              </View>
-            </View>
-
-            <View style={styles.durationChips}>
-              {CALENDAR_TIME_ESTIMATE_OPTIONS.map((option) => {
-                const active = calendarComposer.durationMinutes === option.minutes;
-                return (
-                  <Pressable
-                    key={option.estimate}
-                    onPress={() => setCalendarComposerDuration(option.minutes)}
-                    style={[
-                      styles.durationChip,
-                      {
-                        backgroundColor: active ? tc.tint : tc.inputBg,
-                        borderColor: active ? tc.tint : tc.border,
-                      },
-                    ]}
-                  >
-                    <Text style={[styles.durationChipText, { color: active ? tc.onTint : tc.secondaryText }]}>
-                      {formatDurationLabel(option.minutes)}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            {calendarComposerError && (
-              <Text style={[styles.composerError, { color: tc.danger }]}>
-                {calendarComposerError}
-              </Text>
-            )}
-
-            <View style={styles.composerActions}>
-              <Pressable
-                onPress={closeCalendarComposer}
-                style={[styles.composerCancelButton, { backgroundColor: tc.inputBg }]}
-              >
-                <Text style={[styles.composerActionText, { color: tc.text }]}>{t('common.cancel')}</Text>
-              </Pressable>
-              <Pressable
-                onPress={saveCalendarComposer}
-                disabled={calendarComposer.mode === 'new' ? !calendarComposer.title.trim() : !calendarComposer.selectedTaskId}
-                style={[
-                  styles.composerSaveButton,
-                  {
-                    backgroundColor: tc.tint,
-                    opacity: calendarComposer.mode === 'new' ? (calendarComposer.title.trim() ? 1 : 0.5) : (calendarComposer.selectedTaskId ? 1 : 0.5),
-                  },
-                ]}
-              >
-                <Text style={[styles.composerActionText, { color: tc.onTint }]}>{t('common.save')}</Text>
-              </Pressable>
-            </View>
-          </View>
-        )}
-      </Pressable>
-    </Modal>
+    <CalendarTaskComposerModal
+      bottomInset={insets.bottom}
+      candidates={calendarComposerCandidates}
+      closeComposer={closeCalendarComposer}
+      composer={calendarComposer}
+      endTimePlaceholder={composerEndTimePlaceholder}
+      error={calendarComposerError}
+      formatDurationLabel={formatDurationLabel}
+      isDark={isDark}
+      keyboardInset={composerKeyboardInset}
+      locale={locale}
+      saveComposer={saveCalendarComposer}
+      selectTask={selectCalendarComposerTask}
+      selectedTask={calendarComposerSelectedTask}
+      setDuration={setCalendarComposerDuration}
+      setEndTime={setCalendarComposerEndTime}
+      setMode={setCalendarComposerMode}
+      setQuery={setCalendarComposerQuery}
+      setStartTime={setCalendarComposerStartTime}
+      setTitle={setCalendarComposerTitle}
+      startTimePlaceholder={composerStartTimePlaceholder}
+      t={t}
+      tc={tc}
+      toRgba={toRgba}
+      tr={tr}
+    />
   );
 
   if (viewMode === 'day' && selectedDate && selectedDayStart && selectedDayEnd) {
@@ -963,37 +796,17 @@ export function CalendarView() {
     return (
       <View style={[styles.container, { backgroundColor: tc.bg }]}>
         <View style={[styles.dayModeHeader, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
-          <View style={styles.headerTopRow}>
-            <Pressable
-              onPress={() => shiftSelectedDate(-1)}
-              accessibilityRole="button"
-              accessibilityLabel="Previous day"
-              style={styles.navButton}
-            >
-              <Text style={[styles.navButtonText, { color: tc.text }]}>‹</Text>
-            </Pressable>
-            <View style={styles.dayModeTitleWrap}>
-              <Text style={[styles.dayModeTitle, { color: tc.text }]} numberOfLines={1}>
-                {selectedDayModeLabel}
-              </Text>
-              <Pressable
-                onPress={handleToday}
-                accessibilityRole="button"
-                accessibilityLabel={tr('filters.datePreset.today')}
-                style={[styles.todayButton, { borderColor: tc.border }]}
-              >
-                <Text style={[styles.todayButtonText, { color: tc.tint }]}>{tr('filters.datePreset.today')}</Text>
-              </Pressable>
-            </View>
-            <Pressable
-              onPress={() => shiftSelectedDate(1)}
-              accessibilityRole="button"
-              accessibilityLabel="Next day"
-              style={styles.navButton}
-            >
-              <Text style={[styles.navButtonText, { color: tc.text }]}>›</Text>
-            </Pressable>
-          </View>
+          <CalendarPeriodNavigation
+            label={selectedDayModeLabel}
+            nextLabel={tr('calendar.nextDay')}
+            onNext={() => shiftSelectedDate(1)}
+            onPrevious={() => shiftSelectedDate(-1)}
+            onToday={handleToday}
+            previousLabel={tr('calendar.prevDay')}
+            tc={tc}
+            titleVariant="day"
+            todayLabel={tr('filters.datePreset.today')}
+          />
           {renderModeToggle()}
           {renderShowCompletedToggle()}
         </View>
@@ -1213,22 +1026,16 @@ export function CalendarView() {
     return (
       <View style={[styles.container, { backgroundColor: tc.bg }]}>
         <View style={[styles.header, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
-          <View style={styles.headerTopRow}>
-            <Pressable onPress={() => shiftSelectedDate(-7)} style={styles.navButton}>
-              <Text style={[styles.navButtonText, { color: tc.text }]}>‹</Text>
-            </Pressable>
-            <View style={styles.monthTitleWrap}>
-              <Text style={[styles.title, { color: tc.text }]} numberOfLines={1}>
-                {weekLabel}
-              </Text>
-              <Pressable onPress={handleToday} style={[styles.todayButton, { borderColor: tc.border }]}>
-                <Text style={[styles.todayButtonText, { color: tc.tint }]}>{tr('filters.datePreset.today')}</Text>
-              </Pressable>
-            </View>
-            <Pressable onPress={() => shiftSelectedDate(7)} style={styles.navButton}>
-              <Text style={[styles.navButtonText, { color: tc.text }]}>›</Text>
-            </Pressable>
-          </View>
+          <CalendarPeriodNavigation
+            label={weekLabel}
+            nextLabel={tr('calendar.nextWeek')}
+            onNext={() => shiftSelectedDate(7)}
+            onPrevious={() => shiftSelectedDate(-7)}
+            onToday={handleToday}
+            previousLabel={tr('calendar.prevWeek')}
+            tc={tc}
+            todayLabel={tr('filters.datePreset.today')}
+          />
           {renderModeToggle()}
           {renderShowCompletedToggle()}
         </View>
@@ -1755,32 +1562,16 @@ export function CalendarView() {
   return (
     <View style={[styles.container, { backgroundColor: tc.bg }]}>
       <View style={[styles.header, { backgroundColor: tc.cardBg, borderBottomColor: tc.border }]}>
-        <View style={styles.headerTopRow}>
-          <Pressable
-            onPress={handlePrevMonth}
-            accessibilityRole="button"
-            accessibilityLabel={tr('calendar.prevMonth')}
-            style={styles.navButton}
-          >
-            <Text style={[styles.navButtonText, { color: tc.text }]}>‹</Text>
-          </Pressable>
-          <View style={styles.monthTitleWrap}>
-            <Text style={[styles.title, { color: tc.text }]} numberOfLines={1}>
-              {monthLabel}
-            </Text>
-            <Pressable onPress={handleToday} style={[styles.todayButton, { borderColor: tc.border }]}>
-              <Text style={[styles.todayButtonText, { color: tc.tint }]}>{tr('filters.datePreset.today')}</Text>
-            </Pressable>
-          </View>
-          <Pressable
-            onPress={handleNextMonth}
-            accessibilityRole="button"
-            accessibilityLabel={tr('calendar.nextMonth')}
-            style={styles.navButton}
-          >
-            <Text style={[styles.navButtonText, { color: tc.text }]}>›</Text>
-          </Pressable>
-        </View>
+        <CalendarPeriodNavigation
+          label={monthLabel}
+          nextLabel={tr('calendar.nextMonth')}
+          onNext={handleNextMonth}
+          onPrevious={handlePrevMonth}
+          onToday={handleToday}
+          previousLabel={tr('calendar.prevMonth')}
+          tc={tc}
+          todayLabel={tr('filters.datePreset.today')}
+        />
         {renderModeToggle()}
         {renderShowCompletedToggle()}
       </View>

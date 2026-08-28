@@ -353,8 +353,18 @@ export type SqliteSaveDataStats = {
     sqlCount: number;
 };
 
+export type SqliteAdapterOptions = {
+    /**
+     * Reject a write when another connection changed the snapshot since getData().
+     * Long-lived app processes normally merge concurrent state above this layer;
+     * short-lived automation clients use this guard so retry can reload first.
+     */
+    rejectConcurrentWrites?: boolean;
+};
+
 export class SqliteAdapter {
     private client: SqliteClient;
+    private rejectConcurrentWrites: boolean;
     private schemaReadyPromise: Promise<void> | null = null;
     // Fingerprints of rows submitted by this adapter's last committed save.
     // Revision-guarded upserts make it safe for another process to advance a row;
@@ -366,10 +376,15 @@ export class SqliteAdapter {
     // database version still matches. This keeps a stale full snapshot from
     // deleting rows added or advanced by another process between read and save.
     private lastKnownRowVersions: Map<SqliteEntityTable, Map<string, SqliteKnownRowVersion>> | null = null;
+    // PRAGMA data_version is a connection-local epoch that advances when another
+    // connection commits. It gives guarded automation writes an O(1) stale-read
+    // check without scanning every persisted row under BEGIN IMMEDIATE.
+    private lastObservedExternalChangeEpoch: number | undefined;
     private lastSaveDataStats: SqliteSaveDataStats | null = null;
 
-    constructor(client: SqliteClient) {
+    constructor(client: SqliteClient, options: SqliteAdapterOptions = {}) {
         this.client = client;
+        this.rejectConcurrentWrites = options.rejectConcurrentWrites === true;
     }
 
     private async loadAllRows(table: 'tasks' | 'projects' | 'sections' | 'areas' | 'people'): Promise<Record<string, unknown>[]> {
@@ -423,6 +438,31 @@ export class SqliteAdapter {
             });
         }
         return versions;
+    }
+
+    private async readExternalChangeEpoch(): Promise<number> {
+        const row = await this.client.get<Record<string, unknown>>('PRAGMA data_version');
+        const rawValue = row?.data_version ?? (row ? Object.values(row)[0] : undefined);
+        const epoch = Number(rawValue);
+        if (!Number.isFinite(epoch)) {
+            throw new Error('SQLite did not return a valid PRAGMA data_version value');
+        }
+        return epoch;
+    }
+
+    private concurrentWriteError(detail: string): Error {
+        return new Error(`SQLITE_BUSY: database changed after the automation snapshot was loaded (${detail})`);
+    }
+
+    private async assertObservedSnapshotUnchanged(): Promise<void> {
+        if (!this.rejectConcurrentWrites) return;
+        if (!this.lastKnownRowVersions || this.lastObservedExternalChangeEpoch === undefined) {
+            throw this.concurrentWriteError('no read baseline');
+        }
+        const currentEpoch = await this.readExternalChangeEpoch();
+        if (currentEpoch !== this.lastObservedExternalChangeEpoch) {
+            throw this.concurrentWriteError('external commit');
+        }
     }
 
     private async acquireFtsLock(): Promise<string | null> {
@@ -930,7 +970,7 @@ export class SqliteAdapter {
 
     async getData(): Promise<AppData> {
         await this.ensureSchema();
-        const [tasksRows, projectsRows, sectionsRows, areasRows, peopleRows, settingsRow, savedFilterRows] = await Promise.all([
+        const loadSnapshotRows = () => Promise.all([
             this.loadAllRows('tasks'),
             this.loadAllRows('projects'),
             this.loadAllRows('sections'),
@@ -939,6 +979,25 @@ export class SqliteAdapter {
             this.client.get<Record<string, unknown>>('SELECT data FROM settings WHERE id = 1'),
             this.client.all<Record<string, unknown>>('SELECT rowid as _rowid, * FROM saved_filters ORDER BY createdAt, name'),
         ]);
+        let snapshotRows: Awaited<ReturnType<typeof loadSnapshotRows>> | null = null;
+        if (this.rejectConcurrentWrites) {
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+                const beforeEpoch = await this.readExternalChangeEpoch();
+                const candidateRows = await loadSnapshotRows();
+                const afterEpoch = await this.readExternalChangeEpoch();
+                if (beforeEpoch === afterEpoch) {
+                    snapshotRows = candidateRows;
+                    this.lastObservedExternalChangeEpoch = afterEpoch;
+                    break;
+                }
+            }
+            if (!snapshotRows) {
+                throw this.concurrentWriteError('database changed while loading');
+            }
+        } else {
+            snapshotRows = await loadSnapshotRows();
+        }
+        const [tasksRows, projectsRows, sectionsRows, areasRows, peopleRows, settingsRow, savedFilterRows] = snapshotRows;
 
         const tasks: Task[] = tasksRows.map((row) => this.mapTaskRow(row));
         const projects: Project[] = projectsRows.map((row) => projectFromSqliteRow(row));
@@ -1052,6 +1111,7 @@ export class SqliteAdapter {
         await this.ensureSchema();
         await this.client.run('BEGIN IMMEDIATE');
         try {
+            await this.assertObservedSnapshotUnchanged();
             const columnList = TASK_UPSERT_COLUMNS.join(', ');
             const placeholders = TASK_UPSERT_COLUMNS.map(() => '?').join(', ');
             const entry = getTaskRowEntry(task);
@@ -1059,19 +1119,18 @@ export class SqliteAdapter {
                 `INSERT INTO tasks (${columnList}) VALUES (${placeholders}) ON CONFLICT(id) DO UPDATE SET ${TASK_UPSERT_UPDATE_CLAUSE}`,
                 entry.row
             );
+            const savedRow = await this.client.get<Record<string, unknown>>(
+                'SELECT rowid as _rowid, * FROM tasks WHERE id = ?',
+                [task.id],
+            );
             await this.client.run('COMMIT');
             this.lastSavedFingerprints?.tables.get('tasks')?.set(String(entry.row[0]), entry.fingerprint);
             const knownTables = new Map(this.lastKnownRowVersions ?? []);
             const knownTasks = new Map(knownTables.get('tasks') ?? []);
-            const previousVersion = knownTasks.get(task.id);
-            const rawRev = entry.row[TASK_UPSERT_COLUMNS.indexOf('rev')];
-            const parsedRev = rawRev === null || rawRev === undefined ? null : Number(rawRev);
-            const rawUpdatedAt = entry.row[TASK_UPSERT_COLUMNS.indexOf('updatedAt')];
-            knownTasks.set(task.id, {
-                rowId: previousVersion?.rowId ?? null,
-                rev: parsedRev !== null && Number.isFinite(parsedRev) ? parsedRev : null,
-                updatedAt: typeof rawUpdatedAt === 'string' ? rawUpdatedAt : null,
-            });
+            if (savedRow) {
+                const savedVersion = this.knownRowVersionsFromRows([savedRow]).get(task.id);
+                if (savedVersion) knownTasks.set(task.id, savedVersion);
+            }
             knownTables.set('tasks', knownTasks);
             this.lastKnownRowVersions = knownTables;
         } catch (error) {
@@ -1137,6 +1196,8 @@ export class SqliteAdapter {
         stats.beginMs = Date.now() - beginStartedAt;
         let saveStep = 'begin';
         try {
+            saveStep = 'concurrent-write-check';
+            await this.assertObservedSnapshotUnchanged();
             const nowIso = new Date().toISOString();
             const chunkArray = <T>(items: T[], size: number): T[][] => {
                 const chunks: T[][] = [];

@@ -1,21 +1,44 @@
-import type { Attachment, SyncKeyMaterial } from '@mindwtr/core';
 import {
+  applyAttachmentContentStat,
+  assertBufferedAttachmentUploadSize,
+  AttachmentUploadSizeUnavailableError,
+  bumpAttachmentContentRevision,
+  checkAttachmentContentChange,
+  computeSha256Hex,
   decryptRemoteArtifactOrThrow,
   encryptSyncArtifact,
   inspectSyncArtifact,
+  isSha256Hex,
+  MAX_DOWNLOAD_BYTES,
+  ResponseTooLargeError,
   runAttachmentTransferLifecycle,
   SyncCryptoUnsupportedError,
   SyncEncryptionTerminalError,
+  WebDavRemoteWriteConflictError,
+  type Attachment,
+  type AttachmentDownloadExpectation,
   type AttachmentTransferLifecycleOptions,
   type AttachmentTransferResult,
+  type SyncKeyMaterial,
 } from '@mindwtr/core';
 import * as FileSystem from '../file-system';
+import * as LegacyFileSystem from 'expo-file-system/legacy';
 import {
+  base64ToBytes,
   bytesToBase64,
+  attachmentNeedsManagedLocalCopy,
   canUploadAttachmentFrom,
+  computeAttachmentFileHash,
   createAttachmentLocalMigrationLimiter,
   DEFAULT_CONTENT_TYPE,
+  getLocalAttachmentPresence,
+  readFileAsBytes,
+  reportProgress,
+  statAttachmentFile,
+  validateAttachmentHash,
+  writeBytesSafely,
 } from '../attachment-sync-utils';
+import { installAttachmentFileGeneration } from '../attachment-file-installer';
 import { mobileSyncCryptoPrimitives } from '../sync-crypto-native';
 import { assertMobileWebdavConnection } from '../webdav-request-options';
 
@@ -117,6 +140,338 @@ export const isAttachmentSyncAbortError = (error: unknown, signal?: AbortSignal)
   Boolean(signal?.aborted) || (error instanceof Error && error.name === 'AbortError')
 );
 
+let uploadSnapshotSequence = 0;
+let downloadStageSequence = 0;
+const DOWNLOAD_READ_CHUNK_BYTES = 64 * 1024;
+
+const buildAttachmentDownloadStagePath = (
+  attachmentsDir: string,
+  attachment: Attachment,
+): string => {
+  const normalizedDir = attachmentsDir.endsWith('/') ? attachmentsDir : `${attachmentsDir}/`;
+  downloadStageSequence += 1;
+  const random = Math.random().toString(16).slice(2, 10);
+  const safeId = attachment.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64) || 'attachment';
+  return `${normalizedDir}.mindwtr-download-${Date.now()}-${downloadStageSequence}-${random}-${safeId}.staged`;
+};
+
+export const deleteAttachmentDownloadStageBestEffort = async (stagedPath: string): Promise<void> => {
+  await FileSystem.deleteAsync(stagedPath, { idempotent: true }).catch(() => undefined);
+};
+
+const assertAttachmentDownloadSize = (size: number): void => {
+  if (!Number.isFinite(size) || size < 0 || size > MAX_DOWNLOAD_BYTES) {
+    throw new ResponseTooLargeError(MAX_DOWNLOAD_BYTES);
+  }
+};
+
+type AttachmentDownloadFileSnapshot = {
+  modificationTime: number | null;
+  size: number;
+};
+
+const readAttachmentDownloadFileSnapshot = async (
+  path: string,
+): Promise<AttachmentDownloadFileSnapshot> => {
+  const info = await FileSystem.getInfoAsync(path);
+  if (!info.exists || typeof info.size !== 'number') {
+    throw new Error('Attachment download scratch file is unavailable');
+  }
+  assertAttachmentDownloadSize(info.size);
+  return {
+    modificationTime: typeof info.modificationTime === 'number' ? info.modificationTime : null,
+    size: info.size,
+  };
+};
+
+const snapshotsMatch = (
+  before: AttachmentDownloadFileSnapshot,
+  after: AttachmentDownloadFileSnapshot,
+): boolean => (
+  before.size === after.size
+  && (
+    before.modificationTime === null
+    || after.modificationTime === null
+    || before.modificationTime === after.modificationTime
+  )
+);
+
+/** Native-copy a File/SAF generation into app-private scratch. The remote size is
+ * rejected before copying whenever its provider reports one; the owned scratch
+ * is always statted afterward, so unknown SAF metadata never authorizes a JS read. */
+export const copyAttachmentDownloadToStage = async (
+  attachment: Attachment,
+  attachmentsDir: string,
+  sourcePath: string,
+): Promise<string> => {
+  const stagedPath = buildAttachmentDownloadStagePath(attachmentsDir, attachment);
+  const sourceBefore = await FileSystem.getInfoAsync(sourcePath)
+    .then((info): AttachmentDownloadFileSnapshot | null => {
+      if (!info.exists || typeof info.size !== 'number') return null;
+      assertAttachmentDownloadSize(info.size);
+      return {
+        modificationTime: typeof info.modificationTime === 'number' ? info.modificationTime : null,
+        size: info.size,
+      };
+    })
+    .catch((error) => {
+      if (error instanceof ResponseTooLargeError) throw error;
+      return null;
+    });
+  let copied = false;
+  try {
+    await FileSystem.copyAsync({ from: sourcePath, to: stagedPath });
+    const staged = await readAttachmentDownloadFileSnapshot(stagedPath);
+    if (sourceBefore) {
+      const sourceAfter = await readAttachmentDownloadFileSnapshot(sourcePath);
+      if (!snapshotsMatch(sourceBefore, sourceAfter) || sourceAfter.size !== staged.size) {
+        throw new Error('File Sync attachment changed while staging');
+      }
+    }
+    copied = true;
+    return stagedPath;
+  } finally {
+    if (!copied) await deleteAttachmentDownloadStageBestEffort(stagedPath);
+  }
+};
+
+/** Bounded fallback for encrypted or unverifiable File Sync generations. Reads
+ * fixed-size native chunks from an already-owned scratch file, never base64-ing
+ * the entire provider document in one JS allocation. */
+export const readAttachmentDownloadStageBytes = async (
+  stagedPath: string,
+): Promise<Uint8Array> => {
+  const before = await readAttachmentDownloadFileSnapshot(stagedPath);
+  const chunks: Uint8Array[] = [];
+  let offset = 0;
+  while (offset < before.size) {
+    const length = Math.min(DOWNLOAD_READ_CHUNK_BYTES, before.size - offset);
+    const base64 = await LegacyFileSystem.readAsStringAsync(stagedPath, {
+      encoding: LegacyFileSystem.EncodingType.Base64,
+      position: offset,
+      length,
+    });
+    const chunk = base64ToBytes(base64);
+    if (chunk.byteLength !== length) {
+      throw new Error('Attachment download scratch file changed while reading');
+    }
+    chunks.push(chunk);
+    offset += chunk.byteLength;
+  }
+  const after = await readAttachmentDownloadFileSnapshot(stagedPath);
+  if (!snapshotsMatch(before, after)) {
+    throw new Error('Attachment download scratch file changed while reading');
+  }
+  const bytes = new Uint8Array(before.size);
+  let resultOffset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, resultOffset);
+    resultOffset += chunk.byteLength;
+  }
+  return bytes;
+};
+
+type InstallStagedAttachmentDownloadOptions = {
+  attachment: Attachment;
+  stagedPath: string;
+  targetPath: string;
+  expectation: AttachmentDownloadExpectation;
+  signal?: AbortSignal;
+  expectedStagedHash?: string;
+};
+
+/**
+ * Validate the exact app-private scratch file, then hand publication to the
+ * native generation-bound installer. Once native installation starts, JS must
+ * never delete the scratch path: a conflict or interrupted journal may name it
+ * as the only preserved copy of one generation.
+ */
+export const installStagedAttachmentDownload = async ({
+  attachment,
+  stagedPath,
+  targetPath,
+  expectation,
+  signal,
+  expectedStagedHash,
+}: InstallStagedAttachmentDownloadOptions): Promise<boolean> => {
+  let nativeInstallStarted = false;
+  try {
+    assertAttachmentSyncNotAborted(signal);
+    const stagedBefore = await readAttachmentDownloadFileSnapshot(stagedPath);
+    let actualStagedHash: string;
+    if (isSha256Hex(expectedStagedHash)) {
+      actualStagedHash = expectedStagedHash.toLowerCase();
+      if (isSha256Hex(attachment.fileHash) && attachment.fileHash.toLowerCase() !== actualStagedHash) {
+        throw new Error('Integrity validation failed');
+      }
+    } else {
+      const stagedBytes = await readAttachmentDownloadStageBytes(stagedPath);
+      const computedStagedHash = await computeSha256Hex(stagedBytes);
+      if (!computedStagedHash) throw new Error('Attachment download hash is unavailable');
+      await validateAttachmentHash(attachment, stagedBytes);
+      actualStagedHash = computedStagedHash;
+    }
+    const stagedAfter = await readAttachmentDownloadFileSnapshot(stagedPath);
+    if (!snapshotsMatch(stagedBefore, stagedAfter)) {
+      throw new Error('Attachment download scratch file changed before installation');
+    }
+    assertAttachmentSyncNotAborted(signal);
+    nativeInstallStarted = true;
+    const result = await installAttachmentFileGeneration(
+      stagedPath,
+      targetPath,
+      expectation,
+      actualStagedHash,
+    );
+    if (result.status !== 'installed') {
+      reportProgress(
+        attachment.id,
+        'download',
+        0,
+        attachment.size ?? 0,
+        'failed',
+        'Attachment changed locally during download',
+      );
+      return false;
+    }
+    attachment.fileHash = actualStagedHash;
+    await deleteAttachmentDownloadStageBestEffort(stagedPath);
+    return true;
+  } catch (error) {
+    const installerUnavailable = error instanceof Error
+      && (error as Error & { code?: unknown }).code === 'ATTACHMENT_FILE_INSTALLER_UNAVAILABLE';
+    if (!nativeInstallStarted || installerUnavailable) {
+      await deleteAttachmentDownloadStageBestEffort(stagedPath);
+    }
+    throw error;
+  }
+};
+
+/** Write plaintext download bytes to a unique managed scratch file and install
+ * that exact generation. A false result is a local-generation conflict; the
+ * native result owns every preserved path, so no JS cleanup occurs. */
+export const installAttachmentDownloadBytes = async (
+  attachment: Attachment,
+  attachmentsDir: string,
+  targetPath: string,
+  bytes: Uint8Array,
+  expectation: AttachmentDownloadExpectation,
+  signal?: AbortSignal,
+): Promise<boolean> => {
+  const stagedPath = buildAttachmentDownloadStagePath(attachmentsDir, attachment);
+  const expectedStagedHash = await computeSha256Hex(bytes);
+  if (!expectedStagedHash) {
+    throw new Error('Attachment download hash is unavailable');
+  }
+  try {
+    assertAttachmentSyncNotAborted(signal);
+    await writeBytesSafely(stagedPath, bytes);
+  } catch (error) {
+    await deleteAttachmentDownloadStageBestEffort(stagedPath);
+    throw error;
+  }
+  return installStagedAttachmentDownload({
+    attachment,
+    stagedPath,
+    targetPath,
+    expectation,
+    signal,
+    expectedStagedHash,
+  });
+};
+
+/** CloudKit's native fetch must receive scratch, never the canonical target. */
+export const createAttachmentDownloadStagePath = buildAttachmentDownloadStagePath;
+
+/** A present expectation was hashed from attachment.uri, so publication must
+ * CAS that exact path even when remote metadata now suggests another suffix. */
+export const resolveAttachmentDownloadTargetPath = (
+  attachment: Attachment,
+  fallbackTargetPath: string,
+  expectation: AttachmentDownloadExpectation,
+): string => (
+  expectation.kind === 'present' && attachment.uri
+    ? attachment.uri
+    : fallbackTargetPath
+);
+
+/**
+ * Copy the live attachment into an app-private file before hashing or uploading
+ * it. Native streaming transports and every retry then read the same immutable
+ * source instead of reopening a URI that another app may still be editing.
+ */
+export const createMobileAttachmentUploadSnapshot: NonNullable<
+  AttachmentTransferLifecycleOptions['createUploadSnapshot']
+> = async (sourcePath, attachment) => createMobileAttachmentUploadSnapshotWithLimit(
+  sourcePath,
+  attachment,
+);
+
+export const createMobileAttachmentUploadSnapshotWithLimit = async (
+  sourcePath: string,
+  attachment: Attachment,
+  maxBufferedUploadBytes?: number,
+) => {
+  const baseDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+  if (!baseDir) return null;
+
+  const sourceStatBefore = sourcePath.startsWith('content://')
+    ? null
+    : await statAttachmentFile(sourcePath);
+  if (!sourcePath.startsWith('content://') && !sourceStatBefore && maxBufferedUploadBytes !== undefined) {
+    throw new AttachmentUploadSizeUnavailableError();
+  }
+  if (sourceStatBefore && maxBufferedUploadBytes !== undefined) {
+    assertBufferedAttachmentUploadSize(sourceStatBefore.size, maxBufferedUploadBytes);
+  }
+
+  const normalizedBaseDir = baseDir.endsWith('/') ? baseDir : `${baseDir}/`;
+  uploadSnapshotSequence += 1;
+  const stagedPath = `${normalizedBaseDir}mindwtr-upload-${Date.now()}-${uploadSnapshotSequence}-${attachment.id}`;
+  let retainStagedFile = false;
+  try {
+    await FileSystem.copyAsync({ from: sourcePath, to: stagedPath });
+    const stagedStat = await statAttachmentFile(stagedPath);
+    if (!stagedStat && maxBufferedUploadBytes !== undefined) {
+      throw new AttachmentUploadSizeUnavailableError();
+    }
+    if (stagedStat && maxBufferedUploadBytes !== undefined) {
+      assertBufferedAttachmentUploadSize(stagedStat.size, maxBufferedUploadBytes);
+    }
+    const [stagedBytes, sourceStatAfter] = await Promise.all([
+      readFileAsBytes(stagedPath),
+      sourcePath.startsWith('content://') ? Promise.resolve(null) : statAttachmentFile(sourcePath),
+    ]);
+    const fileHash = await computeSha256Hex(stagedBytes);
+    if (!fileHash) return null;
+    if (
+      sourceStatBefore
+      && (
+        !sourceStatAfter
+        || sourceStatBefore.mtimeMs !== sourceStatAfter.mtimeMs
+        || sourceStatBefore.size !== sourceStatAfter.size
+        || sourceStatAfter.size !== stagedBytes.byteLength
+      )
+    ) {
+      return null;
+    }
+
+    retainStagedFile = true;
+    return {
+      sourcePath: stagedPath,
+      fileHash,
+      stat: sourceStatAfter ?? stagedStat ?? { mtimeMs: 0, size: stagedBytes.byteLength },
+      dispose: async () => {
+        await FileSystem.deleteAsync(stagedPath, { idempotent: true });
+      },
+    };
+  } finally {
+    if (!retainStagedFile) {
+      await FileSystem.deleteAsync(stagedPath, { idempotent: true }).catch(() => undefined);
+    }
+  }
+};
+
 /**
  * Thin adapter over core's shared reconciliation loop (`runAttachmentTransferLifecycle`),
  * mirroring desktop's `syncBasicRemoteAttachments` (apps/desktop/src/lib/sync-attachments.ts).
@@ -129,14 +484,167 @@ export const isAttachmentSyncAbortError = (error: unknown, signal?: AbortSignal)
  * patches for `applyAttachmentPatches` to fold into a fresh document.
  */
 export async function runMobileAttachmentLifecycle(
-  options: Omit<AttachmentTransferLifecycleOptions, 'resolveLocalPath' | 'canUploadFrom'>
+  options: Omit<
+    AttachmentTransferLifecycleOptions,
+    'resolveLocalPath' | 'canUploadFrom' | 'createUploadSnapshot' | 'requireUploadSnapshot'
+  > & { maxBufferedUploadBytes?: number }
 ): Promise<AttachmentTransferResult> {
   return await runAttachmentTransferLifecycle({
     ...options,
     resolveLocalPath: (uri) => uri,
     canUploadFrom: canUploadAttachmentFrom,
+    createUploadSnapshot: (sourcePath, attachment) => createMobileAttachmentUploadSnapshotWithLimit(
+      sourcePath,
+      attachment,
+      options.maxBufferedUploadBytes,
+    ),
+    requireUploadSnapshot: true,
   });
 }
+
+/**
+ * Cloud and Dropbox keep bespoke transfer loops for their batch/credential semantics.
+ * Give those loops the same prepare-side content candidate behavior as the shared
+ * lifecycle: a confirmed local edit updates only local metadata and is uploaded only
+ * if that identity survives merge.
+ */
+export const prepareBespokeAttachmentContentCandidate = async (
+  attachment: Attachment,
+  localPath: string,
+): Promise<boolean> => {
+  const stat = await statAttachmentFile(localPath);
+  if (!stat) return false;
+  const check = await checkAttachmentContentChange(
+    attachment,
+    stat,
+    () => computeAttachmentFileHash(localPath),
+  );
+  if (!check.changed) {
+    if (check.stat.mtimeMs === attachment.contentMtimeMs && check.stat.size === attachment.contentSize) {
+      return false;
+    }
+    applyAttachmentContentStat(attachment, check.stat, check.hash);
+    return true;
+  }
+  if (!check.hash) return false;
+  applyAttachmentContentStat(attachment, check.stat, check.hash);
+  attachment.contentRev = bumpAttachmentContentRevision(attachment);
+  attachment.pendingContentUpload = true;
+  return true;
+};
+
+/** Fail closed if a pending winner's on-disk bytes changed after the merge candidate
+ * was recorded. A later prepare pass will record the newer identity and retry. */
+export const pendingBespokeAttachmentContentStillMatches = async (
+  attachment: Attachment,
+  localPath: string,
+): Promise<boolean> => {
+  const stat = await statAttachmentFile(localPath);
+  if (!stat) return false;
+  const check = await checkAttachmentContentChange(
+    attachment,
+    stat,
+    () => computeAttachmentFileHash(localPath),
+  );
+  if (check.changed) return false;
+  if (check.stat.mtimeMs !== attachment.contentMtimeMs || check.stat.size !== attachment.contentSize) {
+    applyAttachmentContentStat(attachment, check.stat, check.hash);
+  }
+  return true;
+};
+
+export type BespokeAttachmentRemoteWinnerCheck =
+  | { kind: 'none'; metadataChanged: boolean }
+  | { kind: 'local-edit-race'; metadataChanged: false }
+  | { kind: 'download'; metadataChanged: false; expectation: AttachmentDownloadExpectation };
+
+/**
+ * Post-merge companion to `prepareBespokeAttachmentContentCandidate` for the
+ * Cloud and Dropbox adapters that cannot use core's generic transfer loop.
+ *
+ * The merged attachment already names the winning remote content generation.
+ * A hash-confirmed mismatch therefore needs a generation-bound download, but
+ * only while the live file still has the exact stat that was hashed. This is
+ * the same hash + immediate re-stat rule used by core's lifecycle before its
+ * `{ kind: 'present' }` download callback.
+ */
+export const checkBespokeAttachmentRemoteWinner = async (
+  attachment: Attachment,
+  localPath: string,
+): Promise<BespokeAttachmentRemoteWinnerCheck> => {
+  if (attachment.pendingContentUpload === true) {
+    return { kind: 'none', metadataChanged: false };
+  }
+
+  const stat = await statAttachmentFile(localPath);
+  if (!stat) return { kind: 'none', metadataChanged: false };
+  const check = await checkAttachmentContentChange(
+    attachment,
+    stat,
+    () => computeAttachmentFileHash(localPath),
+  );
+  if (!check.changed) {
+    const metadataChanged = check.stat.mtimeMs !== attachment.contentMtimeMs
+      || check.stat.size !== attachment.contentSize;
+    if (metadataChanged) {
+      applyAttachmentContentStat(attachment, check.stat, check.hash);
+    }
+    return { kind: 'none', metadataChanged };
+  }
+  if (!check.hash || !isSha256Hex(check.hash.trim().toLowerCase())) {
+    return { kind: 'none', metadataChanged: false };
+  }
+  const expectedRemoteHash = attachment.fileHash?.trim().toLowerCase();
+  if (!attachment.fileHash) {
+    applyAttachmentContentStat(attachment, check.stat, check.hash);
+    return { kind: 'none', metadataChanged: true };
+  }
+  if (!isSha256Hex(expectedRemoteHash)) {
+    return { kind: 'none', metadataChanged: false };
+  }
+
+  const restat = await statAttachmentFile(localPath);
+  if (
+    !restat
+    || restat.mtimeMs !== check.stat.mtimeMs
+    || restat.size !== check.stat.size
+  ) {
+    return { kind: 'local-edit-race', metadataChanged: false };
+  }
+  return {
+    kind: 'download',
+    metadataChanged: false,
+    expectation: { kind: 'present', sha256: check.hash.trim().toLowerCase() },
+  };
+};
+
+/**
+ * Record a downloaded generation as the local baseline only if the path still
+ * contains the exact remote bytes and remains stable across hash + stat. A
+ * writer that edits immediately after native publication is left for the next
+ * prepare pass instead of being mislabeled as the remote baseline.
+ */
+export const refreshBespokeAttachmentDownloadedContentStat = async (
+  attachment: Attachment,
+  localPath: string,
+): Promise<boolean> => {
+  const expectedRemoteHash = attachment.fileHash?.trim().toLowerCase();
+  if (!isSha256Hex(expectedRemoteHash)) return false;
+  const stat = await statAttachmentFile(localPath);
+  if (!stat) return false;
+  const hash = await computeAttachmentFileHash(localPath);
+  const restat = await statAttachmentFile(localPath);
+  if (
+    hash?.trim().toLowerCase() !== expectedRemoteHash
+    || !restat
+    || restat.mtimeMs !== stat.mtimeMs
+    || restat.size !== stat.size
+  ) {
+    return false;
+  }
+  applyAttachmentContentStat(attachment, restat, expectedRemoteHash);
+  return true;
+};
 
 /**
  * Pre-pass run before the reconciliation loop (or a backend's own bespoke loop): migrates any
@@ -162,6 +670,14 @@ export const migrateAttachmentsLocallyBeforeSync = async (
     assertAttachmentSyncNotAborted(signal);
     if (original.kind !== 'file' || original.deletedAt) continue;
     const attachment: Attachment = { ...original };
+    if (attachmentNeedsManagedLocalCopy(attachment)) {
+      const presence = await getLocalAttachmentPresence(attachment.uri || '');
+      if (presence === 'unreadable') {
+        attachmentsById.delete(attachment.id);
+        continue;
+      }
+      if (presence === 'confirmed-not-found') continue;
+    }
     const result = await migrateAttachmentLocally(attachment);
     if (result.migrated) {
       patches.set(attachment.id, attachment);
@@ -202,37 +718,102 @@ const assertUploadNotAborted = (signal?: AbortSignal): void => {
   throw createUploadAbortError(signal);
 };
 
+export class StreamedUploadCancellationUnconfirmedError extends Error {
+  readonly cancellationError: unknown;
+
+  constructor(cause: Error, cancellationError: unknown) {
+    super('Streamed upload cancellation could not be confirmed after the native upload terminated');
+    this.name = 'StreamedUploadCancellationUnconfirmedError';
+    this.cancellationError = cancellationError;
+    (this as Error & { cause?: unknown }).cause = cause;
+  }
+}
+
 const cancelUploadTask = async (task: unknown): Promise<void> => {
   const cancelAsync = (task as { cancelAsync?: unknown } | null)?.cancelAsync;
-  if (typeof cancelAsync !== 'function') return;
+  if (typeof cancelAsync !== 'function') {
+    throw new Error('Native upload task has no cancellation API');
+  }
   await cancelAsync.call(task);
 };
 
-const runUploadTask = async <T,>(task: { uploadAsync: () => Promise<T> }, signal?: AbortSignal): Promise<T> => {
+const WEBDAV_STREAM_UPLOAD_TIMEOUT_MS = 30_000;
+const CLOUD_STREAM_UPLOAD_TIMEOUT_MS = 30_000;
+
+const runUploadTask = async <T,>(
+  task: { uploadAsync: () => Promise<T> },
+  signal?: AbortSignal,
+  timeoutMs?: number,
+  timeoutMessage = 'Streamed upload timed out',
+): Promise<T> => {
   assertUploadNotAborted(signal);
-  if (!signal) {
+  if (!signal && timeoutMs === undefined) {
     return task.uploadAsync();
   }
 
   return await new Promise<T>((resolve, reject) => {
     let settled = false;
-    let onAbort: () => void;
+    let cancellationStarted = false;
+    let cancellationCause: Error | null = null;
+    let cancellationState:
+      | { state: 'pending' }
+      | { state: 'confirmed' }
+      | { state: 'failed'; error: unknown } = { state: 'pending' };
+    let onAbort: (() => void) | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const uploadOutcome = Promise.resolve().then(() => task.uploadAsync()).then(
+      (value) => ({ state: 'fulfilled', value } as const),
+      (error) => ({ state: 'rejected', error } as const),
+    );
+    const cleanupTriggers = () => {
+      if (timeoutId !== null) clearTimeout(timeoutId);
+      timeoutId = null;
+      if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+      onAbort = null;
+    };
     const finish = (fn: () => void) => {
       if (settled) return;
       settled = true;
-      signal.removeEventListener('abort', onAbort);
+      cleanupTriggers();
       fn();
     };
-    onAbort = () => {
-      void cancelUploadTask(task).catch(() => undefined);
-      finish(() => reject(createUploadAbortError(signal)));
+    const beginCancellation = (cause: Error) => {
+      if (settled || cancellationStarted) return;
+      cancellationStarted = true;
+      cancellationCause = cause;
+      cleanupTriggers();
+      void cancelUploadTask(task).then(
+        () => { cancellationState = { state: 'confirmed' }; },
+        (error) => { cancellationState = { state: 'failed', error }; },
+      );
+      // Do not reject until the native request is terminal. Otherwise the retry/finally
+      // path can release the remote mutation fence while the old PUT is still live.
     };
+    onAbort = () => beginCancellation(createUploadAbortError(signal));
 
-    signal.addEventListener('abort', onAbort, { once: true });
-    task.uploadAsync().then(
-      (result) => finish(() => resolve(result)),
-      (error) => finish(() => reject(error))
-    );
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (timeoutMs !== undefined) {
+      timeoutId = setTimeout(() => {
+        beginCancellation(new Error(timeoutMessage));
+      }, timeoutMs);
+    }
+    void uploadOutcome.then((outcome) => {
+      if (!cancellationStarted) {
+        if (outcome.state === 'fulfilled') finish(() => resolve(outcome.value));
+        else finish(() => reject(outcome.error));
+        return;
+      }
+
+      const cause = cancellationCause ?? new Error('Streamed upload cancelled');
+      if (cancellationState.state === 'confirmed') {
+        finish(() => reject(cause));
+        return;
+      }
+      const cancellationError = cancellationState.state === 'failed'
+        ? cancellationState.error
+        : new Error('Native upload cancellation did not acknowledge before the upload terminated');
+      finish(() => reject(new StreamedUploadCancellationUnconfirmedError(cause, cancellationError)));
+    });
   });
 };
 
@@ -245,13 +826,15 @@ export const uploadWebdavFileWithFileSystem = async (
   allowInsecureHttp: boolean | undefined,
   onProgress?: (sent: number, total: number) => void,
   totalBytes?: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  expectedEtag: string | null | undefined = undefined,
+  timeoutMs = WEBDAV_STREAM_UPLOAD_TIMEOUT_MS,
 ): Promise<boolean> => {
   // Before anything is read or sent: this uploader bypasses core's transports, so it is
   // the only place the cleartext guard can run for it (SEC-10a).
   assertMobileWebdavConnection(url, allowInsecureHttp);
   assertUploadNotAborted(signal);
-  const uploadAsync = (FileSystem as any).uploadAsync;
+  const uploadAsync = LegacyFileSystem.uploadAsync;
   if (typeof uploadAsync !== 'function') return false;
   if (!fileUri.startsWith('file://')) return false;
 
@@ -260,10 +843,12 @@ export const uploadWebdavFileWithFileSystem = async (
     'Content-Type': contentType || DEFAULT_CONTENT_TYPE,
   };
   if (authHeader) headers.Authorization = authHeader;
+  if (expectedEtag === null) headers['If-None-Match'] = '*';
+  else if (expectedEtag !== undefined) headers['If-Match'] = expectedEtag;
 
   const uploadType = resolveUploadType();
-  const createUploadTask = (FileSystem as any).createUploadTask;
-  if (typeof createUploadTask === 'function' && (onProgress || signal)) {
+  const createUploadTask = LegacyFileSystem.createUploadTask;
+  if (typeof createUploadTask === 'function') {
     const task = createUploadTask(
       url,
       fileUri,
@@ -281,9 +866,11 @@ export const uploadWebdavFileWithFileSystem = async (
         }
       }
     );
-    const result = await runUploadTask(task, signal);
+    if (!task || typeof task.uploadAsync !== 'function') return false;
+    const result = await runUploadTask(task, signal, timeoutMs, 'WebDAV streamed upload timed out');
     const status = Number((result as { status?: number } | null)?.status ?? 0);
     if (status && (status < 200 || status >= 300)) {
+      if (status === 409 || status === 412) throw new WebDavRemoteWriteConflictError(status);
       const error = new Error(`WebDAV File PUT failed (${status})`);
       (error as { status?: number }).status = status;
       throw error;
@@ -291,19 +878,9 @@ export const uploadWebdavFileWithFileSystem = async (
     return true;
   }
 
-  if (signal) return false;
-
-  const result = await uploadAsync(url, fileUri, { httpMethod: 'PUT', headers, uploadType });
-  const status = Number((result as { status?: number } | null)?.status ?? 0);
-  if (status && (status < 200 || status >= 300)) {
-    const error = new Error(`WebDAV File PUT failed (${status})`);
-    (error as { status?: number }).status = status;
-    throw error;
-  }
-  if (onProgress && Number.isFinite(totalBytes ?? NaN) && (totalBytes ?? 0) > 0) {
-    onProgress(totalBytes ?? 0, totalBytes ?? 0);
-  }
-  return true;
+  // uploadAsync has no cancellation handle. Fall back to the bounded byte PUT
+  // path rather than start an upload that can outlive the remote mutation lease.
+  return false;
 };
 
 export const uploadCloudFileWithFileSystem = async (
@@ -313,10 +890,11 @@ export const uploadCloudFileWithFileSystem = async (
   token: string,
   onProgress?: (sent: number, total: number) => void,
   totalBytes?: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  timeoutMs = CLOUD_STREAM_UPLOAD_TIMEOUT_MS,
 ): Promise<boolean> => {
   assertUploadNotAborted(signal);
-  const uploadAsync = (FileSystem as any).uploadAsync;
+  const uploadAsync = LegacyFileSystem.uploadAsync;
   if (typeof uploadAsync !== 'function') return false;
   if (!fileUri.startsWith('file://')) return false;
 
@@ -327,8 +905,8 @@ export const uploadCloudFileWithFileSystem = async (
   if (authHeader) headers.Authorization = authHeader;
 
   const uploadType = resolveUploadType();
-  const createUploadTask = (FileSystem as any).createUploadTask;
-  if (typeof createUploadTask === 'function' && (onProgress || signal)) {
+  const createUploadTask = LegacyFileSystem.createUploadTask;
+  if (typeof createUploadTask === 'function') {
     const task = createUploadTask(
       url,
       fileUri,
@@ -346,7 +924,8 @@ export const uploadCloudFileWithFileSystem = async (
         }
       }
     );
-    const result = await runUploadTask(task, signal);
+    if (!task || typeof task.uploadAsync !== 'function') return false;
+    const result = await runUploadTask(task, signal, timeoutMs, 'Cloud streamed upload timed out');
     const status = Number((result as { status?: number } | null)?.status ?? 0);
     if (status && (status < 200 || status >= 300)) {
       const error = new Error(`Cloud File PUT failed (${status})`);
@@ -356,17 +935,7 @@ export const uploadCloudFileWithFileSystem = async (
     return true;
   }
 
-  if (signal) return false;
-
-  const result = await uploadAsync(url, fileUri, { httpMethod: 'PUT', headers, uploadType });
-  const status = Number((result as { status?: number } | null)?.status ?? 0);
-  if (status && (status < 200 || status >= 300)) {
-    const error = new Error(`Cloud File PUT failed (${status})`);
-    (error as { status?: number }).status = status;
-    throw error;
-  }
-  if (onProgress && Number.isFinite(totalBytes ?? NaN) && (totalBytes ?? 0) > 0) {
-    onProgress(totalBytes ?? 0, totalBytes ?? 0);
-  }
-  return true;
+  // uploadAsync has no cancellation handle. Fall back to core's bounded byte PUT
+  // rather than start a request that can occupy the singleton sync indefinitely.
+  return false;
 };

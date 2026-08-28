@@ -10,7 +10,7 @@ import {
     PENDING_REMOTE_ATTACHMENT_DELETE_MAX_ATTEMPTS,
     runAttachmentCleanupLifecycle,
 } from './attachment-cleanup';
-import type { AppData } from './types';
+import type { AppData, Attachment } from './types';
 
 const buildData = (): AppData => ({
     tasks: [],
@@ -384,6 +384,13 @@ describe('findLiveAttachmentResourceReferences', () => {
         )).toBe(true);
     });
 
+    it('matches Windows drive paths case-insensitively across file URI spellings', () => {
+        expect(isAttachmentLocalResourceReferenced(
+            orphanWithUri('C:/Users/Alice/Docs/Report.PDF'),
+            buildLiveReferences('file:///c:/users/alice/docs/report.pdf'),
+        )).toBe(true);
+    });
+
     it('tolerates malformed percent sequences without throwing', () => {
         expect(() => buildLiveReferences('/a/100%.pdf')).not.toThrow();
         expect(isAttachmentLocalResourceReferenced(
@@ -438,12 +445,102 @@ describe('hasFreshAttachmentCleanupWork', () => {
         expect(hasFreshAttachmentCleanupWork(covered)).toBe(false);
     });
 
+    it('immediately drains only fresh entries left by the legacy File publication journal', () => {
+        const data = buildData();
+        const cloudKey = `attachments/a1.${'1'.repeat(64)}.pdf`;
+        data.settings.attachments = {
+            pendingRemoteDeletes: [{ cloudKey, attempts: 0 }],
+        };
+        expect(hasFreshAttachmentCleanupWork(data)).toBe(true);
+
+        data.settings.attachments.pendingRemoteDeletes = [{ cloudKey, attempts: 1 }];
+        expect(hasFreshAttachmentCleanupWork(data)).toBe(false);
+    });
+
     it('fires for records on purged parents and ignores live attachments', () => {
         expect(hasFreshAttachmentCleanupWork(withTaskAttachment(
             fileTombstone({ deletedAt: undefined }),
             { status: 'done', deletedAt: now, purgedAt: now },
         ))).toBe(true);
         expect(hasFreshAttachmentCleanupWork(withTaskAttachment(fileTombstone({ deletedAt: undefined })))).toBe(false);
+    });
+});
+
+describe('remote attachment retention and batching', () => {
+    const now = '2026-07-14T12:00:00.000Z';
+    const H1 = `attachments/a1.${'1'.repeat(64)}.pdf`;
+    const H2 = `attachments/a1.${'2'.repeat(64)}.pdf`;
+    const H3 = `attachments/a1.${'3'.repeat(64)}.pdf`;
+
+    const makeAttachment = (cloudKey: string, overrides: Partial<Attachment> = {}): Attachment => ({
+        id: 'a1',
+        kind: 'file',
+        title: 'report.pdf',
+        uri: '/managed/report.pdf',
+        cloudKey,
+        createdAt: now,
+        updatedAt: now,
+        ...overrides,
+    });
+
+    const withAttachments = (...attachments: Attachment[]): AppData => {
+        const data = buildData();
+        data.tasks.push({
+            id: 't1',
+            title: 'Task',
+            status: 'next',
+            contexts: [],
+            createdAt: now,
+            updatedAt: now,
+            attachments,
+        });
+        return data;
+    };
+
+    it('retains a File Sync generation while clearing its tombstone metadata', async () => {
+        const data = withAttachments(makeAttachment(H1, { deletedAt: now }));
+        data.settings.attachments = {
+            pendingRemoteDeletes: [{ cloudKey: H1, title: 'report.pdf', attempts: 3 }],
+        };
+        const deleteRemoteAttachment = vi.fn(async () => undefined);
+
+        const result = await runAttachmentCleanupLifecycle({
+            appData: data,
+            now: () => now,
+            deleteLocalAttachment: vi.fn(async () => undefined),
+            deleteRemoteAttachment,
+            shouldRetainRemoteAttachment: () => true,
+        });
+
+        expect(deleteRemoteAttachment).not.toHaveBeenCalled();
+        expect(result.appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
+        expect(result.appData.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
+    });
+
+    it('bounds remote deletes and preserves unprocessed attempt state', async () => {
+        const data = withAttachments(makeAttachment(H3));
+        data.settings.attachments = {
+            pendingRemoteDeletes: [
+                { cloudKey: H1, title: 'one', attempts: 1 },
+                { cloudKey: H2, title: 'two', attempts: 2 },
+                { cloudKey: 'attachments/a1.4.pdf', title: 'three', attempts: 3 },
+            ],
+        };
+        const deleteRemoteAttachment = vi.fn(async () => undefined);
+
+        const result = await runAttachmentCleanupLifecycle({
+            appData: data,
+            now: () => now,
+            maxAttachmentTargets: 2,
+            deleteLocalAttachment: vi.fn(async () => undefined),
+            deleteRemoteAttachment,
+        });
+
+        expect(deleteRemoteAttachment.mock.calls.map(([target]) => target.cloudKey)).toEqual([H1, H2]);
+        expect(result.reachedBatchLimit).toBe(true);
+        expect(result.appData.settings.attachments?.pendingRemoteDeletes).toEqual([
+            { cloudKey: 'attachments/a1.4.pdf', title: 'three', attempts: 3 },
+        ]);
     });
 });
 
@@ -673,6 +770,55 @@ describe('applyAttachmentCleanupResult', () => {
 
 describe('runAttachmentCleanupLifecycle', () => {
     const now = '2026-07-14T12:00:00.000Z';
+
+    it('does not delete a Windows path alias still referenced with different casing', async () => {
+        const data = buildData();
+        data.tasks.push(
+            {
+                id: 'purged',
+                title: 'Purged',
+                status: 'done',
+                contexts: [],
+                createdAt: now,
+                updatedAt: now,
+                deletedAt: now,
+                purgedAt: now,
+                attachments: [{
+                    id: 'orphan',
+                    kind: 'file',
+                    title: 'shared',
+                    uri: 'C:/Users/Alice/Mindwtr/attachments/shared.pdf',
+                    createdAt: now,
+                    updatedAt: now,
+                }],
+            },
+            {
+                id: 'live',
+                title: 'Live',
+                status: 'next',
+                contexts: [],
+                createdAt: now,
+                updatedAt: now,
+                attachments: [{
+                    id: 'live-attachment',
+                    kind: 'file',
+                    title: 'shared',
+                    uri: 'file:///c:/users/alice/mindwtr/ATTACHMENTS/shared.pdf',
+                    createdAt: now,
+                    updatedAt: now,
+                }],
+            },
+        );
+        const deleteLocalAttachment = vi.fn(async () => undefined);
+
+        await runAttachmentCleanupLifecycle({
+            appData: data,
+            now: () => now,
+            deleteLocalAttachment,
+        });
+
+        expect(deleteLocalAttachment).not.toHaveBeenCalled();
+    });
 
     it('keeps a soft-deleted record as a tombstone and goes quiet once processed (#1064)', async () => {
         // Removing the record never stuck: the merge unions attachments by id,

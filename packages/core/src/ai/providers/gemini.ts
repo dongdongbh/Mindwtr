@@ -1,6 +1,13 @@
 import type { AIProvider, AIProviderConfig, BreakdownInput, BreakdownResponse, ClarifyInput, ClarifyResponse, CopilotInput, CopilotResponse, ReviewAnalysisInput, ReviewAnalysisResponse, AIRequestOptions } from '../types';
 import { buildBreakdownPrompt, buildClarifyPrompt, buildCopilotPrompt, buildReviewAnalysisPrompt } from '../prompts';
-import { fetchWithTimeout, normalizeTags, normalizeTimeEstimate, parseJson, rateLimit } from '../utils';
+import {
+    fetchTextWithTimeout,
+    normalizeTags,
+    normalizeTimeEstimate,
+    parseJson,
+    rateLimit,
+    type BufferedAIResponse,
+} from '../utils';
 import { resolveGeminiModel } from '../catalog';
 import { isBreakdownResponse, isClarifyResponse, isCopilotResponse, isReviewAnalysisResponse } from '../validators';
 import { sleep } from '../../async-utils';
@@ -61,16 +68,12 @@ const resolveGeminiThinkingConfig = (
     return { thinkingLevel };
 };
 
-async function buildGeminiError(response: Response, usingOfficialGemini: boolean): Promise<Error> {
+async function buildGeminiError(response: BufferedAIResponse, usingOfficialGemini: boolean): Promise<Error> {
     const httpStatus = response.status;
     let message = '';
     let status = '';
     let raw = '';
-    try {
-        raw = await response.text();
-    } catch {
-        raw = '';
-    }
+    raw = response.bodyText;
     if (raw) {
         try {
             const data = JSON.parse(raw) as { error?: { message?: string; status?: string } };
@@ -241,10 +244,10 @@ async function requestGemini(config: AIProviderConfig, prompt: { system: string;
 
     await rateLimit('gemini');
 
-    let response: Response | null = null;
+    let response: BufferedAIResponse | null = null;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
         try {
-            response = await fetchWithTimeout(
+            response = await fetchTextWithTimeout(
                 url,
                 {
                     method: 'POST',
@@ -281,7 +284,7 @@ async function requestGemini(config: AIProviderConfig, prompt: { system: string;
         throw new Error('Gemini request failed to start.');
     }
 
-    const result = await response.json() as GeminiResponse;
+    const result = JSON.parse(response.bodyText) as GeminiResponse;
 
     const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) {

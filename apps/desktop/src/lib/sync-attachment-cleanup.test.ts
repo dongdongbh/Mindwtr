@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
-import { LocalSyncAbort, type AppData } from '@mindwtr/core';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { type AppData } from '@mindwtr/core';
 
 import {
+    cleanupAttachmentTempFiles,
     cleanupOrphanedAttachments,
     deleteAttachmentFile,
     type AttachmentCleanupDeps,
@@ -13,12 +14,18 @@ const fsMocks = vi.hoisted(() => ({
     remove: vi.fn(),
 }));
 
-const pathMocks = vi.hoisted(() => ({
-    join: vi.fn(),
+const coreMocks = vi.hoisted(() => ({
+    webdavDeleteFileVersioned: vi.fn(),
+    webdavHeadFile: vi.fn(),
+}));
+
+vi.mock('@mindwtr/core', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('@mindwtr/core')>()),
+    webdavDeleteFileVersioned: coreMocks.webdavDeleteFileVersioned,
+    webdavHeadFile: coreMocks.webdavHeadFile,
 }));
 
 vi.mock('@tauri-apps/plugin-fs', () => fsMocks);
-vi.mock('@tauri-apps/api/path', () => pathMocks);
 vi.mock('./managed-paths', () => ({
     getManagedPath: async (...segments: string[]) => ['/new-profile', ...segments].join('/'),
 }));
@@ -44,7 +51,6 @@ const buildDeps = (): AttachmentCleanupDeps => ({
     getCloudProvider: vi.fn(async () => 'selfhosted' as const),
     getDropboxAccessToken: vi.fn(async () => ''),
     getDropboxAppKey: vi.fn(async () => ''),
-    getSyncPath: vi.fn(async () => '/sync/data.json'),
     getTauriFetch: vi.fn(async () => undefined),
     getWebDavConfig: vi.fn(async () => ({ url: '', username: '' })),
     isTauriRuntimeEnv: vi.fn(() => true),
@@ -54,26 +60,88 @@ const buildDeps = (): AttachmentCleanupDeps => ({
 });
 
 describe('desktop attachment cleanup freshness', () => {
-    it('aborts after resolving a file target when a local edit makes the snapshot stale', async () => {
-        let stale = false;
-        pathMocks.join.mockImplementation(async (...parts: string[]) => {
-            stale = true;
-            return parts.join('/');
-        });
-        const ensureLocalSnapshotFresh = vi.fn(() => {
-            if (stale) throw new LocalSyncAbort();
-        });
+    beforeEach(() => {
+        vi.clearAllMocks();
+        fsMocks.readDir.mockResolvedValue([]);
+    });
 
-        await expect(cleanupOrphanedAttachments(
+    it('removes only app-owned scratch files and preserves live temp-extension attachments', async () => {
+        const deps = buildDeps();
+        fsMocks.readDir.mockResolvedValue([
+            { isFile: true, name: '4b28a96e-1220-45ce-8a28-641a5b18d936.tmp' },
+            { isFile: true, name: '5488a0f7-0c25-41a9-85db-85d33ef23c81.partial' },
+            { isFile: true, name: '.mindwtr-attachment-write-m7v0x9k2-012345abcdef.tmp' },
+            { isFile: true, name: '.mindwtr-attachment-write-invalid.tmp' },
+        ]);
+
+        await cleanupAttachmentTempFiles(deps);
+
+        expect(fsMocks.remove).toHaveBeenCalledTimes(1);
+        expect(fsMocks.remove).toHaveBeenCalledWith(
+            '/new-profile/attachments/.mindwtr-attachment-write-m7v0x9k2-012345abcdef.tmp',
+        );
+    });
+
+    it('clears File Sync cleanup bookkeeping without deleting shared-folder bytes', async () => {
+        const deps = buildDeps();
+        const cleaned = await cleanupOrphanedAttachments(
             buildData(),
             'file',
-            buildDeps(),
-            { ensureLocalSnapshotFresh },
-        )).rejects.toBeInstanceOf(LocalSyncAbort);
+            deps,
+            { ensureLocalSnapshotFresh: vi.fn() },
+        );
 
-        expect(pathMocks.join).toHaveBeenCalled();
-        expect(ensureLocalSnapshotFresh).toHaveBeenCalledTimes(2);
         expect(fsMocks.remove).not.toHaveBeenCalled();
+        expect(cleaned.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
+    });
+
+    it('bounds remote cleanup and resumes the retained queue on the next pass', async () => {
+        const pendingRemoteDeletes = Array.from({ length: 26 }, (_, index) => ({
+            cloudKey: `attachments/orphan-${index + 1}.pdf`,
+            title: `orphan-${index + 1}.pdf`,
+            attempts: 2,
+            lastErrorAt: `2026-08-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`,
+        }));
+        const appData: AppData = {
+            ...buildData(),
+            settings: { attachments: { pendingRemoteDeletes } },
+        };
+        const deps = buildDeps();
+        vi.mocked(deps.getWebDavConfig).mockResolvedValue({
+            url: 'https://dav.example.com/mindwtr/',
+            username: 'alice',
+        });
+        fsMocks.readDir.mockResolvedValue([]);
+        coreMocks.webdavHeadFile.mockResolvedValue({ exists: true, etag: '"v1"' });
+        coreMocks.webdavDeleteFileVersioned.mockResolvedValue(undefined);
+
+        const firstPass = await cleanupOrphanedAttachments(
+            appData,
+            'webdav',
+            deps,
+            { ensureLocalSnapshotFresh: vi.fn() },
+        );
+
+        expect(coreMocks.webdavHeadFile).toHaveBeenCalledTimes(25);
+        expect(coreMocks.webdavDeleteFileVersioned).toHaveBeenCalledTimes(25);
+        expect(firstPass.settings.attachments?.pendingRemoteDeletes).toEqual([
+            pendingRemoteDeletes[25],
+        ]);
+        expect(deps.logSyncInfo).toHaveBeenCalledWith(
+            'Attachment cleanup batch limit reached',
+            { limit: '25', total: '26' },
+        );
+
+        const secondPass = await cleanupOrphanedAttachments(
+            firstPass,
+            'webdav',
+            deps,
+            { ensureLocalSnapshotFresh: vi.fn() },
+        );
+
+        expect(coreMocks.webdavHeadFile).toHaveBeenCalledTimes(26);
+        expect(coreMocks.webdavDeleteFileVersioned).toHaveBeenCalledTimes(26);
+        expect(secondPass.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
     });
 });
 
@@ -113,5 +181,26 @@ describe('deleteAttachmentFile', () => {
         );
 
         expect(fsMocks.remove).not.toHaveBeenCalled();
+    });
+
+    it('logs an attachment id instead of a private title or path when deletion fails', async () => {
+        const privateTitle = 'Divorce settlement draft.pdf';
+        const privatePath = `/new-profile/attachments/${privateTitle}`;
+        const logSyncWarning = vi.fn();
+        fsMocks.remove.mockRejectedValueOnce(new Error(`Failed to remove ${privatePath}`));
+
+        await deleteAttachmentFile(
+            { ...attachment(privatePath), title: privateTitle },
+            { logSyncWarning },
+            { ensureLocalSnapshotFresh: vi.fn() },
+        );
+
+        const serialized = JSON.stringify(logSyncWarning.mock.calls);
+        expect(serialized).not.toContain(privateTitle);
+        expect(serialized).not.toContain(privatePath);
+        expect(logSyncWarning).toHaveBeenCalledWith(
+            'Failed to delete attachment file a1',
+            expect.any(Error),
+        );
     });
 });

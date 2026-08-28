@@ -75,7 +75,10 @@ describe('useInboxProcessingController not-actionable destinations', () => {
     const tokens: string[] = [];
     const settings = {};
 
-    const renderController = (updateTask: ReturnType<typeof vi.fn>) => renderHook(() => {
+    const renderController = (
+        updateTask: ReturnType<typeof vi.fn>,
+        controllerSettings: Parameters<typeof useInboxProcessingController>[0]['settings'] = settings,
+    ) => renderHook(() => {
         // The session closes itself once the queue drains, so isProcessing has
         // to be real state or the reconciliation effect never settles.
         const [isProcessing, setIsProcessing] = useState(true);
@@ -84,7 +87,7 @@ describe('useInboxProcessingController not-actionable destinations', () => {
             tasks,
             projects,
             areas,
-            settings,
+            settings: controllerSettings,
             addProject: async () => null,
             addTask: async () => ({ success: true }),
             updateTask,
@@ -161,6 +164,158 @@ describe('useInboxProcessingController not-actionable destinations', () => {
             tags: ['#follow-up'],
         }));
     });
+
+    it('lets the explicit Waiting follow-up override a parsed review command', async () => {
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderController(updateTask);
+
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+
+        act(() => {
+            result.current.wizardProps.setField('title', 'Task one /review:2026-09-10');
+            result.current.wizardProps.setDelegateFollowUp('2026-09-20');
+        });
+        await act(async () => {
+            await result.current.wizardProps.handleConfirmWaiting();
+        });
+
+        expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+            status: 'waiting',
+            reviewAt: new Date('2026-09-20T09:00:00').toISOString(),
+        }));
+    });
+
+    it('lets the explicit Later date override a parsed start command', async () => {
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderController(updateTask);
+
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+
+        act(() => {
+            result.current.wizardProps.setField(
+                'title',
+                'Task one /start:2026-09-10 /due:2026-09-11 /review:2026-09-12',
+            );
+            result.current.wizardProps.scheduleFields.start.onDateChange('2026-09-20');
+        });
+        await act(async () => {
+            await result.current.wizardProps.handleLater();
+        });
+
+        expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+            status: 'next',
+            startTime: '2026-09-20',
+            dueDate: expect.stringContaining('2026-09-11'),
+            reviewAt: expect.stringContaining('2026-09-12'),
+        }));
+    });
+
+    it.each([
+        ['start', 'startTime', '/start:2026-09-10'],
+        ['due', 'dueDate', '/due:2026-09-10'],
+        ['review', 'reviewAt', '/review:2026-09-10'],
+    ] as const)(
+        'lets a changed visible %s control override its parsed title command',
+        async (control, field, command) => {
+            const updateTask = vi.fn(async () => ({ success: true }));
+            const { result } = renderController(updateTask, {
+                gtd: {
+                    inboxProcessing: { scheduleEnabled: true },
+                    taskEditor: { hidden: [] },
+                },
+            });
+
+            await waitFor(() => {
+                expect(result.current.wizardProps.processingTask?.id).toBe('one');
+            });
+
+            act(() => {
+                result.current.wizardProps.setField('title', `Call Sam ${command}`);
+                result.current.wizardProps.scheduleFields[control].onDateChange('2026-09-20');
+            });
+            await act(async () => {
+                await result.current.wizardProps.handleSetProject(null);
+            });
+
+            expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+                status: 'next',
+                [field]: '2026-09-20',
+            }));
+        },
+    );
+
+    it('lets an explicitly cleared visible date control override a parsed command on Complete', async () => {
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderController(updateTask, {
+            gtd: {
+                inboxProcessing: { scheduleEnabled: true },
+                taskEditor: { hidden: [] },
+            },
+        });
+
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+
+        act(() => {
+            result.current.wizardProps.setField('title', 'Call Sam /review:2026-09-10');
+            result.current.wizardProps.scheduleFields.review.onClear();
+        });
+        await act(async () => {
+            await result.current.wizardProps.handleTwoMinDone();
+        });
+
+        expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+            status: 'done',
+            reviewAt: undefined,
+        }));
+    });
+
+    it('keeps a parsed due command on Next when scheduling controls are off', async () => {
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderController(updateTask);
+
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+
+        act(() => {
+            result.current.wizardProps.setField('title', 'Call Sam /due:2026-09-21');
+        });
+        await act(async () => {
+            await result.current.wizardProps.handleSetProject(null);
+        });
+
+        expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+            status: 'next',
+            dueDate: expect.stringContaining('2026-09-21'),
+        }));
+    });
+
+    it('keeps a parsed review command on Complete when scheduling controls are off', async () => {
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderController(updateTask);
+
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+
+        act(() => {
+            result.current.wizardProps.setField('title', 'Call Sam /review:2026-09-22');
+        });
+        await act(async () => {
+            await result.current.wizardProps.handleTwoMinDone();
+        });
+
+        expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+            status: 'done',
+            reviewAt: expect.stringContaining('2026-09-22'),
+        }));
+    });
 });
 
 describe('useInboxProcessingController draft writes', () => {
@@ -232,6 +387,97 @@ describe('useInboxProcessingController draft writes', () => {
             result.current.wizardProps.setField('areaId', 'area-1');
         });
         expect(result.current.wizardProps.draft).toMatchObject({ areaId: 'area-1', projectId: 'p2' });
+    });
+});
+
+describe('useInboxProcessingController project conversion persistence', () => {
+    const tasks = [makeTask('one')];
+    const project = { id: 'p1', title: 'Plan Launch', status: 'active' } as Project;
+
+    const renderController = (
+        addTask: ReturnType<typeof vi.fn>,
+        updateTask: ReturnType<typeof vi.fn>,
+    ) => renderHook(() => {
+        const [isProcessing, setIsProcessing] = useState(true);
+        return useInboxProcessingController({
+            t: (key) => key,
+            tasks,
+            projects: [project],
+            areas: [],
+            settings: {},
+            addProject: async () => project,
+            addTask,
+            updateTask,
+            deleteTask: async () => ({ success: true }),
+            allContexts: [],
+            allTags: [],
+            isProcessing,
+            setIsProcessing,
+        });
+    });
+
+    const prepareConversion = async (
+        result: ReturnType<typeof renderController>['result'],
+        extras: string[],
+    ) => {
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+        act(() => {
+            result.current.wizardProps.setConvertToProject(true);
+            result.current.wizardProps.setProjectTitleDraft('Plan Launch');
+            result.current.wizardProps.setNextActionDraft('Draft launch brief');
+            result.current.wizardProps.setExtraActionDrafts(extras);
+        });
+    };
+
+    it('creates all extra actions before moving the original Inbox task', async () => {
+        const addTask = vi.fn(async () => ({ success: true }));
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderController(addTask, updateTask);
+        await prepareConversion(result, ['Book venue']);
+
+        await act(async () => {
+            await result.current.wizardProps.handleConvertToProject();
+        });
+
+        expect(addTask).toHaveBeenCalledWith('Book venue', { status: 'inbox', projectId: 'p1' });
+        expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+            title: 'Draft launch brief',
+            status: 'next',
+            projectId: 'p1',
+        }));
+        expect(addTask.mock.invocationCallOrder[0]).toBeLessThan(updateTask.mock.invocationCallOrder[0]);
+    });
+
+    it('retries only uncommitted extra actions and does not advance after a partial failure', async () => {
+        const addTask = vi.fn()
+            .mockResolvedValueOnce({ success: true })
+            .mockResolvedValueOnce({ success: false, error: 'Offline' })
+            .mockResolvedValueOnce({ success: true });
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderController(addTask, updateTask);
+        await prepareConversion(result, ['Book venue', 'Send invitations']);
+
+        await act(async () => {
+            await result.current.wizardProps.handleConvertToProject();
+        });
+
+        expect(addTask.mock.calls.map(([title]) => title)).toEqual(['Book venue', 'Send invitations']);
+        expect(updateTask).not.toHaveBeenCalled();
+        expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        expect(result.current.wizardProps.extraActionDrafts).toEqual(['Send invitations']);
+
+        await act(async () => {
+            await result.current.wizardProps.handleConvertToProject();
+        });
+
+        expect(addTask.mock.calls.map(([title]) => title)).toEqual([
+            'Book venue',
+            'Send invitations',
+            'Send invitations',
+        ]);
+        expect(updateTask).toHaveBeenCalledTimes(1);
     });
 });
 

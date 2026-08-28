@@ -133,6 +133,34 @@ describe('useTaskItemRecurrence', () => {
         expect(result.current.customMonthDays).toEqual([1, 16]);
     });
 
+    it('round-trips a mixed last-day and numbered-day rule', () => {
+        const setField = vi.fn();
+        const task: Task = { ...baseTask, dueDate: '2026-06-15' };
+        const { result } = renderHook(() => useTaskItemRecurrence({
+            task,
+            draft: {
+                ...createTaskDraft(task),
+                dueDate: '2026-06-15',
+                recurrence: 'monthly',
+                recurrenceRRule: 'FREQ=MONTHLY;BYMONTHDAY=-1,15',
+            },
+            setField,
+        }));
+
+        act(() => {
+            result.current.openCustomRecurrence();
+        });
+
+        expect(result.current.customMode).toBe('date');
+        expect(result.current.customMonthDays).toEqual([-1, 15]);
+
+        act(() => {
+            result.current.applyCustomRecurrence();
+        });
+
+        expect(setField).toHaveBeenCalledWith('recurrenceRRule', 'FREQ=MONTHLY;BYMONTHDAY=-1,15');
+    });
+
     it('ignores the toggle that would clear the last selected month day', () => {
         const setField = vi.fn();
         const task: Task = { ...baseTask, dueDate: '2026-06-01' };

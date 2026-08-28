@@ -1,0 +1,41 @@
+#include <cerrno>
+#include <jni.h>
+#include <sys/file.h>
+
+#include "file_compat_lock.h"
+
+extern "C" JNIEXPORT jint JNICALL
+Java_tech_dongdongbh_mindwtr_syncfilelock_StableRootLockNative_tryLock(
+    JNIEnv *, jobject, jint fd) {
+  if (fd < 0) {
+    return EBADF;
+  }
+  if (flock(fd, LOCK_EX | LOCK_NB) == 0) {
+    return 0;
+  }
+  return errno;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_tech_dongdongbh_mindwtr_syncfilelock_StableRootLockNative_unlock(
+    JNIEnv *, jobject, jint fd) {
+  if (fd < 0) {
+    return EBADF;
+  }
+  if (flock(fd, LOCK_UN) == 0) {
+    return 0;
+  }
+  return errno;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_tech_dongdongbh_mindwtr_syncfilelock_StableRootLockNative_tryOfdLock(
+    JNIEnv *, jobject, jint fd) {
+  return mindwtr_try_ofd_write_lock(fd);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_tech_dongdongbh_mindwtr_syncfilelock_StableRootLockNative_unlockOfdLock(
+    JNIEnv *, jobject, jint fd) {
+  return mindwtr_unlock_ofd_write_lock(fd);
+}

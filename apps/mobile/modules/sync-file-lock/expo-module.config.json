@@ -1,0 +1,11 @@
+{
+  "platforms": ["android", "ios"],
+  "android": {
+    "modules": ["tech.dongdongbh.mindwtr.syncfilelock.SyncFileLockModule"]
+  },
+  "ios": {
+    "podspecPath": "ios/SyncFileLock.podspec",
+    "swiftModuleName": "SyncFileLock",
+    "modules": ["SyncFileLockModule"]
+  }
+}
