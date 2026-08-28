@@ -24,6 +24,7 @@
                 "location",
                 "projectId",
                 "sectionId",
+                "viewSectionIds",
                 "areaId",
                 "isFocusedToday",
                 "timeEstimate",
@@ -46,9 +47,7 @@
                 "orderNum",
                 "focusOrder"
             ],
-            "pendingProduction": [
-                "viewSectionIds"
-            ]
+            "pendingProduction": []
         },
         "MindwtrProject": {
             "deployed": [

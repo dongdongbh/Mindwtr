@@ -88,6 +88,25 @@
   <url type="bugtracker">https://github.com/dongdongbh/Mindwtr/issues</url>
   <url type="vcs-browser">https://github.com/dongdongbh/Mindwtr</url>
   <releases>
+    <release version="1.2.5-rc.2" date="2026-08-28">
+      <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.2.5-rc.2</url>
+      <description>
+        <p>Mindwtr 1.2.5-rc.2 hardens File Sync and attachments while improving capture, Someday organization, and Focus.</p>
+        <p xml:lang="de">Mindwtr 1.2.5-rc.2 macht Dateisynchronisierung und Anhaenge robuster und verbessert Erfassung, Someday-Organisation und Fokus.</p>
+        <ul>
+          <li>File Sync retains exact attachment generations across replacement, cleanup, interruption, and concurrent access.</li>
+          <li xml:lang="de">Die Dateisynchronisierung behaelt exakte Anhanggenerationen bei Ersetzung, Bereinigung, Unterbrechung und gleichzeitigem Zugriff.</li>
+          <li>Sync encryption can be configured before the first sync, and encrypted locations request their passphrase on first contact.</li>
+          <li xml:lang="de">Sync-Verschluesselung kann vor dem ersten Sync eingerichtet werden; verschluesselte Speicherorte fragen beim ersten Kontakt nach der Passphrase.</li>
+          <li>Someday gains synced named sections, while Inbox Processing shares quick-add syntax across desktop and mobile.</li>
+          <li xml:lang="de">Someday erhaelt synchronisierte benannte Abschnitte; die Inbox-Verarbeitung nutzt auf Desktop und Mobilgeraeten dieselbe Schnellerfassungs-Syntax.</li>
+          <li>Focus shows Review Due before Next Actions and previews tasks that start later today without duplicating sections.</li>
+          <li xml:lang="de">Fokus zeigt faellige Ueberpruefungen vor naechsten Aktionen und Aufgaben mit spaeterem Start heute ohne doppelte Abschnitte.</li>
+          <li>Desktop adds filtered CSV export, direct Reference capture, custom area colours, and Linux image paste in Quick Add.</li>
+          <li xml:lang="de">Desktop erhaelt gefilterten CSV-Export, direkte Referenz-Erfassung, eigene Bereichsfarben und Bild-Einfuegen in der Linux-Schnellerfassung.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.2.5-rc.1" date="2026-08-24">
       <url type="details">https://github.com/dongdongbh/Mindwtr/releases/tag/v1.2.5-rc.1</url>
       <description>

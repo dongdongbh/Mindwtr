@@ -74,9 +74,11 @@ describe('Task sync schema contract', () => {
         expect(Object.keys(mapped).sort()).toEqual(sorted(fieldNames));
     });
 
-    it('records the new CloudKit task key as pending production deployment', () => {
-        expect(cloudKitProductionSchema.records.MindwtrTask.pendingProduction)
+    it('records the new CloudKit task key as deployed to production', () => {
+        expect(cloudKitProductionSchema.records.MindwtrTask.deployed)
             .toContain('viewSectionIds');
+        expect(cloudKitProductionSchema.records.MindwtrTask.pendingProduction)
+            .not.toContain('viewSectionIds');
     });
 
     it('keeps the content-comparison excluded-key set aligned with the schema signature field', () => {
