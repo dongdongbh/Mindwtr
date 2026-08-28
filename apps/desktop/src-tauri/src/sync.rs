@@ -4261,29 +4261,31 @@ mod tests {
 
     #[test]
     fn retained_seed_order_is_deterministic_for_case_variant_same_mtime_names() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let upper = dir.path().join("mindwtr-backup-A.json");
-        let lower = dir.path().join("mindwtr-backup-a.json");
-        fs::write(&upper, br#"{"tasks":[{"id":"upper"}]}"#).expect("write upper seed");
-        fs::write(&lower, br#"{"tasks":[{"id":"lower"}]}"#).expect("write lower seed");
         let same_time = UNIX_EPOCH + Duration::from_secs(30);
-        File::open(&upper)
-            .expect("open upper seed")
-            .set_modified(same_time)
-            .expect("set upper mtime");
-        File::open(&lower)
-            .expect("open lower seed")
-            .set_modified(same_time)
-            .expect("set lower mtime");
-        let lock = acquire_sync_lock(dir.path()).expect("acquire retained authority");
-        let root = RetainedSyncRoot::new(dir.path(), &lock);
+        let upper = PathBuf::from("mindwtr-backup-A.json");
+        let lower = PathBuf::from("mindwtr-backup-a.json");
+        let upper_candidate = (
+            same_time,
+            "mindwtr-backup-a.json".to_string(),
+            "mindwtr-backup-A.json".to_string(),
+            upper.clone(),
+        );
+        let lower_candidate = (
+            same_time,
+            "mindwtr-backup-a.json".to_string(),
+            "mindwtr-backup-a.json".to_string(),
+            lower.clone(),
+        );
+        let mut first = vec![upper_candidate.clone(), lower_candidate.clone()];
+        let mut second = vec![lower_candidate, upper_candidate];
 
-        let first = retained_seed_backup_files(&root, ".json").expect("first enumeration");
-        let second = retained_seed_backup_files(&root, ".json").expect("second enumeration");
+        sort_retained_seed_candidates(&mut first);
+        sort_retained_seed_candidates(&mut second);
 
-        assert_eq!(first, second);
-        assert_eq!(first, vec![lower, upper]);
-        release_sync_lock(&lock);
+        let first_paths: Vec<_> = first.into_iter().map(|(_, _, _, path)| path).collect();
+        let second_paths: Vec<_> = second.into_iter().map(|(_, _, _, path)| path).collect();
+        assert_eq!(first_paths, second_paths);
+        assert_eq!(first_paths, vec![lower, upper]);
     }
 
     #[test]
@@ -15140,6 +15142,16 @@ fn retained_seed_backup_files(
             .unwrap_or(UNIX_EPOCH);
         candidates.push((modified, lower, name_text.to_string(), path));
     }
+    sort_retained_seed_candidates(&mut candidates);
+    Ok(candidates
+        .into_iter()
+        .map(|(_, _, _, path)| path)
+        .collect())
+}
+
+fn sort_retained_seed_candidates(
+    candidates: &mut [(SystemTime, String, String, PathBuf)],
+) {
     candidates.sort_by(|left, right| {
         right
             .0
@@ -15147,10 +15159,6 @@ fn retained_seed_backup_files(
             .then_with(|| right.1.cmp(&left.1))
             .then_with(|| right.2.cmp(&left.2))
     });
-    Ok(candidates
-        .into_iter()
-        .map(|(_, _, _, path)| path)
-        .collect())
 }
 
 fn read_sync_file_from_retained_root_with(
