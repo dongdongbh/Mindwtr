@@ -1,6 +1,9 @@
 #include <jni.h>
 
+#include "exact_directory_retirement.h"
+
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <linux/fs.h>
@@ -37,6 +40,35 @@ bool matches_identity(const struct stat& value, const char* expected) {
   return expected != nullptr
       && (std::to_string(static_cast<unsigned long long>(value.st_dev)) + ":"
           + std::to_string(static_cast<unsigned long long>(value.st_ino))) == expected;
+}
+
+bool parse_identity(
+    const char* encoded,
+    mindwtr::attachment_file_installer::DirectoryIdentity* output) {
+  if (encoded == nullptr || output == nullptr) return false;
+  const std::string value(encoded);
+  const size_t separator = value.find(':');
+  if (
+      separator == std::string::npos
+      || separator == 0
+      || separator + 1 >= value.size()
+      || value.find(':', separator + 1) != std::string::npos) {
+    return false;
+  }
+  const std::string device_text = value.substr(0, separator);
+  const std::string inode_text = value.substr(separator + 1);
+  char* device_end = nullptr;
+  char* inode_end = nullptr;
+  errno = 0;
+  const unsigned long long device = strtoull(device_text.c_str(), &device_end, 10);
+  if (errno != 0 || device_end == nullptr || *device_end != '\0') return false;
+  errno = 0;
+  const unsigned long long inode = strtoull(inode_text.c_str(), &inode_end, 10);
+  if (errno != 0 || inode_end == nullptr || *inode_end != '\0') return false;
+  *output = {
+      static_cast<uint64_t>(device),
+      static_cast<uint64_t>(inode)};
+  return true;
 }
 
 constexpr bool rename_noreplace_needs_exact_handle_fallback(int error) {
@@ -158,4 +190,112 @@ Java_tech_dongdongbh_mindwtr_attachmentfileinstaller_ExactAttachmentPublisherNat
     return JNI_FALSE;
   }
   return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_tech_dongdongbh_mindwtr_attachmentfileinstaller_ExactAttachmentPublisherNative_retireEmptyDirectoryIfIdentity(
+    JNIEnv* env,
+    jobject,
+    jstring parent_directory_path,
+    jstring directory_name,
+    jstring expected_directory_identity,
+    jstring expected_parent_identity) {
+  ScopedUtfChars parent_path(env, parent_directory_path);
+  ScopedUtfChars directory_leaf(env, directory_name);
+  ScopedUtfChars expected_directory(env, expected_directory_identity);
+  ScopedUtfChars expected_parent(env, expected_parent_identity);
+  if (parent_path.get() == nullptr || directory_leaf.get() == nullptr
+      || expected_directory.get() == nullptr || expected_parent.get() == nullptr) {
+    return static_cast<jint>(
+        mindwtr::attachment_file_installer::DirectoryRetirementResult::kIoError);
+  }
+  const std::string directory_leaf_value(directory_leaf.get());
+  if (directory_leaf_value.empty() || directory_leaf_value == "." || directory_leaf_value == ".."
+      || directory_leaf_value.find('/') != std::string::npos) {
+    throw_io_exception(env, "Attachment publication directory name is invalid");
+    return static_cast<jint>(
+        mindwtr::attachment_file_installer::DirectoryRetirementResult::kIoError);
+  }
+  mindwtr::attachment_file_installer::DirectoryIdentity directory_identity{};
+  mindwtr::attachment_file_installer::DirectoryIdentity parent_identity{};
+  if (
+      !parse_identity(expected_directory.get(), &directory_identity)
+      || !parse_identity(expected_parent.get(), &parent_identity)) {
+    throw_io_exception(env, "Attachment publication directory identity is invalid");
+    return static_cast<jint>(
+        mindwtr::attachment_file_installer::DirectoryRetirementResult::kIoError);
+  }
+
+  const int parent_fd = open(
+      parent_path.get(),
+      O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  if (parent_fd < 0) {
+    throw_io_exception(
+        env,
+        std::string("Could not retain attachment publication parent: ") + strerror(errno));
+    return static_cast<jint>(
+        mindwtr::attachment_file_installer::DirectoryRetirementResult::kIoError);
+  }
+  int error_number = 0;
+  const auto result = mindwtr::attachment_file_installer::retire_empty_directory_if_identity(
+      parent_fd,
+      directory_leaf.get(),
+      directory_identity,
+      parent_identity,
+      nullptr,
+      nullptr,
+      &error_number);
+  close(parent_fd);
+  if (result == mindwtr::attachment_file_installer::DirectoryRetirementResult::kIoError) {
+    throw_io_exception(
+        env,
+        std::string("Could not retire private attachment publication directory: ")
+            + strerror(error_number));
+  }
+  return static_cast<jint>(result);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_tech_dongdongbh_mindwtr_attachmentfileinstaller_ExactAttachmentPublisherNative_retireReservedPrivateStage(
+    JNIEnv* env,
+    jobject,
+    jstring parent_directory_path,
+    jstring directory_name) {
+  ScopedUtfChars parent_path(env, parent_directory_path);
+  ScopedUtfChars directory_leaf(env, directory_name);
+  if (parent_path.get() == nullptr || directory_leaf.get() == nullptr) {
+    return static_cast<jint>(
+        mindwtr::attachment_file_installer::DirectoryRetirementResult::kIoError);
+  }
+  const std::string directory_leaf_value(directory_leaf.get());
+  if (directory_leaf_value.empty() || directory_leaf_value == "." || directory_leaf_value == ".."
+      || directory_leaf_value.find('/') != std::string::npos) {
+    throw_io_exception(env, "Attachment publication directory name is invalid");
+    return static_cast<jint>(
+        mindwtr::attachment_file_installer::DirectoryRetirementResult::kIoError);
+  }
+
+  const int parent_fd = open(
+      parent_path.get(),
+      O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  if (parent_fd < 0) {
+    throw_io_exception(
+        env,
+        std::string("Could not retain reserved attachment publication parent: ") + strerror(errno));
+    return static_cast<jint>(
+        mindwtr::attachment_file_installer::DirectoryRetirementResult::kIoError);
+  }
+  int error_number = 0;
+  const auto result = mindwtr::attachment_file_installer::retire_reserved_private_stage(
+      parent_fd,
+      directory_leaf.get(),
+      &error_number);
+  close(parent_fd);
+  if (result == mindwtr::attachment_file_installer::DirectoryRetirementResult::kIoError) {
+    throw_io_exception(
+        env,
+        std::string("Could not retire reserved private attachment stage: ")
+            + strerror(error_number));
+  }
+  return static_cast<jint>(result);
 }

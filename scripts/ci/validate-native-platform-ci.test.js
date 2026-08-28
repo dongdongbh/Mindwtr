@@ -38,6 +38,10 @@ test("native CI generates clean projects and compiles Android and iOS sources", 
   expect(workflow).toContain(":app:compileDebugKotlin");
   expect(androidJob).toContain("name: Run Android compatibility-lock process regression");
   expect(androidJob).toContain("file_compat_lock_test.cpp");
+  expect(androidJob).toContain("name: Run Android exact-directory retirement regression");
+  expect(androidJob).toContain("exact_directory_retirement.cpp");
+  expect(androidJob).toContain("exact_directory_retirement_test.cpp");
+  expect(androidJob).toContain(":attachment-file-installer:assembleDebug");
   expect(androidJob).toContain(":sync-file-lock:assembleDebug");
   expect(androidJob).toContain("name: Verify packaged Android lock JNI symbols");
   expect(androidJob).toContain("jni/arm64-v8a/libsync-file-lock.so");
@@ -46,6 +50,17 @@ test("native CI generates clean projects and compiles Android and iOS sources", 
   );
   expect(androidJob).toContain(
     "Java_tech_dongdongbh_mindwtr_syncfilelock_StableRootLockNative_tryOfdLock",
+  );
+  expect(androidJob).toContain("name: Verify packaged Android attachment JNI symbols");
+  expect(androidJob).toContain("jni/arm64-v8a/libattachment-file-installer.so");
+  expect(androidJob).toContain(
+    "Java_tech_dongdongbh_mindwtr_attachmentfileinstaller_ExactAttachmentPublisherNative_publishRelativeNoReplace",
+  );
+  expect(androidJob).toContain(
+    "Java_tech_dongdongbh_mindwtr_attachmentfileinstaller_ExactAttachmentPublisherNative_retireEmptyDirectoryIfIdentity",
+  );
+  expect(androidJob).toContain(
+    "Java_tech_dongdongbh_mindwtr_attachmentfileinstaller_ExactAttachmentPublisherNative_retireReservedPrivateStage",
   );
   expect(androidJob).toContain("name: Run Android native recovery tests");
   expect(androidJob).toContain(":attachment-file-installer:testDebugUnitTest");
@@ -88,6 +103,14 @@ test("attachment installer native CI collects the recovery suites", () => {
     "apps/mobile/modules/attachment-file-installer/android/src/main/cpp/exact_attachment_publisher.cpp",
     "utf8",
   );
+  const androidDirectoryRetirement = readFileSync(
+    "apps/mobile/modules/attachment-file-installer/android/src/main/cpp/exact_directory_retirement.cpp",
+    "utf8",
+  );
+  const androidDirectoryRetirementTests = readFileSync(
+    "apps/mobile/modules/attachment-file-installer/android/src/test/cpp/exact_directory_retirement_test.cpp",
+    "utf8",
+  );
   const swiftPackage = readFileSync(
     "apps/mobile/modules/attachment-file-installer/ios/Package.swift",
     "utf8",
@@ -105,7 +128,10 @@ test("attachment installer native CI collects the recovery suites", () => {
     "utf8",
   );
 
-  expect(androidTests.match(/^\s*@Test$/gm)).toHaveLength(27);
+  expect(androidTests.match(/^\s*@Test$/gm)).toHaveLength(35);
+  expect(androidTests).toContain(
+    "unclaimedPrivateRetirementIsRecoveredFromItsDurableReservation",
+  );
   expect(androidPublisher).toContain("fstatat(private_fd, \"stage\"");
   expect(androidPublisher).toContain("SYS_renameat2");
   expect(androidPublisher).toContain("RENAME_NOREPLACE");
@@ -114,6 +140,24 @@ test("attachment installer native CI collects the recovery suites", () => {
     "static_assert(!rename_noreplace_needs_exact_handle_fallback(EEXIST))",
   );
   expect(androidPublisher).toContain("AT_SYMLINK_FOLLOW");
+  expect(androidDirectoryRetirement).toContain("DirectoryRetirementResult::kMissing");
+  expect(androidDirectoryRetirement).toContain("kBeforeFinalIdentityCheck");
+  expect(androidDirectoryRetirement).toContain("kAfterRetirementBeforeParentSync");
+  expect(androidDirectoryRetirement).toContain(
+    'std::string(directory_name) + ".retiring"',
+  );
+  expect(androidDirectoryRetirementTests).toContain("preserves_a_peer_swapped_in_before_quarantine");
+  expect(androidDirectoryRetirementTests).toContain(
+    "preserves_a_peer_swapped_in_before_final_identity_check",
+  );
+  expect(androidDirectoryRetirementTests).toContain("resumes_after_crash_with_expected_quarantine");
+  expect(androidDirectoryRetirementTests).toContain("confirms_missing_after_crash_before_parent_sync");
+  expect(androidDirectoryRetirementTests).toContain("preserves_peer_after_crash_before_restore_sync");
+  expect(androidDirectoryRetirementTests).toContain("rejects_a_rebound_parent");
+  expect(androidDirectoryRetirementTests).toContain("preserves_a_preexisting_peer_quarantine");
+  expect(androidDirectoryRetirementTests).toContain("retires_an_unclaimed_reserved_stage");
+  expect(androidDirectoryRetirementTests).toContain("resumes_an_unclaimed_reserved_quarantine");
+  expect(androidDirectoryRetirementTests).toContain("retains_the_open_parent_across_path_rebind");
   expect(swiftPackage).toContain(".testTarget(");
   expect(swiftTests).toContain("testAbsentGenerationUsesCreateNoReplace");
   expect(swiftTests).toContain("testPresentGenerationReplacesOnlyMatchingTargetAndPreservesIt");

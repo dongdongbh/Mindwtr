@@ -7,6 +7,7 @@ import java.security.MessageDigest
 internal const val INSTALLER_ARTIFACT_PREFIX = ".mindwtr-install-"
 internal const val INSTALLER_LOCK_NAME = ".mindwtr-attachment-installer.lock"
 internal const val INSTALLER_PRESERVED_PREFIX = ".mindwtr-preserved-"
+internal const val INSTALLER_RETIREMENT_SUFFIX = ".retiring"
 internal val SHA256_HEX_PATTERN = Regex("^[a-f0-9]{64}$")
 
 // Immutable publication protects against crashes and cooperating Mindwtr
@@ -92,6 +93,21 @@ internal interface AttachmentInstallerFileOps {
     expectedDirectoryIdentity: String,
     expectedPrivateDirectoryIdentity: String,
   ): ImmutableAttachmentPublishOutcome
+  /**
+   * Durably retire an empty private directory through a reservation-derived
+   * quarantine. Exact identities still fence every mutation; the stable name
+   * lets recovery resume after a crash before adopted identities reach JS.
+   */
+  fun retireEmptyDirectoryIfIdentity(
+    directory: File,
+    expectedIdentity: String,
+    expectedParentIdentity: String,
+  ): ImmutableAttachmentStageCleanupOutcome
+  /**
+   * Retain the current parent once, adopt this reservation's candidate or
+   * retirement namespace beneath that handle, and durably remove its stage.
+   */
+  fun retireReservedPrivateStage(directory: File): ImmutableAttachmentStageCleanupOutcome
   fun delete(file: File)
   fun deleteEmptyDirectory(directory: File) = delete(directory)
   fun readUtf8(file: File): String
@@ -138,9 +154,22 @@ internal class ImmutableAttachmentStageRecoveryCore(
         )
       } catch (error: Throwable) {
         // The durable device-local reservation owns this exact random name.
-        // Preserve any ambiguous artifact; remove only an empty directory.
-        if (ops.nodeKind(stage) == InstallerNodeKind.MISSING) {
-          try { ops.deleteEmptyDirectory(privateDirectory) } catch (_: Throwable) {}
+        // Persist whichever final namespace state cleanup can safely reach so
+        // recovery never clears the reservation ahead of an unsynced delete.
+        try {
+          if (ops.nodeKind(stage) == InstallerNodeKind.MISSING) {
+            ops.deleteEmptyDirectory(privateDirectory)
+          } else if (ops.nodeKind(privateDirectory) == InstallerNodeKind.DIRECTORY) {
+            ops.syncDirectory(privateDirectory)
+          }
+        } catch (_: Throwable) {
+          // Recovery retains the reservation and reclassifies the namespace.
+        }
+        try {
+          ops.syncDirectory(targetRoot)
+        } catch (_: Throwable) {
+          // Preserve the original preparation failure; recovery fsyncs before
+          // reporting a missing namespace or removing an adopted one.
         }
         throw error
       }
@@ -186,23 +215,50 @@ internal class ImmutableAttachmentStageRecoveryCore(
     return ops.withExclusiveLock(File(targetRoot, INSTALLER_LOCK_NAME)) {
       requireDirectory(targetRoot)
       if (isPrivateStage) {
-        if (ops.nodeKind(privateDirectory) == InstallerNodeKind.MISSING) {
-          return@withExclusiveLock ImmutableAttachmentStageCleanupOutcome.MISSING
-        }
         if (
           expectedDirectoryIdentity == null
-          || ops.nodeIdentity(targetRoot) != expectedDirectoryIdentity
           || expectedPrivateDirectoryIdentity == null
-          || ops.nodeKind(privateDirectory) != InstallerNodeKind.DIRECTORY
+        ) {
+          if (
+            expectedDirectoryIdentity != null
+            || expectedPrivateDirectoryIdentity != null
+            || expectedStagedIdentity != null
+          ) {
+            return@withExclusiveLock ImmutableAttachmentStageCleanupOutcome.CONFLICT
+          }
+          // JS durably reserves this random 128-bit private name before native
+          // prepare. Within the cooperating-writer/private-mode threat model,
+          // that capability owns its candidate and stable retirement names.
+          // Native recovery retains the parent before observing either leaf,
+          // so a provider/root rebind cannot split identity adoption.
+          return@withExclusiveLock ops.retireReservedPrivateStage(privateDirectory)
+        }
+        val privateDirectoryKind = ops.nodeKind(privateDirectory)
+        if (
+          ops.nodeIdentity(targetRoot) != expectedDirectoryIdentity
+        ) {
+          return@withExclusiveLock ImmutableAttachmentStageCleanupOutcome.CONFLICT
+        }
+        if (privateDirectoryKind == InstallerNodeKind.MISSING) {
+          return@withExclusiveLock ops.retireEmptyDirectoryIfIdentity(
+            privateDirectory,
+            expectedPrivateDirectoryIdentity,
+            expectedDirectoryIdentity,
+          )
+        }
+        if (
+          ops.nodeKind(privateDirectory) != InstallerNodeKind.DIRECTORY
           || ops.nodeIdentity(privateDirectory) != expectedPrivateDirectoryIdentity
         ) {
           return@withExclusiveLock ImmutableAttachmentStageCleanupOutcome.CONFLICT
         }
         when (ops.nodeKind(privateStage)) {
           InstallerNodeKind.MISSING -> {
-            ops.deleteEmptyDirectory(privateDirectory)
-            ops.syncDirectory(targetRoot)
-            return@withExclusiveLock ImmutableAttachmentStageCleanupOutcome.MISSING
+            return@withExclusiveLock ops.retireEmptyDirectoryIfIdentity(
+              privateDirectory,
+              expectedPrivateDirectoryIdentity,
+              expectedDirectoryIdentity,
+            )
           }
           InstallerNodeKind.REGULAR_FILE -> Unit
           else -> return@withExclusiveLock ImmutableAttachmentStageCleanupOutcome.CONFLICT
@@ -218,9 +274,11 @@ internal class ImmutableAttachmentStageRecoveryCore(
         // partial digest, so exact-identity cleanup is safe and bounded.
         ops.delete(privateStage)
         ops.syncDirectory(privateDirectory)
-        ops.deleteEmptyDirectory(privateDirectory)
-        ops.syncDirectory(targetRoot)
-        return@withExclusiveLock ImmutableAttachmentStageCleanupOutcome.REMOVED
+        return@withExclusiveLock ops.retireEmptyDirectoryIfIdentity(
+          privateDirectory,
+          expectedPrivateDirectoryIdentity,
+          expectedDirectoryIdentity,
+        )
       }
       if (expectedSha256 == null || expectedStagedIdentity == null || expectedDirectoryIdentity == null) {
         return@withExclusiveLock if (
@@ -398,9 +456,11 @@ internal class ImmutableAttachmentFilePublisherCore(
     rejectSymlink(targetAbsolute, "target attachment")
     val staged = ops.canonical(stagedAbsolute)
     val target = ops.canonical(targetAbsolute)
+    val stagedParent = staged.parentFile
     val privateStage = staged.name == "stage"
-      && staged.parentFile?.parentFile == targetRoot
-      && Regex("^\\.mindwtr-install-[a-f0-9]{32}\\.candidate$").matches(staged.parentFile.name)
+      && stagedParent != null
+      && stagedParent.parentFile == targetRoot
+      && Regex("^\\.mindwtr-install-[a-f0-9]{32}\\.candidate$").matches(stagedParent.name)
     if (!privateStage || target.parentFile != targetRoot || staged == target) {
       throw AttachmentInstallerFailure("Immutable attachment stage must use its reserved private namespace")
     }
@@ -414,7 +474,7 @@ internal class ImmutableAttachmentFilePublisherCore(
       if (ops.nodeKind(target) != InstallerNodeKind.MISSING) {
         return@withExclusiveLock ImmutableAttachmentPublishOutcome.ALREADY_EXISTS
       }
-      ops.publishVerifiedImmutable(
+      val outcome = ops.publishVerifiedImmutable(
         staged,
         target,
         expectedStagedSha256,
@@ -422,6 +482,23 @@ internal class ImmutableAttachmentFilePublisherCore(
         expectedDirectoryIdentity,
         expectedPrivateDirectoryIdentity,
       )
+      if (outcome == ImmutableAttachmentPublishOutcome.PUBLISHED) {
+        val privateDirectory = staged.parentFile
+          ?: throw AttachmentInstallerFailure("Private attachment publication directory is unavailable")
+        val cleanupOutcome = if (ops.nodeKind(staged) == InstallerNodeKind.MISSING) {
+          ops.retireEmptyDirectoryIfIdentity(
+            privateDirectory,
+            expectedPrivateDirectoryIdentity,
+            expectedDirectoryIdentity,
+          )
+        } else {
+          ImmutableAttachmentStageCleanupOutcome.CONFLICT
+        }
+        if (cleanupOutcome == ImmutableAttachmentStageCleanupOutcome.CONFLICT) {
+          throw AttachmentInstallerFailure("Published attachment private namespace changed before cleanup")
+        }
+      }
+      outcome
     }
   }
 

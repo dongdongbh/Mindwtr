@@ -104,10 +104,14 @@ private class TestInstallerFileOps : AttachmentInstallerFileOps {
     expectedDirectoryIdentity: String,
     expectedPrivateDirectoryIdentity: String,
   ): ImmutableAttachmentPublishOutcome {
+    val destinationParent = destination.parentFile
+      ?: throw AttachmentInstallerFailure("Attachment target directory is unavailable")
+    val sourceParent = source.parentFile
+      ?: throw AttachmentInstallerFailure("Attachment private directory is unavailable")
     if (
       fileIdentity(source).fileKey != expectedSourceIdentity
-      || nodeIdentity(destination.parentFile) != expectedDirectoryIdentity
-      || nodeIdentity(source.parentFile) != expectedPrivateDirectoryIdentity
+      || nodeIdentity(destinationParent) != expectedDirectoryIdentity
+      || nodeIdentity(sourceParent) != expectedPrivateDirectoryIdentity
     ) {
       throw AttachmentInstallerFailure("Attachment publication directory identity changed")
     }
@@ -120,6 +124,69 @@ private class TestInstallerFileOps : AttachmentInstallerFileOps {
     } else {
       ImmutableAttachmentPublishOutcome.ALREADY_EXISTS
     }
+  }
+
+  override fun retireEmptyDirectoryIfIdentity(
+    directory: File,
+    expectedIdentity: String,
+    expectedParentIdentity: String,
+  ): ImmutableAttachmentStageCleanupOutcome {
+    val parent = directory.parentFile ?: return ImmutableAttachmentStageCleanupOutcome.CONFLICT
+    if (
+      nodeIdentity(parent) != expectedParentIdentity
+      || nodeKind(directory) != InstallerNodeKind.DIRECTORY
+      || nodeIdentity(directory) != expectedIdentity
+    ) {
+      return ImmutableAttachmentStageCleanupOutcome.CONFLICT
+    }
+    return try {
+      Files.delete(directory.toPath())
+      ImmutableAttachmentStageCleanupOutcome.REMOVED
+    } catch (_: Throwable) {
+      ImmutableAttachmentStageCleanupOutcome.CONFLICT
+    }
+  }
+
+  override fun retireReservedPrivateStage(
+    directory: File,
+  ): ImmutableAttachmentStageCleanupOutcome {
+    val parent = directory.parentFile ?: return ImmutableAttachmentStageCleanupOutcome.CONFLICT
+    val quarantine = File(parent, "${directory.name}$INSTALLER_RETIREMENT_SUFFIX")
+    val directoryKind = nodeKind(directory)
+    val quarantineKind = nodeKind(quarantine)
+    if (directoryKind == InstallerNodeKind.MISSING && quarantineKind == InstallerNodeKind.MISSING) {
+      syncDirectory(parent)
+      return ImmutableAttachmentStageCleanupOutcome.MISSING
+    }
+    if (directoryKind != InstallerNodeKind.MISSING && quarantineKind != InstallerNodeKind.MISSING) {
+      return ImmutableAttachmentStageCleanupOutcome.CONFLICT
+    }
+    if (quarantineKind != InstallerNodeKind.MISSING) {
+      if (quarantineKind != InstallerNodeKind.DIRECTORY) {
+        return ImmutableAttachmentStageCleanupOutcome.CONFLICT
+      }
+      return try {
+        Files.delete(quarantine.toPath())
+        syncDirectory(parent)
+        ImmutableAttachmentStageCleanupOutcome.REMOVED
+      } catch (_: Throwable) {
+        ImmutableAttachmentStageCleanupOutcome.CONFLICT
+      }
+    }
+    if (directoryKind != InstallerNodeKind.DIRECTORY) {
+      return ImmutableAttachmentStageCleanupOutcome.CONFLICT
+    }
+    when (nodeKind(File(directory, "stage"))) {
+      InstallerNodeKind.MISSING -> Unit
+      InstallerNodeKind.REGULAR_FILE -> delete(File(directory, "stage"))
+      else -> return ImmutableAttachmentStageCleanupOutcome.CONFLICT
+    }
+    syncDirectory(directory)
+    return retireEmptyDirectoryIfIdentity(
+      directory,
+      nodeIdentity(directory),
+      nodeIdentity(parent),
+    )
   }
 
   override fun delete(file: File) {
@@ -625,6 +692,45 @@ class AttachmentFileInstallerCoreTest {
   }
 
   @Test
+  fun immutablePublisherPreservesPeerReplacementAtPrivateNamespaceRetirement() = withFixture { fixture ->
+    val target = fixture.target("a.${hash("candidate")}.txt")
+    val prepared = fixture.recovery(ops).prepare(target, "9".repeat(32))
+    val staged = prepared.stagedPath.apply {
+      writeText("candidate")
+    }
+    val privateDirectory = staged.parentFile!!
+    val racingOps = object : AttachmentInstallerFileOps by ops {
+      override fun retireEmptyDirectoryIfIdentity(
+        directory: File,
+        expectedIdentity: String,
+        expectedParentIdentity: String,
+      ): ImmutableAttachmentStageCleanupOutcome {
+        Files.delete(directory.toPath())
+        directory.writeText("peer")
+        return ops.retireEmptyDirectoryIfIdentity(
+          directory,
+          expectedIdentity,
+          expectedParentIdentity,
+        )
+      }
+    }
+
+    assertFailsWithMessage("changed before cleanup") {
+      fixture.publisher(racingOps).publish(
+        staged,
+        target,
+        hash("candidate"),
+        prepared.stagedIdentity,
+        prepared.directoryIdentity,
+        prepared.privateDirectoryIdentity,
+      )
+    }
+
+    assertEquals("candidate", target.readText())
+    assertEquals("peer", privateDirectory.readText())
+  }
+
+  @Test
   fun immutablePublisherPreservesOwnedStageAndPeerTargetOnCollision() = withFixture { fixture ->
     val target = fixture.target("a.${hash("candidate")}.txt").apply { writeText("peer-corruption") }
     val prepared = fixture.recovery(ops).prepare(target, "2".repeat(32))
@@ -712,7 +818,206 @@ class AttachmentFileInstallerCoreTest {
 
     assertEquals(ImmutableAttachmentStageCleanupOutcome.REMOVED, outcome)
     assertFalse(prepared.stagedPath.exists())
-    assertFalse(prepared.stagedPath.parentFile.exists())
+    assertFalse(prepared.stagedPath.parentFile!!.exists())
+  }
+
+  @Test
+  fun missingPrivateStageRecoveryWaitsForDurableDirectoryRetirement() = withFixture { fixture ->
+    val operationId = "5".repeat(32)
+    val target = fixture.target("a.${hash("candidate")}.txt")
+    val recovery = fixture.recovery(ops)
+    val prepared = recovery.prepare(target, operationId)
+    val privateDirectory = prepared.stagedPath.parentFile!!
+    Files.delete(prepared.stagedPath.toPath())
+    Files.delete(privateDirectory.toPath())
+    var retirementCalled = false
+    val recoveryOps = object : AttachmentInstallerFileOps by ops {
+      override fun retireEmptyDirectoryIfIdentity(
+        directory: File,
+        expectedIdentity: String,
+        expectedParentIdentity: String,
+      ): ImmutableAttachmentStageCleanupOutcome {
+        assertEquals(privateDirectory, directory)
+        assertEquals(prepared.privateDirectoryIdentity, expectedIdentity)
+        assertEquals(prepared.directoryIdentity, expectedParentIdentity)
+        retirementCalled = true
+        return ImmutableAttachmentStageCleanupOutcome.REMOVED
+      }
+    }
+
+    val outcome = fixture.recovery(recoveryOps).cleanup(
+      prepared.stagedPath,
+      target,
+      operationId,
+      hash("candidate"),
+      prepared.stagedIdentity,
+      prepared.directoryIdentity,
+      prepared.privateDirectoryIdentity,
+    )
+
+    assertEquals(ImmutableAttachmentStageCleanupOutcome.REMOVED, outcome)
+    assertTrue(retirementCalled)
+  }
+
+  @Test
+  fun unpreparedPrivateStageReservationClearsWhenCandidateWasNeverCreated() = withFixture { fixture ->
+    val operationId = "6".repeat(32)
+    val target = fixture.target("a.${hash("candidate")}.txt")
+    val privateDirectory = fixture.target("$INSTALLER_ARTIFACT_PREFIX$operationId.candidate")
+    val staged = File(privateDirectory, "stage")
+    var reservedRetirementCalled = false
+    val recoveryOps = object : AttachmentInstallerFileOps by ops {
+      override fun retireReservedPrivateStage(
+        directory: File,
+      ): ImmutableAttachmentStageCleanupOutcome {
+        reservedRetirementCalled = true
+        return ops.retireReservedPrivateStage(directory)
+      }
+    }
+
+    val outcome = fixture.recovery(recoveryOps).cleanup(
+      staged,
+      target,
+      operationId,
+      hash("candidate"),
+      null,
+      null,
+      null,
+    )
+
+    assertEquals(ImmutableAttachmentStageCleanupOutcome.MISSING, outcome)
+    assertFalse(privateDirectory.exists())
+    assertTrue(reservedRetirementCalled)
+  }
+
+  @Test
+  fun unclaimedPrivateStageIsRecoveredFromItsDurableReservation() = withFixture { fixture ->
+    val operationId = "7".repeat(32)
+    val target = fixture.target("a.${hash("candidate")}.txt")
+    val prepared = fixture.recovery(ops).prepare(target, operationId)
+
+    val outcome = fixture.recovery(ops).cleanup(
+      prepared.stagedPath,
+      target,
+      operationId,
+      hash("candidate"),
+      null,
+      null,
+      null,
+    )
+
+    assertEquals(ImmutableAttachmentStageCleanupOutcome.REMOVED, outcome)
+    assertFalse(prepared.stagedPath.exists())
+    assertFalse(prepared.stagedPath.parentFile!!.exists())
+  }
+
+  @Test
+  fun unclaimedPrivateRetirementIsRecoveredFromItsDurableReservation() = withFixture { fixture ->
+    val operationId = "a".repeat(32)
+    val target = fixture.target("a.${hash("candidate")}.txt")
+    val privateDirectory = fixture.target("$INSTALLER_ARTIFACT_PREFIX$operationId.candidate")
+    val retirementQuarantine = fixture.target("${privateDirectory.name}$INSTALLER_RETIREMENT_SUFFIX").apply {
+      mkdirs()
+    }
+    val staged = File(privateDirectory, "stage")
+    var retirementAttempted = false
+    val recoveryOps = object : AttachmentInstallerFileOps by ops {
+      override fun retireReservedPrivateStage(
+        directory: File,
+      ): ImmutableAttachmentStageCleanupOutcome {
+        assertEquals(privateDirectory, directory)
+        retirementAttempted = true
+        Files.delete(retirementQuarantine.toPath())
+        syncDirectory(target.parentFile!!)
+        return ImmutableAttachmentStageCleanupOutcome.REMOVED
+      }
+    }
+
+    val outcome = fixture.recovery(recoveryOps).cleanup(
+      staged,
+      target,
+      operationId,
+      hash("candidate"),
+      null,
+      null,
+      null,
+    )
+
+    assertEquals(ImmutableAttachmentStageCleanupOutcome.REMOVED, outcome)
+    assertTrue(retirementAttempted)
+    assertFalse(privateDirectory.exists())
+    assertFalse(retirementQuarantine.exists())
+  }
+
+  @Test
+  fun unclaimedNonDirectoryRetirementIsPreserved() = withFixture { fixture ->
+    val operationId = "b".repeat(32)
+    val target = fixture.target("a.${hash("candidate")}.txt")
+    val privateDirectory = fixture.target("$INSTALLER_ARTIFACT_PREFIX$operationId.candidate")
+    val retirementQuarantine = fixture.target("${privateDirectory.name}$INSTALLER_RETIREMENT_SUFFIX").apply {
+      writeText("peer")
+    }
+
+    val outcome = fixture.recovery(ops).cleanup(
+      File(privateDirectory, "stage"),
+      target,
+      operationId,
+      hash("candidate"),
+      null,
+      null,
+      null,
+    )
+
+    assertEquals(ImmutableAttachmentStageCleanupOutcome.CONFLICT, outcome)
+    assertEquals("peer", retirementQuarantine.readText())
+  }
+
+  @Test
+  fun unclaimedNonDirectoryReservationIsPreserved() = withFixture { fixture ->
+    val operationId = "8".repeat(32)
+    val target = fixture.target("a.${hash("candidate")}.txt")
+    val privateDirectory = fixture.target("$INSTALLER_ARTIFACT_PREFIX$operationId.candidate").apply {
+      writeText("peer")
+    }
+    val staged = File(privateDirectory, "stage")
+
+    val outcome = fixture.recovery(ops).cleanup(
+      staged,
+      target,
+      operationId,
+      hash("candidate"),
+      null,
+      null,
+      null,
+    )
+
+    assertEquals(ImmutableAttachmentStageCleanupOutcome.CONFLICT, outcome)
+    assertEquals("peer", privateDirectory.readText())
+  }
+
+  @Test
+  fun failedPrivateStagePreparationSyncsItsFinalParentNamespace() = withFixture { fixture ->
+    val operationId = "9".repeat(32)
+    val target = fixture.target("a.${hash("candidate")}.txt")
+    val targetRoot = target.parentFile!!
+    var targetRootSynced = false
+    val failingOps = object : AttachmentInstallerFileOps by ops {
+      override fun createNewRegularFile(file: File) {
+        throw AttachmentInstallerFailure("injected stage creation failure")
+      }
+
+      override fun syncDirectory(directory: File) {
+        if (directory == targetRoot) targetRootSynced = true
+        ops.syncDirectory(directory)
+      }
+    }
+
+    assertFailsWithMessage("injected stage creation failure") {
+      fixture.recovery(failingOps).prepare(target, operationId)
+    }
+
+    assertTrue(targetRootSynced)
+    assertFalse(fixture.target("$INSTALLER_ARTIFACT_PREFIX$operationId.candidate").exists())
   }
 
   @Test

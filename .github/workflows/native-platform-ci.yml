@@ -254,6 +254,20 @@ jobs:
             -o "$RUNNER_TEMP/file-compat-lock-test"
           "$RUNNER_TEMP/file-compat-lock-test"
 
+      - name: Run Android exact-directory retirement regression
+        run: |
+          set -euo pipefail
+          c++ \
+            -std=c++17 \
+            -Wall \
+            -Wextra \
+            -Werror \
+            -I apps/mobile/modules/attachment-file-installer/android/src/main/cpp \
+            apps/mobile/modules/attachment-file-installer/android/src/main/cpp/exact_directory_retirement.cpp \
+            apps/mobile/modules/attachment-file-installer/android/src/test/cpp/exact_directory_retirement_test.cpp \
+            -o "$RUNNER_TEMP/exact-directory-retirement-test"
+          "$RUNNER_TEMP/exact-directory-retirement-test"
+
       - name: Generate Android native project
         working-directory: apps/mobile
         env:
@@ -276,6 +290,7 @@ jobs:
           ./gradlew \
             :app:compileDebugKotlin \
             :app:compileDebugJavaWithJavac \
+            :attachment-file-installer:assembleDebug \
             :sync-file-lock:assembleDebug \
             --no-daemon \
             -PreactNativeArchitectures=arm64-v8a
@@ -295,6 +310,25 @@ jobs:
             | grep -F 'Java_tech_dongdongbh_mindwtr_syncfilelock_StableRootLockNative_tryLock'
           readelf --dyn-syms --wide "$RUNNER_TEMP/libsync-file-lock.so" \
             | grep -F 'Java_tech_dongdongbh_mindwtr_syncfilelock_StableRootLockNative_tryOfdLock'
+
+      - name: Verify packaged Android attachment JNI symbols
+        working-directory: apps/mobile/android
+        run: |
+          set -euo pipefail
+          ATTACHMENT_AAR="$(find ../modules/attachment-file-installer/android/build/outputs/aar -name '*debug.aar' -print -quit)"
+          if [ -z "${ATTACHMENT_AAR:-}" ]; then
+            echo "::error::attachment-file-installer debug AAR was not produced"
+            exit 1
+          fi
+          unzip -l "$ATTACHMENT_AAR" | grep -F 'jni/arm64-v8a/libattachment-file-installer.so'
+          unzip -p "$ATTACHMENT_AAR" jni/arm64-v8a/libattachment-file-installer.so \
+            > "$RUNNER_TEMP/libattachment-file-installer.so"
+          readelf --dyn-syms --wide "$RUNNER_TEMP/libattachment-file-installer.so" \
+            | grep -F 'Java_tech_dongdongbh_mindwtr_attachmentfileinstaller_ExactAttachmentPublisherNative_publishRelativeNoReplace'
+          readelf --dyn-syms --wide "$RUNNER_TEMP/libattachment-file-installer.so" \
+            | grep -F 'Java_tech_dongdongbh_mindwtr_attachmentfileinstaller_ExactAttachmentPublisherNative_retireEmptyDirectoryIfIdentity'
+          readelf --dyn-syms --wide "$RUNNER_TEMP/libattachment-file-installer.so" \
+            | grep -F 'Java_tech_dongdongbh_mindwtr_attachmentfileinstaller_ExactAttachmentPublisherNative_retireReservedPrivateStage'
 
       - name: Run Android native recovery tests
         working-directory: apps/mobile/android

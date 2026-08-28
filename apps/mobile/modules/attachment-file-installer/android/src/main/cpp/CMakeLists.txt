@@ -5,5 +5,6 @@ project(attachment_file_installer LANGUAGES CXX)
 add_library(
   attachment-file-installer
   SHARED
+  exact_directory_retirement.cpp
   exact_attachment_publisher.cpp
 )

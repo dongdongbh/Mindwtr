@@ -33,6 +33,18 @@ private object ExactAttachmentPublisherNative {
     expectedPrivateDirectoryIdentity: String,
     expectedTargetDirectoryIdentity: String,
   ): Boolean
+
+  external fun retireEmptyDirectoryIfIdentity(
+    parentDirectoryPath: String,
+    directoryName: String,
+    expectedDirectoryIdentity: String,
+    expectedParentIdentity: String,
+  ): Int
+
+  external fun retireReservedPrivateStage(
+    parentDirectoryPath: String,
+    directoryName: String,
+  ): Int
 }
 
 private class AndroidAttachmentInstallerFileOps : AttachmentInstallerFileOps {
@@ -259,6 +271,52 @@ private class AndroidAttachmentInstallerFileOps : AttachmentInstallerFileOps {
       if (!published) return ImmutableAttachmentPublishOutcome.ALREADY_EXISTS
     }
     return ImmutableAttachmentPublishOutcome.PUBLISHED
+  }
+
+  override fun retireEmptyDirectoryIfIdentity(
+    directory: File,
+    expectedIdentity: String,
+    expectedParentIdentity: String,
+  ): ImmutableAttachmentStageCleanupOutcome {
+    val parent = directory.parentFile
+      ?: throw AttachmentInstallerFailure("Private attachment publication parent is unavailable")
+    val nativeOutcome = try {
+      ExactAttachmentPublisherNative.retireEmptyDirectoryIfIdentity(
+        parent.path,
+        directory.name,
+        expectedIdentity,
+        expectedParentIdentity,
+      )
+    } catch (error: Throwable) {
+      throw AttachmentInstallerFailure("Could not retire private attachment publication directory", error)
+    }
+    return when (nativeOutcome) {
+      0 -> ImmutableAttachmentStageCleanupOutcome.REMOVED
+      1 -> ImmutableAttachmentStageCleanupOutcome.MISSING
+      2 -> ImmutableAttachmentStageCleanupOutcome.CONFLICT
+      else -> throw AttachmentInstallerFailure("Native attachment directory retirement returned an invalid outcome")
+    }
+  }
+
+  override fun retireReservedPrivateStage(
+    directory: File,
+  ): ImmutableAttachmentStageCleanupOutcome {
+    val parent = directory.parentFile
+      ?: throw AttachmentInstallerFailure("Private attachment publication parent is unavailable")
+    val nativeOutcome = try {
+      ExactAttachmentPublisherNative.retireReservedPrivateStage(
+        parent.path,
+        directory.name,
+      )
+    } catch (error: Throwable) {
+      throw AttachmentInstallerFailure("Could not retire reserved private attachment stage", error)
+    }
+    return when (nativeOutcome) {
+      0 -> ImmutableAttachmentStageCleanupOutcome.REMOVED
+      1 -> ImmutableAttachmentStageCleanupOutcome.MISSING
+      2 -> ImmutableAttachmentStageCleanupOutcome.CONFLICT
+      else -> throw AttachmentInstallerFailure("Native reserved attachment retirement returned an invalid outcome")
+    }
   }
 
   override fun delete(file: File) {
