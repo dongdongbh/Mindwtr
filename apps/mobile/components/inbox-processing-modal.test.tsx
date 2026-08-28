@@ -2760,6 +2760,53 @@ describe('InboxProcessingModal', () => {
       }
     });
 
+    it('names Area and Project controls and exposes their selected state', async () => {
+      storeState.projects = [workProject];
+      storeState.areas = [workArea];
+      storeState.tasks = [{ ...baseInboxTask }];
+      const root = await openMode('guided');
+      walkToFileStep(root);
+
+      expect(root.findByProps({
+        accessibilityRole: 'button',
+        accessibilityLabel: 'taskEdit.areaLabel: projects.noArea',
+      }).props.accessibilityState).toEqual({ selected: true });
+      expect(root.findByProps({
+        accessibilityRole: 'button',
+        accessibilityLabel: 'taskEdit.areaLabel: Work',
+      }).props.accessibilityState).toEqual({ selected: false });
+      expect(root.findByProps({
+        accessibilityLabel: 'projects.search',
+      }).props.placeholder).toBe('projects.addPlaceholder');
+      expect(root.findByProps({
+        accessibilityRole: 'button',
+        accessibilityLabel: 'taskEdit.projectLabel: inbox.noProject',
+      }).props.accessibilityState).toEqual({ selected: true });
+      expect(root.findByProps({
+        accessibilityRole: 'button',
+        accessibilityLabel: 'taskEdit.projectLabel: Work Project',
+      }).props.accessibilityState).toEqual({ selected: false });
+
+      act(() => {
+        root.findByProps({
+          accessibilityRole: 'button',
+          accessibilityLabel: 'taskEdit.projectLabel: Work Project',
+        }).props.onPress();
+      });
+      expect(root.findAllByProps({
+        accessibilityRole: 'button',
+        accessibilityLabel: 'taskEdit.projectLabel: Work Project',
+      }).every((option) => option.props.accessibilityState?.selected === true)).toBe(true);
+
+      storeState.tasks = [{ ...baseInboxTask }];
+      const conversionRoot = await openMode('guided');
+      walkToProjectConversion(conversionRoot);
+      expect(conversionRoot.findByProps({
+        accessibilityRole: 'button',
+        accessibilityLabel: 'process.createProject',
+      })).toBeTruthy();
+    });
+
     it('keeps dated Later controls in both modes without an undated escape hatch', async () => {
       mockSettings.gtd.defaultScheduleTime = '09:00';
 
