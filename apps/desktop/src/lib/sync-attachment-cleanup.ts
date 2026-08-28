@@ -33,6 +33,8 @@ import {
 } from './sync-service-utils';
 import { getManagedPath } from './managed-paths';
 
+const ATTACHMENT_CLEANUP_BATCH_LIMIT = 25;
+
 export type AttachmentCleanupDeps = {
     getCloudConfig: () => Promise<CloudConfig>;
     getCloudProvider: () => Promise<CloudProvider>;
@@ -231,6 +233,7 @@ export const cleanupOrphanedAttachments = async (
 
     const result = await runAttachmentCleanupLifecycle({
         appData,
+        maxAttachmentTargets: ATTACHMENT_CLEANUP_BATCH_LIMIT,
         beforeEachAttachment: yieldThenEnsureFresh,
         beforeEachRemoteDelete: yieldThenEnsureFresh,
         deleteLocalAttachment: (attachment) => deleteAttachmentFile(attachment, deps, guards),
@@ -252,6 +255,12 @@ export const cleanupOrphanedAttachments = async (
                 || error instanceof DropboxConflictError
             ) throw error;
             logAttachmentCleanupWarning(deps, 'Failed to delete remote attachment', error);
+        },
+        onBatchLimitReached: ({ limit, total }) => {
+            deps.logSyncInfo('Attachment cleanup batch limit reached', {
+                limit: String(limit),
+                total: String(total),
+            });
         },
     });
 

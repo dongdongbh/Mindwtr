@@ -13,6 +13,17 @@ const fsMocks = vi.hoisted(() => ({
     remove: vi.fn(),
 }));
 
+const coreMocks = vi.hoisted(() => ({
+    webdavDeleteFileVersioned: vi.fn(),
+    webdavHeadFile: vi.fn(),
+}));
+
+vi.mock('@mindwtr/core', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('@mindwtr/core')>()),
+    webdavDeleteFileVersioned: coreMocks.webdavDeleteFileVersioned,
+    webdavHeadFile: coreMocks.webdavHeadFile,
+}));
+
 vi.mock('@tauri-apps/plugin-fs', () => fsMocks);
 vi.mock('./managed-paths', () => ({
     getManagedPath: async (...segments: string[]) => ['/new-profile', ...segments].join('/'),
@@ -61,6 +72,55 @@ describe('desktop attachment cleanup freshness', () => {
         expect(deps.getSyncPath).not.toHaveBeenCalled();
         expect(fsMocks.remove).not.toHaveBeenCalled();
         expect(cleaned.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
+    });
+
+    it('bounds remote cleanup and resumes the retained queue on the next pass', async () => {
+        const pendingRemoteDeletes = Array.from({ length: 26 }, (_, index) => ({
+            cloudKey: `attachments/orphan-${index + 1}.pdf`,
+            title: `orphan-${index + 1}.pdf`,
+            attempts: 2,
+            lastErrorAt: `2026-08-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`,
+        }));
+        const appData: AppData = {
+            ...buildData(),
+            settings: { attachments: { pendingRemoteDeletes } },
+        };
+        const deps = buildDeps();
+        vi.mocked(deps.getWebDavConfig).mockResolvedValue({
+            url: 'https://dav.example.com/mindwtr/',
+            username: 'alice',
+        });
+        fsMocks.readDir.mockResolvedValue([]);
+        coreMocks.webdavHeadFile.mockResolvedValue({ exists: true, etag: '"v1"' });
+        coreMocks.webdavDeleteFileVersioned.mockResolvedValue(undefined);
+
+        const firstPass = await cleanupOrphanedAttachments(
+            appData,
+            'webdav',
+            deps,
+            { ensureLocalSnapshotFresh: vi.fn() },
+        );
+
+        expect(coreMocks.webdavHeadFile).toHaveBeenCalledTimes(25);
+        expect(coreMocks.webdavDeleteFileVersioned).toHaveBeenCalledTimes(25);
+        expect(firstPass.settings.attachments?.pendingRemoteDeletes).toEqual([
+            pendingRemoteDeletes[25],
+        ]);
+        expect(deps.logSyncInfo).toHaveBeenCalledWith(
+            'Attachment cleanup batch limit reached',
+            { limit: '25', total: '26' },
+        );
+
+        const secondPass = await cleanupOrphanedAttachments(
+            firstPass,
+            'webdav',
+            deps,
+            { ensureLocalSnapshotFresh: vi.fn() },
+        );
+
+        expect(coreMocks.webdavHeadFile).toHaveBeenCalledTimes(26);
+        expect(coreMocks.webdavDeleteFileVersioned).toHaveBeenCalledTimes(26);
+        expect(secondPass.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
     });
 });
 
