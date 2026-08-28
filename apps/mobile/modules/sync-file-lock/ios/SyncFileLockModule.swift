@@ -95,6 +95,12 @@ private final class HeldSyncFileLease {
 final class SyncFileLockEngine {
   private let guardLock = NSLock()
   private var held: [String: HeldSyncFileLease] = [:]
+  private var destroyed = false
+  private let beforeLeaseRegistrationForTesting: () -> Void
+
+  init(beforeLeaseRegistrationForTesting: @escaping () -> Void = {}) {
+    self.beforeLeaseRegistrationForTesting = beforeLeaseRegistrationForTesting
+  }
 
   private func synchronized<T>(_ body: () throws -> T) rethrows -> T {
     guardLock.lock()
@@ -118,6 +124,11 @@ final class SyncFileLockEngine {
   }
 
   func acquire(_ uriValue: String) throws -> String {
+    try synchronized {
+      guard !destroyed else {
+        throw SyncFileLockEngineError.unavailable("lock engine was destroyed")
+      }
+    }
     let root = try rootDirectory(uriValue)
     let rootPath = root.path
     let expectedRoot = try pathIdentity(rootPath, requireDirectory: true)
@@ -161,7 +172,15 @@ final class SyncFileLockEngine {
         )
         try lease.revalidate()
         let token = UUID().uuidString
-        synchronized { held[token] = lease }
+        beforeLeaseRegistrationForTesting()
+        let registered = synchronized {
+          guard !destroyed else { return false }
+          held[token] = lease
+          return true
+        }
+        guard registered else {
+          throw SyncFileLockEngineError.unavailable("lock engine was destroyed")
+        }
         return token
       } catch {
         _ = Darwin.close(lockFd)
@@ -198,6 +217,7 @@ final class SyncFileLockEngine {
 
   func drain() {
     let leases = synchronized {
+      destroyed = true
       let values = Array(held.values)
       held.removeAll()
       return values

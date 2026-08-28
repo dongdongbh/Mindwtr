@@ -10442,6 +10442,25 @@ mod tests {
         assert!(journal.borrow().is_none());
     }
 
+    #[test]
+    fn windows_root_authority_name_is_machine_wide_and_identity_bound() {
+        let first = windows_sync_root_authority_name(&SyncLockIdentity {
+            device_id: 0x12,
+            file_id: 0x34,
+        });
+        let second = windows_sync_root_authority_name(&SyncLockIdentity {
+            device_id: 0x12,
+            file_id: 0x35,
+        });
+
+        assert_eq!(
+            first,
+            "Global\\Mindwtr.FileSync.0000000000000012.0000000000000034"
+        );
+        assert_ne!(first, second);
+        assert!(!first.starts_with("Local\\"));
+    }
+
     // T7: is_sync_lock_contention is defined far below this module (it's regular,
     // non-test code after mod tests closes elsewhere in this file) but is visible
     // here via `use super::*;` above — Rust module resolution isn't order-dependent.
@@ -11214,6 +11233,14 @@ fn acquire_sync_root_authority(root: &File, _identity: &SyncLockIdentity) -> Res
     root.try_lock_exclusive().map_err(|error| sync_lock_error_message(&error))
 }
 
+#[cfg(any(test, target_os = "windows"))]
+fn windows_sync_root_authority_name(identity: &SyncLockIdentity) -> String {
+    format!(
+        "Global\\Mindwtr.FileSync.{:016x}.{:016x}",
+        identity.device_id, identity.file_id
+    )
+}
+
 #[cfg(target_os = "windows")]
 fn acquire_sync_root_authority(
     _root: &File,
@@ -11222,16 +11249,18 @@ fn acquire_sync_root_authority(
     use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0, WAIT_TIMEOUT};
     use windows_sys::Win32::System::Threading::{CreateSemaphoreW, WaitForSingleObject};
 
-    let name = format!(
-        "Local\\Mindwtr.FileSync.{:016x}.{:016x}",
-        identity.device_id, identity.file_id
-    );
+    let name = windows_sync_root_authority_name(identity);
     let wide = name.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
+    // `Global\\` is shared by every logon session. A null SECURITY_ATTRIBUTES
+    // pointer deliberately applies the creator token's default DACL, so the
+    // same account can reopen the authority across sessions without granting
+    // other users access. Do not fall back to `Local\\` if creation is denied:
+    // that would silently split the stable authority into concurrent owners.
     // SAFETY: the name is NUL-terminated and remains alive through the call.
     let handle = unsafe { CreateSemaphoreW(std::ptr::null(), 1, 1, wide.as_ptr()) };
     if handle.is_null() {
         return Err(format!(
-            "Failed to create stable File Sync root authority: {}",
+            "Failed to create machine-wide stable File Sync root authority: {}",
             std::io::Error::last_os_error()
         ));
     }
