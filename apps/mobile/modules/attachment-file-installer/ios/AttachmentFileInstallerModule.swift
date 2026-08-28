@@ -10,6 +10,11 @@ private let installerPreservedPrefix = ".mindwtr-preserved-"
 private let installerLockName = ".mindwtr-attachment-installer.lock"
 private let sha256Pattern = try! NSRegularExpression(pattern: "^[a-f0-9]{64}$")
 
+// Immutable publication protects against crashes and cooperating Mindwtr
+// writers by retaining a private namespace and exact descriptors. A malicious
+// same-UID process that can bypass that private directory is outside the model;
+// ambiguous provider or identity behavior remains fail-closed.
+
 private enum InstallerNodeKind {
   case missing
   case regularFile
@@ -36,6 +41,13 @@ enum ImmutableAttachmentPublishOutcome {
 struct ImmutableAttachmentStageIdentity {
   let stagedIdentity: String
   let directoryIdentity: String
+}
+
+struct ImmutableAttachmentPreparedStage {
+  let stagedUrl: URL
+  let stagedIdentity: String
+  let directoryIdentity: String
+  let privateDirectoryIdentity: String
 }
 
 enum ImmutableAttachmentStageCleanupOutcome {
@@ -196,6 +208,7 @@ private func isSha256(_ value: String) -> Bool {
 enum AttachmentFileInstallerFaultPoint: Equatable {
   case afterInitialJournal
   case afterExclusiveLink
+  case beforeImmutablePublication
 }
 
 final class AttachmentFileInstallerEngine {
@@ -292,7 +305,10 @@ final class AttachmentFileInstallerEngine {
   func publishImmutable(
     stagedInput: URL,
     targetInput: URL,
-    expectedStagedSha256: String
+    expectedStagedSha256: String,
+    expectedStagedIdentity: String,
+    expectedDirectoryIdentity: String,
+    expectedPrivateDirectoryIdentity: String
   ) throws -> ImmutableAttachmentPublishOutcome {
     guard isSha256(expectedStagedSha256) else {
       throw installerError("Expected staged attachment SHA-256 is invalid")
@@ -304,35 +320,146 @@ final class AttachmentFileInstallerEngine {
     let staged = Self.canonical(stagedInput)
     let target = Self.canonical(targetInput)
     try validateTargetPath(target)
-    try validateSourcePath(staged)
+    let privateDirectory = staged.deletingLastPathComponent()
+    guard
+      staged.lastPathComponent == "stage",
+      privateDirectory.deletingLastPathComponent() == targetRoot,
+      privateDirectory.lastPathComponent.range(
+        of: "^\\.mindwtr-install-[a-f0-9]{32}\\.candidate$",
+        options: .regularExpression
+      ) != nil
+    else {
+      throw installerError("Immutable attachment stage must use its reserved private namespace")
+    }
     guard staged != target else {
       throw installerError("Immutable attachment stage and target must differ")
     }
 
     return try withExclusiveLock(targetRoot.appendingPathComponent(installerLockName)) {
       try self.requireDirectory(self.targetRoot, label: "File Sync attachment directory")
+      try self.requireDirectory(privateDirectory, label: "private attachment publication directory")
       try self.rejectSymlinkInput(stagedInput, label: "staged attachment")
       try self.rejectSymlinkInput(targetInput, label: "target attachment")
       guard Self.canonical(stagedInput) == staged, Self.canonical(targetInput) == target else {
         throw installerError("Immutable attachment path changed during validation")
       }
-      try self.requireRegularFile(staged, label: "staged attachment")
-      let before = try self.publicationIdentity(staged)
-      let digest = try self.sha256(staged)
-      let after = try self.publicationIdentity(staged)
-      guard before == after, digest == expectedStagedSha256 else {
+      let sourceDescriptor = Darwin.open(staged.path, O_RDWR | O_NOFOLLOW)
+      guard sourceDescriptor >= 0 else {
+        throw installerError("Could not retain private attachment stage handle")
+      }
+      defer { Darwin.close(sourceDescriptor) }
+      let privateDescriptor = Darwin.open(privateDirectory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+      guard privateDescriptor >= 0 else {
+        throw installerError("Could not retain private attachment publication directory")
+      }
+      defer { Darwin.close(privateDescriptor) }
+      let targetDescriptor = Darwin.open(self.targetRoot.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+      guard targetDescriptor >= 0 else {
+        throw installerError("Could not retain attachment target directory")
+      }
+      defer { Darwin.close(targetDescriptor) }
+
+      let before = try self.publicationIdentity(descriptor: sourceDescriptor)
+      let digest = try self.sha256(descriptor: sourceDescriptor)
+      let after = try self.publicationIdentity(descriptor: sourceDescriptor)
+      guard
+        before == after,
+        digest == expectedStagedSha256,
+        self.identityToken(after) == expectedStagedIdentity,
+        try self.directoryIdentity(descriptor: targetDescriptor) == expectedDirectoryIdentity,
+        try self.directoryIdentity(descriptor: privateDescriptor) == expectedPrivateDirectoryIdentity
+      else {
         throw installerError("Staged attachment changed before native publication")
       }
       guard try self.nodeKind(target) == .missing else { return .alreadyExists }
-      guard try self.moveExclusive(from: staged, to: target) else { return .alreadyExists }
-      try self.syncDirectory(self.targetRoot)
+      try self.faultInjector(.beforeImmutablePublication)
+      var named = stat()
       guard
-        try self.nodeKind(target) == .regularFile,
-        try self.sha256(target) == expectedStagedSha256
+        Darwin.fstatat(privateDescriptor, "stage", &named, AT_SYMLINK_NOFOLLOW) == 0,
+        named.st_mode & S_IFMT == S_IFREG,
+        UInt64(named.st_dev) == before.device,
+        UInt64(named.st_ino) == before.inode
       else {
+        throw installerError("Verified attachment stage name changed before publication")
+      }
+      guard Darwin.fsync(sourceDescriptor) == 0 else {
+        throw installerError("Could not flush private attachment stage")
+      }
+      guard
+        try self.directoryIdentity(descriptor: targetDescriptor) == expectedDirectoryIdentity,
+        try self.directoryIdentity(descriptor: privateDescriptor) == expectedPrivateDirectoryIdentity
+      else {
+        throw installerError("Attachment publication directory identity changed")
+      }
+      let result = target.lastPathComponent.withCString { targetName in
+        Darwin.renameatx_np(
+          privateDescriptor,
+          "stage",
+          targetDescriptor,
+          targetName,
+          UInt32(RENAME_EXCL)
+        )
+      }
+      if result != 0 {
+        if errno == EEXIST { return .alreadyExists }
+        throw installerError("Could not publish exact attachment stage")
+      }
+      guard Darwin.fsync(targetDescriptor) == 0, Darwin.fsync(privateDescriptor) == 0 else {
+        throw installerError("Could not flush retained attachment publication directories")
+      }
+      let publishedDescriptor = target.lastPathComponent.withCString { targetName in
+        Darwin.openat(targetDescriptor, targetName, O_RDONLY | O_NOFOLLOW)
+      }
+      guard publishedDescriptor >= 0 else {
+        throw installerError("Could not reopen published attachment from retained directory")
+      }
+      defer { Darwin.close(publishedDescriptor) }
+      guard try self.sha256(descriptor: publishedDescriptor) == expectedStagedSha256 else {
         throw installerError("Published attachment generation failed verification")
       }
       return .published
+    }
+  }
+
+  func prepareImmutableStage(
+    targetInput: URL,
+    operationId: String
+  ) throws -> ImmutableAttachmentPreparedStage {
+    guard operationId.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil else {
+      throw installerError("Attachment publication operation id is invalid")
+    }
+    let target = Self.canonical(targetInput)
+    try validateTargetPath(target)
+    let privateDirectory = targetRoot.appendingPathComponent(
+      "\(installerArtifactPrefix)\(operationId).candidate",
+      isDirectory: true
+    )
+    let stage = privateDirectory.appendingPathComponent("stage")
+    return try withExclusiveLock(targetRoot.appendingPathComponent(installerLockName)) {
+      try self.requireDirectory(self.targetRoot, label: "File Sync attachment directory")
+      guard try self.nodeKind(privateDirectory) == .missing else {
+        throw installerError("Attachment publication private namespace already exists")
+      }
+      guard Darwin.mkdir(privateDirectory.path, S_IRWXU) == 0 else {
+        throw installerError("Could not create private attachment publication directory")
+      }
+      let descriptor = Darwin.open(stage.path, O_CREAT | O_EXCL | O_RDWR | O_NOFOLLOW, 0o600)
+      guard descriptor >= 0 else {
+        throw installerError("Could not create private attachment publication stage")
+      }
+      defer { Darwin.close(descriptor) }
+      guard Darwin.fsync(descriptor) == 0 else {
+        throw installerError("Could not flush private attachment publication stage")
+      }
+      try self.syncDirectory(privateDirectory)
+      try self.syncDirectory(self.targetRoot)
+      let identity = try self.publicationIdentity(descriptor: descriptor)
+      return ImmutableAttachmentPreparedStage(
+        stagedUrl: stage,
+        stagedIdentity: self.identityToken(identity),
+        directoryIdentity: try self.directoryIdentity(self.targetRoot),
+        privateDirectoryIdentity: try self.directoryIdentity(privateDirectory)
+      )
     }
   }
 
@@ -367,12 +494,19 @@ final class AttachmentFileInstallerEngine {
     operationId: String,
     expectedStagedSha256: String?,
     expectedStagedIdentity: String?,
-    expectedDirectoryIdentity: String?
+    expectedDirectoryIdentity: String?,
+    expectedPrivateDirectoryIdentity: String?
   ) throws -> ImmutableAttachmentStageCleanupOutcome {
     guard operationId.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil else {
       throw installerError("Attachment publication operation id is invalid")
     }
-    guard stagedInput.lastPathComponent == ".mindwtr-generation-stage-\(operationId).tmp" else {
+    let privateDirectory = targetRoot.appendingPathComponent(
+      "\(installerArtifactPrefix)\(operationId).candidate",
+      isDirectory: true
+    )
+    let privateStage = privateDirectory.appendingPathComponent("stage")
+    let isPrivateStage = Self.canonical(stagedInput) == Self.canonical(privateStage)
+    guard isPrivateStage || stagedInput.lastPathComponent == ".mindwtr-generation-stage-\(operationId).tmp" else {
       throw installerError("Attachment publication stage name is invalid")
     }
     try validateImmutableRecoveryPaths(stagedInput: stagedInput, targetInput: targetInput)
@@ -383,6 +517,43 @@ final class AttachmentFileInstallerEngine {
     let quarantinedStage = quarantine.appendingPathComponent("stage")
     return try withExclusiveLock(targetRoot.appendingPathComponent(installerLockName)) {
       try self.requireDirectory(self.targetRoot, label: "File Sync attachment directory")
+      if isPrivateStage {
+        if try self.nodeKind(privateDirectory) == .missing { return .missing }
+        guard
+          let expectedDirectoryIdentity,
+          try self.directoryIdentity(self.targetRoot) == expectedDirectoryIdentity,
+          let expectedPrivateDirectoryIdentity,
+          try self.nodeKind(privateDirectory) == .directory,
+          try self.directoryIdentity(privateDirectory) == expectedPrivateDirectoryIdentity
+        else {
+          return .conflict
+        }
+        switch try self.nodeKind(privateStage) {
+        case .missing:
+          guard Darwin.rmdir(privateDirectory.path) == 0 else {
+            throw installerError("Could not remove empty private attachment publication directory")
+          }
+          try self.syncDirectory(self.targetRoot)
+          return .missing
+        case .regularFile:
+          break
+        default:
+          return .conflict
+        }
+        guard
+          let expectedStagedIdentity,
+          self.identityToken(try self.publicationIdentity(privateStage)) == expectedStagedIdentity
+        else {
+          return .conflict
+        }
+        try self.delete(privateStage)
+        try self.syncDirectory(privateDirectory)
+        guard Darwin.rmdir(privateDirectory.path) == 0 else {
+          throw installerError("Could not remove private attachment publication directory")
+        }
+        try self.syncDirectory(self.targetRoot)
+        return .removed
+      }
       guard
         let expectedStagedSha256,
         let expectedStagedIdentity,
@@ -443,12 +614,19 @@ final class AttachmentFileInstallerEngine {
     try rejectSymlinkInput(targetInput, label: "target attachment")
     let staged = Self.canonical(stagedInput)
     let target = Self.canonical(targetInput)
+    let stagedParent = staged.deletingLastPathComponent()
+    let privateStage = staged.lastPathComponent == "stage"
+      && stagedParent.deletingLastPathComponent() == targetRoot
+      && stagedParent.lastPathComponent.range(
+        of: "^\\.mindwtr-install-[a-f0-9]{32}\\.candidate$",
+        options: .regularExpression
+      ) != nil
     guard
-      staged.deletingLastPathComponent() == targetRoot,
+      privateStage || stagedParent == targetRoot,
       target.deletingLastPathComponent() == targetRoot,
       staged != target
     else {
-      throw installerError("Immutable attachment recovery paths must share the target directory")
+      throw installerError("Immutable attachment recovery paths escape the target directory")
     }
   }
 
@@ -460,6 +638,14 @@ final class AttachmentFileInstallerEngine {
     var value = stat()
     guard Darwin.lstat(directory.path, &value) == 0, value.st_mode & S_IFMT == S_IFDIR else {
       throw installerError("File Sync attachment directory is unavailable")
+    }
+    return "\(UInt64(value.st_dev)):\(UInt64(value.st_ino))"
+  }
+
+  private func directoryIdentity(descriptor: Int32) throws -> String {
+    var value = stat()
+    guard Darwin.fstat(descriptor, &value) == 0, value.st_mode & S_IFMT == S_IFDIR else {
+      throw installerError("File Sync attachment directory handle is unavailable")
     }
     return "\(UInt64(value.st_dev)):\(UInt64(value.st_ino))"
   }
@@ -488,6 +674,36 @@ final class AttachmentFileInstallerEngine {
       changedSeconds: Int64(value.st_ctimespec.tv_sec),
       changedNanoseconds: Int64(value.st_ctimespec.tv_nsec)
     )
+  }
+
+  private func publicationIdentity(descriptor: Int32) throws -> PublicationIdentity {
+    var value = stat()
+    guard Darwin.fstat(descriptor, &value) == 0, value.st_mode & S_IFMT == S_IFREG else {
+      throw installerError("Attachment handle is not a regular file")
+    }
+    return PublicationIdentity(
+      device: UInt64(value.st_dev),
+      inode: UInt64(value.st_ino),
+      size: Int64(value.st_size),
+      modifiedSeconds: Int64(value.st_mtimespec.tv_sec),
+      modifiedNanoseconds: Int64(value.st_mtimespec.tv_nsec),
+      changedSeconds: Int64(value.st_ctimespec.tv_sec),
+      changedNanoseconds: Int64(value.st_ctimespec.tv_nsec)
+    )
+  }
+
+  private func sha256(descriptor: Int32) throws -> String {
+    let duplicate = Darwin.dup(descriptor)
+    guard duplicate >= 0 else {
+      throw installerError("Could not duplicate attachment stage handle")
+    }
+    let input = FileHandle(fileDescriptor: duplicate, closeOnDealloc: true)
+    defer { try? input.close() }
+    var digest = SHA256()
+    while let data = try input.read(upToCount: 1024 * 1024), !data.isEmpty {
+      digest.update(data: data)
+    }
+    return digest.finalize().map { String(format: "%02x", $0) }.joined()
   }
 
   private func installWhenAbsent(
@@ -1197,14 +1413,17 @@ public final class AttachmentFileInstallerModule: Module {
         (
           stagedPath: String,
           targetPath: String,
-          expectedStagedSha256: String
+          expectedStagedSha256: String,
+          expectedStagedIdentity: String,
+          expectedDirectoryIdentity: String,
+          expectedPrivateDirectoryIdentity: String
         ) -> [String: String] in
       let staged = try Self.fileUrl(stagedPath)
       let target = try Self.fileUrl(targetPath)
       let targetRoot = target.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
       let stagedRoot = staged.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
-      guard stagedRoot == targetRoot else {
-        throw installerError("Immutable attachment stage and target must share a directory")
+      guard stagedRoot.deletingLastPathComponent() == targetRoot else {
+        throw installerError("Immutable attachment stage must use a private child of the target directory")
       }
       let outcome = try AttachmentFileInstallerEngine(
         targetRoot: targetRoot,
@@ -1215,7 +1434,10 @@ public final class AttachmentFileInstallerModule: Module {
         expectedStagedSha256: try Self.parseSha256(
           expectedStagedSha256,
           label: "Expected staged attachment"
-        )
+        ),
+        expectedStagedIdentity: expectedStagedIdentity,
+        expectedDirectoryIdentity: expectedDirectoryIdentity,
+        expectedPrivateDirectoryIdentity: expectedPrivateDirectoryIdentity
       )
       switch outcome {
       case .published:
@@ -1223,6 +1445,22 @@ public final class AttachmentFileInstallerModule: Module {
       case .alreadyExists:
         return ["status": "alreadyExists"]
       }
+    }
+
+    AsyncFunction("prepareImmutableStageAsync") {
+        (targetPath: String, operationId: String) -> [String: String] in
+      let target = try Self.fileUrl(targetPath)
+      let targetRoot = target.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
+      let prepared = try AttachmentFileInstallerEngine(
+        targetRoot: targetRoot,
+        sourceRoots: [targetRoot]
+      ).prepareImmutableStage(targetInput: target, operationId: operationId)
+      return [
+        "stagedPath": prepared.stagedUrl.absoluteString,
+        "stagedIdentity": prepared.stagedIdentity,
+        "directoryIdentity": prepared.directoryIdentity,
+        "privateDirectoryIdentity": prepared.privateDirectoryIdentity,
+      ]
     }
 
     AsyncFunction("snapshotImmutableStageAsync") {
@@ -1255,7 +1493,8 @@ public final class AttachmentFileInstallerModule: Module {
           operationId: String,
           expectedStagedSha256: String?,
           expectedStagedIdentity: String?,
-          expectedDirectoryIdentity: String?
+          expectedDirectoryIdentity: String?,
+          expectedPrivateDirectoryIdentity: String?
         ) -> [String: String] in
       let staged = try Self.fileUrl(stagedPath)
       let target = try Self.fileUrl(targetPath)
@@ -1269,7 +1508,8 @@ public final class AttachmentFileInstallerModule: Module {
         operationId: operationId,
         expectedStagedSha256: expectedStagedSha256,
         expectedStagedIdentity: expectedStagedIdentity,
-        expectedDirectoryIdentity: expectedDirectoryIdentity
+        expectedDirectoryIdentity: expectedDirectoryIdentity,
+        expectedPrivateDirectoryIdentity: expectedPrivateDirectoryIdentity
       )
       switch outcome {
       case .removed: return ["status": "removed"]

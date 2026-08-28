@@ -276,7 +276,7 @@ describe('attachment sync', () => {
       const parentPath = targetPath.slice(0, targetPath.lastIndexOf('/') + 1);
       return {
         operationId: 'test-reservation',
-        stagedPath: `${parentPath}.mindwtr-generation-stage-test-reservation.tmp`,
+        stagedPath: `${parentPath}.mindwtr-install-${'1'.repeat(32)}.candidate/stage`,
         targetPath,
       };
     });
@@ -1072,7 +1072,7 @@ describe('attachment sync', () => {
             ? { exists: false }
             : { exists: true, size: H1_BYTES.length, modificationTime: 1 };
         }
-        if (uri.includes('.mindwtr-generation-stage-')) return { exists: false };
+        if (uri.includes('.mindwtr-install-') && uri.endsWith('/stage')) return { exists: true };
         return { exists: false };
       });
       fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(H1_BYTES));
@@ -1089,13 +1089,10 @@ describe('attachment sync', () => {
 
       expect(result.data.tasks[0].attachments?.[0]?.cloudKey).toBe(generationKey);
       expect(result.data.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
-      expect(modernFileSystemMock.create).toHaveBeenCalledWith(
-        expect.stringContaining('.mindwtr-generation-stage-'),
-        { overwrite: false },
-      );
+      expect(modernFileSystemMock.create).not.toHaveBeenCalled();
       expect(attachmentFileInstallerMock.publishImmutableAttachmentFileGeneration)
         .toHaveBeenCalledWith(
-          expect.stringContaining('.mindwtr-generation-stage-'),
+          expect.stringContaining('.mindwtr-install-'),
           targetUri,
           expect.stringMatching(/^[a-f0-9]{64}$/),
         );
@@ -1155,7 +1152,10 @@ describe('attachment sync', () => {
       expect(remoteFiles.get(h2Uri)).toBe(base64Of(H2_BYTES));
       const stageUri = modernFileSystemMock.create.mock.calls
         .map(([uri]) => uri as string)
-        .find((uri) => uri.includes('.mindwtr-generation-stage-'));
+        .find((uri) => uri.includes('.mindwtr-install-'))
+        ?? fileSystemMock.writeAsStringAsync.mock.calls
+          .map(([uri]) => uri as string)
+          .find((uri) => uri.includes('.mindwtr-install-'));
       expect(stageUri).toBeTruthy();
       expect(stageUri && remoteFiles.get(stageUri)).toBe(base64Of(H1_BYTES));
       expect(attachmentFileInstallerMock.recoverFileSyncAttachmentPublications)
@@ -1164,7 +1164,7 @@ describe('attachment sync', () => {
         .toHaveBeenCalledWith(h1Uri, expect.stringMatching(/^[a-f0-9]{64}$/));
       expect(
         attachmentFileInstallerMock.reserveFileSyncAttachmentPublication.mock.invocationCallOrder[0],
-      ).toBeLessThan(modernFileSystemMock.create.mock.invocationCallOrder[0]);
+      ).toBeLessThan(fileSystemMock.writeAsStringAsync.mock.invocationCallOrder[0]);
       expect(attachmentFileInstallerMock.retainFileSyncAttachmentPublicationForInvalidTarget)
         .toHaveBeenCalledWith(expect.objectContaining({ stagedPath: stageUri, targetPath: h1Uri }));
       expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(h1Uri, expect.anything());
@@ -3347,11 +3347,11 @@ describe('attachment sync', () => {
       );
 
       const generationKey = `attachments/${id}.${sha256Hex(OLD_BYTES)}.txt`;
-      const stagedUri = modernFileSystemMock.create.mock.calls[0]?.[0] as string;
-      expect(modernFileSystemMock.create).toHaveBeenCalledWith(
-        expect.stringContaining('file://sync/attachments/.mindwtr-generation-stage-'),
-        { overwrite: false },
-      );
+      const stagedUri = fileSystemMock.writeAsStringAsync.mock.calls
+        .map(([uri]) => uri as string)
+        .find((uri) => uri.includes('.mindwtr-install-')) as string;
+      expect(modernFileSystemMock.create).not.toHaveBeenCalled();
+      expect(stagedUri).toContain('file://sync/attachments/.mindwtr-install-');
       expect(fileSystemMock.writeAsStringAsync).toHaveBeenCalledWith(
         stagedUri,
         base64Of(OLD_BYTES),

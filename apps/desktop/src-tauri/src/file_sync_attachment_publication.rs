@@ -18,8 +18,14 @@ const JOURNAL_CLEARED_SUFFIX: &str = ".cleared";
 const MAX_JOURNAL_ENTRY_BYTES: u64 = 16 * 1024;
 const MAX_JOURNAL_ENTRIES: usize = 1024;
 const ATTACHMENTS_DIR_NAME: &str = "attachments";
-const SCRATCH_PREFIX: &str = ".mindwtr-attachment-generation-";
-const SCRATCH_SUFFIX: &str = ".tmp";
+const PRIVATE_DIRECTORY_PREFIX: &str = ".mindwtr-install-";
+const PRIVATE_DIRECTORY_SUFFIX: &str = ".candidate";
+const PRIVATE_STAGE_NAME: &str = "stage";
+
+// Publication is hardened against crashes and cooperating Mindwtr writers by
+// retaining a mode-0700 private namespace and exact file/directory handles.
+// A malicious same-UID process that can bypass that private namespace is out
+// of scope; ambiguous identity or provider behavior must still fail closed.
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 struct DirectoryIdentity {
@@ -32,7 +38,7 @@ struct BoundDirectory {
     identity: DirectoryIdentity,
     // Retaining the original directory handle prevents its identity from being
     // recycled while the renderer owns the File Sync lease.
-    _handle: File,
+    handle: File,
 }
 
 #[derive(Debug)]
@@ -48,6 +54,9 @@ struct PublicationEntry {
     operation_id: String,
     sync_root: PathBuf,
     scratch_path: PathBuf,
+    private_directory_path: PathBuf,
+    #[serde(default)]
+    private_directory_identity: Option<DirectoryIdentity>,
     target_path: PathBuf,
     expected_size: u64,
     expected_sha256: String,
@@ -171,10 +180,7 @@ fn open_directory_no_follow(path: &Path, label: &str) -> Result<BoundDirectory, 
         }
     }
     let identity = directory_identity(&handle)?;
-    Ok(BoundDirectory {
-        identity,
-        _handle: handle,
-    })
+    Ok(BoundDirectory { identity, handle })
 }
 
 impl BoundDirectory {
@@ -241,6 +247,12 @@ impl PublicationRoot {
             );
         }
         Ok(())
+    }
+
+    fn attachments_directory(&self) -> Result<&BoundDirectory, String> {
+        self.attachments
+            .as_ref()
+            .ok_or_else(|| "File Sync attachments directory is not bound".to_string())
     }
 }
 
@@ -358,10 +370,14 @@ fn validate_entry(entry: &PublicationEntry, sync_root: &Path) -> Result<(), Stri
         );
     }
     validate_generation_target(sync_root, &entry.target_path)?;
-    let expected_scratch = sync_root.join(ATTACHMENTS_DIR_NAME).join(format!(
-        "{SCRATCH_PREFIX}{}{SCRATCH_SUFFIX}",
+    let expected_private_directory = sync_root.join(ATTACHMENTS_DIR_NAME).join(format!(
+        "{PRIVATE_DIRECTORY_PREFIX}{}{PRIVATE_DIRECTORY_SUFFIX}",
         entry.operation_id
     ));
+    if entry.private_directory_path != expected_private_directory {
+        return Err("Attachment publication private namespace ownership is invalid".to_string());
+    }
+    let expected_scratch = expected_private_directory.join(PRIVATE_STAGE_NAME);
     if entry.scratch_path != expected_scratch {
         return Err("Attachment publication scratch ownership is invalid".to_string());
     }
@@ -395,6 +411,43 @@ fn move_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
     } else {
         Err(io::Error::last_os_error())
     }
+}
+
+#[cfg(windows)]
+fn move_replace_durably(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    // SAFETY: both buffers are retained and NUL-terminated.
+    if unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn move_replace_durably(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
 }
 
 #[cfg(target_os = "macos")]
@@ -454,6 +507,33 @@ fn sync_directory(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("Failed to flush attachment publication directory: {error}"))
 }
 
+#[cfg(unix)]
+fn sync_bound_directory(directory: &BoundDirectory) -> Result<(), String> {
+    directory.handle.sync_all().map_err(|error| {
+        format!("Failed to flush retained attachment publication directory: {error}")
+    })
+}
+
+#[cfg(windows)]
+fn sync_bound_directory(directory: &BoundDirectory) -> Result<(), String> {
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Storage::FileSystem::FlushFileBuffers;
+
+    if unsafe { FlushFileBuffers(directory.handle.as_raw_handle()) } == 0 {
+        Err(format!(
+            "Failed to flush retained attachment publication directory: {}",
+            io::Error::last_os_error()
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn sync_bound_directory(_directory: &BoundDirectory) -> Result<(), String> {
+    Err("Retained attachment directory flushing is unsupported".to_string())
+}
+
 #[cfg(not(unix))]
 fn sync_directory(_path: &Path) -> Result<(), String> {
     // Journal publication/removal uses MOVEFILE_WRITE_THROUGH on Windows.
@@ -491,6 +571,45 @@ fn write_entry(data_dir: &Path, entry: &PublicationEntry) -> Result<PathBuf, Str
         move_no_replace(&temp_path, &final_path).map_err(|error| {
             format!("Failed to publish attachment publication journal: {error}")
         })?;
+        sync_directory(&directory)?;
+        Ok(final_path.clone())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    result
+}
+
+fn replace_entry(data_dir: &Path, entry: &PublicationEntry) -> Result<PathBuf, String> {
+    let directory = journal_dir(data_dir);
+    validate_journal_dir(&directory)?;
+    let final_path = entry_path(data_dir, &entry.sync_root, &entry.operation_id);
+    let temp_path = directory.join(format!(
+        ".{}-{}-{JOURNAL_TEMP_SUFFIX}",
+        entry.operation_id,
+        random_id()
+    ));
+    let encoded = serde_json::to_vec(entry)
+        .map_err(|error| format!("Failed to encode attachment publication journal: {error}"))?;
+    if encoded.len() as u64 > MAX_JOURNAL_ENTRY_BYTES {
+        return Err("Attachment publication journal entry is too large".to_string());
+    }
+
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+            .map_err(|error| format!("Failed to create attachment publication journal: {error}"))?;
+        restrict_to_owner(&temp_path, 0o600)?;
+        file.write_all(&encoded)
+            .and_then(|_| file.sync_all())
+            .map_err(|error| {
+                format!("Failed to persist attachment publication journal: {error}")
+            })?;
+        drop(file);
+        move_replace_durably(&temp_path, &final_path)
+            .map_err(|error| format!("Failed to update attachment publication journal: {error}"))?;
         sync_directory(&directory)?;
         Ok(final_path.clone())
     })();
@@ -602,7 +721,41 @@ fn remove_entry_durably(path: &Path) -> Result<(), String> {
     }
 }
 
+fn open_entry_private_directory(entry: &PublicationEntry) -> Result<BoundDirectory, String> {
+    let expected_identity = entry.private_directory_identity.as_ref().ok_or_else(|| {
+        "Attachment publication private namespace was not fully reserved".to_string()
+    })?;
+    let directory = open_directory_no_follow(&entry.private_directory_path, "private publication")?;
+    if &directory.identity != expected_identity {
+        return Err("Attachment publication private namespace changed".to_string());
+    }
+    Ok(directory)
+}
+
+fn remove_empty_private_directory(entry: &PublicationEntry) -> Result<(), String> {
+    let directory = open_entry_private_directory(entry)?;
+    directory.revalidate(&entry.private_directory_path, "private publication")?;
+    fs::remove_dir(&entry.private_directory_path)
+        .map_err(|error| format!("Failed to remove attachment publication namespace: {error}"))?;
+    sync_directory(
+        entry
+            .private_directory_path
+            .parent()
+            .ok_or_else(|| "Attachment publication namespace has no parent".to_string())?,
+    )
+}
+
 fn remove_owned_scratch(entry: &PublicationEntry) -> Result<(), String> {
+    if entry.private_directory_identity.is_none() {
+        return match fs::symlink_metadata(&entry.private_directory_path) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            _ => Err(
+                "Attachment publication private namespace ownership was not recorded; preserving it"
+                    .to_string(),
+            ),
+        };
+    }
+    let directory = open_entry_private_directory(entry)?;
     match fs::symlink_metadata(&entry.scratch_path) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
             return Err("Journal-owned attachment scratch is not a regular file".to_string())
@@ -611,19 +764,16 @@ fn remove_owned_scratch(entry: &PublicationEntry) -> Result<(), String> {
             fs::remove_file(&entry.scratch_path).map_err(|error| {
                 format!("Failed to remove journal-owned attachment scratch: {error}")
             })?;
-            sync_directory(
-                entry
-                    .scratch_path
-                    .parent()
-                    .ok_or_else(|| "Attachment scratch has no parent".to_string())?,
-            )?;
-            Ok(())
+            directory.revalidate(&entry.private_directory_path, "private publication")?;
+            sync_directory(&entry.private_directory_path)?;
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => Err(format!(
             "Failed to inspect journal-owned attachment scratch: {error}"
-        )),
+        ))?,
     }
+    drop(directory);
+    remove_empty_private_directory(entry)
 }
 
 fn count_active_entries(directory: &Path) -> Result<usize, String> {
@@ -666,10 +816,11 @@ pub(crate) fn reserve(
 
     for _ in 0..16 {
         let operation_id = random_id();
-        let scratch_path = sync_root
-            .join(ATTACHMENTS_DIR_NAME)
-            .join(format!("{SCRATCH_PREFIX}{operation_id}{SCRATCH_SUFFIX}"));
-        match fs::symlink_metadata(&scratch_path) {
+        let private_directory_path = sync_root.join(ATTACHMENTS_DIR_NAME).join(format!(
+            "{PRIVATE_DIRECTORY_PREFIX}{operation_id}{PRIVATE_DIRECTORY_SUFFIX}"
+        ));
+        let scratch_path = private_directory_path.join(PRIVATE_STAGE_NAME);
+        match fs::symlink_metadata(&private_directory_path) {
             Ok(_) => continue,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => {
@@ -678,11 +829,13 @@ pub(crate) fn reserve(
                 ))
             }
         }
-        let entry = PublicationEntry {
+        let mut entry = PublicationEntry {
             version: JOURNAL_VERSION,
             operation_id: operation_id.clone(),
             sync_root: sync_root.to_path_buf(),
             scratch_path: scratch_path.clone(),
+            private_directory_path: private_directory_path.clone(),
+            private_directory_identity: None,
             target_path: target_path.to_path_buf(),
             expected_size,
             expected_sha256: expected_sha256.clone(),
@@ -690,10 +843,33 @@ pub(crate) fn reserve(
             attachments_identity: attachments_identity.clone(),
         };
         let journal_path = write_entry(data_dir, &entry)?;
+        match fs::create_dir(&private_directory_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                remove_entry_durably(&journal_path)?;
+                continue;
+            }
+            Err(error) => {
+                // The durable journal intentionally remains: recovery can
+                // distinguish a missing namespace from an ambiguous one.
+                return Err(format!(
+                    "Failed to create private attachment publication namespace: {error}"
+                ));
+            }
+        }
+        restrict_to_owner(&private_directory_path, 0o700)?;
+        sync_directory(
+            private_directory_path
+                .parent()
+                .expect("private publication namespace has attachments parent"),
+        )?;
+        let private_directory =
+            open_directory_no_follow(&private_directory_path, "private publication")?;
+        entry.private_directory_identity = Some(private_directory.identity.clone());
+        replace_entry(data_dir, &entry)?;
         if let Err(error) = publication_root.validate_entry_identities(&entry) {
-            // No scratch path has escaped this function yet, so this local
-            // journal can be safely retired without touching the sync folder.
-            let _ = remove_entry_durably(&journal_path);
+            // The private namespace exists and is journal-owned. Preserve the
+            // journal so restart recovery can remove only that exact identity.
             return Err(error);
         }
         return Ok(PublicationReservation {
@@ -704,29 +880,340 @@ pub(crate) fn reserve(
     Err("Failed to allocate a unique attachment publication scratch path".to_string())
 }
 
-pub(crate) fn publish_with<F>(
+fn open_verified_stage(entry: &PublicationEntry) -> Result<File, String> {
+    let mut options = OpenOptions::new();
+    options.read(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE};
+        use windows_sys::Win32::Storage::FileSystem::{
+            DELETE, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ,
+            FILE_SHARE_WRITE,
+        };
+        options
+            .access_mode(GENERIC_READ | GENERIC_WRITE | DELETE)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let mut file = options
+        .open(&entry.scratch_path)
+        .map_err(|error| format!("Failed to open attachment generation stage: {error}"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("Failed to inspect attachment generation stage: {error}"))?;
+    if !metadata.is_file() || metadata.len() != entry.expected_size {
+        return Err("Attachment generation stage size changed before publication".to_string());
+    }
+    let mut hasher = Sha256::new();
+    let mut total = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| format!("Failed to read attachment generation stage: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        total = total
+            .checked_add(read as u64)
+            .ok_or_else(|| "Attachment generation stage size overflow".to_string())?;
+        if total > entry.expected_size {
+            return Err("Attachment generation stage size changed before publication".to_string());
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let actual_sha256 = format!("{:x}", hasher.finalize());
+    if total != entry.expected_size || actual_sha256 != entry.expected_sha256 {
+        return Err("Attachment generation stage failed integrity verification".to_string());
+    }
+    if file
+        .metadata()
+        .map_err(|error| format!("Failed to restat attachment generation stage: {error}"))?
+        .len()
+        != entry.expected_size
+    {
+        return Err("Attachment generation stage size changed before publication".to_string());
+    }
+    file.sync_all()
+        .map_err(|error| format!("Failed to flush attachment generation stage: {error}"))?;
+    Ok(file)
+}
+
+fn named_stage_matches_handle(
+    private_directory: &BoundDirectory,
+    stage: &File,
+    _entry: &PublicationEntry,
+) -> Result<bool, String> {
+    #[cfg(unix)]
+    {
+        use std::mem::MaybeUninit;
+        use std::os::fd::AsRawFd as _;
+
+        let name = CString::new(PRIVATE_STAGE_NAME).expect("static stage name has no NUL");
+        let mut stat = MaybeUninit::<libc::stat>::uninit();
+        // SAFETY: the retained private directory descriptor is valid and the
+        // output storage is initialized by a successful fstatat call.
+        if unsafe {
+            libc::fstatat(
+                private_directory.handle.as_raw_fd(),
+                name.as_ptr(),
+                stat.as_mut_ptr(),
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        } != 0
+        {
+            return Err(format!(
+                "Failed to revalidate private attachment stage: {}",
+                io::Error::last_os_error()
+            ));
+        }
+        let named = unsafe { stat.assume_init() };
+        let opened = stage
+            .metadata()
+            .map_err(|error| format!("Failed to identify verified attachment stage: {error}"))?;
+        use std::os::unix::fs::MetadataExt as _;
+        return Ok(named.st_mode & libc::S_IFMT == libc::S_IFREG
+            && named.st_dev as u64 == opened.dev()
+            && named.st_ino as u64 == opened.ino());
+    }
+
+    #[cfg(windows)]
+    {
+        let named = open_verified_stage(_entry)?;
+        return Ok(directory_identity(&named)? == directory_identity(stage)?);
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (private_directory, stage, _entry);
+        Err("Exact attachment stage identity is unsupported on this platform".to_string())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn publish_linux_with_fallback<Link, Rename>(link: Link, rename: Rename) -> io::Result<bool>
+where
+    Link: FnOnce() -> io::Result<()>,
+    Rename: FnOnce() -> io::Result<()>,
+{
+    match link() {
+        Ok(()) => Ok(false),
+        Err(error)
+            if matches!(
+                error.raw_os_error(),
+                Some(libc::EXDEV) | Some(libc::EPERM) | Some(libc::EOPNOTSUPP) | Some(libc::ENOSYS)
+            ) =>
+        {
+            rename()?;
+            Ok(true)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn publish_exact_stage(
+    private_directory: &BoundDirectory,
+    stage: &File,
+    attachments_directory: &BoundDirectory,
+    target_name: &std::ffi::OsStr,
+) -> io::Result<()> {
+    use std::os::fd::AsRawFd as _;
+    use std::os::unix::ffi::OsStrExt as _;
+
+    let source = CString::new(format!("/proc/self/fd/{}", stage.as_raw_fd()))
+        .expect("file descriptor path has no NUL");
+    let target = CString::new(target_name.as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "target contains a NUL byte"))?;
+    // `AT_EMPTY_PATH` requires a capability on Linux. The documented
+    // `/proc/self/fd` + `AT_SYMLINK_FOLLOW` form links the exact open inode.
+    let stage_name = CString::new(PRIVATE_STAGE_NAME).expect("static stage name has no NUL");
+    let renamed = publish_linux_with_fallback(
+        || {
+            let result = unsafe {
+                libc::linkat(
+                    libc::AT_FDCWD,
+                    source.as_ptr(),
+                    attachments_directory.handle.as_raw_fd(),
+                    target.as_ptr(),
+                    libc::AT_SYMLINK_FOLLOW,
+                )
+            };
+            if result == 0 {
+                Ok(())
+            } else {
+                Err(io::Error::last_os_error())
+            }
+        },
+        || {
+            // Some virtual mounts support same-filesystem rename but not hard
+            // links. The private directory is retained, mode 0700, and the
+            // caller just proved `stage` still names the verified open inode.
+            let result = unsafe {
+                libc::renameat2(
+                    private_directory.handle.as_raw_fd(),
+                    stage_name.as_ptr(),
+                    attachments_directory.handle.as_raw_fd(),
+                    target.as_ptr(),
+                    libc::RENAME_NOREPLACE,
+                )
+            };
+            if result == 0 {
+                Ok(())
+            } else {
+                Err(io::Error::last_os_error())
+            }
+        },
+    )?;
+    if renamed {
+        return Ok(());
+    }
+    if unsafe { libc::unlinkat(private_directory.handle.as_raw_fd(), stage_name.as_ptr(), 0) } != 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn publish_exact_stage(
+    private_directory: &BoundDirectory,
+    _stage: &File,
+    attachments_directory: &BoundDirectory,
+    target_name: &std::ffi::OsStr,
+) -> io::Result<()> {
+    use std::os::fd::AsRawFd as _;
+    use std::os::unix::ffi::OsStrExt as _;
+    let source = CString::new(PRIVATE_STAGE_NAME).expect("static stage name has no NUL");
+    let target = CString::new(target_name.as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "target contains a NUL byte"))?;
+    let result = unsafe {
+        libc::renameatx_np(
+            private_directory.handle.as_raw_fd(),
+            source.as_ptr(),
+            attachments_directory.handle.as_raw_fd(),
+            target.as_ptr(),
+            libc::RENAME_EXCL,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(windows)]
+fn publish_exact_stage(
+    _private_directory: &BoundDirectory,
+    stage: &File,
+    attachments_directory: &BoundDirectory,
+    target_name: &std::ffi::OsStr,
+) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt as _;
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FileRenameInfo, SetFileInformationByHandle, FILE_RENAME_INFO,
+    };
+
+    let target = target_name.encode_wide().collect::<Vec<_>>();
+    let fixed = std::mem::size_of::<FILE_RENAME_INFO>() - std::mem::size_of::<u16>();
+    let mut buffer = vec![0_u8; fixed + target.len() * std::mem::size_of::<u16>()];
+    let information = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    unsafe {
+        (*information).Anonymous.ReplaceIfExists = false;
+        (*information).RootDirectory = attachments_directory.handle.as_raw_handle();
+        (*information).FileNameLength = (target.len() * std::mem::size_of::<u16>()) as u32;
+        std::ptr::copy_nonoverlapping(
+            target.as_ptr(),
+            (*information).FileName.as_mut_ptr(),
+            target.len(),
+        );
+        if SetFileInformationByHandle(
+            stage.as_raw_handle(),
+            FileRenameInfo,
+            information.cast(),
+            buffer.len() as u32,
+        ) == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn publish_exact_stage(
+    _private_directory: &BoundDirectory,
+    _stage: &File,
+    _attachments_directory: &BoundDirectory,
+    _target_name: &std::ffi::OsStr,
+) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "exact attachment publication is unsupported",
+    ))
+}
+
+fn publish_with_hook<F>(
     data_dir: &Path,
     publication_root: &mut PublicationRoot,
     operation_id: &str,
-    publish: F,
+    before_publish: F,
 ) -> Result<PublicationAttempt, String>
 where
-    F: FnOnce(&Path, &Path, u64, &str) -> Result<PublicationAttempt, String>,
+    F: FnOnce(&Path) -> Result<(), String>,
 {
     let _guard = journal_lock();
     let (path, entry) = read_owned_entry(data_dir, publication_root, operation_id)?;
     publication_root.validate_entry_identities(&entry)?;
-    let outcome = publish(
-        &entry.scratch_path,
-        &entry.target_path,
-        entry.expected_size,
-        &entry.expected_sha256,
-    )?;
+    let private_directory = open_entry_private_directory(&entry)?;
+    let stage = open_verified_stage(&entry)?;
+    before_publish(&entry.scratch_path)?;
     publication_root.validate_entry_identities(&entry)?;
-    if outcome == PublicationAttempt::Published {
-        remove_entry_durably(&path)?;
+    private_directory.revalidate(&entry.private_directory_path, "private publication")?;
+    if !named_stage_matches_handle(&private_directory, &stage, &entry)? {
+        return Err("Verified attachment stage name changed before publication".to_string());
     }
-    Ok(outcome)
+    let target_name = entry
+        .target_path
+        .file_name()
+        .ok_or_else(|| "Attachment publication target has no file name".to_string())?;
+    let attachments_directory = publication_root.attachments_directory()?;
+    match publish_exact_stage(
+        &private_directory,
+        &stage,
+        attachments_directory,
+        target_name,
+    ) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            return Ok(PublicationAttempt::AlreadyExists)
+        }
+        Err(error) => return Err(format!("Failed to publish attachment generation: {error}")),
+    }
+    sync_bound_directory(attachments_directory)?;
+    sync_bound_directory(&private_directory)?;
+    drop(stage);
+    drop(private_directory);
+    remove_empty_private_directory(&entry)?;
+    publication_root.validate_entry_identities(&entry)?;
+    remove_entry_durably(&path)?;
+    Ok(PublicationAttempt::Published)
+}
+
+pub(crate) fn publish(
+    data_dir: &Path,
+    publication_root: &mut PublicationRoot,
+    operation_id: &str,
+) -> Result<PublicationAttempt, String> {
+    publish_with_hook(data_dir, publication_root, operation_id, |_| Ok(()))
 }
 
 pub(crate) fn abandon(
@@ -813,6 +1300,10 @@ mod tests {
         PublicationRoot::bind(sync_root).expect("bind publication root")
     }
 
+    fn digest(bytes: &[u8]) -> String {
+        format!("{:x}", Sha256::digest(bytes))
+    }
+
     #[test]
     fn reservation_is_durable_before_scratch_creation_and_empty_recovery_clears_it() {
         let (_temp, data_dir, sync_root, target) = fixture();
@@ -840,7 +1331,7 @@ mod tests {
         fs::write(&owned, b"partial").expect("owned scratch");
         let peer = sync_root
             .join(ATTACHMENTS_DIR_NAME)
-            .join(format!("{SCRATCH_PREFIX}peer{SCRATCH_SUFFIX}"));
+            .join("peer-generation.tmp");
         fs::write(&peer, b"peer").expect("peer scratch");
 
         assert_eq!(recover(&data_dir, &mut root).expect("recover"), 1);
@@ -868,17 +1359,12 @@ mod tests {
         let (_temp, data_dir, sync_root, target) = fixture();
         let mut root = bind(&sync_root);
         let reservation =
-            reserve(&data_dir, &mut root, &target, 3, &"b".repeat(64)).expect("reserve");
+            reserve(&data_dir, &mut root, &target, 3, &digest(b"new")).expect("reserve");
         let scratch = PathBuf::from(&reservation.scratch_path);
         fs::write(&scratch, b"new").expect("scratch");
+        fs::write(&target, b"peer").expect("peer target");
 
-        let outcome = publish_with(
-            &data_dir,
-            &mut root,
-            &reservation.operation_id,
-            |_scratch, _target, _size, _sha| Ok(PublicationAttempt::AlreadyExists),
-        )
-        .expect("collision");
+        let outcome = publish(&data_dir, &mut root, &reservation.operation_id).expect("collision");
         assert_eq!(outcome, PublicationAttempt::AlreadyExists);
         assert!(scratch.exists());
         assert!(entry_path(&data_dir, &sync_root, &reservation.operation_id).exists());
@@ -893,24 +1379,95 @@ mod tests {
         let (_temp, data_dir, sync_root, target) = fixture();
         let mut root = bind(&sync_root);
         let reservation =
-            reserve(&data_dir, &mut root, &target, 3, &"b".repeat(64)).expect("reserve");
+            reserve(&data_dir, &mut root, &target, 3, &digest(b"new")).expect("reserve");
         let scratch = PathBuf::from(&reservation.scratch_path);
         fs::write(&scratch, b"new").expect("scratch");
 
-        let outcome = publish_with(
-            &data_dir,
-            &mut root,
-            &reservation.operation_id,
-            |scratch, target, _size, _sha| {
-                fs::rename(scratch, target).map_err(|error| error.to_string())?;
-                Ok(PublicationAttempt::Published)
-            },
-        )
-        .expect("publish");
+        let outcome = publish(&data_dir, &mut root, &reservation.operation_id).expect("publish");
         assert_eq!(outcome, PublicationAttempt::Published);
         assert_eq!(fs::read(&target).expect("target"), b"new");
         assert!(!scratch.exists());
         assert!(!entry_path(&data_dir, &sync_root, &reservation.operation_id).exists());
+    }
+
+    #[test]
+    fn verified_stage_name_swap_is_rejected_before_target_or_journal_mutation() {
+        let (_temp, data_dir, sync_root, target) = fixture();
+        let mut root = bind(&sync_root);
+        let reservation =
+            reserve(&data_dir, &mut root, &target, 3, &digest(b"new")).expect("reserve");
+        let scratch = PathBuf::from(&reservation.scratch_path);
+        fs::write(&scratch, b"new").expect("scratch");
+        let displaced = scratch.with_file_name("displaced-stage");
+
+        let error = publish_with_hook(
+            &data_dir,
+            &mut root,
+            &reservation.operation_id,
+            |verified_name| {
+                fs::rename(verified_name, &displaced).map_err(|error| error.to_string())?;
+                fs::write(verified_name, b"bad").map_err(|error| error.to_string())?;
+                Ok(())
+            },
+        )
+        .expect_err("name swap must fail closed");
+
+        assert!(error.contains("name changed"));
+        assert!(!target.exists());
+        assert_eq!(
+            fs::read(displaced).expect("verified bytes retained"),
+            b"new"
+        );
+        assert_eq!(fs::read(scratch).expect("replacement retained"), b"bad");
+        assert!(entry_path(&data_dir, &sync_root, &reservation.operation_id).exists());
+    }
+
+    #[test]
+    fn transient_attachments_replacement_inside_publication_hook_writes_nothing() {
+        let (temp, data_dir, sync_root, target) = fixture();
+        let mut root = bind(&sync_root);
+        let reservation =
+            reserve(&data_dir, &mut root, &target, 3, &digest(b"new")).expect("reserve");
+        fs::write(&reservation.scratch_path, b"new").expect("scratch");
+        let attachments = sync_root.join(ATTACHMENTS_DIR_NAME);
+        let original = temp.path().join("held-attachments");
+
+        let error = publish_with_hook(&data_dir, &mut root, &reservation.operation_id, |_| {
+            fs::rename(&attachments, &original).map_err(|error| error.to_string())?;
+            fs::create_dir(&attachments).map_err(|error| error.to_string())?;
+            Ok(())
+        })
+        .expect_err("replacement must fail closed");
+
+        assert!(error.contains("attachments directory changed"));
+        assert!(!target.exists());
+        assert!(!attachments
+            .join(target.file_name().expect("target name"))
+            .exists());
+        assert!(entry_path(&data_dir, &sync_root, &reservation.operation_id).exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_capability_failure_uses_relative_rename_but_collision_does_not() {
+        let rename_calls = std::cell::Cell::new(0_u8);
+        let renamed = publish_linux_with_fallback(
+            || Err(io::Error::from_raw_os_error(libc::EOPNOTSUPP)),
+            || {
+                rename_calls.set(rename_calls.get() + 1);
+                Ok(())
+            },
+        )
+        .expect("capability fallback");
+        assert!(renamed);
+        assert_eq!(rename_calls.get(), 1);
+
+        let error = publish_linux_with_fallback(
+            || Err(io::Error::from(io::ErrorKind::AlreadyExists)),
+            || panic!("a target collision must never fall back"),
+        )
+        .expect_err("collision remains a collision");
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
     }
 
     #[test]
@@ -972,19 +1529,27 @@ mod tests {
         let mut root = bind(&sync_root);
         let reservation =
             reserve(&data_dir, &mut root, &target, 3, &"b".repeat(64)).expect("reserve");
-        let scratch_name = Path::new(&reservation.scratch_path)
-            .file_name()
-            .expect("scratch name")
+        let scratch_relative = Path::new(&reservation.scratch_path)
+            .strip_prefix(sync_root.join(ATTACHMENTS_DIR_NAME))
+            .expect("scratch relative path")
             .to_owned();
 
         let original_root = temp.path().join("original-sync-root");
         fs::rename(&sync_root, &original_root).expect("move leased root");
-        let original_scratch = original_root.join(ATTACHMENTS_DIR_NAME).join(&scratch_name);
+        let original_scratch = original_root
+            .join(ATTACHMENTS_DIR_NAME)
+            .join(&scratch_relative);
         fs::write(&original_scratch, b"original").expect("original scratch");
 
         let replacement_attachments = sync_root.join(ATTACHMENTS_DIR_NAME);
         fs::create_dir_all(&replacement_attachments).expect("replacement root");
-        let replacement_scratch = replacement_attachments.join(&scratch_name);
+        let replacement_scratch = replacement_attachments.join(&scratch_relative);
+        fs::create_dir_all(
+            replacement_scratch
+                .parent()
+                .expect("replacement private parent"),
+        )
+        .expect("replacement private namespace");
         fs::write(&replacement_scratch, b"replacement").expect("replacement scratch");
 
         let error = recover(&data_dir, &mut root).expect_err("root replacement must fail");
@@ -1006,18 +1571,24 @@ mod tests {
         let mut root = bind(&sync_root);
         let reservation =
             reserve(&data_dir, &mut root, &target, 3, &"b".repeat(64)).expect("reserve");
-        let scratch_name = Path::new(&reservation.scratch_path)
-            .file_name()
-            .expect("scratch name")
+        let scratch_relative = Path::new(&reservation.scratch_path)
+            .strip_prefix(sync_root.join(ATTACHMENTS_DIR_NAME))
+            .expect("scratch relative path")
             .to_owned();
         let attachments = sync_root.join(ATTACHMENTS_DIR_NAME);
         let original_attachments = temp.path().join("original-attachments");
         fs::rename(&attachments, &original_attachments).expect("move leased attachments");
-        let original_scratch = original_attachments.join(&scratch_name);
+        let original_scratch = original_attachments.join(&scratch_relative);
         fs::write(&original_scratch, b"original").expect("original scratch");
 
         fs::create_dir(&attachments).expect("replacement attachments");
-        let replacement_scratch = attachments.join(&scratch_name);
+        let replacement_scratch = attachments.join(&scratch_relative);
+        fs::create_dir_all(
+            replacement_scratch
+                .parent()
+                .expect("replacement private parent"),
+        )
+        .expect("replacement private namespace");
         fs::write(&replacement_scratch, b"replacement").expect("replacement scratch");
 
         let error = abandon(&data_dir, &mut root, &reservation.operation_id)
@@ -1043,19 +1614,21 @@ mod tests {
         let mut root = bind(&sync_root);
         let reservation =
             reserve(&data_dir, &mut root, &target, 3, &"b".repeat(64)).expect("reserve");
-        let scratch_name = Path::new(&reservation.scratch_path)
-            .file_name()
-            .expect("scratch name")
+        let scratch_relative = Path::new(&reservation.scratch_path)
+            .strip_prefix(sync_root.join(ATTACHMENTS_DIR_NAME))
+            .expect("scratch relative path")
             .to_owned();
         let attachments = sync_root.join(ATTACHMENTS_DIR_NAME);
         let original_attachments = temp.path().join("original-attachments");
         fs::rename(&attachments, &original_attachments).expect("move leased attachments");
-        let original_scratch = original_attachments.join(&scratch_name);
+        let original_scratch = original_attachments.join(&scratch_relative);
         fs::write(&original_scratch, b"original").expect("original scratch");
 
         let external = temp.path().join("external-attachments");
         fs::create_dir(&external).expect("external attachments");
-        let external_scratch = external.join(&scratch_name);
+        let external_scratch = external.join(&scratch_relative);
+        fs::create_dir_all(external_scratch.parent().expect("external private parent"))
+            .expect("external private namespace");
         fs::write(&external_scratch, b"external").expect("external scratch");
         symlink(&external, &attachments).expect("replace attachments with symlink");
 

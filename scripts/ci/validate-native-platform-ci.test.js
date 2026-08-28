@@ -69,6 +69,10 @@ test("attachment installer native CI collects the recovery suites", () => {
     "apps/mobile/modules/attachment-file-installer/android/src/test/java/tech/dongdongbh/mindwtr/attachmentfileinstaller/AttachmentFileInstallerCoreTest.kt",
     "utf8",
   );
+  const androidPublisher = readFileSync(
+    "apps/mobile/modules/attachment-file-installer/android/src/main/cpp/exact_attachment_publisher.cpp",
+    "utf8",
+  );
   const swiftPackage = readFileSync(
     "apps/mobile/modules/attachment-file-installer/ios/Package.swift",
     "utf8",
@@ -86,7 +90,11 @@ test("attachment installer native CI collects the recovery suites", () => {
     "utf8",
   );
 
-  expect(androidTests.match(/^\s*@Test$/gm)).toHaveLength(25);
+  expect(androidTests.match(/^\s*@Test$/gm)).toHaveLength(27);
+  expect(androidPublisher).toContain("fstatat(private_fd, \"stage\"");
+  expect(androidPublisher).toContain("SYS_renameat2");
+  expect(androidPublisher).toContain("RENAME_NOREPLACE");
+  expect(androidPublisher).toContain("AT_SYMLINK_FOLLOW");
   expect(swiftPackage).toContain(".testTarget(");
   expect(swiftTests).toContain("testAbsentGenerationUsesCreateNoReplace");
   expect(swiftTests).toContain("testPresentGenerationReplacesOnlyMatchingTargetAndPreservesIt");
@@ -95,6 +103,8 @@ test("attachment installer native CI collects the recovery suites", () => {
   expect(swiftTests).toContain("testLateWriterMutatesRetainedOldInodeWithoutTouchingInstalledGeneration");
   expect(swiftTests).toContain("testImmutablePublisherCreatesNoSharedInstallerRecoveryArtifacts");
   expect(swiftTests).toContain("testImmutablePublisherPreservesOwnedStageAndPeerTargetOnCollision");
+  expect(swiftTests).toContain("testImmutablePublisherRejectsVerifiedStageNameSwap");
+  expect(swiftTests).toContain("testPreparedPrivateStageRecoveryRemovesOnlyRecordedInode");
   expect(swiftTests).toContain("testOwnedStageRecoveryDeletesOnlyRecordedInodeAndDigest");
   expect(swiftTests).toContain("testOwnedStageRecoveryPreservesReplacementInodeWithSameDigest");
   expect(swiftTests).toContain("testOwnedStageRecoveryRejectsReplacedAttachmentRoot");

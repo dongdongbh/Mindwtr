@@ -31,6 +31,11 @@ type NativeOwnedStageIdentity = {
   directoryIdentity: string;
 };
 
+type NativePreparedStageIdentity = NativeOwnedStageIdentity & {
+  privateDirectoryIdentity: string;
+  stagedPath: string;
+};
+
 type NativeAttachmentFileInstaller = {
   installAsync(
     stagedPath: string,
@@ -42,6 +47,13 @@ type NativeAttachmentFileInstaller = {
     stagedPath: string,
     targetPath: string,
     expectedStagedSha256: string,
+    expectedStagedIdentity: string,
+    expectedDirectoryIdentity: string,
+    expectedPrivateDirectoryIdentity: string,
+  ): Promise<unknown>;
+  prepareImmutableStageAsync(
+    targetPath: string,
+    operationId: string,
   ): Promise<unknown>;
   snapshotImmutableStageAsync(
     stagedPath: string,
@@ -55,6 +67,7 @@ type NativeAttachmentFileInstaller = {
     expectedStagedSha256: string | null,
     expectedStagedIdentity: string | null,
     expectedDirectoryIdentity: string | null,
+    expectedPrivateDirectoryIdentity: string | null,
   ): Promise<unknown>;
   hashAsync(path: string): Promise<unknown>;
 };
@@ -90,17 +103,20 @@ const getNativeModule = (): NativeAttachmentFileInstaller => {
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
 const FILE_SYNC_PUBLICATION_RESERVATIONS_KEY = '@mindwtr/file-sync-publication-reservations-v1';
 const FILE_SYNC_PUBLICATION_STAGE_PREFIX = '.mindwtr-generation-stage-';
+const FILE_SYNC_PUBLICATION_PRIVATE_PREFIX = '.mindwtr-install-';
+const FILE_SYNC_PUBLICATION_PRIVATE_SUFFIX = '.candidate';
 const FILE_SYNC_PUBLICATION_MAX_RESERVATIONS = 128;
 const FILE_SYNC_PUBLICATION_MAX_INVALID_TARGET_ATTEMPTS = 3;
 
 type FileSyncPublicationReservationRecord = {
-  version: 2;
+  version: 2 | 3;
   operationId: string | null;
   stagedPath: string | null;
   targetPath: string;
   expectedStagedSha256: string | null;
   stagedIdentity: string | null;
   directoryIdentity: string | null;
+  privateDirectoryIdentity: string | null;
   invalidTargetAttempts: number;
   state: 'reserved' | 'invalid-target';
 };
@@ -142,7 +158,7 @@ const parseReservationRecords = (raw: string | null): FileSyncPublicationReserva
     }
     const record = entry as Record<string, unknown>;
     if (
-      (record.version !== 1 && record.version !== 2)
+      (record.version !== 1 && record.version !== 2 && record.version !== 3)
       || typeof record.targetPath !== 'string'
       || !record.targetPath.startsWith('file://')
       || (record.operationId !== null && typeof record.operationId !== 'string')
@@ -151,8 +167,10 @@ const parseReservationRecords = (raw: string | null): FileSyncPublicationReserva
         typeof record.expectedStagedSha256 !== 'string'
         || !SHA256_HEX_PATTERN.test(record.expectedStagedSha256)
       ))
-      || (record.version === 2 && record.stagedIdentity !== null && typeof record.stagedIdentity !== 'string')
-      || (record.version === 2 && record.directoryIdentity !== null && typeof record.directoryIdentity !== 'string')
+      || (record.version !== 1 && record.stagedIdentity !== null && typeof record.stagedIdentity !== 'string')
+      || (record.version !== 1 && record.directoryIdentity !== null && typeof record.directoryIdentity !== 'string')
+      || (record.version === 3 && record.privateDirectoryIdentity !== null
+        && typeof record.privateDirectoryIdentity !== 'string')
       || !Number.isInteger(record.invalidTargetAttempts)
       || (record.invalidTargetAttempts as number) < 0
       || (record.state !== 'reserved' && record.state !== 'invalid-target')
@@ -164,19 +182,23 @@ const parseReservationRecords = (raw: string | null): FileSyncPublicationReserva
     if (
       (record.state === 'reserved' && (!operationId || !stagedPath || !record.expectedStagedSha256))
       || (record.state === 'invalid-target' && ((operationId == null) !== (stagedPath == null)))
-      || (stagedPath != null && (
-        parentPath(stagedPath) !== parentPath(record.targetPath)
-        || stagedPath !== `${parentPath(record.targetPath)}${FILE_SYNC_PUBLICATION_STAGE_PREFIX}${operationId}.tmp`
-      ))
-      || (record.version === 2 && ((record.stagedIdentity == null) !== (record.directoryIdentity == null)))
+      || (stagedPath != null && (record.version === 3
+        ? stagedPath !== `${parentPath(record.targetPath)}${FILE_SYNC_PUBLICATION_PRIVATE_PREFIX}${operationId}${FILE_SYNC_PUBLICATION_PRIVATE_SUFFIX}/stage`
+        : parentPath(stagedPath) !== parentPath(record.targetPath)
+          || stagedPath !== `${parentPath(record.targetPath)}${FILE_SYNC_PUBLICATION_STAGE_PREFIX}${operationId}.tmp`))
+      || (record.version !== 1 && ((record.stagedIdentity == null) !== (record.directoryIdentity == null)))
+      || (record.version === 3 && record.privateDirectoryIdentity != null && record.directoryIdentity == null)
     ) {
       throw new Error('File Sync attachment publication recovery state is invalid');
     }
     return {
-      ...(record as Omit<FileSyncPublicationReservationRecord, 'version' | 'stagedIdentity' | 'directoryIdentity'>),
-      version: 2,
-      stagedIdentity: record.version === 2 ? record.stagedIdentity as string | null : null,
-      directoryIdentity: record.version === 2 ? record.directoryIdentity as string | null : null,
+      ...(record as Omit<FileSyncPublicationReservationRecord, 'version' | 'stagedIdentity' | 'directoryIdentity' | 'privateDirectoryIdentity'>),
+      version: record.version === 3 ? 3 : 2,
+      stagedIdentity: record.version !== 1 ? record.stagedIdentity as string | null : null,
+      directoryIdentity: record.version !== 1 ? record.directoryIdentity as string | null : null,
+      privateDirectoryIdentity: record.version === 3
+        ? record.privateDirectoryIdentity as string | null
+        : null,
     };
   });
 };
@@ -211,6 +233,24 @@ const parseNativeOwnedStageIdentity = (value: unknown): NativeOwnedStageIdentity
   };
 };
 
+const parseNativePreparedStageIdentity = (value: unknown): NativePreparedStageIdentity => {
+  const identity = parseNativeOwnedStageIdentity(value);
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.privateDirectoryIdentity !== 'string'
+    || candidate.privateDirectoryIdentity.length === 0
+    || typeof candidate.stagedPath !== 'string'
+    || !candidate.stagedPath.startsWith('file://')
+  ) {
+    throw new Error('Attachment file publisher returned an invalid private stage identity');
+  }
+  return {
+    ...identity,
+    privateDirectoryIdentity: candidate.privateDirectoryIdentity,
+    stagedPath: candidate.stagedPath,
+  };
+};
+
 const cleanupReservationStage = async (
   record: FileSyncPublicationReservationRecord,
 ): Promise<'removed' | 'missing'> => {
@@ -222,6 +262,7 @@ const cleanupReservationStage = async (
     record.expectedStagedSha256,
     record.stagedIdentity,
     record.directoryIdentity,
+    record.privateDirectoryIdentity,
   );
   if (!value || typeof value !== 'object') {
     throw new Error('Attachment file publisher returned an invalid cleanup result');
@@ -234,7 +275,7 @@ const cleanupReservationStage = async (
   throw new Error('Attachment file publisher returned an invalid cleanup result');
 };
 
-/** Recover only exact shared-folder scratch paths previously reserved in
+/** Recover only exact private publication namespaces previously reserved in
  * device-local state. The shared folder is deliberately never scanned. */
 export const recoverFileSyncAttachmentPublications = async (
   attachmentsDirectoryPath: string,
@@ -258,13 +299,14 @@ export const recoverFileSyncAttachmentPublications = async (
         expectedStagedSha256: null,
         stagedIdentity: null,
         directoryIdentity: null,
+        privateDirectoryIdentity: null,
       });
     }
   }
   await storeReservationRecords(retained);
 });
 
-/** Persist exact ownership before the caller creates a shared-folder scratch. */
+/** Persist exact ownership before native code creates the private stage. */
 export const reserveFileSyncAttachmentPublication = async (
   targetPath: string,
   expectedStagedSha256: string,
@@ -290,19 +332,32 @@ export const reserveFileSyncAttachmentPublication = async (
   }
   const operationId = Array.from({ length: 4 }, () => Math.floor(Math.random() * 0x1_0000_0000)
     .toString(16).padStart(8, '0')).join('');
-  const stagedPath = `${parentPath(target)}${FILE_SYNC_PUBLICATION_STAGE_PREFIX}${operationId}.tmp`;
+  const stagedPath = `${parentPath(target)}${FILE_SYNC_PUBLICATION_PRIVATE_PREFIX}${operationId}${FILE_SYNC_PUBLICATION_PRIVATE_SUFFIX}/stage`;
   const next: FileSyncPublicationReservationRecord = {
-    version: 2,
+    version: 3,
     operationId,
     stagedPath,
     targetPath: target,
     expectedStagedSha256: digest,
     stagedIdentity: null,
     directoryIdentity: null,
+    privateDirectoryIdentity: null,
     invalidTargetAttempts,
     state: 'reserved',
   };
   await storeReservationRecords([...recordsWithoutTarget, next]);
+  const prepared = parseNativePreparedStageIdentity(
+    await getNativeModule().prepareImmutableStageAsync(target, operationId),
+  );
+  if (prepared.stagedPath !== stagedPath) {
+    throw new Error('Attachment file publisher prepared an unexpected private stage path');
+  }
+  await storeReservationRecords([...recordsWithoutTarget, {
+    ...next,
+    stagedIdentity: prepared.stagedIdentity,
+    directoryIdentity: prepared.directoryIdentity,
+    privateDirectoryIdentity: prepared.privateDirectoryIdentity,
+  }]);
   return { operationId, stagedPath, targetPath: target };
 });
 
@@ -326,6 +381,12 @@ export const claimFileSyncAttachmentPublication = async (
     record.targetPath,
     record.expectedStagedSha256,
   ));
+  if (
+    record.stagedIdentity != null && identity.stagedIdentity !== record.stagedIdentity
+    || record.directoryIdentity != null && identity.directoryIdentity !== record.directoryIdentity
+  ) {
+    throw new Error('File Sync attachment publication stage identity changed before claim');
+  }
   await storeReservationRecords(records.map((candidate) => candidate === record ? {
     ...candidate,
     ...identity,
@@ -492,10 +553,27 @@ export const publishImmutableAttachmentFileGeneration = async (
   if (!SHA256_HEX_PATTERN.test(digest)) {
     throw new Error('Expected staged attachment SHA-256 must be 64 lowercase hexadecimal characters');
   }
-  const result = await getNativeModule().publishImmutableAsync(
-    assertPath(stagedPath, 'Staged attachment path'),
-    assertPath(targetPath, 'Target attachment path'),
-    digest,
-  );
-  return parseNativePublishResult(result);
+  const staged = assertPath(stagedPath, 'Staged attachment path');
+  const target = assertPath(targetPath, 'Target attachment path');
+  return withReservationLock(async () => {
+    const record = (await loadReservationRecords()).find((candidate) => (
+      candidate.stagedPath === staged && candidate.targetPath === target
+    ));
+    if (
+      !record?.stagedIdentity
+      || !record.directoryIdentity
+      || !record.privateDirectoryIdentity
+    ) {
+      throw new Error('File Sync attachment publication identity is unavailable');
+    }
+    const result = await getNativeModule().publishImmutableAsync(
+      staged,
+      target,
+      digest,
+      record.stagedIdentity,
+      record.directoryIdentity,
+      record.privateDirectoryIdentity,
+    );
+    return parseNativePublishResult(result);
+  });
 };

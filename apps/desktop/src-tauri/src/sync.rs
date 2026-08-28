@@ -20,6 +20,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 use tauri_plugin_fs::FsExt;
 
+#[cfg(test)]
 use crate::attachment_installer::move_no_replace;
 use crate::config::{
     get_keyring_secret, lock_config_read_modify_write, read_bound_credential, read_config,
@@ -14226,19 +14227,24 @@ fn sync_fs_path(app: &tauri::AppHandle, path: String) -> Result<PathBuf, String>
     }
 }
 
+#[cfg(test)]
 const FILE_SYNC_ATTACHMENT_SCRATCH_PREFIX: &str = ".mindwtr-attachment-generation-";
+#[cfg(test)]
 const FILE_SYNC_ATTACHMENT_SCRATCH_SUFFIX: &str = ".tmp";
 
+#[cfg(test)]
 fn is_sha256_hex(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+#[cfg(test)]
 fn is_file_sync_attachment_generation_target(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name.split('.').any(is_sha256_hex))
 }
 
+#[cfg(test)]
 fn verify_and_flush_file_sync_generation_scratch(
     scratch_path: &Path,
     expected_size: u64,
@@ -14326,6 +14332,7 @@ pub(crate) fn sync_fs_reserve_attachment_generation(
     })
 }
 
+#[cfg(test)]
 fn publish_file_sync_attachment_generation_with<Replace, SyncParent>(
     scratch_path: &Path,
     target_path: &Path,
@@ -14455,28 +14462,10 @@ pub(crate) fn sync_fs_publish_attachment_generation(
     operation_id: String,
 ) -> Result<FileSyncAttachmentGenerationPublication, String> {
     with_file_sync_lease(&state, &lease_token, window.label(), |lease| {
-        let outcome = file_sync_attachment_publication::publish_with(
+        let outcome = file_sync_attachment_publication::publish(
             &crate::storage::get_data_dir(&app),
             &mut lease.publication_root,
             &operation_id,
-            |scratch_path, target_path, expected_size, expected_sha256| {
-                publish_file_sync_attachment_generation_with(
-                    scratch_path,
-                    target_path,
-                    expected_size,
-                    expected_sha256,
-                    move_no_replace,
-                    sync_parent_directory_for_durability,
-                )
-                .map(|outcome| match outcome {
-                    FileSyncAttachmentGenerationPublication::Published => {
-                        PublicationAttempt::Published
-                    }
-                    FileSyncAttachmentGenerationPublication::AlreadyExists => {
-                        PublicationAttempt::AlreadyExists
-                    }
-                })
-            },
         )?;
         Ok(match outcome {
             PublicationAttempt::Published => FileSyncAttachmentGenerationPublication::Published,

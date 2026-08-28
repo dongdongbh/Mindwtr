@@ -22,6 +22,14 @@ private class TestInstallerFileOps : AttachmentInstallerFileOps {
     Files.createDirectories(directory.toPath())
   }
 
+  override fun createPrivateDirectoryExclusive(directory: File) {
+    Files.createDirectory(directory.toPath())
+  }
+
+  override fun createNewRegularFile(file: File) {
+    Files.createFile(file.toPath())
+  }
+
   override fun nodeKind(file: File): InstallerNodeKind {
     val path = file.toPath()
     if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) return InstallerNodeKind.MISSING
@@ -36,6 +44,15 @@ private class TestInstallerFileOps : AttachmentInstallerFileOps {
       attributes.isDirectory -> InstallerNodeKind.DIRECTORY
       else -> InstallerNodeKind.OTHER
     }
+  }
+
+  override fun nodeIdentity(file: File): String {
+    val attributes = Files.readAttributes(
+      file.toPath(),
+      BasicFileAttributes::class.java,
+      LinkOption.NOFOLLOW_LINKS,
+    )
+    return attributes.fileKey()?.toString() ?: file.canonicalPath
   }
 
   override fun fileIdentity(file: File): AttachmentFileIdentity {
@@ -76,6 +93,32 @@ private class TestInstallerFileOps : AttachmentInstallerFileOps {
       true
     } catch (_: FileAlreadyExistsException) {
       false
+    }
+  }
+
+  override fun publishVerifiedImmutable(
+    source: File,
+    destination: File,
+    expectedSha256: String,
+    expectedSourceIdentity: String,
+    expectedDirectoryIdentity: String,
+    expectedPrivateDirectoryIdentity: String,
+  ): ImmutableAttachmentPublishOutcome {
+    if (
+      fileIdentity(source).fileKey != expectedSourceIdentity
+      || nodeIdentity(destination.parentFile) != expectedDirectoryIdentity
+      || nodeIdentity(source.parentFile) != expectedPrivateDirectoryIdentity
+    ) {
+      throw AttachmentInstallerFailure("Attachment publication directory identity changed")
+    }
+    val before = fileIdentity(source)
+    if (sha256(source) != expectedSha256 || fileIdentity(source).fileKey != before.fileKey) {
+      throw AttachmentInstallerFailure("Staged attachment changed before native publication")
+    }
+    return if (moveExclusive(source, destination)) {
+      ImmutableAttachmentPublishOutcome.PUBLISHED
+    } else {
+      ImmutableAttachmentPublishOutcome.ALREADY_EXISTS
     }
   }
 
@@ -560,10 +603,20 @@ class AttachmentFileInstallerCoreTest {
 
   @Test
   fun immutablePublisherCreatesNoSharedInstallerRecoveryArtifacts() = withFixture { fixture ->
-    val staged = fixture.target(".mindwtr-generation-stage-owned.tmp").apply { writeText("candidate") }
     val target = fixture.target("a.${hash("candidate")}.txt")
+    val prepared = fixture.recovery(ops).prepare(target, "1".repeat(32))
+    val staged = prepared.stagedPath.apply {
+      writeText("candidate")
+    }
 
-    val outcome = fixture.publisher(ops).publish(staged, target, hash("candidate"))
+    val outcome = fixture.publisher(ops).publish(
+      staged,
+      target,
+      hash("candidate"),
+      prepared.stagedIdentity,
+      prepared.directoryIdentity,
+      prepared.privateDirectoryIdentity,
+    )
 
     assertEquals(ImmutableAttachmentPublishOutcome.PUBLISHED, outcome)
     assertEquals("candidate", target.readText())
@@ -573,15 +626,93 @@ class AttachmentFileInstallerCoreTest {
 
   @Test
   fun immutablePublisherPreservesOwnedStageAndPeerTargetOnCollision() = withFixture { fixture ->
-    val staged = fixture.target(".mindwtr-generation-stage-owned.tmp").apply { writeText("candidate") }
     val target = fixture.target("a.${hash("candidate")}.txt").apply { writeText("peer-corruption") }
+    val prepared = fixture.recovery(ops).prepare(target, "2".repeat(32))
+    val staged = prepared.stagedPath.apply {
+      writeText("candidate")
+    }
 
-    val outcome = fixture.publisher(ops).publish(staged, target, hash("candidate"))
+    val outcome = fixture.publisher(ops).publish(
+      staged,
+      target,
+      hash("candidate"),
+      prepared.stagedIdentity,
+      prepared.directoryIdentity,
+      prepared.privateDirectoryIdentity,
+    )
 
     assertEquals(ImmutableAttachmentPublishOutcome.ALREADY_EXISTS, outcome)
     assertEquals("candidate", staged.readText())
     assertEquals("peer-corruption", target.readText())
-    assertTrue(fixture.internalArtifacts().isEmpty())
+    assertEquals(1, fixture.internalArtifacts().size)
+  }
+
+  @Test
+  fun immutablePublisherRejectsPrivateStageNameSwapWithoutTouchingTarget() = withFixture { fixture ->
+    val target = fixture.target("a.${hash("candidate")}.txt")
+    val prepared = fixture.recovery(ops).prepare(target, "3".repeat(32))
+    val staged = prepared.stagedPath.apply {
+      writeText("candidate")
+    }
+    val displaced = File(staged.parentFile, "displaced-stage")
+    val racingOps = object : AttachmentInstallerFileOps by ops {
+      override fun publishVerifiedImmutable(
+        source: File,
+        destination: File,
+        expectedSha256: String,
+        expectedSourceIdentity: String,
+        expectedDirectoryIdentity: String,
+        expectedPrivateDirectoryIdentity: String,
+      ): ImmutableAttachmentPublishOutcome {
+        Files.move(source.toPath(), displaced.toPath())
+        source.writeText("replacement")
+        return ops.publishVerifiedImmutable(
+          source,
+          destination,
+          expectedSha256,
+          expectedSourceIdentity,
+          expectedDirectoryIdentity,
+          expectedPrivateDirectoryIdentity,
+        )
+      }
+    }
+
+    assertFailsWithMessage("identity changed") {
+      fixture.publisher(racingOps).publish(
+        staged,
+        target,
+        hash("candidate"),
+        prepared.stagedIdentity,
+        prepared.directoryIdentity,
+        prepared.privateDirectoryIdentity,
+      )
+    }
+    assertFalse(target.exists())
+    assertEquals("candidate", displaced.readText())
+    assertEquals("replacement", staged.readText())
+  }
+
+  @Test
+  fun preparedPrivateStageRecoveryRemovesOnlyItsCreateNewInode() = withFixture { fixture ->
+    val operationId = "4".repeat(32)
+    val target = fixture.target("a.${hash("candidate")}.txt")
+    val recovery = fixture.recovery(ops)
+    val prepared = recovery.prepare(target, operationId)
+    prepared.stagedPath.writeText("partial")
+
+    val outcome = recovery.cleanup(
+      prepared.stagedPath,
+      target,
+      operationId,
+      hash("candidate"),
+      prepared.stagedIdentity,
+      prepared.directoryIdentity,
+      prepared.privateDirectoryIdentity,
+    )
+
+    assertEquals(ImmutableAttachmentStageCleanupOutcome.REMOVED, outcome)
+    assertFalse(prepared.stagedPath.exists())
+    assertFalse(prepared.stagedPath.parentFile.exists())
   }
 
   @Test
@@ -601,6 +732,7 @@ class AttachmentFileInstallerCoreTest {
       hash("candidate"),
       identity.stagedIdentity,
       identity.directoryIdentity,
+      null,
     )
 
     assertEquals(ImmutableAttachmentStageCleanupOutcome.REMOVED, outcome)
@@ -627,6 +759,7 @@ class AttachmentFileInstallerCoreTest {
       hash("candidate"),
       identity.stagedIdentity,
       identity.directoryIdentity,
+      null,
     )
 
     assertEquals(ImmutableAttachmentStageCleanupOutcome.CONFLICT, outcome)
@@ -653,6 +786,7 @@ class AttachmentFileInstallerCoreTest {
       hash("candidate"),
       identity.stagedIdentity,
       identity.directoryIdentity,
+      null,
     )
 
     assertEquals(ImmutableAttachmentStageCleanupOutcome.CONFLICT, outcome)
@@ -678,6 +812,7 @@ class AttachmentFileInstallerCoreTest {
       hash("candidate"),
       identity.stagedIdentity,
       identity.directoryIdentity,
+      null,
     )
 
     assertEquals(ImmutableAttachmentStageCleanupOutcome.CONFLICT, outcome)
@@ -705,6 +840,7 @@ class AttachmentFileInstallerCoreTest {
       hash("candidate"),
       identity.stagedIdentity,
       identity.directoryIdentity,
+      null,
     )
 
     assertEquals(ImmutableAttachmentStageCleanupOutcome.CONFLICT, outcome)

@@ -335,7 +335,6 @@ export const syncFileAttachments = async (
         const reservation = await reserveFileSyncAttachmentPublication(targetUri, wireHash);
         const stagedUri = reservation.stagedPath;
         try {
-          new FileSystem.File(stagedUri).create({ overwrite: false });
           assertAttachmentSyncNotAborted(signal);
           await FileSystem.writeAsStringAsync(stagedUri, wireBase64, {
             encoding: FileSystem.EncodingType.Base64,

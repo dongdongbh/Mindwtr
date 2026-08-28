@@ -2,6 +2,7 @@ package tech.dongdongbh.mindwtr.attachmentfileinstaller
 
 import android.content.Context
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
@@ -17,6 +18,22 @@ import java.util.UUID
 
 private class AttachmentFileInstallerException(message: String, cause: Throwable? = null) :
   CodedException("ATTACHMENT_FILE_INSTALLER_FAILED: $message", cause)
+
+private object ExactAttachmentPublisherNative {
+  init {
+    System.loadLibrary("attachment-file-installer")
+  }
+
+  external fun publishRelativeNoReplace(
+    sourceFd: Int,
+    privateDirectoryPath: String,
+    targetDirectoryPath: String,
+    targetName: String,
+    expectedSourceIdentity: String,
+    expectedPrivateDirectoryIdentity: String,
+    expectedTargetDirectoryIdentity: String,
+  ): Boolean
+}
 
 private class AndroidAttachmentInstallerFileOps : AttachmentInstallerFileOps {
   override fun canonical(file: File): File = file.canonicalFile
@@ -45,6 +62,32 @@ private class AndroidAttachmentInstallerFileOps : AttachmentInstallerFileOps {
     }
   }
 
+  override fun createPrivateDirectoryExclusive(directory: File) {
+    try {
+      Os.mkdir(directory.path, 0x1c0)
+      Os.chmod(directory.path, 0x1c0)
+    } catch (error: Throwable) {
+      throw AttachmentInstallerFailure("Could not create private attachment publication directory", error)
+    }
+  }
+
+  override fun createNewRegularFile(file: File) {
+    val descriptor = try {
+      Os.open(
+        file.path,
+        OsConstants.O_CREAT or OsConstants.O_EXCL or OsConstants.O_WRONLY or OsConstants.O_NOFOLLOW,
+        0x180,
+      )
+    } catch (error: Throwable) {
+      throw AttachmentInstallerFailure("Could not create private attachment publication stage", error)
+    }
+    try {
+      Os.fsync(descriptor)
+    } finally {
+      Os.close(descriptor)
+    }
+  }
+
   override fun nodeKind(file: File): InstallerNodeKind {
     val stat = try {
       Os.lstat(file.path)
@@ -58,6 +101,15 @@ private class AndroidAttachmentInstallerFileOps : AttachmentInstallerFileOps {
       OsConstants.S_ISDIR(stat.st_mode) -> InstallerNodeKind.DIRECTORY
       else -> InstallerNodeKind.OTHER
     }
+  }
+
+  override fun nodeIdentity(file: File): String {
+    val stat = try {
+      Os.lstat(file.path)
+    } catch (error: Throwable) {
+      throw AttachmentInstallerFailure("Could not inspect attachment node identity", error)
+    }
+    return "${stat.st_dev}:${stat.st_ino}"
   }
 
   override fun fileIdentity(file: File): AttachmentFileIdentity {
@@ -132,6 +184,81 @@ private class AndroidAttachmentInstallerFileOps : AttachmentInstallerFileOps {
       throw AttachmentInstallerFailure("Published attachment generation could not release its old path", error)
     }
     return true
+  }
+
+  override fun publishVerifiedImmutable(
+    source: File,
+    destination: File,
+    expectedSha256: String,
+    expectedSourceIdentity: String,
+    expectedDirectoryIdentity: String,
+    expectedPrivateDirectoryIdentity: String,
+  ): ImmutableAttachmentPublishOutcome {
+    val privateDirectory = source.parentFile
+      ?: throw AttachmentInstallerFailure("Private attachment publication directory is unavailable")
+    val targetDirectory = destination.parentFile
+      ?: throw AttachmentInstallerFailure("Attachment target directory is unavailable")
+    if (
+      nodeIdentity(targetDirectory) != expectedDirectoryIdentity
+      || nodeIdentity(privateDirectory) != expectedPrivateDirectoryIdentity
+    ) {
+      throw AttachmentInstallerFailure("Attachment publication directory identity changed")
+    }
+    val descriptor = try {
+      ParcelFileDescriptor.open(source, ParcelFileDescriptor.MODE_READ_WRITE)
+    } catch (error: Throwable) {
+      throw AttachmentInstallerFailure("Could not retain private attachment stage handle", error)
+    }
+    descriptor.use { retained ->
+      val before = Os.fstat(retained.fileDescriptor)
+      if (!OsConstants.S_ISREG(before.st_mode)) {
+        throw AttachmentInstallerFailure("Immutable attachment stage is not a regular file")
+      }
+      val digest = MessageDigest.getInstance("SHA-256")
+      ParcelFileDescriptor.AutoCloseInputStream(ParcelFileDescriptor.dup(retained.fileDescriptor)).use { input ->
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+          val count = input.read(buffer)
+          if (count < 0) break
+          if (count > 0) digest.update(buffer, 0, count)
+        }
+      }
+      val after = Os.fstat(retained.fileDescriptor)
+      val actualSha256 = digest.digest().joinToString(separator = "") { byte ->
+        "%02x".format(byte.toInt() and 0xff)
+      }
+      if (
+        before.st_dev != after.st_dev
+        || before.st_ino != after.st_ino
+        || before.st_size != after.st_size
+        || actualSha256 != expectedSha256
+        || "${after.st_dev}:${after.st_ino}" != expectedSourceIdentity
+      ) {
+        throw AttachmentInstallerFailure("Staged attachment changed before native publication")
+      }
+      Os.fsync(retained.fileDescriptor)
+      if (
+        nodeIdentity(targetDirectory) != expectedDirectoryIdentity
+        || nodeIdentity(privateDirectory) != expectedPrivateDirectoryIdentity
+      ) {
+        throw AttachmentInstallerFailure("Attachment publication directory identity changed")
+      }
+      val published = try {
+        ExactAttachmentPublisherNative.publishRelativeNoReplace(
+          retained.fd,
+          privateDirectory.path,
+          targetDirectory.path,
+          destination.name,
+          expectedSourceIdentity,
+          expectedPrivateDirectoryIdentity,
+          expectedDirectoryIdentity,
+        )
+      } catch (error: Throwable) {
+        throw AttachmentInstallerFailure("Could not publish exact attachment stage", error)
+      }
+      if (!published) return ImmutableAttachmentPublishOutcome.ALREADY_EXISTS
+    }
+    return ImmutableAttachmentPublishOutcome.PUBLISHED
   }
 
   override fun delete(file: File) {
@@ -270,6 +397,9 @@ class AttachmentFileInstallerModule : Module() {
         stagedPath: String,
         targetPath: String,
         expectedStagedSha256: String,
+        expectedStagedIdentity: String,
+        expectedDirectoryIdentity: String,
+        expectedPrivateDirectoryIdentity: String,
       ->
       try {
         val staged = fileFromPath(stagedPath).absoluteFile
@@ -278,9 +408,9 @@ class AttachmentFileInstallerModule : Module() {
           ?: throw AttachmentFileInstallerException("Target attachment parent is unavailable")
         val stagedRoot = staged.parentFile
           ?: throw AttachmentFileInstallerException("Staged attachment parent is unavailable")
-        if (stagedRoot.canonicalFile != targetRoot.canonicalFile) {
+        if (stagedRoot.parentFile?.canonicalFile != targetRoot.canonicalFile) {
           throw AttachmentFileInstallerException(
-            "Immutable attachment stage and target must share a directory",
+            "Immutable attachment stage must use a private child of the target directory",
           )
         }
         val outcome = ImmutableAttachmentFilePublisherCore(
@@ -290,6 +420,9 @@ class AttachmentFileInstallerModule : Module() {
           staged,
           target,
           parseSha256(expectedStagedSha256, "Expected staged attachment"),
+          expectedStagedIdentity,
+          expectedDirectoryIdentity,
+          expectedPrivateDirectoryIdentity,
         )
         when (outcome) {
           ImmutableAttachmentPublishOutcome.PUBLISHED -> mapOf("status" to "published")
@@ -302,6 +435,26 @@ class AttachmentFileInstallerModule : Module() {
           error.message ?: "Immutable attachment publication failed",
           error,
         )
+      }
+    }
+
+    AsyncFunction("prepareImmutableStageAsync") { targetPath: String, operationId: String ->
+      try {
+        val target = fileFromPath(targetPath).absoluteFile
+        val targetRoot = target.parentFile
+          ?: throw AttachmentFileInstallerException("Target attachment parent is unavailable")
+        val prepared = ImmutableAttachmentStageRecoveryCore(
+          targetRoot,
+          AndroidAttachmentInstallerFileOps(),
+        ).prepare(target, operationId)
+        mapOf(
+          "stagedPath" to Uri.fromFile(prepared.stagedPath).toString(),
+          "stagedIdentity" to prepared.stagedIdentity,
+          "directoryIdentity" to prepared.directoryIdentity,
+          "privateDirectoryIdentity" to prepared.privateDirectoryIdentity,
+        )
+      } catch (error: Throwable) {
+        throw AttachmentFileInstallerException(error.message ?: "Attachment stage preparation failed", error)
       }
     }
 
@@ -335,6 +488,7 @@ class AttachmentFileInstallerModule : Module() {
         expectedStagedSha256: String?,
         expectedStagedIdentity: String?,
         expectedDirectoryIdentity: String?,
+        expectedPrivateDirectoryIdentity: String?,
       ->
       try {
         val staged = fileFromPath(stagedPath).absoluteFile
@@ -351,6 +505,7 @@ class AttachmentFileInstallerModule : Module() {
           expectedStagedSha256,
           expectedStagedIdentity,
           expectedDirectoryIdentity,
+          expectedPrivateDirectoryIdentity,
         )
         mapOf("status" to when (outcome) {
           ImmutableAttachmentStageCleanupOutcome.REMOVED -> "removed"

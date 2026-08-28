@@ -69,14 +69,21 @@ final class AttachmentFileInstallerEngineTests: XCTestCase {
 
   func testImmutablePublisherCreatesNoSharedInstallerRecoveryArtifacts() throws {
     try withFixture { fixture in
-      let staged = fixture.target(".mindwtr-generation-stage-owned.tmp")
       let target = fixture.target("a.\(digest("candidate")).txt")
+      let prepared = try fixture.engine().prepareImmutableStage(
+        targetInput: target,
+        operationId: String(repeating: "1", count: 32)
+      )
+      let staged = prepared.stagedUrl
       try write("candidate", to: staged)
 
       let outcome = try fixture.engine().publishImmutable(
         stagedInput: staged,
         targetInput: target,
-        expectedStagedSha256: digest("candidate")
+        expectedStagedSha256: digest("candidate"),
+        expectedStagedIdentity: prepared.stagedIdentity,
+        expectedDirectoryIdentity: prepared.directoryIdentity,
+        expectedPrivateDirectoryIdentity: prepared.privateDirectoryIdentity
       )
 
       guard case .published = outcome else { return XCTFail("Expected published outcome") }
@@ -88,21 +95,85 @@ final class AttachmentFileInstallerEngineTests: XCTestCase {
 
   func testImmutablePublisherPreservesOwnedStageAndPeerTargetOnCollision() throws {
     try withFixture { fixture in
-      let staged = fixture.target(".mindwtr-generation-stage-owned.tmp")
       let target = fixture.target("a.\(digest("candidate")).txt")
+      let prepared = try fixture.engine().prepareImmutableStage(
+        targetInput: target,
+        operationId: String(repeating: "2", count: 32)
+      )
+      let staged = prepared.stagedUrl
       try write("candidate", to: staged)
       try write("peer-corruption", to: target)
 
       let outcome = try fixture.engine().publishImmutable(
         stagedInput: staged,
         targetInput: target,
-        expectedStagedSha256: digest("candidate")
+        expectedStagedSha256: digest("candidate"),
+        expectedStagedIdentity: prepared.stagedIdentity,
+        expectedDirectoryIdentity: prepared.directoryIdentity,
+        expectedPrivateDirectoryIdentity: prepared.privateDirectoryIdentity
       )
 
       guard case .alreadyExists = outcome else { return XCTFail("Expected already-exists outcome") }
       XCTAssertEqual(try contents(staged), "candidate")
       XCTAssertEqual(try contents(target), "peer-corruption")
-      XCTAssertTrue(try fixture.internalArtifacts().isEmpty)
+      XCTAssertEqual(try fixture.internalArtifacts().count, 1)
+    }
+  }
+
+  func testPreparedPrivateStageRecoveryRemovesOnlyRecordedInode() throws {
+    try withFixture { fixture in
+      let operationId = String(repeating: "4", count: 32)
+      let target = fixture.target("a.\(digest("candidate")).txt")
+      let engine = fixture.engine()
+      let prepared = try engine.prepareImmutableStage(
+        targetInput: target,
+        operationId: operationId
+      )
+      try write("partial", to: prepared.stagedUrl)
+
+      let outcome = try engine.cleanupImmutableStage(
+        stagedInput: prepared.stagedUrl,
+        targetInput: target,
+        operationId: operationId,
+        expectedStagedSha256: digest("candidate"),
+        expectedStagedIdentity: prepared.stagedIdentity,
+        expectedDirectoryIdentity: prepared.directoryIdentity,
+        expectedPrivateDirectoryIdentity: prepared.privateDirectoryIdentity
+      )
+
+      guard case .removed = outcome else { return XCTFail("Expected removed outcome") }
+      XCTAssertFalse(FileManager.default.fileExists(atPath: prepared.stagedUrl.path))
+      XCTAssertFalse(FileManager.default.fileExists(atPath: prepared.stagedUrl.deletingLastPathComponent().path))
+    }
+  }
+
+  func testImmutablePublisherRejectsVerifiedStageNameSwap() throws {
+    try withFixture { fixture in
+      let target = fixture.target("a.\(digest("candidate")).txt")
+      let prepared = try fixture.engine().prepareImmutableStage(
+        targetInput: target,
+        operationId: String(repeating: "3", count: 32)
+      )
+      try write("candidate", to: prepared.stagedUrl)
+      let displaced = prepared.stagedUrl.deletingLastPathComponent()
+        .appendingPathComponent("displaced-stage")
+      let racing = fixture.engine { point in
+        guard point == .beforeImmutablePublication else { return }
+        try FileManager.default.moveItem(at: prepared.stagedUrl, to: displaced)
+        try self.write("replacement", to: prepared.stagedUrl)
+      }
+
+      XCTAssertThrowsError(try racing.publishImmutable(
+        stagedInput: prepared.stagedUrl,
+        targetInput: target,
+        expectedStagedSha256: digest("candidate"),
+        expectedStagedIdentity: prepared.stagedIdentity,
+        expectedDirectoryIdentity: prepared.directoryIdentity,
+        expectedPrivateDirectoryIdentity: prepared.privateDirectoryIdentity
+      ))
+      XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+      XCTAssertEqual(try contents(displaced), "candidate")
+      XCTAssertEqual(try contents(prepared.stagedUrl), "replacement")
     }
   }
 
@@ -125,7 +196,8 @@ final class AttachmentFileInstallerEngineTests: XCTestCase {
         operationId: operationId,
         expectedStagedSha256: digest("candidate"),
         expectedStagedIdentity: identity.stagedIdentity,
-        expectedDirectoryIdentity: identity.directoryIdentity
+        expectedDirectoryIdentity: identity.directoryIdentity,
+        expectedPrivateDirectoryIdentity: nil
       )
 
       guard case .removed = outcome else { return XCTFail("Expected removed outcome") }
@@ -155,7 +227,8 @@ final class AttachmentFileInstallerEngineTests: XCTestCase {
         operationId: operationId,
         expectedStagedSha256: digest("candidate"),
         expectedStagedIdentity: identity.stagedIdentity,
-        expectedDirectoryIdentity: identity.directoryIdentity
+        expectedDirectoryIdentity: identity.directoryIdentity,
+        expectedPrivateDirectoryIdentity: nil
       )
 
       guard case .conflict = outcome else { return XCTFail("Expected conflict outcome") }
@@ -186,7 +259,8 @@ final class AttachmentFileInstallerEngineTests: XCTestCase {
         operationId: operationId,
         expectedStagedSha256: digest("candidate"),
         expectedStagedIdentity: identity.stagedIdentity,
-        expectedDirectoryIdentity: identity.directoryIdentity
+        expectedDirectoryIdentity: identity.directoryIdentity,
+        expectedPrivateDirectoryIdentity: nil
       )
 
       guard case .conflict = outcome else { return XCTFail("Expected conflict outcome") }
@@ -215,7 +289,8 @@ final class AttachmentFileInstallerEngineTests: XCTestCase {
         operationId: operationId,
         expectedStagedSha256: digest("candidate"),
         expectedStagedIdentity: identity.stagedIdentity,
-        expectedDirectoryIdentity: identity.directoryIdentity
+        expectedDirectoryIdentity: identity.directoryIdentity,
+        expectedPrivateDirectoryIdentity: nil
       )
 
       guard case .conflict = outcome else { return XCTFail("Expected conflict outcome") }
@@ -246,7 +321,8 @@ final class AttachmentFileInstallerEngineTests: XCTestCase {
         operationId: operationId,
         expectedStagedSha256: digest("candidate"),
         expectedStagedIdentity: identity.stagedIdentity,
-        expectedDirectoryIdentity: identity.directoryIdentity
+        expectedDirectoryIdentity: identity.directoryIdentity,
+        expectedPrivateDirectoryIdentity: nil
       )
 
       guard case .conflict = outcome else { return XCTFail("Expected conflict outcome") }

@@ -19,6 +19,7 @@ const {
   deleteAsync,
   hashAsync,
   installAsync,
+  prepareImmutableStageAsync,
   publishImmutableAsync,
   requireNativeModule,
   snapshotImmutableStageAsync,
@@ -28,11 +29,13 @@ const {
   deleteAsync: vi.fn(),
   hashAsync: vi.fn(),
   installAsync: vi.fn(),
+  prepareImmutableStageAsync: vi.fn(),
   publishImmutableAsync: vi.fn(),
   requireNativeModule: vi.fn(() => ({
     cleanupImmutableStageAsync,
     hashAsync,
     installAsync,
+    prepareImmutableStageAsync,
     publishImmutableAsync,
     snapshotImmutableStageAsync,
   })),
@@ -61,6 +64,13 @@ describe('installAttachmentFileGeneration', () => {
     deleteAsync.mockResolvedValue(undefined);
     installAsync.mockReset();
     hashAsync.mockReset();
+    prepareImmutableStageAsync.mockReset();
+    prepareImmutableStageAsync.mockImplementation(async (targetPath: string, operationId: string) => ({
+      stagedPath: `${targetPath.slice(0, targetPath.lastIndexOf('/') + 1)}.mindwtr-install-${operationId}.candidate/stage`,
+      stagedIdentity: 'stage-device:inode',
+      directoryIdentity: 'directory-device:inode',
+      privateDirectoryIdentity: 'private-device:inode',
+    }));
     publishImmutableAsync.mockReset();
     snapshotImmutableStageAsync.mockReset();
     snapshotImmutableStageAsync.mockResolvedValue({
@@ -148,16 +158,22 @@ describe('installAttachmentFileGeneration', () => {
 
   it('publishes an immutable same-directory generation through native create-no-replace', async () => {
     publishImmutableAsync.mockResolvedValue({ status: 'alreadyExists' });
+    const target = `file:///sync/attachments/a.${downloadHash}.txt`;
+    const reservation = await reserveFileSyncAttachmentPublication(target, downloadHash);
+    await claimFileSyncAttachmentPublication(reservation);
 
     await expect(publishImmutableAttachmentFileGeneration(
-      ' file:///sync/attachments/.mindwtr-generation-stage-1.tmp ',
-      ' file:///sync/attachments/a.hash.txt ',
+      ` ${reservation.stagedPath} `,
+      ` ${target} `,
       downloadHash.toUpperCase(),
     )).resolves.toEqual({ status: 'alreadyExists' });
     expect(publishImmutableAsync).toHaveBeenCalledWith(
-      'file:///sync/attachments/.mindwtr-generation-stage-1.tmp',
-      'file:///sync/attachments/a.hash.txt',
+      reservation.stagedPath,
+      target,
       downloadHash,
+      'stage-device:inode',
+      'directory-device:inode',
+      'private-device:inode',
     );
   });
 
@@ -168,13 +184,14 @@ describe('installAttachmentFileGeneration', () => {
 
     expect(reservation.targetPath).toBe(target);
     expect(reservation.stagedPath).toBe(
-      `file:///sync/attachments/.mindwtr-generation-stage-${reservation.operationId}.tmp`,
+      `file:///sync/attachments/.mindwtr-install-${reservation.operationId}.candidate/stage`,
     );
+    expect(prepareImmutableStageAsync).toHaveBeenCalledWith(target, reservation.operationId);
     expect(deleteAsync).not.toHaveBeenCalled();
     expect([...storage.values()].join('')).toContain(reservation.stagedPath);
   });
 
-  it('recovers only the exact device-owned scratch after a process dies before native handoff', async () => {
+  it('recovers only the exact native-prepared private stage after a process dies', async () => {
     const target = `file:///sync/attachments/a.${downloadHash}.txt`;
     const reservation = await reserveFileSyncAttachmentPublication(target, downloadHash);
 
@@ -185,10 +202,40 @@ describe('installAttachmentFileGeneration', () => {
       target,
       reservation.operationId,
       downloadHash,
+      'stage-device:inode',
+      'directory-device:inode',
+      'private-device:inode',
+    );
+    expect(deleteAsync).not.toHaveBeenCalled();
+    expect(storage.size).toBe(0);
+  });
+
+  it('persists the reservation before native private-stage preparation', async () => {
+    const target = `file:///sync/attachments/a.${downloadHash}.txt`;
+    prepareImmutableStageAsync.mockRejectedValueOnce(new Error('simulated process boundary'));
+
+    await expect(reserveFileSyncAttachmentPublication(target, downloadHash))
+      .rejects.toThrow('simulated process boundary');
+
+    const persisted = JSON.parse([...storage.values()][0]!) as Record<string, unknown>[];
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]).toMatchObject({
+      version: 3,
+      targetPath: target,
+      stagedIdentity: null,
+      directoryIdentity: null,
+      privateDirectoryIdentity: null,
+    });
+    await recoverFileSyncAttachmentPublications('file:///sync/attachments/');
+    expect(cleanupImmutableStageAsync).toHaveBeenCalledWith(
+      persisted[0]?.stagedPath,
+      target,
+      persisted[0]?.operationId,
+      downloadHash,
+      null,
       null,
       null,
     );
-    expect(deleteAsync).not.toHaveBeenCalled();
     expect(storage.size).toBe(0);
   });
 
@@ -196,8 +243,8 @@ describe('installAttachmentFileGeneration', () => {
     const target = `file:///sync/attachments/a.${downloadHash}.txt`;
     const reservation = await reserveFileSyncAttachmentPublication(target, downloadHash);
     snapshotImmutableStageAsync.mockResolvedValueOnce({
-      stagedIdentity: 'owned-stage',
-      directoryIdentity: 'owned-directory',
+      stagedIdentity: 'stage-device:inode',
+      directoryIdentity: 'directory-device:inode',
     });
     await claimFileSyncAttachmentPublication(reservation);
     cleanupImmutableStageAsync.mockResolvedValueOnce({ status: 'conflict' });
@@ -205,7 +252,7 @@ describe('installAttachmentFileGeneration', () => {
     await expect(recoverFileSyncAttachmentPublications('file:///sync/attachments/'))
       .rejects.toThrow('different generation');
 
-    expect([...storage.values()].join('')).toContain('owned-stage');
+    expect([...storage.values()].join('')).toContain('stage-device:inode');
     expect(deleteAsync).not.toHaveBeenCalled();
   });
 
