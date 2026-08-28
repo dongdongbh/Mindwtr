@@ -416,6 +416,9 @@ jobs:
     env:
       DROPBOX_APP_KEY: ${{ vars.DROPBOX_APP_KEY || secrets.DROPBOX_APP_KEY }}
       DONATION_PROMPT_ENABLED: "true"
+      # R8 exceeded the default 4 GiB heap while packaging v1.2.5-rc.2.
+      # Keep the larger heap scoped to the direct-download APK build.
+      GRADLE_OPTS: '-Dorg.gradle.jvmargs="-Xmx6144m -XX:MaxMetaspaceSize=1024m -Dfile.encoding=UTF-8"'
 
     steps:
       - name: Checkout code

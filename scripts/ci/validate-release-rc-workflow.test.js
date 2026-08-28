@@ -129,6 +129,14 @@ test("RC Android Play and FOSS builds share a parallel versionCode preflight", (
   );
 });
 
+test("direct-download Android APK build gives R8 a release-sized heap", () => {
+  const workflow = parse(
+    readFileSync(".github/workflows/release-android.yml", "utf8"),
+  );
+
+  expect(workflow.jobs["build-apk"].env.GRADLE_OPTS).toContain("-Xmx6144m");
+});
+
 test("RC validation checks the committed FOSS version before platform builds start", () => {
   const workflow = parse(
     readFileSync(".github/workflows/release-rc.yml", "utf8"),
