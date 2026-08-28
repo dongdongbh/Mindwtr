@@ -1054,18 +1054,23 @@ class AttachmentFileInstallerCoreTest {
     val target = fixture.target("a.${hash("candidate")}.txt")
     val recovery = fixture.recovery(ops)
     val identity = recovery.snapshot(staged, target, hash("candidate"))
-    Files.delete(staged.toPath())
-    staged.writeText("candidate")
+    val outcome = RandomAccessFile(staged, "r").use {
+      // Keep the unlinked inode allocated so the filesystem cannot immediately
+      // reuse its identity for the same-path replacement.
+      Files.delete(staged.toPath())
+      staged.writeText("candidate")
+      assertTrue(ops.fileIdentity(staged).fileKey != identity.stagedIdentity)
 
-    val outcome = recovery.cleanup(
-      staged,
-      target,
-      operationId,
-      hash("candidate"),
-      identity.stagedIdentity,
-      identity.directoryIdentity,
-      null,
-    )
+      recovery.cleanup(
+        staged,
+        target,
+        operationId,
+        hash("candidate"),
+        identity.stagedIdentity,
+        identity.directoryIdentity,
+        null,
+      )
+    }
 
     assertEquals(ImmutableAttachmentStageCleanupOutcome.CONFLICT, outcome)
     val preserved = fixture.target("$INSTALLER_ARTIFACT_PREFIX$operationId.quarantine/stage")
