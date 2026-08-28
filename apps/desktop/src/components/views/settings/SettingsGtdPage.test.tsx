@@ -6,6 +6,44 @@ import { SettingsGtdPage } from './SettingsGtdPage';
 import { useUiStore } from '../../../store/ui-store';
 
 describe('SettingsGtdPage', () => {
+    it('saves Board, Priorities, and Time estimates as independent optional features', async () => {
+        const updateSettings = vi.fn().mockResolvedValue(undefined);
+        const labels = {
+            ...getEnglishSettingsLabels(),
+            featureBoard: 'Board',
+            featureBoardDesc: 'Show the Board view in navigation.',
+        };
+
+        const { getByRole } = render(
+            <SettingsGtdPage
+                t={labels}
+                language="en"
+                settings={{ features: { board: false, priorities: false, timeEstimates: false } }}
+                updateSettings={updateSettings}
+                showSaved={vi.fn()}
+                autoArchiveDays={7}
+                areas={[]}
+            />
+        );
+
+        fireEvent.click(getByRole('button', { name: /features/i }));
+        fireEvent.click(getByRole('switch', { name: 'Board' }));
+        fireEvent.click(getByRole('switch', { name: 'Priorities' }));
+        fireEvent.click(getByRole('switch', { name: 'Time estimates' }));
+
+        await waitFor(() => {
+            expect(updateSettings).toHaveBeenNthCalledWith(1, {
+                features: { board: true, priorities: false, timeEstimates: false },
+            });
+            expect(updateSettings).toHaveBeenNthCalledWith(2, {
+                features: { board: false, priorities: true, timeEstimates: false },
+            });
+            expect(updateSettings).toHaveBeenNthCalledWith(3, {
+                features: { board: false, priorities: false, timeEstimates: true },
+            });
+        });
+    });
+
     it('saves the task editor presentation setting', async () => {
         const updateSettings = vi.fn().mockResolvedValue(undefined);
         const showSaved = vi.fn();

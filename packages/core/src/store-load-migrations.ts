@@ -158,6 +158,33 @@ const freshInstallNotificationsDefaultMigration: LoadMigration = {
     },
 };
 
+const freshInstallFeatureDefaultsMigration: LoadMigration = {
+    name: 'fresh-install-feature-defaults',
+    run: (data, ctx) => {
+        if (!ctx.isFreshInstall) return null;
+        const features = data.settings.features ?? {};
+        if (
+            features.board !== undefined
+            && features.priorities !== undefined
+            && features.timeEstimates !== undefined
+        ) {
+            return null;
+        }
+        return {
+            ...data,
+            settings: {
+                ...data.settings,
+                features: {
+                    ...features,
+                    board: features.board ?? false,
+                    priorities: features.priorities ?? false,
+                    timeEstimates: features.timeEstimates ?? false,
+                },
+            },
+        };
+    },
+};
+
 const taskEditorDefaultsMigration: LoadMigration = {
     name: 'task-editor-defaults',
     run: (data) => {
@@ -673,6 +700,7 @@ const LOAD_MIGRATIONS: LoadMigration[] = [
     // Everything below reads settings.deviceId for revBy stamping.
     ensureDeviceIdMigration,
     freshInstallNotificationsDefaultMigration,
+    freshInstallFeatureDefaultsMigration,
     taskEditorDefaultsMigration,
     focusGroupByDefaultsMigration,
     clearDeletedTaskProjectArchiveMetadataMigration,

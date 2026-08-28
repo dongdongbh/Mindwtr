@@ -179,8 +179,8 @@ describe('settings menu search index', () => {
             path: 'GTD → Default capture method',
         });
         expect(findSettingsMenuMatch('gtd', t('settings.gtd'), t, 'estimate')).toEqual({
-            title: 'Time estimate presets',
-            path: 'GTD',
+            title: 'Time estimates',
+            path: 'GTD → Features',
         });
         // A row that matched on its own title has no inner setting to report.
         expect(findSettingsMenuMatch('gtd', t('settings.gtd'), t, 'gtd')).toBeNull();

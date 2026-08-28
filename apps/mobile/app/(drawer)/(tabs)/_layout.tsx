@@ -19,7 +19,7 @@ import { useLanguage } from '../../../contexts/language-context';
 import { QuickCaptureSheet } from '@/components/quick-capture-sheet';
 import { QuickCaptureProvider, useQuickCapture, type QuickCaptureOptions } from '../../../contexts/quick-capture-context';
 import { useToastBottomOffset } from '../../../contexts/toast-context';
-import { getDefaultTaskAreaMode, useTaskStore, type MobileQuickAccessView, type SavedSearch, type Task } from '@mindwtr/core';
+import { getDefaultTaskAreaMode, resolveFeatureFlags, useTaskStore, type MobileQuickAccessView, type SavedSearch, type Task } from '@mindwtr/core';
 import {
   coerceMobileQuickAccessView,
   MOBILE_QUICK_ACCESS_STACK_ROUTE,
@@ -144,6 +144,7 @@ function MoreNavigationSheet({
   tc,
   visible,
   quickAccessView,
+  boardEnabled,
 }: {
   closeRequestId: number;
   onClose: () => void;
@@ -154,6 +155,7 @@ function MoreNavigationSheet({
   tc: ReturnType<typeof useThemeColors>;
   visible: boolean;
   quickAccessView: MobileQuickAccessView;
+  boardEnabled: boolean;
 }) {
   const reducedMotion = useReducedMotion();
   const sheetTranslateY = useRef(new Animated.Value(Dimensions.get('window').height)).current;
@@ -257,7 +259,9 @@ function MoreNavigationSheet({
   );
   const primaryItems: MoreDestination[] = [
     { id: 'waiting', label: t('nav.waiting'), icon: 'pause.circle.fill', iconColor: iconColors.waiting, route: '/waiting' },
-    { id: 'board', label: t('nav.board'), icon: 'square.grid.2x2.fill', iconColor: iconColors.board, route: '/board' },
+    ...(boardEnabled
+      ? [{ id: 'board', label: t('nav.board'), icon: 'square.grid.2x2.fill' as const, iconColor: iconColors.board, route: '/board' }]
+      : []),
     moreQuickAccessItem('projects'),
     {
       id: 'someday',
@@ -657,6 +661,7 @@ export default function TabLayout() {
   const defaultCapture = settings.gtd?.defaultCaptureMethod ?? 'text';
   const defaultAutoRecord = defaultCapture === 'audio';
   const quickAccessView = coerceMobileQuickAccessView(settings.appearance?.mobileQuickAccessView);
+  const boardEnabled = resolveFeatureFlags(settings).board;
   const quickAccessTabRoute = MOBILE_QUICK_ACCESS_TAB_ROUTE[quickAccessView];
   const { syncBadgeAccessibilityLabel, syncBadgeColor } = useMobileSyncBadge();
 
@@ -887,6 +892,7 @@ export default function TabLayout() {
       tc={tc}
       visible={moreSheetVisible}
       quickAccessView={quickAccessView}
+      boardEnabled={boardEnabled}
     />
     </QuickCaptureProvider>
   );

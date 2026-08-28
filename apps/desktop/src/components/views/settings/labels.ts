@@ -176,6 +176,8 @@ export const SETTINGS_LABEL_KEYS = [
     'taskEditorSectionDetails',
     'featurePriorities',
     'featurePrioritiesDesc',
+    'featureBoard',
+    'featureBoardDesc',
     'featureTimeEstimates',
     'featureTimeEstimatesDesc',
     'featurePomodoro',

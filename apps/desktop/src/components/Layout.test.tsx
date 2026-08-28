@@ -738,6 +738,26 @@ describe('Layout sync conflict surface', () => {
 });
 
 describe('Layout collapsed sidebar area filter', () => {
+    it('hides Board navigation only when the Board feature is explicitly disabled', () => {
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                settings: {
+                    ...state.settings,
+                    features: {
+                        ...(state.settings?.features ?? {}),
+                        board: false,
+                    },
+                },
+            }));
+        });
+
+        const { container, queryByRole } = renderLayout();
+
+        expect(queryByRole('button', { name: 'Board' })).not.toBeInTheDocument();
+        expect(container.querySelector('[data-view="board"]')).not.toBeInTheDocument();
+    });
+
     it('keeps the area filter available when the sidebar is collapsed', () => {
         act(() => {
             useTaskStore.setState((state) => ({

@@ -210,7 +210,11 @@ describe('runLoadMigrations', () => {
 
     it('fresh-install-notifications-default: defaults notifications off only on a fresh install', () => {
         const data = settledData();
-        data.settings = { ...data.settings, notificationsEnabled: undefined };
+        data.settings = {
+            ...data.settings,
+            notificationsEnabled: undefined,
+            features: { board: true, priorities: true, timeEstimates: true },
+        };
         const { data: result, applied } = runLoadMigrations(data, ctxFor(data, true));
         expect(applied).toEqual(['fresh-install-notifications-default']);
         expect(result.settings.notificationsEnabled).toBe(false);
@@ -221,6 +225,61 @@ describe('runLoadMigrations', () => {
         data.settings = { ...data.settings, notificationsEnabled: undefined };
         const { applied } = runLoadMigrations(data, ctxFor(data, false));
         expect(applied).not.toContain('fresh-install-notifications-default');
+    });
+
+    it('fresh-install-feature-defaults: disables optional planning features on a fresh profile', () => {
+        const data = settledData();
+        data.settings = { ...data.settings, notificationsEnabled: true, features: undefined };
+
+        const first = runLoadMigrations(data, ctxFor(data, true));
+
+        expect(first.applied).toEqual(['fresh-install-feature-defaults']);
+        expect(first.data.settings.features).toEqual({
+            board: false,
+            priorities: false,
+            timeEstimates: false,
+        });
+        expect(runLoadMigrations(first.data, ctxFor(first.data, true)).applied).toEqual([]);
+    });
+
+    it('preserves explicit fresh-profile feature choices while filling only missing defaults', () => {
+        const data = settledData();
+        data.settings = {
+            ...data.settings,
+            notificationsEnabled: true,
+            features: { board: true, priorities: false, pomodoro: true },
+        };
+
+        const { data: result } = runLoadMigrations(data, ctxFor(data, true));
+
+        expect(result.settings.features).toEqual({
+            board: true,
+            priorities: false,
+            timeEstimates: false,
+            pomodoro: true,
+        });
+    });
+
+    it('grandfathers existing profiles and leaves stored feature data untouched', () => {
+        const task = {
+            id: 't-feature-data',
+            title: 'Keep planning metadata',
+            status: 'next',
+            priority: 'high',
+            timeEstimate: '30min',
+            boardOrder: 7,
+            tags: [],
+            contexts: [],
+            createdAt: NOW_ISO,
+            updatedAt: NOW_ISO,
+        } as unknown as Task;
+        const data = settledData({ tasks: [task] });
+
+        const { data: result, applied } = runLoadMigrations(data, ctxFor(data, false));
+
+        expect(applied).not.toContain('fresh-install-feature-defaults');
+        expect(result.settings.features).toBeUndefined();
+        expect(result.tasks).toEqual([task]);
     });
 
     it('task-editor-defaults: migrates an uncustomized layout to the lean default hidden set', () => {

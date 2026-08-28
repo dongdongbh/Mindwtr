@@ -19,6 +19,7 @@ const mockRestorableRoute = vi.hoisted(() => ({
 const selectedAreaIdForNewTasksMock = vi.hoisted(() => ({ current: null as string | null | undefined }));
 const mockTaskSettings = vi.hoisted(() => ({
   appearance: {} as Record<string, unknown>,
+  features: {} as { board?: boolean },
   gtd: {
     defaultCaptureMethod: 'text',
     defaultAreaMode: undefined as 'none' | 'fixed' | 'active' | undefined,
@@ -373,6 +374,7 @@ describe('mobile tab quick capture', () => {
     });
     mockRestorableRoute.current = null;
     mockTaskSettings.appearance = {};
+    mockTaskSettings.features = {};
     mockTaskSettings.gtd.defaultCaptureMethod = 'text';
     mockTaskSettings.gtd.defaultAreaMode = undefined;
     mockTaskSettings.gtd.defaultAreaId = undefined;
@@ -642,6 +644,21 @@ describe('mobile tab quick capture', () => {
 
     expect(mockRouterPush).toHaveBeenCalledWith('/calendar');
     expect(getMoreSheetButtons(tree, 'Calendar')).toHaveLength(0);
+  });
+
+  it('hides Board from the More sheet when the Board feature is disabled', () => {
+    mockTaskSettings.features = { board: false };
+    let tree!: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<TabLayout />);
+    });
+    act(() => {
+      getMenuButton(tree).props.onPress();
+    });
+
+    expect(getMoreSheetButtons(tree, 'Board View')).toHaveLength(0);
+    expect(getVisibleMoreDestinationLabels(tree)).not.toContain('Board View');
   });
 
   it('swaps a selected quick access view with Review in the More sheet', () => {

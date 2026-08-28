@@ -1273,6 +1273,8 @@ export const zhHans: Record<string, string> = {
         'settings.enableTimeEstimates': '启用时间估算',
         'settings.features': '功能',
         'settings.featuresDesc': '按需开启可选信号。',
+        'settings.featureBoard': '看板',
+        'settings.featureBoardDesc': '在导航中显示看板视图。',
         'settings.featurePriorities': '优先级',
         'settings.featurePrioritiesDesc': '为任务显示优先级标记。',
         'settings.featureTimeEstimates': '时间估算',

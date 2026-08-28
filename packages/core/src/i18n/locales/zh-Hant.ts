@@ -1273,6 +1273,8 @@ export const zhHant: Record<string, string> = {
         'settings.enableTimeEstimates': '啓用時間估算',
         'settings.features': '功能',
         'settings.featuresDesc': '按需開啓可選信號。',
+        'settings.featureBoard': '看板',
+        'settings.featureBoardDesc': '在導覽中顯示看板檢視。',
         'settings.featurePriorities': '優先級',
         'settings.featurePrioritiesDesc': '爲任務顯示優先級標記。',
         'settings.featureTimeEstimates': '時間估算',
