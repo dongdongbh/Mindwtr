@@ -20,6 +20,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 use tauri_plugin_fs::FsExt;
 
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _};
+#[cfg(target_os = "windows")]
+use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+#[cfg(target_os = "windows")]
+use std::os::windows::io::AsRawHandle as _;
+
 use crate::config::{
     get_keyring_secret, lock_config_read_modify_write, read_bound_credential, read_config,
     read_dropbox_credential_state, set_keyring_secret, update_dropbox_credential_state,
@@ -4715,6 +4722,58 @@ mod tests {
 
         assert!(!tmp_file.exists(), "probe temp file must be removed");
         assert!(!final_file.exists(), "probe final file must be removed");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn sync_folder_probe_rejects_a_replaced_root_before_publication() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let sync_dir = parent.path().join("sync");
+        let displaced_dir = parent.path().join("displaced-sync");
+        fs::create_dir(&sync_dir).expect("create sync root");
+        let tmp_file = sync_dir.join(".mindwtr-folder-probe-root-swap.tmp");
+        let final_file = sync_dir.join(".mindwtr-folder-probe-root-swap");
+        let replacement_final_file = final_file.clone();
+        let mut swapped = false;
+        let mut before_stage = |stage: AtomicWriteStage| {
+            if stage == AtomicWriteStage::Rename && !swapped {
+                fs::rename(&sync_dir, &displaced_dir).map_err(|error| error.to_string())?;
+                fs::create_dir(&sync_dir).map_err(|error| error.to_string())?;
+                fs::write(&replacement_final_file, b"replacement-owned")
+                    .map_err(|error| error.to_string())?;
+                swapped = true;
+            }
+            Ok(())
+        };
+        let mut read_back = |path: &Path| fs::read(path).map_err(|error| error.to_string());
+        let mut remove_file = |path: &Path| match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.to_string()),
+        };
+
+        let error = probe_sync_dir_at_with(
+            &sync_dir,
+            &tmp_file,
+            &final_file,
+            &mut before_stage,
+            &mut read_back,
+            &mut remove_file,
+        )
+        .expect_err("root replacement must abort the probe");
+
+        assert!(error.starts_with("Could not finalize a file in this folder"));
+        assert!(error.contains("Sync folder changed during the test"));
+        assert_eq!(
+            fs::read(&replacement_final_file).expect("replacement leaf remains"),
+            b"replacement-owned"
+        );
+        assert!(
+            displaced_dir
+                .join(".mindwtr-folder-probe-root-swap.tmp")
+                .exists(),
+            "cleanup must not follow the replaced root name"
+        );
     }
 
     #[test]
@@ -9498,6 +9557,109 @@ struct AtomicWriteError {
     detail: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct NativeFileIdentity {
+    volume: u64,
+    file: u128,
+}
+
+#[cfg(unix)]
+fn native_file_identity(file: &File) -> std::io::Result<NativeFileIdentity> {
+    let metadata = file.metadata()?;
+    Ok(NativeFileIdentity {
+        volume: metadata.dev(),
+        file: u128::from(metadata.ino()),
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn native_file_identity(file: &File) -> std::io::Result<NativeFileIdentity> {
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+    };
+
+    let mut information = BY_HANDLE_FILE_INFORMATION::default();
+    let succeeded = unsafe {
+        GetFileInformationByHandle(file.as_raw_handle() as _, &mut information)
+    };
+    if succeeded == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(NativeFileIdentity {
+        volume: u64::from(information.dwVolumeSerialNumber),
+        file: (u128::from(information.nFileIndexHigh) << 32)
+            | u128::from(information.nFileIndexLow),
+    })
+}
+
+fn open_sync_root_no_follow(path: &Path) -> std::io::Result<File> {
+    #[cfg(unix)]
+    {
+        return OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+            .open(path);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
+            FILE_FLAG_OPEN_REPARSE_POINT,
+        };
+
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "sync root is a reparse point",
+            ));
+        }
+        return OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path);
+    }
+}
+
+#[derive(Debug)]
+struct SyncRootAuthority {
+    directory: File,
+    identity: NativeFileIdentity,
+}
+
+impl SyncRootAuthority {
+    fn retain(sync_dir: &Path) -> Result<Self, String> {
+        let directory = open_sync_root_no_follow(sync_dir)
+            .map_err(|error| format!("Failed to retain sync folder authority: {error}"))?;
+        let identity = native_file_identity(&directory)
+            .map_err(|error| format!("Failed to identify sync folder: {error}"))?;
+        Ok(Self {
+            directory,
+            identity,
+        })
+    }
+
+    fn revalidate(&self, sync_dir: &Path) -> Result<(), String> {
+        // Keep the original descriptor alive for the entire probe, then compare
+        // the name currently configured by the UI to that exact directory.
+        let current = open_sync_root_no_follow(sync_dir)
+            .map_err(|error| format!("Sync folder changed during the test: {error}"))?;
+        let current_identity = native_file_identity(&current)
+            .map_err(|error| format!("Could not identify the current sync folder: {error}"))?;
+        if current_identity != self.identity {
+            return Err("Sync folder changed during the test".to_string());
+        }
+        // Read metadata through the retained descriptor as well. Besides making
+        // the authority lifetime explicit, this catches an invalidated remote
+        // directory handle before any path-based operation is attempted.
+        self.directory
+            .metadata()
+            .map_err(|error| format!("Sync folder authority became unavailable: {error}"))?;
+        Ok(())
+    }
+}
+
 /// The one atomic write shape shared by real file sync and folder probing.
 /// Keep the newly-created handle open through `write_all` and `sync_all`, then
 /// release it before renaming. Virtual filesystems can refuse the flush lazily,
@@ -9574,11 +9736,16 @@ where
     ReadBack: FnMut(&Path) -> Result<Vec<u8>, String>,
     Remove: FnMut(&Path) -> Result<(), String>,
 {
+    let root_authority = SyncRootAuthority::retain(sync_dir).map_err(|error| {
+        sync_folder_probe_stage_error(AtomicWriteStage::Create, &error)
+    })?;
     let sync_lock = match acquire_sync_lock(sync_dir).and_then(require_exclusive_probe_lock) {
         Ok(sync_lock) => sync_lock,
         Err(error) => {
-            let _ = remove_file(tmp_file);
-            let _ = remove_file(final_file);
+            if root_authority.revalidate(sync_dir).is_ok() {
+                let _ = remove_file(tmp_file);
+                let _ = remove_file(final_file);
+            }
             return Err(sync_folder_probe_stage_error(
                 AtomicWriteStage::Create,
                 &error,
@@ -9587,15 +9754,25 @@ where
     };
 
     let result = (|| -> Result<(), String> {
+        root_authority.revalidate(sync_dir).map_err(|error| {
+            sync_folder_probe_stage_error(AtomicWriteStage::Create, &error)
+        })?;
+        let mut guarded_before_stage = |stage: AtomicWriteStage| {
+            before_stage(stage)?;
+            root_authority.revalidate(sync_dir)
+        };
         atomic_tmp_write_then_rename_with(
             tmp_file,
             final_file,
             SYNC_FOLDER_PROBE_BYTES,
-            before_stage,
+            &mut guarded_before_stage,
             None,
         )
         .map_err(|error| sync_folder_probe_stage_error(error.stage, &error.detail))?;
 
+        root_authority
+            .revalidate(sync_dir)
+            .map_err(|error| format!("Wrote a file but could not read it back: {error}"))?;
         let actual = read_back(final_file)
             .map_err(|error| format!("Wrote a file but could not read it back: {error}"))?;
         if actual != SYNC_FOLDER_PROBE_BYTES {
@@ -9604,14 +9781,19 @@ where
             );
         }
 
+        root_authority
+            .revalidate(sync_dir)
+            .map_err(|error| format!("Could not remove the test file: {error}"))?;
         remove_file(final_file)
             .map_err(|error| format!("Could not remove the test file: {error}"))
     })();
 
     // Every stage gets a best-effort cleanup pass. In particular, a failed
     // delete is retried here before its stage-specific error is returned.
-    let _ = remove_file(tmp_file);
-    let _ = remove_file(final_file);
+    if root_authority.revalidate(sync_dir).is_ok() {
+        let _ = remove_file(tmp_file);
+        let _ = remove_file(final_file);
+    }
     release_sync_lock(&sync_lock);
     result
 }
