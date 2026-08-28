@@ -256,9 +256,11 @@ const fsMocks = vi.hoisted(() => ({
 // The sync folder's exists/mkdir/remove/rename go through async Rust commands,
 // not the fs plugin's main-thread ones (#1037).
 const syncFsMocks = vi.hoisted(() => ({
+    abandonAttachmentGeneration: vi.fn(),
     exists: vi.fn(),
     mkdir: vi.fn(),
     publishAttachmentGeneration: vi.fn(),
+    reserveAttachmentGeneration: vi.fn(),
     remove: vi.fn(),
     rename: vi.fn(),
     stat: vi.fn(),
@@ -376,7 +378,19 @@ describe('desktop sync-service runtime', () => {
         fsMocks.readDir.mockResolvedValue([]);
         syncFsMocks.exists.mockImplementation(async (path: string) => path === 'mindwtr/attachments/doc.txt');
         syncFsMocks.mkdir.mockResolvedValue(undefined);
-        syncFsMocks.publishAttachmentGeneration.mockResolvedValue(undefined);
+        syncFsMocks.abandonAttachmentGeneration.mockResolvedValue(undefined);
+        syncFsMocks.publishAttachmentGeneration.mockResolvedValue({ status: 'published' });
+        syncFsMocks.reserveAttachmentGeneration.mockImplementation(async (
+            _leaseToken: string,
+            targetPath: string,
+        ) => {
+            const separatorIndex = Math.max(targetPath.lastIndexOf('/'), targetPath.lastIndexOf('\\'));
+            const separator = targetPath.includes('\\') ? '\\' : '/';
+            return {
+                operationId: 'runtime-publication-1',
+                scratchPath: `${targetPath.slice(0, separatorIndex)}${separator}.mindwtr-attachment-generation-runtime-publication-1.tmp`,
+            };
+        });
         syncFsMocks.rename.mockResolvedValue(undefined);
         syncFsMocks.remove.mockResolvedValue(undefined);
         syncFsMocks.stat.mockResolvedValue({
@@ -1046,11 +1060,15 @@ describe('desktop sync-service runtime', () => {
             expect.stringMatching(/^\/sync\/attachments\/\.mindwtr-attachment-generation-.*\.tmp$/),
             { write: true, createNew: true },
         );
-        expect(syncFsMocks.publishAttachmentGeneration).toHaveBeenCalledWith(
-            expect.stringMatching(/^\/sync\/attachments\/\.mindwtr-attachment-generation-.*\.tmp$/),
+        expect(syncFsMocks.reserveAttachmentGeneration).toHaveBeenCalledWith(
+            'runtime-file-sync-lease',
             `/sync/attachments/att-1.${LOCAL_ATTACHMENT_HASH}.txt`,
             3,
             LOCAL_ATTACHMENT_HASH,
+        );
+        expect(syncFsMocks.publishAttachmentGeneration).toHaveBeenCalledWith(
+            'runtime-file-sync-lease',
+            'runtime-publication-1',
         );
         expect(invokeMock).toHaveBeenCalledWith('save_data', {
             baselineEntities: {
@@ -1121,13 +1139,15 @@ describe('desktop sync-service runtime', () => {
             ),
             { write: true, createNew: true },
         );
-        expect(syncFsMocks.publishAttachmentGeneration).toHaveBeenCalledWith(
-            expect.stringMatching(
-                /^\\\\\?\\C:\\Users\\Pjuter\\Documents\\Mindwtr_sync\\attachments\\\.mindwtr-attachment-generation-.*\.tmp$/,
-            ),
+        expect(syncFsMocks.reserveAttachmentGeneration).toHaveBeenCalledWith(
+            'runtime-file-sync-lease',
             `\\\\?\\C:\\Users\\Pjuter\\Documents\\Mindwtr_sync\\attachments\\att-1.${LOCAL_ATTACHMENT_HASH}.txt`,
             3,
             LOCAL_ATTACHMENT_HASH,
+        );
+        expect(syncFsMocks.publishAttachmentGeneration).toHaveBeenCalledWith(
+            'runtime-file-sync-lease',
+            'runtime-publication-1',
         );
     });
 
