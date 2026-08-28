@@ -5479,8 +5479,8 @@ mod tests {
         let helper_call = format!("{helper_name}(");
         assert_eq!(
             source.matches(&helper_call).count(),
-            5,
-            "only the real sync writer, folder probe, and focused root/partial-publication test shims may call the atomic helper"
+            10,
+            "only the real sync writer, folder probe, and focused root/fallback/partial-publication test shims may call the atomic helper"
         );
 
         let helper_declaration = format!("fn {helper_name}<");
@@ -6450,6 +6450,267 @@ mod tests {
                     .starts_with(".mindwtr-probe-retire-")),
             "authority loss before reservation must not create retirement scratch"
         );
+    }
+
+    #[cfg(unix)]
+    fn retained_retirement_artifacts(sync_dir: &Path) -> Vec<PathBuf> {
+        fs::read_dir(sync_dir)
+            .expect("enumerate retained root")
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".mindwtr-probe-retire-")
+            })
+            .map(|entry| entry.path())
+            .collect()
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn atomic_writer_forced_link_fallback_retires_source_without_scratch() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let source = dir.path().join("data.json.tmp");
+        let destination = dir.path().join(DATA_FILE_NAME);
+        let lock = acquire_sync_lock(dir.path()).expect("acquire retained authority");
+        let root = RetainedSyncRoot::new(dir.path(), &lock).with_forced_link_fallback();
+        let mut rename_validations = 0;
+        let mut before_stage = |stage: AtomicWriteStage| {
+            if stage == AtomicWriteStage::Rename {
+                rename_validations += 1;
+            }
+            Ok::<(), String>(())
+        };
+
+        let mut publication = atomic_retained_tmp_write_then_rename_with(
+            &root,
+            &source,
+            &destination,
+            b"owned-generation",
+            &mut before_stage,
+            None,
+            false,
+        )
+        .expect("forced unsupported syscall must use the retained link fallback");
+        publication.keep();
+
+        assert_eq!(rename_validations, 6, "every fallback mutation is fenced");
+        assert_eq!(
+            fs::read(&destination).expect("read published generation"),
+            b"owned-generation"
+        );
+        assert!(!source.exists(), "successful fallback retires the source");
+        assert!(
+            retained_retirement_artifacts(dir.path()).is_empty(),
+            "successful fallback leaves no retirement scratch"
+        );
+        release_sync_lock(&lock);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn atomic_writer_forced_link_fallback_preserves_source_after_link_authority_loss() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let source = dir.path().join("data.json.tmp");
+        let destination = dir.path().join(DATA_FILE_NAME);
+        let lock = acquire_sync_lock(dir.path()).expect("acquire retained authority");
+        let root = RetainedSyncRoot::new(dir.path(), &lock).with_forced_link_fallback();
+        let mut rename_validations = 0;
+        let mut before_stage = |stage: AtomicWriteStage| {
+            if stage == AtomicWriteStage::Rename {
+                rename_validations += 1;
+                if rename_validations == 4 {
+                    return Err(retained_cleanup_authority_error(
+                        "injected authority loss after link publication".to_string(),
+                    ));
+                }
+            }
+            Ok(())
+        };
+
+        let error = atomic_retained_tmp_write_then_rename_with(
+            &root,
+            &source,
+            &destination,
+            b"owned-generation",
+            &mut before_stage,
+            None,
+            false,
+        )
+        .expect_err("post-link authority loss must abort source retirement");
+
+        assert!(is_retained_cleanup_authority_error(&error.detail));
+        assert!(error.owned_temp.is_none(), "lost authority cannot own cleanup");
+        assert_eq!(
+            fs::read(&destination).expect("linked generation remains"),
+            b"owned-generation"
+        );
+        assert_eq!(
+            fs::read(&source).expect("source generation remains"),
+            b"owned-generation"
+        );
+        assert!(
+            retained_retirement_artifacts(dir.path()).is_empty(),
+            "authority loss before reservation creates no retirement scratch"
+        );
+        release_sync_lock(&lock);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn atomic_writer_forced_link_fallback_preserves_source_after_reservation_authority_loss() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let source = dir.path().join("data.json.tmp");
+        let destination = dir.path().join(DATA_FILE_NAME);
+        let lock = acquire_sync_lock(dir.path()).expect("acquire retained authority");
+        let root = RetainedSyncRoot::new(dir.path(), &lock).with_forced_link_fallback();
+        let mut rename_validations = 0;
+        let mut before_stage = |stage: AtomicWriteStage| {
+            if stage == AtomicWriteStage::Rename {
+                rename_validations += 1;
+                if rename_validations == 5 {
+                    return Err(retained_cleanup_authority_error(
+                        "injected authority loss after retirement reservation".to_string(),
+                    ));
+                }
+            }
+            Ok(())
+        };
+
+        let error = atomic_retained_tmp_write_then_rename_with(
+            &root,
+            &source,
+            &destination,
+            b"owned-generation",
+            &mut before_stage,
+            None,
+            false,
+        )
+        .expect_err("post-reservation authority loss must abort retirement");
+
+        assert_eq!(error.stage, AtomicWriteStage::Rename);
+        assert!(is_retained_cleanup_authority_error(&error.detail));
+        assert!(error.owned_temp.is_none(), "lost authority cannot own cleanup");
+        assert_eq!(
+            fs::read(&destination).expect("linked generation remains"),
+            b"owned-generation"
+        );
+        assert_eq!(
+            fs::read(&source).expect("source generation remains"),
+            b"owned-generation"
+        );
+        let retirement = retained_retirement_artifacts(dir.path());
+        assert_eq!(retirement.len(), 1, "reserved placeholder is preserved");
+        assert_eq!(
+            fs::metadata(&retirement[0])
+                .expect("inspect reserved placeholder")
+                .len(),
+            0
+        );
+        release_sync_lock(&lock);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn atomic_writer_forced_link_fallback_preserves_quarantine_after_authority_loss() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let source = dir.path().join("data.json.tmp");
+        let destination = dir.path().join(DATA_FILE_NAME);
+        let lock = acquire_sync_lock(dir.path()).expect("acquire retained authority");
+        let root = RetainedSyncRoot::new(dir.path(), &lock).with_forced_link_fallback();
+        let mut rename_validations = 0;
+        let mut before_stage = |stage: AtomicWriteStage| {
+            if stage == AtomicWriteStage::Rename {
+                rename_validations += 1;
+                if rename_validations == 6 {
+                    return Err(retained_cleanup_authority_error(
+                        "injected authority loss after source quarantine".to_string(),
+                    ));
+                }
+            }
+            Ok(())
+        };
+
+        let error = atomic_retained_tmp_write_then_rename_with(
+            &root,
+            &source,
+            &destination,
+            b"owned-generation",
+            &mut before_stage,
+            None,
+            false,
+        )
+        .expect_err("post-retirement authority loss must preserve quarantine");
+
+        assert!(is_retained_cleanup_authority_error(&error.detail));
+        assert!(!source.exists(), "source has moved into quarantine");
+        assert_eq!(
+            fs::read(&destination).expect("linked generation remains"),
+            b"owned-generation"
+        );
+        let retirement = retained_retirement_artifacts(dir.path());
+        assert_eq!(retirement.len(), 1);
+        assert_eq!(
+            fs::read(&retirement[0]).expect("quarantined source remains"),
+            b"owned-generation"
+        );
+        release_sync_lock(&lock);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn atomic_writer_forced_link_fallback_preserves_placeholder_when_cleanup_loses_authority() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let source = dir.path().join("data.json.tmp");
+        let displaced_source = dir.path().join("owned-source-preserved");
+        let destination = dir.path().join(DATA_FILE_NAME);
+        let lock = acquire_sync_lock(dir.path()).expect("acquire retained authority");
+        let root = RetainedSyncRoot::new(dir.path(), &lock).with_forced_link_fallback();
+        let mut rename_validations = 0;
+        let mut before_stage = |stage: AtomicWriteStage| {
+            if stage == AtomicWriteStage::Rename {
+                rename_validations += 1;
+                if rename_validations == 5 {
+                    fs::rename(&source, &displaced_source).map_err(|error| error.to_string())?;
+                } else if rename_validations == 6 {
+                    return Err(retained_cleanup_authority_error(
+                        "injected authority loss before placeholder cleanup".to_string(),
+                    ));
+                }
+            }
+            Ok(())
+        };
+
+        let error = atomic_retained_tmp_write_then_rename_with(
+            &root,
+            &source,
+            &destination,
+            b"owned-generation",
+            &mut before_stage,
+            None,
+            false,
+        )
+        .expect_err("placeholder cleanup must stop on authority loss");
+
+        assert!(is_retained_cleanup_authority_error(&error.detail));
+        assert_eq!(
+            fs::read(&destination).expect("linked generation remains"),
+            b"owned-generation"
+        );
+        assert_eq!(
+            fs::read(&displaced_source).expect("displaced source remains"),
+            b"owned-generation"
+        );
+        let retirement = retained_retirement_artifacts(dir.path());
+        assert_eq!(retirement.len(), 1, "placeholder remains for recovery");
+        assert_eq!(
+            fs::metadata(&retirement[0])
+                .expect("inspect retained placeholder")
+                .len(),
+            0
+        );
+        release_sync_lock(&lock);
     }
 
     #[test]
@@ -13617,9 +13878,31 @@ fn sync_parent_directory_for_durability(path: &Path) -> std::io::Result<()> {
 /// This closes crashes and races with cooperating clients/providers. A malicious
 /// same-UID process that can mutate private process handles remains outside the
 /// File Sync threat boundary.
+#[derive(Clone, Copy)]
+enum RetainedRootRenameStrategy {
+    Native,
+    #[cfg(all(test, unix))]
+    ForceLinkFallback,
+}
+
+impl RetainedRootRenameStrategy {
+    fn force_link_fallback(self) -> bool {
+        #[cfg(all(test, unix))]
+        {
+            return matches!(self, Self::ForceLinkFallback);
+        }
+        #[cfg(not(all(test, unix)))]
+        {
+            let _ = self;
+            false
+        }
+    }
+}
+
 struct RetainedSyncRoot<'a> {
     sync_dir: &'a Path,
     directory: &'a File,
+    rename_strategy: RetainedRootRenameStrategy,
 }
 
 impl<'a> RetainedSyncRoot<'a> {
@@ -13627,7 +13910,14 @@ impl<'a> RetainedSyncRoot<'a> {
         Self {
             sync_dir,
             directory: &sync_lock.sync_root,
+            rename_strategy: RetainedRootRenameStrategy::Native,
         }
+    }
+
+    #[cfg(all(test, unix))]
+    fn with_forced_link_fallback(mut self) -> Self {
+        self.rename_strategy = RetainedRootRenameStrategy::ForceLinkFallback;
+        self
     }
 
     fn leaf<'b>(&self, path: &'b Path) -> std::io::Result<&'b OsStr> {
@@ -13707,6 +13997,7 @@ impl<'a> RetainedSyncRoot<'a> {
             self.leaf(destination)?,
             replace,
             before_mutation,
+            self.rename_strategy,
         )
     }
 
@@ -13879,11 +14170,13 @@ fn retained_root_rename(
     destination: &OsStr,
     replace: bool,
     before_mutation: &mut dyn FnMut() -> std::io::Result<()>,
+    rename_strategy: RetainedRootRenameStrategy,
 ) -> std::io::Result<()> {
     use std::os::fd::AsRawFd as _;
 
     let source = retained_root_leaf_c_string(source)?;
     let destination = retained_root_leaf_c_string(destination)?;
+    let forced_fallback = !replace && rename_strategy.force_link_fallback();
     before_mutation()?;
     let result = if replace {
         unsafe {
@@ -13894,6 +14187,8 @@ fn retained_root_rename(
                 destination.as_ptr(),
             )
         }
+    } else if forced_fallback {
+        -1
     } else {
         unsafe {
             libc::syscall(
@@ -13909,7 +14204,11 @@ fn retained_root_rename(
     if result == 0 {
         return Ok(());
     }
-    let error = std::io::Error::last_os_error();
+    let error = if forced_fallback {
+        std::io::Error::from_raw_os_error(libc::EOPNOTSUPP)
+    } else {
+        std::io::Error::last_os_error()
+    };
     if !replace
         && matches!(
             error.raw_os_error(),
@@ -13933,11 +14232,13 @@ fn retained_root_rename(
     destination: &OsStr,
     replace: bool,
     before_mutation: &mut dyn FnMut() -> std::io::Result<()>,
+    rename_strategy: RetainedRootRenameStrategy,
 ) -> std::io::Result<()> {
     use std::os::fd::AsRawFd as _;
 
     let source = retained_root_leaf_c_string(source)?;
     let destination = retained_root_leaf_c_string(destination)?;
+    let forced_fallback = !replace && rename_strategy.force_link_fallback();
     before_mutation()?;
     let result = if replace {
         unsafe {
@@ -13948,6 +14249,8 @@ fn retained_root_rename(
                 destination.as_ptr(),
             )
         }
+    } else if forced_fallback {
+        -1
     } else {
         unsafe {
             libc::renameatx_np(
@@ -13962,7 +14265,11 @@ fn retained_root_rename(
     if result == 0 {
         return Ok(());
     }
-    let error = std::io::Error::last_os_error();
+    let error = if forced_fallback {
+        std::io::Error::from_raw_os_error(libc::ENOTSUP)
+    } else {
+        std::io::Error::last_os_error()
+    };
     if !replace
         && matches!(
             error.raw_os_error(),
@@ -13986,6 +14293,7 @@ fn retained_root_rename(
     destination: &OsStr,
     replace: bool,
     before_mutation: &mut dyn FnMut() -> std::io::Result<()>,
+    rename_strategy: RetainedRootRenameStrategy,
 ) -> std::io::Result<()> {
     use std::os::fd::AsRawFd as _;
 
@@ -14005,6 +14313,11 @@ fn retained_root_rename(
             return Ok(());
         }
         return Err(std::io::Error::last_os_error());
+    }
+    if rename_strategy.force_link_fallback() {
+        // Keep the deterministic test seam's validation sequence aligned with
+        // Linux/macOS, where one native no-replace attempt precedes fallback.
+        before_mutation()?;
     }
     retained_root_link_then_unlink_no_replace(
         directory,
@@ -14173,6 +14486,7 @@ fn retained_root_rename(
     destination: &OsStr,
     replace: bool,
     before_mutation: &mut dyn FnMut() -> std::io::Result<()>,
+    _rename_strategy: RetainedRootRenameStrategy,
 ) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt as _;
     use std::os::windows::io::AsRawHandle as _;
@@ -14220,6 +14534,7 @@ fn retained_root_rename(
     _destination: &OsStr,
     _replace: bool,
     _before_mutation: &mut dyn FnMut() -> std::io::Result<()>,
+    _rename_strategy: RetainedRootRenameStrategy,
 ) -> std::io::Result<()> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
@@ -15000,6 +15315,7 @@ impl OwnedRetainedRootPublication {
         RetainedSyncRoot {
             sync_dir: &self.sync_dir,
             directory: &self.directory,
+            rename_strategy: RetainedRootRenameStrategy::Native,
         }
     }
 
