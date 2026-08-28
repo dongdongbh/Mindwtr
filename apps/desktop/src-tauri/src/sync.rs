@@ -6002,9 +6002,15 @@ mod tests {
         let peer = dir.path().join("peer");
         fs::write(&source, b"owned-generation").expect("seed source");
         fs::write(&peer, b"peer-generation").expect("seed peer");
+        let directory = File::open(dir.path()).expect("open retained directory");
+        let source_leaf = retained_root_leaf_c_string(source.file_name().unwrap()).unwrap();
+        let destination_leaf =
+            retained_root_leaf_c_string(destination.file_name().unwrap()).unwrap();
 
         let error = retained_root_link_then_unlink_no_replace_with(
-            || fs::hard_link(&source, &destination),
+            &directory,
+            source_leaf.as_c_str(),
+            destination_leaf.as_c_str(),
             || {
                 fs::rename(&destination, &linked_generation)?;
                 fs::rename(&peer, &destination)?;
@@ -6025,6 +6031,59 @@ mod tests {
         assert_eq!(
             fs::read(&source).expect("source remains"),
             b"owned-generation"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn link_fallback_quarantines_a_swapped_source_without_deleting_it() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let source = dir.path().join("stage");
+        let destination = dir.path().join("canonical");
+        let displaced_source = dir.path().join("owned-source-preserved");
+        let peer = dir.path().join("peer");
+        fs::write(&source, b"owned-generation").expect("seed source");
+        fs::write(&peer, b"peer-generation").expect("seed peer");
+        let directory = File::open(dir.path()).expect("open retained directory");
+        let source_leaf = retained_root_leaf_c_string(source.file_name().unwrap()).unwrap();
+        let destination_leaf =
+            retained_root_leaf_c_string(destination.file_name().unwrap()).unwrap();
+
+        let error = retained_root_link_then_unlink_no_replace_with(
+            &directory,
+            source_leaf.as_c_str(),
+            destination_leaf.as_c_str(),
+            || {
+                fs::rename(&source, &displaced_source)?;
+                fs::rename(&peer, &source)?;
+                Ok(())
+            },
+        )
+        .expect_err("source replacement must not be unlinked");
+
+        assert!(error.to_string().contains("replacement source generation"));
+        assert_eq!(
+            fs::read(&destination).expect("linked generation remains"),
+            b"owned-generation"
+        );
+        assert_eq!(
+            fs::read(&displaced_source).expect("displaced source remains"),
+            b"owned-generation"
+        );
+        let quarantined_peer = fs::read_dir(dir.path())
+            .expect("enumerate quarantine")
+            .filter_map(Result::ok)
+            .find(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".mindwtr-probe-retire-")
+            })
+            .expect("replacement source is preserved in quarantine")
+            .path();
+        assert_eq!(
+            fs::read(quarantined_peer).expect("read preserved peer"),
+            b"peer-generation"
         );
     }
 
@@ -13530,56 +13589,121 @@ fn retained_root_link_then_unlink_no_replace(
     source: &CStr,
     destination: &CStr,
 ) -> std::io::Result<()> {
-    use std::os::fd::AsRawFd as _;
-
-    retained_root_link_then_unlink_no_replace_with(
-        || {
-            if unsafe {
-                libc::linkat(
-                    directory.as_raw_fd(),
-                    source.as_ptr(),
-                    directory.as_raw_fd(),
-                    destination.as_ptr(),
-                    0,
-                )
-            } == 0
-            {
-                Ok(())
-            } else {
-                Err(std::io::Error::last_os_error())
-            }
-        },
-        || {
-            if unsafe { libc::unlinkat(directory.as_raw_fd(), source.as_ptr(), 0) } == 0 {
-                Ok(())
-            } else {
-                Err(std::io::Error::last_os_error())
-            }
-        },
-    )
+    retained_root_link_then_unlink_no_replace_with(directory, source, destination, || Ok(()))
 }
 
 #[cfg(unix)]
-fn retained_root_link_then_unlink_no_replace_with<Link, UnlinkSource>(
-    mut link: Link,
-    mut unlink_source: UnlinkSource,
+fn retained_root_link_then_unlink_no_replace_with<BeforeSourceRetirement>(
+    directory: &File,
+    source: &CStr,
+    destination: &CStr,
+    mut before_source_retirement: BeforeSourceRetirement,
 ) -> std::io::Result<()>
 where
-    Link: FnMut() -> std::io::Result<()>,
-    UnlinkSource: FnMut() -> std::io::Result<()>,
+    BeforeSourceRetirement: FnMut() -> std::io::Result<()>,
 {
-    link()?;
-    let Err(unlink_error) = unlink_source() else {
+    use std::os::fd::AsRawFd as _;
+    use std::os::unix::ffi::OsStrExt as _;
+
+    let source_file = retained_root_open(
+        directory,
+        OsStr::from_bytes(source.to_bytes()),
+        false,
+        false,
+        false,
+    )?;
+    let source_identity = native_file_identity(&source_file)?;
+    if unsafe {
+        libc::linkat(
+            directory.as_raw_fd(),
+            source.as_ptr(),
+            directory.as_raw_fd(),
+            destination.as_ptr(),
+            0,
+        )
+    } != 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    if let Err(error) = before_source_retirement() {
+        return Err(retained_linked_destination_preserved_error(error));
+    }
+    for _ in 0..16 {
+        let sequence = RETAINED_CLEANUP_SEQUENCE.fetch_add(1, AtomicOrdering::Relaxed);
+        let quarantine = CString::new(format!(
+            ".mindwtr-probe-retire-{}-{sequence:016x}",
+            std::process::id()
+        ))
+        .expect("generated quarantine name contains no NUL");
+        let quarantine_leaf = OsStr::from_bytes(quarantine.as_bytes());
+        let reservation = match retained_root_open(
+            directory,
+            quarantine_leaf,
+            true,
+            true,
+            false,
+        ) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(retained_linked_destination_preserved_error(error)),
+        };
+        drop(reservation);
+        if unsafe {
+            libc::renameat(
+                directory.as_raw_fd(),
+                source.as_ptr(),
+                directory.as_raw_fd(),
+                quarantine.as_ptr(),
+            )
+        } != 0
+        {
+            let error = std::io::Error::last_os_error();
+            // This invocation reserved the private leaf create-new. Replacing
+            // that placeholder cannot overwrite a peer-owned quarantine.
+            let _ = unsafe { libc::unlinkat(directory.as_raw_fd(), quarantine.as_ptr(), 0) };
+            return Err(retained_linked_destination_preserved_error(error));
+        }
+
+        let quarantined = retained_root_open(
+            directory,
+            quarantine_leaf,
+            false,
+            false,
+            false,
+        );
+        let matches_source = quarantined
+            .ok()
+            .and_then(|file| native_file_identity(&file).ok())
+            .is_some_and(|identity| identity == source_identity);
+        if !matches_source {
+            return Err(std::io::Error::other(format!(
+                "{RETAINED_LINKED_DESTINATION_PRESERVED}: no-replace publication preserved a replacement source generation in quarantine"
+            )));
+        }
+        if unsafe { libc::unlinkat(directory.as_raw_fd(), quarantine.as_ptr(), 0) } != 0 {
+            return Err(retained_linked_destination_preserved_error(
+                std::io::Error::last_os_error(),
+            ));
+        }
         return Ok(());
-    };
-    // Do not try to roll the destination back by pathname. A peer can replace
-    // that name after `linkat` and before a compensating `unlinkat`, which
-    // would delete the peer generation. Retaining the exact hard-linked
-    // generation is the fail-safe outcome; callers report the failed source
-    // retirement and preserve/recover the duplicate on a later pass.
-    Err(std::io::Error::other(format!(
-        "{RETAINED_LINKED_DESTINATION_PRESERVED}: no-replace publication linked the exact source generation but could not retire the source; both names were preserved: {unlink_error}"
-    )))
+    }
+    Err(retained_linked_destination_preserved_error(
+        std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "could not allocate a unique source-retirement quarantine",
+        ),
+    ))
+}
+
+#[cfg(unix)]
+fn retained_linked_destination_preserved_error(error: std::io::Error) -> std::io::Error {
+    // Publication has already created the destination. Preserve both names on
+    // every retirement ambiguity so the caller can quarantine only the exact
+    // destination generation it owns.
+    std::io::Error::other(format!(
+        "{RETAINED_LINKED_DESTINATION_PRESERVED}: no-replace publication linked the exact source generation but could not safely retire the source; both names were preserved: {error}"
+    ))
 }
 
 const RETAINED_LINKED_DESTINATION_PRESERVED: &str =
