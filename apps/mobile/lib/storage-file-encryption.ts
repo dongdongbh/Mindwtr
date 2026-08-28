@@ -509,7 +509,11 @@ const DESKTOP_RECOVERY_ENTRY_PREFIX = '.mindwtr-desktop-recovery-entry-';
 // without inheriting user-controlled leaf length.
 const TRANSITION_SCRATCH_MARKER = '.mindwtr-et-';
 const ATTACHMENT_INSTALLER_LOCK_NAME = '.mindwtr-attachment-installer.lock';
-const ATTACHMENT_INSTALLER_RECOVERY_ARTIFACT = /^\.mindwtr-install-[a-f0-9]{64}\.(?:journal|candidate|quarantine)$/;
+// Android and iOS derive this 32-hex identifier from the first half of the
+// SHA-256 of the native install target path. Keep this shape aligned with both
+// native AttachmentFileInstaller implementations: a retained artifact must
+// stop an encryption transition before any shared-folder mutation.
+const ATTACHMENT_INSTALLER_RECOVERY_ARTIFACT = /^\.mindwtr-install-[a-f0-9]{32}\.(?:journal|candidate|quarantine)$/;
 let transitionScratchCounter = 0;
 
 export type FileSyncTransitionMutationPoint = 'before-quarantine' | 'before-install' | 'before-remove-commit';

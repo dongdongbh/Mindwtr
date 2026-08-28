@@ -963,8 +963,8 @@ describe('File Sync transitions through core orchestration', () => {
   }, 30_000);
 
   it.each([
-    ['path', SYNC_URI, `${SYNC_DIR}/attachments/.mindwtr-install-${'c'.repeat(64)}.journal`],
-    ['SAF', SAF_SYNC_URI, `content://provider/tree/root/document/root/attachments/.mindwtr-install-${'d'.repeat(64)}.candidate`],
+    ['path', SYNC_URI, `${SYNC_DIR}/attachments/.mindwtr-install-${'c'.repeat(32)}.journal`],
+    ['SAF', SAF_SYNC_URI, `content://provider/tree/root/document/root/attachments/.mindwtr-install-${'d'.repeat(32)}.candidate`],
   ])('fails closed before writes when %s contains a retained native publication artifact', async (
     _posture,
     syncUri,
