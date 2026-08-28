@@ -6277,8 +6277,13 @@ mod tests {
             retained_directory_name_range(0, 104, 2, 106).expect("packed final entry"),
             104..106
         );
+        assert_eq!(
+            retained_directory_entry_range(0, 112, 218).expect("padded typed entry"),
+            0..112
+        );
         assert!(retained_directory_name_range(0, 104, 4, 106).is_err());
         assert!(retained_directory_name_range(usize::MAX, 104, 2, usize::MAX).is_err());
+        assert!(retained_directory_entry_range(0, 112, 106).is_err());
 
         let source = include_str!("sync.rs");
         let windows_enumerator = source
@@ -13961,7 +13966,19 @@ fn retained_root_list_names(directory: &File) -> std::io::Result<Vec<OsString>> 
     };
 
     let buffer_bytes = 64 * 1024;
-    let words = buffer_bytes / std::mem::size_of::<usize>();
+    // The provider may pack a final filename through the exact end of the
+    // advertised payload even though Rust's typed structure includes trailing
+    // padding after FileName. Keep initialized padding outside the payload so
+    // forming the typed reference below never extends beyond the allocation.
+    let allocation_bytes = buffer_bytes
+        .checked_add(std::mem::size_of::<FILE_ID_BOTH_DIR_INFO>())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "File Sync directory enumeration buffer size overflowed",
+            )
+        })?;
+    let words = allocation_bytes.div_ceil(std::mem::size_of::<usize>());
     let mut buffer = vec![0_usize; words];
     let mut restart = true;
     let mut names = Vec::new();
@@ -13991,15 +14008,12 @@ fn retained_root_list_names(directory: &File) -> std::io::Result<Vec<OsString>> 
         let mut offset = 0_usize;
         loop {
             let fixed = std::mem::offset_of!(FILE_ID_BOTH_DIR_INFO, FileName);
-            if offset
-                .checked_add(fixed)
-                .map_or(true, |end| end > buffer_bytes)
-            {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "File Sync directory enumeration returned a truncated entry",
-                ));
-            }
+            retained_directory_entry_range(
+                offset,
+                std::mem::size_of::<FILE_ID_BOTH_DIR_INFO>(),
+                buffer.len() * std::mem::size_of::<usize>(),
+            )?;
+            retained_directory_name_range(offset, fixed, 0, buffer_bytes)?;
             let entry = unsafe {
                 &*buffer
                     .as_ptr()
@@ -14046,6 +14060,27 @@ fn retained_root_list_names(directory: &File) -> std::io::Result<Vec<OsString>> 
         }
     }
     Ok(names)
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn retained_directory_entry_range(
+    entry_offset: usize,
+    entry_bytes: usize,
+    allocation_bytes: usize,
+) -> std::io::Result<std::ops::Range<usize>> {
+    let end = entry_offset.checked_add(entry_bytes).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "File Sync directory enumeration entry offset overflowed",
+        )
+    })?;
+    if end > allocation_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "File Sync directory enumeration returned a truncated typed entry",
+        ));
+    }
+    Ok(entry_offset..end)
 }
 
 #[cfg(any(target_os = "windows", test))]
