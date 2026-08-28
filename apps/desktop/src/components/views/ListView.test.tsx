@@ -17,6 +17,12 @@ vi.mock('../../lib/report-error', () => ({
   reportError: reportErrorMock,
 }));
 
+const exportDesktopCsvMock = vi.hoisted(() => vi.fn());
+
+vi.mock('../../lib/data-transfer', () => ({
+  exportDesktopCsv: exportDesktopCsvMock,
+}));
+
 const initialTaskState = useTaskStore.getState();
 const initialUiState = useUiStore.getState();
 const now = new Date().toISOString();
@@ -1379,5 +1385,87 @@ describe('ListView', () => {
       expect(queryByText('Work done task')).toBeInTheDocument();
       expect(queryByText('Home done task')).not.toBeInTheDocument();
     });
+  });
+});
+
+// #1096: "Export current results as CSV" exports filteredTasks — the query —
+// not visibleTasks, which grouping and collapse have already thinned out.
+describe('ListView filtered CSV export', () => {
+  const exportedTitles = () => {
+    const calls = exportDesktopCsvMock.mock.calls;
+    const [, tasks] = calls[calls.length - 1] as [unknown, Task[]];
+    return tasks.map((task) => task.title);
+  };
+
+  beforeEach(() => {
+    exportDesktopCsvMock.mockReset();
+    exportDesktopCsvMock.mockResolvedValue(undefined);
+    window.localStorage.removeItem('mindwtr:view:list:next:v1');
+    useTaskStore.setState(initialTaskState, true);
+    useUiStore.setState(initialUiState, true);
+    useTaskStore.setState({
+      _allTasks: [
+        makeTask('1', { title: 'Work next', status: 'next', contexts: ['@work'] }),
+        makeTask('2', { title: 'Home next', status: 'next', contexts: ['@home'] }),
+      ],
+      _allProjects: [],
+      _allAreas: [],
+      settings: {},
+      lastDataChangeAt: 1,
+    });
+    useUiStore.setState((state) => ({
+      ...state,
+      listFilters: { criteria: {}, open: false },
+      listOptions: {
+        showDetails: false,
+        focusGroupBy: 'none', inboxGroupBy: 'none', nextGroupBy: 'none',
+        waitingGroupBy: 'none', somedayGroupBy: 'none',
+        referenceGroupBy: 'area', doneGroupBy: 'none', archivedGroupBy: 'none',
+        focusTop3Only: false,
+      },
+      projectView: { selectedProjectId: null },
+      editingTaskId: null,
+      expandedTaskIds: {},
+    }));
+  });
+
+  it('exports every task the filter kept, and nothing it dropped', async () => {
+    const { getByRole, queryByText } = renderListView('next', 'Next');
+
+    fireEvent.click(getByRole('button', { name: 'Filters' }));
+    const panel = document.getElementById('list-filters-panel');
+    fireEvent.click(within(panel!).getByRole('button', { name: /@work/ }));
+    await waitFor(() => expect(queryByText('Home next')).not.toBeInTheDocument());
+
+    fireEvent.click(getByRole('button', { name: 'Export CSV' }));
+
+    await waitFor(() => expect(exportDesktopCsvMock).toHaveBeenCalledTimes(1));
+    expect(exportedTitles()).toEqual(['Work next']);
+  });
+
+  it('still exports a collapsed group — folding one is presentation, not a filter', async () => {
+    useUiStore.setState((state) => ({
+      ...state,
+      listOptions: { ...state.listOptions, nextGroupBy: 'context' },
+    }));
+    const { getByRole, queryByText } = renderListView('next', 'Next');
+
+    fireEvent.click(getByRole('button', { name: /@work\s*1/i }));
+    expect(queryByText('Work next')).not.toBeInTheDocument();
+
+    fireEvent.click(getByRole('button', { name: 'Export CSV' }));
+
+    await waitFor(() => expect(exportDesktopCsvMock).toHaveBeenCalledTimes(1));
+    expect(exportedTitles().sort()).toEqual(['Home next', 'Work next']);
+  });
+
+  it('hands the serializer the whole dataset, so a subset task can still name its project', async () => {
+    const { getByRole } = renderListView('next', 'Next');
+
+    fireEvent.click(getByRole('button', { name: 'Export CSV' }));
+
+    await waitFor(() => expect(exportDesktopCsvMock).toHaveBeenCalledTimes(1));
+    const [data] = exportDesktopCsvMock.mock.calls[0] as [{ tasks: Task[] }, Task[]];
+    expect(data.tasks.map((task) => task.id).sort()).toEqual(['1', '2']);
   });
 });

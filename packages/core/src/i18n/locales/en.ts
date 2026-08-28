@@ -158,6 +158,8 @@ export const en: Record<string, string> = {
         'list.details': 'Details',
         'list.showDetails': 'Show details',
         'list.hideDetails': 'Hide details',
+        'list.exportCsv': 'Export CSV',
+        'list.exportCsvFiltered': 'Export current results as CSV',
         'list.compact': 'Compact',
         'list.density': 'Density',
         'list.densityComfortable': 'Comfortable',

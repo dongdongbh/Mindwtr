@@ -150,6 +150,8 @@ export const faOverrides: Record<string, string> = {
         'list.details': 'جزئیات',
         'list.showDetails': 'نمایش جزئیات',
         'list.hideDetails': 'پنهان کردن جزئیات',
+        'list.exportCsv': 'خروجی CSV',
+        'list.exportCsvFiltered': 'خروجی گرفتن نتایج فعلی به‌صورت CSV',
         'list.compact': 'فشرده',
         'list.density': 'تراکم',
         'list.densityComfortable': 'راحت',

@@ -150,6 +150,8 @@ export const svOverrides: Record<string, string> = {
         'list.details': 'Detaljer',
         'list.showDetails': 'Visa detaljer',
         'list.hideDetails': 'Dölj detaljer',
+        'list.exportCsv': 'Exportera CSV',
+        'list.exportCsvFiltered': 'Exportera aktuella resultat som CSV',
         'list.compact': 'Kompakt',
         'list.density': 'Densitet',
         'list.densityComfortable': 'Bekväm',

@@ -8,6 +8,7 @@ import {
     serializeBackupData,
     type AppData,
     type MergeResult,
+    type Task,
     useTaskStore,
 } from '@mindwtr/core';
 import {
@@ -238,7 +239,12 @@ export const exportDesktopBackup = async (data: AppData): Promise<void> => {
     }
 };
 
-export const exportDesktopCsv = async (data: AppData): Promise<void> => {
+/**
+ * `tasks` narrows the export to a view's current result set (#1096) — `data`
+ * stays the full dataset because that is where the serializer looks up project,
+ * section and area titles.
+ */
+export const exportDesktopCsv = async (data: AppData, tasks?: readonly Task[]): Promise<void> => {
     addBreadcrumb('transfer:export');
     void logInfo('CSV export started', {
         scope: 'transfer',
@@ -247,8 +253,8 @@ export const exportDesktopCsv = async (data: AppData): Promise<void> => {
     try {
         await flushPendingSave();
         await downloadTextFile(
-            createBackupFileName().replace(/\.json$/u, '.csv'),
-            serializeMindwtrCsv(data),
+            createBackupFileName().replace(/\.json$/u, tasks ? '-filtered.csv' : '.csv'),
+            serializeMindwtrCsv(data, tasks ? { tasks } : {}),
             { name: 'CSV', extension: 'csv', mimeType: 'text/csv' },
         );
         void logInfo('CSV export complete', {

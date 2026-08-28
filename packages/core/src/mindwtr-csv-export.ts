@@ -17,6 +17,14 @@ import type { AppData, Task } from './types';
 export interface MindwtrCsvExportOptions {
     /** Field separator. The importer sniffs `,`/`;`/tab; comma is its default. */
     delimiter?: string;
+    /**
+     * Export only these tasks, in this order, instead of every live task in
+     * `data` — what a view exports when the user has filtered it (#1096).
+     * `data` still has to be the WHOLE dataset: project, section and area
+     * titles are resolved out of it, and a subset task's project may not be
+     * represented in the subset at all.
+     */
+    tasks?: readonly Task[];
 }
 
 const isLive = (entity: { deletedAt?: string; purgedAt?: string }): boolean => (
@@ -94,7 +102,7 @@ export function serializeMindwtrCsv(data: AppData, options: MindwtrCsvExportOpti
         };
     };
 
-    const rows = data.tasks
+    const rows = (options.tasks ?? data.tasks)
         .filter(isLive)
         .map((task) => {
             const cells = cellsFor(task);

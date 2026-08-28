@@ -205,6 +205,8 @@ export const zhHans: Record<string, string> = {
         'list.details': '详情',
         'list.showDetails': '显示详情',
         'list.hideDetails': '隐藏详情',
+        'list.exportCsv': '导出 CSV',
+        'list.exportCsvFiltered': '将当前结果导出为 CSV',
         'list.compact': '紧凑',
         'list.density': '密度',
         'list.densityComfortable': '舒适',

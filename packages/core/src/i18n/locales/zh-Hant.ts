@@ -205,6 +205,8 @@ export const zhHant: Record<string, string> = {
         'list.details': '詳情',
         'list.showDetails': '顯示詳情',
         'list.hideDetails': '隱藏詳情',
+        'list.exportCsv': '匯出 CSV',
+        'list.exportCsvFiltered': '將目前結果匯出為 CSV',
         'list.compact': '緊湊',
         'list.density': '密度',
         'list.densityComfortable': '舒適',

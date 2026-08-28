@@ -168,6 +168,8 @@ export const jaOverrides: Record<string, string> = {
         'list.details': '詳細',
         'list.showDetails': '詳細を表示',
         'list.hideDetails': '詳細を隠す',
+        'list.exportCsv': 'CSV をエクスポート',
+        'list.exportCsvFiltered': '現在の結果を CSV としてエクスポート',
         'list.compact': 'コンパクト',
         'list.density': '表示密度',
         'list.densityComfortable': 'ゆったり',

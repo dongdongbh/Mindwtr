@@ -393,3 +393,59 @@ describe('serializeMindwtrCsv', () => {
         expect(reimport(csv).tasks[0].recurrence).toEqual({ rule: 'weekly', rrule: 'FREQ=WEEKLY' });
     });
 });
+
+// #1096: a view exports what it currently shows. The subset narrows the ROWS
+// only — every lookup table still comes from the full AppData.
+describe('serializeMindwtrCsv with a task subset', () => {
+    const titles = (csv: string) => csv.split('\n').slice(1).map((row) => row.split(',')[0]);
+
+    const filterableData = () => appData({
+        areas: [{ id: 'area-1', name: 'Work', createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-01T00:00:00.000Z' }] as AppData['areas'],
+        projects: [project({ areaId: 'area-1' })],
+        sections: [{ id: 'section-1', projectId: 'project-1', title: 'Launch', order: 0, createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-01T00:00:00.000Z' }] as Section[],
+        tasks: [
+            task({ id: 'kept', title: 'Kept', projectId: 'project-1', sectionId: 'section-1', contexts: ['@customer1'] }),
+            task({ id: 'dropped', title: 'Dropped', projectId: 'project-1', contexts: ['@other'] }),
+        ],
+    });
+
+    it('writes only the given tasks', () => {
+        const data = filterableData();
+        const kept = data.tasks.filter((item) => item.contexts?.includes('@customer1'));
+
+        expect(titles(serializeMindwtrCsv(data, { tasks: kept }))).toEqual(['Kept']);
+    });
+
+    it('still resolves project, section and inherited area from the full dataset', () => {
+        const data = filterableData();
+        const csv = serializeMindwtrCsv(data, { tasks: [data.tasks[0]] });
+        const header = csv.split('\n')[0].split(',');
+        const cells = csv.split('\n')[1].split(',');
+
+        expect(csv.split('\n')).toHaveLength(2);
+        expect(cells[header.indexOf('Project')]).toBe('Marketing');
+        expect(cells[header.indexOf('Section')]).toBe('Launch');
+        expect(cells[header.indexOf('Area')]).toBe('Work');
+    });
+
+    it('keeps the caller ordering', () => {
+        const data = filterableData();
+
+        expect(titles(serializeMindwtrCsv(data, { tasks: [data.tasks[1], data.tasks[0]] })))
+            .toEqual(['Dropped', 'Kept']);
+    });
+
+    it('still drops tombstones from the subset', () => {
+        const data = filterableData();
+        const deleted = task({ id: 'gone', title: 'Gone', deletedAt: '2026-08-02T00:00:00.000Z' });
+
+        expect(titles(serializeMindwtrCsv(data, { tasks: [data.tasks[0], deleted] }))).toEqual(['Kept']);
+    });
+
+    it('exports the whole dataset, byte for byte, when no subset is given', () => {
+        const data = filterableData();
+
+        expect(serializeMindwtrCsv(data, {})).toBe(serializeMindwtrCsv(data));
+        expect(titles(serializeMindwtrCsv(data))).toEqual(['Kept', 'Dropped']);
+    });
+});

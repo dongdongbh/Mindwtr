@@ -26,6 +26,7 @@ import { buildProjectOrderMap,
     resolveI18nText,
     useTaskStore, tFallback,
     baseTextCollator,
+    getInMemoryAppDataSnapshot,
 } from '@mindwtr/core';
 import type { FilterCriteria, Task, TaskStatus } from '@mindwtr/core';
 import type { BulkOrganizeTaskUpdateInput } from '@mindwtr/core';
@@ -937,6 +938,21 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
         taskIndexById,
         toggleMultiSelect,
     ]);
+    // filteredTasks, NOT visibleTasks: collapsing a group hides rows, it does not
+    // narrow the query, so a collapsed group still exports (#1096).
+    const handleExportCsv = useCallback(async () => {
+        try {
+            // Imported lazily: data-transfer drags in the sync service and both
+            // storage adapters, which the list has no other reason to load.
+            const { exportDesktopCsv } = await import('../../lib/data-transfer');
+            await exportDesktopCsv(getInMemoryAppDataSnapshot(), filteredTasks);
+            showToast(resolveText('settings.exportCsvSuccess', 'CSV exported successfully!'), 'success');
+        } catch (error) {
+            reportError('Failed to export filtered CSV', error);
+            showToast(resolveText('settings.exportCsvFailed', 'Failed to export CSV'), 'error');
+        }
+    }, [filteredTasks, resolveText, showToast]);
+
     const handleToggleDetails = useCallback(() => {
         if (showListDetails) {
             collapseAllTaskDetails();
@@ -988,6 +1004,7 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                         onToggleSelection={toggleSelectionMode}
                         showListDetails={showListDetails}
                         onToggleDetails={handleToggleDetails}
+                        onExportCsv={() => { void handleExportCsv(); }}
                         densityMode={densityMode}
                         onToggleDensity={() => {
                             void updateSettings({
