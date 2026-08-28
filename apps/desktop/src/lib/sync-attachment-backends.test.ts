@@ -87,6 +87,9 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
     coreMocks.computeSha256Hex.mockImplementation(actual.computeSha256Hex);
     return {
         ...actual,
+        // Keep the File Sync read-boundary regressions small while exercising
+        // the same above-limit behavior as production's much larger ceiling.
+        MAX_DOWNLOAD_BYTES: 16,
         computeSha256Hex: coreMocks.computeSha256Hex,
         webdavFileExists: coreMocks.webdavFileExists,
         webdavHeadFile: coreMocks.webdavHeadFile,
@@ -1485,6 +1488,56 @@ describe('desktop sync attachment backends', () => {
             expect(syncFsMocks.remove).not.toHaveBeenCalledWith(scratchPath);
             expect(syncFsMocks.remove).not.toHaveBeenCalledWith(generationPath);
             expect(result.tasks[0].attachments?.[0]?.cloudKey).toBe(generationKey);
+        });
+
+        it.each([
+            ['preflight', false],
+            ['publication race', true],
+        ])('reuses a valid oversized File Sync generation during %s verification', async (_label, race) => {
+            const oversizedBytes = new Uint8Array(MAX_DOWNLOAD_BYTES + 1).fill(7);
+            const appData = makePendingData();
+            appData.tasks[0].attachments![0].cloudKey = undefined;
+            Object.assign(appData.tasks[0].attachments![0], {
+                contentSize: oversizedBytes.byteLength,
+            });
+            const generationKey = `attachments/attachment-1.${BYTES_HASH}.txt`;
+            const generationPath = `/candidate-sync/${generationKey}`;
+            let targetChecks = 0;
+            fsMocks.exists.mockResolvedValue(true);
+            fsMocks.readFile.mockResolvedValue(oversizedBytes);
+            fsMocks.stat.mockResolvedValue({ mtime: new Date(1000), size: oversizedBytes.byteLength });
+            syncFsMocks.stat.mockResolvedValue({ mtimeMs: 1000, size: oversizedBytes.byteLength });
+            syncFsMocks.exists.mockImplementation(async (path: string) => {
+                if (path !== generationPath) return false;
+                targetChecks += 1;
+                return race ? targetChecks > 1 : true;
+            });
+            syncFsMocks.publishAttachmentGeneration.mockResolvedValue({ status: 'alreadyExists' });
+
+            await coreMocks.computeSha256Hex.withImplementation(
+                async () => BYTES_HASH,
+                async () => {
+                    const result = expectFoldedData(await syncFileAttachments(
+                        appData,
+                        '/candidate-sync',
+                        depsFor(),
+                        postMergeHelpers(),
+                    ));
+
+                    expect(syncFsMocks.stat).toHaveBeenCalledWith(generationPath);
+                    expect(result.tasks[0].attachments?.[0]).toMatchObject({
+                        cloudKey: generationKey,
+                        pendingContentUpload: undefined,
+                    });
+                    if (race) {
+                        expect(syncFsMocks.publishAttachmentGeneration).toHaveBeenCalledTimes(1);
+                        expect(syncFsMocks.abandonAttachmentGeneration).toHaveBeenCalledWith('', 'operation-1');
+                    } else {
+                        expect(syncFsMocks.reserveAttachmentGeneration).not.toHaveBeenCalled();
+                        expect(syncFsMocks.publishAttachmentGeneration).not.toHaveBeenCalled();
+                    }
+                },
+            );
         });
 
         it('publishes a losing File Sync candidate under its own generation key', async () => {

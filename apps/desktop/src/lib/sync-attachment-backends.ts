@@ -1461,14 +1461,25 @@ export async function syncFileAttachments(
         computeSha256Hex(await readLocalFile(path, attachment));
     const createUploadSnapshot = createAttachmentUploadSnapshotFactory({ readLocalFile, statLocalFile });
 
-    const readFileSyncWireData = async (sourcePath: string): Promise<Uint8Array> => {
+    const readFileSyncWireData = async (
+        sourcePath: string,
+        options?: { expectedSize?: number },
+    ): Promise<Uint8Array> => {
+        const expectedSize = options?.expectedSize;
+        const readLimit = expectedSize ?? MAX_DOWNLOAD_BYTES;
+        if (!Number.isSafeInteger(readLimit) || readLimit < 0) {
+            throw new Error('File Sync attachment read limit is invalid');
+        }
         const sourceStat = await syncFsStat(sourcePath);
         if (
             !Number.isFinite(sourceStat.size)
             || sourceStat.size < 0
-            || sourceStat.size > MAX_DOWNLOAD_BYTES
+            || sourceStat.size > readLimit
         ) {
-            throw new ResponseTooLargeError(MAX_DOWNLOAD_BYTES);
+            throw new ResponseTooLargeError(readLimit);
+        }
+        if (expectedSize !== undefined && sourceStat.size !== expectedSize) {
+            throw new Error('File Sync attachment generation size does not match the candidate');
         }
         const source = await open(sourcePath, { read: true });
         const chunks: Uint8Array[] = [];
@@ -1482,8 +1493,8 @@ export async function syncFileAttachments(
                     throw new Error('File Sync attachment read returned an invalid byte count');
                 }
                 totalBytes += bytesRead;
-                if (totalBytes > MAX_DOWNLOAD_BYTES) {
-                    throw new ResponseTooLargeError(MAX_DOWNLOAD_BYTES);
+                if (totalBytes > readLimit) {
+                    throw new ResponseTooLargeError(readLimit);
                 }
                 chunks.push(buffer.slice(0, bytesRead));
             }
@@ -1495,6 +1506,9 @@ export async function syncFileAttachments(
         for (const chunk of chunks) {
             wireData.set(chunk, wireOffset);
             wireOffset += chunk.byteLength;
+        }
+        if (expectedSize !== undefined && wireData.byteLength !== expectedSize) {
+            throw new Error('File Sync attachment generation size changed while reading');
         }
         return wireData;
     };
@@ -1511,7 +1525,10 @@ export async function syncFileAttachments(
         const publicationLeaseToken = fileSyncLeaseToken ?? '';
         const verifyExistingGeneration = async (): Promise<void> => {
             try {
-                const plaintext = await openAttachmentBytes(await readFileSyncWireData(targetPath));
+                const plaintext = await openAttachmentBytes(await readFileSyncWireData(
+                    targetPath,
+                    { expectedSize: wireData.byteLength },
+                ));
                 const actualSha256 = await computeSha256Hex(plaintext);
                 if (actualSha256?.toLowerCase() !== expectedPlaintextSha256.toLowerCase()) {
                     throw new Error('plaintext digest mismatch');
