@@ -1214,7 +1214,11 @@ export const useSyncSettings = ({
                 );
             } else if (result.fileSyncLockUnavailable) {
                 showFileSyncLockFeedback('unavailable');
-            } else if (result.fileAttachmentUploadBlocked === 'too-large') {
+            } else if (
+                result.success
+                && !result.remoteWriteDeferred
+                && result.fileAttachmentUploadBlocked === 'too-large'
+            ) {
                 showToast(resolveText(
                     'settings.syncFileAttachmentTooLarge',
                     'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',

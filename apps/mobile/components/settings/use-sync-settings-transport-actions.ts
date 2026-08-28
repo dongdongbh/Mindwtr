@@ -939,7 +939,11 @@ export function useSyncSettingsTransportActions({
                 );
                 return;
             }
-            if (result.fileAttachmentUploadBlocked === 'too-large') {
+            if (
+                result.success
+                && !result.remoteWriteDeferred
+                && result.fileAttachmentUploadBlocked === 'too-large'
+            ) {
                 showSettingsWarning(
                     tr('common.notice'),
                     tr('settings.syncFileAttachmentTooLarge'),

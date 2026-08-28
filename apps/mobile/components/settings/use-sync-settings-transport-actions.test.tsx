@@ -1026,7 +1026,20 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
     });
 
-    it('prioritizes a deferred remote document write over attachment recovery guidance', async () => {
+    it.each([
+        {
+            outcome: 'failed',
+            result: { success: false, error: 'Document sync failed.' },
+        },
+        {
+            outcome: 'deferred',
+            result: {
+                success: true,
+                remoteWriteDeferred: true,
+                error: 'Remote write failed. Retrying in the background.',
+            },
+        },
+    ])('prioritizes a $outcome document sync result over attachment guidance', async ({ result }) => {
         seedStorage([
             [SYNC_BACKEND_KEY, 'webdav'],
             [WEBDAV_URL_KEY, 'https://dav.example.com/mindwtr/'],
@@ -1037,10 +1050,9 @@ describe('useSyncSettingsTransportActions', () => {
         await renderHarness();
         mocked.performMobileSync.mockClear();
         mocked.performMobileSync.mockResolvedValueOnce({
-            success: true,
-            remoteWriteDeferred: true,
+            ...result,
             attachmentWriteDeferred: true,
-            error: 'Remote write failed. Retrying in the background.',
+            fileAttachmentUploadBlocked: 'too-large',
         });
 
         await act(async () => {
@@ -1054,6 +1066,11 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.showSettingsWarning).not.toHaveBeenCalledWith(
             'common.notice',
             'settings.syncAttachmentWriteDeferred',
+            6000,
+        );
+        expect(mocked.showSettingsWarning).not.toHaveBeenCalledWith(
+            'common.notice',
+            'settings.syncFileAttachmentTooLarge',
             6000,
         );
         expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));

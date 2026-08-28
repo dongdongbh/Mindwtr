@@ -1345,7 +1345,20 @@ describe('useSyncSettings cloud token validation', () => {
         expect(showToast).not.toHaveBeenCalledWith('Sync completed', 'success');
     });
 
-    it('prioritizes a deferred remote document write over attachment recovery guidance', async () => {
+    it.each([
+        {
+            outcome: 'failed',
+            result: { success: false, error: 'Document sync failed.' },
+        },
+        {
+            outcome: 'deferred',
+            result: {
+                success: true,
+                remoteWriteDeferred: true,
+                error: 'Remote write failed. Retrying in the background.',
+            },
+        },
+    ])('prioritizes a $outcome document sync result over attachment guidance', async ({ result: syncResult }) => {
         vi.mocked(SyncService.getSyncBackend).mockResolvedValue('cloud');
         vi.mocked(SyncService.getCloudProvider).mockResolvedValue('selfhosted');
         vi.mocked(SyncService.getCloudConfig).mockResolvedValue({
@@ -1355,10 +1368,9 @@ describe('useSyncSettings cloud token validation', () => {
             allowInsecureHttp: false,
         });
         vi.mocked(SyncService.performSync).mockResolvedValueOnce({
-            success: true,
-            remoteWriteDeferred: true,
+            ...syncResult,
             attachmentWriteDeferred: true,
-            error: 'Remote write failed. Retrying in the background.',
+            fileAttachmentUploadBlocked: 'too-large',
         });
         const showToast = vi.fn();
         useUiStore.setState({ showToast } as never);
@@ -1375,6 +1387,11 @@ describe('useSyncSettings cloud token validation', () => {
         );
         expect(showToast).not.toHaveBeenCalledWith(
             'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
+            'info',
+            6000,
+        );
+        expect(showToast).not.toHaveBeenCalledWith(
+            'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
             'info',
             6000,
         );

@@ -415,6 +415,43 @@ describe('Layout sync conflict surface', () => {
 
     it.each([
         {
+            outcome: 'failed',
+            result: { success: false, error: 'Document sync failed.' },
+        },
+        {
+            outcome: 'deferred',
+            result: {
+                success: true,
+                remoteWriteDeferred: true,
+                error: 'Remote write failed. Retrying in the background.',
+            },
+        },
+    ])('prioritizes a $outcome document sync result over File attachment size guidance', async ({ result }) => {
+        const showToast = vi.fn();
+        const performSyncSpy = vi.spyOn(SyncService, 'performSync').mockResolvedValue({
+            ...result,
+            fileAttachmentUploadBlocked: 'too-large',
+        } as Awaited<ReturnType<typeof SyncService.performSync>>);
+        act(() => {
+            useUiStore.setState((state) => ({ ...state, showToast }));
+        });
+
+        const { getByRole } = renderLayout();
+        fireEvent.click(getByRole('button', { name: /Sync now/i }));
+
+        await waitFor(() => expect(performSyncSpy).toHaveBeenCalledWith({ manual: true }));
+        expect(showToast).toHaveBeenCalledWith(result.error, 'error');
+        expect(showToast).not.toHaveBeenCalledWith(
+            'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
+            'info',
+            6000,
+        );
+
+        performSyncSpy.mockRestore();
+    });
+
+    it.each([
+        {
             deferred: 'busy' as const,
             message: 'Another compatible Mindwtr device is updating this sync location. Wait for it to finish, then sync again.',
         },

@@ -129,7 +129,11 @@ export function useManualPullSync() {
         return;
       }
 
-      if (result.fileAttachmentUploadBlocked === 'too-large') {
+      if (
+        result.success
+        && !result.remoteWriteDeferred
+        && result.fileAttachmentUploadBlocked === 'too-large'
+      ) {
         finishDeferredIndicator();
         showToast({
           title: tFallback(t, 'common.notice', 'Notice'),
@@ -144,7 +148,11 @@ export function useManualPullSync() {
         return;
       }
 
-      if (result.success && result.attachmentWriteDeferred) {
+      if (
+        result.success
+        && !result.remoteWriteDeferred
+        && result.attachmentWriteDeferred
+      ) {
         finishDeferredIndicator();
         showToast({
           title: tFallback(t, 'common.notice', 'Notice'),
