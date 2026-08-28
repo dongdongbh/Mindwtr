@@ -727,6 +727,47 @@ describe('cloud server utils', () => {
         expect(invalidRecurrence.error).toContain('recurrence');
     });
 
+    test('accepts Task.viewSectionIds on the deployed open task shape', () => {
+        const baseTask = makeTestTask({ id: 'view-section-task', title: 'Task' });
+        const result = validateAppData({
+            tasks: [{
+                ...baseTask,
+                viewSectionIds: {
+                    someday: 'books',
+                },
+            }],
+            projects: [],
+            settings: {
+                gtd: {
+                    viewSections: {
+                        someday: [{ id: 'books', title: 'Books to read', order: 0 }],
+                    },
+                },
+            },
+        });
+        expect(result.ok).toBe(true);
+    });
+
+    test('validates forward-compatible viewSectionIds values without allowlisting scope keys', () => {
+        const baseTask = makeTestTask({ id: 'view-section-task', title: 'Task' });
+        const futureScope = validateAppData({
+            tasks: [{
+                ...baseTask,
+                viewSectionIds: { futureScopeAddedByNewerClient: 'future-heading' },
+            }],
+            projects: [],
+        });
+        expect(futureScope.ok).toBe(true);
+
+        const invalid = validateAppData({
+            tasks: [{ ...baseTask, viewSectionIds: { someday: 42 } }],
+            projects: [],
+        });
+        expect(invalid.ok).toBe(false);
+        if (invalid.ok) throw new Error('Expected invalid viewSectionIds');
+        expect(invalid.error).toContain('viewSectionIds');
+    });
+
     test('validates settings.attachments.pendingRemoteDeletes structure', () => {
         const iso = '2024-01-01T00:00:00.000Z';
         const base = {

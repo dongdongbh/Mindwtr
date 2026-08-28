@@ -1,4 +1,5 @@
 import React from 'react';
+import { Alert } from 'react-native';
 import renderer from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -30,6 +31,11 @@ const storeState = vi.hoisted(() => ({
     appearance: {
       density: 'compact',
     },
+    gtd: {
+      viewSections: {
+        someday: [{ id: 'books', title: 'Books to read', order: 0 }],
+      },
+    },
   },
   getDerivedState: () => ({
     allContexts: ['@office'],
@@ -60,7 +66,15 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 vi.mock('@mindwtr/core', () => ({
   AREA_PRESET_COLORS: ['#3b82f6', '#10b981'],
   DEFAULT_AREA_COLOR: '#3b82f6',
+  formatI18nTemplate: (template: string, values: Record<string, string>) => (
+    template.replace(/{{(\w+)}}/g, (_match, key: string) => values[key] ?? '')
+  ),
   getPersonNameKey: (value?: string) => value?.trim().toLowerCase() ?? '',
+  sortViewSectionDefinitions: (definitions: any[] = []) => [...definitions].sort((a, b) => a.order - b.order),
+  tFallback: (translate: (key: string) => string, key: string, fallback: string) => {
+    const value = translate(key);
+    return value && value !== key ? value : fallback;
+  },
   useTaskStore: (selector?: (state: typeof storeState) => unknown) => (selector ? selector(storeState) : storeState),
 }));
 
@@ -88,11 +102,14 @@ vi.mock('./settings.hooks', () => ({
         'settings.manage': 'Manage',
         'areas.manage': 'Areas',
         'common.add': 'Add',
+        'common.cancel': 'Cancel',
+        'common.delete': 'Delete',
         'contexts.title': 'Contexts',
         'common.tasks': 'tasks',
         'projects.changeColor': 'Change color',
         'projects.noArea': 'No area',
         'projects.noTags': 'No tags',
+        'viewSections.somedaySections': 'Someday sections',
       }[key] ?? key),
   }),
   useSettingsScrollContent: () => ({}),
@@ -164,8 +181,56 @@ describe('ManageSettingsScreen', () => {
 
     expect(asyncStorageMocks.setItem).toHaveBeenLastCalledWith(
       'mindwtr:settings:manage:openSections',
-      JSON.stringify({ areas: true, people: false, contexts: false, tags: false }),
+      JSON.stringify({ areas: true, people: false, somedaySections: false, contexts: false, tags: false }),
     );
+  });
+
+  it('renders Someday sections collapsed by default and confirms deletion', async () => {
+    asyncStorageMocks.getItem.mockResolvedValue(null);
+    const alertSpy = vi.spyOn(Alert, 'alert');
+
+    let tree!: renderer.ReactTestRenderer;
+    await renderer.act(async () => {
+      tree = renderer.create(<ManageSettingsScreen />);
+      await flushEffects();
+    });
+
+    expect(tree.root.findByProps({ testID: 'manage-section-toggle-someday-sections' })).toBeTruthy();
+    expect(
+      tree.root.findAll((node) => (node.type as unknown) === 'Text' && node.props.children === 'Books to read'),
+    ).toHaveLength(0);
+
+    await renderer.act(async () => {
+      tree.root
+        .find(
+          (node) =>
+            node.props.testID === 'manage-section-toggle-someday-sections' &&
+            typeof node.props.onPress === 'function',
+        )
+        .props.onPress();
+      await flushEffects();
+    });
+
+    expect(
+      tree.root.findAll((node) => (node.type as unknown) === 'Text' && node.props.children === 'Books to read'),
+    ).toHaveLength(1);
+
+    renderer.act(() => {
+      tree.root.findByProps({ accessibilityLabel: 'Delete: Books to read' }).props.onPress();
+    });
+    expect(storeState.updateSettings).not.toHaveBeenCalled();
+    expect(alertSpy).toHaveBeenCalledTimes(1);
+
+    await renderer.act(async () => {
+      alertSpy.mock.calls[0]?.[2]?.find((button) => button.style === 'destructive')?.onPress?.();
+      await flushEffects();
+    });
+    expect(storeState.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      gtd: expect.objectContaining({
+        viewSections: expect.objectContaining({ someday: [] }),
+      }),
+    }));
+    alertSpy.mockRestore();
   });
 
   it('creates a managed person from the people section', async () => {

@@ -1,5 +1,5 @@
 {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "sinceVersionPolicy": "Contract versions start at 1 for every field present when this table was introduced; they are independent of SQLite migration versions.",
     "fields": [
         { "name": "id", "sync": "identity", "nullability": "required", "sinceVersion": 1, "signature": "content", "sqliteColumn": "id", "cloudKit": null, "cloudWrite": "managed", "sqliteOrder": 0, "sqliteType": null },
@@ -24,6 +24,7 @@
         { "name": "location", "sync": "content", "nullability": "optional", "sinceVersion": 1, "signature": "content", "sqliteColumn": "location", "cloudKit": { "key": "location", "kind": "string" }, "cloudWrite": "create-patch", "sqliteOrder": 20, "sqliteType": "TEXT" },
         { "name": "projectId", "sync": "content", "nullability": "optional", "sinceVersion": 1, "signature": "content", "sqliteColumn": "projectId", "cloudKit": { "key": "projectId", "kind": "string" }, "cloudWrite": "create-patch", "sqliteOrder": 21, "sqliteType": "TEXT" },
         { "name": "sectionId", "sync": "content", "nullability": "optional", "sinceVersion": 1, "signature": "content", "sqliteColumn": "sectionId", "cloudKit": { "key": "sectionId", "kind": "string" }, "cloudWrite": "create-patch", "sqliteOrder": 22, "sqliteType": "TEXT" },
+        { "name": "viewSectionIds", "sync": "content", "nullability": "optional", "sinceVersion": 2, "signature": "content", "sqliteColumn": "viewSectionIds", "cloudKit": { "key": "viewSectionIds", "kind": "json-string" }, "cloudWrite": "create-patch", "sqliteOrder": 43, "sqliteType": "TEXT" },
         { "name": "areaId", "sync": "content", "nullability": "optional", "sinceVersion": 1, "signature": "content", "sqliteColumn": "areaId", "cloudKit": { "key": "areaId", "kind": "string" }, "cloudWrite": "create-patch", "sqliteOrder": 23, "sqliteType": "TEXT" },
         { "name": "isFocusedToday", "sync": "content", "nullability": "optional", "sinceVersion": 1, "signature": "content", "sqliteColumn": "isFocusedToday", "cloudKit": { "key": "isFocusedToday", "kind": "boolean" }, "cloudWrite": "create-patch", "sqliteOrder": 27, "sqliteType": "INTEGER" },
         { "name": "timeEstimate", "sync": "content", "nullability": "optional", "sinceVersion": 1, "signature": "content", "sqliteColumn": "timeEstimate", "cloudKit": { "key": "timeEstimate", "kind": "string" }, "cloudWrite": "create-patch", "sqliteOrder": 28, "sqliteType": "TEXT" },
@@ -77,6 +78,7 @@
         "location": "Test lab",
         "projectId": "project-schema",
         "sectionId": "section-schema",
+        "viewSectionIds": { "someday": "view-section-schema" },
         "areaId": "area-schema",
         "isFocusedToday": true,
         "timeEstimate": "30min",

@@ -18,7 +18,7 @@ import {
     undoTaskCompletion,
     useTaskStore,
 } from '@mindwtr/core';
-import type { Area, Project, ProjectSequenceTaskCue, Task, TaskStatus } from '@mindwtr/core';
+import type { Area, Project, ProjectSequenceTaskCue, Section, Task, TaskStatus } from '@mindwtr/core';
 import { useLanguage } from '../contexts/language-context';
 import React, { useCallback, useRef, useState } from 'react';
 import { ArrowRight, Check, RotateCcw, Trash2 } from 'lucide-react-native';
@@ -111,6 +111,7 @@ export type SwipeableTaskItemRowContext = {
     updateTask: TaskStoreActions['updateTask'];
     restoreTask: TaskStoreActions['restoreTask'];
     projects: Project[];
+    sectionById: Map<string, Section>;
     areas: Area[];
     focusedCount: number;
     focusTaskLimit: number;
@@ -194,6 +195,7 @@ function StoreBackedSwipeableTaskItem(props: Omit<SwipeableTaskItemInnerProps, '
             updateTask: state.updateTask,
             restoreTask: state.restoreTask,
             projects: state.projects,
+            sectionById: state._sectionsById,
             areas: state.areas,
             focusedCount: state.getDerivedState().focusedCount,
             focusTaskLimit: normalizeFocusTaskLimit(state.settings?.gtd?.focusTaskLimit),
@@ -257,6 +259,7 @@ function SwipeableTaskItemInner({
         updateTask,
         restoreTask,
         projects,
+        sectionById,
         areas,
         focusedCount,
         focusTaskLimit,
@@ -690,6 +693,7 @@ function SwipeableTaskItemInner({
             onToggleFocus={toggleFocus}
             focusToggleDisabledLabel={task.isFocusedToday ? undefined : focusToggleDisabledLabel}
             projects={projects}
+            sectionById={sectionById}
             selectionMode={selectionMode}
             sequenceCue={sequenceCue}
             showChecklist={!isReference && showChecklist}

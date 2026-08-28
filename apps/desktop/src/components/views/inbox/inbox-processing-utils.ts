@@ -1,5 +1,24 @@
+import { useEffect, useRef } from 'react';
 import { normalizeClockTimeInput, type Area, type Person, type Project, type TimeEstimate } from '@mindwtr/core';
 import { joinDateTime, splitDateTime } from '@mindwtr/core/date-draft';
+
+/**
+ * Put the caret in the processing title as each capture opens, so a
+ * keyboard-first pass can type `@phone !Work /due:tomorrow` without reaching
+ * for the mouse (#1088). The caret lands at the end rather than selecting the
+ * text: the first keystroke has to refine the captured thought, never wipe it.
+ */
+export function useProcessingTitleFocus(taskId?: string, step?: string) {
+    const ref = useRef<HTMLInputElement | null>(null);
+    useEffect(() => {
+        const input = ref.current;
+        if (!input) return;
+        input.focus();
+        const caret = input.value.length;
+        input.setSelectionRange(caret, caret);
+    }, [taskId, step]);
+    return ref;
+}
 
 /** The delegate's email, taken from their saved mailto: reference link ('' when unknown). */
 export const resolveDelegateEmail = (people: readonly Person[], who: string): string => {

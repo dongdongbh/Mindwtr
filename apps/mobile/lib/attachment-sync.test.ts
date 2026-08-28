@@ -1804,6 +1804,69 @@ describe('attachment sync', () => {
     expect(data.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
   });
 
+  it('downloads a remote-only attachment through the generation installer when proving a candidate cloud backend', async () => {
+    const remoteBytes = new Uint8Array([1, 2, 3]);
+    const remoteHash = sha256Hex(remoteBytes);
+    mockMissingTargetWithDownloadStage(remoteBytes);
+    const core = await import('@mindwtr/core');
+    vi.mocked(core.cloudGetFile).mockResolvedValue(remoteBytes.buffer);
+    const appData: AppData = {
+      tasks: [{
+        id: 'task-1',
+        title: 'Task',
+        status: 'inbox',
+        tags: [],
+        contexts: [],
+        attachments: [{
+          id: 'report',
+          kind: 'file',
+          title: 'Report.pdf',
+          uri: '',
+          cloudKey: 'attachments/report.pdf',
+          fileHash: remoteHash,
+          localStatus: 'missing',
+          createdAt: '2026-08-03T10:00:00.000Z',
+          updatedAt: '2026-08-03T10:00:00.000Z',
+        }],
+        createdAt: '2026-08-03T10:00:00.000Z',
+        updatedAt: '2026-08-03T10:00:00.000Z',
+      }],
+      projects: [],
+      sections: [],
+      areas: [],
+      settings: {},
+    };
+
+    const { syncCloudAttachments } = attachmentSync;
+    const { didMutate, data } = syncResult(
+      await syncCloudAttachments(
+        appData,
+        { url: 'https://candidate.example/v1/data', token: 'candidate-token' },
+        'https://candidate.example/v1',
+        { activationProbe: true, phase: 'post-merge' },
+      ),
+      appData,
+    );
+
+    expect(didMutate).toBe(true);
+    expect(core.cloudGetFile).toHaveBeenCalledWith(
+      'https://candidate.example/v1/attachments/report.pdf',
+      { token: 'candidate-token' },
+    );
+    expect(attachmentFileInstallerMock.installAttachmentFileGeneration).toHaveBeenCalledWith(
+      expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-download-/),
+      'file://document/attachments/report.pdf',
+      { kind: 'absent' },
+      remoteHash,
+    );
+    expect(data.tasks[0]?.attachments?.[0]).toMatchObject({
+      cloudKey: 'attachments/report.pdf',
+      uri: 'file://document/attachments/report.pdf',
+      fileHash: remoteHash,
+      localStatus: 'available',
+    });
+  });
+
   it('uploads a candidate-cleared local attachment when proving a cloud backend', async () => {
     const localUri = 'file://document/attachments/notes.txt';
     fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
@@ -1870,7 +1933,7 @@ describe('attachment sync', () => {
 
   it('proves an existing candidate cloud attachment with a bounded GET and hash check', async () => {
     const remoteBytes = new Uint8Array([1, 2, 3]);
-    fileSystemMock.getInfoAsync.mockResolvedValue({ exists: false });
+    mockMissingTargetWithDownloadStage(remoteBytes);
     const core = await import('@mindwtr/core');
     vi.mocked(core.cloudGetFile).mockResolvedValue(remoteBytes.slice().buffer as ArrayBuffer);
     const appData: AppData = {

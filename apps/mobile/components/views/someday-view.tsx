@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet, Platform } from 'react-native';
-import { shallow, tFallback, useTaskStore } from '@mindwtr/core';
+import { groupTasksByViewSection, shallow, sortViewSectionDefinitions, tFallback, useTaskStore } from '@mindwtr/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Task, TaskStatus } from '@mindwtr/core';
 import { useTheme } from '../../contexts/theme-context';
@@ -20,9 +20,10 @@ import { DeferredProjectsSection, selectDeferredProjects } from './deferred-proj
 
 
 export function SomedayView() {
-  const { tasks, projects, updateTask, updateProject, deleteTask, restoreTask, batchMoveTasks, batchDeleteTasks, batchUpdateTasks, highlightTaskId, setHighlightTask } = useTaskStore((state) => ({
+  const { tasks, projects, settings, updateTask, updateProject, deleteTask, restoreTask, batchMoveTasks, batchDeleteTasks, batchUpdateTasks, highlightTaskId, setHighlightTask } = useTaskStore((state) => ({
     tasks: state.tasks,
     projects: state.projects,
+    settings: state.settings,
     updateTask: state.updateTask,
     updateProject: state.updateProject,
     deleteTask: state.deleteTask,
@@ -63,7 +64,19 @@ export function SomedayView() {
     () => selectDeferredProjects(projects, 'someday', resolvedAreaFilter, areaById),
     [projects, resolvedAreaFilter, areaById],
   );
-
+  const somedaySections = useMemo(
+    () => sortViewSectionDefinitions(settings?.gtd?.viewSections?.someday ?? []),
+    [settings?.gtd?.viewSections?.someday],
+  );
+  const somedayTaskGroups = useMemo(
+    () => groupTasksByViewSection(
+      somedayTasks,
+      'someday',
+      somedaySections,
+      tFallback(t, 'viewSections.noSection', 'No section'),
+    ),
+    [somedaySections, somedayTasks, t],
+  );
   const selection = useTaskListSelection({
     batchDeleteTasks,
     batchMoveTasks,
@@ -122,6 +135,7 @@ export function SomedayView() {
 
       <TaskListView
         tasks={somedayTasks}
+        taskGroups={somedayTaskGroups}
         isDark={isDark}
         themeColors={tc}
         t={t}
@@ -133,14 +147,16 @@ export function SomedayView() {
         bulkStatusOptions={bulkMoveStatusOptions}
         contentContainerStyle={taskListContentStyle}
         ListHeaderComponent={(
-          <DeferredProjectsSection
-            projects={deferredProjects}
-            areaById={areaById}
-            themeColors={tc}
-            t={t}
-            onActivateProject={handleActivateProject}
-            onOpenProject={handleOpenProject}
-          />
+          <View>
+            <DeferredProjectsSection
+              projects={deferredProjects}
+              areaById={areaById}
+              themeColors={tc}
+              t={t}
+              onActivateProject={handleActivateProject}
+              onOpenProject={handleOpenProject}
+            />
+          </View>
         )}
         ListEmptyComponent={deferredProjects.length === 0 ? (
           <View style={styles.emptyState}>

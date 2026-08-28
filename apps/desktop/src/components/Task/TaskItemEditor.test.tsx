@@ -1,8 +1,9 @@
-import { fireEvent, render, within } from '@testing-library/react';
+import { fireEvent, render, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createTaskDraft, type Task } from '@mindwtr/core';
 
 import { TaskItemEditor } from './TaskItemEditor';
+import { LanguageProvider } from '../../contexts/language-context';
 
 type EditorAi = Parameters<typeof TaskItemEditor>[0]['ai'];
 
@@ -82,6 +83,11 @@ const translations: Record<string, string> = {
     'common.delete': 'Delete',
     'common.save': 'Save',
     'common.cancel': 'Cancel',
+    'viewSections.add': 'New section…',
+    'viewSections.nameHint': 'Section name',
+    'viewSections.namePlaceholder': 'Books to read',
+    'viewSections.noSection': 'No section',
+    'viewSections.somedaySection': 'Someday section',
     'status.done': 'Done',
 };
 
@@ -107,9 +113,11 @@ const baseProps: Parameters<typeof TaskItemEditor>[0] = {
     projects: [],
     sections: [],
     areas: [],
+    somedaySections: [],
     onCreateProject: vi.fn().mockResolvedValue(null),
     onCreateArea: vi.fn().mockResolvedValue(null),
     onCreateSection: vi.fn().mockResolvedValue(null),
+    onCreateSomedaySection: vi.fn().mockResolvedValue(null),
     organizerFields: [],
     basicFieldsBeforeOrganizers: [],
     basicFieldsAfterOrganizers: [],
@@ -136,6 +144,72 @@ const baseProps: Parameters<typeof TaskItemEditor>[0] = {
 };
 
 describe('TaskItemEditor', () => {
+    it('assigns a Someday section without changing project or project-section membership', () => {
+        const setField = vi.fn();
+        const somedayTask: Task = {
+            ...baseTask,
+            status: 'someday',
+            projectId: 'project-1',
+            sectionId: 'project-section-1',
+            viewSectionIds: { waiting: 'waiting-heading' },
+        };
+        const { getByRole } = render(
+            <TaskItemEditor
+                {...baseProps}
+                draft={createTaskDraft(somedayTask)}
+                setField={setField}
+                somedaySections={[{ id: 'books', title: 'Books to read', order: 0 }]}
+            />
+        );
+
+        fireEvent.change(getByRole('combobox', { name: 'Someday section' }), {
+            target: { value: 'books' },
+        });
+
+        expect(setField).toHaveBeenCalledWith('viewSectionIds', {
+            someday: 'books',
+            waiting: 'waiting-heading',
+        });
+        expect(setField).not.toHaveBeenCalledWith('projectId', expect.anything());
+        expect(setField).not.toHaveBeenCalledWith('sectionId', expect.anything());
+    });
+
+    it('creates and assigns a new Someday section from the assignment picker', async () => {
+        const setField = vi.fn();
+        const onCreateSomedaySection = vi.fn().mockResolvedValue('career');
+        const somedayTask: Task = {
+            ...baseTask,
+            status: 'someday',
+            viewSectionIds: { waiting: 'waiting-heading' },
+        };
+        const view = render(
+            <LanguageProvider>
+                <TaskItemEditor
+                    {...baseProps}
+                    draft={createTaskDraft(somedayTask)}
+                    setField={setField}
+                    onCreateSomedaySection={onCreateSomedaySection}
+                />
+            </LanguageProvider>
+        );
+
+        fireEvent.change(view.getByRole('combobox', { name: 'Someday section' }), {
+            target: { value: '__new-someday-section__' },
+        });
+        fireEvent.change(view.getByPlaceholderText('Books to read'), {
+            target: { value: 'Career ideas' },
+        });
+        fireEvent.click(within(view.getByRole('dialog')).getByRole('button', { name: 'Save' }));
+
+        await waitFor(() => {
+            expect(onCreateSomedaySection).toHaveBeenCalledWith('Career ideas');
+            expect(setField).toHaveBeenCalledWith('viewSectionIds', {
+                someday: 'career',
+                waiting: 'waiting-heading',
+            });
+        });
+    });
+
     it('keeps optional sections collapsed when their defaults are off', () => {
         const { getByRole, queryByText } = render(<TaskItemEditor {...baseProps} />);
 

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="apps/mobile/assets/images/icon.png" width="120" alt="Mindwtr Logo">
+<a href="https://mindwtr.app"><img src="apps/mobile/assets/images/icon.png" width="120" alt="Mindwtr Logo"></a>
 
 # Mindwtr
 

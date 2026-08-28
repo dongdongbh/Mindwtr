@@ -142,6 +142,24 @@ describe('prepareProcessInboxDecision', () => {
         },
     );
 
+    it('keeps an explicit Someday section through the shared decision policy', () => {
+        expect(prepareProcessInboxDecision({
+            task,
+            draft: {
+                ...fullDraft,
+                fields: { ...fullDraft.fields, viewSectionIds: { someday: 'ideas' } },
+            },
+            decision: { type: 'someday' },
+            plan,
+        })).toMatchObject({
+            ok: true,
+            event: {
+                type: 'someday',
+                fields: { viewSectionIds: { someday: 'ideas' } },
+            },
+        });
+    });
+
     it('requires a Later date so undated work stays a Someday decision', () => {
         const draft = { ...fullDraft, fields: { ...fullDraft.fields, startTime: undefined } };
 
