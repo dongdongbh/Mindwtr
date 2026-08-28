@@ -528,17 +528,20 @@ export const useSyncSettings = ({
     const handleTestSyncPath = useCallback(async () => {
         const path = syncPath.trim();
         if (!path || !isTauri) return;
+        const testGeneration = syncConfigurationGeneration.current;
         setIsTestingSyncPath(true);
         setSyncError(null);
         try {
             await SyncService.testSyncPath(path);
+            if (syncConfigurationGeneration.current !== testGeneration) return;
             showToast(resolveText('settings.folderTestSucceeded', 'Folder test passed.'), 'success');
         } catch (error) {
+            void logError(error, { scope: 'sync', step: 'testSyncPath' });
+            if (syncConfigurationGeneration.current !== testGeneration) return;
             const message = toErrorMessage(
                 error,
                 resolveText('settings.feedback.actionFailed', "Couldn't complete this action. Try again."),
             );
-            void logError(error, { scope: 'sync', step: 'testSyncPath' });
             setSyncError(message);
             showToast(message, 'error');
         } finally {

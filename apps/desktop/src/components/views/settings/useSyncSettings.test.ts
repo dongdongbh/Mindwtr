@@ -333,6 +333,46 @@ describe('useSyncSettings cloud token validation', () => {
         expect(result.current.syncPageProps.isTestingSyncPath).toBe(false);
     });
 
+    it.each(['success', 'failure'] as const)(
+        'ignores a stale folder-test %s after the selected path changes',
+        async (outcome) => {
+            let resolveProbe!: () => void;
+            let rejectProbe!: (error: Error) => void;
+            vi.mocked(SyncService.testSyncPath).mockReturnValueOnce(new Promise<void>((resolve, reject) => {
+                resolveProbe = resolve;
+                rejectProbe = reject;
+            }));
+            const showToast = vi.fn();
+            useUiStore.setState({ showToast } as never);
+            const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
+            await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+            act(() => result.current.syncPageProps.onSyncPathChange('/sync/folder-a'));
+
+            let testPromise!: Promise<void>;
+            act(() => {
+                testPromise = result.current.syncPageProps.onTestSyncPath();
+            });
+            await waitFor(() => {
+                expect(SyncService.testSyncPath).toHaveBeenCalledWith('/sync/folder-a');
+                expect(result.current.syncPageProps.isTestingSyncPath).toBe(true);
+            });
+
+            act(() => result.current.syncPageProps.onSyncPathChange('/sync/folder-b'));
+            expect(result.current.syncPageProps.syncPath).toBe('/sync/folder-b');
+
+            await act(async () => {
+                if (outcome === 'success') resolveProbe();
+                else rejectProbe(new Error('Folder A is unavailable'));
+                await testPromise;
+            });
+
+            expect(result.current.syncPageProps.syncPath).toBe('/sync/folder-b');
+            expect(result.current.syncPageProps.syncError).toBeNull();
+            expect(result.current.syncPageProps.isTestingSyncPath).toBe(false);
+            expect(showToast).not.toHaveBeenCalled();
+        },
+    );
+
     it('shows the native folder-probe stage when testing fails', async () => {
         const stageError = 'Could not finalize a file in this folder: rename refused';
         vi.mocked(SyncService.testSyncPath).mockRejectedValueOnce(new Error(stageError));
