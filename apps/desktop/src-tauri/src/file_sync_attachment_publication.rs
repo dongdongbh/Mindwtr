@@ -1137,10 +1137,11 @@ fn publish_exact_stage(
     };
 
     let target = target_name.encode_wide().collect::<Vec<_>>();
-    // `FILE_RENAME_INFO` is a variable-length record. Its x64 Rust layout has
-    // trailing padding after `FileName`; Windows expects the payload length to
-    // begin at the field offset, not at `size_of - 2`.
-    let fixed = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
+    // SetFileInformationByHandle requires the variable-length record to retain
+    // the complete fixed FILE_RENAME_INFO, including its x64 trailing padding.
+    // FileNameLength still describes only the UTF-16 payload copied at the
+    // FileName field below.
+    let fixed = std::mem::size_of::<FILE_RENAME_INFO>();
     let target_bytes = target
         .len()
         .checked_mul(std::mem::size_of::<u16>())
@@ -1333,6 +1334,28 @@ mod tests {
 
     fn digest(bytes: &[u8]) -> String {
         format!("{:x}", Sha256::digest(bytes))
+    }
+
+    #[test]
+    fn windows_exact_stage_rename_buffer_includes_the_full_fixed_record() {
+        let source = include_str!("file_sync_attachment_publication.rs").replace("\r\n", "\n");
+        let windows_rename = source
+            .split_once("#[cfg(windows)]\nfn publish_exact_stage")
+            .expect("Windows exact-stage rename")
+            .1
+            .split_once(
+                "\n#[cfg(not(any(target_os = \"linux\", target_os = \"macos\", windows)))]",
+            )
+            .expect("end of exact-stage rename implementations")
+            .0;
+
+        assert!(windows_rename.contains(
+            "let fixed = std::mem::size_of::<FILE_RENAME_INFO>();"
+        ));
+        assert!(!windows_rename.contains(
+            "let fixed = std::mem::offset_of!(FILE_RENAME_INFO, FileName);"
+        ));
+        assert!(windows_rename.contains("(*information).FileName.as_mut_ptr()"));
     }
 
     #[test]

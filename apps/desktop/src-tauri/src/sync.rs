@@ -5527,7 +5527,7 @@ mod tests {
 
     #[test]
     fn sync_folder_probe_and_real_write_share_one_atomic_write_helper() {
-        let source = include_str!("sync.rs");
+        let source = include_str!("sync.rs").replace("\r\n", "\n");
         let helper_name = ["atomic_retained_tmp_write_then_", "rename_with"].concat();
         let helper_call = format!("{helper_name}(");
         assert_eq!(
@@ -7001,9 +7001,29 @@ mod tests {
             assert!(
                 std::mem::offset_of!(FILE_RENAME_INFO, FileName)
                     < std::mem::size_of::<FILE_RENAME_INFO>(),
-                "rename buffers must start their variable name at the field offset"
+                "the full fixed rename record includes padding beyond the name field offset"
             );
         }
+    }
+
+    #[test]
+    fn windows_retained_rename_buffer_includes_the_full_fixed_record() {
+        let source = include_str!("sync.rs").replace("\r\n", "\n");
+        let windows_rename = source
+            .split_once("#[cfg(target_os = \"windows\")]\nfn retained_root_rename")
+            .expect("Windows retained-root rename")
+            .1
+            .split_once("\n#[cfg(not(any(unix, target_os = \"windows\")))]")
+            .expect("end of retained-root rename implementations")
+            .0;
+
+        assert!(windows_rename.contains(
+            "let fixed = std::mem::size_of::<FILE_RENAME_INFO>();"
+        ));
+        assert!(!windows_rename.contains(
+            "let fixed = std::mem::offset_of!(FILE_RENAME_INFO, FileName);"
+        ));
+        assert!(windows_rename.contains("(*information).FileName.as_mut_ptr()"));
     }
 
     #[test]
@@ -14579,11 +14599,11 @@ fn retained_root_rename(
 
     let source = retained_root_open(directory, source, true, false, false)?;
     let target = destination.encode_wide().collect::<Vec<_>>();
-    // `FILE_RENAME_INFO` is a variable-length record. In particular, the x64
-    // Rust layout has trailing padding after `FileName`, so `size_of - 2`
-    // overstates the fixed prefix accepted by SetFileInformationByHandle and
-    // makes an otherwise valid retained-root rename fail with ERROR_INVALID_PARAMETER.
-    let fixed = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
+    // SetFileInformationByHandle requires the variable-length record to retain
+    // the complete fixed FILE_RENAME_INFO, including its x64 trailing padding.
+    // FileNameLength still describes only the UTF-16 payload copied at the
+    // FileName field below.
+    let fixed = std::mem::size_of::<FILE_RENAME_INFO>();
     let target_bytes = target
         .len()
         .checked_mul(std::mem::size_of::<u16>())
