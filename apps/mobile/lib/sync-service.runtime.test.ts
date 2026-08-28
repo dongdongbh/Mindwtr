@@ -122,7 +122,7 @@ const coreMocks = vi.hoisted(() => ({
   acquireSyncRemoteMutationFence: vi.fn(),
   createDropboxSyncRemoteMutationFencePort: vi.fn(),
   createWebdavSyncRemoteMutationFencePort: vi.fn(),
-  assertWebdavStrongEtagSupport: vi.fn(),
+  probeWebdavSyncCompatibility: vi.fn(),
   webdavGetJson: vi.fn(),
   webdavGetSyncDocument: vi.fn(),
   webdavHeadFile: vi.fn(),
@@ -247,7 +247,7 @@ vi.mock('@mindwtr/core', async () => {
     acquireSyncRemoteMutationFence: coreMocks.acquireSyncRemoteMutationFence,
     createDropboxSyncRemoteMutationFencePort: coreMocks.createDropboxSyncRemoteMutationFencePort,
     createWebdavSyncRemoteMutationFencePort: coreMocks.createWebdavSyncRemoteMutationFencePort,
-    assertWebdavStrongEtagSupport: coreMocks.assertWebdavStrongEtagSupport,
+    probeWebdavSyncCompatibility: coreMocks.probeWebdavSyncCompatibility,
     webdavGetJson: coreMocks.webdavGetJson,
     webdavGetSyncDocument: coreMocks.webdavGetSyncDocument,
     webdavHeadFile: coreMocks.webdavHeadFile,
@@ -357,7 +357,7 @@ describe('mobile sync-service runtime', () => {
       renew: vi.fn().mockResolvedValue(undefined),
       release: vi.fn().mockResolvedValue(undefined),
     });
-    coreMocks.assertWebdavStrongEtagSupport.mockResolvedValue(undefined);
+    coreMocks.probeWebdavSyncCompatibility.mockResolvedValue('strong-etag');
     coreMocks.withRetry.mockImplementation(async (operation: () => Promise<unknown>) => await operation());
     coreMocks.webdavGetJson.mockResolvedValue(emptyData);
     coreMocks.webdavGetSyncDocument.mockReset();
@@ -420,7 +420,7 @@ describe('mobile sync-service runtime', () => {
   });
 
   it('proves a legacy persisted WebDAV backend before any sync-document IO', async () => {
-    coreMocks.assertWebdavStrongEtagSupport.mockRejectedValueOnce(
+    coreMocks.probeWebdavSyncCompatibility.mockRejectedValueOnce(
       new Error('SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE: conditional writes unavailable'),
     );
 
@@ -430,7 +430,7 @@ describe('mobile sync-service runtime', () => {
       success: false,
       error: expect.stringContaining('conditional writes unavailable'),
     });
-    expect(coreMocks.assertWebdavStrongEtagSupport).toHaveBeenCalledWith(
+    expect(coreMocks.probeWebdavSyncCompatibility).toHaveBeenCalledWith(
       'https://sync.example.com/data.json',
       expect.objectContaining({ username: 'user', password: 'pass' }),
     );
