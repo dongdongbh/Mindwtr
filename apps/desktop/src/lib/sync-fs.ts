@@ -34,16 +34,37 @@ export type AttachmentGenerationPublication =
     | { status: 'published' }
     | { status: 'alreadyExists' };
 
-export const publishAttachmentGeneration = (
-    scratchPath: string,
+export type AttachmentGenerationReservation = {
+    operationId: string;
+    scratchPath: string;
+};
+
+export const reserveAttachmentGeneration = (
+    leaseToken: string,
     targetPath: string,
     expectedSize: number,
     expectedSha256: string,
-): Promise<AttachmentGenerationPublication> => invokeNative('sync_fs_publish_attachment_generation', {
-    scratchPath,
+): Promise<AttachmentGenerationReservation> => invokeNative('sync_fs_reserve_attachment_generation', {
+    leaseToken,
     targetPath,
     expectedSize,
     expectedSha256,
+});
+
+export const publishAttachmentGeneration = (
+    leaseToken: string,
+    operationId: string,
+): Promise<AttachmentGenerationPublication> => invokeNative('sync_fs_publish_attachment_generation', {
+    leaseToken,
+    operationId,
+});
+
+export const abandonAttachmentGeneration = (
+    leaseToken: string,
+    operationId: string,
+): Promise<void> => invokeNative('sync_fs_abandon_attachment_generation', {
+    leaseToken,
+    operationId,
 });
 
 /** #1057: same main-thread-freeze risk as `exists` above — the fs plugin's `stat`

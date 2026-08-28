@@ -48,10 +48,11 @@ import {
 } from './sync-service-utils';
 import { getManagedPath } from './managed-paths';
 import {
+    abandonAttachmentGeneration as syncFsAbandonAttachmentGeneration,
     exists as syncFsExists,
     mkdir as syncFsMkdir,
     publishAttachmentGeneration as syncFsPublishAttachmentGeneration,
-    remove as syncFsRemove,
+    reserveAttachmentGeneration as syncFsReserveAttachmentGeneration,
     stat as syncFsStat,
 } from './sync-fs';
 import {
@@ -108,7 +109,6 @@ const FILE_BACKEND_VALIDATION_CONFIG = {
     blockedMimeTypes: [],
 };
 const FILE_DOWNLOAD_READ_CHUNK_BYTES = 64 * 1024;
-let fileSyncUploadScratchSequence = 0;
 
 class FileSyncGenerationIntegrityError extends Error {
     constructor(message: string, cause?: unknown) {
@@ -1410,6 +1410,7 @@ export async function syncFileAttachments(
     baseSyncDir: string,
     deps: AttachmentBackendDeps,
     helpers?: SyncRunAttachmentHelpers,
+    fileSyncLeaseToken?: string,
 ): Promise<AppData | false> {
     if (!deps.isTauriRuntimeEnv() || !baseSyncDir) return false;
 
@@ -1417,7 +1418,7 @@ export async function syncFileAttachments(
     // slow mount, so the ones the plugin runs on the main thread come from
     // ./sync-fs instead. The plugin's own readFile/writeFile are already async.
     const { BaseDirectory, exists, open, readFile, stat, writeFile, remove } = await import('@tauri-apps/plugin-fs');
-    const { dataDir, dirname, join } = await import('@tauri-apps/api/path');
+    const { dataDir, join } = await import('@tauri-apps/api/path');
 
     const attachmentsDir = await join(baseSyncDir, ATTACHMENTS_DIR_NAME);
     try {
@@ -1507,6 +1508,7 @@ export async function syncFileAttachments(
         if (!expectedWireSha256) {
             throw new Error('File Sync attachment generation hash is unavailable');
         }
+        const publicationLeaseToken = fileSyncLeaseToken ?? '';
         const verifyExistingGeneration = async (): Promise<void> => {
             try {
                 const plaintext = await openAttachmentBytes(await readFileSyncWireData(targetPath));
@@ -1527,17 +1529,18 @@ export async function syncFileAttachments(
             return;
         }
 
-        fileSyncUploadScratchSequence += 1;
-        const random = Math.random().toString(16).slice(2, 10);
-        const scratchPath = await join(
-            await dirname(targetPath),
-            `.mindwtr-attachment-generation-${Date.now()}-${fileSyncUploadScratchSequence}-${random}.tmp`,
+        const reservation = await syncFsReserveAttachmentGeneration(
+            publicationLeaseToken,
+            targetPath,
+            wireData.byteLength,
+            expectedWireSha256,
         );
-        const target = await open(scratchPath, { write: true, createNew: true });
 
+        let target: Awaited<ReturnType<typeof open>> | undefined;
         let closed = false;
         let readyForPublication = false;
         try {
+            target = await open(reservation.scratchPath, { write: true, createNew: true });
             const written = await target.write(wireData);
             if (written !== wireData.byteLength) {
                 throw new Error('File Sync attachment generation write was incomplete');
@@ -1547,26 +1550,30 @@ export async function syncFileAttachments(
             readyForPublication = true;
             for (let attempt = 0; attempt < 2; attempt += 1) {
                 const publication = await syncFsPublishAttachmentGeneration(
-                    scratchPath,
-                    targetPath,
-                    wireData.byteLength,
-                    expectedWireSha256,
+                    publicationLeaseToken,
+                    reservation.operationId,
                 );
                 if (publication.status === 'published') return;
                 if (await syncFsExists(targetPath)) {
                     await verifyExistingGeneration();
-                    await syncFsRemove(scratchPath);
+                    await syncFsAbandonAttachmentGeneration(
+                        publicationLeaseToken,
+                        reservation.operationId,
+                    );
                     return;
                 }
             }
             throw new Error('File Sync attachment generation collision could not be resolved');
         } catch (error) {
-            if (!closed) await target.close().catch(() => undefined);
+            if (target && !closed) await target.close().catch(() => undefined);
             // Before native verification the scratch is only a partial write and
             // cannot help recovery. Once ready, retain it on publication failure;
             // the device-local publication journal reclaims that exact owned path.
             if (!readyForPublication) {
-                await syncFsRemove(scratchPath).catch(() => undefined);
+                await syncFsAbandonAttachmentGeneration(
+                    publicationLeaseToken,
+                    reservation.operationId,
+                ).catch(() => undefined);
             }
             throw error;
         }

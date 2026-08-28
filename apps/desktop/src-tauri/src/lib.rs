@@ -43,6 +43,7 @@ mod attachment_installer;
 mod autostart;
 mod config;
 mod email_capture;
+mod file_sync_attachment_publication;
 mod install;
 mod linux_calendar;
 mod local_api;
@@ -121,7 +122,8 @@ use sync::{
     recover_dropbox_credentials_before_sync_configuration, recover_dropbox_credentials_on_startup,
     release_file_sync_lease, release_file_sync_leases_for_window,
     rollback_staged_dropbox_credentials, set_sync_path, sync_fs_create_dir, sync_fs_exists,
-    sync_fs_publish_attachment_generation, sync_fs_remove_file, sync_fs_rename, sync_fs_stat,
+    sync_fs_abandon_attachment_generation, sync_fs_publish_attachment_generation,
+    sync_fs_remove_file, sync_fs_rename, sync_fs_reserve_attachment_generation, sync_fs_stat,
     webdav_get_json, webdav_put_json, write_sync_file, DropboxStagedCredentialState,
     DropboxStartupRecoveryOutcome, FileSyncLeaseState,
 };
@@ -1736,7 +1738,9 @@ pub fn run() {
             sync_fs_remove_file,
             sync_fs_rename,
             sync_fs_stat,
+            sync_fs_reserve_attachment_generation,
             sync_fs_publish_attachment_generation,
+            sync_fs_abandon_attachment_generation,
             install_attachment_download,
             set_tray_visible,
             set_tray_tooltip,

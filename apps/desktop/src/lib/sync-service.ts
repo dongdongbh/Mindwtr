@@ -2402,6 +2402,7 @@ export class SyncService {
                 context.fileBaseDir,
                 attachmentBackendDeps,
                 helpers,
+                context.fileSyncLeaseToken ?? undefined,
             ),
             syncCloudAttachments: async (data, helpers) => {
                 const baseUrl = getCloudBaseUrl(context.cloudConfig!.url);

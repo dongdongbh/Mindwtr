@@ -26,6 +26,9 @@ use crate::config::{
     read_dropbox_credential_state, set_keyring_secret, update_dropbox_credential_state,
     write_config_files, CredentialService,
 };
+use crate::file_sync_attachment_publication::{
+    self, PublicationAttempt, PublicationReservation,
+};
 use crate::storage::{
     get_config_path, get_secrets_path, read_json_with_retries_decoded,
     read_json_with_retries_validated,
@@ -6932,7 +6935,9 @@ mod tests {
             "sync_fs_remove_file",
             "sync_fs_rename",
             "sync_fs_stat",
+            "sync_fs_reserve_attachment_generation",
             "sync_fs_publish_attachment_generation",
+            "sync_fs_abandon_attachment_generation",
         ] {
             assert!(
                 handler.contains(&format!("{name},")),
@@ -11054,6 +11059,30 @@ fn acquire_file_sync_lease_for_dir(
     Ok(token)
 }
 
+fn with_file_sync_lease<T, F>(
+    state: &FileSyncLeaseState,
+    token: &str,
+    owner_window_label: &str,
+    operation: F,
+) -> Result<T, String>
+where
+    F: FnOnce(&Path) -> Result<T, String>,
+{
+    // Keep the map guard for the whole operation so a concurrent release cannot
+    // drop the OS lock between token validation and the final journal/file write.
+    let leases = state
+        .leases
+        .lock()
+        .map_err(|_| "File Sync lease state is unavailable".to_string())?;
+    let lease = leases
+        .get(token)
+        .ok_or_else(|| "Unknown or already released File Sync lease".to_string())?;
+    if lease.owner_window_label != owner_window_label {
+        return Err("File Sync lease belongs to a different renderer window".to_string());
+    }
+    operation(&lease.sync_dir)
+}
+
 fn release_file_sync_lease_token(
     state: &FileSyncLeaseState,
     token: &str,
@@ -11117,7 +11146,20 @@ pub(crate) fn acquire_file_sync_lease(
         None => configured_sync_dir(&app)?
             .ok_or_else(|| "Sync path is not configured".to_string())?,
     };
-    acquire_file_sync_lease_for_dir(&state, &sync_dir, window.label())
+    let token = acquire_file_sync_lease_for_dir(&state, &sync_dir, window.label())?;
+    let recovery = with_file_sync_lease(&state, &token, window.label(), |leased_root| {
+        file_sync_attachment_publication::recover(
+            &crate::storage::get_data_dir(&app),
+            leased_root,
+        )
+        .map(|_| ())
+    });
+    if let Err(error) = recovery {
+        // Recovery failed closed before the token escaped to the renderer.
+        let _ = release_file_sync_lease_token(&state, &token, window.label());
+        return Err(error);
+    }
+    Ok(token)
 }
 
 #[tauri::command(async)]
@@ -14237,6 +14279,28 @@ pub(crate) enum FileSyncAttachmentGenerationPublication {
     AlreadyExists,
 }
 
+#[tauri::command(async)]
+pub(crate) fn sync_fs_reserve_attachment_generation(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, FileSyncLeaseState>,
+    lease_token: String,
+    target_path: String,
+    expected_size: u64,
+    expected_sha256: String,
+) -> Result<PublicationReservation, String> {
+    let target_path = PathBuf::from(target_path);
+    with_file_sync_lease(&state, &lease_token, window.label(), |leased_root| {
+        file_sync_attachment_publication::reserve(
+            &crate::storage::get_data_dir(&app),
+            leased_root,
+            &target_path,
+            expected_size,
+            &expected_sha256,
+        )
+    })
+}
+
 fn publish_file_sync_attachment_generation_with<Replace, SyncParent>(
     scratch_path: &Path,
     target_path: &Path,
@@ -14360,19 +14424,57 @@ pub(crate) fn sync_fs_rename(
 #[tauri::command(async)]
 pub(crate) fn sync_fs_publish_attachment_generation(
     app: tauri::AppHandle,
-    scratch_path: String,
-    target_path: String,
-    expected_size: u64,
-    expected_sha256: String,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, FileSyncLeaseState>,
+    lease_token: String,
+    operation_id: String,
 ) -> Result<FileSyncAttachmentGenerationPublication, String> {
-    let scratch_path = sync_fs_path(&app, scratch_path)?;
-    let target_path = sync_fs_path(&app, target_path)?;
-    publish_file_sync_attachment_generation_with(
-        &scratch_path,
-        &target_path,
-        expected_size,
-        &expected_sha256,
-        move_no_replace,
-        sync_parent_directory_for_durability,
-    )
+    with_file_sync_lease(&state, &lease_token, window.label(), |leased_root| {
+        let outcome = file_sync_attachment_publication::publish_with(
+            &crate::storage::get_data_dir(&app),
+            leased_root,
+            &operation_id,
+            |scratch_path, target_path, expected_size, expected_sha256| {
+                publish_file_sync_attachment_generation_with(
+                    scratch_path,
+                    target_path,
+                    expected_size,
+                    expected_sha256,
+                    move_no_replace,
+                    sync_parent_directory_for_durability,
+                )
+                .map(|outcome| match outcome {
+                    FileSyncAttachmentGenerationPublication::Published => {
+                        PublicationAttempt::Published
+                    }
+                    FileSyncAttachmentGenerationPublication::AlreadyExists => {
+                        PublicationAttempt::AlreadyExists
+                    }
+                })
+            },
+        )?;
+        Ok(match outcome {
+            PublicationAttempt::Published => FileSyncAttachmentGenerationPublication::Published,
+            PublicationAttempt::AlreadyExists => {
+                FileSyncAttachmentGenerationPublication::AlreadyExists
+            }
+        })
+    })
+}
+
+#[tauri::command(async)]
+pub(crate) fn sync_fs_abandon_attachment_generation(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, FileSyncLeaseState>,
+    lease_token: String,
+    operation_id: String,
+) -> Result<(), String> {
+    with_file_sync_lease(&state, &lease_token, window.label(), |leased_root| {
+        file_sync_attachment_publication::abandon(
+            &crate::storage::get_data_dir(&app),
+            leased_root,
+            &operation_id,
+        )
+    })
 }
