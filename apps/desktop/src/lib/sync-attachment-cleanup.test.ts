@@ -50,7 +50,6 @@ const buildDeps = (): AttachmentCleanupDeps => ({
     getCloudProvider: vi.fn(async () => 'selfhosted' as const),
     getDropboxAccessToken: vi.fn(async () => ''),
     getDropboxAppKey: vi.fn(async () => ''),
-    getSyncPath: vi.fn(async () => '/sync/data.json'),
     getTauriFetch: vi.fn(async () => undefined),
     getWebDavConfig: vi.fn(async () => ({ url: '', username: '' })),
     isTauriRuntimeEnv: vi.fn(() => true),
@@ -69,7 +68,6 @@ describe('desktop attachment cleanup freshness', () => {
             { ensureLocalSnapshotFresh: vi.fn() },
         );
 
-        expect(deps.getSyncPath).not.toHaveBeenCalled();
         expect(fsMocks.remove).not.toHaveBeenCalled();
         expect(cleaned.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
     });

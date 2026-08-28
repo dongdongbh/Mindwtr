@@ -40,7 +40,6 @@ type MobileAttachmentCleanupOptions = {
   webdavConfig: MobileWebDavCleanupConfig | null;
   cloudConfig: MobileCloudCleanupConfig | null;
   cloudProvider: CloudProvider;
-  fileSyncPath: string | null;
   fetcher: typeof fetch;
   ensureLocalSnapshotFresh: () => void;
   assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>;

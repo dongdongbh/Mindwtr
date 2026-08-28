@@ -71,10 +71,9 @@ function findPurgedParentAttachmentIds(appData: AppData): Set<string> {
  */
 export function hasFreshAttachmentCleanupWork(appData: AppData): boolean {
     const pendingRemoteDeletes = normalizePendingRemoteDeletes(appData.settings.attachments?.pendingRemoteDeletes);
-    // A fresh File Sync publication journal is safe to reconcile only after the
-    // authoritative document write returns. This predicate runs at exactly that
-    // boundary, so process it immediately; failed deletes increment attempts and
-    // fall back to the existing bounded cleanup interval instead of hot-looping.
+    // Drain an attempt-zero digest-qualified entry left by versions that used
+    // pendingRemoteDeletes as a File publication journal. Current File cleanup
+    // retains the shared-folder bytes and clears only local bookkeeping.
     if (
         pendingRemoteDeletes.some(
             (entry) => isFileSyncGenerationCloudKey(entry.cloudKey) && (entry.attempts ?? 0) === 0,

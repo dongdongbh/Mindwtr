@@ -625,7 +625,6 @@ const attachmentBackendDeps: AttachmentBackendDeps = {
 
 const getAttachmentCleanupDeps = (
     dropboxCredentialHandle?: string | null,
-    fileSyncPathOverride?: string,
 ): AttachmentCleanupDeps => ({
     getCloudConfig: () => SyncService.getCloudConfig(),
     getCloudProvider: () => SyncService.getCloudProvider(),
@@ -634,9 +633,6 @@ const getAttachmentCleanupDeps = (
         credentialHandle: dropboxCredentialHandle ?? undefined,
     }),
     getDropboxAppKey: () => SyncService.getDropboxAppKey(),
-    getSyncPath: () => fileSyncPathOverride !== undefined
-        ? Promise.resolve(fileSyncPathOverride)
-        : SyncService.getSyncPath(),
     getTauriFetch,
     getWebDavConfig: () => SyncService.getWebDavConfig(),
     isTauriRuntimeEnv,
@@ -2966,10 +2962,7 @@ export class SyncService {
                         cleanupContext.ensureLocalSnapshotFresh(data);
                         await cleanupContext.ensureNetworkStillAvailable();
                         const ensureLocalSnapshotFresh = () => cleanupContext.ensureLocalSnapshotFresh(data);
-                        const cleanupDeps = getAttachmentCleanupDeps(
-                            context.dropboxCredentialHandle,
-                            context.backend === 'file' ? context.syncPath : undefined,
-                        );
+                        const cleanupDeps = getAttachmentCleanupDeps(context.dropboxCredentialHandle);
                         const orphanedAttachments = findOrphanedAttachments(data);
                         const deletedAttachments = findDeletedAttachmentsForFileCleanup(data);
                         const pendingRemoteDeletes = data.settings.attachments?.pendingRemoteDeletes ?? [];

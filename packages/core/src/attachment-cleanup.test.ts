@@ -445,6 +445,18 @@ describe('hasFreshAttachmentCleanupWork', () => {
         expect(hasFreshAttachmentCleanupWork(covered)).toBe(false);
     });
 
+    it('immediately drains only fresh entries left by the legacy File publication journal', () => {
+        const data = buildData();
+        const cloudKey = `attachments/a1.${'1'.repeat(64)}.pdf`;
+        data.settings.attachments = {
+            pendingRemoteDeletes: [{ cloudKey, attempts: 0 }],
+        };
+        expect(hasFreshAttachmentCleanupWork(data)).toBe(true);
+
+        data.settings.attachments.pendingRemoteDeletes = [{ cloudKey, attempts: 1 }];
+        expect(hasFreshAttachmentCleanupWork(data)).toBe(false);
+    });
+
     it('fires for records on purged parents and ignores live attachments', () => {
         expect(hasFreshAttachmentCleanupWork(withTaskAttachment(
             fileTombstone({ deletedAt: undefined }),

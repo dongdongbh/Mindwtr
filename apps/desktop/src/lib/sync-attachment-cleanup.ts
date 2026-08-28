@@ -40,7 +40,6 @@ export type AttachmentCleanupDeps = {
     getCloudProvider: () => Promise<CloudProvider>;
     getDropboxAccessToken: (clientId: string, options?: { forceRefresh?: boolean }) => Promise<string>;
     getDropboxAppKey: () => Promise<string>;
-    getSyncPath: () => Promise<string>;
     getTauriFetch: () => Promise<typeof fetch | undefined>;
     getWebDavConfig: () => Promise<WebDavConfig>;
     isTauriRuntimeEnv: () => boolean;

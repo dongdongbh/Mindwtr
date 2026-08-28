@@ -10,7 +10,6 @@ const h1 = '1'.repeat(64);
 const h2 = '2'.repeat(64);
 const h1CloudKey = `attachments/live-attachment.${h1}.pdf`;
 const h2CloudKey = `attachments/live-attachment.${h2}.pdf`;
-const safSyncPath = 'content://provider/tree/root/document/root%3Amindwtr/data.json';
 
 const buildData = (): AppData => ({
   tasks: [
@@ -70,7 +69,6 @@ const buildCleanupOptions = (appData: AppData) => ({
   webdavConfig: null,
   cloudConfig: null,
   cloudProvider: 'selfhosted' as const,
-  fileSyncPath: '/sync/mindwtr.json',
   fetcher: vi.fn() as unknown as typeof fetch,
   ensureLocalSnapshotFresh: vi.fn(),
   deleteDropboxAttachment: vi.fn(async () => undefined),
@@ -225,10 +223,7 @@ describe('runMobileAttachmentCleanup', () => {
     const inspectDirectory = vi.spyOn(AttachmentSyncUtils, 'inspectSafDirectoryEntriesByName');
     const deleteAsync = vi.spyOn(FileSystem, 'deleteAsync').mockResolvedValue(undefined);
 
-    const result = await runMobileAttachmentCleanup({
-      ...buildCleanupOptions(data),
-      fileSyncPath: safSyncPath,
-    });
+    const result = await runMobileAttachmentCleanup(buildCleanupOptions(data));
 
     expect(resolveFileSyncDir).not.toHaveBeenCalled();
     expect(inspectDirectory).not.toHaveBeenCalled();
@@ -249,10 +244,7 @@ describe('runMobileAttachmentCleanup', () => {
     const inspectDirectory = vi.spyOn(AttachmentSyncUtils, 'inspectSafDirectoryEntriesByName');
     const deleteAsync = vi.spyOn(FileSystem, 'deleteAsync').mockResolvedValue(undefined);
 
-    const result = await runMobileAttachmentCleanup({
-      ...buildCleanupOptions(data),
-      fileSyncPath: safSyncPath,
-    });
+    const result = await runMobileAttachmentCleanup(buildCleanupOptions(data));
 
     expect(inspectDirectory).not.toHaveBeenCalled();
     expect(deleteAsync).not.toHaveBeenCalled();

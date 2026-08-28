@@ -1177,7 +1177,6 @@ class MobileSyncRun {
           webdavConfig: this.webdavConfig,
           cloudConfig: this.cloudConfig,
           cloudProvider: this.cloudProvider,
-          fileSyncPath: this.fileSyncPath,
           fetcher: this.fetchWithAbort,
           ensureLocalSnapshotFresh: () => context.ensureLocalSnapshotFresh(),
           assertRemoteMutationFenceHeld: context.assertRemoteMutationFenceHeld,
