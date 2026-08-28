@@ -24,6 +24,7 @@ import type {
 import { SyncRemoteWriteConflict } from './sync-run-ports';
 import { LocalSyncAbort, ensureFreshLocalSyncSnapshot, getInMemoryAppDataSnapshot, shouldRunAttachmentCleanup } from './sync-client-helpers';
 import { hasFreshAttachmentCleanupWork } from './attachment-cleanup';
+import { isAttachmentUploadTooLargeError } from './attachment-transfer';
 import { flushPendingSave, useTaskStore } from './store';
 import {
     assertNoPendingAttachmentContentReplacements,
@@ -109,6 +110,7 @@ type SharedSyncRunState = {
     lastRemoteWriteMergedServerData: boolean;
     webdavRemoteCorrupted: boolean;
     hadAttachmentWarning: boolean;
+    fileAttachmentUploadBlocked: 'too-large' | null;
 };
 
 const DEFAULT_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -252,6 +254,7 @@ class SharedSyncRunMachine {
         lastRemoteWriteMergedServerData: false,
         webdavRemoteCorrupted: false,
         hadAttachmentWarning: false,
+        fileAttachmentUploadBlocked: null,
     };
 
     constructor(ports: SyncRunPorts) {
@@ -284,6 +287,9 @@ class SharedSyncRunMachine {
         }
         if (this.state.hadAttachmentWarning) {
             result.hadAttachmentWarning = true;
+        }
+        if (this.state.fileAttachmentUploadBlocked) {
+            result.fileAttachmentUploadBlocked = this.state.fileAttachmentUploadBlocked;
         }
         return result;
     }
@@ -828,6 +834,10 @@ class SharedSyncRunMachine {
             if (error instanceof LocalSyncAbort) throw error;
             if (isSyncRemoteMutationFenceError(error)) throw error;
             if (this.hooks.isCycleAborted?.()) throw error;
+            if (isAttachmentUploadTooLargeError(error)) {
+                this.state.fileAttachmentUploadBlocked = 'too-large';
+                return;
+            }
             this.state.hadAttachmentWarning = true;
             this.notifier.logWarning('Attachment pre-sync warning', error);
         }
@@ -949,6 +959,10 @@ class SharedSyncRunMachine {
         } catch (error) {
             if (error instanceof LocalSyncAbort) throw error;
             if (isSyncRemoteMutationFenceError(error)) throw error;
+            if (isAttachmentUploadTooLargeError(error)) {
+                this.state.fileAttachmentUploadBlocked = 'too-large';
+                return currentData;
+            }
             if (this.policy.postMergeAttachmentErrorPolicy === 'fail') throw error;
             this.state.hadAttachmentWarning = true;
             this.notifier.logWarning('Attachment sync warning', error);
@@ -1136,6 +1150,7 @@ class SharedSyncRunMachine {
                 success: true,
                 remoteWriteDeferred: true,
                 attachmentWriteDeferred: attachmentWriteDeferred || undefined,
+                fileAttachmentUploadBlocked: this.state.fileAttachmentUploadBlocked ?? undefined,
                 error: mergedData.settings.lastSyncError,
                 stats,
             };
@@ -1143,11 +1158,18 @@ class SharedSyncRunMachine {
         return {
             success: true,
             attachmentWriteDeferred: attachmentWriteDeferred || undefined,
+            fileAttachmentUploadBlocked: this.state.fileAttachmentUploadBlocked ?? undefined,
             stats,
         };
     }
 
     private async handleRunError(error: unknown): Promise<SyncRunResult> {
+        if (isAttachmentUploadTooLargeError(error)) {
+            return {
+                success: !this.options.activationProbe,
+                fileAttachmentUploadBlocked: 'too-large',
+            };
+        }
         if (error instanceof SyncFileLockBusyError) {
             const retryAttempt = this.options.fileSyncLockBusyRetryAttempt ?? 0;
             if (!this.options.activationProbe && retryAttempt < 1) {

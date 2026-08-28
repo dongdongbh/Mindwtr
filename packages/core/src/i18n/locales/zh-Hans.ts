@@ -2425,6 +2425,7 @@ export const zhHans: Record<string, string> = {
         'settings.syncRemoteBusy': '另一台兼容的 Mindwtr 设备正在更新此同步位置。请等待其完成，然后再次同步。',
         'settings.syncRemoteCleanupDeferred': '同步操作已完成。Mindwtr 无法移除临时同步锁，但该锁会自动过期。无需重试。',
         'settings.syncAttachmentWriteDeferred': '部分附件更改未能完成。请恢复缺失的本地文件或移除受影响的附件，然后再次同步。',
+        'settings.syncFileAttachmentTooLarge': 'Mindwtr 已保留本地附件。File Sync 只能同步小于 100 MB 的附件。请换用较小的文件或移除该附件，然后再次同步。',
         'settings.syncFileGenerationCorrupt': 'Mindwtr 已保留本地附件，但所选同步文件夹中的副本已损坏。请从该文件夹中移除损坏的附件版本，或选择其他同步文件夹，然后运行“立即同步”。',
         'settings.syncFileLockBusy': '另一个 Mindwtr 操作正在使用文件同步。请等待其完成；Mindwtr 会自动重试。',
         'settings.syncFileLockActivationBusy': '另一个 Mindwtr 操作正在使用文件同步。请等待其完成，然后再次选择“立即同步”。',

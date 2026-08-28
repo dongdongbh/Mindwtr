@@ -1109,6 +1109,16 @@ export const useSyncSettings = ({
                     showFileSyncLockFeedback('unavailable');
                     return;
                 }
+                if (probeResult.fileAttachmentUploadBlocked === 'too-large') {
+                    if (configOverride.dropboxCredentialHandle) {
+                        await resolveCapturedCredential();
+                    }
+                    showToast(resolveText(
+                        'settings.syncFileAttachmentTooLarge',
+                        'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
+                    ), 'error', 6000);
+                    return;
+                }
                 const probeRemoteCleanupDeferred = probeResult.success
                     && probeResult.remoteFenceDeferred === 'cleanup';
                 const probeFileCleanupDeferred = probeResult.success
@@ -1204,6 +1214,11 @@ export const useSyncSettings = ({
                 );
             } else if (result.fileSyncLockUnavailable) {
                 showFileSyncLockFeedback('unavailable');
+            } else if (result.fileAttachmentUploadBlocked === 'too-large') {
+                showToast(resolveText(
+                    'settings.syncFileAttachmentTooLarge',
+                    'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
+                ), 'info', 6000);
             } else if (result.success && result.remoteFenceDeferred) {
                 showRemoteFenceFeedback(activationCleanupDeferred === 'remote' ? 'cleanup' : result.remoteFenceDeferred);
             } else if (

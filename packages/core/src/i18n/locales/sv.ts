@@ -2453,6 +2453,7 @@ export const svOverrides: Record<string, string> = {
         'settings.syncRemoteBusy': 'En annan kompatibel Mindwtr-enhet uppdaterar den här synkroniseringsplatsen. Vänta tills den är klar och synkronisera sedan igen.',
         'settings.syncRemoteCleanupDeferred': 'Synkroniseringen slutfördes. Mindwtr kunde inte ta bort det tillfälliga synkroniseringslåset, men det upphör automatiskt. Du behöver inte försöka igen.',
         'settings.syncAttachmentWriteDeferred': 'Vissa ändringar av bilagor kunde inte slutföras. Återställ saknade lokala filer eller ta bort de berörda bilagorna och synkronisera sedan igen.',
+        'settings.syncFileAttachmentTooLarge': 'Mindwtr behöll den lokala bilagan. File Sync kan bara synkronisera bilagor som är mindre än 100 MB. Ersätt den med en mindre fil eller ta bort bilagan och synkronisera igen.',
         'settings.syncFileGenerationCorrupt': 'Mindwtr behöll den lokala bilagan, men kopian i den valda synkroniseringsmappen är skadad. Ta bort den skadade bilagegenerationen från mappen eller välj en annan synkroniseringsmapp och kör sedan Synkronisera nu.',
         'settings.syncFileLockBusy': 'En annan Mindwtr-åtgärd använder filsynkronisering. Vänta tills den är klar; Mindwtr försöker igen automatiskt.',
         'settings.syncFileLockActivationBusy': 'En annan Mindwtr-åtgärd använder filsynkronisering. Vänta tills den är klar och välj sedan Synkronisera nu igen.',

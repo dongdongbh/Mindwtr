@@ -29,6 +29,7 @@ import {
     SyncRemoteMutationFenceLostError,
     type SyncRemoteMutationFenceLease,
 } from './sync-remote-fence';
+import { AttachmentUploadTooLargeError } from './attachment-transfer';
 
 const NOW = new Date('2026-07-13T10:00:00.000Z');
 const STAMP = '2026-07-01T00:00:00.000Z';
@@ -1559,6 +1560,85 @@ describe('runSharedSyncCycle', () => {
         expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
     });
 
+    it('returns a neutral typed File Sync block for an oversized pending upload without retrying or changing metadata', async () => {
+        const task = createTask('t-oversized-file', 'Oversized attachment');
+        task.attachments = [{
+            id: 'attachment-oversized-file',
+            kind: 'file',
+            title: 'archive.zip',
+            uri: '/local/archive.zip',
+            cloudKey: 'attachments/archive.old.zip',
+            fileHash: 'ab'.repeat(32),
+            contentRev: 4,
+            contentMtimeMs: 1000,
+            contentSize: 42,
+            pendingContentUpload: true,
+            localStatus: 'available',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const local = createData([task]);
+        const syncAttachments = vi.fn(async () => {
+            throw new AttachmentUploadTooLargeError(101, 100);
+        });
+        const { harness, hooks, io, run } = createHarness({
+            local,
+            remote: cloneAppData(local),
+            backend: 'file',
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: true,
+            fileAttachmentUploadBlocked: 'too-large',
+        });
+        expect(result.hadAttachmentWarning).toBeUndefined();
+        expect(harness.persisted.tasks[0]?.attachments?.[0]).toEqual(local.tasks[0]?.attachments?.[0]);
+        expect(harness.remote?.tasks[0]?.attachments?.[0]).toEqual(local.tasks[0]?.attachments?.[0]);
+        expect(io.writeRemote).not.toHaveBeenCalled();
+        expect(hooks.requestFollowUp).not.toHaveBeenCalled();
+        expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
+        expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
+    });
+
+    it('fails a File Sync activation probe actionably when an attachment exceeds the buffered cap', async () => {
+        const task = createTask('t-oversized-activation', 'Oversized activation attachment');
+        task.attachments = [{
+            id: 'attachment-oversized-activation',
+            kind: 'file',
+            title: 'archive.zip',
+            uri: '/local/archive.zip',
+            localStatus: 'available',
+            createdAt: STAMP,
+            updatedAt: STAMP,
+        }];
+        const syncAttachments = vi.fn(async () => {
+            throw new AttachmentUploadTooLargeError(101, 100);
+        });
+        const { harness, hooks, io, storage, run } = createHarness({
+            local: createData([task]),
+            remote: null,
+            backend: 'file',
+            activationProbe: true,
+            io: { syncAttachments },
+        });
+
+        const result = await run();
+
+        expect(result).toEqual({
+            success: false,
+            fileAttachmentUploadBlocked: 'too-large',
+        });
+        expect(io.writeRemote).not.toHaveBeenCalled();
+        expect(storage.persistLocal).not.toHaveBeenCalled();
+        expect(harness.persisted.tasks[0]?.attachments?.[0]).toEqual(task.attachments[0]);
+        expect(hooks.requestFollowUp).not.toHaveBeenCalled();
+        expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
+        expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
+    });
+
     it('aborts to a requeued skip when local data changes mid-cycle', async () => {
         const staleEvents: unknown[] = [];
         const { harness, hooks, io, run } = createHarness({
@@ -1722,6 +1802,35 @@ describe('runSharedSyncCycle', () => {
         expect(second.skipped).toBe('unchanged');
         // Mobile order: the pre-sync ran again even though the cycle then skipped.
         expect(mobileAttachments.mock.calls.length).toBeGreaterThan(mobileCalls);
+    });
+
+    it('preserves an oversized File attachment block when mobile pre-sync is followed by an unchanged fast skip', async () => {
+        let attachmentIsOversized = false;
+        const syncAttachments = vi.fn(async () => {
+            if (attachmentIsOversized) {
+                throw new AttachmentUploadTooLargeError(101, 100);
+            }
+            return false;
+        });
+        const { hooks, run } = createHarness({
+            backend: 'file',
+            fastSyncScope: 'scope-file-oversized-fast-skip',
+            policy: { preSyncAttachmentsBeforeFastCheck: true },
+            io: { syncAttachments },
+        });
+        expect((await run()).skipped).toBeUndefined();
+
+        attachmentIsOversized = true;
+        const result = await run();
+
+        expect(result).toMatchObject({
+            success: true,
+            skipped: 'unchanged',
+            fileAttachmentUploadBlocked: 'too-large',
+        });
+        expect(hooks.requestFollowUp).not.toHaveBeenCalled();
+        expect(hooks.requestFollowUpAfter).not.toHaveBeenCalled();
+        expect(hooks.finalizeErrorStatus).not.toHaveBeenCalled();
     });
 
     it('persists attachment pre-sync mutations when the cycle aborts before writing locally', async () => {

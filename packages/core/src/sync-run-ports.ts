@@ -37,6 +37,10 @@ export type SyncRunResult = {
      *  durable content-upload work. No automatic retry is implied: callers
      *  should suppress plain-success UI and offer recovery guidance. */
     attachmentWriteDeferred?: boolean;
+    /** File Sync could not admit a local attachment into its bounded buffered
+     * upload path. Local bytes and durable attachment metadata are unchanged;
+     * callers should surface actionable guidance without scheduling a retry. */
+    fileAttachmentUploadBlocked?: 'too-large';
     /** A compatible peer currently owns the mutation fence, or this run could
      *  not conditionally remove its own lease. Suppresses plain-success UI. */
     remoteFenceDeferred?: 'busy' | 'cleanup';

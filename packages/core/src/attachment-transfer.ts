@@ -6,6 +6,7 @@ import {
 } from './attachment-change-detection';
 import { computeSha256Hex, isSha256Hex } from './attachment-hash';
 import { globalProgressTracker } from './attachment-progress';
+import { MAX_DOWNLOAD_BYTES } from './http-utils';
 import type { AppData, Attachment, AttachmentSettings } from './types';
 
 type PendingRemoteAttachmentDeleteEntry = NonNullable<AttachmentSettings['pendingRemoteDeletes']>[number];
@@ -65,6 +66,59 @@ export const validateAttachmentHash = async (attachment: Attachment, bytes: Uint
 const unhashableStats = new Map<string, string>();
 
 const statMarker = (stat: LocalFileStat): string => `${stat.mtimeMs}:${stat.size}`;
+
+/** MWENC1 v1 adds a 54-byte authenticated header and a 16-byte GCM tag. File
+ * Sync reserves that envelope inside the same 100 MB ceiling used by bounded
+ * remote reads, so an encrypted generation remains readable after upload. */
+const FILE_SYNC_ENCRYPTED_ARTIFACT_OVERHEAD_BYTES = 70;
+
+export const MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES =
+    MAX_DOWNLOAD_BYTES - FILE_SYNC_ENCRYPTED_ARTIFACT_OVERHEAD_BYTES;
+
+export class AttachmentUploadTooLargeError extends Error {
+    readonly actualBytes: number;
+    readonly limitBytes: number;
+
+    constructor(actualBytes: number, limitBytes: number) {
+        super(`Attachment exceeds the ${limitBytes} byte buffered upload limit`);
+        this.name = 'AttachmentUploadTooLargeError';
+        this.actualBytes = actualBytes;
+        this.limitBytes = limitBytes;
+    }
+}
+
+export class AttachmentUploadSizeUnavailableError extends Error {
+    constructor() {
+        super('Attachment size is unavailable for bounded buffered upload');
+        this.name = 'AttachmentUploadSizeUnavailableError';
+    }
+}
+
+export const isAttachmentUploadTooLargeError = (
+    error: unknown,
+): error is AttachmentUploadTooLargeError => error instanceof AttachmentUploadTooLargeError;
+
+export const isAttachmentUploadAdmissionError = (
+    error: unknown,
+): error is AttachmentUploadTooLargeError | AttachmentUploadSizeUnavailableError => (
+    error instanceof AttachmentUploadTooLargeError
+    || error instanceof AttachmentUploadSizeUnavailableError
+);
+
+export const assertBufferedAttachmentUploadSize = (
+    actualBytes: number,
+    limitBytes: number,
+): void => {
+    if (!Number.isSafeInteger(actualBytes) || actualBytes < 0) {
+        throw new AttachmentUploadSizeUnavailableError();
+    }
+    if (!Number.isSafeInteger(limitBytes) || limitBytes < 0) {
+        throw new Error('Buffered attachment upload limit is invalid');
+    }
+    if (actualBytes > limitBytes) {
+        throw new AttachmentUploadTooLargeError(actualBytes, limitBytes);
+    }
+};
 
 export const resetUnhashableAttachmentStatsForTests = (): void => {
     unhashableStats.clear();
@@ -219,6 +273,10 @@ export type AttachmentTransferLifecycleOptions = {
      * anything is treated as a real change.
      */
     getLocalFileStat?: (path: string, attachment: Attachment) => Promise<LocalFileStat | null>;
+    /** Optional ceiling for backends that buffer a complete upload generation.
+     * Checked against an authoritative local stat before hashing or snapshot reads.
+     * Omitted by streaming/remote backends; File Sync supplies the wire-safe cap. */
+    maxBufferedUploadBytes?: number;
     /** Only invoked when the cheap stat compare already mismatched. */
     computeLocalFileHash?: (path: string, attachment: Attachment) => Promise<string | null>;
     /** Prepare one immutable upload source and its digest. When present, the
@@ -348,6 +406,10 @@ export async function runAttachmentTransferLifecycle(
     const patches = new Map<string, Attachment>();
     const hasCloudCopy = options.hasCloudCopy ?? ((attachment: Attachment) => Boolean(attachment.cloudKey));
     const resolveLocalPath = options.resolveLocalPath ?? defaultResolveLocalPath;
+    const assertUploadStatAllowed = (stat: LocalFileStat): void => {
+        if (options.maxBufferedUploadBytes === undefined) return;
+        assertBufferedAttachmentUploadSize(stat.size, options.maxBufferedUploadBytes);
+    };
 
     // First-transfer bookkeeping: populate contentMtimeMs/contentSize (and, on
     // upload, fileHash) from whatever's actually on disk once a transfer succeeds, so
@@ -394,6 +456,10 @@ export async function runAttachmentTransferLifecycle(
         localPath: string,
         expectedHash?: string,
     ): Promise<boolean> => {
+        if (options.getLocalFileStat) {
+            const uploadStat = await options.getLocalFileStat(localPath, attachment).catch(() => null);
+            if (uploadStat) assertUploadStatAllowed(uploadStat);
+        }
         const snapshot = options.createUploadSnapshot
             ? await options.createUploadSnapshot(localPath, attachment)
             : null;
@@ -630,6 +696,7 @@ export async function runAttachmentTransferLifecycle(
         if (hasCloudCopy(attachment) && mayReadForSync && options.getLocalFileStat && options.contentChangePhase) {
             const stat = await options.getLocalFileStat(localPath, attachment).catch(() => null);
             if (stat) {
+                assertUploadStatAllowed(stat);
                 const check = await checkAttachmentContentChange(
                     attachment,
                     stat,

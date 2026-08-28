@@ -632,6 +632,28 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
     });
 
+    it('does not activate File Sync when a local attachment exceeds the buffered cap', async () => {
+        seedStorage([[SYNC_PATH_KEY, 'file:///sync-folder/data.json']]);
+        mocked.performMobileSync.mockResolvedValueOnce({
+            success: false,
+            fileAttachmentUploadBlocked: 'too-large',
+        });
+        await renderHarness();
+        mocked.asyncStorage.setItem.mockClear();
+
+        await act(async () => {
+            await latestHookResult?.handleSync({ backend: 'file' });
+        });
+
+        expect(mocked.performMobileSync).toHaveBeenCalledTimes(1);
+        expect(mocked.asyncStorage.setItem).not.toHaveBeenCalledWith(SYNC_BACKEND_KEY, 'file');
+        expect(mocked.showSettingsErrorToast).toHaveBeenCalledWith(
+            'settings.syncMobile.error',
+            'settings.syncFileAttachmentTooLarge',
+        );
+        expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+    });
+
     it('commits a cleanup-deferred File Sync activation and warns without suggesting retry', async () => {
         seedStorage([[SYNC_PATH_KEY, 'file:///sync-folder/data.json']]);
         mocked.performMobileSync
@@ -976,6 +998,30 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.showSettingsErrorToast).toHaveBeenCalledWith(
             'settings.syncMobile.error',
             'settings.syncFileGenerationCorrupt',
+        );
+        expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+    });
+
+    it('shows actionable File Sync size guidance without a success toast for an active backend', async () => {
+        seedStorage([
+            [SYNC_BACKEND_KEY, 'file'],
+            [SYNC_PATH_KEY, 'file:///sync-folder/data.json'],
+        ]);
+        await renderHarness();
+        mocked.performMobileSync.mockClear();
+        mocked.performMobileSync.mockResolvedValueOnce({
+            success: true,
+            fileAttachmentUploadBlocked: 'too-large',
+        });
+
+        await act(async () => {
+            await latestHookResult?.handleSync();
+        });
+
+        expect(mocked.showSettingsWarning).toHaveBeenCalledWith(
+            'common.notice',
+            'settings.syncFileAttachmentTooLarge',
+            6000,
         );
         expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
     });

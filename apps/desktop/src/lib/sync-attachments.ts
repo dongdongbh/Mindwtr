@@ -1,5 +1,7 @@
 import {
     computeSha256Hex,
+    assertBufferedAttachmentUploadSize,
+    AttachmentUploadSizeUnavailableError,
     runAttachmentTransferLifecycle,
     type Attachment,
     type AttachmentTransferLifecycleOptions,
@@ -39,6 +41,7 @@ type BasicRemoteAttachmentSyncOptions = Omit<
 type AttachmentUploadSnapshotFactoryOptions = {
     readLocalFile: (path: string, attachment: Attachment) => Promise<Uint8Array>;
     statLocalFile: (path: string, attachment: Attachment) => Promise<LocalFileStat | null>;
+    maxBufferedUploadBytes?: number;
     stageBytes?: (
         bytes: Uint8Array,
         attachment: Attachment,
@@ -54,11 +57,20 @@ export const createAttachmentUploadSnapshotFactory = ({
     readLocalFile,
     statLocalFile,
     stageBytes,
+    maxBufferedUploadBytes,
 }: AttachmentUploadSnapshotFactoryOptions): NonNullable<
     AttachmentTransferLifecycleOptions['createUploadSnapshot']
 > => async (path, attachment): Promise<AttachmentUploadSnapshot | null> => {
     const before = await statLocalFile(path, attachment);
-    if (!before) return null;
+    if (!before) {
+        if (maxBufferedUploadBytes !== undefined) {
+            throw new AttachmentUploadSizeUnavailableError();
+        }
+        return null;
+    }
+    if (maxBufferedUploadBytes !== undefined) {
+        assertBufferedAttachmentUploadSize(before.size, maxBufferedUploadBytes);
+    }
 
     const bytes = await readLocalFile(path, attachment);
     const after = await statLocalFile(path, attachment);

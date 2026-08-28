@@ -8,6 +8,8 @@ import {
   buildFileSyncGenerationCloudKey,
   computeSha256Hex,
   isSha256Hex,
+  isAttachmentUploadAdmissionError,
+  MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES,
   validateAttachmentForUpload,
   validateAttachmentHash,
 } from '@mindwtr/core';
@@ -184,8 +186,12 @@ export const syncFileAttachments = async (
     deferUploads: options.phase === 'prepare',
     getLocalFileStat: (path) => statAttachmentFile(path),
     computeLocalFileHash: (path) => computeManagedAttachmentFileHash(path),
+    maxBufferedUploadBytes: MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES,
     contentChangePhase: options.phase,
-    isFatalError: (error) => isAttachmentSyncAbortError(error, signal),
+    isFatalError: (error) => (
+      isAttachmentSyncAbortError(error, signal)
+      || isAttachmentUploadAdmissionError(error)
+    ),
     // Normal background sync leaves remote-only files for on-demand fetch. An
     // activation probe is different: its cloned snapshot must prove that every
     // referenced object exists before settings commit. Marking the clone

@@ -90,6 +90,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
         // Keep the File Sync read-boundary regressions small while exercising
         // the same above-limit behavior as production's much larger ceiling.
         MAX_DOWNLOAD_BYTES: 16,
+        MAX_FILE_SYNC_BUFFERED_PLAINTEXT_BYTES: 15,
         computeSha256Hex: coreMocks.computeSha256Hex,
         webdavFileExists: coreMocks.webdavFileExists,
         webdavHeadFile: coreMocks.webdavHeadFile,
@@ -1490,54 +1491,59 @@ describe('desktop sync attachment backends', () => {
             expect(result.tasks[0].attachments?.[0]?.cloudKey).toBe(generationKey);
         });
 
-        it.each([
-            ['preflight', false],
-            ['publication race', true],
-        ])('reuses a valid oversized File Sync generation during %s verification', async (_label, race) => {
-            const oversizedBytes = new Uint8Array(MAX_DOWNLOAD_BYTES + 1).fill(7);
+        it('blocks an oversized pending File Sync upload before reading or verifying an existing generation', async () => {
+            const oversizedLength = MAX_DOWNLOAD_BYTES;
             const appData = makePendingData();
             appData.tasks[0].attachments![0].cloudKey = undefined;
             Object.assign(appData.tasks[0].attachments![0], {
-                contentSize: oversizedBytes.byteLength,
+                contentSize: oversizedLength,
             });
             const generationKey = `attachments/attachment-1.${BYTES_HASH}.txt`;
             const generationPath = `/candidate-sync/${generationKey}`;
-            let targetChecks = 0;
             fsMocks.exists.mockResolvedValue(true);
-            fsMocks.readFile.mockResolvedValue(oversizedBytes);
-            fsMocks.stat.mockResolvedValue({ mtime: new Date(1000), size: oversizedBytes.byteLength });
-            syncFsMocks.stat.mockResolvedValue({ mtimeMs: 1000, size: oversizedBytes.byteLength });
-            syncFsMocks.exists.mockImplementation(async (path: string) => {
-                if (path !== generationPath) return false;
-                targetChecks += 1;
-                return race ? targetChecks > 1 : true;
+            fsMocks.stat.mockResolvedValue({ mtime: new Date(1000), size: oversizedLength });
+            syncFsMocks.exists.mockResolvedValue(true);
+
+            await expect(syncFileAttachments(
+                appData,
+                '/candidate-sync',
+                depsFor(),
+                postMergeHelpers(),
+            )).rejects.toMatchObject({
+                name: 'AttachmentUploadTooLargeError',
+                actualBytes: oversizedLength,
+                limitBytes: 15,
             });
-            syncFsMocks.publishAttachmentGeneration.mockResolvedValue({ status: 'alreadyExists' });
 
-            await coreMocks.computeSha256Hex.withImplementation(
-                async () => BYTES_HASH,
-                async () => {
-                    const result = expectFoldedData(await syncFileAttachments(
-                        appData,
-                        '/candidate-sync',
-                        depsFor(),
-                        postMergeHelpers(),
-                    ));
+            expect(fsMocks.readFile).not.toHaveBeenCalled();
+            expect(syncFsMocks.stat).not.toHaveBeenCalledWith(generationPath);
+            expect(syncFsMocks.reserveAttachmentGeneration).not.toHaveBeenCalled();
+            expect(syncFsMocks.publishAttachmentGeneration).not.toHaveBeenCalled();
+            expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+                cloudKey: undefined,
+                fileHash: BYTES_HASH,
+                pendingContentUpload: true,
+                localStatus: 'available',
+            });
+        });
 
-                    expect(syncFsMocks.stat).toHaveBeenCalledWith(generationPath);
-                    expect(result.tasks[0].attachments?.[0]).toMatchObject({
-                        cloudKey: generationKey,
-                        pendingContentUpload: undefined,
-                    });
-                    if (race) {
-                        expect(syncFsMocks.publishAttachmentGeneration).toHaveBeenCalledTimes(1);
-                        expect(syncFsMocks.abandonAttachmentGeneration).toHaveBeenCalledWith('', 'operation-1');
-                    } else {
-                        expect(syncFsMocks.reserveAttachmentGeneration).not.toHaveBeenCalled();
-                        expect(syncFsMocks.publishAttachmentGeneration).not.toHaveBeenCalled();
-                    }
-                },
-            );
+        it('fails the File Sync upload closed when the local size cannot be established', async () => {
+            const appData = makePendingData();
+            const original = structuredClone(appData.tasks[0].attachments?.[0]);
+            fsMocks.exists.mockResolvedValue(true);
+            fsMocks.stat.mockRejectedValue(new Error('stat unavailable'));
+
+            await expect(syncFileAttachments(
+                appData,
+                '/candidate-sync',
+                depsFor(),
+                postMergeHelpers(),
+            )).rejects.toMatchObject({ name: 'AttachmentUploadSizeUnavailableError' });
+
+            expect(fsMocks.readFile).not.toHaveBeenCalled();
+            expect(syncFsMocks.reserveAttachmentGeneration).not.toHaveBeenCalled();
+            expect(syncFsMocks.publishAttachmentGeneration).not.toHaveBeenCalled();
+            expect(appData.tasks[0].attachments?.[0]).toEqual(original);
         });
 
         it('publishes a losing File Sync candidate under its own generation key', async () => {
@@ -1649,17 +1655,21 @@ describe('desktop sync attachment backends', () => {
             });
         });
 
-        it('does not apply the bounded download ceiling to an immutable File Sync upload', async () => {
+        it('retries successfully after an oversized File Sync source shrinks below the cap', async () => {
             const appData = makePendingData();
-            const oversizedLength = MAX_DOWNLOAD_BYTES + 1;
-            const oversizedBytes = {
-                byteLength: oversizedLength,
-                length: oversizedLength,
-            } as Uint8Array;
             fsMocks.exists.mockResolvedValue(true);
-            fsMocks.readFile.mockResolvedValue(oversizedBytes);
-            fsMocks.stat.mockResolvedValue({ mtime: new Date(1000), size: oversizedLength });
             syncFsMocks.exists.mockResolvedValue(false);
+            fsMocks.stat.mockResolvedValueOnce({ mtime: new Date(1000), size: MAX_DOWNLOAD_BYTES });
+
+            await expect(syncFileAttachments(
+                appData,
+                '/candidate-sync',
+                depsFor(),
+                postMergeHelpers(),
+            )).rejects.toMatchObject({ name: 'AttachmentUploadTooLargeError' });
+
+            fsMocks.stat.mockResolvedValue({ mtime: new Date(2000), size: bytes.length });
+            fsMocks.readFile.mockResolvedValue(bytes);
 
             await coreMocks.computeSha256Hex.withImplementation(
                 async () => BYTES_HASH,
@@ -1671,19 +1681,17 @@ describe('desktop sync attachment backends', () => {
                         postMergeHelpers(),
                     ));
 
-                    expect(syncFsMocks.stat).not.toHaveBeenCalledWith(
-                        expect.stringContaining('.mindwtr-attachment-generation-'),
-                    );
                     expect(syncFsMocks.reserveAttachmentGeneration).toHaveBeenCalledWith(
                         '',
                         `/candidate-sync/attachments/attachment-1.${BYTES_HASH}.txt`,
-                        oversizedLength,
+                        bytes.length,
                         BYTES_HASH,
                     );
                     expect(syncFsMocks.publishAttachmentGeneration).toHaveBeenCalledWith('', 'operation-1');
                     expect(result.tasks[0].attachments?.[0]).toMatchObject({
                         cloudKey: `attachments/attachment-1.${BYTES_HASH}.txt`,
                         pendingContentUpload: undefined,
+                        localStatus: 'available',
                     });
                 },
             );

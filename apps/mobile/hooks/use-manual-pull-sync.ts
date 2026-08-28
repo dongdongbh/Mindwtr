@@ -129,6 +129,21 @@ export function useManualPullSync() {
         return;
       }
 
+      if (result.fileAttachmentUploadBlocked === 'too-large') {
+        finishDeferredIndicator();
+        showToast({
+          title: tFallback(t, 'common.notice', 'Notice'),
+          message: tFallback(
+            t,
+            'settings.syncFileAttachmentTooLarge',
+            'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.'
+          ),
+          tone: 'warning',
+          durationMs: 6000,
+        });
+        return;
+      }
+
       if (result.success && result.attachmentWriteDeferred) {
         finishDeferredIndicator();
         showToast({

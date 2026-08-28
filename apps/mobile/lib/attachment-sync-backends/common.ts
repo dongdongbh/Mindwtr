@@ -1,5 +1,7 @@
 import {
   applyAttachmentContentStat,
+  assertBufferedAttachmentUploadSize,
+  AttachmentUploadSizeUnavailableError,
   bumpAttachmentContentRevision,
   checkAttachmentContentChange,
   computeSha256Hex,
@@ -400,13 +402,28 @@ export const resolveAttachmentDownloadTargetPath = (
  */
 export const createMobileAttachmentUploadSnapshot: NonNullable<
   AttachmentTransferLifecycleOptions['createUploadSnapshot']
-> = async (sourcePath, attachment) => {
+> = async (sourcePath, attachment) => createMobileAttachmentUploadSnapshotWithLimit(
+  sourcePath,
+  attachment,
+);
+
+export const createMobileAttachmentUploadSnapshotWithLimit = async (
+  sourcePath: string,
+  attachment: Attachment,
+  maxBufferedUploadBytes?: number,
+) => {
   const baseDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
   if (!baseDir) return null;
 
   const sourceStatBefore = sourcePath.startsWith('content://')
     ? null
     : await statAttachmentFile(sourcePath);
+  if (!sourcePath.startsWith('content://') && !sourceStatBefore && maxBufferedUploadBytes !== undefined) {
+    throw new AttachmentUploadSizeUnavailableError();
+  }
+  if (sourceStatBefore && maxBufferedUploadBytes !== undefined) {
+    assertBufferedAttachmentUploadSize(sourceStatBefore.size, maxBufferedUploadBytes);
+  }
 
   const normalizedBaseDir = baseDir.endsWith('/') ? baseDir : `${baseDir}/`;
   uploadSnapshotSequence += 1;
@@ -414,8 +431,14 @@ export const createMobileAttachmentUploadSnapshot: NonNullable<
   let retainStagedFile = false;
   try {
     await FileSystem.copyAsync({ from: sourcePath, to: stagedPath });
-    const [stagedStat, stagedBytes, sourceStatAfter] = await Promise.all([
-      statAttachmentFile(stagedPath),
+    const stagedStat = await statAttachmentFile(stagedPath);
+    if (!stagedStat && maxBufferedUploadBytes !== undefined) {
+      throw new AttachmentUploadSizeUnavailableError();
+    }
+    if (stagedStat && maxBufferedUploadBytes !== undefined) {
+      assertBufferedAttachmentUploadSize(stagedStat.size, maxBufferedUploadBytes);
+    }
+    const [stagedBytes, sourceStatAfter] = await Promise.all([
       readFileAsBytes(stagedPath),
       sourcePath.startsWith('content://') ? Promise.resolve(null) : statAttachmentFile(sourcePath),
     ]);
@@ -464,13 +487,17 @@ export async function runMobileAttachmentLifecycle(
   options: Omit<
     AttachmentTransferLifecycleOptions,
     'resolveLocalPath' | 'canUploadFrom' | 'createUploadSnapshot' | 'requireUploadSnapshot'
-  >
+  > & { maxBufferedUploadBytes?: number }
 ): Promise<AttachmentTransferResult> {
   return await runAttachmentTransferLifecycle({
     ...options,
     resolveLocalPath: (uri) => uri,
     canUploadFrom: canUploadAttachmentFrom,
-    createUploadSnapshot: createMobileAttachmentUploadSnapshot,
+    createUploadSnapshot: (sourcePath, attachment) => createMobileAttachmentUploadSnapshotWithLimit(
+      sourcePath,
+      attachment,
+      options.maxBufferedUploadBytes,
+    ),
     requireUploadSnapshot: true,
   });
 }
