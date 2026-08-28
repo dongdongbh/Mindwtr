@@ -4260,6 +4260,33 @@ mod tests {
     }
 
     #[test]
+    fn retained_seed_order_is_deterministic_for_case_variant_same_mtime_names() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let upper = dir.path().join("mindwtr-backup-A.json");
+        let lower = dir.path().join("mindwtr-backup-a.json");
+        fs::write(&upper, br#"{"tasks":[{"id":"upper"}]}"#).expect("write upper seed");
+        fs::write(&lower, br#"{"tasks":[{"id":"lower"}]}"#).expect("write lower seed");
+        let same_time = UNIX_EPOCH + Duration::from_secs(30);
+        File::open(&upper)
+            .expect("open upper seed")
+            .set_modified(same_time)
+            .expect("set upper mtime");
+        File::open(&lower)
+            .expect("open lower seed")
+            .set_modified(same_time)
+            .expect("set lower mtime");
+        let lock = acquire_sync_lock(dir.path()).expect("acquire retained authority");
+        let root = RetainedSyncRoot::new(dir.path(), &lock);
+
+        let first = retained_seed_backup_files(&root, ".json").expect("first enumeration");
+        let second = retained_seed_backup_files(&root, ".json").expect("second enumeration");
+
+        assert_eq!(first, second);
+        assert_eq!(first, vec![lower, upper]);
+        release_sync_lock(&lock);
+    }
+
+    #[test]
     #[cfg(unix)]
     fn retained_seed_inventory_follows_the_held_root_not_a_rebound_path() {
         let parent = tempfile::tempdir().expect("temp parent");
@@ -14836,7 +14863,7 @@ fn retained_seed_backup_files(
     let names = root.list_direct_child_names().map_err(|error| {
         format!("Failed to enumerate retained File Sync root: {error}")
     })?;
-    let mut candidates: Vec<(SystemTime, String, PathBuf)> = Vec::new();
+    let mut candidates: Vec<(SystemTime, String, String, PathBuf)> = Vec::new();
     for name in names {
         let Some(name_text) = name.to_str() else {
             continue;
@@ -14855,12 +14882,18 @@ fn retained_seed_backup_files(
             .metadata()
             .and_then(|metadata| metadata.modified())
             .unwrap_or(UNIX_EPOCH);
-        candidates.push((modified, lower, path));
+        candidates.push((modified, lower, name_text.to_string(), path));
     }
-    candidates.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+    candidates.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| right.1.cmp(&left.1))
+            .then_with(|| right.2.cmp(&left.2))
+    });
     Ok(candidates
         .into_iter()
-        .map(|(_, _, path)| path)
+        .map(|(_, _, _, path)| path)
         .collect())
 }
 
