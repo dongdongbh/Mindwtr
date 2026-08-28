@@ -2184,6 +2184,41 @@ describe('InboxProcessingModal', () => {
       expect(updateTask).toHaveBeenLastCalledWith('inbox-1', expect.objectContaining({ status: 'inbox' }));
     });
 
+    it('binds each queued Undo toast to the decision that created it', async () => {
+      asyncStorageMock.getItem.mockResolvedValue('quick');
+      storeState.tasks = [
+        { ...baseInboxTask, id: 'inbox-a', title: 'First capture' },
+        { ...baseInboxTask, id: 'inbox-b', title: 'Second capture', createdAt: '2025-01-02T00:00:00.000Z' },
+      ];
+      const root = await openFlow();
+
+      await pressAsync(root, 'inbox.someday');
+      await pressAsync(root, 'File it');
+      const firstUndo = showToast.mock.calls
+        .map(([options]) => options)
+        .find((options) => options?.actionLabel === 'Undo' && options.message.includes('First capture'));
+
+      await pressAsync(root, 'inbox.someday');
+      await pressAsync(root, 'File it');
+      expect(showToast.mock.calls.some(([options]) => (
+        options?.actionLabel === 'Undo' && options.message.includes('Second capture')
+      ))).toBe(true);
+
+      await act(async () => {
+        firstUndo!.onAction();
+        await Promise.resolve();
+      });
+
+      expect(updateTask).toHaveBeenLastCalledWith(
+        'inbox-a',
+        expect.objectContaining({ status: 'inbox' }),
+      );
+      expect(updateTask).not.toHaveBeenCalledWith(
+        'inbox-b',
+        expect.objectContaining({ status: 'inbox' }),
+      );
+    });
+
     it('uses recurrence-aware completion undo for a recurring two-minute item', async () => {
       const recurringTask = {
         ...baseInboxTask,
