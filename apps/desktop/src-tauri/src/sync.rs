@@ -11221,17 +11221,6 @@ fn empty_remote_app_data() -> serde_json::Value {
     })
 }
 
-// Runs off the UI thread: the sync folder can be a network or FUSE mount
-// (rclone, WinFSP) where a single read blocks for tens of seconds, and a
-// plain `#[tauri::command]` executes on the main thread and freezes the window.
-fn sync_regular_file_for_durability(path: &Path) -> std::io::Result<()> {
-    OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(path)?
-        .sync_all()
-}
-
 fn sync_parent_directory_for_durability(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
