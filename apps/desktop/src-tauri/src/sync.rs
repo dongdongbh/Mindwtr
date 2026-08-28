@@ -6305,14 +6305,21 @@ mod tests {
         let destination_leaf =
             retained_root_leaf_c_string(destination.file_name().unwrap()).unwrap();
 
+        let mut validations = 0;
         let error = retained_root_link_then_unlink_no_replace_with(
             &directory,
             source_leaf.as_c_str(),
             destination_leaf.as_c_str(),
             || {
-                fs::rename(&destination, &linked_generation)?;
-                fs::rename(&peer, &destination)?;
-                Err(std::io::Error::other("injected source retirement failure"))
+                validations += 1;
+                if validations == 2 {
+                    fs::rename(&destination, &linked_generation)?;
+                    fs::rename(&peer, &destination)?;
+                    return Err(std::io::Error::other(
+                        "injected source retirement failure",
+                    ));
+                }
+                Ok(())
             },
         )
         .expect_err("failed source retirement must report the retained duplicate");
@@ -6347,13 +6354,17 @@ mod tests {
         let destination_leaf =
             retained_root_leaf_c_string(destination.file_name().unwrap()).unwrap();
 
+        let mut validations = 0;
         let error = retained_root_link_then_unlink_no_replace_with(
             &directory,
             source_leaf.as_c_str(),
             destination_leaf.as_c_str(),
             || {
-                fs::rename(&source, &displaced_source)?;
-                fs::rename(&peer, &source)?;
+                validations += 1;
+                if validations == 2 {
+                    fs::rename(&source, &displaced_source)?;
+                    fs::rename(&peer, &source)?;
+                }
                 Ok(())
             },
         )
@@ -6382,6 +6393,62 @@ mod tests {
         assert_eq!(
             fs::read(quarantined_peer).expect("read preserved peer"),
             b"peer-generation"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn link_fallback_preserves_linked_and_source_bytes_when_authority_is_lost() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let source = dir.path().join("stage");
+        let destination = dir.path().join("canonical");
+        fs::write(&source, b"owned-generation").expect("seed source");
+        let directory = File::open(dir.path()).expect("open retained directory");
+        let source_leaf = retained_root_leaf_c_string(source.file_name().unwrap()).unwrap();
+        let destination_leaf =
+            retained_root_leaf_c_string(destination.file_name().unwrap()).unwrap();
+        let mut validations = 0;
+
+        let error = retained_root_link_then_unlink_no_replace_with(
+            &directory,
+            source_leaf.as_c_str(),
+            destination_leaf.as_c_str(),
+            || {
+                validations += 1;
+                if validations == 2 {
+                    return Err(std::io::Error::other(retained_cleanup_authority_error(
+                        "injected authority loss after link publication".to_string(),
+                    )));
+                }
+                Ok(())
+            },
+        )
+        .expect_err("authority loss must stop source retirement");
+
+        assert!(
+            error
+                .to_string()
+                .starts_with(RETAINED_CLEANUP_AUTHORITY_LOST),
+            "authority loss must remain a terminal outer marker: {error}"
+        );
+        assert_eq!(validations, 2);
+        assert_eq!(
+            fs::read(&destination).expect("linked destination remains"),
+            b"owned-generation"
+        );
+        assert_eq!(
+            fs::read(&source).expect("source remains"),
+            b"owned-generation"
+        );
+        assert!(
+            fs::read_dir(dir.path())
+                .expect("enumerate retained root")
+                .filter_map(Result::ok)
+                .all(|entry| !entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".mindwtr-probe-retire-")),
+            "authority loss before reservation must not create retirement scratch"
         );
     }
 
@@ -6504,7 +6571,10 @@ mod tests {
         )
         .expect("replace through retained root");
 
-        assert_eq!(validations, 6, "each of three mutations is fenced twice");
+        assert_eq!(
+            validations, 8,
+            "each mutation is fenced before/after and each rename revalidates at its OS boundary"
+        );
         assert_eq!(fs::read(&target).expect("installed target"), b"new-generation");
         assert!(!replacement.exists());
         assert!(!previous.exists());
@@ -13624,12 +13694,19 @@ impl<'a> RetainedSyncRoot<'a> {
         self.identity(path).is_ok_and(|actual| actual == expected)
     }
 
-    fn rename(&self, source: &Path, destination: &Path, replace: bool) -> std::io::Result<()> {
+    fn rename(
+        &self,
+        source: &Path,
+        destination: &Path,
+        replace: bool,
+        before_mutation: &mut dyn FnMut() -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
         retained_root_rename(
             self.directory,
             self.leaf(source)?,
             self.leaf(destination)?,
             replace,
+            before_mutation,
         )
     }
 
@@ -13801,11 +13878,13 @@ fn retained_root_rename(
     source: &OsStr,
     destination: &OsStr,
     replace: bool,
+    before_mutation: &mut dyn FnMut() -> std::io::Result<()>,
 ) -> std::io::Result<()> {
     use std::os::fd::AsRawFd as _;
 
     let source = retained_root_leaf_c_string(source)?;
     let destination = retained_root_leaf_c_string(destination)?;
+    before_mutation()?;
     let result = if replace {
         unsafe {
             libc::renameat(
@@ -13841,6 +13920,7 @@ fn retained_root_rename(
             directory,
             source.as_c_str(),
             destination.as_c_str(),
+            before_mutation,
         );
     }
     Err(error)
@@ -13852,11 +13932,13 @@ fn retained_root_rename(
     source: &OsStr,
     destination: &OsStr,
     replace: bool,
+    before_mutation: &mut dyn FnMut() -> std::io::Result<()>,
 ) -> std::io::Result<()> {
     use std::os::fd::AsRawFd as _;
 
     let source = retained_root_leaf_c_string(source)?;
     let destination = retained_root_leaf_c_string(destination)?;
+    before_mutation()?;
     let result = if replace {
         unsafe {
             libc::renameat(
@@ -13891,6 +13973,7 @@ fn retained_root_rename(
             directory,
             source.as_c_str(),
             destination.as_c_str(),
+            before_mutation,
         );
     }
     Err(error)
@@ -13902,12 +13985,14 @@ fn retained_root_rename(
     source: &OsStr,
     destination: &OsStr,
     replace: bool,
+    before_mutation: &mut dyn FnMut() -> std::io::Result<()>,
 ) -> std::io::Result<()> {
     use std::os::fd::AsRawFd as _;
 
     let source = retained_root_leaf_c_string(source)?;
     let destination = retained_root_leaf_c_string(destination)?;
     if replace {
+        before_mutation()?;
         if unsafe {
             libc::renameat(
                 directory.as_raw_fd(),
@@ -13925,6 +14010,7 @@ fn retained_root_rename(
         directory,
         source.as_c_str(),
         destination.as_c_str(),
+        before_mutation,
     )
 }
 
@@ -13933,19 +14019,25 @@ fn retained_root_link_then_unlink_no_replace(
     directory: &File,
     source: &CStr,
     destination: &CStr,
+    before_mutation: &mut dyn FnMut() -> std::io::Result<()>,
 ) -> std::io::Result<()> {
-    retained_root_link_then_unlink_no_replace_with(directory, source, destination, || Ok(()))
+    retained_root_link_then_unlink_no_replace_with(
+        directory,
+        source,
+        destination,
+        before_mutation,
+    )
 }
 
 #[cfg(unix)]
-fn retained_root_link_then_unlink_no_replace_with<BeforeSourceRetirement>(
+fn retained_root_link_then_unlink_no_replace_with<BeforeMutation>(
     directory: &File,
     source: &CStr,
     destination: &CStr,
-    mut before_source_retirement: BeforeSourceRetirement,
+    mut before_mutation: BeforeMutation,
 ) -> std::io::Result<()>
 where
-    BeforeSourceRetirement: FnMut() -> std::io::Result<()>,
+    BeforeMutation: FnMut() -> std::io::Result<()>,
 {
     use std::os::fd::AsRawFd as _;
     use std::os::unix::ffi::OsStrExt as _;
@@ -13958,6 +14050,7 @@ where
         false,
     )?;
     let source_identity = native_file_identity(&source_file)?;
+    before_mutation()?;
     if unsafe {
         libc::linkat(
             directory.as_raw_fd(),
@@ -13971,10 +14064,10 @@ where
         return Err(std::io::Error::last_os_error());
     }
 
-    if let Err(error) = before_source_retirement() {
-        return Err(retained_linked_destination_preserved_error(error));
-    }
     for _ in 0..16 {
+        if let Err(error) = before_mutation() {
+            return Err(retained_linked_destination_preserved_error(error));
+        }
         let sequence = RETAINED_CLEANUP_SEQUENCE.fetch_add(1, AtomicOrdering::Relaxed);
         let quarantine = CString::new(format!(
             ".mindwtr-probe-retire-{}-{sequence:016x}",
@@ -13994,6 +14087,9 @@ where
             Err(error) => return Err(retained_linked_destination_preserved_error(error)),
         };
         drop(reservation);
+        if let Err(error) = before_mutation() {
+            return Err(retained_linked_destination_preserved_error(error));
+        }
         if unsafe {
             libc::renameat(
                 directory.as_raw_fd(),
@@ -14006,6 +14102,11 @@ where
             let error = std::io::Error::last_os_error();
             // This invocation reserved the private leaf create-new. Replacing
             // that placeholder cannot overwrite a peer-owned quarantine.
+            if let Err(authority_error) = before_mutation() {
+                return Err(retained_linked_destination_preserved_error(
+                    authority_error,
+                ));
+            }
             let _ = unsafe { libc::unlinkat(directory.as_raw_fd(), quarantine.as_ptr(), 0) };
             return Err(retained_linked_destination_preserved_error(error));
         }
@@ -14025,6 +14126,9 @@ where
             return Err(std::io::Error::other(format!(
                 "{RETAINED_LINKED_DESTINATION_PRESERVED}: no-replace publication preserved a replacement source generation in quarantine"
             )));
+        }
+        if let Err(error) = before_mutation() {
+            return Err(retained_linked_destination_preserved_error(error));
         }
         if unsafe { libc::unlinkat(directory.as_raw_fd(), quarantine.as_ptr(), 0) } != 0 {
             return Err(retained_linked_destination_preserved_error(
@@ -14046,6 +14150,14 @@ fn retained_linked_destination_preserved_error(error: std::io::Error) -> std::io
     // Publication has already created the destination. Preserve both names on
     // every retirement ambiguity so the caller can quarantine only the exact
     // destination generation it owns.
+    if error
+        .to_string()
+        .starts_with(RETAINED_CLEANUP_AUTHORITY_LOST)
+    {
+        return std::io::Error::other(format!(
+            "{error}; {RETAINED_LINKED_DESTINATION_PRESERVED}: no-replace publication linked the exact source generation but could not safely retire the source; both names were preserved"
+        ));
+    }
     std::io::Error::other(format!(
         "{RETAINED_LINKED_DESTINATION_PRESERVED}: no-replace publication linked the exact source generation but could not safely retire the source; both names were preserved: {error}"
     ))
@@ -14060,6 +14172,7 @@ fn retained_root_rename(
     source: &OsStr,
     destination: &OsStr,
     replace: bool,
+    before_mutation: &mut dyn FnMut() -> std::io::Result<()>,
 ) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt as _;
     use std::os::windows::io::AsRawHandle as _;
@@ -14077,6 +14190,7 @@ fn retained_root_rename(
     // happen to provide it.
     let mut buffer = vec![0_usize; words];
     let information = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    before_mutation()?;
     unsafe {
         (*information).Anonymous.ReplaceIfExists = replace;
         (*information).RootDirectory = directory.as_raw_handle();
@@ -14105,6 +14219,7 @@ fn retained_root_rename(
     _source: &OsStr,
     _destination: &OsStr,
     _replace: bool,
+    _before_mutation: &mut dyn FnMut() -> std::io::Result<()>,
 ) -> std::io::Result<()> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
@@ -14813,12 +14928,18 @@ where
             ".mindwtr-probe-cleanup-{}-{sequence:016x}",
             std::process::id()
         ));
-        before_mutation(RetainedCleanupMutation::Quarantine, path)?;
-        match root.rename(path, &quarantine, false) {
+        let mut before_quarantine = || {
+            before_mutation(RetainedCleanupMutation::Quarantine, path)
+                .map_err(std::io::Error::other)
+        };
+        match root.rename(path, &quarantine, false, &mut before_quarantine) {
             Ok(()) => {
                 if !root.has_identity(&quarantine, identity) {
-                    before_mutation(RetainedCleanupMutation::Restore, &quarantine)?;
-                    let restore = root.rename(&quarantine, path, false);
+                    let mut before_restore = || {
+                        before_mutation(RetainedCleanupMutation::Restore, &quarantine)
+                            .map_err(std::io::Error::other)
+                    };
+                    let restore = root.rename(&quarantine, path, false, &mut before_restore);
                     let preservation = match restore {
                         Ok(()) => {
                             "probe cleanup captured a replacement leaf; restored it without deleting it"
@@ -14827,6 +14948,11 @@ where
                         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                             "probe cleanup captured a replacement leaf; preserved it in quarantine because the canonical name was occupied"
                                 .to_string()
+                        }
+                        Err(error)
+                            if is_retained_cleanup_authority_error(&error.to_string()) =>
+                        {
+                            return Err(error.to_string());
                         }
                         Err(error) => format!(
                             "probe cleanup captured a replacement leaf; preserved it in quarantine because restoration failed: {error}"
@@ -14852,6 +14978,9 @@ where
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) if is_retained_cleanup_authority_error(&error.to_string()) => {
+                return Err(error.to_string());
+            }
             Err(error) => {
                 return Err(format!(
                     "Failed to quarantine probe file before cleanup: {error}"
@@ -15066,7 +15195,14 @@ where
             before_stage(AtomicWriteStage::Rename)
         }),
         None => root
-            .rename(tmp_file, destination, destination_may_exist)
+            .rename(
+                tmp_file,
+                destination,
+                destination_may_exist,
+                &mut || {
+                    before_stage(AtomicWriteStage::Rename).map_err(std::io::Error::other)
+                },
+            )
             .map_err(|error| error.to_string()),
     };
     if let Err(mut detail) = rename_result {
@@ -15441,13 +15577,17 @@ where
     let target_was_present = root.exists(target).map_err(|error| error.to_string())?;
     if target_was_present {
         validate()?;
-        root.rename(target, previous, false)
+        root.rename(target, previous, false, &mut || {
+            validate().map_err(std::io::Error::other)
+        })
             .map_err(|error| format!("Failed to preserve the current {description}: {error}"))?;
         validate()?;
     }
 
     validate()?;
-    match root.rename(replacement, target, false) {
+    match root.rename(replacement, target, false, &mut || {
+        validate().map_err(std::io::Error::other)
+    }) {
         Ok(()) => {
             validate()?;
             if target_was_present {
@@ -15459,12 +15599,19 @@ where
             }
             Ok(())
         }
+        Err(replace_error)
+            if is_retained_cleanup_authority_error(&replace_error.to_string()) =>
+        {
+            Err(replace_error.to_string())
+        }
         Err(replace_error) if !target_was_present => Err(format!(
             "Failed to install the replacement {description}: {replace_error}"
         )),
         Err(replace_error) => {
             validate()?;
-            let restore = root.rename(previous, target, false);
+            let restore = root.rename(previous, target, false, &mut || {
+                validate().map_err(std::io::Error::other)
+            });
             if restore.is_ok() {
                 validate()?;
             }
@@ -16583,7 +16730,9 @@ where
                         &mut validate_authority,
                     )
                 } else {
-                    root.rename(&backup_tmp, &backup_file, true)
+                    root.rename(&backup_tmp, &backup_file, true, &mut || {
+                        validate_authority().map_err(std::io::Error::other)
+                    })
                         .map_err(|error| error.to_string())
                 };
                 let directory_flush = root.sync_directory().map_err(|error| {
