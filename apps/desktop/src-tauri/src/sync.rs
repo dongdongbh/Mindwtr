@@ -4102,6 +4102,127 @@ mod tests {
     }
 
     #[test]
+    fn retained_reader_retries_partial_primary_and_keeps_relaxed_json_parsing() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let primary = dir.path().join(DATA_FILE_NAME);
+        fs::write(&primary, b"placeholder").expect("seed path for eviction check");
+        let mut reads = 0;
+        let mut waits = 0;
+        let mut read_bytes = |_path: &Path| {
+            reads += 1;
+            if reads == 1 {
+                Ok(b"{\"tasks\":[".to_vec())
+            } else {
+                Ok(b"\xef\xbb\xbf{\"tasks\":[{\"id\":\"new-primary\"}]} trailing-provider-bytes"
+                    .to_vec())
+            }
+        };
+        let mut wait = |_duration: Duration| waits += 1;
+
+        let value = read_sync_candidate_from_retained_root_with(
+            &primary,
+            5,
+            SyncFileCrypto::Off,
+            &mut read_bytes,
+            &mut wait,
+        )
+        .expect("second retained read recovers the complete primary");
+
+        assert_eq!(value["tasks"][0]["id"], "new-primary");
+        assert_eq!(reads, 2, "primary retries before considering recovery files");
+        assert_eq!(waits, 1);
+
+        let source = include_str!("sync.rs");
+        let retained_reader = source
+            .split_once("fn read_sync_file_from_retained_root_with(")
+            .expect("retained reader")
+            .1
+            .split_once("\n#[derive(Clone, Copy, Debug, Eq, PartialEq)]")
+            .expect("end of retained reader")
+            .0;
+        for required in [
+            "root, &primary, 5, crypto",
+            "root, path, 2, crypto",
+            "root, &legacy, 1, crypto",
+            "root, &seed, 1, crypto",
+        ] {
+            assert!(
+                retained_reader.contains(required),
+                "retained reader must preserve the old recovery attempt count ({required})"
+            );
+        }
+    }
+
+    #[test]
+    fn retained_seed_recovery_prefers_mtime_over_reverse_lexical_name() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let lexically_later = dir.path().join("mindwtr-backup-z.json");
+        let actually_newer = dir.path().join("mindwtr-backup-a.json");
+        fs::write(&lexically_later, br#"{"tasks":[{"id":"older"}]}"#)
+            .expect("write older seed");
+        fs::write(&actually_newer, br#"{"tasks":[{"id":"newer"}]}"#)
+            .expect("write newer seed");
+        File::open(&lexically_later)
+            .expect("open older seed")
+            .set_modified(UNIX_EPOCH + Duration::from_secs(10))
+            .expect("set older mtime");
+        File::open(&actually_newer)
+            .expect("open newer seed")
+            .set_modified(UNIX_EPOCH + Duration::from_secs(20))
+            .expect("set newer mtime");
+        let lock = acquire_sync_lock(dir.path()).expect("sync lock");
+        let root = RetainedSyncRoot::new(dir.path(), &lock);
+
+        assert_eq!(retained_seed_backup_files(&root, ".json").unwrap().len(), 2);
+        assert_eq!(
+            retained_seed_backup_files(&root, ".json").unwrap().len(),
+            2,
+            "retained directory enumeration must restart from the beginning"
+        );
+
+        let recovered = read_sync_file_from_retained_root_with(&root, SyncFileCrypto::Off)
+            .expect("recover newest seed");
+
+        assert_eq!(recovered["tasks"][0]["id"], "newer");
+        release_sync_lock(&lock);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn retained_seed_inventory_follows_the_held_root_not_a_rebound_path() {
+        let parent = tempfile::tempdir().expect("temp parent");
+        let sync_dir = parent.path().join("sync");
+        let displaced = parent.path().join("displaced-sync");
+        fs::create_dir(&sync_dir).expect("sync dir");
+        fs::write(
+            sync_dir.join("mindwtr-backup-retained.json"),
+            br#"{"tasks":[{"id":"retained"}]}"#,
+        )
+        .expect("write retained seed");
+        let lock = acquire_sync_lock(&sync_dir).expect("sync lock");
+        let root = RetainedSyncRoot::new(&sync_dir, &lock);
+        fs::rename(&sync_dir, &displaced).expect("displace held root");
+        fs::create_dir(&sync_dir).expect("replacement root");
+
+        let seeds = retained_seed_backup_files(&root, ".json")
+            .expect("enumerate through retained root authority");
+        assert_eq!(seeds.len(), 1);
+        let retained = read_sync_candidate_from_retained_root(
+            &root,
+            &seeds[0],
+            1,
+            SyncFileCrypto::Off,
+        )
+        .expect("read seed through retained root authority");
+        assert_eq!(retained["tasks"][0]["id"], "retained");
+        assert!(fs::read_dir(&sync_dir)
+            .expect("replacement root")
+            .next()
+            .is_none());
+        release_sync_lock(&lock);
+    }
+
+    #[test]
     fn recovered_backup_is_repaired_without_rotating_corrupt_primary() {
         let dir = tempfile::tempdir().expect("temp dir");
         let primary = dir.path().join(DATA_FILE_NAME);
@@ -12655,6 +12776,10 @@ impl<'a> RetainedSyncRoot<'a> {
     fn try_clone_directory(&self) -> std::io::Result<File> {
         self.directory.try_clone()
     }
+
+    fn list_direct_child_names(&self) -> std::io::Result<Vec<OsString>> {
+        retained_root_list_names(self.directory)
+    }
 }
 
 #[cfg(unix)]
@@ -13101,6 +13226,169 @@ fn retained_root_sync_directory(_directory: &File) -> std::io::Result<()> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "retained-root File Sync directory flush is unsupported",
+    ))
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn retained_root_list_names(directory: &File) -> std::io::Result<Vec<OsString>> {
+    use std::os::fd::AsRawFd as _;
+    use std::os::unix::ffi::OsStringExt as _;
+
+    struct DirectoryStream(*mut libc::DIR);
+    impl Drop for DirectoryStream {
+        fn drop(&mut self) {
+            unsafe { libc::closedir(self.0) };
+        }
+    }
+
+    let descriptor = unsafe { libc::dup(directory.as_raw_fd()) };
+    if descriptor < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let stream = unsafe { libc::fdopendir(descriptor) };
+    if stream.is_null() {
+        let error = std::io::Error::last_os_error();
+        unsafe { libc::close(descriptor) };
+        return Err(error);
+    }
+    let stream = DirectoryStream(stream);
+    unsafe { libc::rewinddir(stream.0) };
+    let mut names = Vec::new();
+    loop {
+        #[cfg(target_os = "linux")]
+        unsafe {
+            *libc::__errno_location() = 0;
+        }
+        #[cfg(target_os = "macos")]
+        unsafe {
+            *libc::__error() = 0;
+        }
+        let entry = unsafe { libc::readdir(stream.0) };
+        if entry.is_null() {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error().unwrap_or(0) == 0 {
+                break;
+            }
+            return Err(error);
+        }
+        let bytes = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) }.to_bytes();
+        if bytes == b"." || bytes == b".." {
+            continue;
+        }
+        names.push(OsString::from_vec(bytes.to_vec()));
+    }
+    Ok(names)
+}
+
+#[cfg(target_os = "windows")]
+fn retained_root_list_names(directory: &File) -> std::io::Result<Vec<OsString>> {
+    use std::os::windows::ffi::OsStringExt as _;
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Foundation::ERROR_NO_MORE_FILES;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo,
+        GetFileInformationByHandleEx, FILE_ID_BOTH_DIR_INFO,
+    };
+
+    let buffer_bytes = 64 * 1024;
+    let words = buffer_bytes / std::mem::size_of::<usize>();
+    let mut buffer = vec![0_usize; words];
+    let mut restart = true;
+    let mut names = Vec::new();
+    loop {
+        let class = if restart {
+            FileIdBothDirectoryRestartInfo
+        } else {
+            FileIdBothDirectoryInfo
+        };
+        restart = false;
+        if unsafe {
+            GetFileInformationByHandleEx(
+                directory.as_raw_handle(),
+                class,
+                buffer.as_mut_ptr().cast(),
+                buffer_bytes as u32,
+            )
+        } == 0
+        {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(ERROR_NO_MORE_FILES as i32) {
+                break;
+            }
+            return Err(error);
+        }
+
+        let mut offset = 0_usize;
+        loop {
+            if offset + std::mem::size_of::<FILE_ID_BOTH_DIR_INFO>() > buffer_bytes {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "File Sync directory enumeration returned a truncated entry",
+                ));
+            }
+            let entry = unsafe {
+                &*buffer
+                    .as_ptr()
+                    .cast::<u8>()
+                    .add(offset)
+                    .cast::<FILE_ID_BOTH_DIR_INFO>()
+            };
+            let name_units = usize::try_from(entry.FileNameLength)
+                .ok()
+                .filter(|length| length % std::mem::size_of::<u16>() == 0)
+                .map(|length| length / std::mem::size_of::<u16>())
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "File Sync directory enumeration returned an invalid name length",
+                    )
+                })?;
+            let fixed = std::mem::size_of::<FILE_ID_BOTH_DIR_INFO>()
+                - std::mem::size_of::<u16>();
+            if offset + fixed + name_units * std::mem::size_of::<u16>() > buffer_bytes {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "File Sync directory enumeration returned a truncated name",
+                ));
+            }
+            let name = unsafe { std::slice::from_raw_parts(entry.FileName.as_ptr(), name_units) };
+            if name != ['.' as u16] && name != ['.' as u16, '.' as u16] {
+                names.push(OsString::from_wide(name));
+            }
+            if entry.NextEntryOffset == 0 {
+                break;
+            }
+            let next = usize::try_from(entry.NextEntryOffset).map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "File Sync directory enumeration returned an invalid offset",
+                )
+            })?;
+            if next == 0 || offset + next >= buffer_bytes {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "File Sync directory enumeration returned an out-of-range offset",
+                ));
+            }
+            offset += next;
+        }
+    }
+    Ok(names)
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+fn retained_root_list_names(_directory: &File) -> std::io::Result<Vec<OsString>> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "retained-root File Sync enumeration is unsupported",
+    ))
+}
+
+#[cfg(not(any(unix, target_os = "windows")))]
+fn retained_root_list_names(_directory: &File) -> std::io::Result<Vec<OsString>> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "retained-root File Sync enumeration is unsupported",
     ))
 }
 
@@ -14029,7 +14317,26 @@ fn read_sync_candidate_bytes_with(
             })?
         }
     };
-    let value: Value = serde_json::from_str(&plaintext).map_err(|error| error.to_string())?;
+    let mut sanitized = plaintext
+        .trim_start_matches('\u{FEFF}')
+        .trim_end()
+        .to_string();
+    while sanitized.ends_with('\u{0}') {
+        sanitized.pop();
+    }
+    if sanitized.is_empty() {
+        sanitized.push_str("{}");
+    }
+    let value = match serde_json::from_str::<Value>(&sanitized) {
+        Ok(value) => value,
+        Err(_) => {
+            let start = sanitized
+                .find(|character| character == '{' || character == '[')
+                .unwrap_or(0);
+            let mut deserializer = serde_json::Deserializer::from_str(&sanitized[start..]);
+            Value::deserialize(&mut deserializer).map_err(|error| error.to_string())?
+        }
+    };
     sync_payload_is_valid(&value)?;
     Ok(normalize_sync_document_value(value))
 }
@@ -14037,10 +14344,83 @@ fn read_sync_candidate_bytes_with(
 fn read_sync_candidate_from_retained_root(
     root: &RetainedSyncRoot<'_>,
     path: &Path,
+    attempts: usize,
     crypto: SyncFileCrypto<'_>,
 ) -> Result<Value, String> {
-    let bytes = root.read(path).map_err(|error| error.to_string())?;
-    read_sync_candidate_bytes_with(&bytes, crypto)
+    let mut read_bytes = |path: &Path| root.read(path).map_err(|error| error.to_string());
+    let mut wait = |duration| std::thread::sleep(duration);
+    read_sync_candidate_from_retained_root_with(
+        path,
+        attempts,
+        crypto,
+        &mut read_bytes,
+        &mut wait,
+    )
+}
+
+fn read_sync_candidate_from_retained_root_with<ReadBytes, Wait>(
+    path: &Path,
+    attempts: usize,
+    crypto: SyncFileCrypto<'_>,
+    read_bytes: &mut ReadBytes,
+    wait: &mut Wait,
+) -> Result<Value, String>
+where
+    ReadBytes: FnMut(&Path) -> Result<Vec<u8>, String>,
+    Wait: FnMut(Duration),
+{
+    let mut last_error = None;
+    for attempt in 0..attempts {
+        if is_icloud_evicted(path) {
+            last_error = Some("File is iCloud-evicted (placeholder only)".to_string());
+        } else {
+            match read_bytes(path)
+                .and_then(|bytes| read_sync_candidate_bytes_with(&bytes, crypto))
+            {
+                Ok(value) => return Ok(value),
+                Err(error) => last_error = Some(error),
+            }
+        }
+        if attempt + 1 < attempts {
+            wait(Duration::from_millis(120 + (attempt as u64) * 80));
+        }
+    }
+    Err(last_error.unwrap_or_else(|| "Failed to read sync file".to_string()))
+}
+
+fn retained_seed_backup_files(
+    root: &RetainedSyncRoot<'_>,
+    seed_suffix: &str,
+) -> Result<Vec<PathBuf>, String> {
+    let names = root.list_direct_child_names().map_err(|error| {
+        format!("Failed to enumerate retained File Sync root: {error}")
+    })?;
+    let mut candidates: Vec<(SystemTime, String, PathBuf)> = Vec::new();
+    for name in names {
+        let Some(name_text) = name.to_str() else {
+            continue;
+        };
+        let lower = name_text.to_ascii_lowercase();
+        if !(lower.starts_with("mindwtr-backup-") || lower.starts_with("data-backup-"))
+            || !lower.ends_with(seed_suffix)
+        {
+            continue;
+        }
+        let path = root.sync_dir.join(&name);
+        let file = root.open_read(&path).map_err(|error| {
+            format!("Failed to inspect retained File Sync seed candidate: {error}")
+        })?;
+        let modified = file
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .unwrap_or(UNIX_EPOCH);
+        candidates.push((modified, lower, path));
+    }
+    candidates.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+    Ok(candidates
+        .into_iter()
+        .map(|(_, _, path)| path)
+        .collect())
 }
 
 fn read_sync_file_from_retained_root_with(
@@ -14059,77 +14439,121 @@ fn read_sync_file_from_retained_root_with(
         legacy_name
     });
 
-    let mut first_non_terminal_error = None;
-    for path in [&primary, &primary_previous, &backup, &backup_previous, &legacy] {
-        let exists = root.exists(path).map_err(|error| error.to_string())?;
-        if !exists {
-            continue;
-        }
-        match read_sync_candidate_from_retained_root(root, path, crypto) {
-            Ok(data) => return Ok(data),
-            Err(error) if is_terminal_error(&error) => return Err(error),
-            Err(error) => first_non_terminal_error.get_or_insert(error),
-        };
-    }
-
-    // Seed recovery is legacy-only. The pathname inventory supplies leaf names,
-    // but the bytes are always opened through the retained root handle.
     let seed_suffix = if crypto.is_on() { ".json.enc" } else { ".json" };
-    let mut seed_names = fs::read_dir(root.sync_dir)
-        .map(|entries| {
-            entries
-                .filter_map(Result::ok)
-                .filter_map(|entry| entry.file_name().into_string().ok())
-                .filter(|name| {
-                    let lower = name.to_ascii_lowercase();
-                    (lower.starts_with("mindwtr-backup-")
-                        || lower.starts_with("data-backup-"))
-                        && lower.ends_with(seed_suffix)
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    seed_names.sort();
-    seed_names.reverse();
-    for name in seed_names {
-        let path = root.sync_dir.join(name);
-        match read_sync_candidate_from_retained_root(root, &path, crypto) {
-            Ok(data) => return Ok(data),
-            Err(error) if is_terminal_error(&error) => return Err(error),
-            Err(error) => {
-                first_non_terminal_error.get_or_insert(error);
+    let read_recovery = || -> Result<Option<Value>, String> {
+        for path in [&primary_previous, &backup, &backup_previous] {
+            if !root.exists(path).map_err(|error| error.to_string())? {
+                continue;
+            }
+            match read_sync_candidate_from_retained_root(root, path, 2, crypto) {
+                Ok(data) => return Ok(Some(data)),
+                Err(error) if is_terminal_error(&error) => return Err(error),
+                Err(_) => continue,
             }
         }
+        Ok(None)
+    };
+    let read_seed_or_legacy = || -> Result<Option<Value>, String> {
+        let mut first_error = None;
+        if root.exists(&legacy).map_err(|error| error.to_string())? {
+            match read_sync_candidate_from_retained_root(root, &legacy, 1, crypto) {
+                Ok(data) => return Ok(Some(data)),
+                Err(error) if is_terminal_error(&error) => return Err(error),
+                Err(error) => first_error = Some(error),
+            }
+        }
+        for seed in retained_seed_backup_files(root, seed_suffix)? {
+            match read_sync_candidate_from_retained_root(root, &seed, 1, crypto) {
+                Ok(data) => return Ok(Some(data)),
+                Err(error) if is_terminal_error(&error) => return Err(error),
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(None),
+        }
+    };
+    let detect_opposite_generation = || -> Result<Option<String>, String> {
+        if !crypto.is_on() {
+            let encrypted = root
+                .sync_dir
+                .join(encrypted_artifact_name(DATA_FILE_NAME));
+            if root.exists(&encrypted).map_err(|error| error.to_string())? {
+                let bytes = root.read(&encrypted).map_err(|error| error.to_string())?;
+                return Ok(match inspect_sync_artifact(&bytes) {
+                    SyncArtifactInspection::Encrypted(header) => {
+                        Some(encrypted_discovery_marker(&header))
+                    }
+                    SyncArtifactInspection::Unsupported(reason) => Some(terminal_error(reason)),
+                    SyncArtifactInspection::Plaintext => None,
+                });
+            }
+        } else {
+            let plaintext = root.sync_dir.join(DATA_FILE_NAME);
+            if root.exists(&plaintext).map_err(|error| error.to_string())?
+                && is_plaintext_sync_artifact(
+                    &root.read(&plaintext).map_err(|error| error.to_string())?,
+                )
+            {
+                return Ok(Some(SYNC_ENCRYPTION_REMOTE_PLAINTEXT.to_string()));
+            }
+        }
+        Ok(None)
+    };
+
+    if is_icloud_evicted(&primary) {
+        if let Some(data) = read_recovery()? {
+            return Ok(data);
+        }
+        if let Some(data) = read_seed_or_legacy()? {
+            return Ok(data);
+        }
+        return Err(format!(
+            "Sync file has been offloaded by iCloud Optimize Storage. Open Finder and navigate to {:?} to trigger a re-download, then try again.",
+            root.sync_dir
+        ));
     }
 
-    if let Some(error) = first_non_terminal_error {
-        return Err(error);
+    if !root.exists(&primary).map_err(|error| error.to_string())? {
+        if let Some(data) = read_recovery()? {
+            return Ok(data);
+        }
+        if let Some(data) = read_seed_or_legacy()? {
+            return Ok(data);
+        }
+        if let Some(discovery) = detect_opposite_generation()? {
+            return Err(discovery);
+        }
+        return Ok(empty_remote_app_data());
     }
-    if !crypto.is_on() {
-        let encrypted = root
-            .sync_dir
-            .join(encrypted_artifact_name(DATA_FILE_NAME));
-        if root.exists(&encrypted).map_err(|error| error.to_string())? {
-            let bytes = root.read(&encrypted).map_err(|error| error.to_string())?;
-            return match inspect_sync_artifact(&bytes) {
-                SyncArtifactInspection::Encrypted(header) => {
-                    Err(encrypted_discovery_marker(&header))
+
+    match read_sync_candidate_from_retained_root(root, &primary, 5, crypto) {
+        Ok(data) => Ok(data),
+        Err(primary_error) if is_terminal_error(&primary_error) => Err(primary_error),
+        Err(primary_error) => {
+            if !crypto.is_on() {
+                let bytes = root.read(&primary).map_err(|error| error.to_string())?;
+                match inspect_sync_artifact(&bytes) {
+                    SyncArtifactInspection::Encrypted(header) => {
+                        return Err(encrypted_discovery_marker(&header));
+                    }
+                    SyncArtifactInspection::Unsupported(reason) => {
+                        return Err(terminal_error(reason));
+                    }
+                    SyncArtifactInspection::Plaintext => {}
                 }
-                SyncArtifactInspection::Unsupported(reason) => Err(terminal_error(reason)),
-                SyncArtifactInspection::Plaintext => Ok(empty_remote_app_data()),
-            };
-        }
-    } else {
-        let plaintext = root.sync_dir.join(DATA_FILE_NAME);
-        if root.exists(&plaintext).map_err(|error| error.to_string())?
-            && is_plaintext_sync_artifact(
-                &root.read(&plaintext).map_err(|error| error.to_string())?,
-            )
-        {
-            return Err(SYNC_ENCRYPTION_REMOTE_PLAINTEXT.to_string());
+            }
+            if let Some(data) = read_recovery()? {
+                return Ok(data);
+            }
+            Err(primary_error)
         }
     }
-    Ok(empty_remote_app_data())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -14641,7 +15065,7 @@ where
         }
 
         let existing_primary = if root.exists(&sync_file).map_err(|error| error.to_string())? {
-            match read_sync_candidate_from_retained_root(&root, &sync_file, crypto) {
+            match read_sync_candidate_from_retained_root(&root, &sync_file, 1, crypto) {
                 Ok(_) => Some(true),
                 // Fail closed: ciphertext we cannot open may be a peer's newer generation.
                 // Refuse to write over it at all — do not rotate, do not overwrite, do not
