@@ -23,7 +23,6 @@ import {
     buildQuickAddParseOptions,
     getPersonOptionNames,
     normalizeTimeSpentMinutes,
-    sortViewSectionDefinitions,
     useTaskStore,
     areDraftAttachmentsDirty,
     isTaskDraftDirty,
@@ -63,6 +62,7 @@ import { dispatchContextsTokenSelection } from '../lib/contexts-view-state';
 import { reportError } from '../lib/report-error';
 import { registerUndoableAction } from '../lib/undo-registry';
 import { undoTaskCompletion } from '../lib/undo-task-completion';
+import { createSomedaySection } from '../lib/someday-section-actions';
 import { resolveNativeDateInputLocale } from '../lib/native-date-input-locale';
 import { setCalendarTaskDragData } from '../lib/calendar-task-drag';
 import { useTaskItemStoreState, useTaskItemUiState } from './Task/useTaskItemStoreState';
@@ -509,30 +509,8 @@ export const TaskItem = memo(function TaskItem({
         return created?.id ?? null;
     }, [addSection, draft.projectId, sectionsByProject, task.projectId]);
     const handleCreateSomedaySection = useCallback(async (title: string) => {
-        const trimmed = title.trim();
-        if (!trimmed) return null;
-        const state = useTaskStore.getState();
-        const currentSettings = state.settings;
-        const currentSections = sortViewSectionDefinitions(currentSettings?.gtd?.viewSections?.someday);
-        const existing = currentSections.find((section) => section.title.toLowerCase() === trimmed.toLowerCase());
-        if (existing) return existing.id;
-        const id = globalThis.crypto?.randomUUID?.()
-            ?? `someday-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        const maxOrder = currentSections.reduce(
-            (maximum, section) => Number.isFinite(section.order) ? Math.max(maximum, section.order) : maximum,
-            -1,
-        );
         try {
-            await state.updateSettings({
-                gtd: {
-                    ...(currentSettings?.gtd ?? {}),
-                    viewSections: {
-                        ...(currentSettings?.gtd?.viewSections ?? {}),
-                        someday: [...currentSections, { id, title: trimmed, order: maxOrder + 1 }],
-                    },
-                },
-            });
-            return id;
+            return await createSomedaySection(title);
         } catch (error) {
             reportError('Failed to create Someday section', error);
             showToast(tFallback(t, 'viewSections.updateFailed', 'Could not update Someday sections.'), 'error');

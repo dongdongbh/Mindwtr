@@ -243,8 +243,11 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
     }),
     // The real store is selector-based; the controller's shared visible-task
     // context subscribes field by field, so the mock has to honour selectors.
-    useTaskStore: (selector?: (state: typeof storeState) => unknown) => (
-      selector ? selector(storeState) : storeState
+    useTaskStore: Object.assign(
+      (selector?: (state: typeof storeState) => unknown) => (
+        selector ? selector(storeState) : storeState
+      ),
+      { getState: () => storeState },
     ),
     loadAIKey: vi.fn(),
   };

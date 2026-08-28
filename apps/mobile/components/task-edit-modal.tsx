@@ -60,6 +60,7 @@ import {
 } from './task-edit/use-task-edit-state';
 import { useTaskEditDerivedState } from './task-edit/use-task-edit-derived-state';
 import { useTaskTokenSuggestions } from './task-edit/use-task-token-suggestions';
+import { createSomedaySection } from '../lib/someday-section-actions';
 
 
 const EMPTY_COPILOT_TAGS: string[] = [];
@@ -104,7 +105,6 @@ function TaskEditModalInner({
         addSection,
         addArea,
         addPerson,
-        updateSettings,
         deleteTask,
         restoreTask,
         allContexts = [],
@@ -127,7 +127,6 @@ function TaskEditModalInner({
             addSection: state.addSection,
             addArea: state.addArea,
             addPerson: state.addPerson,
-            updateSettings: state.updateSettings,
             deleteTask: state.deleteTask,
             restoreTask: state.restoreTask,
             allContexts: derived.allContexts,
@@ -406,27 +405,8 @@ function TaskEditModalInner({
         );
     }, [setDraftField, taskEditDraft?.draft.viewSectionIds]);
     const handleCreateSomedaySection = useCallback(async (title: string) => {
-        const trimmed = title.trim();
-        if (!trimmed) return null;
-        const currentSections = sortViewSectionDefinitions(settings.gtd?.viewSections?.someday);
-        const existing = currentSections.find((section) => section.title.toLowerCase() === trimmed.toLowerCase());
-        if (existing) return existing.id;
-        const id = `someday-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-        const maxOrder = currentSections.reduce(
-            (maximum, section) => Number.isFinite(section.order) ? Math.max(maximum, section.order) : maximum,
-            -1,
-        );
         try {
-            await updateSettings({
-                gtd: {
-                    ...(settings.gtd ?? {}),
-                    viewSections: {
-                        ...(settings.gtd?.viewSections ?? {}),
-                        someday: [...currentSections, { id, title: trimmed, order: maxOrder + 1 }],
-                    },
-                },
-            });
-            return id;
+            return await createSomedaySection(title);
         } catch {
             showToast({
                 title: tFallback(t, 'common.error', 'Error'),
@@ -435,7 +415,7 @@ function TaskEditModalInner({
             });
             return null;
         }
-    }, [settings.gtd, showToast, t, updateSettings]);
+    }, [showToast, t]);
 
     const editedTaskProjectId = taskEditDraft?.draft.projectId;
     const editedTaskSectionId = taskEditDraft?.draft.sectionId;
