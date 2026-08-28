@@ -14067,13 +14067,13 @@ fn retained_root_open(
 ) -> std::io::Result<File> {
     use std::os::windows::ffi::OsStrExt as _;
     use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _};
-    use windows_sys::Wdk::Foundation::{RtlNtStatusToDosError, OBJECT_ATTRIBUTES};
+    use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
     use windows_sys::Wdk::Storage::FileSystem::{
         NtCreateFile, FILE_CREATE, FILE_NON_DIRECTORY_FILE, FILE_OPEN,
         FILE_OPEN_REPARSE_POINT, FILE_OVERWRITE_IF, FILE_SYNCHRONOUS_IO_NONALERT,
     };
     use windows_sys::Win32::Foundation::{
-        GENERIC_READ, GENERIC_WRITE, OBJ_CASE_INSENSITIVE, UNICODE_STRING,
+        RtlNtStatusToDosError, GENERIC_READ, GENERIC_WRITE, OBJ_CASE_INSENSITIVE, UNICODE_STRING,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         DELETE, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
@@ -14700,7 +14700,7 @@ fn retained_root_list_names(directory: &File) -> std::io::Result<Vec<OsString>> 
         GetFileInformationByHandleEx, FILE_ID_BOTH_DIR_INFO,
     };
 
-    let buffer_bytes = 64 * 1024;
+    let buffer_bytes: usize = 64 * 1024;
     // The provider may pack a final filename through the exact end of the
     // advertised payload even though Rust's typed structure includes trailing
     // padding after FileName. Keep initialized padding outside the payload so
