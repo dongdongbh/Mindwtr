@@ -5872,6 +5872,80 @@ mod tests {
     }
 
     #[test]
+    fn retained_windows_replacement_validates_around_every_mutation() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let replacement = dir.path().join("data.json.tmp");
+        let target = dir.path().join(DATA_FILE_NAME);
+        let previous = dir.path().join("data.json.previous");
+        fs::write(&replacement, b"new-generation").expect("seed replacement");
+        fs::write(&target, b"old-generation").expect("seed target");
+        let lock = acquire_sync_lock(dir.path()).expect("acquire retained authority");
+        let root = RetainedSyncRoot::new(dir.path(), &lock);
+        let mut validations = 0;
+
+        replace_retained_file_preserving_previous(
+            &root,
+            &replacement,
+            &target,
+            &previous,
+            "sync file",
+            &mut || {
+                validations += 1;
+                Ok(())
+            },
+        )
+        .expect("replace through retained root");
+
+        assert_eq!(validations, 6, "each of three mutations is fenced twice");
+        assert_eq!(fs::read(&target).expect("installed target"), b"new-generation");
+        assert!(!replacement.exists());
+        assert!(!previous.exists());
+        release_sync_lock(&lock);
+    }
+
+    #[test]
+    fn retained_windows_replacement_stops_before_install_when_lease_changes() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let replacement = dir.path().join("data.json.tmp");
+        let target = dir.path().join(DATA_FILE_NAME);
+        let previous = dir.path().join("data.json.previous");
+        fs::write(&replacement, b"new-generation").expect("seed replacement");
+        fs::write(&target, b"old-generation").expect("seed target");
+        let lock = acquire_sync_lock(dir.path()).expect("acquire retained authority");
+        let root = RetainedSyncRoot::new(dir.path(), &lock);
+        let mut validations = 0;
+
+        let error = replace_retained_file_preserving_previous(
+            &root,
+            &replacement,
+            &target,
+            &previous,
+            "sync file",
+            &mut || {
+                validations += 1;
+                if validations == 3 {
+                    Err("injected lock identity loss".to_string())
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .expect_err("identity loss before install must stop the sequence");
+
+        assert!(error.contains("identity loss"));
+        assert!(!target.exists(), "no later install mutation may run");
+        assert_eq!(
+            fs::read(&previous).expect("old generation remains recoverable"),
+            b"old-generation"
+        );
+        assert_eq!(
+            fs::read(&replacement).expect("new generation remains staged"),
+            b"new-generation"
+        );
+        release_sync_lock(&lock);
+    }
+
+    #[test]
     fn sync_folder_probe_reports_create_failure_and_cleans_up() {
         assert_folder_probe_failure(
             ProbeFailureStage::Create,
@@ -13935,7 +14009,12 @@ fn atomic_retained_tmp_write_then_rename_with<BeforeStage>(
     content: &[u8],
     before_stage: &mut BeforeStage,
     rename_override: Option<
-        &mut dyn FnMut(&RetainedSyncRoot<'_>, &Path, &Path) -> Result<(), String>,
+        &mut dyn FnMut(
+            &RetainedSyncRoot<'_>,
+            &Path,
+            &Path,
+            &mut dyn FnMut() -> Result<(), String>,
+        ) -> Result<(), String>,
     >,
     destination_may_exist: bool,
 ) -> Result<OwnedRetainedRootPublication, RetainedAtomicWriteError>
@@ -14000,7 +14079,9 @@ where
         }
     };
     let rename_result = match rename_override {
-        Some(rename) => rename(root, tmp_file, destination),
+        Some(rename) => rename(root, tmp_file, destination, &mut || {
+            before_stage(AtomicWriteStage::Rename)
+        }),
         None => root
             .rename(tmp_file, destination, destination_may_exist)
             .map_err(|error| error.to_string()),
@@ -14238,36 +14319,56 @@ where
     replace_file_preserving_previous(replacement, target, previous, "sync file", remove, rename)
 }
 
-fn replace_retained_file_preserving_previous(
+fn replace_retained_file_preserving_previous<Validate>(
     root: &RetainedSyncRoot<'_>,
     replacement: &Path,
     target: &Path,
     previous: &Path,
     description: &str,
-) -> Result<(), String> {
+    validate: &mut Validate,
+) -> Result<(), String>
+where
+    Validate: FnMut() -> Result<(), String> + ?Sized,
+{
     if root.exists(previous).map_err(|error| error.to_string())? {
+        validate()?;
         root.remove(previous).map_err(|error| {
             format!("Failed to clear the previous {description} recovery file: {error}")
         })?;
+        validate()?;
     }
 
     let target_was_present = root.exists(target).map_err(|error| error.to_string())?;
     if target_was_present {
+        validate()?;
         root.rename(target, previous, false)
             .map_err(|error| format!("Failed to preserve the current {description}: {error}"))?;
+        validate()?;
     }
 
+    validate()?;
     match root.rename(replacement, target, false) {
         Ok(()) => {
+            validate()?;
             if target_was_present {
-                let _ = root.remove(previous);
+                validate()?;
+                root.remove(previous).map_err(|error| {
+                    format!("Failed to clear the installed {description} recovery file: {error}")
+                })?;
+                validate()?;
             }
             Ok(())
         }
         Err(replace_error) if !target_was_present => Err(format!(
             "Failed to install the replacement {description}: {replace_error}"
         )),
-        Err(replace_error) => match root.rename(previous, target, false) {
+        Err(replace_error) => {
+            validate()?;
+            let restore = root.rename(previous, target, false);
+            if restore.is_ok() {
+                validate()?;
+            }
+            match restore {
             Ok(()) => Err(format!(
                 "Failed to install the replacement {description}; restored the previous {description}: {replace_error}"
             )),
@@ -14275,7 +14376,8 @@ fn replace_retained_file_preserving_previous(
                 "Failed to install the replacement {description} ({replace_error}); the previous {description} remains at {} because restoration also failed: {restore_error}",
                 previous.display()
             )),
-        },
+            }
+        }
     }
 }
 
@@ -15221,6 +15323,7 @@ where
                         &backup_file,
                         &backup_previous_file,
                         "sync backup",
+                        &mut validate_authority,
                     )
                 } else {
                     root.rename(&backup_tmp, &backup_file, true)
@@ -15258,17 +15361,28 @@ where
         // Windows cannot rename over an existing destination. Move the primary
         // aside so a failed installation can roll back without depending on the
         // best-effort backup copy. New destinations use the helper's normal rename.
-        let mut replace_existing = |retained_root: &RetainedSyncRoot<'_>, from: &Path, to: &Path| {
+        let mut replace_existing = |
+            retained_root: &RetainedSyncRoot<'_>,
+            from: &Path,
+            to: &Path,
+            validate: &mut dyn FnMut() -> Result<(), String>,
+        | {
             replace_retained_file_preserving_previous(
                 retained_root,
                 from,
                 to,
                 &primary_previous_file,
                 "sync file",
+                validate,
             )
         };
         let rename_override: Option<
-            &mut dyn FnMut(&RetainedSyncRoot<'_>, &Path, &Path) -> Result<(), String>,
+            &mut dyn FnMut(
+                &RetainedSyncRoot<'_>,
+                &Path,
+                &Path,
+                &mut dyn FnMut() -> Result<(), String>,
+            ) -> Result<(), String>,
         > = if windows_replacement {
             Some(&mut replace_existing)
         } else {
