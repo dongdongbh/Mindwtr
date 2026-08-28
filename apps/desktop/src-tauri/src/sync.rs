@@ -5801,6 +5801,77 @@ mod tests {
     }
 
     #[test]
+    fn retained_error_cleanup_quarantines_before_deciding_ownership() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let owned = dir.path().join("data.json.tmp");
+        let displaced_owned = dir.path().join("owned-stage-preserved");
+        fs::write(&owned, b"owned-stage").expect("seed owned stage");
+        let lock = acquire_sync_lock(dir.path()).expect("acquire retained authority");
+        let root = RetainedSyncRoot::new(dir.path(), &lock);
+        let identity = root.identity(&owned).expect("capture owned identity");
+        let mut swapped = false;
+        let mut swap_before_quarantine = |path: &Path| {
+            fs::rename(path, &displaced_owned).map_err(|error| error.to_string())?;
+            fs::write(path, b"peer-stage").map_err(|error| error.to_string())?;
+            swapped = true;
+            Ok(())
+        };
+
+        let error = quarantine_and_remove_retained_identity_with(
+            &root,
+            &owned,
+            identity,
+            &mut swap_before_quarantine,
+        )
+        .expect_err("replacement must be preserved rather than removed");
+
+        assert!(swapped);
+        assert!(error.contains("captured a replacement leaf"));
+        assert_eq!(fs::read(&owned).expect("peer restored"), b"peer-stage");
+        assert_eq!(
+            fs::read(&displaced_owned).expect("owned stage preserved"),
+            b"owned-stage"
+        );
+        release_sync_lock(&lock);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn link_fallback_never_unlinks_a_replaced_destination_on_source_failure() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let source = dir.path().join("stage");
+        let destination = dir.path().join("canonical");
+        let linked_generation = dir.path().join("linked-generation-preserved");
+        let peer = dir.path().join("peer");
+        fs::write(&source, b"owned-generation").expect("seed source");
+        fs::write(&peer, b"peer-generation").expect("seed peer");
+
+        let error = retained_root_link_then_unlink_no_replace_with(
+            || fs::hard_link(&source, &destination),
+            || {
+                fs::rename(&destination, &linked_generation)?;
+                fs::rename(&peer, &destination)?;
+                Err(std::io::Error::other("injected source retirement failure"))
+            },
+        )
+        .expect_err("failed source retirement must report the retained duplicate");
+
+        assert!(error.to_string().contains("both names were preserved"));
+        assert_eq!(
+            fs::read(&destination).expect("peer destination remains"),
+            b"peer-generation"
+        );
+        assert_eq!(
+            fs::read(&linked_generation).expect("linked generation remains"),
+            b"owned-generation"
+        );
+        assert_eq!(
+            fs::read(&source).expect("source remains"),
+            b"owned-generation"
+        );
+    }
+
+    #[test]
     fn sync_folder_probe_reports_create_failure_and_cleans_up() {
         assert_folder_probe_failure(
             ProbeFailureStage::Create,
@@ -13068,29 +13139,54 @@ fn retained_root_link_then_unlink_no_replace(
 ) -> std::io::Result<()> {
     use std::os::fd::AsRawFd as _;
 
-    if unsafe {
-        libc::linkat(
-            directory.as_raw_fd(),
-            source.as_ptr(),
-            directory.as_raw_fd(),
-            destination.as_ptr(),
-            0,
-        )
-    } != 0
-    {
-        return Err(std::io::Error::last_os_error());
-    }
-    if unsafe { libc::unlinkat(directory.as_raw_fd(), source.as_ptr(), 0) } == 0 {
+    retained_root_link_then_unlink_no_replace_with(
+        || {
+            if unsafe {
+                libc::linkat(
+                    directory.as_raw_fd(),
+                    source.as_ptr(),
+                    directory.as_raw_fd(),
+                    destination.as_ptr(),
+                    0,
+                )
+            } == 0
+            {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        },
+        || {
+            if unsafe { libc::unlinkat(directory.as_raw_fd(), source.as_ptr(), 0) } == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        },
+    )
+}
+
+#[cfg(unix)]
+fn retained_root_link_then_unlink_no_replace_with<Link, UnlinkSource>(
+    mut link: Link,
+    mut unlink_source: UnlinkSource,
+) -> std::io::Result<()>
+where
+    Link: FnMut() -> std::io::Result<()>,
+    UnlinkSource: FnMut() -> std::io::Result<()>,
+{
+    link()?;
+    let Err(unlink_error) = unlink_source() else {
         return Ok(());
-    }
-    let unlink_error = std::io::Error::last_os_error();
-    if unsafe { libc::unlinkat(directory.as_raw_fd(), destination.as_ptr(), 0) } != 0 {
-        return Err(std::io::Error::other(format!(
-            "no-replace publication linked the destination but could not retire the source ({unlink_error}) or roll back the destination ({})",
-            std::io::Error::last_os_error()
-        )));
-    }
-    Err(unlink_error)
+    };
+    // Do not try to roll the destination back by pathname. A peer can replace
+    // that name after `linkat` and before a compensating `unlinkat`, which
+    // would delete the peer generation. Retaining the exact hard-linked
+    // generation is the fail-safe outcome; callers report the failed source
+    // retirement and preserve/recover the duplicate on a later pass.
+    Err(std::io::Error::other(format!(
+        "no-replace publication linked the exact source generation but could not retire the source; both names were preserved: {unlink_error}"
+    )))
 }
 
 #[cfg(target_os = "windows")]
@@ -13692,6 +13788,76 @@ struct OwnedRetainedRootPublication {
 
 static RETAINED_CLEANUP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+fn quarantine_and_remove_retained_identity_with<BeforeQuarantine>(
+    root: &RetainedSyncRoot<'_>,
+    path: &Path,
+    identity: NativeFileIdentity,
+    before_quarantine: &mut BeforeQuarantine,
+) -> Result<(), String>
+where
+    BeforeQuarantine: FnMut(&Path) -> Result<(), String>,
+{
+    before_quarantine(path)?;
+    for _ in 0..16 {
+        let sequence = RETAINED_CLEANUP_SEQUENCE.fetch_add(1, AtomicOrdering::Relaxed);
+        let quarantine = root.sync_dir.join(format!(
+            ".mindwtr-probe-cleanup-{}-{sequence:016x}",
+            std::process::id()
+        ));
+        match root.rename(path, &quarantine, false) {
+            Ok(()) => {
+                if !root.has_identity(&quarantine, identity) {
+                    let restore = root.rename(&quarantine, path, false);
+                    let preservation = match restore {
+                        Ok(()) => {
+                            "probe cleanup captured a replacement leaf; restored it without deleting it"
+                                .to_string()
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                            "probe cleanup captured a replacement leaf; preserved it in quarantine because the canonical name was occupied"
+                                .to_string()
+                        }
+                        Err(error) => format!(
+                            "probe cleanup captured a replacement leaf; preserved it in quarantine because restoration failed: {error}"
+                        ),
+                    };
+                    root.sync_directory().map_err(|error| {
+                        format!(
+                            "{preservation}; failed to flush the preserved directory state: {error}"
+                        )
+                    })?;
+                    return Err(preservation);
+                }
+                // The quarantine name is invocation-private and allocated with
+                // a no-replace move. Cooperative peers never target it, so the
+                // unlink cannot remove a shared canonical generation.
+                root.remove(&quarantine)
+                    .map_err(|error| format!("Failed to remove quarantined probe file: {error}"))?;
+                root.sync_directory().map_err(|error| {
+                    format!("Failed to flush probe cleanup directory metadata: {error}")
+                })?;
+                return Ok(());
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(format!(
+                    "Failed to quarantine probe file before cleanup: {error}"
+                ))
+            }
+        }
+    }
+    Err("Could not allocate a unique probe cleanup quarantine".to_string())
+}
+
+fn quarantine_and_remove_retained_identity(
+    root: &RetainedSyncRoot<'_>,
+    path: &Path,
+    identity: NativeFileIdentity,
+) -> Result<(), String> {
+    quarantine_and_remove_retained_identity_with(root, path, identity, &mut |_| Ok(()))
+}
+
 impl OwnedRetainedRootPublication {
     fn path(&self) -> PathBuf {
         self.sync_dir.join(&self.leaf)
@@ -13721,53 +13887,7 @@ impl OwnedRetainedRootPublication {
 
     fn quarantine_and_remove(&self, path: &Path) -> Result<(), String> {
         let root = self.root();
-        for _ in 0..16 {
-            let sequence = RETAINED_CLEANUP_SEQUENCE.fetch_add(1, AtomicOrdering::Relaxed);
-            let quarantine = self.sync_dir.join(format!(
-                ".mindwtr-probe-cleanup-{}-{sequence:016x}",
-                std::process::id()
-            ));
-            match root.rename(path, &quarantine, false) {
-                Ok(()) => {
-                    if !root.has_identity(&quarantine, self.identity) {
-                        let restore = root.rename(&quarantine, path, false);
-                        let preservation = match restore {
-                            Ok(()) => {
-                                "probe cleanup captured a replacement leaf; restored it without deleting it"
-                                    .to_string()
-                            }
-                            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                                "probe cleanup captured a replacement leaf; preserved it in quarantine because the canonical name was occupied"
-                                    .to_string()
-                            }
-                            Err(error) => format!(
-                                "probe cleanup captured a replacement leaf; preserved it in quarantine because restoration failed: {error}"
-                            ),
-                        };
-                        root.sync_directory().map_err(|error| {
-                            format!(
-                                "{preservation}; failed to flush the preserved directory state: {error}"
-                            )
-                        })?;
-                        return Err(preservation);
-                    }
-                    root.remove(&quarantine)
-                        .map_err(|error| format!("Failed to remove quarantined probe file: {error}"))?;
-                    root.sync_directory().map_err(|error| {
-                        format!("Failed to flush probe cleanup directory metadata: {error}")
-                    })?;
-                    return Ok(());
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => {
-                    return Err(format!(
-                        "Failed to quarantine probe file before cleanup: {error}"
-                    ))
-                }
-            }
-        }
-        Err("Could not allocate a unique probe cleanup quarantine".to_string())
+        quarantine_and_remove_retained_identity(&root, path, self.identity)
     }
 
     fn remove_with<BeforeRemove>(
@@ -13845,9 +13965,7 @@ where
     })();
     drop(file);
     if let Err(detail) = write_result {
-        if root.has_identity(tmp_file, identity) {
-            let _ = root.remove(tmp_file);
-        }
+        let _ = quarantine_and_remove_retained_identity(root, tmp_file, identity);
         return Err(RetainedAtomicWriteError {
             stage: AtomicWriteStage::WriteAndSync,
             detail,
@@ -13856,9 +13974,7 @@ where
     }
 
     if let Err(detail) = before_stage(AtomicWriteStage::Rename) {
-        if root.has_identity(tmp_file, identity) {
-            let _ = root.remove(tmp_file);
-        }
+        let _ = quarantine_and_remove_retained_identity(root, tmp_file, identity);
         return Err(RetainedAtomicWriteError {
             stage: AtomicWriteStage::Rename,
             detail,
@@ -13875,9 +13991,7 @@ where
     let retained_directory = match root.try_clone_directory() {
         Ok(directory) => directory,
         Err(error) => {
-            if root.has_identity(tmp_file, identity) {
-                let _ = root.remove(tmp_file);
-            }
+            let _ = quarantine_and_remove_retained_identity(root, tmp_file, identity);
             return Err(RetainedAtomicWriteError {
                 stage: AtomicWriteStage::Rename,
                 detail: format!("Failed to retain sync root before publication: {error}"),
@@ -13892,17 +14006,15 @@ where
             .map_err(|error| error.to_string()),
     };
     if let Err(detail) = rename_result {
-        let owned_temp = root.has_identity(tmp_file, identity).then(|| {
-            OwnedRetainedRootPublication {
-                directory: retained_directory,
-                sync_dir: root.sync_dir.to_path_buf(),
-                leaf: tmp_file
-                    .file_name()
-                    .expect("validated direct-child temp has a leaf")
-                    .to_os_string(),
-                identity,
-                cleanup_on_drop: true,
-            }
+        let owned_temp = Some(OwnedRetainedRootPublication {
+            directory: retained_directory,
+            sync_dir: root.sync_dir.to_path_buf(),
+            leaf: tmp_file
+                .file_name()
+                .expect("validated direct-child temp has a leaf")
+                .to_os_string(),
+            identity,
+            cleanup_on_drop: true,
         });
         return Err(RetainedAtomicWriteError {
             stage: AtomicWriteStage::Rename,
