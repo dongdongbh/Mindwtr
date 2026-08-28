@@ -5281,8 +5281,8 @@ mod tests {
         let helper_call = format!("{helper_name}(");
         assert_eq!(
             source.matches(&helper_call).count(),
-            3,
-            "only the real sync writer, folder probe, and focused test shim may call the atomic helper"
+            5,
+            "only the real sync writer, folder probe, and focused root/partial-publication test shims may call the atomic helper"
         );
 
         let helper_declaration = format!("fn {helper_name}<");
@@ -5968,6 +5968,92 @@ mod tests {
             fs::read(&source).expect("source remains"),
             b"owned-generation"
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn retained_atomic_writer_cleans_a_partially_linked_destination() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let tmp_file = dir.path().join("probe.tmp");
+        let final_file = dir.path().join("probe");
+        let lock = acquire_sync_lock(dir.path()).expect("acquire retained authority");
+        let root = RetainedSyncRoot::new(dir.path(), &lock);
+        let mut before_stage = |_stage: AtomicWriteStage| Ok::<(), String>(());
+        let mut partial_link = |
+            _root: &RetainedSyncRoot<'_>,
+            source: &Path,
+            destination: &Path,
+            validate: &mut dyn FnMut() -> Result<(), String>,
+        | {
+            validate()?;
+            fs::hard_link(source, destination).map_err(|error| error.to_string())?;
+            Err(format!(
+                "{RETAINED_LINKED_DESTINATION_PRESERVED}: injected source retirement failure"
+            ))
+        };
+
+        let error = atomic_retained_tmp_write_then_rename_with(
+            &root,
+            &tmp_file,
+            &final_file,
+            b"probe-generation",
+            &mut before_stage,
+            Some(&mut partial_link),
+            false,
+        )
+        .expect_err("partial fallback publication must remain an error");
+
+        assert!(!final_file.exists(), "the exact partial destination is retired");
+        assert!(tmp_file.exists(), "the source remains owned until error disposal");
+        drop(error);
+        assert!(!tmp_file.exists(), "the source owner retires its exact stage");
+        release_sync_lock(&lock);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn retained_partial_link_cleanup_preserves_a_replacement_destination() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let tmp_file = dir.path().join("probe.tmp");
+        let final_file = dir.path().join("probe");
+        let displaced_link = dir.path().join("linked-generation-preserved");
+        let lock = acquire_sync_lock(dir.path()).expect("acquire retained authority");
+        let root = RetainedSyncRoot::new(dir.path(), &lock);
+        let mut before_stage = |_stage: AtomicWriteStage| Ok::<(), String>(());
+        let mut partial_link = |
+            _root: &RetainedSyncRoot<'_>,
+            source: &Path,
+            destination: &Path,
+            validate: &mut dyn FnMut() -> Result<(), String>,
+        | {
+            validate()?;
+            fs::hard_link(source, destination).map_err(|error| error.to_string())?;
+            fs::rename(destination, &displaced_link).map_err(|error| error.to_string())?;
+            fs::write(destination, b"peer-generation").map_err(|error| error.to_string())?;
+            Err(format!(
+                "{RETAINED_LINKED_DESTINATION_PRESERVED}: injected raced retirement failure"
+            ))
+        };
+
+        let error = atomic_retained_tmp_write_then_rename_with(
+            &root,
+            &tmp_file,
+            &final_file,
+            b"probe-generation",
+            &mut before_stage,
+            Some(&mut partial_link),
+            false,
+        )
+        .expect_err("raced partial publication must remain an error");
+
+        assert!(error.detail.contains("preserved an ambiguous generation"));
+        assert_eq!(fs::read(&final_file).expect("peer remains"), b"peer-generation");
+        assert_eq!(
+            fs::read(&displaced_link).expect("linked generation preserved"),
+            b"probe-generation"
+        );
+        drop(error);
+        release_sync_lock(&lock);
     }
 
     #[test]
@@ -13407,9 +13493,12 @@ where
     // generation is the fail-safe outcome; callers report the failed source
     // retirement and preserve/recover the duplicate on a later pass.
     Err(std::io::Error::other(format!(
-        "no-replace publication linked the exact source generation but could not retire the source; both names were preserved: {unlink_error}"
+        "{RETAINED_LINKED_DESTINATION_PRESERVED}: no-replace publication linked the exact source generation but could not retire the source; both names were preserved: {unlink_error}"
     )))
 }
+
+const RETAINED_LINKED_DESTINATION_PRESERVED: &str =
+    "RETAINED_LINKED_DESTINATION_PRESERVED";
 
 #[cfg(target_os = "windows")]
 fn retained_root_rename(
@@ -14285,7 +14374,16 @@ where
             .rename(tmp_file, destination, destination_may_exist)
             .map_err(|error| error.to_string()),
     };
-    if let Err(detail) = rename_result {
+    if let Err(mut detail) = rename_result {
+        if detail.starts_with(RETAINED_LINKED_DESTINATION_PRESERVED) {
+            if let Err(cleanup_error) =
+                quarantine_and_remove_retained_identity(root, destination, identity)
+            {
+                detail = format!(
+                    "{detail}; linked destination cleanup preserved an ambiguous generation: {cleanup_error}"
+                );
+            }
+        }
         let owned_temp = Some(OwnedRetainedRootPublication {
             directory: retained_directory,
             sync_dir: root.sync_dir.to_path_buf(),
