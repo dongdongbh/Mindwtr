@@ -4,6 +4,10 @@ import { Switch } from '../../../ui/Switch';
 import { SettingField, SettingRow } from '../SettingRow';
 import type { SettingsSyncPageProps } from './types';
 
+const isDocumentPortalPath = (path: string): boolean => (
+    /^\/run\/user\/\d+\/doc(?:\/|$)/.test(path.trim())
+);
+
 type SyncConfigurationSectionProps = Pick<
     SettingsSyncPageProps,
     | 't'
@@ -17,6 +21,8 @@ type SyncConfigurationSectionProps = Pick<
     | 'onSyncPathChange'
     | 'onSaveSyncPath'
     | 'onBrowseSyncPath'
+    | 'isTestingSyncPath'
+    | 'onTestSyncPath'
     | 'webdavUrl'
     | 'webdavUsername'
     | 'webdavPassword'
@@ -498,6 +504,7 @@ export function SyncConfigurationSection({
     isMacOS,
     isSavingWebDav,
     isTauri,
+    isTestingSyncPath,
     isTestingWebDav,
     onBrowseSyncPath,
     onCloudAllowInsecureHttpChange,
@@ -516,6 +523,7 @@ export function SyncConfigurationSection({
     onSetSyncBackend,
     onSyncPathChange,
     onTestDropboxConnection,
+    onTestSyncPath,
     onTestWebDavConnection,
     onWebdavAllowInsecureHttpChange,
     onWebdavPasswordChange,
@@ -658,13 +666,13 @@ export function SyncConfigurationSection({
 
                 {syncBackend === 'file' && (
                     <SettingField settingsKey="syncFolderLocation" title={t.syncFolderLocation}>
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
                             <input
                                 type="text"
                                 value={syncPath}
                                 onChange={(e) => onSyncPathChange(e.target.value)}
                                 placeholder="/path/to/your/sync/folder"
-                                className="flex-1 bg-muted p-2 rounded text-sm font-mono border border-border focus:outline-none focus:ring-2 focus:ring-primary"
+                                className="min-w-64 flex-1 bg-muted p-2 rounded text-sm font-mono border border-border focus:outline-none focus:ring-2 focus:ring-primary"
                             />
                             <button
                                 onClick={onSaveSyncPath}
@@ -680,8 +688,22 @@ export function SyncConfigurationSection({
                             >
                                 {t.browse}
                             </button>
+                            <button
+                                type="button"
+                                onClick={onTestSyncPath}
+                                disabled={!syncPath.trim() || !isTauri || isTestingSyncPath}
+                                aria-busy={isTestingSyncPath}
+                                className="px-4 py-2 bg-secondary text-secondary-foreground rounded-md text-sm font-medium hover:bg-secondary/90 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {isTestingSyncPath ? t.testingFolder : t.testFolder}
+                            </button>
                         </div>
                         <p className="text-xs text-muted-foreground">{t.pathHint}</p>
+                        {isDocumentPortalPath(syncPath) && (
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                                {t.portalPathNote}
+                            </p>
+                        )}
                     </SettingField>
                 )}
 

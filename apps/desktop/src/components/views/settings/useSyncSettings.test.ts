@@ -157,9 +157,11 @@ describe('useSyncSettings cloud token validation', () => {
         vi.spyOn(SyncService, 'disconnectDropbox').mockResolvedValue(undefined);
         vi.spyOn(SyncService, 'testDropboxConnection').mockResolvedValue(undefined);
         vi.spyOn(SyncService, 'testWebDavConnection').mockResolvedValue(undefined);
+        vi.spyOn(SyncService, 'testSyncPath').mockResolvedValue(undefined);
         vi.spyOn(SyncService, 'listDataSnapshots').mockResolvedValue([]);
         vi.spyOn(SyncService, 'subscribeSyncStatus').mockImplementation(() => () => {});
         vi.spyOn(SyncService, 'setSyncBackend').mockResolvedValue(undefined);
+        vi.spyOn(SyncService, 'setSyncPath').mockResolvedValue({ success: true, path: '/sync/folder' });
         vi.spyOn(SyncService, 'setCloudProvider').mockResolvedValue(undefined);
         vi.spyOn(SyncService, 'setCloudConfig').mockResolvedValue(undefined);
         vi.spyOn(SyncService, 'commitProvenSyncConfiguration').mockResolvedValue(COMMITTED_RESULT);
@@ -170,9 +172,13 @@ describe('useSyncSettings cloud token validation', () => {
         vi.restoreAllMocks();
     });
 
-    const setup = (showSaved = vi.fn(), requestConfirmation = vi.fn().mockResolvedValue(true)) => renderHook(() => useSyncSettings({
+    const setup = (
+        showSaved = vi.fn(),
+        requestConfirmation = vi.fn().mockResolvedValue(true),
+        isTauri = false,
+    ) => renderHook(() => useSyncSettings({
         appVersion: '1.0.0',
-        isTauri: false,
+        isTauri,
         showSaved,
         selectSyncFolderTitle: 'Select folder',
         lastSyncNeverLabel: 'Never',
@@ -306,6 +312,84 @@ describe('useSyncSettings cloud token validation', () => {
         });
 
         expect(showToast).toHaveBeenCalledWith('Paramètres prêts à vérifier.', 'info');
+    });
+
+    it('tests the selected sync folder without saving it', async () => {
+        languageMocks.t.mockImplementation((key: string) => (
+            key === 'settings.folderTestSucceeded' ? 'Folder test passed.' : key
+        ));
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        act(() => result.current.syncPageProps.onSyncPathChange('/sync/folder'));
+
+        await act(async () => {
+            await result.current.syncPageProps.onTestSyncPath();
+        });
+
+        expect(SyncService.testSyncPath).toHaveBeenCalledWith('/sync/folder');
+        expect(SyncService.setSyncPath).not.toHaveBeenCalled();
+        expect(showToast).toHaveBeenCalledWith('Folder test passed.', 'success');
+        expect(result.current.syncPageProps.isTestingSyncPath).toBe(false);
+    });
+
+    it('shows the native folder-probe stage when testing fails', async () => {
+        const stageError = 'Could not finalize a file in this folder: rename refused';
+        vi.mocked(SyncService.testSyncPath).mockRejectedValueOnce(new Error(stageError));
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        act(() => result.current.syncPageProps.onSyncPathChange('/sync/folder'));
+
+        await act(async () => {
+            await result.current.syncPageProps.onTestSyncPath();
+        });
+
+        expect(result.current.syncPageProps.syncError).toBe(stageError);
+        expect(showToast).toHaveBeenCalledWith(stageError, 'error');
+        expect(result.current.syncPageProps.isTestingSyncPath).toBe(false);
+    });
+
+    it('shows the folder-probe stage when saving a changed folder fails', async () => {
+        const stageError = 'Could not finish writing a file in this folder: flush refused';
+        vi.mocked(SyncService.commitProvenSyncConfiguration).mockRejectedValueOnce(new Error(stageError));
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
+        await waitFor(() => expect(SyncService.getCloudConfig).toHaveBeenCalled());
+        act(() => {
+            void result.current.syncPageProps.onSetSyncBackend('file');
+            result.current.syncPageProps.onSyncPathChange('/sync/folder');
+        });
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(result.current.syncPageProps.syncError).toBe(stageError);
+        expect(showToast).toHaveBeenCalledWith(stageError, 'error');
+    });
+
+    it('keeps the normal sync fallback for unrelated file-sync failures', async () => {
+        languageMocks.t.mockImplementation((key: string) => (
+            key === 'settings.lastSyncError' ? 'Sync failed' : key
+        ));
+        vi.mocked(SyncService.getSyncBackend).mockResolvedValue('file');
+        vi.mocked(SyncService.getSyncPath).mockResolvedValue('/sync/folder');
+        vi.mocked(SyncService.performSync).mockRejectedValueOnce(new Error('remote payload refused'));
+        const showToast = vi.fn();
+        useUiStore.setState({ showToast } as never);
+        const { result } = setup(vi.fn(), vi.fn().mockResolvedValue(true), true);
+        await waitFor(() => expect(result.current.syncPageProps.syncBackend).toBe('file'));
+
+        await act(async () => {
+            await result.current.syncPageProps.onSyncNow();
+        });
+
+        expect(result.current.syncPageProps.syncError).toBe('Sync failed');
+        expect(showToast).toHaveBeenCalledWith('Sync failed', 'error');
     });
 
     it('renders structured backup warnings through the active desktop locale', async () => {
