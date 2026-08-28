@@ -4979,9 +4979,65 @@ mod tests {
             fs::read(&document_path).expect("read unchanged document"),
             document_before
         );
-        assert!(!dir.path().join("data.json.tmp").exists());
+        assert!(
+            dir.path().join("data.json.tmp").exists(),
+            "identity loss preserves the ambiguous staged generation instead of mutating through the stale authority"
+        );
         release_file_sync_lease_token(&state, &token, "main")
             .expect_err("release retains the identity-loss result");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn windows_replacement_identity_loss_preserves_temp_without_stale_cleanup() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let initial = serde_json::json!({ "tasks": [{ "id": "original" }] });
+        write_sync_file_to_dir(dir.path(), initial, None).expect("seed document");
+        let document = dir.path().join(DATA_FILE_NAME);
+        let document_before = fs::read(&document).expect("read original");
+        let document_tmp = dir.path().join("data.json.tmp");
+        let document_previous = dir.path().join("data.json.previous");
+        let lock_path = dir.path().join(".mindwtr.lock");
+        let displaced_lock = dir.path().join(".mindwtr.lock.displaced");
+        let lock = acquire_sync_lock(dir.path()).expect("acquire retained authority");
+        let mut replaced = false;
+        let mut replace_after_preserve = || {
+            if !replaced && document_previous.exists() && document_tmp.exists() {
+                fs::rename(&lock_path, &displaced_lock).map_err(|error| error.to_string())?;
+                fs::write(&lock_path, b"peer lock").map_err(|error| error.to_string())?;
+                replaced = true;
+            }
+            Ok(())
+        };
+
+        let error = write_sync_file_to_dir_with_lease_and_validation_for_platform(
+            dir.path(),
+            serde_json::json!({ "tasks": [{ "id": "replacement" }] }),
+            None,
+            SyncFileCrypto::Off,
+            Some(&lock),
+            &mut replace_after_preserve,
+            true,
+        )
+        .expect_err("Windows replacement must abort after lock identity loss");
+
+        assert!(replaced);
+        assert!(error.contains("lock identity changed"), "unexpected error: {error}");
+        assert!(!document.exists(), "no later install mutation may run");
+        assert_eq!(
+            fs::read(&document_previous).expect("old generation recoverable"),
+            document_before
+        );
+        assert!(
+            document_tmp.exists(),
+            "the stale authority must not clean the staged name after identity loss"
+        );
+        assert!(
+            fs::read_to_string(&document_tmp)
+                .expect("staged replacement")
+                .contains("replacement")
+        );
+        release_sync_lock(&lock);
     }
 
     #[cfg(unix)]
@@ -5841,10 +5897,10 @@ mod tests {
             b"replacement-owned"
         );
         assert!(
-            !displaced_dir
+            displaced_dir
                 .join(".mindwtr-folder-probe-root-swap.tmp")
                 .exists(),
-            "cleanup must remove only the temp identity through the retained root"
+            "root identity loss must preserve the staged generation instead of mutating through stale authority"
         );
     }
 
@@ -13877,6 +13933,16 @@ enum AtomicWriteStage {
     Rename,
 }
 
+const RETAINED_CLEANUP_AUTHORITY_LOST: &str = "RETAINED_CLEANUP_AUTHORITY_LOST";
+
+fn retained_cleanup_authority_error(detail: String) -> String {
+    format!("{RETAINED_CLEANUP_AUTHORITY_LOST}: {detail}")
+}
+
+fn is_retained_cleanup_authority_error(detail: &str) -> bool {
+    detail.starts_with(RETAINED_CLEANUP_AUTHORITY_LOST)
+}
+
 #[cfg(test)]
 #[derive(Debug, PartialEq, Eq)]
 struct AtomicWriteError {
@@ -14332,7 +14398,9 @@ where
     })();
     drop(file);
     if let Err(detail) = write_result {
-        let _ = quarantine_and_remove_retained_identity(root, tmp_file, identity);
+        if !is_retained_cleanup_authority_error(&detail) {
+            let _ = quarantine_and_remove_retained_identity(root, tmp_file, identity);
+        }
         return Err(RetainedAtomicWriteError {
             stage: AtomicWriteStage::WriteAndSync,
             detail,
@@ -14341,7 +14409,9 @@ where
     }
 
     if let Err(detail) = before_stage(AtomicWriteStage::Rename) {
-        let _ = quarantine_and_remove_retained_identity(root, tmp_file, identity);
+        if !is_retained_cleanup_authority_error(&detail) {
+            let _ = quarantine_and_remove_retained_identity(root, tmp_file, identity);
+        }
         return Err(RetainedAtomicWriteError {
             stage: AtomicWriteStage::Rename,
             detail,
@@ -14375,6 +14445,22 @@ where
             .map_err(|error| error.to_string()),
     };
     if let Err(mut detail) = rename_result {
+        if is_retained_cleanup_authority_error(&detail) {
+            return Err(RetainedAtomicWriteError {
+                stage: AtomicWriteStage::Rename,
+                detail,
+                owned_temp: None,
+            });
+        }
+        if let Err(authority_error) = before_stage(AtomicWriteStage::Rename) {
+            return Err(RetainedAtomicWriteError {
+                stage: AtomicWriteStage::Rename,
+                detail: format!(
+                    "{detail}; retained temp was preserved because cleanup authority was lost: {authority_error}"
+                ),
+                owned_temp: None,
+            });
+        }
         if detail.starts_with(RETAINED_LINKED_DESTINATION_PRESERVED) {
             if let Err(cleanup_error) =
                 quarantine_and_remove_retained_identity(root, destination, identity)
@@ -14459,7 +14545,7 @@ where
         })?;
         let mut guarded_before_stage = |stage: AtomicWriteStage| {
             before_stage(stage)?;
-            revalidate_sync_lock(&sync_lock, sync_dir)
+            revalidate_sync_lock(&sync_lock, sync_dir).map_err(retained_cleanup_authority_error)
         };
         let publication = atomic_retained_tmp_write_then_rename_with(
             &root,
@@ -15597,6 +15683,29 @@ fn write_sync_file_to_dir_with_lease_and_validation<ValidateLease>(
 where
     ValidateLease: FnMut() -> Result<(), String>,
 {
+    write_sync_file_to_dir_with_lease_and_validation_for_platform(
+        sync_dir,
+        data,
+        expected_fingerprint,
+        crypto,
+        existing_sync_lock,
+        validate_existing_lease,
+        cfg!(windows),
+    )
+}
+
+fn write_sync_file_to_dir_with_lease_and_validation_for_platform<ValidateLease>(
+    sync_dir: &Path,
+    data: Value,
+    expected_fingerprint: Option<&str>,
+    crypto: SyncFileCrypto<'_>,
+    existing_sync_lock: Option<&SyncFileLock>,
+    validate_existing_lease: &mut ValidateLease,
+    windows_semantics: bool,
+) -> Result<bool, String>
+where
+    ValidateLease: FnMut() -> Result<(), String>,
+{
     let data_base = crypto.data_base();
     let sync_file = sync_dir.join(&data_base);
     let backup_file = sync_dir.join(format!("{data_base}.bak"));
@@ -15670,7 +15779,7 @@ where
                 log::warn!("Sync backup copy failed: {error}");
             } else {
                 validate_authority()?;
-                let replacement = if cfg!(windows)
+                let replacement = if windows_semantics
                     && root
                         .exists(&backup_file)
                         .map_err(|error| error.to_string())?
@@ -15712,7 +15821,7 @@ where
         // check below binds the reported success to the same authority.
         validate_authority()?;
 
-        let windows_replacement = cfg!(windows)
+        let windows_replacement = windows_semantics
             && root
                 .exists(&sync_file)
                 .map_err(|error| error.to_string())?;
@@ -15748,7 +15857,9 @@ where
         };
 
         let publication_result = {
-            let mut before_stage = |_stage: AtomicWriteStage| validate_authority();
+            let mut before_stage = |_stage: AtomicWriteStage| {
+                validate_authority().map_err(retained_cleanup_authority_error)
+            };
             atomic_retained_tmp_write_then_rename_with(
                 &root,
                 &tmp_file,
@@ -15773,7 +15884,7 @@ where
             }
             Err(mut error) => {
                 let rename_err = std::mem::take(&mut error.detail);
-                let publication = error.owned_temp.take().ok_or_else(|| {
+                let mut publication = error.owned_temp.take().ok_or_else(|| {
                     format!(
                         "Sync write failed: rename error: {rename_err}; the invocation-owned temp file is no longer available"
                     )
@@ -15787,10 +15898,16 @@ where
                         "Sync write failed: rename error: {rename_err}; temp ownership error: {ownership_error}"
                     )
                 })?;
-                validate_authority()?;
+                if let Err(authority_error) = validate_authority() {
+                    publication.keep();
+                    return Err(authority_error);
+                }
                 match root.write_replace(&sync_file, &content) {
                     Ok(_) => {
-                        validate_authority()?;
+                        if let Err(authority_error) = validate_authority() {
+                            publication.keep();
+                            return Err(authority_error);
+                        }
                         let mut before_remove = |_owned_path: &Path| Ok(());
                         publication.remove_with(&tmp_file, &mut before_remove)?;
                         root.sync_directory().map_err(|error| {
