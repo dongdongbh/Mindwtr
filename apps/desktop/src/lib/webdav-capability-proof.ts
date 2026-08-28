@@ -1,4 +1,4 @@
-import { normalizeWebdavUrl } from '@mindwtr/core';
+import { normalizeWebdavUrl, type WebdavSyncCompatibility } from '@mindwtr/core';
 
 export const WEBDAV_CAPABILITY_PROOF_STORAGE_KEY = 'mindwtr-webdav-capability-proof-v1';
 
@@ -38,9 +38,12 @@ export const rememberWebdavCapabilityProof = (config: WebdavCapabilityProofConfi
 
 export const ensureWebdavCapabilityProof = async (
     config: WebdavCapabilityProofConfig,
-    probe: () => Promise<void>,
-): Promise<void> => {
-    if (hasWebdavCapabilityProof(config)) return;
-    await probe();
-    rememberWebdavCapabilityProof(config);
+    probe: () => Promise<WebdavSyncCompatibility | void>,
+): Promise<WebdavSyncCompatibility> => {
+    if (hasWebdavCapabilityProof(config)) return 'strong-etag';
+    const compatibility = await probe() ?? 'strong-etag';
+    // Never cache legacy mode: a later server upgrade must be detected without
+    // requiring the user to re-save the endpoint.
+    if (compatibility === 'strong-etag') rememberWebdavCapabilityProof(config);
+    return compatibility;
 };

@@ -53,9 +53,9 @@ use crate::sync_encryption::{
     encrypted_artifact_name, hex_to_bytes,
     is_encryption_enabled, is_terminal_error, mark_remote_encrypted_no_key,
     mark_remote_plaintext, persist_enabled_material_with_fence,
-    plaintext_artifact_name, resolve_key_material, terminal_error,
+    plaintext_artifact_name, read_local_state, resolve_key_material, terminal_error,
     TRANSITION_CHANGE_PASSPHRASE, TRANSITION_DISABLE, TRANSITION_ENABLE,
-    SYNC_ENCRYPTION_REMOTE_ENCRYPTED, SYNC_ENCRYPTION_REMOTE_PLAINTEXT,
+    STATE_OFF, SYNC_ENCRYPTION_REMOTE_ENCRYPTED, SYNC_ENCRYPTION_REMOTE_PLAINTEXT,
 };
 #[cfg(target_os = "macos")]
 use crate::{
@@ -1399,6 +1399,27 @@ fn webdav_write_condition(
             Ok((reqwest::header::IF_MATCH, value))
         }
     }
+}
+
+fn webdav_write_condition_for_request(
+    expected_etag: Option<&str>,
+    allow_legacy_plaintext: bool,
+    material_present: bool,
+    encryption_exactly_off: bool,
+) -> Result<Option<(reqwest::header::HeaderName, reqwest::header::HeaderValue)>, String> {
+    if !allow_legacy_plaintext {
+        return webdav_write_condition(expected_etag).map(Some);
+    }
+    if material_present || !encryption_exactly_off {
+        return Err(
+            "SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE: legacy WebDAV writes require sync encryption to be exactly off"
+                .to_string(),
+        );
+    }
+    if expected_etag.is_some() {
+        return Err("Legacy WebDAV plaintext mode cannot also use an expected ETag".to_string());
+    }
+    Ok(None)
 }
 
 fn remote_json_write_result_from_headers(
@@ -3464,7 +3485,18 @@ fn webdav_put_json_blocking(
     data: &Value,
     material: Option<&SyncKeyMaterial>,
     expected_etag: Option<&str>,
+    allow_legacy_plaintext: bool,
 ) -> Result<RemoteJsonWriteResult, String> {
+    let encryption_exactly_off = match read_local_state(app)? {
+        None => true,
+        Some(state) => state.state == STATE_OFF && state.incomplete_transition.is_none(),
+    };
+    let write_condition = webdav_write_condition_for_request(
+        expected_etag,
+        allow_legacy_plaintext,
+        material.is_some(),
+        encryption_exactly_off,
+    )?;
     let (config, password) = read_bound_credential(app, CredentialService::Webdav)?;
     let allow_insecure_http = webdav_allows_insecure_http(&config);
     let url = resolve_webdav_request_url(&config)?;
@@ -3487,21 +3519,27 @@ fn webdav_put_json_blocking(
         ),
     };
     let client = webdav_blocking_http_client(config.proxy_url.as_deref(), allow_insecure_http)?;
-    let (condition_name, condition_value) = webdav_write_condition(expected_etag)?;
     let send_put = || {
-        client
+        let request = client
             .put(url.clone())
             .basic_auth(&username, Some(&password))
             .header("Content-Type", content_type)
-            .header(condition_name.clone(), condition_value.clone())
-            .body(payload.clone())
+            .body(payload.clone());
+        let request = match &write_condition {
+            Some((condition_name, condition_value)) => {
+                request.header(condition_name.clone(), condition_value.clone())
+            }
+            None => request,
+        };
+        request
             .send()
             .map_err(|e| format_reqwest_send_error("WebDAV request failed", &e))
     };
     let mut response = send_put()?;
 
-    if response.status() == reqwest::StatusCode::NOT_FOUND
-        || response.status() == reqwest::StatusCode::CONFLICT
+    if write_condition.is_some()
+        && (response.status() == reqwest::StatusCode::NOT_FOUND
+            || response.status() == reqwest::StatusCode::CONFLICT)
     {
         if let Err(error) =
             ensure_webdav_parent_collections_blocking(&client, &url, &username, &password)
@@ -3537,10 +3575,17 @@ pub(crate) async fn webdav_put_json(
     app: tauri::AppHandle,
     data: Value,
     expected_etag: Option<String>,
+    allow_legacy_plaintext: Option<bool>,
 ) -> Result<RemoteJsonWriteResult, String> {
     let material = resolve_sync_encryption_material(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        webdav_put_json_blocking(&app, &data, material.as_ref(), expected_etag.as_deref())
+        webdav_put_json_blocking(
+            &app,
+            &data,
+            material.as_ref(),
+            expected_etag.as_deref(),
+            allow_legacy_plaintext.unwrap_or(false),
+        )
     })
     .await
     .map_err(|e| e.to_string())?
@@ -9009,6 +9054,22 @@ mod tests {
     }
 
     #[test]
+    fn webdav_legacy_plaintext_write_mode_is_explicit_and_encryption_off_only() {
+        assert!(webdav_write_condition_for_request(None, true, false, true)
+            .expect("legacy plaintext mode")
+            .is_none());
+        assert!(webdav_write_condition_for_request(None, true, true, true)
+            .expect_err("encrypted material must fail")
+            .contains("SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE"));
+        assert!(webdav_write_condition_for_request(None, true, false, false)
+            .expect_err("non-off state must fail")
+            .contains("SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE"));
+        assert!(webdav_write_condition_for_request(Some("\"v1\""), true, false, true)
+            .expect_err("mixed legacy and conditional mode must fail")
+            .contains("cannot also use an expected ETag"));
+    }
+
+    #[test]
     fn invalid_webdav_document_error_carries_the_strong_get_validator() {
         let versioned = invalid_webdav_document_error(
             "Invalid WebDAV response: error decoding response body".to_string(),
@@ -14067,13 +14128,13 @@ fn retained_root_open(
 ) -> std::io::Result<File> {
     use std::os::windows::ffi::OsStrExt as _;
     use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _};
-    use windows_sys::Wdk::Foundation::{RtlNtStatusToDosError, OBJECT_ATTRIBUTES};
+    use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
     use windows_sys::Wdk::Storage::FileSystem::{
         NtCreateFile, FILE_CREATE, FILE_NON_DIRECTORY_FILE, FILE_OPEN,
         FILE_OPEN_REPARSE_POINT, FILE_OVERWRITE_IF, FILE_SYNCHRONOUS_IO_NONALERT,
     };
     use windows_sys::Win32::Foundation::{
-        GENERIC_READ, GENERIC_WRITE, OBJ_CASE_INSENSITIVE, UNICODE_STRING,
+        RtlNtStatusToDosError, GENERIC_READ, GENERIC_WRITE, OBJ_CASE_INSENSITIVE, UNICODE_STRING,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         DELETE, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
@@ -14700,7 +14761,7 @@ fn retained_root_list_names(directory: &File) -> std::io::Result<Vec<OsString>> 
         GetFileInformationByHandleEx, FILE_ID_BOTH_DIR_INFO,
     };
 
-    let buffer_bytes = 64 * 1024;
+    let buffer_bytes: usize = 64 * 1024;
     // The provider may pack a final filename through the exact end of the
     // advertised payload even though Rust's typed structure includes trailing
     // padding after FileName. Keep initialized padding outside the payload so

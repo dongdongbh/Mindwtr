@@ -1,6 +1,5 @@
 
 import {
-    assertWebdavStrongEtagSupport,
     AppData,
     AppSettings,
     Attachment,
@@ -28,6 +27,7 @@ import {
     performSyncCycle,
     normalizeAppData,
     normalizeWebdavUrl,
+    probeWebdavSyncCompatibility,
     normalizeStrongWebdavEtag,
     normalizeCloudUrl,
     runDataTransferTransactionWithoutSnapshot,
@@ -372,6 +372,10 @@ const logSyncWarning = (message: string, error?: unknown) => {
 const logSyncInfo = (message: string, extra?: Record<string, string>) => {
     void syncServiceDependencies.logInfo(message, { scope: 'sync', extra });
 };
+
+const isLegacyWebdavPlaintextPostureAllowed = (
+    status: Pick<SyncEncryptionStatus, 'state' | 'incompleteTransition'>,
+): boolean => status.state === 'off' && !status.incompleteTransition;
 
 const logSyncPayloadTrace = (
     message: string,
@@ -728,6 +732,7 @@ type DesktopSyncCycleContext = {
     syncPath: string;
     fileBaseDir: string;
     fileSyncLeaseToken: string | null;
+    allowLegacyWebdavPlaintext: boolean;
 };
 
 const createDesktopSyncCycleContext = (): DesktopSyncCycleContext => ({
@@ -745,6 +750,7 @@ const createDesktopSyncCycleContext = (): DesktopSyncCycleContext => ({
     syncPath: '',
     fileBaseDir: '',
     fileSyncLeaseToken: null,
+    allowLegacyWebdavPlaintext: false,
 });
 
 const createFetchWithAbortForContext = async (context: DesktopSyncCycleContext): Promise<typeof fetch> => {
@@ -1605,7 +1611,10 @@ export class SyncService {
         return writeWebDavConfig(config, getSyncConfigDeps());
     }
 
-    private static async probeWebDavStrongEtagSupport(config: { url: string; username?: string; password?: string; hasPassword?: boolean; allowInsecureHttp?: boolean }): Promise<void> {
+    private static async probeWebDavCompatibility(
+        config: { url: string; username?: string; password?: string; hasPassword?: boolean; allowInsecureHttp?: boolean },
+        allowLegacyPlaintext: boolean,
+    ): Promise<'strong-etag' | 'legacy-plaintext'> {
         const normalizedUrl = normalizeWebdavUrl(config.url.trim());
         if (!normalizedUrl) {
             throw new Error('WebDAV URL not configured');
@@ -1622,13 +1631,17 @@ export class SyncService {
             hasPassword: config.hasPassword,
         });
         try {
-            await assertWebdavStrongEtagSupport(normalizedUrl, {
+            const compatibility = await probeWebdavSyncCompatibility(normalizedUrl, {
                 allowInsecureHttp: config.allowInsecureHttp,
                 username: config.username?.trim(),
                 password,
                 timeoutMs: 10_000,
                 fetcher: fetcher ?? fetch,
             });
+            if (compatibility === 'legacy-plaintext' && !allowLegacyPlaintext) {
+                throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV data.json');
+            }
+            return compatibility;
         } catch (error) {
             logSyncWarning('WebDAV connection test failed', error);
             throw error;
@@ -1636,8 +1649,12 @@ export class SyncService {
     }
 
     static async testWebDavConnection(config: { url: string; username?: string; password?: string; hasPassword?: boolean; allowInsecureHttp?: boolean }): Promise<void> {
-        await SyncService.probeWebDavStrongEtagSupport(config);
-        rememberWebdavCapabilityProof(config);
+        const encryptionStatus = await readSyncEncryptionStatus();
+        const compatibility = await SyncService.probeWebDavCompatibility(
+            config,
+            isLegacyWebdavPlaintextPostureAllowed(encryptionStatus),
+        );
+        if (compatibility === 'strong-etag') rememberWebdavCapabilityProof(config);
     }
 
     static async getCloudConfig(options?: { silent?: boolean }): Promise<CloudConfig> {
@@ -2052,6 +2069,8 @@ export class SyncService {
         }
 
         const encryptionStatus = await readSyncEncryptionStatus();
+        const legacyWebdavPostureAllowed = isLegacyWebdavPlaintextPostureAllowed(encryptionStatus);
+        context.allowLegacyWebdavPlaintext = false;
         if (encryptionStatus.incompleteTransition) {
             if (!options.manual && !options.activationProbe) return { kind: 'disabled' };
             throw new SyncEncryptionTransitionIncompleteError(encryptionStatus.incompleteTransition);
@@ -2094,10 +2113,14 @@ export class SyncService {
             ? configOverride?.webdav ?? await SyncService.getWebDavConfig()
             : null;
         if (context.webdavConfig) {
-            await ensureWebdavCapabilityProof(
+            const compatibility = await ensureWebdavCapabilityProof(
                 context.webdavConfig,
-                () => SyncService.probeWebDavStrongEtagSupport(context.webdavConfig!),
+                () => SyncService.probeWebDavCompatibility(
+                    context.webdavConfig!,
+                    legacyWebdavPostureAllowed,
+                ),
             );
+            context.allowLegacyWebdavPlaintext = compatibility === 'legacy-plaintext';
         }
         context.cloudProvider = context.backend === 'cloud'
             ? configOverride?.cloudProvider ?? await SyncService.getCloudProvider()
@@ -2157,6 +2180,7 @@ export class SyncService {
             filePath: context.fileBaseDir,
             dropboxAppKey: context.dropboxAppKey,
             dropboxRev: null,
+            allowLegacyWebdavPlaintext: context.allowLegacyWebdavPlaintext,
         };
     }
 
@@ -2211,10 +2235,18 @@ export class SyncService {
                     return remote;
                 };
                 if (isTauriRuntimeEnv() && !context.usesConfigOverride) {
-                    return logMissingRemote(await withRetry(
+                    const remote = await withRetry(
                         () => invokeSyncNative<WebdavSyncReadResult>('webdav_get_json'),
                         WEBDAV_READ_RETRY_OPTIONS,
-                    ));
+                    );
+                    if (
+                        !context.allowLegacyWebdavPlaintext
+                        && remote.exists
+                        && !normalizeStrongWebdavEtag(remote.strongEtag)
+                    ) {
+                        throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV encrypted sync document');
+                    }
+                    return logMissingRemote(remote);
                 }
                 const webdavConfig = context.webdavConfig!;
                 const password = await resolveWebdavPassword(webdavConfig);
@@ -2250,6 +2282,13 @@ export class SyncService {
                     await markRemoteSyncEncryptionPlaintext();
                     throw new SyncEncryptionRemotePlaintextError('the WebDAV remote is no longer encrypted');
                 }
+                if (
+                    material
+                    && result.exists
+                    && !normalizeStrongWebdavEtag(result.strongEtag)
+                ) {
+                    throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV encrypted sync document');
+                }
                 return logMissingRemote({
                     data: result.data,
                     exists: result.exists,
@@ -2280,6 +2319,34 @@ export class SyncService {
                     material,
                     cryptoPrims: desktopSyncCryptoPrimitives,
                     expectedEtag,
+                });
+            },
+            webdavPutLegacyPlaintext: async (sanitized, assertRemoteMutationFenceHeld) => {
+                if (!context.allowLegacyWebdavPlaintext) {
+                    throw new SyncEncryptionRemoteVersionUnavailableError('Encrypted WebDAV sync document');
+                }
+                await assertRemoteMutationFenceHeld?.(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
+                if (isTauriRuntimeEnv() && !context.usesConfigOverride) {
+                    return invokeSyncNative<RemoteJsonWriteResult | boolean>('webdav_put_json', {
+                        data: sanitized,
+                        expectedEtag: null,
+                        allowLegacyPlaintext: true,
+                    });
+                }
+                const config = context.webdavConfig ?? await SyncService.getWebDavConfig();
+                const password = await resolveWebdavPassword(config);
+                const material = await getSyncEncryptionMaterial();
+                if (material) {
+                    throw new SyncEncryptionRemoteVersionUnavailableError('Encrypted WebDAV sync document');
+                }
+                const fetcher = await createFetchWithAbortForContext(context);
+                return webdavPutSyncDocument(normalizeWebdavUrl(config.url), sanitized, {
+                    allowInsecureHttp: config.allowInsecureHttp,
+                    username: config.username,
+                    password,
+                    fetcher,
+                    signal: context.requestAbortController.signal,
+                    legacyUnconditionalPlaintext: true,
                 });
             },
             webdavHead: async () => {
@@ -3111,6 +3178,7 @@ export class SyncService {
 }
 
 export const __syncServiceTestUtils = {
+    isLegacyWebdavPlaintextPostureAllowed,
     setDependenciesForTests(overrides: Partial<SyncServiceDependencies>) {
         syncServiceDependencies = {
             ...syncServiceDependencies,

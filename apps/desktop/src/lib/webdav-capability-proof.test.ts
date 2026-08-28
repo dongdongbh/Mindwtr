@@ -55,4 +55,16 @@ describe('desktop WebDAV capability proof', () => {
         );
         expect(hasWebdavCapabilityProof(config)).toBe(false);
     });
+
+    it('does not cache legacy plaintext compatibility and detects a later strong capability', async () => {
+        const probe = vi.fn()
+            .mockResolvedValueOnce('legacy-plaintext')
+            .mockResolvedValueOnce('strong-etag');
+
+        await expect(ensureWebdavCapabilityProof(config, probe)).resolves.toBe('legacy-plaintext');
+        expect(hasWebdavCapabilityProof(config)).toBe(false);
+        await expect(ensureWebdavCapabilityProof(config, probe)).resolves.toBe('strong-etag');
+        expect(hasWebdavCapabilityProof(config)).toBe(true);
+        expect(probe).toHaveBeenCalledTimes(2);
+    });
 });

@@ -17,6 +17,7 @@ const makeTransport = (overrides: Partial<SyncTransport> = {}): SyncTransport =>
         strongEtag: '"webdav-read-v1"',
     }),
     webdavPut: vi.fn().mockResolvedValue({ fingerprint: 'webdav-fp' }),
+    webdavPutLegacyPlaintext: vi.fn().mockResolvedValue({ fingerprint: 'webdav-legacy-fp' }),
     webdavHead: vi.fn().mockResolvedValue({ exists: true, fingerprint: 'webdav-head-fp' }),
     cloudGet: vi.fn().mockResolvedValue(APP_DATA),
     cloudPut: vi.fn().mockResolvedValue({ fingerprint: 'cloud-fp' }),
@@ -75,6 +76,18 @@ describe('createSyncBackendIO', () => {
 
             await expect(io.acquireRemoteMutationFence!()).resolves.toBe(lease);
             expect(acquireWebdavRemoteMutationFence).toHaveBeenCalledTimes(1);
+        });
+
+        it('bypasses the strong-ETag mutation fence in explicit legacy plaintext mode', async () => {
+            const acquireWebdavRemoteMutationFence = vi.fn();
+            const io = createSyncBackendIO({
+                backend: 'webdav', cloudProvider: 'selfhosted',
+                webdav: { url: 'https://dav.example.com/data.json' }, dropboxRev: null,
+                allowLegacyWebdavPlaintext: true,
+            }, makeTransport({ acquireWebdavRemoteMutationFence }));
+
+            await expect(io.acquireRemoteMutationFence!()).resolves.toBeNull();
+            expect(acquireWebdavRemoteMutationFence).not.toHaveBeenCalled();
         });
 
         it('throws when unconfigured and never touches the transport', async () => {
@@ -159,6 +172,92 @@ describe('createSyncBackendIO', () => {
             await io.readRemote();
             await expect(io.writeRemote(APP_DATA)).rejects.toThrow('safe strong ETag');
             expect(transport.webdavPut).not.toHaveBeenCalled();
+        });
+
+        it('uses one explicit legacy plaintext write after a matching bounded reread', async () => {
+            const ctx: SyncBackendContext = {
+                backend: 'webdav', cloudProvider: 'selfhosted',
+                webdav: { url: 'https://dav.example.com/data.json' }, dropboxRev: null,
+                allowLegacyWebdavPlaintext: true,
+            };
+            const webdavGet = vi.fn()
+                .mockResolvedValue({ data: APP_DATA, exists: true, strongEtag: null });
+            const transport = makeTransport({ webdavGet });
+            const io = createSyncBackendIO(ctx, transport);
+            const guard = vi.fn().mockResolvedValue(undefined);
+
+            await io.readRemote();
+            await expect(io.writeRemote(APP_DATA, guard)).resolves.toEqual({
+                fingerprint: 'webdav-legacy-fp',
+                serverMergedRemoteData: false,
+            });
+
+            expect(webdavGet).toHaveBeenCalledTimes(2);
+            expect(guard).toHaveBeenCalled();
+            expect(transport.webdavPutLegacyPlaintext).toHaveBeenCalledWith(APP_DATA, guard);
+            expect(transport.webdavPut).not.toHaveBeenCalled();
+        });
+
+        it('uses the bounded one-shot legacy transport when the weak-ETag document became absent', async () => {
+            const ctx: SyncBackendContext = {
+                backend: 'webdav', cloudProvider: 'selfhosted',
+                webdav: { url: 'https://dav.example.com/data.json' }, dropboxRev: null,
+                allowLegacyWebdavPlaintext: true,
+            };
+            const webdavGet = vi.fn()
+                .mockResolvedValue({ data: null, exists: false, strongEtag: null });
+            const transport = makeTransport({ webdavGet });
+            const io = createSyncBackendIO(ctx, transport);
+
+            await io.readRemote();
+            await expect(io.writeRemote(APP_DATA)).resolves.toEqual({
+                fingerprint: 'webdav-legacy-fp',
+                serverMergedRemoteData: false,
+            });
+
+            expect(webdavGet).toHaveBeenCalledTimes(2);
+            expect(transport.webdavPutLegacyPlaintext).toHaveBeenCalledOnce();
+            expect(transport.webdavPutLegacyPlaintext).toHaveBeenCalledWith(APP_DATA);
+            expect(transport.webdavPut).not.toHaveBeenCalled();
+        });
+
+        it('requeues instead of overwriting when a weak-ETag remote changes before legacy plaintext write', async () => {
+            const ctx: SyncBackendContext = {
+                backend: 'webdav', cloudProvider: 'selfhosted',
+                webdav: { url: 'https://dav.example.com/data.json' }, dropboxRev: null,
+                allowLegacyWebdavPlaintext: true,
+            };
+            const changed = { ...APP_DATA, tasks: [{ id: 'peer' }] } as AppData;
+            const webdavGet = vi.fn()
+                .mockResolvedValueOnce({ data: APP_DATA, exists: true, strongEtag: null })
+                .mockResolvedValueOnce({ data: changed, exists: true, strongEtag: null });
+            const transport = makeTransport({ webdavGet });
+            const io = createSyncBackendIO(ctx, transport);
+
+            await io.readRemote();
+            await expect(io.writeRemote(APP_DATA)).rejects.toBeInstanceOf(SyncRemoteWriteConflict);
+
+            expect(transport.webdavPutLegacyPlaintext).not.toHaveBeenCalled();
+            expect(transport.webdavPut).not.toHaveBeenCalled();
+        });
+
+        it('upgrades a matching legacy reread to strong-ETag CAS when support appears', async () => {
+            const ctx: SyncBackendContext = {
+                backend: 'webdav', cloudProvider: 'selfhosted',
+                webdav: { url: 'https://dav.example.com/data.json' }, dropboxRev: null,
+                allowLegacyWebdavPlaintext: true,
+            };
+            const webdavGet = vi.fn()
+                .mockResolvedValueOnce({ data: APP_DATA, exists: true, strongEtag: null })
+                .mockResolvedValueOnce({ data: APP_DATA, exists: true, strongEtag: '"upgraded-v2"' });
+            const transport = makeTransport({ webdavGet });
+            const io = createSyncBackendIO(ctx, transport);
+
+            await io.readRemote();
+            await io.writeRemote(APP_DATA);
+
+            expect(transport.webdavPut).toHaveBeenCalledWith(APP_DATA, '"upgraded-v2"');
+            expect(transport.webdavPutLegacyPlaintext).not.toHaveBeenCalled();
         });
 
         it('maps a conditional WebDAV conflict into SyncRemoteWriteConflict', async () => {

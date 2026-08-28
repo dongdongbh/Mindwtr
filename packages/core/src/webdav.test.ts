@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
     __webdavTestUtils,
     assertWebdavStrongEtagSupport,
+    probeWebdavSyncCompatibility,
     webdavDeleteFile,
     webdavDeleteFileVersioned,
     webdavGetFile,
@@ -684,6 +685,51 @@ describe('versioned WebDAV transition byte operations', () => {
         expect(requests[7]?.headers.get('if-match')).toBe('"probe-v1"');
         expect(requests[9]?.headers.get('if-match')).toBe('"probe-v2"');
         expect(getProbeUrl()).toContain('data.json.mindwtr-etag-probe-');
+    });
+
+    it.each([
+        ['missing', null],
+        ['weak', 'W/"legacy-v1"'],
+    ])('recognizes a valid plaintext document with a %s ETag as legacy-compatible without writing', async (_case, etag) => {
+        const requests: string[] = [];
+        const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+            requests.push(init?.method ?? 'GET');
+            return new Response('{"tasks":[]}', {
+                status: 200,
+                headers: etag ? { etag } : undefined,
+            });
+        }) as unknown as typeof fetch;
+
+        await expect(probeWebdavSyncCompatibility(
+            'https://example.com/dav/data.json',
+            { fetcher },
+        )).resolves.toBe('legacy-plaintext');
+        expect(requests).toEqual(['GET']);
+    });
+
+    it('recognizes an absent document as legacy-compatible without creating a probe', async () => {
+        const requests: string[] = [];
+        const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+            requests.push(init?.method ?? 'GET');
+            return new Response(null, { status: 404 });
+        }) as unknown as typeof fetch;
+
+        await expect(probeWebdavSyncCompatibility(
+            'https://example.com/dav/data.json',
+            { fetcher },
+        )).resolves.toBe('legacy-plaintext');
+        expect(requests).toEqual(['GET']);
+    });
+
+    it('does not downgrade a strong-ETag server that fails conditional-write enforcement', async () => {
+        const documentUrl = 'https://example.com/dav/data.json';
+        const { fetcher } = createWebdavCapabilityFetcher(documentUrl, {
+            documentBody: '{"tasks":[]}',
+            ignoreStaleMatch: true,
+        });
+
+        await expect(probeWebdavSyncCompatibility(documentUrl, { fetcher }))
+            .rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
     });
 
     it.each([

@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { AppData, acquireSyncRemoteMutationFence, assertWebdavStrongEtagSupport, createDropboxSyncRemoteMutationFencePort, createSyncOrchestrator, createWebdavSyncRemoteMutationFencePort, runSerializedSyncDocumentOperation, runSharedSyncCycle, useTaskStore, webdavGetSyncDocument, webdavHeadFile, webdavPutSyncDocument, syncEncryptedArtifactName, markRemoteEncryptionDiscovered, markRemotePlaintextDiscovered, SyncEncryptionRemoteConflictError, SyncEncryptionRemotePlaintextError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, SyncEncryptionTransitionIncompleteError, SyncFileLockUnavailableError, SyncRemoteWriteConflict, type SyncKeyMaterial, cloudGetJson, cloudHeadJson, cloudPutJson, flushPendingSave, performSyncCycle, withRetry, isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeStrongWebdavEtag, normalizeWebdavUrl, normalizeCloudUrl, createSyncBackendIO, buildFastSyncScope, hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, getInMemoryAppDataSnapshot, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, isDropboxUnauthorizedError, parseFastSyncState, serializeFastSyncState, summarizeTaskLifecycleCounts, decodeUriSafe, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES, SYNC_FILE_NAME, SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type Attachment, type CloudProvider, type FastSyncState, type SyncBackendContext, type SyncBackendIO, type SyncRunDiagnosticEvent, type SyncRunNotifier, type SyncRunPlatformHooks, type SyncRunResult, type SyncRunStorage, type SyncTransport } from '@mindwtr/core';
+import { AppData, acquireSyncRemoteMutationFence, createDropboxSyncRemoteMutationFencePort, createSyncOrchestrator, createWebdavSyncRemoteMutationFencePort, probeWebdavSyncCompatibility, runSerializedSyncDocumentOperation, runSharedSyncCycle, useTaskStore, webdavGetSyncDocument, webdavHeadFile, webdavPutSyncDocument, syncEncryptedArtifactName, markRemoteEncryptionDiscovered, markRemotePlaintextDiscovered, SyncEncryptionRemoteConflictError, SyncEncryptionRemotePlaintextError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, SyncEncryptionTransitionIncompleteError, SyncFileLockUnavailableError, SyncRemoteWriteConflict, type SyncKeyMaterial, cloudGetJson, cloudHeadJson, cloudPutJson, flushPendingSave, performSyncCycle, withRetry, isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeStrongWebdavEtag, normalizeWebdavUrl, normalizeCloudUrl, createSyncBackendIO, buildFastSyncScope, hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, getInMemoryAppDataSnapshot, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, isDropboxUnauthorizedError, parseFastSyncState, serializeFastSyncState, summarizeTaskLifecycleCounts, decodeUriSafe, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES, SYNC_FILE_NAME, SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type Attachment, type CloudProvider, type FastSyncState, type SyncBackendContext, type SyncBackendIO, type SyncRunDiagnosticEvent, type SyncRunNotifier, type SyncRunPlatformHooks, type SyncRunResult, type SyncRunStorage, type SyncTransport } from '@mindwtr/core';
 import { mobileStorage } from './storage-adapter';
 import { logInfo, logSyncError, logWarn, sanitizeLogMessage } from './app-log';
 import { readSyncFileVersioned, resolveSyncFileUri, writeSyncFile } from './storage-file';
@@ -48,7 +48,7 @@ import { getSecureConfigValue, isSecretConfigKey } from './secure-config';
 import { mobileSyncCryptoPrimitives } from './sync-crypto-native';
 import {
   flushSyncEncryptionLocalState,
-  getIncompleteSyncEncryptionTransition,
+  getMobileSyncEncryptionStatus,
   getSyncEncryptionMaterial,
   isSyncEncryptionBlocked,
   SyncEncryptionNoKeyError,
@@ -565,6 +565,7 @@ class MobileSyncRun {
   private fileSyncBookmark: string | null = null;
   private fileSyncLease: Awaited<ReturnType<typeof acquireMobileFileSyncLease>> | null = null;
   private activationProof: MobileSyncResult['activationProof'];
+  private allowLegacyWebdavPlaintext = false;
   /** #1056: resolved once per cycle in setupCycle. `null` is the encryption-off path and
    *  every seam below then behaves byte-for-byte as it did before the feature. */
   private encryptionMaterial: SyncKeyMaterial | null = null;
@@ -1082,9 +1083,15 @@ class MobileSyncRun {
         // the remote is encrypted but holds no key must not sync at all — writing a fresh
         // plaintext document beside the ciphertext is exactly the outcome decision #5
         // exists to prevent. Automatic and background runs go quiet; a manual run says why.
+        let legacyWebdavPostureAllowed = false;
         if (this.supportsSyncEncryption()) {
           const probingCandidate = this.activationProbe && Boolean(this.configOverride);
-          const incompleteTransition = await getIncompleteSyncEncryptionTransition();
+          const encryptionStatus = await getMobileSyncEncryptionStatus();
+          const incompleteTransition = encryptionStatus.incompleteTransition;
+          legacyWebdavPostureAllowed = backend === 'webdav'
+            && encryptionStatus.state === 'off'
+            && !incompleteTransition;
+          this.allowLegacyWebdavPlaintext = false;
           if (incompleteTransition) {
             if (!this.manual && !probingCandidate) return { kind: 'disabled' };
             throw new SyncEncryptionTransitionIncompleteError(incompleteTransition);
@@ -1097,15 +1104,20 @@ class MobileSyncRun {
         }
         if (backend === 'webdav') {
           const webdavConfig = this.webdavConfig!;
-          await ensureWebdavCapabilityProof(webdavConfig, () => (
-            assertWebdavStrongEtagSupport(webdavConfig.url, {
+          const compatibility = await ensureWebdavCapabilityProof(webdavConfig, async () => {
+            const compatibility = await probeWebdavSyncCompatibility(webdavConfig.url, {
               ...getMobileWebDavRequestOptions(webdavConfig.allowInsecureHttp),
               username: webdavConfig.username,
               password: webdavConfig.password,
               timeoutMs: 10_000,
               fetcher: this.fetchWithAbort,
-            })
-          ));
+            });
+            if (compatibility === 'legacy-plaintext' && !legacyWebdavPostureAllowed) {
+              throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV data.json');
+            }
+            return compatibility;
+          });
+          this.allowLegacyWebdavPlaintext = compatibility === 'legacy-plaintext';
         }
         // CloudKit setup — ensure zone and subscription exist before sync cycle.
         if (backend === 'cloudkit') {
@@ -1328,6 +1340,7 @@ class MobileSyncRun {
       filePath: this.fileSyncPath ?? '',
       dropboxAppKey: this.dropboxClientId,
       dropboxRev: this.dropboxLastRev,
+      allowLegacyWebdavPlaintext: this.allowLegacyWebdavPlaintext,
     };
   }
 
@@ -1407,6 +1420,13 @@ class MobileSyncRun {
             this.markCandidateEncryptedRemoteProven();
             throw new SyncEncryptionNoKeyError();
           }
+          if (
+            result.exists
+            && !normalizeStrongWebdavEtag(result.strongEtag)
+            && !this.allowLegacyWebdavPlaintext
+          ) {
+            throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV encrypted sync document');
+          }
           return {
             data: result.data,
             exists: result.exists,
@@ -1448,6 +1468,35 @@ class MobileSyncRun {
             },
             WEBDAV_RETRY_OPTIONS
           );
+        } catch (error) {
+          if (!isSyncEncryptionError(error)) this.handleWebdavRateLimit(error);
+          throw error;
+        }
+      },
+      webdavPutLegacyPlaintext: async (sanitized, assertRemoteMutationFenceHeld) => {
+        const webdavConfig = this.webdavConfig;
+        if (!webdavConfig?.url) throw new Error('WebDAV URL not configured');
+        if (!this.allowLegacyWebdavPlaintext || this.encryptionMaterial) {
+          throw new SyncEncryptionRemoteVersionUnavailableError('Encrypted WebDAV sync document');
+        }
+        const requestOptions = {
+          ...getMobileWebDavRequestOptions(webdavConfig.allowInsecureHttp),
+          username: webdavConfig.username,
+          password: webdavConfig.password,
+          timeoutMs: DEFAULT_SYNC_TIMEOUT_MS,
+          fetcher: this.fetchWithAbort,
+          signal: this.requestAbortController.signal,
+          allowWeakFingerprint: webdavConfig.allowWeakFingerprint,
+        };
+        this.ensureWebdavSyncNotRateLimited();
+        try {
+          await assertRemoteMutationFenceHeld?.(SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS);
+          // Deliberately one-shot: retrying an unconditional legacy PUT after an
+          // ambiguous transport failure could overwrite a peer generation.
+          return await webdavPutSyncDocument(webdavConfig.url, sanitized, {
+            ...requestOptions,
+            legacyUnconditionalPlaintext: true,
+          });
         } catch (error) {
           if (!isSyncEncryptionError(error)) this.handleWebdavRateLimit(error);
           throw error;

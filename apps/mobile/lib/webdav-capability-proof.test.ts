@@ -70,4 +70,16 @@ describe('mobile WebDAV capability proof', () => {
     );
     await expect(hasWebdavCapabilityProof(config)).resolves.toBe(false);
   });
+
+  it('does not cache legacy plaintext compatibility and detects a later strong capability', async () => {
+    const probe = vi.fn()
+      .mockResolvedValueOnce('legacy-plaintext')
+      .mockResolvedValueOnce('strong-etag');
+
+    await expect(ensureWebdavCapabilityProof(config, probe)).resolves.toBe('legacy-plaintext');
+    await expect(hasWebdavCapabilityProof(config)).resolves.toBe(false);
+    await expect(ensureWebdavCapabilityProof(config, probe)).resolves.toBe('strong-etag');
+    await expect(hasWebdavCapabilityProof(config)).resolves.toBe(true);
+    expect(probe).toHaveBeenCalledTimes(2);
+  });
 });
