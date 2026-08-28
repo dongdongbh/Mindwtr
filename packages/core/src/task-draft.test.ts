@@ -55,6 +55,36 @@ describe('task-draft', () => {
         expect(toWaiting.focusedToday).toBe(true);
     });
 
+    it('retains a Someday-section assignment across status changes', () => {
+        const somedayTask: Task = {
+            ...baseTask,
+            status: 'someday',
+            viewSectionIds: { someday: 'books' },
+        };
+        const nextDraft = setTaskDraftField(createTaskDraft(somedayTask), 'status', 'next');
+
+        expect(nextDraft.viewSectionIds).toEqual({ someday: 'books' });
+        expect(taskDraftToUpdatePatch(nextDraft, somedayTask)).toMatchObject({
+            status: 'next',
+            viewSectionIds: { someday: 'books' },
+        });
+    });
+
+    it('compares section maps without insertion order while preserving an explicit clear', () => {
+        const assigned: Task = {
+            ...baseTask,
+            viewSectionIds: { someday: 'books', waiting: 'people' },
+        };
+        const draft = createTaskDraft(assigned);
+
+        expect(isTaskDraftDirty({
+            ...draft,
+            viewSectionIds: { waiting: 'people', someday: 'books' },
+        }, assigned)).toBe(false);
+        expect(isTaskDraftDirty({ ...draft, viewSectionIds: {} }, assigned)).toBe(true);
+        expect(isTaskDraftDirty({ ...createTaskDraft(baseTask), viewSectionIds: {} }, baseTask)).toBe(true);
+    });
+
     it('the inbox cascade result round-trips through the dirty check', () => {
         const starred: Task = { ...baseTask, isFocusedToday: true };
         const draft = setTaskDraftField(createTaskDraft(starred), 'status', 'inbox');

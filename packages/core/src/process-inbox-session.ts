@@ -1,3 +1,5 @@
+import { isDueForReview } from './date';
+
 export type ProcessInboxCandidate = {
     id: string;
 };
@@ -5,7 +7,23 @@ export type ProcessInboxCandidate = {
 export type ProcessInboxQueueCandidate = ProcessInboxCandidate & {
     status: string;
     deletedAt?: unknown;
+    reviewAt?: string | null;
 };
+
+/**
+ * An incubated item whose return date has arrived (#1089). It never moves back
+ * to the Inbox — it stays Someday until the user decides something — but it
+ * belongs in the clarify pass, because "park this and bring it back so I can
+ * decide again" is the question that pass answers. Deferring an item you have
+ * already clarified is the other concept, and that one keeps writing
+ * Next + a start date.
+ */
+export function isProcessInboxReturningTask(
+    candidate: Pick<ProcessInboxQueueCandidate, 'status' | 'reviewAt'>,
+    now: Date = new Date(),
+): boolean {
+    return candidate.status === 'someday' && isDueForReview(candidate.reviewAt, now);
+}
 
 export type ProcessInboxSession<Step extends string = string> = {
     currentTaskId: string | null;
@@ -22,10 +40,11 @@ export type ProcessInboxTaskTransitionOptions<Step extends string> = {
 export function selectProcessInboxCandidates<Candidate extends ProcessInboxQueueCandidate>(
     candidates: readonly Candidate[],
     isVisible: (candidate: Candidate) => boolean = () => true,
+    now: Date = new Date(),
 ): Candidate[] {
     return candidates.filter((candidate) => (
-        candidate.status === 'inbox'
-        && !candidate.deletedAt
+        !candidate.deletedAt
+        && (candidate.status === 'inbox' || isProcessInboxReturningTask(candidate, now))
         && isVisible(candidate)
     ));
 }

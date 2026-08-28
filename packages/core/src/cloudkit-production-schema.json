@@ -46,7 +46,9 @@
                 "orderNum",
                 "focusOrder"
             ],
-            "pendingProduction": []
+            "pendingProduction": [
+                "viewSectionIds"
+            ]
         },
         "MindwtrProject": {
             "deployed": [

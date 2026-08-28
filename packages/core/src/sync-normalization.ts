@@ -231,6 +231,7 @@ export const normalizeTaskForSyncMerge = (
         location: normalized.location,
         projectId: normalized.projectId,
         sectionId: normalizeOptionalString(normalized.sectionId),
+        viewSectionIds: normalized.viewSectionIds,
         areaId: normalized.areaId,
         isFocusedToday: normalizeSyncedBoolean(normalized.isFocusedToday),
         timeEstimate: normalized.timeEstimate,
@@ -267,6 +268,7 @@ export const normalizeTaskForSyncMerge = (
     // point across the composed pipeline (#766). rev needs no such branch:
     // normalizeTaskForLoad always backfills it to a valid number.
     if (candidate.revBy === undefined) delete candidate.revBy;
+    if (!hasOwnKey(normalized, 'viewSectionIds')) delete candidate.viewSectionIds;
     return sameShallowRecord(task, candidate) ? task : candidate;
 };
 

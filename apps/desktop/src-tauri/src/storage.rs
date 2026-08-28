@@ -37,7 +37,7 @@ const SNAPSHOT_RETENTION_RECENT_COUNT: usize = 2;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 const STORAGE_RETRY_ATTEMPTS: usize = 4;
 const STORAGE_RETRY_BASE_DELAY_MS: u64 = 120;
-const STORAGE_SCHEMA_VERSION: i64 = 5;
+const STORAGE_SCHEMA_VERSION: i64 = 6;
 const STORAGE_SCHEMA_STATE_TABLE: &str = "storage_schema_state";
 // Version 4 adds assignedTo to the desktop-native FTS schema and forces one
 // content rebuild after the corrected triggers are installed.
@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   location TEXT,
   projectId TEXT REFERENCES projects(id) ON DELETE SET NULL,
   sectionId TEXT REFERENCES sections(id) ON DELETE SET NULL,
+  viewSectionIds TEXT,
   areaId TEXT REFERENCES areas(id) ON DELETE SET NULL,
   orderNum INTEGER,
   boardOrder INTEGER,
@@ -518,6 +519,7 @@ fn initialize_sqlite_schema(conn: &mut Connection) -> Result<i64, String> {
         ensure_column(&transaction, "tasks", "focusOrder", "INTEGER")?;
         ensure_tasks_area_column(&transaction)?;
         ensure_tasks_section_column(&transaction)?;
+        ensure_column(&transaction, "tasks", "viewSectionIds", "TEXT")?;
         ensure_tasks_organization_indexes(&transaction)?;
         ensure_projects_order_column(&transaction)?;
         ensure_column(&transaction, "projects", "sequentialScope", "TEXT")?;
@@ -1676,10 +1678,11 @@ fn replace_task_row(conn: &Connection, task: &Value) -> Result<(), String> {
     let recurrence_json = json_str(task.get("recurrence"));
     let checklist_json = json_str(task.get("checklist"));
     let attachments_json = json_str(task.get("attachments"));
+    let view_section_ids_json = json_str(task.get("viewSectionIds"));
     let normalized_rev = normalized_revision_for_storage(task.get("rev"));
     let normalized_rev_by = normalized_rev_by(task.get("revBy"));
     conn.execute(
-        "INSERT OR REPLACE INTO tasks (id, title, status, priority, energyLevel, assignedTo, taskMode, startTime, relativeStartOffset, dueDate, recurrence, showFutureRecurrence, pushCount, tags, contexts, checklist, description, textDirection, attachments, location, projectId, sectionId, areaId, orderNum, boardOrder, focusOrder, isFocusedToday, timeEstimate, suppressMindwtrReminders, repeatReminderMinutes, reviewAt, completedAt, statusBeforeProjectArchive, completedAtBeforeProjectArchive, isFocusedTodayBeforeProjectArchive, projectArchivedAt, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, timeSpentMinutes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43)",
+        "INSERT OR REPLACE INTO tasks (id, title, status, priority, energyLevel, assignedTo, taskMode, startTime, relativeStartOffset, dueDate, recurrence, showFutureRecurrence, pushCount, tags, contexts, checklist, description, textDirection, attachments, location, projectId, sectionId, viewSectionIds, areaId, orderNum, boardOrder, focusOrder, isFocusedToday, timeEstimate, suppressMindwtrReminders, repeatReminderMinutes, reviewAt, completedAt, statusBeforeProjectArchive, completedAtBeforeProjectArchive, isFocusedTodayBeforeProjectArchive, projectArchivedAt, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, timeSpentMinutes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44)",
         params![
             task.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
             task.get("title").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -1703,6 +1706,7 @@ fn replace_task_row(conn: &Connection, task: &Value) -> Result<(), String> {
             task.get("location").and_then(|v| v.as_str()),
             task.get("projectId").and_then(|v| v.as_str()),
             task.get("sectionId").and_then(|v| v.as_str()),
+            view_section_ids_json,
             task.get("areaId").and_then(|v| v.as_str()),
             task.get("order")
                 .and_then(|v| v.as_f64())
@@ -1878,6 +1882,11 @@ fn row_to_task_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Error> 
         if let Some(v) = val {
             map.insert("sectionId".to_string(), Value::String(v));
         }
+    }
+    let view_section_ids_raw: Option<String> = row.get("viewSectionIds")?;
+    let view_section_ids_val = parse_json_value(view_section_ids_raw);
+    if !view_section_ids_val.is_null() {
+        map.insert("viewSectionIds".to_string(), view_section_ids_val);
     }
     if let Ok(val) = row.get::<_, Option<String>>("areaId") {
         if let Some(v) = val {
@@ -3171,8 +3180,9 @@ fn replace_data_in_transaction(conn: &Connection, mut data: Value) -> Result<Val
         let recurrence_json = json_str(task.get("recurrence"));
         let checklist_json = json_str(task.get("checklist"));
         let attachments_json = json_str(task.get("attachments"));
+        let view_section_ids_json = json_str(task.get("viewSectionIds"));
         conn.execute(
-            "INSERT OR REPLACE INTO tasks (id, title, status, priority, energyLevel, assignedTo, taskMode, startTime, relativeStartOffset, dueDate, recurrence, showFutureRecurrence, pushCount, tags, contexts, checklist, description, textDirection, attachments, location, projectId, sectionId, areaId, orderNum, boardOrder, focusOrder, isFocusedToday, timeEstimate, suppressMindwtrReminders, repeatReminderMinutes, reviewAt, completedAt, statusBeforeProjectArchive, completedAtBeforeProjectArchive, isFocusedTodayBeforeProjectArchive, projectArchivedAt, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, timeSpentMinutes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43)",
+            "INSERT OR REPLACE INTO tasks (id, title, status, priority, energyLevel, assignedTo, taskMode, startTime, relativeStartOffset, dueDate, recurrence, showFutureRecurrence, pushCount, tags, contexts, checklist, description, textDirection, attachments, location, projectId, sectionId, viewSectionIds, areaId, orderNum, boardOrder, focusOrder, isFocusedToday, timeEstimate, suppressMindwtrReminders, repeatReminderMinutes, reviewAt, completedAt, statusBeforeProjectArchive, completedAtBeforeProjectArchive, isFocusedTodayBeforeProjectArchive, projectArchivedAt, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, timeSpentMinutes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44)",
             params![
                 task.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
                 task.get("title").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -3196,6 +3206,7 @@ fn replace_data_in_transaction(conn: &Connection, mut data: Value) -> Result<Val
                 task.get("location").and_then(|v| v.as_str()),
                 task.get("projectId").and_then(|v| v.as_str()),
                 task.get("sectionId").and_then(|v| v.as_str()),
+                view_section_ids_json,
                 task.get("areaId").and_then(|v| v.as_str()),
                 task.get("order")
                     .and_then(|v| v.as_f64())
@@ -5693,6 +5704,10 @@ mod tests {
             "location": "Office",
             "projectId": "project-full",
             "sectionId": "section-1",
+            "viewSectionIds": {
+                "someday": "someday-books",
+                "future-scope": "future-heading"
+            },
             "areaId": "area-1",
             "order": 17,
             "boardOrder": 4,
@@ -5809,6 +5824,7 @@ mod tests {
             "location",
             "projectId",
             "sectionId",
+            "viewSectionIds",
             "areaId",
             "order",
             "boardOrder",

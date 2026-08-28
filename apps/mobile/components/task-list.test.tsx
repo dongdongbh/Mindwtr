@@ -13,6 +13,12 @@ const flatListPropsSpy = vi.hoisted(() => vi.fn());
 const flatListScrollToIndexMock = vi.hoisted(() => vi.fn());
 const flatListScrollToOffsetMock = vi.hoisted(() => vi.fn());
 const rowRenderSpy = vi.hoisted(() => vi.fn());
+const mobileAreaFilterState = vi.hoisted(() => ({
+  current: {
+    areaById: new Map<string, Area>(),
+    resolvedAreaFilter: { included: [] as string[], excluded: [] as string[] },
+  },
+}));
 const taskListSelectionState = vi.hoisted(() => ({
   current: {
     bulkActionLabel: 'Move',
@@ -159,12 +165,10 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
     })),
     getUsedTaskTokens: vi.fn(() => []),
     hasActiveFilterCriteria: vi.fn(() => false),
-    isTaskInActiveProject: vi.fn(() => true),
     matchesTask: vi.fn(() => true),
     parseSearchQuery: vi.fn(() => ({ filters: [], text: '' })),
     sortTasksBy: (tasks: Task[]) => tasks,
     splitCompletedTasks: (tasks: Task[]) => ({ activeTasks: tasks, completedTasks: [] }),
-    taskMatchesAreaFilterSelection: vi.fn(() => true),
     taskMatchesFilterCriteria: vi.fn(() => true),
   });
 });
@@ -241,10 +245,7 @@ vi.mock('@/hooks/use-reduced-motion', () => ({
 }));
 
 vi.mock('@/hooks/use-mobile-area-filter', () => ({
-  useMobileAreaFilter: () => ({
-    areaById: new Map(),
-    resolvedAreaFilter: { included: [], excluded: [] },
-  }),
+  useMobileAreaFilter: () => mobileAreaFilterState.current,
 }));
 
 vi.mock('@/contexts/toast-context', () => ({
@@ -350,7 +351,12 @@ describe('TaskList', () => {
     storeState.tasks = [];
     storeState._allTasks = [];
     storeState.areas = [];
+    storeState.projects = [projectFixture as Project];
     storeState.highlightTaskId = null;
+    mobileAreaFilterState.current = {
+      areaById: new Map(),
+      resolvedAreaFilter: { included: [], excluded: [] },
+    };
     storeState.settings = {
       ai: { enabled: false },
       appearance: {},
@@ -427,6 +433,55 @@ describe('TaskList', () => {
       groupByLabel: 'Tags',
       onOpenGroup: expect.any(Function),
     }));
+
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  it('does not leak a Someday task from a Someday project into the Someday task list', async () => {
+    const workArea: Area = {
+      id: 'area-work',
+      name: 'Work',
+      color: '#3b82f6',
+      order: 0,
+      createdAt: '2026-06-01T00:00:00.000Z',
+      updatedAt: '2026-06-01T00:00:00.000Z',
+    };
+    const somedayProject: Project = {
+      ...project,
+      id: 'project-someday',
+      title: 'Someday ideas',
+      status: 'someday',
+      areaId: workArea.id,
+    };
+    const somedayTask = makeTask('someday-project-task', 'Try a pottery class', {
+      status: 'someday',
+      projectId: somedayProject.id,
+    });
+    storeState.areas = [workArea];
+    storeState.projects = [somedayProject];
+    mobileAreaFilterState.current = {
+      areaById: new Map([[workArea.id, workArea]]),
+      resolvedAreaFilter: { included: [workArea.id], excluded: [] },
+    };
+
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(
+        <TaskList
+          groupBy="project"
+          onChangeGroupBy={vi.fn()}
+          showHeader={false}
+          statusFilter="someday"
+          taskSource={[somedayTask]}
+          title="Someday"
+        />,
+      );
+    });
+
+    const data = flatListPropsSpy.mock.calls.at(-1)?.[0].data as { type: string; title?: string; task?: Task }[];
+    expect(data.some((item) => item.type === 'task' && item.task?.id === somedayTask.id)).toBe(false);
 
     act(() => {
       tree.unmount();

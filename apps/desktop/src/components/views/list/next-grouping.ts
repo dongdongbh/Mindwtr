@@ -3,10 +3,11 @@ import {
     compareProjectsByOrder,
     DEFAULT_AREA_COLOR,
     getContextColor,
+    groupTasksByViewSection,
     tFallback,
     baseTextCollator,
 } from '@mindwtr/core';
-import type { Area, Project, Task, TaskEnergyLevel, TaskPriority, TaskStatus } from '@mindwtr/core';
+import type { Area, Project, Task, TaskEnergyLevel, TaskPriority, TaskStatus, ViewSectionDefinition } from '@mindwtr/core';
 
 // The rosters are data, and the types are derived from them — never the other
 // way round. One array per view is what the dropdown renders AND what the
@@ -19,6 +20,9 @@ import type { Area, Project, Task, TaskEnergyLevel, TaskPriority, TaskStatus } f
 export const FOCUS_AXES = ['none', 'context', 'area', 'project', 'tag', 'energy', 'priority', 'person'] as const;
 export type NextGroupBy = typeof FOCUS_AXES[number];
 
+export const SOMEDAY_AXES = [...FOCUS_AXES, 'viewSection'] as const;
+export type SomedayGroupBy = typeof SOMEDAY_AXES[number];
+
 export const REFERENCE_AXES = ['none', 'context', 'area', 'project', 'tag'] as const;
 export type ReferenceGroupBy = typeof REFERENCE_AXES[number];
 
@@ -27,13 +31,13 @@ export type ReferenceGroupBy = typeof REFERENCE_AXES[number];
 export const DONE_AXES = ['none', 'completedDate', 'context', 'area', 'project', 'tag'] as const;
 export type DoneGroupBy = typeof DONE_AXES[number];
 
-export type TaskListGroupBy = NextGroupBy | ReferenceGroupBy | DoneGroupBy;
+export type TaskListGroupBy = NextGroupBy | SomedayGroupBy | ReferenceGroupBy | DoneGroupBy;
 
 // Every axis any status list can offer. Collapse state is sanitized against
 // this one roster instead of the per-status one, so a list keeps the collapsed
 // groups of an axis it no longer shows rather than dropping them silently.
 export const LIST_AXES: readonly TaskListGroupBy[] = Array.from(
-    new Set<TaskListGroupBy>([...FOCUS_AXES, ...REFERENCE_AXES, ...DONE_AXES]),
+    new Set<TaskListGroupBy>([...FOCUS_AXES, ...SOMEDAY_AXES, ...REFERENCE_AXES, ...DONE_AXES]),
 );
 
 // Contexts and Review both span every status, so status itself is a useful axis
@@ -472,6 +476,7 @@ export type GroupTasksInputs = {
     t: (key: string) => string;
     /** Active theme, for the context/tag swatch palette only (#974). */
     theme?: string;
+    viewSectionDefinitions?: readonly ViewSectionDefinition[];
 };
 
 /**
@@ -479,7 +484,7 @@ export type GroupTasksInputs = {
  * included. Views declare which axes they offer and where the choice
  * persists — nothing else.
  */
-export function groupTasks(axis: TaskGroupAxis, { tasks, areas, projectMap, t, theme }: GroupTasksInputs): TaskGroup[] {
+export function groupTasks(axis: TaskGroupAxis, { tasks, areas, projectMap, t, theme, viewSectionDefinitions }: GroupTasksInputs): TaskGroup[] {
     switch (axis) {
         case 'none':
             return [];
@@ -503,6 +508,13 @@ export function groupTasks(axis: TaskGroupAxis, { tasks, areas, projectMap, t, t
             // Bucketing and labels live in core so Done/Archive read the same
             // on both platforms (#959).
             return buildCompletionDateSections({ tasks, t });
+        case 'viewSection':
+            return groupTasksByViewSection(
+                tasks,
+                'someday',
+                viewSectionDefinitions,
+                tFallback(t, 'viewSections.noSection', 'No section'),
+            );
     }
 }
 
@@ -518,6 +530,7 @@ export function getGroupAxisLabel(axis: TaskGroupAxis, t: (key: string) => strin
         case 'priority': return tFallback(t, 'filters.priority', 'Priority');
         case 'energy': return tFallback(t, 'focus.group.energy', 'Energy');
         case 'person': return tFallback(t, 'people.title', 'People');
+        case 'viewSection': return tFallback(t, 'viewSections.somedaySection', 'Someday section');
     }
 }
 

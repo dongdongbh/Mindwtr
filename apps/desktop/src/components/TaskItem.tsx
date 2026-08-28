@@ -23,6 +23,7 @@ import {
     buildQuickAddParseOptions,
     getPersonOptionNames,
     normalizeTimeSpentMinutes,
+    sortViewSectionDefinitions,
     useTaskStore,
     areDraftAttachmentsDirty,
     isTaskDraftDirty,
@@ -148,6 +149,7 @@ export const TaskItem = memo(function TaskItem({
         sections,
         areas,
         project: storeProject,
+        section: storeSection,
         projectArea,
         taskArea: storeTaskArea,
         settings,
@@ -509,6 +511,37 @@ export const TaskItem = memo(function TaskItem({
         const created = await addSection(projectId, trimmed);
         return created?.id ?? null;
     }, [addSection, draft.projectId, sectionsByProject, task.projectId]);
+    const handleCreateSomedaySection = useCallback(async (title: string) => {
+        const trimmed = title.trim();
+        if (!trimmed) return null;
+        const state = useTaskStore.getState();
+        const currentSettings = state.settings;
+        const currentSections = sortViewSectionDefinitions(currentSettings?.gtd?.viewSections?.someday);
+        const existing = currentSections.find((section) => section.title.toLowerCase() === trimmed.toLowerCase());
+        if (existing) return existing.id;
+        const id = globalThis.crypto?.randomUUID?.()
+            ?? `someday-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const maxOrder = currentSections.reduce(
+            (maximum, section) => Number.isFinite(section.order) ? Math.max(maximum, section.order) : maximum,
+            -1,
+        );
+        try {
+            await state.updateSettings({
+                gtd: {
+                    ...(currentSettings?.gtd ?? {}),
+                    viewSections: {
+                        ...(currentSettings?.gtd?.viewSections ?? {}),
+                        someday: [...currentSections, { id, title: trimmed, order: maxOrder + 1 }],
+                    },
+                },
+            });
+            return id;
+        } catch (error) {
+            reportError('Failed to create Someday section', error);
+            showToast(tFallback(t, 'viewSections.updateFailed', 'Could not update Someday sections.'), 'error');
+            return null;
+        }
+    }, [showToast, t]);
     const visibleAttachments = (task.attachments || []).filter((a) => !a.deletedAt);
     const visibleEditAttachments = editAttachments.filter((a) => !a.deletedAt);
     const wasEditingRef = useRef(false);
@@ -1205,10 +1238,12 @@ export const TaskItem = memo(function TaskItem({
             timeEstimatesEnabled={timeEstimatesEnabled}
             projects={projects}
             areas={areas}
+            somedaySections={settings?.gtd?.viewSections?.someday ?? []}
             sections={projectSections}
             onCreateProject={handleCreateProject}
             onCreateArea={handleCreateArea}
             onCreateSection={handleCreateSection}
+            onCreateSomedaySection={handleCreateSomedaySection}
             organizerFields={organizerFields}
             basicFieldsBeforeOrganizers={basicFieldsBeforeOrganizers}
             basicFieldsAfterOrganizers={basicFieldsAfterOrganizers}
@@ -1363,6 +1398,7 @@ export const TaskItem = memo(function TaskItem({
                                 task={task}
                                 language={language}
                                 project={project}
+                                section={storeSection}
                                 area={taskArea}
                                 projectColor={projectColor}
                                 selectionMode={selectionMode}

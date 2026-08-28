@@ -15,4 +15,7 @@ export const TASK_WRITE_FIELD_EXCLUSIONS: Readonly<Partial<Record<keyof Task, st
         + 'file bytes this text interface cannot supply.',
     orderNum: 'Legacy alias of `order` (same SQLite column) — this surface exposes only '
         + '`order` to avoid two keys writing one value.',
+    viewSectionIds: 'Presentational per-view grouping whose section ids live in a settings '
+        + 'catalogue this surface cannot enumerate or create, so a raw id map would be '
+        + 'unusable from a tool call (#1090).',
 };

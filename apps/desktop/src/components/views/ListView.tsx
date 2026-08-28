@@ -63,9 +63,11 @@ import {
     groupTasks,
     LIST_AXES,
     REFERENCE_AXES,
+    SOMEDAY_AXES,
     type DoneGroupBy,
     type NextGroupBy,
     type ReferenceGroupBy,
+    type SomedayGroupBy,
     type TaskGroup,
     type TaskListGroupBy,
 } from './list/next-grouping';
@@ -526,26 +528,42 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             return sortTasksBy(filtered, deferredFilterInputs.sortBy);
         });
     }, [deferredFilterInputs, nextVisibilityDayKey, nextVisibilityTick, normalizedSearchQuery, showViewFilterInput]);
-    const activeNextGroupBy: NextGroupBy = statusFilter !== 'reference' && statusFilter !== 'done' ? nextGroupBy : 'none';
+    const activeNextGroupBy: NextGroupBy = statusFilter !== 'reference' && statusFilter !== 'done' && statusFilter !== 'someday'
+        ? nextGroupBy as NextGroupBy
+        : 'none';
+    const activeSomedayGroupBy: SomedayGroupBy = statusFilter === 'someday'
+        ? nextGroupBy as SomedayGroupBy
+        : 'none';
     const activeReferenceGroupBy: ReferenceGroupBy = statusFilter === 'reference' ? (referenceGroupBy ?? 'area') : 'none';
     const activeDoneGroupBy: DoneGroupBy = statusFilter === 'done' ? (doneGroupBy ?? 'none') : 'none';
     const activeGroupBy: TaskListGroupBy = statusFilter === 'reference'
         ? activeReferenceGroupBy
         : statusFilter === 'done'
             ? activeDoneGroupBy
-            : activeNextGroupBy;
+            : statusFilter === 'someday'
+                ? activeSomedayGroupBy
+                : activeNextGroupBy;
     const completedGroupingDayKey = useLocalDayKey(activeDoneGroupBy === 'completedDate');
     const groupByOptions: readonly TaskListGroupBy[] = statusFilter === 'reference'
         ? REFERENCE_AXES
         : statusFilter === 'done'
             ? DONE_AXES
-            : FOCUS_AXES;
+            : statusFilter === 'someday'
+                ? SOMEDAY_AXES
+                : FOCUS_AXES;
     const isListGrouping = activeGroupBy !== 'none';
     const groupedTasks = useMemo(() => (
         isListGrouping
-            ? groupTasks(activeGroupBy, { tasks: filteredTasks, areas, projectMap, t, theme: settings?.theme })
+            ? groupTasks(activeGroupBy, {
+                tasks: filteredTasks,
+                areas,
+                projectMap,
+                t,
+                theme: settings?.theme,
+                viewSectionDefinitions: settings?.gtd?.viewSections?.someday,
+            })
             : [] as TaskGroup[]
-    ), [activeGroupBy, areas, completedGroupingDayKey, filteredTasks, isListGrouping, projectMap, settings?.theme, t]);
+    ), [activeGroupBy, areas, completedGroupingDayKey, filteredTasks, isListGrouping, projectMap, settings?.gtd?.viewSections?.someday, settings?.theme, t]);
     const {
         collapsedGroupIds,
         getSectionDomId,
@@ -613,7 +631,6 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                 showToast(tFallback(t, 'projects.reactivateFailed', 'Failed to reactivate project'), 'error');
             });
     }, [showToast, t, updateProject]);
-
     const virtualRowCount = groupedVirtualRows?.length ?? filteredTasks.length;
     const shouldVirtualize = virtualRowCount > LIST_VIRTUALIZATION_THRESHOLD;
     const rowVirtualizer = useVirtualizer({

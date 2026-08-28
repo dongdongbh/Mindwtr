@@ -1,8 +1,8 @@
 import { afterEach, describe, it, expect } from 'vitest';
 import { getTaskDateCoherenceIssues } from './task-date-coherence';
 import { configureDateFormatting } from './date';
-import type { Person, Task } from './types';
-import { buildQuickAddParseOptions, getQuickAddProjectInitialProps, parseProjectNextActionInput, parseQuickAdd, parseQuickAddDateCommands, splitQuickAddBulkLines } from './quick-add';
+import type { Area, Person, Project, Task } from './types';
+import { buildQuickAddParseOptions, getQuickAddProjectInitialProps, parseProcessInboxTitleInput, parseProjectNextActionInput, parseQuickAdd, parseQuickAddDateCommands, splitQuickAddBulkLines } from './quick-add';
 
 describe('quick-add', () => {
     it('splits bulk quick-add text into trimmed nonblank lines', () => {
@@ -29,6 +29,29 @@ describe('quick-add', () => {
         expect(result.props.description).toBe('ask about trip');
         const expectedLocal = new Date(2025, 0, 2, 17, 0, 0, 0).toISOString();
         expect(result.props.dueDate).toBe(expectedLocal);
+    });
+
+    it('leaves an email address alone instead of reading its @ as a context (#1087)', () => {
+        const now = new Date('2026-08-27T10:00:00Z');
+        const result = parseQuickAdd('Email bob@example.com', undefined, now);
+
+        expect(result.title).toBe('Email bob@example.com');
+        expect(result.props.contexts ?? []).toEqual([]);
+    });
+
+    it('only opens a context or tag at a word start (#1087)', () => {
+        const now = new Date('2026-08-27T10:00:00Z');
+        // A marker mid-word belongs to the word: an address, a URL fragment.
+        const url = parseQuickAdd('Read https://example.com/docs#install', undefined, now);
+        expect(url.title).toBe('Read https://example.com/docs#install');
+        expect(url.props.tags ?? []).toEqual([]);
+
+        // A real token still parses when it starts a word, including alongside
+        // an address in the same line.
+        const mixed = parseQuickAdd('Email bob@example.com @phone #followup', undefined, now);
+        expect(mixed.title).toBe('Email bob@example.com');
+        expect(mixed.props.contexts).toEqual(['@phone']);
+        expect(mixed.props.tags).toEqual(['#followup']);
     });
 
     it('parses focus quick-add tokens and implies next when no status is supplied', () => {
@@ -948,6 +971,31 @@ describe('quick-add', () => {
         }
     });
 
+    it('accepts a closing-glyph opener after the marker (#1094 macOS smart quotes)', () => {
+        // macOS smart punctuation sees the marker character before the quote and
+        // substitutes the CLOSING glyph for both quotes: %"Jim" becomes %”Jim”.
+        const now = new Date('2026-08-27T10:00:00Z');
+        for (const input of ['Do something %”my neighbor”', 'Do something %”my neighbor"']) {
+            const result = parseQuickAdd(input, undefined, now);
+            expect(result.props.assignedTo, input).toBe('my neighbor');
+            expect(result.title, input).toBe('Do something');
+        }
+        const areas = [{ id: 'area-1', name: 'Deep Work' }];
+        const area = parseQuickAdd('Task !”Deep Work”', undefined, now, areas as any);
+        expect(area.props.areaId).toBe('area-1');
+        expect(area.title).toBe('Task');
+    });
+
+    it('accepts curly quotes around @/# tokens (#1094)', () => {
+        const now = new Date('2026-08-27T10:00:00Z');
+        for (const input of ['Call @”deep work” #”home office”', 'Call @“deep work” #“home office”']) {
+            const result = parseQuickAdd(input, undefined, now);
+            expect(result.props.contexts, input).toEqual(['@deep work']);
+            expect(result.props.tags, input).toEqual(['#home office']);
+            expect(result.title, input).toBe('Call');
+        }
+    });
+
     it('supports quoted person names for explicit delimiting', () => {
         const now = new Date('2026-07-11T10:00:00Z');
         const result = parseQuickAdd('task %"Jane Doe" more words', undefined, now);
@@ -1347,5 +1395,46 @@ describe('quick-add', () => {
             });
             expect(withoutPeople.props.assignedTo).toBe('Jim');
         });
+    });
+});
+
+describe('parseProcessInboxTitleInput', () => {
+    const projects = [{ id: 'p1', title: 'Vacation', status: 'active' } as Project];
+    const areas = [{ id: 'a1', name: 'Work' } as Area];
+
+    it('reads the same grammar the capture box does (#1088)', () => {
+        const parsed = parseProcessInboxTitleInput('Call Alice @phone #urgent !Work +Vacation %Bob /energy:low', {
+            projects,
+            areas,
+            parseOptions: { knownPeople: ['Bob'] },
+        });
+        expect(parsed.title).toBe('Call Alice');
+        expect(parsed.props).toMatchObject({
+            contexts: ['@phone'],
+            tags: ['#urgent'],
+            areaId: 'a1',
+            projectId: 'p1',
+            assignedTo: 'Bob',
+            energyLevel: 'low',
+        });
+    });
+
+    it('drops a status token so the clarify decision keeps the destination', () => {
+        const parsed = parseProcessInboxTitleInput('Ask Bob /waiting @phone', { projects, areas });
+        expect(parsed.props.status).toBeUndefined();
+        expect(parsed.props.contexts).toEqual(['@phone']);
+        expect(parsed.title).toBe('Ask Bob');
+    });
+
+    it('never creates a project: an unknown +Name goes back into the title', () => {
+        const parsed = parseProcessInboxTitleInput('Book hotel +"Summer Trip"', { projects, areas });
+        expect(parsed.props.projectId).toBeUndefined();
+        expect(parsed.title).toBe('Book hotel +"Summer Trip"');
+    });
+
+    it('still parses the date commands it already supported (#370)', () => {
+        const parsed = parseProcessInboxTitleInput('Submit paper /due:2026-09-01', { projects, areas });
+        expect(parsed.props.dueDate).toContain('2026-09-01');
+        expect(parsed.title).toBe('Submit paper');
     });
 });

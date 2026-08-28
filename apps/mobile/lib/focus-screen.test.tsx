@@ -1098,6 +1098,68 @@ describe('FocusScreen', () => {
     expect(() => tree.root.findByProps({ children: 'All clear' })).toThrow();
   });
 
+  it('orders mobile Focus sections as Schedule, Review Due, Next Actions, Upcoming, then Projects to review', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-05T12:00:00.000Z'));
+    storeState.tasks = [
+      makeTask('schedule-task', { dueDate: '2026-04-05' }),
+      makeTask('review-task', {
+        status: 'waiting',
+        reviewAt: '2026-04-04T12:00:00.000Z',
+      }),
+      makeTask('next-task'),
+      makeTask('upcoming-task', { startTime: '2026-04-08T09:00:00.000Z' }),
+    ];
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<FocusScreen />);
+    });
+
+    const sections = tree.root.findByType(SectionList).props.sections as { title: string }[];
+    expect(sections.map((section) => section.title)).toEqual([
+      'Today',
+      'Review Due',
+      'Next Actions',
+      'Upcoming',
+      'Projects to review',
+    ]);
+  });
+
+  it('keeps mobile Focus tasks exclusive with Schedule ahead of Review Due ahead of Next Actions', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-05T12:00:00.000Z'));
+    storeState.tasks = [
+      makeTask('scheduled-review-next', {
+        dueDate: '2026-04-05',
+        reviewAt: '2026-04-04T12:00:00.000Z',
+      }),
+      makeTask('review-next', { reviewAt: '2026-04-04T12:00:00.000Z' }),
+      makeTask('plain-next'),
+    ];
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<FocusScreen />);
+    });
+
+    const sections = tree.root.findByType(SectionList).props.sections as {
+      title: string;
+      data: { type: string; task?: Task }[];
+    }[];
+    const idsIn = (title: string) => sections
+      .find((section) => section.title === title)?.data
+      .map((item) => item.task?.id)
+      .filter(Boolean) ?? [];
+    const allTaskIds = sections.flatMap((section) => section.data)
+      .flatMap((item) => item.task ? [item.task.id] : []);
+
+    expect(idsIn('Today')).toEqual(['scheduled-review-next']);
+    expect(idsIn('Review Due')).toEqual(['review-next']);
+    expect(idsIn('Next Actions')).toEqual(['plain-next']);
+    expect(allTaskIds).toEqual(['scheduled-review-next', 'review-next', 'plain-next']);
+  });
+
   it('shows the status badge on review-due rows but keeps it hidden on next actions', () => {
     storeState.tasks = [
       makeTask('plain-next', { title: 'Plain next' }),

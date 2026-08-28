@@ -61,6 +61,35 @@ const normalizeForMerge = (data: AppData, nowIso = NOW): AppData => {
 };
 
 describe('sync normalization', () => {
+    it('preserves viewSectionIds when merging with an old-client task that lacks the field', () => {
+        const localTask = {
+            ...createMockTask('task-view-section', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'),
+            title: 'Local title',
+            rev: 1,
+            revBy: 'new-client',
+            viewSectionIds: { someday: 'books' },
+        };
+        const { viewSectionIds: _omitted, ...oldClientTask } = {
+            ...localTask,
+            title: 'Updated by old client',
+            rev: 2,
+            revBy: 'old-client',
+            updatedAt: '2026-01-01T00:01:00.000Z',
+        };
+        const local = mockAppData([localTask]);
+        const incoming = mockAppData([oldClientTask as Task]);
+
+        const forward = mergeAppData(local, incoming, { nowIso: NOW });
+        const reverse = mergeAppData(incoming, local, { nowIso: NOW });
+
+        expect(forward.tasks[0]).toMatchObject({
+            title: 'Updated by old client',
+            viewSectionIds: { someday: 'books' },
+        });
+        expect(reverse.tasks[0]).toEqual(forward.tasks[0]);
+        expect(mergeAppData(forward, incoming, { nowIso: NOW }).tasks[0]).toEqual(forward.tasks[0]);
+    });
+
     it('stamps purged-content compaction once so a legacy peer cannot republish the full tombstone', () => {
         const purgedAt = '2025-12-31T23:00:00.000Z';
         const full = mockAppData(

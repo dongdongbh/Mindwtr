@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Task } from '@mindwtr/core';
+import { groupTasksByViewSection, type Task } from '@mindwtr/core';
 
 import { TaskListView, type TaskListViewProps } from './task-list-view';
 
@@ -117,6 +117,34 @@ describe('TaskListView', () => {
   it('renders one row per task', () => {
     const renderer = renderView({ tasks: [makeTask('a'), makeTask('b'), makeTask('c')] });
     expect(renderer.root.findAllByType('SwipeableTaskItem' as never)).toHaveLength(3);
+  });
+
+  it('renders an orphaned Someday assignment under No section without clearing it', () => {
+    const known = makeTask('known', {
+      status: 'someday',
+      viewSectionIds: { someday: 'books' },
+    });
+    const orphan = makeTask('orphan', {
+      status: 'someday',
+      viewSectionIds: { someday: 'heading-from-another-device' },
+    });
+    const beforeRender = JSON.stringify(orphan);
+    const tasks = [known, orphan];
+    const taskGroups = groupTasksByViewSection(
+      tasks,
+      'someday',
+      [{ id: 'books', title: 'Books to read', order: 0 }],
+      'No section',
+    );
+
+    const renderer = renderView({ tasks, taskGroups });
+    const headers = renderer.root.findAllByProps({ accessibilityRole: 'header' });
+
+    expect(Array.from(new Set(headers.map((header) => header.props.children))))
+      .toEqual(['Books to read', 'No section']);
+    expect(renderer.root.findAllByType('SwipeableTaskItem' as never)).toHaveLength(2);
+    expect(JSON.stringify(orphan)).toBe(beforeRender);
+    expect(orphan.viewSectionIds?.someday).toBe('heading-from-another-device');
   });
 
   it('returns the delete action result through the row wrapper', () => {

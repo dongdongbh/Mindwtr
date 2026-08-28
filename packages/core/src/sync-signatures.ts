@@ -25,6 +25,19 @@ const SIGNATURE_OPAQUE_KEYS = new Set([
 const normalizeOptionalArrayForComparison = <T>(value: T[] | undefined): T[] | undefined =>
     Array.isArray(value) && value.length > 0 ? value : undefined;
 
+export const canonicalizeStringMapForComparison = (
+    value: unknown,
+): Record<string, string> | undefined => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const entries = Object.entries(value as Record<string, unknown>)
+        .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+    if (entries.length === 0) return undefined;
+    const canonical: Record<string, string> = {};
+    for (const [key, entryValue] of entries) canonical[key] = entryValue;
+    return canonical;
+};
+
 const normalizeAttachmentForContentComparison = (attachment: Attachment): Record<string, unknown> => {
     if (attachment.kind === 'link') {
         return {
@@ -112,6 +125,7 @@ export const normalizeTaskForContentComparison = (task: Task): Record<string, un
         location: task.location,
         projectId: task.projectId,
         sectionId: task.sectionId,
+        viewSectionIds: canonicalizeStringMapForComparison(task.viewSectionIds),
         areaId: task.areaId,
         isFocusedToday: task.isFocusedToday ? true : undefined,
         timeEstimate: task.timeEstimate,

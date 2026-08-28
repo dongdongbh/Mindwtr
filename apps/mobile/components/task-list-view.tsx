@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef } from 'react';
-import { FlatList, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
-import type { Task, TaskStatus } from '@mindwtr/core';
+import { FlatList, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import type { Task, TaskStatus, ViewSectionTaskGroup } from '@mindwtr/core';
 
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
@@ -16,10 +16,15 @@ import type { useTaskListSelection } from './use-task-list-selection';
  * prop typed without re-listing every field.
  */
 export type TaskListViewSelection = ReturnType<typeof useTaskListSelection>;
+type TaskListViewRow =
+  | { kind: 'heading'; id: string; title: string; muted?: boolean }
+  | { kind: 'task'; task: Task };
 
 export interface TaskListViewProps {
   /** Flat, already filtered + sorted rows. The view owns no data logic. */
   tasks: Task[];
+  /** Optional headings for views whose grouping is part of their presentation. */
+  taskGroups?: readonly ViewSectionTaskGroup[];
   isDark: boolean;
   themeColors: ThemeColors;
   t: (key: string) => string;
@@ -59,6 +64,7 @@ export interface TaskListViewProps {
  */
 export function TaskListView({
   tasks,
+  taskGroups,
   isDark,
   themeColors,
   t,
@@ -96,6 +102,13 @@ export function TaskListView({
   } = selection;
 
   const visibleTaskIds = useMemo(() => tasks.map((task) => task.id), [tasks]);
+  const rows = useMemo<TaskListViewRow[]>(() => {
+    if (!taskGroups) return tasks.map((task) => ({ kind: 'task' as const, task }));
+    return taskGroups.flatMap((group) => [
+      { kind: 'heading' as const, id: group.id, title: group.title, muted: group.muted },
+      ...group.tasks.map((task) => ({ kind: 'task' as const, task })),
+    ]);
+  }, [taskGroups, tasks]);
 
   // The handlers arrive as props and the visible ids change with the data, so
   // rows reach them through one object that never changes identity and reads
@@ -126,9 +139,23 @@ export function TaskListView({
     },
   }), []);
 
-  const renderTask = useCallback(({ item: task }: { item: Task }) => (
-    <SwipeableTaskItem
-      task={task}
+  const renderTask = useCallback(({ item }: { item: (typeof rows)[number] }) => {
+    if (item.kind === 'heading') {
+      return (
+        <View style={styles.groupHeading}>
+          <Text
+            accessibilityRole="header"
+            style={[styles.groupHeadingText, { color: item.muted ? themeColors.secondaryText : themeColors.text }]}
+          >
+            {item.title}
+          </Text>
+        </View>
+      );
+    }
+    const task = item.task;
+    return (
+      <SwipeableTaskItem
+        task={task}
       isDark={isDark}
       tc={themeColors}
       actions={rowActions}
@@ -140,8 +167,9 @@ export function TaskListView({
       onProjectPress={openProjectScreen}
       onContextPress={openContextsScreen}
       onTagPress={openContextsScreen}
-    />
-  ), [
+      />
+    );
+  }, [
     highlightTaskId,
     isDark,
     multiSelectedIds,
@@ -172,9 +200,9 @@ export function TaskListView({
       ) : null}
 
       <FlatList
-        data={tasks}
+        data={rows}
         renderItem={renderTask}
-        keyExtractor={(task) => task.id}
+        keyExtractor={(item) => item.kind === 'heading' ? item.id : item.task.id}
         style={listStyle ?? styles.list}
         contentContainerStyle={contentContainerStyle}
         {...TASK_LIST_WINDOWING_PROPS}
@@ -203,5 +231,14 @@ export function TaskListView({
 const styles = StyleSheet.create({
   list: {
     flex: 1,
+  },
+  groupHeading: {
+    paddingBottom: 6,
+    paddingTop: 18,
+  },
+  groupHeadingText: {
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.4,
   },
 });
