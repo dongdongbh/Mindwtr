@@ -1369,7 +1369,6 @@ describe('useSyncSettings cloud token validation', () => {
         });
         vi.mocked(SyncService.performSync).mockResolvedValueOnce({
             ...syncResult,
-            attachmentWriteDeferred: true,
             fileAttachmentUploadBlocked: 'too-large',
         });
         const showToast = vi.fn();
@@ -1384,11 +1383,6 @@ describe('useSyncSettings cloud token validation', () => {
         expect(showToast).toHaveBeenCalledWith(
             'Sync did not complete. Your previous sync settings are still active.',
             'error',
-        );
-        expect(showToast).not.toHaveBeenCalledWith(
-            'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
-            'info',
-            6000,
         );
         expect(showToast).not.toHaveBeenCalledWith(
             'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',

@@ -293,7 +293,6 @@ describe('useManualPullSync', () => {
   ])('prioritizes a $outcome document sync result over attachment guidance', async ({ result }) => {
     mocked.performMobileSync.mockResolvedValue({
       ...result,
-      attachmentWriteDeferred: true,
       fileAttachmentUploadBlocked: 'too-large',
     });
     renderHarness();

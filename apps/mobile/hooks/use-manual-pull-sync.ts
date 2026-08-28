@@ -148,11 +148,7 @@ export function useManualPullSync() {
         return;
       }
 
-      if (
-        result.success
-        && !result.remoteWriteDeferred
-        && result.attachmentWriteDeferred
-      ) {
+      if (result.success && result.attachmentWriteDeferred) {
         finishDeferredIndicator();
         showToast({
           title: tFallback(t, 'common.notice', 'Notice'),

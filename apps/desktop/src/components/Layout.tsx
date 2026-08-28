@@ -559,11 +559,7 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
                     'settings.syncFileAttachmentTooLarge',
                     'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
                 ), 'info', 6000);
-            } else if (
-                result.success
-                && !result.remoteWriteDeferred
-                && result.attachmentWriteDeferred
-            ) {
+            } else if (result.success && result.attachmentWriteDeferred) {
                 showToast(tFallback(
                     t,
                     'settings.syncAttachmentWriteDeferred',

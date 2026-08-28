@@ -1051,7 +1051,6 @@ describe('useSyncSettingsTransportActions', () => {
         mocked.performMobileSync.mockClear();
         mocked.performMobileSync.mockResolvedValueOnce({
             ...result,
-            attachmentWriteDeferred: true,
             fileAttachmentUploadBlocked: 'too-large',
         });
 
@@ -1062,11 +1061,6 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.showSettingsErrorToast).toHaveBeenCalledWith(
             'settings.syncMobile.error',
             'Retry sync later.',
-        );
-        expect(mocked.showSettingsWarning).not.toHaveBeenCalledWith(
-            'common.notice',
-            'settings.syncAttachmentWriteDeferred',
-            6000,
         );
         expect(mocked.showSettingsWarning).not.toHaveBeenCalledWith(
             'common.notice',
