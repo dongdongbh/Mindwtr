@@ -74,6 +74,7 @@ const modernFileSystemMock = vi.hoisted(() => {
 const attachmentFileInstallerMock = vi.hoisted(() => ({
   abandonFileSyncAttachmentPublication: vi.fn(),
   clearFileSyncAttachmentPublicationRecovery: vi.fn(),
+  claimFileSyncAttachmentPublication: vi.fn(),
   completeFileSyncAttachmentPublication: vi.fn(),
   hashAttachmentFileGeneration: vi.fn(),
   installAttachmentFileGeneration: vi.fn(),
@@ -267,6 +268,7 @@ describe('attachment sync', () => {
     });
     attachmentFileInstallerMock.abandonFileSyncAttachmentPublication.mockResolvedValue(undefined);
     attachmentFileInstallerMock.clearFileSyncAttachmentPublicationRecovery.mockResolvedValue(undefined);
+    attachmentFileInstallerMock.claimFileSyncAttachmentPublication.mockResolvedValue(undefined);
     attachmentFileInstallerMock.completeFileSyncAttachmentPublication.mockResolvedValue(undefined);
     attachmentFileInstallerMock.recoverFileSyncAttachmentPublications.mockResolvedValue(undefined);
     attachmentFileInstallerMock.retainFileSyncAttachmentPublicationForInvalidTarget.mockResolvedValue(undefined);

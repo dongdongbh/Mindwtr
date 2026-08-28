@@ -33,6 +33,17 @@ enum ImmutableAttachmentPublishOutcome {
   case alreadyExists
 }
 
+struct ImmutableAttachmentStageIdentity {
+  let stagedIdentity: String
+  let directoryIdentity: String
+}
+
+enum ImmutableAttachmentStageCleanupOutcome {
+  case removed
+  case missing
+  case conflict
+}
+
 struct AttachmentFileHashSnapshot {
   let sha256: String
   let size: UInt64
@@ -323,6 +334,134 @@ final class AttachmentFileInstallerEngine {
       }
       return .published
     }
+  }
+
+  func snapshotImmutableStage(
+    stagedInput: URL,
+    targetInput: URL,
+    expectedStagedSha256: String
+  ) throws -> ImmutableAttachmentStageIdentity {
+    guard isSha256(expectedStagedSha256) else {
+      throw installerError("Expected staged attachment SHA-256 is invalid")
+    }
+    try validateImmutableRecoveryPaths(stagedInput: stagedInput, targetInput: targetInput)
+    return try withExclusiveLock(targetRoot.appendingPathComponent(installerLockName)) {
+      try self.requireDirectory(self.targetRoot, label: "File Sync attachment directory")
+      try self.requireRegularFile(stagedInput, label: "staged attachment")
+      let before = try self.publicationIdentity(stagedInput)
+      let digest = try self.sha256(stagedInput)
+      let after = try self.publicationIdentity(stagedInput)
+      guard before == after, digest == expectedStagedSha256 else {
+        throw installerError("Staged attachment changed before ownership was recorded")
+      }
+      return ImmutableAttachmentStageIdentity(
+        stagedIdentity: self.identityToken(after),
+        directoryIdentity: try self.directoryIdentity(self.targetRoot)
+      )
+    }
+  }
+
+  func cleanupImmutableStage(
+    stagedInput: URL,
+    targetInput: URL,
+    operationId: String,
+    expectedStagedSha256: String?,
+    expectedStagedIdentity: String?,
+    expectedDirectoryIdentity: String?
+  ) throws -> ImmutableAttachmentStageCleanupOutcome {
+    guard operationId.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil else {
+      throw installerError("Attachment publication operation id is invalid")
+    }
+    guard stagedInput.lastPathComponent == ".mindwtr-generation-stage-\(operationId).tmp" else {
+      throw installerError("Attachment publication stage name is invalid")
+    }
+    try validateImmutableRecoveryPaths(stagedInput: stagedInput, targetInput: targetInput)
+    let quarantine = targetRoot.appendingPathComponent(
+      "\(installerArtifactPrefix)\(operationId).quarantine",
+      isDirectory: true
+    )
+    let quarantinedStage = quarantine.appendingPathComponent("stage")
+    return try withExclusiveLock(targetRoot.appendingPathComponent(installerLockName)) {
+      try self.requireDirectory(self.targetRoot, label: "File Sync attachment directory")
+      guard
+        let expectedStagedSha256,
+        let expectedStagedIdentity,
+        let expectedDirectoryIdentity
+      else {
+        return try self.nodeKind(stagedInput) == .missing && self.nodeKind(quarantine) == .missing
+          ? .missing
+          : .conflict
+      }
+      guard try self.directoryIdentity(self.targetRoot) == expectedDirectoryIdentity else {
+        return .conflict
+      }
+      switch try self.nodeKind(quarantine) {
+      case .missing:
+        guard try self.nodeKind(stagedInput) == .regularFile else {
+          return try self.nodeKind(stagedInput) == .missing ? .missing : .conflict
+        }
+        guard Darwin.mkdir(quarantine.path, S_IRWXU) == 0 else {
+          throw installerError("Could not create private attachment recovery directory")
+        }
+        guard try self.moveExclusive(from: stagedInput, to: quarantinedStage) else {
+          return .conflict
+        }
+        try self.syncDirectory(self.targetRoot)
+      case .directory:
+        guard try self.nodeKind(stagedInput) == .missing else { return .conflict }
+      default:
+        return .conflict
+      }
+      guard try self.directoryIdentity(self.targetRoot) == expectedDirectoryIdentity else {
+        return .conflict
+      }
+      guard try self.nodeKind(quarantinedStage) == .regularFile else { return .conflict }
+      let before = try self.publicationIdentity(quarantinedStage)
+      let digest = try self.sha256(quarantinedStage)
+      let after = try self.publicationIdentity(quarantinedStage)
+      guard
+        before == after,
+        identityToken(after) == expectedStagedIdentity,
+        digest == expectedStagedSha256
+      else {
+        return .conflict
+      }
+      try self.delete(quarantinedStage)
+      try self.syncDirectory(quarantine)
+      guard Darwin.rmdir(quarantine.path) == 0 else {
+        throw installerError("Could not remove private attachment recovery directory")
+      }
+      try self.syncDirectory(self.targetRoot)
+      return .removed
+    }
+  }
+
+  private func validateImmutableRecoveryPaths(stagedInput: URL, targetInput: URL) throws {
+    try ensureDirectory(targetRoot)
+    try requireDirectory(targetRoot, label: "File Sync attachment directory")
+    try rejectSymlinkInput(stagedInput, label: "staged attachment")
+    try rejectSymlinkInput(targetInput, label: "target attachment")
+    let staged = Self.canonical(stagedInput)
+    let target = Self.canonical(targetInput)
+    guard
+      staged.deletingLastPathComponent() == targetRoot,
+      target.deletingLastPathComponent() == targetRoot,
+      staged != target
+    else {
+      throw installerError("Immutable attachment recovery paths must share the target directory")
+    }
+  }
+
+  private func identityToken(_ identity: PublicationIdentity) -> String {
+    "\(identity.device):\(identity.inode)"
+  }
+
+  private func directoryIdentity(_ directory: URL) throws -> String {
+    var value = stat()
+    guard Darwin.lstat(directory.path, &value) == 0, value.st_mode & S_IFMT == S_IFDIR else {
+      throw installerError("File Sync attachment directory is unavailable")
+    }
+    return "\(UInt64(value.st_dev)):\(UInt64(value.st_ino))"
   }
 
   private struct PublicationIdentity: Equatable {
@@ -1083,6 +1222,59 @@ public final class AttachmentFileInstallerModule: Module {
         return ["status": "published"]
       case .alreadyExists:
         return ["status": "alreadyExists"]
+      }
+    }
+
+    AsyncFunction("snapshotImmutableStageAsync") {
+        (
+          stagedPath: String,
+          targetPath: String,
+          expectedStagedSha256: String
+        ) -> [String: String] in
+      let staged = try Self.fileUrl(stagedPath)
+      let target = try Self.fileUrl(targetPath)
+      let targetRoot = target.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
+      let identity = try AttachmentFileInstallerEngine(
+        targetRoot: targetRoot,
+        sourceRoots: [targetRoot]
+      ).snapshotImmutableStage(
+        stagedInput: staged,
+        targetInput: target,
+        expectedStagedSha256: try Self.parseSha256(expectedStagedSha256, label: "Expected staged attachment")
+      )
+      return [
+        "stagedIdentity": identity.stagedIdentity,
+        "directoryIdentity": identity.directoryIdentity,
+      ]
+    }
+
+    AsyncFunction("cleanupImmutableStageAsync") {
+        (
+          stagedPath: String,
+          targetPath: String,
+          operationId: String,
+          expectedStagedSha256: String?,
+          expectedStagedIdentity: String?,
+          expectedDirectoryIdentity: String?
+        ) -> [String: String] in
+      let staged = try Self.fileUrl(stagedPath)
+      let target = try Self.fileUrl(targetPath)
+      let targetRoot = target.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
+      let outcome = try AttachmentFileInstallerEngine(
+        targetRoot: targetRoot,
+        sourceRoots: [targetRoot]
+      ).cleanupImmutableStage(
+        stagedInput: staged,
+        targetInput: target,
+        operationId: operationId,
+        expectedStagedSha256: expectedStagedSha256,
+        expectedStagedIdentity: expectedStagedIdentity,
+        expectedDirectoryIdentity: expectedDirectoryIdentity
+      )
+      switch outcome {
+      case .removed: return ["status": "removed"]
+      case .missing: return ["status": "missing"]
+      case .conflict: return ["status": "conflict"]
       }
     }
 

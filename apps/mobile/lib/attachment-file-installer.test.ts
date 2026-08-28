@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   clearFileSyncAttachmentPublicationRecovery,
+  claimFileSyncAttachmentPublication,
   recoverFileSyncAttachmentPublications,
   reserveFileSyncAttachmentPublication,
   retainFileSyncAttachmentPublicationForInvalidTarget,
@@ -9,12 +10,29 @@ import {
   publishImmutableAttachmentFileGeneration,
 } from './attachment-file-installer';
 
-const { deleteAsync, hashAsync, installAsync, publishImmutableAsync, requireNativeModule, storage } = vi.hoisted(() => ({
+const {
+  cleanupImmutableStageAsync,
+  deleteAsync,
+  hashAsync,
+  installAsync,
+  publishImmutableAsync,
+  requireNativeModule,
+  snapshotImmutableStageAsync,
+  storage,
+} = vi.hoisted(() => ({
+  cleanupImmutableStageAsync: vi.fn(),
   deleteAsync: vi.fn(),
   hashAsync: vi.fn(),
   installAsync: vi.fn(),
   publishImmutableAsync: vi.fn(),
-  requireNativeModule: vi.fn(() => ({ hashAsync, installAsync, publishImmutableAsync })),
+  requireNativeModule: vi.fn(() => ({
+    cleanupImmutableStageAsync,
+    hashAsync,
+    installAsync,
+    publishImmutableAsync,
+    snapshotImmutableStageAsync,
+  })),
+  snapshotImmutableStageAsync: vi.fn(),
   storage: new Map<string, string>(),
 }));
 const downloadHash = 'd'.repeat(64);
@@ -40,6 +58,13 @@ describe('installAttachmentFileGeneration', () => {
     installAsync.mockReset();
     hashAsync.mockReset();
     publishImmutableAsync.mockReset();
+    snapshotImmutableStageAsync.mockReset();
+    snapshotImmutableStageAsync.mockResolvedValue({
+      stagedIdentity: 'stage-device:inode',
+      directoryIdentity: 'directory-device:inode',
+    });
+    cleanupImmutableStageAsync.mockReset();
+    cleanupImmutableStageAsync.mockResolvedValue({ status: 'missing' });
   });
 
   it('passes the absent generation contract to the native installer', async () => {
@@ -151,10 +176,33 @@ describe('installAttachmentFileGeneration', () => {
 
     await recoverFileSyncAttachmentPublications('file:///sync/attachments/');
 
-    expect(deleteAsync).toHaveBeenCalledTimes(1);
-    expect(deleteAsync).toHaveBeenCalledWith(reservation.stagedPath, { idempotent: true });
-    expect(deleteAsync).not.toHaveBeenCalledWith(target, expect.anything());
+    expect(cleanupImmutableStageAsync).toHaveBeenCalledWith(
+      reservation.stagedPath,
+      target,
+      reservation.operationId,
+      downloadHash,
+      null,
+      null,
+    );
+    expect(deleteAsync).not.toHaveBeenCalled();
     expect(storage.size).toBe(0);
+  });
+
+  it('preserves recovery state when native cleanup finds a different generation', async () => {
+    const target = `file:///sync/attachments/a.${downloadHash}.txt`;
+    const reservation = await reserveFileSyncAttachmentPublication(target, downloadHash);
+    snapshotImmutableStageAsync.mockResolvedValueOnce({
+      stagedIdentity: 'owned-stage',
+      directoryIdentity: 'owned-directory',
+    });
+    await claimFileSyncAttachmentPublication(reservation);
+    cleanupImmutableStageAsync.mockResolvedValueOnce({ status: 'conflict' });
+
+    await expect(recoverFileSyncAttachmentPublications('file:///sync/attachments/'))
+      .rejects.toThrow('different generation');
+
+    expect([...storage.values()].join('')).toContain('owned-stage');
+    expect(deleteAsync).not.toHaveBeenCalled();
   });
 
   it('bounds repeated corrupt canonical collisions without accumulating shared scratches', async () => {
@@ -163,14 +211,16 @@ describe('installAttachmentFileGeneration', () => {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const reservation = await reserveFileSyncAttachmentPublication(target, downloadHash);
       stages.push(reservation.stagedPath);
+      await claimFileSyncAttachmentPublication(reservation);
       await retainFileSyncAttachmentPublicationForInvalidTarget(reservation);
+      cleanupImmutableStageAsync.mockResolvedValueOnce({ status: 'removed' });
       await recoverFileSyncAttachmentPublications('file:///sync/attachments/');
     }
 
     await expect(reserveFileSyncAttachmentPublication(target, downloadHash))
       .rejects.toThrow('remains corrupt after bounded retries');
-    expect(deleteAsync.mock.calls.map(([path]) => path)).toEqual(stages);
-    expect(deleteAsync.mock.calls.some(([path]) => path === target)).toBe(false);
+    expect(cleanupImmutableStageAsync).toHaveBeenCalledTimes(3);
+    expect(deleteAsync).not.toHaveBeenCalled();
 
     await clearFileSyncAttachmentPublicationRecovery(target);
     await expect(reserveFileSyncAttachmentPublication(target, downloadHash))

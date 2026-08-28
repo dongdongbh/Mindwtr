@@ -106,6 +106,154 @@ final class AttachmentFileInstallerEngineTests: XCTestCase {
     }
   }
 
+  func testOwnedStageRecoveryDeletesOnlyRecordedInodeAndDigest() throws {
+    try withFixture { fixture in
+      let operationId = String(repeating: "a", count: 32)
+      let staged = fixture.target(".mindwtr-generation-stage-\(operationId).tmp")
+      let target = fixture.target("a.\(digest("candidate")).txt")
+      try write("candidate", to: staged)
+      let engine = fixture.engine()
+      let identity = try engine.snapshotImmutableStage(
+        stagedInput: staged,
+        targetInput: target,
+        expectedStagedSha256: digest("candidate")
+      )
+
+      let outcome = try engine.cleanupImmutableStage(
+        stagedInput: staged,
+        targetInput: target,
+        operationId: operationId,
+        expectedStagedSha256: digest("candidate"),
+        expectedStagedIdentity: identity.stagedIdentity,
+        expectedDirectoryIdentity: identity.directoryIdentity
+      )
+
+      guard case .removed = outcome else { return XCTFail("Expected removed outcome") }
+      XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
+      XCTAssertTrue(try fixture.internalArtifacts().isEmpty)
+    }
+  }
+
+  func testOwnedStageRecoveryPreservesReplacementInodeWithSameDigest() throws {
+    try withFixture { fixture in
+      let operationId = String(repeating: "b", count: 32)
+      let staged = fixture.target(".mindwtr-generation-stage-\(operationId).tmp")
+      let target = fixture.target("a.\(digest("candidate")).txt")
+      try write("candidate", to: staged)
+      let engine = fixture.engine()
+      let identity = try engine.snapshotImmutableStage(
+        stagedInput: staged,
+        targetInput: target,
+        expectedStagedSha256: digest("candidate")
+      )
+      try FileManager.default.removeItem(at: staged)
+      try write("candidate", to: staged)
+
+      let outcome = try engine.cleanupImmutableStage(
+        stagedInput: staged,
+        targetInput: target,
+        operationId: operationId,
+        expectedStagedSha256: digest("candidate"),
+        expectedStagedIdentity: identity.stagedIdentity,
+        expectedDirectoryIdentity: identity.directoryIdentity
+      )
+
+      guard case .conflict = outcome else { return XCTFail("Expected conflict outcome") }
+      let preserved = fixture.target(".mindwtr-install-\(operationId).quarantine/stage")
+      XCTAssertEqual(try contents(preserved), "candidate")
+    }
+  }
+
+  func testOwnedStageRecoveryPreservesPreexistingQuarantineAmbiguity() throws {
+    try withFixture { fixture in
+      let operationId = String(repeating: "c", count: 32)
+      let staged = fixture.target(".mindwtr-generation-stage-\(operationId).tmp")
+      let target = fixture.target("a.\(digest("candidate")).txt")
+      try write("candidate", to: staged)
+      let engine = fixture.engine()
+      let identity = try engine.snapshotImmutableStage(
+        stagedInput: staged,
+        targetInput: target,
+        expectedStagedSha256: digest("candidate")
+      )
+      let quarantine = fixture.target(".mindwtr-install-\(operationId).quarantine")
+      try FileManager.default.createDirectory(at: quarantine, withIntermediateDirectories: false)
+      try write("peer", to: quarantine.appendingPathComponent("stage"))
+
+      let outcome = try engine.cleanupImmutableStage(
+        stagedInput: staged,
+        targetInput: target,
+        operationId: operationId,
+        expectedStagedSha256: digest("candidate"),
+        expectedStagedIdentity: identity.stagedIdentity,
+        expectedDirectoryIdentity: identity.directoryIdentity
+      )
+
+      guard case .conflict = outcome else { return XCTFail("Expected conflict outcome") }
+      XCTAssertEqual(try contents(staged), "candidate")
+      XCTAssertEqual(try contents(quarantine.appendingPathComponent("stage")), "peer")
+    }
+  }
+
+  func testOwnedStageRecoveryRejectsReplacedAttachmentRoot() throws {
+    try withFixture { fixture in
+      let operationId = String(repeating: "d", count: 32)
+      let staged = fixture.target(".mindwtr-generation-stage-\(operationId).tmp")
+      let target = fixture.target("a.\(digest("candidate")).txt")
+      try write("candidate", to: staged)
+      let engine = fixture.engine()
+      let identity = try engine.snapshotImmutableStage(
+        stagedInput: staged,
+        targetInput: target,
+        expectedStagedSha256: digest("candidate")
+      )
+      let originalRoot = try fixture.replaceAttachmentsRoot()
+
+      let outcome = try engine.cleanupImmutableStage(
+        stagedInput: staged,
+        targetInput: target,
+        operationId: operationId,
+        expectedStagedSha256: digest("candidate"),
+        expectedStagedIdentity: identity.stagedIdentity,
+        expectedDirectoryIdentity: identity.directoryIdentity
+      )
+
+      guard case .conflict = outcome else { return XCTFail("Expected conflict outcome") }
+      XCTAssertEqual(try contents(originalRoot.appendingPathComponent(staged.lastPathComponent)), "candidate")
+      XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
+    }
+  }
+
+  func testOwnedStageRecoveryPreservesReplacementDirectory() throws {
+    try withFixture { fixture in
+      let operationId = String(repeating: "e", count: 32)
+      let staged = fixture.target(".mindwtr-generation-stage-\(operationId).tmp")
+      let target = fixture.target("a.\(digest("candidate")).txt")
+      try write("candidate", to: staged)
+      let engine = fixture.engine()
+      let identity = try engine.snapshotImmutableStage(
+        stagedInput: staged,
+        targetInput: target,
+        expectedStagedSha256: digest("candidate")
+      )
+      try FileManager.default.removeItem(at: staged)
+      try FileManager.default.createDirectory(at: staged, withIntermediateDirectories: false)
+      try write("peer", to: staged.appendingPathComponent("peer"))
+
+      let outcome = try engine.cleanupImmutableStage(
+        stagedInput: staged,
+        targetInput: target,
+        operationId: operationId,
+        expectedStagedSha256: digest("candidate"),
+        expectedStagedIdentity: identity.stagedIdentity,
+        expectedDirectoryIdentity: identity.directoryIdentity
+      )
+
+      guard case .conflict = outcome else { return XCTFail("Expected conflict outcome") }
+      XCTAssertEqual(try contents(staged.appendingPathComponent("peer")), "peer")
+    }
+  }
+
   func testPresentGenerationReplacesOnlyMatchingTargetAndPreservesIt() throws {
     try withFixture { fixture in
       let staged = try fixture.stage("new generation")
@@ -323,6 +471,13 @@ private struct Fixture {
 
   func target(_ name: String) -> URL {
     attachmentsRoot.appendingPathComponent(name)
+  }
+
+  func replaceAttachmentsRoot() throws -> URL {
+    let original = root.appendingPathComponent("original-attachments", isDirectory: true)
+    try FileManager.default.moveItem(at: attachmentsRoot, to: original)
+    try FileManager.default.createDirectory(at: attachmentsRoot, withIntermediateDirectories: true)
+    return original
   }
 
   func internalArtifacts(suffix: String? = nil) throws -> [URL] {

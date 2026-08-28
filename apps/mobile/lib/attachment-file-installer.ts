@@ -1,6 +1,5 @@
 import { requireNativeModule } from 'expo-modules-core';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from './file-system';
 
 export type AttachmentFileExpectedGeneration =
   | { kind: 'absent' }
@@ -26,6 +25,11 @@ export type FileSyncAttachmentPublicationReservation = {
   targetPath: string;
 };
 
+type NativeOwnedStageIdentity = {
+  stagedIdentity: string;
+  directoryIdentity: string;
+};
+
 type NativeAttachmentFileInstaller = {
   installAsync(
     stagedPath: string,
@@ -37,6 +41,19 @@ type NativeAttachmentFileInstaller = {
     stagedPath: string,
     targetPath: string,
     expectedStagedSha256: string,
+  ): Promise<unknown>;
+  snapshotImmutableStageAsync(
+    stagedPath: string,
+    targetPath: string,
+    expectedStagedSha256: string,
+  ): Promise<unknown>;
+  cleanupImmutableStageAsync(
+    stagedPath: string,
+    targetPath: string,
+    operationId: string,
+    expectedStagedSha256: string | null,
+    expectedStagedIdentity: string | null,
+    expectedDirectoryIdentity: string | null,
   ): Promise<unknown>;
   hashAsync(path: string): Promise<unknown>;
 };
@@ -76,16 +93,17 @@ const FILE_SYNC_PUBLICATION_MAX_RESERVATIONS = 128;
 const FILE_SYNC_PUBLICATION_MAX_INVALID_TARGET_ATTEMPTS = 3;
 
 type FileSyncPublicationReservationRecord = {
-  version: 1;
+  version: 2;
   operationId: string | null;
   stagedPath: string | null;
   targetPath: string;
   expectedStagedSha256: string | null;
+  stagedIdentity: string | null;
+  directoryIdentity: string | null;
   invalidTargetAttempts: number;
   state: 'reserved' | 'invalid-target';
 };
 
-let reservationSequence = 0;
 let reservationQueue: Promise<void> = Promise.resolve();
 
 const withReservationLock = async <T>(operation: () => Promise<T>): Promise<T> => {
@@ -123,7 +141,7 @@ const parseReservationRecords = (raw: string | null): FileSyncPublicationReserva
     }
     const record = entry as Record<string, unknown>;
     if (
-      record.version !== 1
+      (record.version !== 1 && record.version !== 2)
       || typeof record.targetPath !== 'string'
       || !record.targetPath.startsWith('file://')
       || (record.operationId !== null && typeof record.operationId !== 'string')
@@ -132,6 +150,8 @@ const parseReservationRecords = (raw: string | null): FileSyncPublicationReserva
         typeof record.expectedStagedSha256 !== 'string'
         || !SHA256_HEX_PATTERN.test(record.expectedStagedSha256)
       ))
+      || (record.version === 2 && record.stagedIdentity !== null && typeof record.stagedIdentity !== 'string')
+      || (record.version === 2 && record.directoryIdentity !== null && typeof record.directoryIdentity !== 'string')
       || !Number.isInteger(record.invalidTargetAttempts)
       || (record.invalidTargetAttempts as number) < 0
       || (record.state !== 'reserved' && record.state !== 'invalid-target')
@@ -147,10 +167,16 @@ const parseReservationRecords = (raw: string | null): FileSyncPublicationReserva
         parentPath(stagedPath) !== parentPath(record.targetPath)
         || stagedPath !== `${parentPath(record.targetPath)}${FILE_SYNC_PUBLICATION_STAGE_PREFIX}${operationId}.tmp`
       ))
+      || (record.version === 2 && ((record.stagedIdentity == null) !== (record.directoryIdentity == null)))
     ) {
       throw new Error('File Sync attachment publication recovery state is invalid');
     }
-    return record as FileSyncPublicationReservationRecord;
+    return {
+      ...(record as Omit<FileSyncPublicationReservationRecord, 'version' | 'stagedIdentity' | 'directoryIdentity'>),
+      version: 2,
+      stagedIdentity: record.version === 2 ? record.stagedIdentity as string | null : null,
+      directoryIdentity: record.version === 2 ? record.directoryIdentity as string | null : null,
+    };
   });
 };
 
@@ -163,6 +189,48 @@ const storeReservationRecords = async (records: FileSyncPublicationReservationRe
     return;
   }
   await AsyncStorage.setItem(FILE_SYNC_PUBLICATION_RESERVATIONS_KEY, JSON.stringify(records));
+};
+
+const parseNativeOwnedStageIdentity = (value: unknown): NativeOwnedStageIdentity => {
+  if (!value || typeof value !== 'object') {
+    throw new Error('Attachment file publisher returned an invalid stage identity');
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.stagedIdentity !== 'string'
+    || candidate.stagedIdentity.length === 0
+    || typeof candidate.directoryIdentity !== 'string'
+    || candidate.directoryIdentity.length === 0
+  ) {
+    throw new Error('Attachment file publisher returned an invalid stage identity');
+  }
+  return {
+    stagedIdentity: candidate.stagedIdentity,
+    directoryIdentity: candidate.directoryIdentity,
+  };
+};
+
+const cleanupReservationStage = async (
+  record: FileSyncPublicationReservationRecord,
+): Promise<'removed' | 'missing'> => {
+  if (!record.stagedPath || !record.operationId) return 'missing';
+  const value = await getNativeModule().cleanupImmutableStageAsync(
+    record.stagedPath,
+    record.targetPath,
+    record.operationId,
+    record.expectedStagedSha256,
+    record.stagedIdentity,
+    record.directoryIdentity,
+  );
+  if (!value || typeof value !== 'object') {
+    throw new Error('Attachment file publisher returned an invalid cleanup result');
+  }
+  const result = value as Record<string, unknown>;
+  if (result.status === 'removed' || result.status === 'missing') return result.status;
+  if (result.status === 'conflict') {
+    throw new Error('File Sync attachment publication recovery found a different generation');
+  }
+  throw new Error('Attachment file publisher returned an invalid cleanup result');
 };
 
 /** Recover only exact shared-folder scratch paths previously reserved in
@@ -180,15 +248,15 @@ export const recoverFileSyncAttachmentPublications = async (
       retained.push(record);
       continue;
     }
-    if (record.stagedPath) {
-      await FileSystem.deleteAsync(record.stagedPath, { idempotent: true });
-    }
+    await cleanupReservationStage(record);
     if (record.state === 'invalid-target') {
       retained.push({
         ...record,
         operationId: null,
         stagedPath: null,
         expectedStagedSha256: null,
+        stagedIdentity: null,
+        directoryIdentity: null,
       });
     }
   }
@@ -219,20 +287,48 @@ export const reserveFileSyncAttachmentPublication = async (
   if (recordsWithoutTarget.length >= FILE_SYNC_PUBLICATION_MAX_RESERVATIONS) {
     throw new Error('File Sync attachment publication recovery state has reached its entry limit');
   }
-  reservationSequence += 1;
-  const operationId = `${Date.now().toString(36)}-${reservationSequence.toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const operationId = Array.from({ length: 4 }, () => Math.floor(Math.random() * 0x1_0000_0000)
+    .toString(16).padStart(8, '0')).join('');
   const stagedPath = `${parentPath(target)}${FILE_SYNC_PUBLICATION_STAGE_PREFIX}${operationId}.tmp`;
   const next: FileSyncPublicationReservationRecord = {
-    version: 1,
+    version: 2,
     operationId,
     stagedPath,
     targetPath: target,
     expectedStagedSha256: digest,
+    stagedIdentity: null,
+    directoryIdentity: null,
     invalidTargetAttempts,
     state: 'reserved',
   };
   await storeReservationRecords([...recordsWithoutTarget, next]);
   return { operationId, stagedPath, targetPath: target };
+});
+
+/** Bind the durable reservation to the exact fully-written inode before native
+ * publication. Recovery never deletes an unclaimed or replaced pathname. */
+export const claimFileSyncAttachmentPublication = async (
+  reservation: FileSyncAttachmentPublicationReservation,
+): Promise<void> => withReservationLock(async () => {
+  const records = await loadReservationRecords();
+  const record = records.find((candidate) => candidate.targetPath === reservation.targetPath);
+  if (
+    !record
+    || record.operationId !== reservation.operationId
+    || record.stagedPath !== reservation.stagedPath
+    || !record.expectedStagedSha256
+  ) {
+    throw new Error('File Sync attachment publication reservation no longer matches');
+  }
+  const identity = parseNativeOwnedStageIdentity(await getNativeModule().snapshotImmutableStageAsync(
+    record.stagedPath,
+    record.targetPath,
+    record.expectedStagedSha256,
+  ));
+  await storeReservationRecords(records.map((candidate) => candidate === record ? {
+    ...candidate,
+    ...identity,
+  } : candidate));
 });
 
 const settleReservation = async (
@@ -249,7 +345,7 @@ const settleReservation = async (
     throw new Error('File Sync attachment publication reservation no longer matches');
   }
   if (outcome !== 'invalid-target') {
-    await FileSystem.deleteAsync(record.stagedPath!, { idempotent: true });
+    await cleanupReservationStage(record);
   }
   const remaining = records.filter((candidate) => candidate !== record);
   if (outcome === 'invalid-target') {
@@ -284,7 +380,7 @@ export const clearFileSyncAttachmentPublicationRecovery = async (
   const matching = records.filter((record) => record.targetPath === target);
   for (const record of matching) {
     if (record.stagedPath) {
-      await FileSystem.deleteAsync(record.stagedPath, { idempotent: true });
+      await cleanupReservationStage(record);
     }
   }
   await storeReservationRecords(records.filter((record) => record.targetPath !== target));

@@ -48,9 +48,21 @@ internal enum class ImmutableAttachmentPublishOutcome {
   ALREADY_EXISTS,
 }
 
+internal data class ImmutableAttachmentStageIdentity(
+  val stagedIdentity: String,
+  val directoryIdentity: String,
+)
+
+internal enum class ImmutableAttachmentStageCleanupOutcome {
+  REMOVED,
+  MISSING,
+  CONFLICT,
+}
+
 internal interface AttachmentInstallerFileOps {
   fun canonical(file: File): File
   fun ensureDirectory(directory: File)
+  fun ensurePrivateDirectory(directory: File) = ensureDirectory(directory)
   fun nodeKind(file: File): InstallerNodeKind
   fun fileIdentity(file: File): AttachmentFileIdentity
   fun copySnapshot(source: File, destination: File)
@@ -58,10 +70,139 @@ internal interface AttachmentInstallerFileOps {
   /** Move without replacing destination. False means destination already exists. */
   fun moveExclusive(source: File, destination: File): Boolean
   fun delete(file: File)
+  fun deleteEmptyDirectory(directory: File) = delete(directory)
   fun readUtf8(file: File): String
   fun writeUtf8Durably(file: File, content: String)
   fun syncDirectory(directory: File)
   fun <T> withExclusiveLock(lockFile: File, action: () -> T): T
+}
+
+/** Recovery for a device-reserved File Sync publication stage. A shared leaf is
+ * never deleted in place: it is first displaced create-no-replace into a
+ * deterministic private quarantine, then its recorded inode and digest are
+ * revalidated before deletion. Any ambiguity preserves bytes and fails closed. */
+internal class ImmutableAttachmentStageRecoveryCore(
+  targetRoot: File,
+  private val ops: AttachmentInstallerFileOps,
+) {
+  private val targetRoot = ops.canonical(targetRoot)
+
+  fun snapshot(stagedInput: File, targetInput: File, expectedSha256: String): ImmutableAttachmentStageIdentity {
+    validateInputs(stagedInput, targetInput, expectedSha256)
+    return ops.withExclusiveLock(File(targetRoot, INSTALLER_LOCK_NAME)) {
+      requireDirectory(targetRoot)
+      requireRegular(stagedInput)
+      val before = ops.fileIdentity(stagedInput)
+      val digest = ops.sha256(stagedInput)
+      val after = ops.fileIdentity(stagedInput)
+      if (before.fileKey != after.fileKey || before != after || digest != expectedSha256) {
+        throw AttachmentInstallerFailure("Staged attachment changed before ownership was recorded")
+      }
+      ImmutableAttachmentStageIdentity(after.fileKey, ops.fileIdentity(targetRoot).fileKey)
+    }
+  }
+
+  fun cleanup(
+    stagedInput: File,
+    targetInput: File,
+    operationId: String,
+    expectedSha256: String?,
+    expectedStagedIdentity: String?,
+    expectedDirectoryIdentity: String?,
+  ): ImmutableAttachmentStageCleanupOutcome {
+    if (!Regex("^[a-f0-9]{32}$").matches(operationId)) {
+      throw AttachmentInstallerFailure("Attachment publication operation id is invalid")
+    }
+    if (stagedInput.name != ".mindwtr-generation-stage-$operationId.tmp") {
+      throw AttachmentInstallerFailure("Attachment publication stage name is invalid")
+    }
+    validatePaths(stagedInput, targetInput)
+    val quarantine = File(targetRoot, "$INSTALLER_ARTIFACT_PREFIX$operationId.quarantine")
+    val quarantinedStage = File(quarantine, "stage")
+    return ops.withExclusiveLock(File(targetRoot, INSTALLER_LOCK_NAME)) {
+      requireDirectory(targetRoot)
+      if (expectedSha256 == null || expectedStagedIdentity == null || expectedDirectoryIdentity == null) {
+        return@withExclusiveLock if (
+          ops.nodeKind(stagedInput) == InstallerNodeKind.MISSING
+          && ops.nodeKind(quarantine) == InstallerNodeKind.MISSING
+        ) ImmutableAttachmentStageCleanupOutcome.MISSING else ImmutableAttachmentStageCleanupOutcome.CONFLICT
+      }
+      if (ops.fileIdentity(targetRoot).fileKey != expectedDirectoryIdentity) {
+        return@withExclusiveLock ImmutableAttachmentStageCleanupOutcome.CONFLICT
+      }
+      when (ops.nodeKind(quarantine)) {
+        InstallerNodeKind.MISSING -> {
+          when (ops.nodeKind(stagedInput)) {
+            InstallerNodeKind.MISSING -> return@withExclusiveLock ImmutableAttachmentStageCleanupOutcome.MISSING
+            InstallerNodeKind.REGULAR_FILE -> Unit
+            else -> return@withExclusiveLock ImmutableAttachmentStageCleanupOutcome.CONFLICT
+          }
+          ops.ensurePrivateDirectory(quarantine)
+          if (!ops.moveExclusive(stagedInput, quarantinedStage)) {
+            return@withExclusiveLock ImmutableAttachmentStageCleanupOutcome.CONFLICT
+          }
+          ops.syncDirectory(targetRoot)
+        }
+        InstallerNodeKind.DIRECTORY -> {
+          if (ops.nodeKind(stagedInput) != InstallerNodeKind.MISSING) {
+            return@withExclusiveLock ImmutableAttachmentStageCleanupOutcome.CONFLICT
+          }
+        }
+        else -> return@withExclusiveLock ImmutableAttachmentStageCleanupOutcome.CONFLICT
+      }
+      if (ops.fileIdentity(targetRoot).fileKey != expectedDirectoryIdentity) {
+        return@withExclusiveLock ImmutableAttachmentStageCleanupOutcome.CONFLICT
+      }
+      if (ops.nodeKind(quarantinedStage) != InstallerNodeKind.REGULAR_FILE) {
+        return@withExclusiveLock ImmutableAttachmentStageCleanupOutcome.CONFLICT
+      }
+      val before = ops.fileIdentity(quarantinedStage)
+      val digest = ops.sha256(quarantinedStage)
+      val after = ops.fileIdentity(quarantinedStage)
+      if (
+        before != after
+        || after.fileKey != expectedStagedIdentity
+        || digest != expectedSha256
+      ) {
+        return@withExclusiveLock ImmutableAttachmentStageCleanupOutcome.CONFLICT
+      }
+      ops.delete(quarantinedStage)
+      ops.syncDirectory(quarantine)
+      ops.deleteEmptyDirectory(quarantine)
+      ops.syncDirectory(targetRoot)
+      ImmutableAttachmentStageCleanupOutcome.REMOVED
+    }
+  }
+
+  private fun validateInputs(staged: File, target: File, expectedSha256: String) {
+    if (!SHA256_HEX_PATTERN.matches(expectedSha256)) {
+      throw AttachmentInstallerFailure("Expected staged attachment SHA-256 is invalid")
+    }
+    validatePaths(staged, target)
+  }
+
+  private fun validatePaths(staged: File, target: File) {
+    if (ops.nodeKind(staged) == InstallerNodeKind.SYMLINK || ops.nodeKind(target) == InstallerNodeKind.SYMLINK) {
+      throw AttachmentInstallerFailure("Immutable attachment recovery path is a symbolic link")
+    }
+    val canonicalStaged = ops.canonical(staged)
+    val canonicalTarget = ops.canonical(target)
+    if (canonicalStaged.parentFile != targetRoot || canonicalTarget.parentFile != targetRoot || staged == target) {
+      throw AttachmentInstallerFailure("Immutable attachment recovery paths must share the target directory")
+    }
+  }
+
+  private fun requireDirectory(directory: File) {
+    if (ops.nodeKind(directory) != InstallerNodeKind.DIRECTORY) {
+      throw AttachmentInstallerFailure("File Sync attachment directory is unavailable")
+    }
+  }
+
+  private fun requireRegular(file: File) {
+    if (ops.nodeKind(file) != InstallerNodeKind.REGULAR_FILE) {
+      throw AttachmentInstallerFailure("Immutable attachment stage is not a regular file")
+    }
+  }
 }
 
 /** Stable, streaming hash of one managed canonical attachment. The installer

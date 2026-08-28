@@ -37,6 +37,7 @@ import {
 import {
   abandonFileSyncAttachmentPublication,
   clearFileSyncAttachmentPublicationRecovery,
+  claimFileSyncAttachmentPublication,
   completeFileSyncAttachmentPublication,
   hashAttachmentFileGeneration,
   publishImmutableAttachmentFileGeneration,
@@ -340,6 +341,7 @@ export const syncFileAttachments = async (
             encoding: FileSystem.EncodingType.Base64,
           });
           await verifyPublishedGeneration(stagedUri);
+          await claimFileSyncAttachmentPublication(reservation);
         } catch (error) {
           await abandonFileSyncAttachmentPublication(reservation).catch(() => undefined);
           throw error;

@@ -27,6 +27,24 @@ private class AndroidAttachmentInstallerFileOps : AttachmentInstallerFileOps {
     }
   }
 
+  override fun ensurePrivateDirectory(directory: File) {
+    try {
+      Os.mkdir(directory.path, 0x1c0)
+    } catch (error: ErrnoException) {
+      if (error.errno != OsConstants.EEXIST) {
+        throw AttachmentInstallerFailure("Could not create private attachment recovery directory", error)
+      }
+    }
+    if (nodeKind(directory) != InstallerNodeKind.DIRECTORY) {
+      throw AttachmentInstallerFailure("Attachment recovery path is not a directory")
+    }
+    try {
+      Os.chmod(directory.path, 0x1c0)
+    } catch (error: Throwable) {
+      throw AttachmentInstallerFailure("Could not restrict attachment recovery directory", error)
+    }
+  }
+
   override fun nodeKind(file: File): InstallerNodeKind {
     val stat = try {
       Os.lstat(file.path)
@@ -125,6 +143,8 @@ private class AndroidAttachmentInstallerFileOps : AttachmentInstallerFileOps {
       }
     }
   }
+
+  override fun deleteEmptyDirectory(directory: File) = delete(directory)
 
   override fun readUtf8(file: File): String = file.readText(Charsets.UTF_8)
 
@@ -282,6 +302,63 @@ class AttachmentFileInstallerModule : Module() {
           error.message ?: "Immutable attachment publication failed",
           error,
         )
+      }
+    }
+
+    AsyncFunction("snapshotImmutableStageAsync") {
+        stagedPath: String,
+        targetPath: String,
+        expectedStagedSha256: String,
+      ->
+      try {
+        val staged = fileFromPath(stagedPath).absoluteFile
+        val target = fileFromPath(targetPath).absoluteFile
+        val targetRoot = target.parentFile
+          ?: throw AttachmentFileInstallerException("Target attachment parent is unavailable")
+        val identity = ImmutableAttachmentStageRecoveryCore(
+          targetRoot,
+          AndroidAttachmentInstallerFileOps(),
+        ).snapshot(staged, target, parseSha256(expectedStagedSha256, "Expected staged attachment"))
+        mapOf(
+          "stagedIdentity" to identity.stagedIdentity,
+          "directoryIdentity" to identity.directoryIdentity,
+        )
+      } catch (error: Throwable) {
+        throw AttachmentFileInstallerException(error.message ?: "Attachment stage snapshot failed", error)
+      }
+    }
+
+    AsyncFunction("cleanupImmutableStageAsync") {
+        stagedPath: String,
+        targetPath: String,
+        operationId: String,
+        expectedStagedSha256: String?,
+        expectedStagedIdentity: String?,
+        expectedDirectoryIdentity: String?,
+      ->
+      try {
+        val staged = fileFromPath(stagedPath).absoluteFile
+        val target = fileFromPath(targetPath).absoluteFile
+        val targetRoot = target.parentFile
+          ?: throw AttachmentFileInstallerException("Target attachment parent is unavailable")
+        val outcome = ImmutableAttachmentStageRecoveryCore(
+          targetRoot,
+          AndroidAttachmentInstallerFileOps(),
+        ).cleanup(
+          staged,
+          target,
+          operationId,
+          expectedStagedSha256,
+          expectedStagedIdentity,
+          expectedDirectoryIdentity,
+        )
+        mapOf("status" to when (outcome) {
+          ImmutableAttachmentStageCleanupOutcome.REMOVED -> "removed"
+          ImmutableAttachmentStageCleanupOutcome.MISSING -> "missing"
+          ImmutableAttachmentStageCleanupOutcome.CONFLICT -> "conflict"
+        })
+      } catch (error: Throwable) {
+        throw AttachmentFileInstallerException(error.message ?: "Attachment stage cleanup failed", error)
       }
     }
 

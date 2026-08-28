@@ -86,7 +86,7 @@ test("attachment installer native CI collects the recovery suites", () => {
     "utf8",
   );
 
-  expect(androidTests.match(/^\s*@Test$/gm)).toHaveLength(20);
+  expect(androidTests.match(/^\s*@Test$/gm)).toHaveLength(25);
   expect(swiftPackage).toContain(".testTarget(");
   expect(swiftTests).toContain("testAbsentGenerationUsesCreateNoReplace");
   expect(swiftTests).toContain("testPresentGenerationReplacesOnlyMatchingTargetAndPreservesIt");
@@ -95,6 +95,9 @@ test("attachment installer native CI collects the recovery suites", () => {
   expect(swiftTests).toContain("testLateWriterMutatesRetainedOldInodeWithoutTouchingInstalledGeneration");
   expect(swiftTests).toContain("testImmutablePublisherCreatesNoSharedInstallerRecoveryArtifacts");
   expect(swiftTests).toContain("testImmutablePublisherPreservesOwnedStageAndPeerTargetOnCollision");
+  expect(swiftTests).toContain("testOwnedStageRecoveryDeletesOnlyRecordedInodeAndDigest");
+  expect(swiftTests).toContain("testOwnedStageRecoveryPreservesReplacementInodeWithSameDigest");
+  expect(swiftTests).toContain("testOwnedStageRecoveryRejectsReplacedAttachmentRoot");
   expect(cloudKitSwiftPackage).toContain("CloudKitAttachmentErrorClassifierTests");
   expect(cloudKitSwiftPackage).toContain('.testTarget(');
   expect(cloudKitSwiftTests).toContain("testClassifiesMindwtrRecordAndAssetAbsenceAsTerminal");

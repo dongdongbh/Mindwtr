@@ -584,6 +584,133 @@ class AttachmentFileInstallerCoreTest {
     assertTrue(fixture.internalArtifacts().isEmpty())
   }
 
+  @Test
+  fun ownedStageRecoveryDeletesOnlyTheRecordedInodeAndDigest() = withFixture { fixture ->
+    val operationId = "a".repeat(32)
+    val staged = fixture.target(".mindwtr-generation-stage-$operationId.tmp").apply {
+      writeText("candidate")
+    }
+    val target = fixture.target("a.${hash("candidate")}.txt")
+    val recovery = fixture.recovery(ops)
+    val identity = recovery.snapshot(staged, target, hash("candidate"))
+
+    val outcome = recovery.cleanup(
+      staged,
+      target,
+      operationId,
+      hash("candidate"),
+      identity.stagedIdentity,
+      identity.directoryIdentity,
+    )
+
+    assertEquals(ImmutableAttachmentStageCleanupOutcome.REMOVED, outcome)
+    assertFalse(staged.exists())
+    assertTrue(fixture.internalArtifacts().isEmpty())
+  }
+
+  @Test
+  fun ownedStageRecoveryPreservesAReplacementInodeEvenWithTheSameDigest() = withFixture { fixture ->
+    val operationId = "b".repeat(32)
+    val staged = fixture.target(".mindwtr-generation-stage-$operationId.tmp").apply {
+      writeText("candidate")
+    }
+    val target = fixture.target("a.${hash("candidate")}.txt")
+    val recovery = fixture.recovery(ops)
+    val identity = recovery.snapshot(staged, target, hash("candidate"))
+    Files.delete(staged.toPath())
+    staged.writeText("candidate")
+
+    val outcome = recovery.cleanup(
+      staged,
+      target,
+      operationId,
+      hash("candidate"),
+      identity.stagedIdentity,
+      identity.directoryIdentity,
+    )
+
+    assertEquals(ImmutableAttachmentStageCleanupOutcome.CONFLICT, outcome)
+    val preserved = fixture.target("$INSTALLER_ARTIFACT_PREFIX$operationId.quarantine/stage")
+    assertEquals("candidate", preserved.readText())
+  }
+
+  @Test
+  fun ownedStageRecoveryPreservesBothSidesOfAPreexistingQuarantineAmbiguity() = withFixture { fixture ->
+    val operationId = "c".repeat(32)
+    val staged = fixture.target(".mindwtr-generation-stage-$operationId.tmp").apply {
+      writeText("candidate")
+    }
+    val target = fixture.target("a.${hash("candidate")}.txt")
+    val recovery = fixture.recovery(ops)
+    val identity = recovery.snapshot(staged, target, hash("candidate"))
+    val quarantine = fixture.target("$INSTALLER_ARTIFACT_PREFIX$operationId.quarantine").apply { mkdirs() }
+    quarantine.resolve("stage").writeText("peer")
+
+    val outcome = recovery.cleanup(
+      staged,
+      target,
+      operationId,
+      hash("candidate"),
+      identity.stagedIdentity,
+      identity.directoryIdentity,
+    )
+
+    assertEquals(ImmutableAttachmentStageCleanupOutcome.CONFLICT, outcome)
+    assertEquals("candidate", staged.readText())
+    assertEquals("peer", quarantine.resolve("stage").readText())
+  }
+
+  @Test
+  fun ownedStageRecoveryRejectsAReplacedAttachmentRoot() = withFixture { fixture ->
+    val operationId = "d".repeat(32)
+    val staged = fixture.target(".mindwtr-generation-stage-$operationId.tmp").apply {
+      writeText("candidate")
+    }
+    val target = fixture.target("a.${hash("candidate")}.txt")
+    val recovery = fixture.recovery(ops)
+    val identity = recovery.snapshot(staged, target, hash("candidate"))
+    val originalRoot = fixture.replaceAttachmentsRoot()
+
+    val outcome = recovery.cleanup(
+      staged,
+      target,
+      operationId,
+      hash("candidate"),
+      identity.stagedIdentity,
+      identity.directoryIdentity,
+    )
+
+    assertEquals(ImmutableAttachmentStageCleanupOutcome.CONFLICT, outcome)
+    assertEquals("candidate", originalRoot.resolve(staged.name).readText())
+    assertFalse(staged.exists())
+  }
+
+  @Test
+  fun ownedStageRecoveryPreservesAReplacementDirectory() = withFixture { fixture ->
+    val operationId = "e".repeat(32)
+    val staged = fixture.target(".mindwtr-generation-stage-$operationId.tmp").apply {
+      writeText("candidate")
+    }
+    val target = fixture.target("a.${hash("candidate")}.txt")
+    val recovery = fixture.recovery(ops)
+    val identity = recovery.snapshot(staged, target, hash("candidate"))
+    Files.delete(staged.toPath())
+    Files.createDirectory(staged.toPath())
+    staged.resolve("peer").writeText("peer")
+
+    val outcome = recovery.cleanup(
+      staged,
+      target,
+      operationId,
+      hash("candidate"),
+      identity.stagedIdentity,
+      identity.directoryIdentity,
+    )
+
+    assertEquals(ImmutableAttachmentStageCleanupOutcome.CONFLICT, outcome)
+    assertEquals("peer", staged.resolve("peer").readText())
+  }
+
   private fun assertFailsWithMessage(expected: String, action: () -> Unit) {
     try {
       action()
@@ -627,11 +754,23 @@ class AttachmentFileInstallerCoreTest {
       ops = ops,
     )
 
+    fun recovery(ops: AttachmentInstallerFileOps) = ImmutableAttachmentStageRecoveryCore(
+      targetRoot = attachments,
+      ops = ops,
+    )
+
     fun stage(content: String): File = cache.resolve("stage-${System.nanoTime()}.bin").apply {
       writeText(content)
     }
 
     fun target(name: String): File = attachments.resolve(name)
+
+    fun replaceAttachmentsRoot(): File {
+      val original = root.resolve("original-attachments")
+      Files.move(attachments.toPath(), original.toPath())
+      Files.createDirectories(attachments.toPath())
+      return original
+    }
 
     fun activeArtifact(suffix: String): File {
       val journal = internalArtifacts().single { it.name.endsWith(".journal") }
