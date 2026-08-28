@@ -6236,6 +6236,32 @@ mod tests {
     }
 
     #[test]
+    fn windows_directory_parser_rejects_malformed_next_offsets() {
+        assert_eq!(
+            retained_directory_next_entry_offset(0, 112, 106, 104, 216)
+                .expect("valid aligned next entry"),
+            Some(112)
+        );
+        assert_eq!(
+            retained_directory_next_entry_offset(0, 0, 106, 104, 216)
+                .expect("zero marks the final entry"),
+            None
+        );
+
+        assert!(retained_directory_next_entry_offset(0, 108, 106, 104, 220).is_err());
+        assert!(retained_directory_next_entry_offset(0, 104, 106, 104, 220).is_err());
+        assert!(retained_directory_next_entry_offset(0, 112, 106, 104, 215).is_err());
+        assert!(retained_directory_next_entry_offset(
+            usize::MAX - 7,
+            8,
+            usize::MAX - 1,
+            1,
+            usize::MAX,
+        )
+        .is_err());
+    }
+
+    #[test]
     fn sync_folder_probe_reports_create_failure_and_cleans_up() {
         assert_folder_probe_failure(
             ProbeFailureStage::Create,
@@ -13829,7 +13855,7 @@ fn retained_root_list_names(directory: &File) -> std::io::Result<Vec<OsString>> 
                         "File Sync directory enumeration returned an invalid name length",
                     )
                 })?;
-            retained_directory_name_range(
+            let name_range = retained_directory_name_range(
                 offset,
                 fixed,
                 name_units * std::mem::size_of::<u16>(),
@@ -13839,22 +13865,22 @@ fn retained_root_list_names(directory: &File) -> std::io::Result<Vec<OsString>> 
             if name != ['.' as u16] && name != ['.' as u16, '.' as u16] {
                 names.push(OsString::from_wide(name));
             }
-            if entry.NextEntryOffset == 0 {
-                break;
-            }
             let next = usize::try_from(entry.NextEntryOffset).map_err(|_| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "File Sync directory enumeration returned an invalid offset",
                 )
             })?;
-            if next == 0 || offset + next >= buffer_bytes {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "File Sync directory enumeration returned an out-of-range offset",
-                ));
-            }
-            offset += next;
+            let Some(next_offset) = retained_directory_next_entry_offset(
+                offset,
+                next,
+                name_range.end,
+                fixed,
+                buffer_bytes,
+            )? else {
+                break;
+            };
+            offset = next_offset;
         }
     }
     Ok(names)
@@ -13888,6 +13914,52 @@ fn retained_directory_name_range(
         ));
     }
     Ok(start..end)
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn retained_directory_next_entry_offset(
+    current_offset: usize,
+    next_entry_offset: usize,
+    current_name_end: usize,
+    fixed_header_bytes: usize,
+    buffer_bytes: usize,
+) -> std::io::Result<Option<usize>> {
+    if next_entry_offset == 0 {
+        return Ok(None);
+    }
+    if next_entry_offset % 8 != 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "File Sync directory enumeration returned a misaligned offset",
+        ));
+    }
+    let next = current_offset
+        .checked_add(next_entry_offset)
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "File Sync directory enumeration offset overflowed",
+            )
+        })?;
+    if next <= current_offset || next < current_name_end {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "File Sync directory enumeration returned an overlapping offset",
+        ));
+    }
+    let next_header_end = next.checked_add(fixed_header_bytes).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "File Sync directory enumeration header offset overflowed",
+        )
+    })?;
+    if next_header_end > buffer_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "File Sync directory enumeration returned an out-of-range offset",
+        ));
+    }
+    Ok(Some(next))
 }
 
 #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
