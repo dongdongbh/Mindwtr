@@ -16,10 +16,15 @@ import { reconcilePomodoroSnapshot, usePomodoroStore } from '../store/pomodoro-s
  *
  * Covers both phases: the break end alerts the same way the focus end does,
  * once the break is actually running (auto-start breaks, or Start pressed).
+ *
+ * Deliberately not gated on the Task reminders setting: that switch governs
+ * date-driven reminders, it is off on every fresh install, and gating on it
+ * meant the completion alert of a timer the user had just started silently
+ * never fired (#528). Enabling the Pomodoro feature and pressing Start is the
+ * consent; the OS notification permission is still the outer gate.
  */
 export function usePomodoroAlerts(): void {
     const pomodoroEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).pomodoro);
-    const notificationsEnabled = useTaskStore((state) => state.settings.notificationsEnabled !== false);
     const autoStartBreaks = useTaskStore((state) => state.settings.gtd?.pomodoro?.autoStartBreaks === true);
     const autoStartFocus = useTaskStore((state) => state.settings.gtd?.pomodoro?.autoStartFocus === true);
     const isRunning = usePomodoroStore((state) => state.snapshot.timerState.isRunning);
@@ -53,7 +58,7 @@ export function usePomodoroAlerts(): void {
         // event after hydration. Its minutes are credited silently on purpose, so
         // the sound, notification and taskbar flash stay silent with them (#528).
         if (previous === undefined) return;
-        if (!lastEvent || lastEvent === previous || !notificationsEnabled) return;
+        if (!lastEvent || lastEvent === previous) return;
         const message = lastEvent === 'focus-finished'
             ? translateWithFallback(t, 'pomodoro.focusComplete', 'Focus session complete. Take a short break.')
             : translateWithFallback(t, 'pomodoro.breakComplete', 'Break complete. Ready for the next focus session.');
@@ -61,5 +66,5 @@ export function usePomodoroAlerts(): void {
             translateWithFallback(t, 'pomodoro.title', 'Pomodoro Focus'),
             message
         );
-    }, [hasHydrated, lastEvent, notificationsEnabled, t]);
+    }, [hasHydrated, lastEvent, t]);
 }

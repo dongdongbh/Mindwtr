@@ -209,6 +209,34 @@ describe('PomodoroPanel', () => {
     tree.unmount();
   });
 
+  it('schedules the completion alarm while task reminders are off', async () => {
+    // Task reminders are off on every fresh install, and the completion alert
+    // used to be gated on them, so a timer the user started never alerted (#528).
+    const { scheduleMobilePomodoroCompletionNotification } = await import('../lib/notification-service');
+    vi.mocked(scheduleMobilePomodoroCompletionNotification).mockClear();
+    storeState.settings = { notificationsEnabled: false, gtd: { pomodoro: {} } };
+
+    const phaseEndsAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    mockStorage({
+      '@mindwtr_pomodoro_state': JSON.stringify({
+        durations: { focusMinutes: 25, breakMinutes: 5 },
+        timerState: { phase: 'focus', remainingSeconds: 600, isRunning: true, completedFocusSessions: 0 },
+        phaseEndsAt,
+      }),
+    });
+
+    const tree = await renderPanel();
+
+    expect(scheduleMobilePomodoroCompletionNotification).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      new Date(phaseEndsAt),
+      { phase: 'focus-complete' },
+    );
+
+    tree.unmount();
+  });
+
   it('renders the phase as read-only status and names the next switch action', async () => {
     const tree = await renderPanel();
 

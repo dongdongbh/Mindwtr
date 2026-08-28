@@ -47,7 +47,6 @@ export function PomodoroPanel({
   const { t } = useLanguage();
   const tc = useThemeColors();
   const filledButton = useFilledButtonColors();
-  const notificationsEnabled = useTaskStore((state) => state.settings.notificationsEnabled !== false);
   const customDurations = useTaskStore((state) => state.settings.gtd?.pomodoro?.customDurations);
   const linkTaskEnabled = useTaskStore((state) => state.settings.gtd?.pomodoro?.linkTask === true);
   const liveTasks = useTaskStore((state) => state.tasks);
@@ -255,14 +254,18 @@ export function PomodoroPanel({
   const timerPhase = timerState.phase;
 
   useEffect(() => {
+    // Deliberately not gated on the Task reminders setting: that switch governs
+    // date-driven reminders, it is off on every fresh install, and gating on it
+    // meant the completion alert of a timer the user had just started silently
+    // never fired (#528). Enabling the Pomodoro feature and pressing Start is
+    // the consent; the OS notification permission is still the outer gate.
+    //
     // Before the stored session hydrates, the default state reads as "not
     // running" — cancelling then would kill the pending completion alarm of a
     // timer that is in fact still running (#888). Wait for the real state.
     if (isHydratingSession) return;
-    if (!notificationsEnabled || !timerIsRunning || !phaseEndsAt) {
-      void cancelMobilePomodoroCompletionNotification(
-        !notificationsEnabled ? 'notifications-disabled' : !timerIsRunning ? 'timer-not-running' : 'no-phase-end',
-      );
+    if (!timerIsRunning || !phaseEndsAt) {
+      void cancelMobilePomodoroCompletionNotification(!timerIsRunning ? 'timer-not-running' : 'no-phase-end');
       return;
     }
     const fireAt = new Date(phaseEndsAt);
@@ -270,7 +273,7 @@ export function PomodoroPanel({
     void scheduleMobilePomodoroCompletionNotification(cardTitle, message, fireAt, {
       phase: timerPhase === 'focus' ? 'focus-complete' : 'break-complete',
     });
-  }, [breakDoneLabel, cardTitle, focusDoneLabel, isHydratingSession, notificationsEnabled, phaseEndsAt, timerIsRunning, timerPhase]);
+  }, [breakDoneLabel, cardTitle, focusDoneLabel, isHydratingSession, phaseEndsAt, timerIsRunning, timerPhase]);
 
   const handleApplyPreset = (focusMinutes: number, breakMinutes: number) => {
     const nextDurations = { focusMinutes, breakMinutes };
