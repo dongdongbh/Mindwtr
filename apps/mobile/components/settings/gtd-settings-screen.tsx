@@ -126,7 +126,6 @@ export function GtdSettingsScreen({
         ? Math.max(0, Math.floor(settings.gtd?.autoArchiveDays as number))
         : 7;
     const {
-        board: boardEnabled,
         priorities: prioritiesEnabled,
         timeEstimates: timeEstimatesEnabled,
         pomodoro: pomodoroEnabled,
@@ -177,7 +176,7 @@ export function GtdSettingsScreen({
         setDefaultScheduleTimeDraft(defaultScheduleTime);
     }, [defaultScheduleTime]);
 
-    const updateFeatureFlags = (next: Partial<FeatureSettings>) => {
+    const updateFeatureFlags = (next: { priorities?: boolean; timeEstimates?: boolean; pomodoro?: boolean }) => {
         updateSettings({
             features: {
                 ...(settings.features ?? {}),
@@ -449,30 +448,6 @@ export function GtdSettingsScreen({
                         <SettingRow
                             label={t('settings.features')}
                             description={t('settings.featuresDesc')}
-                        />
-                        <SettingToggleRow
-                            divider
-                            label={t('settings.featureBoard')}
-                            description={t('settings.featureBoardDesc')}
-                            value={boardEnabled}
-                            onChange={(value) => updateFeatureFlags({ board: value })}
-                            switchTestID="feature-board-switch"
-                        />
-                        <SettingToggleRow
-                            divider
-                            label={t('settings.featurePriorities')}
-                            description={t('settings.featurePrioritiesDesc')}
-                            value={prioritiesEnabled}
-                            onChange={(value) => updateFeatureFlags({ priorities: value })}
-                            switchTestID="feature-priorities-switch"
-                        />
-                        <SettingToggleRow
-                            divider
-                            label={t('settings.featureTimeEstimates')}
-                            description={t('settings.featureTimeEstimatesDesc')}
-                            value={timeEstimatesEnabled}
-                            onChange={(value) => updateFeatureFlags({ timeEstimates: value })}
-                            switchTestID="feature-time-estimates-switch"
                         />
                         <SettingToggleRow
                             divider

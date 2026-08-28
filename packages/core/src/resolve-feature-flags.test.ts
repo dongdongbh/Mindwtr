@@ -3,28 +3,20 @@ import { resolveFeatureFlags } from './resolve-feature-flags';
 import type { AppSettings } from './types';
 
 describe('resolveFeatureFlags', () => {
-    it('defaults board, priorities, and timeEstimates on, pomodoro off, when settings are undefined', () => {
+    it('defaults priorities and timeEstimates on, pomodoro off, when settings are undefined', () => {
         expect(resolveFeatureFlags(undefined)).toEqual({
-            board: true,
             priorities: true,
             timeEstimates: true,
             pomodoro: false,
         });
     });
 
-    it('defaults board, priorities, and timeEstimates on, pomodoro off, when features is missing', () => {
+    it('defaults priorities and timeEstimates on, pomodoro off, when features is missing', () => {
         expect(resolveFeatureFlags({} as AppSettings)).toEqual({
-            board: true,
             priorities: true,
             timeEstimates: true,
             pomodoro: false,
         });
-    });
-
-    it('reads board as disabled only on an explicit false', () => {
-        expect(resolveFeatureFlags({ features: { board: false } } as AppSettings).board).toBe(false);
-        expect(resolveFeatureFlags({ features: { board: true } } as AppSettings).board).toBe(true);
-        expect(resolveFeatureFlags({ features: { board: undefined } } as AppSettings).board).toBe(true);
     });
 
     it('reads priorities as disabled only on an explicit false', () => {

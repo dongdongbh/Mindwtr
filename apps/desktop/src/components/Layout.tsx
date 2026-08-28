@@ -25,7 +25,7 @@ import {
     type LucideIcon,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { shallow, useTaskStore, safeFormatDate, tFallback, isAllowedInsecureUrl, formatTaskMovedMessage, isSyncFileLockUnavailableError, resolveFeatureFlags } from '@mindwtr/core';
+import { shallow, useTaskStore, safeFormatDate, tFallback, isAllowedInsecureUrl, formatTaskMovedMessage, isSyncFileLockUnavailableError } from '@mindwtr/core';
 import type { StoreActionResult, TaskStatus } from '@mindwtr/core';
 import { showUndoToast } from '../lib/undo-registry';
 import { useLanguage } from '../contexts/language-context';
@@ -129,7 +129,6 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
     const isFocusMode = useUiStore((state) => state.isFocusMode);
     const showToast = useUiStore((state) => state.showToast);
     const isObsidianEnabled = useObsidianStore((state) => state.config.enabled);
-    const boardEnabled = resolveFeatureFlags(settings).board;
     const [syncStatus, setSyncStatus] = useState(() => SyncService.getSyncStatus());
     const [isManualSyncing, setIsManualSyncing] = useState(false);
     const [isOnline, setIsOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
@@ -350,7 +349,7 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
                 ...(isObsidianEnabled
                     ? [{ id: 'obsidian', labelKey: 'nav.obsidian', fallbackLabel: 'Obsidian', icon: BookOpen }]
                     : []),
-                ...(boardEnabled ? [{ id: 'board', labelKey: 'nav.board', icon: Kanban }] : []),
+                { id: 'board', labelKey: 'nav.board', icon: Kanban },
             ],
         },
         {
@@ -362,7 +361,7 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
                 { id: 'trash', labelKey: 'nav.trash', icon: Trash2, tone: 'recessed' },
             ],
         },
-    ]), [boardEnabled, inboxCount, isObsidianEnabled, t]);
+    ]), [inboxCount, isObsidianEnabled, t]);
 
     const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => loadCollapsedSections());
 

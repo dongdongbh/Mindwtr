@@ -1352,8 +1352,6 @@ export const jaOverrides: Record<string, string> = {
         'settings.enableTimeEstimates': '所要時間を使う',
         'settings.features': '機能',
         'settings.featuresDesc': '必要なときだけオンにできる、任意の項目です。',
-        'settings.featureBoard': 'ボード',
-        'settings.featureBoardDesc': 'ナビゲーションにボードビューを表示します。',
         'settings.featurePriorities': '優先度',
         'settings.featurePrioritiesDesc': 'タスクに優先度のフラグを表示します。',
         'settings.featureTimeEstimates': '所要時間',

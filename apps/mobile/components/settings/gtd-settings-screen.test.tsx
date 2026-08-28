@@ -62,7 +62,6 @@ vi.mock('@mindwtr/core', () => ({
   },
   normalizeFocusTaskLimit: (value?: number) => value ?? 3,
   resolveFeatureFlags: (settings: AppData['settings']) => ({
-    board: settings?.features?.board !== false,
     priorities: settings?.features?.priorities !== false,
     timeEstimates: settings?.features?.timeEstimates !== false,
     pomodoro: settings?.features?.pomodoro === true,
@@ -179,37 +178,6 @@ describe('GtdSettingsScreen task editor layout', () => {
       },
     };
     storeState.areas = [];
-  });
-
-  it('saves Board, Priorities, and Time estimates as independent optional features', () => {
-    storeState.settings = {
-      features: {
-        board: false,
-        priorities: false,
-        timeEstimates: false,
-      },
-      gtd: { taskEditor: {} },
-    };
-    let tree!: renderer.ReactTestRenderer;
-    renderer.act(() => {
-      tree = renderer.create(<GtdSettingsScreen onNavigate={vi.fn()} screen="gtd" />);
-    });
-
-    renderer.act(() => {
-      tree.root.findByProps({ testID: 'feature-board-switch' }).props.onValueChange(true);
-      tree.root.findByProps({ testID: 'feature-priorities-switch' }).props.onValueChange(true);
-      tree.root.findByProps({ testID: 'feature-time-estimates-switch' }).props.onValueChange(true);
-    });
-
-    expect(updateSettings).toHaveBeenNthCalledWith(1, {
-      features: { board: true, priorities: false, timeEstimates: false },
-    });
-    expect(updateSettings).toHaveBeenNthCalledWith(2, {
-      features: { board: false, priorities: true, timeEstimates: false },
-    });
-    expect(updateSettings).toHaveBeenNthCalledWith(3, {
-      features: { board: false, priorities: false, timeEstimates: true },
-    });
   });
 
   it('quick-toggles the eye icon without opening the field sheet', () => {

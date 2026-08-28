@@ -120,8 +120,6 @@ type Labels = {
     taskEditorSectionDetails: string;
     featurePriorities: string;
     featurePrioritiesDesc: string;
-    featureBoard: string;
-    featureBoardDesc: string;
     featureTimeEstimates: string;
     featureTimeEstimatesDesc: string;
     featurePomodoro: string;
@@ -191,8 +189,6 @@ export function SettingsGtdPage({
         return `${days} ${t.autoArchiveDayUnit}`;
     };
     const resolvedFeatureFlags = resolveFeatureFlags(safeSettings);
-    const boardEnabled = resolvedFeatureFlags.board;
-    const prioritiesEnabled = resolvedFeatureFlags.priorities;
     const featureHiddenFields = new Set<TaskEditorFieldId>();
     if (!resolvedFeatureFlags.priorities) {
         featureHiddenFields.add('priority');
@@ -332,15 +328,6 @@ export function SettingsGtdPage({
                 timeEstimates: true,
             },
         }).then(showSaved).catch((error) => reportSettingsFailure('Failed to enable time estimates', error, t.settingsSaveFailed));
-    };
-
-    const updateFeatureFlag = (key: keyof FeatureSettings, value: boolean) => {
-        updateSettings({
-            features: {
-                ...(safeSettings.features ?? {}),
-                [key]: value,
-            },
-        }).then(showSaved).catch((error) => reportSettingsFailure('Failed to update feature flags', error, t.settingsSaveFailed));
     };
 
     const commitDefaultScheduleTime = () => {
@@ -657,32 +644,18 @@ export function SettingsGtdPage({
                 open={featuresOpen}
                 onToggle={() => setFeaturesOpen((prev) => !prev)}
             >
-                <SettingRow padded settingsKey="featureBoard" title={t.featureBoard} description={t.featureBoardDesc}>
-                    <Switch
-                        aria-label={t.featureBoard}
-                        checked={boardEnabled}
-                        onCheckedChange={(value) => updateFeatureFlag('board', value)}
-                    />
-                </SettingRow>
-                <SettingRow padded settingsKey="featurePriorities" title={t.featurePriorities} description={t.featurePrioritiesDesc}>
-                    <Switch
-                        aria-label={t.featurePriorities}
-                        checked={prioritiesEnabled}
-                        onCheckedChange={(value) => updateFeatureFlag('priorities', value)}
-                    />
-                </SettingRow>
-                <SettingRow padded settingsKey="featureTimeEstimates" title={t.featureTimeEstimates} description={t.featureTimeEstimatesDesc}>
-                    <Switch
-                        aria-label={t.featureTimeEstimates}
-                        checked={timeEstimatesEnabled}
-                        onCheckedChange={(value) => updateFeatureFlag('timeEstimates', value)}
-                    />
-                </SettingRow>
                 <SettingRow padded settingsKey="featurePomodoro" title={t.featurePomodoro} description={t.featurePomodoroDesc}>
                     <Switch
                         aria-label={t.featurePomodoro}
                         checked={pomodoroEnabled}
-                        onCheckedChange={(value) => updateFeatureFlag('pomodoro', value)}
+                        onCheckedChange={() => {
+                            updateSettings({
+                                features: {
+                                    ...(safeSettings.features ?? {}),
+                                    pomodoro: !pomodoroEnabled,
+                                },
+                            }).then(showSaved).catch((error) => reportSettingsFailure('Failed to update feature flags', error, t.settingsSaveFailed));
+                        }}
                     />
                 </SettingRow>
                 {pomodoroEnabled && (

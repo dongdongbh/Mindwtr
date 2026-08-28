@@ -417,7 +417,6 @@ export interface AttachmentSettings {
 }
 
 export interface FeatureSettings {
-    board?: boolean;
     priorities?: boolean;
     timeEstimates?: boolean;
     pomodoro?: boolean;

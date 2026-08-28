@@ -1321,8 +1321,6 @@ export const svOverrides: Record<string, string> = {
         'settings.enableTimeEstimates': 'Aktivera tidsuppskattningar',
         'settings.features': 'Funktioner',
         'settings.featuresDesc': 'Valfria signaler du kan aktivera vid behov.',
-        'settings.featureBoard': 'Tavla',
-        'settings.featureBoardDesc': 'Visa tavelvyn i navigeringen.',
         'settings.featurePriorities': 'Prioriteringar',
         'settings.featurePrioritiesDesc': 'Visa en prioritetsflagga på uppgifter.',
         'settings.featureTimeEstimates': 'Tidsuppskattningar',

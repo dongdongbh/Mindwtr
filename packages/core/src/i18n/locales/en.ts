@@ -1346,8 +1346,6 @@ export const en: Record<string, string> = {
         'settings.enableTimeEstimates': 'Enable Time Estimates',
         'settings.features': 'Features',
         'settings.featuresDesc': 'Optional signals you can turn on when needed.',
-        'settings.featureBoard': 'Board',
-        'settings.featureBoardDesc': 'Show the Board view in navigation.',
         'settings.featurePriorities': 'Priorities',
         'settings.featurePrioritiesDesc': 'Show a priority flag on tasks.',
         'settings.featureTimeEstimates': 'Time estimates',

@@ -1321,8 +1321,6 @@ export const faOverrides: Record<string, string> = {
         'settings.enableTimeEstimates': 'فعال‌سازی برآورد زمان',
         'settings.features': 'ویژگی‌ها',
         'settings.featuresDesc': 'سیگنال‌های اختیاری که می‌توانید در صورت نیاز روشن کنید.',
-        'settings.featureBoard': 'تابلو',
-        'settings.featureBoardDesc': 'نمای تابلو را در پیمایش نشان دهید.',
         'settings.featurePriorities': 'اولویت‌ها',
         'settings.featurePrioritiesDesc': 'نمایش پرچم اولویت روی کارها.',
         'settings.featureTimeEstimates': 'برآورد زمان',
