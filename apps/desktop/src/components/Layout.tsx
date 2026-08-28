@@ -559,6 +559,8 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
                     'settings.syncFileAttachmentTooLarge',
                     'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
                 ), 'info', 6000);
+            } else if (result.success && result.remoteWriteDeferred) {
+                showToast(result.error || settings?.lastSyncError || tFallback(t, 'settings.lastSyncError', 'Sync failed'), 'error');
             } else if (result.success && result.attachmentWriteDeferred) {
                 showToast(tFallback(
                     t,
@@ -595,8 +597,6 @@ export function Layout({ children, currentView, onViewChange, onOpenSyncSettings
                     'settings.syncRemoteCleanupDeferred',
                     'The sync operation completed. Mindwtr could not remove the temporary sync lock, but it expires automatically. No retry is needed.',
                 ), 'info', 6000);
-            } else if (result.success && result.remoteWriteDeferred) {
-                showToast(result.error || settings?.lastSyncError || tFallback(t, 'settings.lastSyncError', 'Sync failed'), 'error');
             } else if (result.success) {
                 showToast(tFallback(t, 'settings.lastSyncSuccess', 'Sync completed'), 'success');
             } else {

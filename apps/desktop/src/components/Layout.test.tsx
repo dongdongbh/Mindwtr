@@ -389,6 +389,43 @@ describe('Layout sync conflict surface', () => {
         performSyncSpy.mockRestore();
     });
 
+    it.each([
+        {
+            outcome: 'failed',
+            result: { success: false, error: 'Document sync failed.' },
+        },
+        {
+            outcome: 'deferred',
+            result: {
+                success: true,
+                remoteWriteDeferred: true,
+                error: 'Remote write failed. Retrying in the background.',
+            },
+        },
+    ])('prioritizes a $outcome document sync result over deferred attachment feedback', async ({ result }) => {
+        const showToast = vi.fn();
+        const performSyncSpy = vi.spyOn(SyncService, 'performSync').mockResolvedValue({
+            ...result,
+            attachmentWriteDeferred: true,
+        } as Awaited<ReturnType<typeof SyncService.performSync>>);
+        act(() => {
+            useUiStore.setState((state) => ({ ...state, showToast }));
+        });
+
+        const { getByRole } = renderLayout();
+        fireEvent.click(getByRole('button', { name: /Sync now/i }));
+
+        await waitFor(() => expect(performSyncSpy).toHaveBeenCalledWith({ manual: true }));
+        expect(showToast).toHaveBeenCalledWith(result.error, 'error');
+        expect(showToast).not.toHaveBeenCalledWith(
+            'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
+            'info',
+            6000,
+        );
+
+        performSyncSpy.mockRestore();
+    });
+
     it('shows the File Sync size guidance instead of reporting a completed manual sync', async () => {
         const showToast = vi.fn();
         const performSyncSpy = vi.spyOn(SyncService, 'performSync').mockResolvedValue({

@@ -148,6 +148,10 @@ export function useManualPullSync() {
         return;
       }
 
+      if (result.remoteWriteDeferred) {
+        throw new Error(result.error || tFallback(t, 'settings.lastSyncError', 'Sync failed'));
+      }
+
       if (result.success && result.attachmentWriteDeferred) {
         finishDeferredIndicator();
         showToast({
@@ -224,7 +228,7 @@ export function useManualPullSync() {
         return;
       }
 
-      if (!result.success || result.remoteWriteDeferred) {
+      if (!result.success) {
         throw new Error(result.error || tFallback(t, 'settings.lastSyncError', 'Sync failed'));
       }
 

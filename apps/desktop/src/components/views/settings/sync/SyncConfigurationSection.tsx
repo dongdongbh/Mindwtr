@@ -669,6 +669,7 @@ export function SyncConfigurationSection({
                         <div className="flex flex-wrap gap-2">
                             <input
                                 type="text"
+                                aria-label={t.syncFolderLocation}
                                 value={syncPath}
                                 onChange={(e) => onSyncPathChange(e.target.value)}
                                 placeholder="/path/to/your/sync/folder"

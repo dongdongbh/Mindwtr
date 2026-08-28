@@ -69,12 +69,14 @@ export function SomedayView() {
     [settings?.gtd?.viewSections?.someday],
   );
   const somedayTaskGroups = useMemo(
-    () => groupTasksByViewSection(
-      somedayTasks,
-      'someday',
-      somedaySections,
-      tFallback(t, 'viewSections.noSection', 'No section'),
-    ),
+    () => somedaySections.length === 0
+      ? undefined
+      : groupTasksByViewSection(
+        somedayTasks,
+        'someday',
+        somedaySections,
+        tFallback(t, 'viewSections.noSection', 'No section'),
+      ),
     [somedaySections, somedayTasks, t],
   );
   const selection = useTaskListSelection({
