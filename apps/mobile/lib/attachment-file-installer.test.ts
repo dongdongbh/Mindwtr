@@ -177,6 +177,30 @@ describe('installAttachmentFileGeneration', () => {
       .resolves.toMatchObject({ targetPath: target });
   });
 
+  it('rejects a distinct 129th reservation without poisoning persisted recovery state', async () => {
+    const storageKey = '@mindwtr/file-sync-publication-reservations-v1';
+    const records = Array.from({ length: 128 }, (_, index) => ({
+      version: 1,
+      operationId: null,
+      stagedPath: null,
+      targetPath: `file:///sync/attachments/a-${index}.${downloadHash}.txt`,
+      expectedStagedSha256: null,
+      invalidTargetAttempts: 1,
+      state: 'invalid-target',
+    }));
+    const persisted = JSON.stringify(records);
+    storage.set(storageKey, persisted);
+
+    await expect(reserveFileSyncAttachmentPublication(
+      `file:///sync/attachments/new.${downloadHash}.txt`,
+      downloadHash,
+    )).rejects.toThrow('recovery state has reached its entry limit');
+
+    expect(storage.get(storageKey)).toBe(persisted);
+    expect(JSON.parse(storage.get(storageKey)!)).toHaveLength(128);
+    expect(deleteAsync).not.toHaveBeenCalled();
+  });
+
   it('rejects malformed native hash snapshots', async () => {
     hashAsync.mockResolvedValue({ sha256: 'bad', size: 42, modificationTimeMs: 1_234 });
 

@@ -72,6 +72,7 @@ const getNativeModule = (): NativeAttachmentFileInstaller => {
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
 const FILE_SYNC_PUBLICATION_RESERVATIONS_KEY = '@mindwtr/file-sync-publication-reservations-v1';
 const FILE_SYNC_PUBLICATION_STAGE_PREFIX = '.mindwtr-generation-stage-';
+const FILE_SYNC_PUBLICATION_MAX_RESERVATIONS = 128;
 const FILE_SYNC_PUBLICATION_MAX_INVALID_TARGET_ATTEMPTS = 3;
 
 type FileSyncPublicationReservationRecord = {
@@ -113,7 +114,7 @@ const parseReservationRecords = (raw: string | null): FileSyncPublicationReserva
   } catch (error) {
     throw new Error('File Sync attachment publication recovery state is unreadable', { cause: error });
   }
-  if (!Array.isArray(value) || value.length > 128) {
+  if (!Array.isArray(value) || value.length > FILE_SYNC_PUBLICATION_MAX_RESERVATIONS) {
     throw new Error('File Sync attachment publication recovery state is invalid');
   }
   return value.map((entry) => {
@@ -214,6 +215,10 @@ export const reserveFileSyncAttachmentPublication = async (
   if (invalidTargetAttempts >= FILE_SYNC_PUBLICATION_MAX_INVALID_TARGET_ATTEMPTS) {
     throw new Error('File Sync attachment generation remains corrupt after bounded retries');
   }
+  const recordsWithoutTarget = records.filter((record) => record.targetPath !== target);
+  if (recordsWithoutTarget.length >= FILE_SYNC_PUBLICATION_MAX_RESERVATIONS) {
+    throw new Error('File Sync attachment publication recovery state has reached its entry limit');
+  }
   reservationSequence += 1;
   const operationId = `${Date.now().toString(36)}-${reservationSequence.toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const stagedPath = `${parentPath(target)}${FILE_SYNC_PUBLICATION_STAGE_PREFIX}${operationId}.tmp`;
@@ -226,7 +231,7 @@ export const reserveFileSyncAttachmentPublication = async (
     invalidTargetAttempts,
     state: 'reserved',
   };
-  await storeReservationRecords([...records.filter((record) => record.targetPath !== target), next]);
+  await storeReservationRecords([...recordsWithoutTarget, next]);
   return { operationId, stagedPath, targetPath: target };
 });
 
