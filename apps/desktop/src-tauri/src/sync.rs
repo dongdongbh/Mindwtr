@@ -8,16 +8,15 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::error::Error as StdError;
-#[cfg(target_os = "macos")]
-use std::ffi::CStr;
 #[cfg(unix)]
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::Manager;
@@ -4988,6 +4987,30 @@ mod tests {
                 "the shared atomic helper must not use {forbidden}"
             );
         }
+        assert!(
+            !helper_body.contains("root.exists(destination)"),
+            "probe publication must rely on one OS no-replace operation, not an exists-then-rename check"
+        );
+
+        let retained_rename_body = source
+            .split_once("fn retained_root_rename(")
+            .expect("retained-root rename implementations")
+            .1
+            .split_once("\n#[cfg(unix)]\nfn retained_root_remove")
+            .expect("end of retained-root rename implementations")
+            .0;
+        for required in [
+            "SYS_renameat2",
+            "RENAME_NOREPLACE",
+            "renameatx_np",
+            "RENAME_EXCL",
+            "ReplaceIfExists = replace",
+        ] {
+            assert!(
+                retained_rename_body.contains(required),
+                "every supported desktop platform must retain its OS no-replace primitive ({required})"
+            );
+        }
 
         let probe_declaration = format!("fn {}<", "probe_sync_dir_at_with");
         let probe_end_declaration = format!("\nfn {}(", "probe_sync_dir");
@@ -5171,6 +5194,93 @@ mod tests {
 
         assert!(!tmp_file.exists(), "probe temp file must be removed");
         assert!(!final_file.exists(), "probe final file must be removed");
+    }
+
+    #[test]
+    fn sync_folder_probe_publish_never_replaces_a_final_gap_peer_leaf() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let tmp_file = dir.path().join(".mindwtr-folder-probe-race.tmp");
+        let final_file = dir.path().join(".mindwtr-folder-probe-race");
+        let peer_file = final_file.clone();
+        let mut published_peer = false;
+        let mut before_stage = |stage: AtomicWriteStage| {
+            if stage == AtomicWriteStage::Rename && !published_peer {
+                fs::write(&peer_file, b"peer-generation")
+                    .map_err(|error| error.to_string())?;
+                published_peer = true;
+            }
+            Ok(())
+        };
+        let mut read_back = |_path: &Path, bytes: Vec<u8>| Ok(bytes);
+        let mut before_remove = |_path: &Path| Ok(());
+
+        let error = probe_sync_dir_at_with(
+            dir.path(),
+            &tmp_file,
+            &final_file,
+            &mut before_stage,
+            &mut read_back,
+            &mut before_remove,
+        )
+        .expect_err("OS no-replace publication must reject the late peer leaf");
+
+        assert!(error.starts_with("Could not finalize a file in this folder"));
+        assert_eq!(
+            fs::read(&final_file).expect("peer leaf remains"),
+            b"peer-generation"
+        );
+        assert!(!tmp_file.exists(), "owned temp is cleaned up");
+    }
+
+    #[test]
+    fn sync_folder_probe_cleanup_quarantines_and_preserves_a_final_gap_peer_leaf() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let tmp_file = dir.path().join(".mindwtr-folder-probe-cleanup-race.tmp");
+        let final_file = dir.path().join(".mindwtr-folder-probe-cleanup-race");
+        let displaced_owned = dir.path().join("owned-probe-generation");
+        let mut before_stage = |_stage: AtomicWriteStage| Ok(());
+        let mut read_back = |_path: &Path, bytes: Vec<u8>| Ok(bytes);
+        let mut swapped = false;
+        let mut before_remove = |path: &Path| {
+            if !swapped {
+                fs::rename(path, &displaced_owned).map_err(|error| error.to_string())?;
+                fs::write(path, b"peer-generation").map_err(|error| error.to_string())?;
+                swapped = true;
+            }
+            Ok(())
+        };
+
+        let error = probe_sync_dir_at_with(
+            dir.path(),
+            &tmp_file,
+            &final_file,
+            &mut before_stage,
+            &mut read_back,
+            &mut before_remove,
+        )
+        .expect_err("cleanup must reject the captured peer generation");
+
+        assert!(error.starts_with("Could not remove the test file"));
+        assert!(error.contains("captured a replacement leaf"));
+        assert_eq!(
+            fs::read(&final_file).expect("peer leaf restored"),
+            b"peer-generation"
+        );
+        assert_eq!(
+            fs::read(&displaced_owned).expect("owned generation preserved"),
+            SYNC_FOLDER_PROBE_BYTES
+        );
+        assert!(!tmp_file.exists());
+        let retained_quarantines = fs::read_dir(dir.path())
+            .expect("list directory")
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .filter(|name| name.starts_with(".mindwtr-probe-cleanup-"))
+            .collect::<Vec<_>>();
+        assert!(
+            retained_quarantines.is_empty(),
+            "restored peer must not leave a duplicate quarantine: {retained_quarantines:?}"
+        );
     }
 
     fn run_atomic_write_test<BeforeStage>(
@@ -12589,30 +12699,170 @@ fn retained_root_open(
     ))
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn retained_root_rename(
     directory: &File,
     source: &OsStr,
     destination: &OsStr,
-    _replace: bool,
+    replace: bool,
 ) -> std::io::Result<()> {
     use std::os::fd::AsRawFd as _;
 
     let source = retained_root_leaf_c_string(source)?;
     let destination = retained_root_leaf_c_string(destination)?;
+    let result = if replace {
+        unsafe {
+            libc::renameat(
+                directory.as_raw_fd(),
+                source.as_ptr(),
+                directory.as_raw_fd(),
+                destination.as_ptr(),
+            )
+        }
+    } else {
+        unsafe {
+            libc::syscall(
+                libc::SYS_renameat2,
+                directory.as_raw_fd(),
+                source.as_ptr(),
+                directory.as_raw_fd(),
+                destination.as_ptr(),
+                libc::RENAME_NOREPLACE,
+            ) as i32
+        }
+    };
+    if result == 0 {
+        return Ok(());
+    }
+    let error = std::io::Error::last_os_error();
+    if !replace
+        && matches!(
+            error.raw_os_error(),
+            Some(libc::ENOSYS) | Some(libc::EINVAL) | Some(libc::EOPNOTSUPP)
+        )
+    {
+        return retained_root_link_then_unlink_no_replace(
+            directory,
+            source.as_c_str(),
+            destination.as_c_str(),
+        );
+    }
+    Err(error)
+}
+
+#[cfg(target_os = "macos")]
+fn retained_root_rename(
+    directory: &File,
+    source: &OsStr,
+    destination: &OsStr,
+    replace: bool,
+) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd as _;
+
+    let source = retained_root_leaf_c_string(source)?;
+    let destination = retained_root_leaf_c_string(destination)?;
+    let result = if replace {
+        unsafe {
+            libc::renameat(
+                directory.as_raw_fd(),
+                source.as_ptr(),
+                directory.as_raw_fd(),
+                destination.as_ptr(),
+            )
+        }
+    } else {
+        unsafe {
+            libc::renameatx_np(
+                directory.as_raw_fd(),
+                source.as_ptr(),
+                directory.as_raw_fd(),
+                destination.as_ptr(),
+                libc::RENAME_EXCL,
+            )
+        }
+    };
+    if result == 0 {
+        return Ok(());
+    }
+    let error = std::io::Error::last_os_error();
+    if !replace
+        && matches!(
+            error.raw_os_error(),
+            Some(libc::ENOSYS) | Some(libc::EINVAL) | Some(libc::ENOTSUP)
+        )
+    {
+        return retained_root_link_then_unlink_no_replace(
+            directory,
+            source.as_c_str(),
+            destination.as_c_str(),
+        );
+    }
+    Err(error)
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+fn retained_root_rename(
+    directory: &File,
+    source: &OsStr,
+    destination: &OsStr,
+    replace: bool,
+) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd as _;
+
+    let source = retained_root_leaf_c_string(source)?;
+    let destination = retained_root_leaf_c_string(destination)?;
+    if replace {
+        if unsafe {
+            libc::renameat(
+                directory.as_raw_fd(),
+                source.as_ptr(),
+                directory.as_raw_fd(),
+                destination.as_ptr(),
+            )
+        } == 0
+        {
+            return Ok(());
+        }
+        return Err(std::io::Error::last_os_error());
+    }
+    retained_root_link_then_unlink_no_replace(
+        directory,
+        source.as_c_str(),
+        destination.as_c_str(),
+    )
+}
+
+#[cfg(unix)]
+fn retained_root_link_then_unlink_no_replace(
+    directory: &File,
+    source: &CStr,
+    destination: &CStr,
+) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd as _;
+
     if unsafe {
-        libc::renameat(
+        libc::linkat(
             directory.as_raw_fd(),
             source.as_ptr(),
             directory.as_raw_fd(),
             destination.as_ptr(),
+            0,
         )
-    } == 0
+    } != 0
     {
-        Ok(())
-    } else {
-        Err(std::io::Error::last_os_error())
+        return Err(std::io::Error::last_os_error());
     }
+    if unsafe { libc::unlinkat(directory.as_raw_fd(), source.as_ptr(), 0) } == 0 {
+        return Ok(());
+    }
+    let unlink_error = std::io::Error::last_os_error();
+    if unsafe { libc::unlinkat(directory.as_raw_fd(), destination.as_ptr(), 0) } != 0 {
+        return Err(std::io::Error::other(format!(
+            "no-replace publication linked the destination but could not retire the source ({unlink_error}) or roll back the destination ({})",
+            std::io::Error::last_os_error()
+        )));
+    }
+    Err(unlink_error)
 }
 
 #[cfg(target_os = "windows")]
@@ -13049,6 +13299,8 @@ struct OwnedRetainedRootPublication {
     cleanup_on_drop: bool,
 }
 
+static RETAINED_CLEANUP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
 impl OwnedRetainedRootPublication {
     fn path(&self) -> PathBuf {
         self.sync_dir.join(&self.leaf)
@@ -13076,6 +13328,57 @@ impl OwnedRetainedRootPublication {
         Ok(bytes)
     }
 
+    fn quarantine_and_remove(&self, path: &Path) -> Result<(), String> {
+        let root = self.root();
+        for _ in 0..16 {
+            let sequence = RETAINED_CLEANUP_SEQUENCE.fetch_add(1, AtomicOrdering::Relaxed);
+            let quarantine = self.sync_dir.join(format!(
+                ".mindwtr-probe-cleanup-{}-{sequence:016x}",
+                std::process::id()
+            ));
+            match root.rename(path, &quarantine, false) {
+                Ok(()) => {
+                    if !root.has_identity(&quarantine, self.identity) {
+                        let restore = root.rename(&quarantine, path, false);
+                        let preservation = match restore {
+                            Ok(()) => {
+                                "probe cleanup captured a replacement leaf; restored it without deleting it"
+                                    .to_string()
+                            }
+                            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                                "probe cleanup captured a replacement leaf; preserved it in quarantine because the canonical name was occupied"
+                                    .to_string()
+                            }
+                            Err(error) => format!(
+                                "probe cleanup captured a replacement leaf; preserved it in quarantine because restoration failed: {error}"
+                            ),
+                        };
+                        root.sync_directory().map_err(|error| {
+                            format!(
+                                "{preservation}; failed to flush the preserved directory state: {error}"
+                            )
+                        })?;
+                        return Err(preservation);
+                    }
+                    root.remove(&quarantine)
+                        .map_err(|error| format!("Failed to remove quarantined probe file: {error}"))?;
+                    root.sync_directory().map_err(|error| {
+                        format!("Failed to flush probe cleanup directory metadata: {error}")
+                    })?;
+                    return Ok(());
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => {
+                    return Err(format!(
+                        "Failed to quarantine probe file before cleanup: {error}"
+                    ))
+                }
+            }
+        }
+        Err("Could not allocate a unique probe cleanup quarantine".to_string())
+    }
+
     fn remove_with<BeforeRemove>(
         &self,
         path: &Path,
@@ -13088,9 +13391,16 @@ impl OwnedRetainedRootPublication {
             return Ok(());
         }
         self.verify_at(path)?;
-        before_remove(path)?;
-        self.verify_at(path)?;
-        self.root().remove(path).map_err(|error| error.to_string())
+        if let Err(first_error) = before_remove(path) {
+            if before_remove(path).is_err() {
+                return Err(first_error);
+            }
+            if let Err(cleanup_error) = self.quarantine_and_remove(path) {
+                return Err(format!("{first_error}; cleanup retry failed safely: {cleanup_error}"));
+            }
+            return Err(first_error);
+        }
+        self.quarantine_and_remove(path)
     }
 
     fn keep(&mut self) {
@@ -13102,9 +13412,7 @@ impl Drop for OwnedRetainedRootPublication {
     fn drop(&mut self) {
         if self.cleanup_on_drop {
             let path = self.path();
-            if self.root().has_identity(&path, self.identity) {
-                let _ = self.root().remove(&path);
-            }
+            let _ = self.quarantine_and_remove(&path);
         }
     }
 }
@@ -13170,16 +13478,6 @@ where
         return Err(RetainedAtomicWriteError {
             stage: AtomicWriteStage::Rename,
             detail: "Atomic write temp file was replaced before publication".to_string(),
-            owned_temp: None,
-        });
-    }
-    if !destination_may_exist && root.exists(destination).unwrap_or(true) {
-        if root.has_identity(tmp_file, identity) {
-            let _ = root.remove(tmp_file);
-        }
-        return Err(RetainedAtomicWriteError {
-            stage: AtomicWriteStage::Rename,
-            detail: "Atomic write destination already exists".to_string(),
             owned_temp: None,
         });
     }
