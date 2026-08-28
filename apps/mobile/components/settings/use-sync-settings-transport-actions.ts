@@ -821,7 +821,7 @@ export function useSyncSettingsTransportActions({
                 }
                 if (probeResult.skipped === 'requeued') {
                     showSettingsWarning(
-                        tr('settings.syncQueued'),
+                        tr('common.notice'),
                         tr('settings.syncActivationRequeuedBody'),
                         4200,
                     );

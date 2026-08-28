@@ -991,7 +991,7 @@ describe('useSyncSettingsTransportActions', () => {
         expect(mocked.syncMobileBackgroundSyncRegistration).not.toHaveBeenCalled();
         if (_label === 'requeue') {
             expect(mocked.showSettingsWarning).toHaveBeenCalledWith(
-                'settings.syncQueued',
+                'common.notice',
                 'settings.syncActivationRequeuedBody',
                 4200,
             );
