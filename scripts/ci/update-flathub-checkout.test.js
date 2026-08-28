@@ -9,6 +9,20 @@ const script = resolve("scripts/ci/update-flathub-checkout.sh");
 const fixtures = resolve("scripts/ci/fixtures/flathub");
 const commit = "fedcba9876543210fedcba9876543210fedcba98";
 
+test("desktop declares XML parsing as an isolated-install dependency", () => {
+  const packageJson = JSON.parse(
+    readFileSync("apps/desktop/package.json", "utf8"),
+  );
+  const packageLock = JSON.parse(
+    readFileSync("apps/desktop/package-lock.json", "utf8"),
+  );
+
+  expect(packageJson.dependencies["@xmldom/xmldom"]).toBe("0.8.13");
+  expect(packageLock.packages["node_modules/@xmldom/xmldom"].version).toBe(
+    "0.8.13",
+  );
+});
+
 afterEach(() => {
   for (const root of tempRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });

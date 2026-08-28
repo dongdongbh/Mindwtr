@@ -96,6 +96,7 @@
         "@tauri-apps/plugin-http": "2.5.4",
         "@tauri-apps/plugin-notification": "2.3.3",
         "@tauri-apps/plugin-shell": "2.3.3",
+        "@xmldom/xmldom": "0.8.13",
         "clsx": "^2.1.0",
         "date-fns": "^4.1.0",
         "fflate": "^0.8.2",
