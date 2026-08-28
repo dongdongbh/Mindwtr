@@ -1216,6 +1216,86 @@ describe('InboxProcessingModal', () => {
       status: 'inbox',
       projectId: 'project-created',
     });
+    expect(addTask.mock.invocationCallOrder[0]).toBeLessThan(updateTask.mock.invocationCallOrder[0]);
+  });
+
+  it('retries only uncommitted project actions before moving the original Inbox task', async () => {
+    addProject.mockResolvedValue({
+      id: 'project-created',
+      title: 'Plan Launch',
+      color: '#3b82f6',
+      status: 'active',
+      order: 0,
+      tagIds: [],
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+    });
+    addTask
+      .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce({ success: false, error: 'Offline' })
+      .mockResolvedValueOnce({ success: true });
+    const onClose = vi.fn();
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={onClose} />);
+    });
+
+    const root = tree!.root;
+    walkToProjectConversion(root);
+    act(() => {
+      root.findByProps({ accessibilityLabel: 'projects.title' }).props.onChangeText('Plan Launch');
+      findPressableWithText(root, 'process.addAnotherAction').props.onPress();
+    });
+    act(() => {
+      findPressableWithText(root, 'process.addAnotherAction').props.onPress();
+    });
+
+    const findActionInputs = () => root.findAll((node) => (
+      typeof node.type === 'string'
+      && node.props.accessibilityLabel === 'process.nextAction'
+      && typeof node.props.onChangeText === 'function'
+    ));
+    act(() => {
+      findActionInputs()[0].props.onChangeText('Draft launch brief');
+    });
+    act(() => {
+      findActionInputs()[1].props.onChangeText('Book venue');
+    });
+    act(() => {
+      findActionInputs()[2].props.onChangeText('Send invitations');
+    });
+
+    await act(async () => {
+      findPressableWithText(root, 'process.createProject').props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(addTask.mock.calls.map(([title]) => title)).toEqual(['Book venue', 'Send invitations']);
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(findActionInputs().map((input) => input.props.value)).toEqual([
+      'Draft launch brief',
+      'Send invitations',
+    ]);
+
+    await act(async () => {
+      findPressableWithText(root, 'process.createProject').props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(addTask.mock.calls.map(([title]) => title)).toEqual([
+      'Book venue',
+      'Send invitations',
+      'Send invitations',
+    ]);
+    expect(updateTask).toHaveBeenCalledTimes(1);
+    expect(updateTask).toHaveBeenCalledWith('inbox-1', expect.objectContaining({
+      title: 'Draft launch brief',
+      status: 'next',
+      projectId: 'project-created',
+    }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('suggests existing contexts and tags while typing without a prefix', () => {
@@ -2184,6 +2264,41 @@ describe('InboxProcessingModal', () => {
       expect(updateTask).toHaveBeenLastCalledWith('inbox-1', expect.objectContaining({ status: 'inbox' }));
     });
 
+    it('binds each queued Undo toast to the decision that created it', async () => {
+      asyncStorageMock.getItem.mockResolvedValue('quick');
+      storeState.tasks = [
+        { ...baseInboxTask, id: 'inbox-a', title: 'First capture' },
+        { ...baseInboxTask, id: 'inbox-b', title: 'Second capture', createdAt: '2025-01-02T00:00:00.000Z' },
+      ];
+      const root = await openFlow();
+
+      await pressAsync(root, 'inbox.someday');
+      await pressAsync(root, 'File it');
+      const firstUndo = showToast.mock.calls
+        .map(([options]) => options)
+        .find((options) => options?.actionLabel === 'Undo' && options.message.includes('First capture'));
+
+      await pressAsync(root, 'inbox.someday');
+      await pressAsync(root, 'File it');
+      expect(showToast.mock.calls.some(([options]) => (
+        options?.actionLabel === 'Undo' && options.message.includes('Second capture')
+      ))).toBe(true);
+
+      await act(async () => {
+        firstUndo!.onAction();
+        await Promise.resolve();
+      });
+
+      expect(updateTask).toHaveBeenLastCalledWith(
+        'inbox-a',
+        expect.objectContaining({ status: 'inbox' }),
+      );
+      expect(updateTask).not.toHaveBeenCalledWith(
+        'inbox-b',
+        expect.objectContaining({ status: 'inbox' }),
+      );
+    });
+
     it('uses recurrence-aware completion undo for a recurring two-minute item', async () => {
       const recurringTask = {
         ...baseInboxTask,
@@ -2643,6 +2758,53 @@ describe('InboxProcessingModal', () => {
         expect(findNodesWithText(root, 'projects.noArea').length).toBeGreaterThan(0);
         expect(findNodesWithText(root, 'Work Project').length).toBeGreaterThan(0);
       }
+    });
+
+    it('names Area and Project controls and exposes their selected state', async () => {
+      storeState.projects = [workProject];
+      storeState.areas = [workArea];
+      storeState.tasks = [{ ...baseInboxTask }];
+      const root = await openMode('guided');
+      walkToFileStep(root);
+
+      expect(root.findByProps({
+        accessibilityRole: 'button',
+        accessibilityLabel: 'taskEdit.areaLabel: projects.noArea',
+      }).props.accessibilityState).toEqual({ selected: true });
+      expect(root.findByProps({
+        accessibilityRole: 'button',
+        accessibilityLabel: 'taskEdit.areaLabel: Work',
+      }).props.accessibilityState).toEqual({ selected: false });
+      expect(root.findByProps({
+        accessibilityLabel: 'projects.search',
+      }).props.placeholder).toBe('projects.addPlaceholder');
+      expect(root.findByProps({
+        accessibilityRole: 'button',
+        accessibilityLabel: 'taskEdit.projectLabel: inbox.noProject',
+      }).props.accessibilityState).toEqual({ selected: true });
+      expect(root.findByProps({
+        accessibilityRole: 'button',
+        accessibilityLabel: 'taskEdit.projectLabel: Work Project',
+      }).props.accessibilityState).toEqual({ selected: false });
+
+      act(() => {
+        root.findByProps({
+          accessibilityRole: 'button',
+          accessibilityLabel: 'taskEdit.projectLabel: Work Project',
+        }).props.onPress();
+      });
+      expect(root.findAllByProps({
+        accessibilityRole: 'button',
+        accessibilityLabel: 'taskEdit.projectLabel: Work Project',
+      }).every((option) => option.props.accessibilityState?.selected === true)).toBe(true);
+
+      storeState.tasks = [{ ...baseInboxTask }];
+      const conversionRoot = await openMode('guided');
+      walkToProjectConversion(conversionRoot);
+      expect(conversionRoot.findByProps({
+        accessibilityRole: 'button',
+        accessibilityLabel: 'process.createProject',
+      })).toBeTruthy();
     });
 
     it('keeps dated Later controls in both modes without an undated escape hatch', async () => {

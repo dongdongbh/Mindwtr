@@ -293,7 +293,7 @@ describe('useManualPullSync', () => {
   ])('prioritizes a $outcome document sync result over attachment guidance', async ({ result }) => {
     mocked.performMobileSync.mockResolvedValue({
       ...result,
-      fileAttachmentUploadBlocked: 'too-large',
+      attachmentWriteDeferred: true,
     });
     renderHarness();
 
@@ -309,7 +309,7 @@ describe('useManualPullSync', () => {
       durationMs: 5200,
     });
     expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({
-      message: 'Mindwtr kept the local attachment. File Sync can only sync attachments under 100 MB. Replace it with a smaller file or remove the attachment, then sync again.',
+      message: 'Some attachment changes could not finish. Restore any missing local files or remove the affected attachments, then sync again.',
     }));
   });
 

@@ -107,6 +107,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
     actionabilityChoice,
     clearDecision,
     convertToProject,
+    createDecisionUndoReceipt,
     currentTask,
     executionChoice,
     handleNextTask,
@@ -133,7 +134,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
     twoMinuteChoice,
     twoMinuteEnabled,
     twoMinuteFirst,
-    undoLastDecision,
+    undoDecision,
   } = controller;
   const { showToast } = useToast();
   const filledButton = useFilledButtonColors();
@@ -197,6 +198,10 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
 
   const commit = useCallback(async (committed: Committed, run: () => Promise<boolean>) => {
     if (submittingRef.current) return;
+    const undoReceipt = createDecisionUndoReceipt(
+      committed === 'trash' ? 'discarded' : committed === 'done' ? 'completed' : 'filed',
+    );
+    if (!undoReceipt) return;
     // Same title the write commits (prepareProcessingEdits), not the raw
     // capture — refining the title mid-step must show up in the Undo toast.
     const title = controller.processingTitle.trim() || currentTask?.title || '';
@@ -220,10 +225,10 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
       message,
       tone: 'info',
       actionLabel: tFallback(t, 'common.undo', 'Undo'),
-      onAction: () => { void undoLastDecision(); },
+      onAction: () => { void undoDecision(undoReceipt); },
       durationMs: 5200,
     });
-  }, [controller.processingTitle, currentTask?.title, showToast, t, undoLastDecision]);
+  }, [controller.processingTitle, createDecisionUndoReceipt, currentTask?.title, showToast, t, undoDecision]);
 
   const goBack = useCallback(() => {
     if (quick) {

@@ -74,6 +74,14 @@ const ENERGY_LEVEL_OPTIONS: NonNullable<Task['energyLevel']>[] = ['low', 'medium
 type ActionabilityChoice = 'actionable' | 'later' | 'incubate' | 'trash' | 'someday' | 'reference' | null;
 type TwoMinuteChoice = 'yes' | 'no' | null;
 type ExecutionChoice = 'defer' | 'delegate' | null;
+type InboxDecisionUndoKind = 'discarded' | 'completed' | 'filed';
+type InboxDecisionUndoReceipt = Readonly<{
+  taskId: string;
+  kind: InboxDecisionUndoKind;
+  previousStatus: Task['status'];
+  wasFocusedToday: boolean;
+  restoreUpdates: Partial<Task>;
+}>;
 
 const buildInboxDecisionRestoreUpdates = (task: Task): Partial<Task> => ({
   title: task.title,
@@ -141,6 +149,7 @@ export function useInboxProcessingController({
   const [projectTitleDraft, setProjectTitleDraft] = useState('');
   const [nextActionDraft, setNextActionDraft] = useState('');
   const [extraActionDrafts, setExtraActionDrafts] = useState<string[]>([]);
+  const projectConversionInFlightRef = useRef(false);
   const [processingTitle, setProcessingTitle] = useState('');
   const [processingDescription, setProcessingDescription] = useState('');
   const [processingTitleFocused, setProcessingTitleFocused] = useState(false);
@@ -169,17 +178,6 @@ export function useInboxProcessingController({
   const titleInputRef = useRef<any>(null);
   const processingScrollRef = useRef<any>(null);
   const hasInitialized = useRef(false);
-  // Last committed decision, kept so a presentation that auto-advances can
-  // offer an Undo without re-deriving what it just did.
-  const lastCommittedRef = useRef<{
-    taskId: string;
-    discarded: boolean;
-    completed: boolean;
-    previousStatus: Task['status'];
-    wasFocusedToday: boolean;
-    restoreUpdates: Partial<Task>;
-  } | null>(null);
-
   const processInboxPlan = useMemo(() => resolveProcessInboxPlan(settings), [settings]);
   const {
     twoMinuteEnabled,
@@ -752,16 +750,6 @@ export function useInboxProcessingController({
         showProcessingError(getActionFailureMessage(outcome.writeResult));
         return false;
       }
-      if (prepared.event.type !== 'skip') {
-        lastCommittedRef.current = {
-          taskId: currentTask.id,
-          discarded: prepared.event.type === 'discard',
-          completed: prepared.event.type === 'complete',
-          previousStatus: currentTask.status,
-          wasFocusedToday: currentTask.isFocusedToday === true,
-          restoreUpdates: buildInboxDecisionRestoreUpdates(currentTask),
-        };
-      }
       if (options.advance !== false && !activateProcessingSession(outcome.session)) {
         handleClose();
       }
@@ -786,30 +774,36 @@ export function useInboxProcessingController({
     updateTask,
   ]);
 
-  // Undo the decision just committed: a discard is a soft delete that left the
-  // task in the Inbox, everything else moved its status out of it.
-  const undoLastDecision = useCallback(async () => {
-    const committed = lastCommittedRef.current;
-    if (!committed) return;
+  // Capture the task generation before a decision runs. Toasts keep this exact
+  // receipt, so a later decision cannot redirect an older queued Undo action.
+  const createDecisionUndoReceipt = useCallback((kind: InboxDecisionUndoKind): InboxDecisionUndoReceipt | null => {
+    if (!currentTask) return null;
+    return {
+      taskId: currentTask.id,
+      kind,
+      previousStatus: currentTask.status,
+      wasFocusedToday: currentTask.isFocusedToday === true,
+      restoreUpdates: buildInboxDecisionRestoreUpdates(currentTask),
+    };
+  }, [currentTask]);
+
+  const undoDecision = useCallback(async (receipt: InboxDecisionUndoReceipt) => {
     try {
-      if (committed.completed) {
+      if (receipt.kind === 'completed') {
         await undoTaskCompletion(
-          committed.taskId,
-          committed.previousStatus,
-          committed.wasFocusedToday,
-          { restoreUpdates: committed.restoreUpdates },
+          receipt.taskId,
+          receipt.previousStatus,
+          receipt.wasFocusedToday,
+          { restoreUpdates: receipt.restoreUpdates },
         );
-        lastCommittedRef.current = null;
         return;
       }
-      const result = committed.discarded
-        ? await restoreTask(committed.taskId)
-        : await updateTask(committed.taskId, committed.restoreUpdates);
+      const result = receipt.kind === 'discarded'
+        ? await restoreTask(receipt.taskId)
+        : await updateTask(receipt.taskId, receipt.restoreUpdates);
       if (isActionFailure(result)) {
         showProcessingError(getActionFailureMessage(result));
-        return;
       }
-      lastCommittedRef.current = null;
     } catch (error) {
       showProcessingError(getUnknownErrorMessage(error));
     }
@@ -1051,7 +1045,7 @@ export function useInboxProcessingController({
   ]);
 
   const handleConvertToProject = useCallback(async (): Promise<boolean> => {
-    if (!currentTask) return false;
+    if (!currentTask || projectConversionInFlightRef.current) return false;
     const projectTitle = projectTitleDraft.trim() || processingTitle.trim() || currentTask.title;
     const nextAction = nextActionDraft.trim();
     if (!projectTitle) return false;
@@ -1064,6 +1058,7 @@ export function useInboxProcessingController({
       return false;
     }
 
+    projectConversionInFlightRef.current = true;
     try {
       const existing = projects.find((project) => project.title.toLowerCase() === projectTitle.toLowerCase());
       const project = existing ?? await addProject(
@@ -1073,6 +1068,26 @@ export function useInboxProcessingController({
       );
       if (!project) return false;
 
+      // Extra actions are independent durable writes. Commit and remove each
+      // one before moving the original Inbox task, so retry cannot lose or
+      // duplicate actions already saved.
+      const extraActions = extraActionDrafts
+        .map((draftValue) => ({ draftValue, title: draftValue.trim() }))
+        .filter(({ title }) => Boolean(title));
+      for (const { draftValue, title } of extraActions) {
+        const result = await addTask(title, { status: 'inbox', projectId: project.id });
+        if (isActionFailure(result)) {
+          showProcessingError(getActionFailureMessage(result));
+          return false;
+        }
+        setExtraActionDrafts((currentDrafts) => {
+          const committedIndex = currentDrafts.indexOf(draftValue);
+          return committedIndex < 0
+            ? currentDrafts
+            : currentDrafts.filter((_, index) => index !== committedIndex);
+        });
+      }
+
       const applied = await applyWorkflowDecision({ type: 'next' }, {
         fields: { projectId: project.id, areaId: undefined },
         titleOverride: nextAction,
@@ -1080,19 +1095,6 @@ export function useInboxProcessingController({
         advance: false,
       });
       if (!applied) return false;
-
-      // The converted capture becomes the project's clarified next action.
-      // Extra actions typed at the split step are raw captures, so they
-      // return to the Inbox (project attached) for their own clarify pass —
-      // same semantics as a quick-add with a +Project token (#827).
-      const extraActions = extraActionDrafts.map((title) => title.trim()).filter(Boolean);
-      for (const title of extraActions) {
-        const result = await addTask(title, { status: 'inbox', projectId: project.id });
-        if (isActionFailure(result)) {
-          showProcessingError(getActionFailureMessage(result));
-          return false;
-        }
-      }
       setExtraActionDrafts([]);
       setPendingStartDate(null);
       setPendingDueDate(null);
@@ -1111,6 +1113,8 @@ export function useInboxProcessingController({
         tone: 'error',
       });
       return false;
+    } finally {
+      projectConversionInFlightRef.current = false;
     }
   }, [
     addProject,
@@ -1285,6 +1289,7 @@ export function useInboxProcessingController({
     closeAIModal,
     contextCopilotSuggestions,
     convertToProject,
+    createDecisionUndoReceipt,
     createSomedaySection,
     currentArea,
     currentProject,
@@ -1311,7 +1316,7 @@ export function useInboxProcessingController({
     isReturningItem,
     handleTwoMinYes,
     finalizeNextAction,
-    undoLastDecision,
+    undoDecision,
     handleProjectConversionCancel,
     handleProjectConversionStart,
     handleSendDelegateRequest,
