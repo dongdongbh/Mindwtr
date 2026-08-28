@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   hashAttachmentFileGeneration,
   installAttachmentFileGeneration,
+  publishImmutableAttachmentFileGeneration,
 } from './attachment-file-installer';
 
-const { hashAsync, installAsync, requireNativeModule } = vi.hoisted(() => ({
+const { hashAsync, installAsync, publishImmutableAsync, requireNativeModule } = vi.hoisted(() => ({
   hashAsync: vi.fn(),
   installAsync: vi.fn(),
-  requireNativeModule: vi.fn(() => ({ hashAsync, installAsync })),
+  publishImmutableAsync: vi.fn(),
+  requireNativeModule: vi.fn(() => ({ hashAsync, installAsync, publishImmutableAsync })),
 }));
 const downloadHash = 'd'.repeat(64);
 
@@ -18,6 +20,7 @@ describe('installAttachmentFileGeneration', () => {
   beforeEach(() => {
     installAsync.mockReset();
     hashAsync.mockReset();
+    publishImmutableAsync.mockReset();
   });
 
   it('passes the absent generation contract to the native installer', async () => {
@@ -93,6 +96,21 @@ describe('installAttachmentFileGeneration', () => {
     await expect(hashAttachmentFileGeneration(' file:///private/documents/attachments/a1 '))
       .resolves.toEqual({ sha256: downloadHash, size: 42, modificationTimeMs: 1_234 });
     expect(hashAsync).toHaveBeenCalledWith('file:///private/documents/attachments/a1');
+  });
+
+  it('publishes an immutable same-directory generation through native create-no-replace', async () => {
+    publishImmutableAsync.mockResolvedValue({ status: 'alreadyExists' });
+
+    await expect(publishImmutableAttachmentFileGeneration(
+      ' file:///sync/attachments/.mindwtr-generation-stage-1.tmp ',
+      ' file:///sync/attachments/a.hash.txt ',
+      downloadHash.toUpperCase(),
+    )).resolves.toEqual({ status: 'alreadyExists' });
+    expect(publishImmutableAsync).toHaveBeenCalledWith(
+      'file:///sync/attachments/.mindwtr-generation-stage-1.tmp',
+      'file:///sync/attachments/a.hash.txt',
+      downloadHash,
+    );
   });
 
   it('rejects malformed native hash snapshots', async () => {

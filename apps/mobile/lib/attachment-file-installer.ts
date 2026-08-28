@@ -14,12 +14,21 @@ export type AttachmentFileHashSnapshot = {
   modificationTimeMs: number;
 };
 
+export type ImmutableAttachmentFilePublishResult =
+  | { status: 'published' }
+  | { status: 'alreadyExists' };
+
 type NativeAttachmentFileInstaller = {
   installAsync(
     stagedPath: string,
     targetPath: string,
     expected: { kind: 'absent' } | { kind: 'present'; sha256: string },
     expectedDownloadSha256: string,
+  ): Promise<unknown>;
+  publishImmutableAsync(
+    stagedPath: string,
+    targetPath: string,
+    expectedStagedSha256: string,
   ): Promise<unknown>;
   hashAsync(path: string): Promise<unknown>;
 };
@@ -100,6 +109,15 @@ const parseNativeHashSnapshot = (value: unknown): AttachmentFileHashSnapshot => 
   return { sha256, size: snapshot.size, modificationTimeMs: snapshot.modificationTimeMs };
 };
 
+const parseNativePublishResult = (value: unknown): ImmutableAttachmentFilePublishResult => {
+  if (!value || typeof value !== 'object') {
+    throw new Error('Attachment file publisher returned an invalid result');
+  }
+  const status = (value as Record<string, unknown>).status;
+  if (status === 'published' || status === 'alreadyExists') return { status };
+  throw new Error('Attachment file publisher returned an invalid result');
+};
+
 export const installAttachmentFileGeneration = async (
   stagedPath: string,
   targetPath: string,
@@ -136,4 +154,24 @@ export const hashAttachmentFileGeneration = async (
 ): Promise<AttachmentFileHashSnapshot> => {
   const value = await getNativeModule().hashAsync(assertPath(path, 'Attachment path'));
   return parseNativeHashSnapshot(value);
+};
+
+/** Publish an immutable File Sync generation from a verified same-directory
+ * stage. Native code uses create-no-replace semantics; an existing target is
+ * reported without modifying either path. */
+export const publishImmutableAttachmentFileGeneration = async (
+  stagedPath: string,
+  targetPath: string,
+  expectedStagedSha256: string,
+): Promise<ImmutableAttachmentFilePublishResult> => {
+  const digest = expectedStagedSha256.trim().toLowerCase();
+  if (!SHA256_HEX_PATTERN.test(digest)) {
+    throw new Error('Expected staged attachment SHA-256 must be 64 lowercase hexadecimal characters');
+  }
+  const result = await getNativeModule().publishImmutableAsync(
+    assertPath(stagedPath, 'Staged attachment path'),
+    assertPath(targetPath, 'Target attachment path'),
+    digest,
+  );
+  return parseNativePublishResult(result);
 };

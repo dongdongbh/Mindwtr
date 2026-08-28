@@ -74,6 +74,7 @@ const modernFileSystemMock = vi.hoisted(() => {
 const attachmentFileInstallerMock = vi.hoisted(() => ({
   hashAttachmentFileGeneration: vi.fn(),
   installAttachmentFileGeneration: vi.fn(),
+  publishImmutableAttachmentFileGeneration: vi.fn(),
 }));
 
 vi.mock('expo-file-system', () => ({
@@ -255,6 +256,9 @@ describe('attachment sync', () => {
       new Error('Native hash fixture not configured'),
     );
     attachmentFileInstallerMock.installAttachmentFileGeneration.mockResolvedValue({ status: 'installed' });
+    attachmentFileInstallerMock.publishImmutableAttachmentFileGeneration.mockResolvedValue({
+      status: 'published',
+    });
   });
 
   it('persists generic Android content uris with a native copy into managed storage', async () => {
@@ -959,7 +963,9 @@ describe('attachment sync', () => {
     const H1_BYTES = new Uint8Array([81, 82, 83]);
     const H2_BYTES = new Uint8Array([91, 92, 93, 94]);
 
-    it('publishes a losing path H1 candidate without touching the H2 document winner', async () => {
+    it.each([false, true])(
+      'publishes a losing path H1 candidate without touching the H2 document winner (activation=%s)',
+      async (activationProbe) => {
       const id = 'path-two-writer';
       const h1 = sha256Hex(H1_BYTES);
       const h2 = sha256Hex(H2_BYTES);
@@ -986,13 +992,16 @@ describe('attachment sync', () => {
         if (remoteFiles.has(uri)) throw new Error('already exists');
         remoteFiles.set(uri, '');
       });
-      modernFileSystemMock.move.mockImplementation((from: string, to: string) => {
-        const contents = remoteFiles.get(from);
-        if (contents === undefined) throw new Error('stage missing');
-        if (remoteFiles.has(to)) throw new Error('destination exists');
-        remoteFiles.set(to, contents);
-        remoteFiles.delete(from);
-      });
+      attachmentFileInstallerMock.publishImmutableAttachmentFileGeneration.mockImplementation(
+        async (from: string, to: string) => {
+          const contents = remoteFiles.get(from);
+          if (contents === undefined) throw new Error('stage missing');
+          if (remoteFiles.has(to)) return { status: 'alreadyExists' };
+          remoteFiles.set(to, contents);
+          remoteFiles.delete(from);
+          return { status: 'published' };
+        },
+      );
       fileSystemMock.writeAsStringAsync.mockImplementation(async (uri: string, base64: string) => {
         remoteFiles.set(uri, base64);
       });
@@ -1001,7 +1010,7 @@ describe('attachment sync', () => {
         appData,
         'file://sync/data.json',
         undefined,
-        { phase: 'post-merge' },
+        { phase: 'post-merge', activationProbe },
       ), appData).data;
 
       expect(candidate.tasks[0].attachments?.[0]?.cloudKey).toBe(h1Key);
@@ -1016,7 +1025,8 @@ describe('attachment sync', () => {
         expect.anything(),
       );
       expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(h2Uri, expect.anything());
-    });
+      },
+    );
 
     it('reuses only a verified existing same-generation path object', async () => {
       const id = 'path-same-generation';
@@ -1041,14 +1051,12 @@ describe('attachment sync', () => {
             ? { exists: false }
             : { exists: true, size: H1_BYTES.length, modificationTime: 1 };
         }
-        if (uri === `${targetUri}.mindwtr-staged`) {
-          return { exists: false };
-        }
+        if (uri.includes('.mindwtr-generation-stage-')) return { exists: false };
         return { exists: false };
       });
       fileSystemMock.readAsStringAsync.mockResolvedValue(base64Of(H1_BYTES));
-      modernFileSystemMock.move.mockImplementation(() => {
-        throw new Error('peer won create-new race');
+      attachmentFileInstallerMock.publishImmutableAttachmentFileGeneration.mockResolvedValue({
+        status: 'alreadyExists',
       });
 
       const result = syncResult(await attachmentSync.syncFileAttachments(
@@ -1061,17 +1069,20 @@ describe('attachment sync', () => {
       expect(result.data.tasks[0].attachments?.[0]?.cloudKey).toBe(generationKey);
       expect(result.data.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
       expect(modernFileSystemMock.create).toHaveBeenCalledWith(
-        `${targetUri}.mindwtr-staged`,
+        expect.stringContaining('.mindwtr-generation-stage-'),
         { overwrite: false },
       );
-      expect(modernFileSystemMock.move).toHaveBeenCalledWith(
-        `${targetUri}.mindwtr-staged`,
-        targetUri,
-      );
+      expect(attachmentFileInstallerMock.publishImmutableAttachmentFileGeneration)
+        .toHaveBeenCalledWith(
+          expect.stringContaining('.mindwtr-generation-stage-'),
+          targetUri,
+          expect.stringMatching(/^[a-f0-9]{64}$/),
+        );
+      expect(modernFileSystemMock.move).not.toHaveBeenCalled();
       expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(targetUri, expect.anything());
     });
 
-    it('repairs a crash-poisoned path generation without touching another valid generation', async () => {
+    it('fails closed on a corrupt pre-existing path generation and retains its verified stage', async () => {
       const id = 'path-restart-recovery';
       const h1 = sha256Hex(H1_BYTES);
       const h2 = sha256Hex(H2_BYTES);
@@ -1107,29 +1118,32 @@ describe('attachment sync', () => {
       fileSystemMock.deleteAsync.mockImplementation(async (uri: string) => {
         remoteFiles.delete(uri);
       });
-      modernFileSystemMock.move.mockImplementation((from: string, to: string) => {
-        const contents = remoteFiles.get(from);
-        if (contents === undefined) throw new Error('stage missing');
-        if (remoteFiles.has(to)) throw new Error('destination exists');
-        remoteFiles.set(to, contents);
-        remoteFiles.delete(from);
+      attachmentFileInstallerMock.publishImmutableAttachmentFileGeneration.mockResolvedValue({
+        status: 'alreadyExists',
       });
 
-      const result = syncResult(await attachmentSync.syncFileAttachments(
+      await expect(attachmentSync.syncFileAttachments(
         appData,
         'file://sync/data.json',
         undefined,
         { phase: 'post-merge' },
-      ), appData);
+      )).resolves.toBe(false);
 
-      expect(result.data.tasks[0].attachments?.[0]?.cloudKey).toBe(h1Key);
-      expect(remoteFiles.get(h1Uri)).toBe(base64Of(H1_BYTES));
+      expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
+      expect(remoteFiles.get(h1Uri)).toBe(base64Of(new Uint8Array([81])));
       expect(remoteFiles.get(h2Uri)).toBe(base64Of(H2_BYTES));
-      expect(fileSystemMock.deleteAsync).toHaveBeenCalledWith(h1Uri, { idempotent: true });
+      const stageUri = modernFileSystemMock.create.mock.calls
+        .map(([uri]) => uri as string)
+        .find((uri) => uri.includes('.mindwtr-generation-stage-'));
+      expect(stageUri).toBeTruthy();
+      expect(stageUri && remoteFiles.get(stageUri)).toBe(base64Of(H1_BYTES));
+      expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(h1Uri, expect.anything());
       expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(h2Uri, expect.anything());
     });
 
-    it('publishes a losing SAF H1 candidate without touching the H2 document winner', async () => {
+    it.each([false, true])(
+      'publishes a losing SAF H1 candidate without touching the H2 document winner (activation=%s)',
+      async (activationProbe) => {
       const id = 'saf-two-writer';
       const h1 = sha256Hex(H1_BYTES);
       const h2 = sha256Hex(H2_BYTES);
@@ -1174,7 +1188,7 @@ describe('attachment sync', () => {
         appData,
         syncFileUri,
         undefined,
-        { phase: 'post-merge' },
+        { phase: 'post-merge', activationProbe },
       ), appData).data;
 
       expect(candidate.tasks[0].attachments?.[0]?.cloudKey).toBe(h1Key);
@@ -1187,7 +1201,8 @@ describe('attachment sync', () => {
         expect.anything(),
       );
       expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(h2Uri, expect.anything());
-    });
+      },
+    );
 
     it('reuses only a verified existing same-generation SAF object', async () => {
       const id = 'saf-same-generation';
@@ -1240,7 +1255,49 @@ describe('attachment sync', () => {
       expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(targetUri, expect.anything());
     });
 
-    it('repairs a crash-poisoned SAF generation without touching another valid generation', async () => {
+    it('fails closed when a renamed SAF create reveals a corrupt same-name peer', async () => {
+      const id = 'saf-renamed-corrupt-peer';
+      const hash = sha256Hex(H1_BYTES);
+      const generationKey = `attachments/${id}.${hash}.txt`;
+      const syncFileUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fdata.json';
+      const attachmentsDirUri = 'content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMindwtr%20Backup/document/primary%3ADocuments%2FMindwtr%20Backup%2Fattachments/';
+      const targetUri = `${attachmentsDirUri}${generationKey.split('/').pop()}`;
+      const renamedUri = `${attachmentsDirUri}${id}.${hash}%20%281%29.txt`;
+      const localUri = `file://document/attachments/${id}.txt`;
+      const appData = singleAttachmentData({ id, uri: localUri, localStatus: 'available' });
+      fileSystemMock.getInfoAsync.mockImplementation(async (uri: string) => (
+        uri === localUri || uri.startsWith('file://cache/mindwtr-upload-')
+          ? { exists: true, size: H1_BYTES.length, modificationTime: 1 }
+          : { exists: false }
+      ));
+      let attachmentInventoryReads = 0;
+      fileSystemMock.StorageAccessFramework.readDirectoryAsync.mockImplementation(async (uri: string) => {
+        if (uri === attachmentsDirUri) {
+          attachmentInventoryReads += 1;
+          return attachmentInventoryReads === 1 ? [] : [targetUri];
+        }
+        if (uri.includes('primary%3ADocuments%2FMindwtr%20Backup')) return [attachmentsDirUri];
+        return [];
+      });
+      fileSystemMock.StorageAccessFramework.createFileAsync.mockResolvedValue(renamedUri);
+      fileSystemMock.readAsStringAsync.mockImplementation(async (uri: string) => (
+        uri === targetUri ? base64Of(new Uint8Array([0])) : base64Of(H1_BYTES)
+      ));
+
+      await expect(attachmentSync.syncFileAttachments(
+        appData,
+        syncFileUri,
+        undefined,
+        { phase: 'post-merge' },
+      )).resolves.toBe(false);
+
+      expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
+      expect(fileSystemMock.StorageAccessFramework.writeAsStringAsync).not.toHaveBeenCalled();
+      expect(fileSystemMock.deleteAsync).toHaveBeenCalledWith(renamedUri, { idempotent: true });
+      expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(targetUri, expect.anything());
+    });
+
+    it('fails closed on a corrupt pre-existing SAF generation without writing either generation', async () => {
       const id = 'saf-restart-recovery';
       const h1 = sha256Hex(H1_BYTES);
       const h2 = sha256Hex(H2_BYTES);
@@ -1280,26 +1337,27 @@ describe('attachment sync', () => {
         remoteFiles.set(uri, base64);
       });
 
-      const result = syncResult(await attachmentSync.syncFileAttachments(
+      await expect(attachmentSync.syncFileAttachments(
         appData,
         syncFileUri,
         undefined,
         { phase: 'post-merge' },
-      ), appData);
+      )).resolves.toBe(false);
 
-      expect(result.data.tasks[0].attachments?.[0]?.cloudKey).toBe(h1Key);
+      expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBeUndefined();
       expect(fileSystemMock.readAsStringAsync).toHaveBeenCalledWith(
         h1Uri,
         { encoding: 'base64' },
       );
-      expect(fileSystemMock.writeAsStringAsync).toHaveBeenCalledWith(
+      expect(fileSystemMock.writeAsStringAsync).not.toHaveBeenCalledWith(
         h1Uri,
-        base64Of(H1_BYTES),
-        { encoding: 'base64' },
+        expect.anything(),
+        expect.anything(),
       );
-      expect(remoteFiles.get(h1Uri)).toBe(base64Of(H1_BYTES));
+      expect(remoteFiles.get(h1Uri)).toBe(base64Of(new Uint8Array([81])));
       expect(remoteFiles.get(h2Uri)).toBe(base64Of(H2_BYTES));
       expect(fileSystemMock.StorageAccessFramework.createFileAsync).not.toHaveBeenCalled();
+      expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(h1Uri, expect.anything());
       expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(h2Uri, expect.anything());
     });
   });
@@ -3259,15 +3317,22 @@ describe('attachment sync', () => {
       );
 
       const generationKey = `attachments/${id}.${sha256Hex(OLD_BYTES)}.txt`;
+      const stagedUri = modernFileSystemMock.create.mock.calls[0]?.[0] as string;
       expect(modernFileSystemMock.create).toHaveBeenCalledWith(
-        `file://sync/${generationKey}.mindwtr-staged`,
+        expect.stringContaining('file://sync/attachments/.mindwtr-generation-stage-'),
         { overwrite: false },
       );
       expect(fileSystemMock.writeAsStringAsync).toHaveBeenCalledWith(
-        `file://sync/${generationKey}.mindwtr-staged`,
+        stagedUri,
         base64Of(OLD_BYTES),
         { encoding: 'base64' },
       );
+      expect(attachmentFileInstallerMock.publishImmutableAttachmentFileGeneration)
+        .toHaveBeenCalledWith(
+          stagedUri,
+          `file://sync/${generationKey}`,
+          sha256Hex(OLD_BYTES),
+        );
       expect(result.data.tasks[0].attachments?.[0]).toMatchObject({
         cloudKey: generationKey,
         fileHash: sha256Hex(OLD_BYTES),

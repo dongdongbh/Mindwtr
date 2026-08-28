@@ -973,6 +973,39 @@ public final class AttachmentFileInstallerModule: Module {
       }
     }
 
+    AsyncFunction("publishImmutableAsync") {
+        (
+          stagedPath: String,
+          targetPath: String,
+          expectedStagedSha256: String
+        ) -> [String: String] in
+      let staged = try Self.fileUrl(stagedPath)
+      let target = try Self.fileUrl(targetPath)
+      let targetRoot = target.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
+      let stagedRoot = staged.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
+      guard stagedRoot == targetRoot else {
+        throw installerError("Immutable attachment stage and target must share a directory")
+      }
+      let outcome = try AttachmentFileInstallerEngine(
+        targetRoot: targetRoot,
+        sourceRoots: [targetRoot]
+      ).install(
+        stagedInput: staged,
+        targetInput: target,
+        expected: .absent,
+        expectedDownloadSha256: try Self.parseSha256(
+          expectedStagedSha256,
+          label: "Expected staged attachment"
+        )
+      )
+      switch outcome {
+      case .installed:
+        return ["status": "published"]
+      case .conflict:
+        return ["status": "alreadyExists"]
+      }
+    }
+
     AsyncFunction("hashAsync") { (targetPath: String) -> [String: Any] in
       let fileManager = FileManager.default
       guard let documentsRoot = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {

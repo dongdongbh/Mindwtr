@@ -246,6 +246,47 @@ class AttachmentFileInstallerModule : Module() {
       }
     }
 
+    AsyncFunction("publishImmutableAsync") {
+        stagedPath: String,
+        targetPath: String,
+        expectedStagedSha256: String,
+      ->
+      try {
+        val staged = fileFromPath(stagedPath).absoluteFile
+        val target = fileFromPath(targetPath).absoluteFile
+        val targetRoot = target.parentFile
+          ?: throw AttachmentFileInstallerException("Target attachment parent is unavailable")
+        val stagedRoot = staged.parentFile
+          ?: throw AttachmentFileInstallerException("Staged attachment parent is unavailable")
+        if (stagedRoot.canonicalFile != targetRoot.canonicalFile) {
+          throw AttachmentFileInstallerException(
+            "Immutable attachment stage and target must share a directory",
+          )
+        }
+        val outcome = AttachmentFileInstallerCore(
+          targetRoot = targetRoot,
+          sourceRoots = listOf(targetRoot),
+          ops = AndroidAttachmentInstallerFileOps(),
+        ).install(
+          stagedInput = staged,
+          targetInput = target,
+          expected = ExpectedAttachmentGeneration.Absent,
+          expectedDownloadSha256 = parseSha256(expectedStagedSha256, "Expected staged attachment"),
+        )
+        when (outcome) {
+          is AttachmentInstallOutcome.Installed -> mapOf("status" to "published")
+          is AttachmentInstallOutcome.Conflict -> mapOf("status" to "alreadyExists")
+        }
+      } catch (error: AttachmentFileInstallerException) {
+        throw error
+      } catch (error: Throwable) {
+        throw AttachmentFileInstallerException(
+          error.message ?: "Immutable attachment publication failed",
+          error,
+        )
+      }
+    }
+
     AsyncFunction("hashAsync") { targetPath: String ->
       try {
         val filesRoot = context.filesDir.canonicalFile

@@ -34,7 +34,10 @@ import {
   StorageAccessFramework,
   writeBytesSafely,
 } from '../attachment-sync-utils';
-import { hashAttachmentFileGeneration } from '../attachment-file-installer';
+import {
+  hashAttachmentFileGeneration,
+  publishImmutableAttachmentFileGeneration,
+} from '../attachment-file-installer';
 import {
   assertAttachmentSyncNotAborted,
   copyAttachmentDownloadToStage,
@@ -293,30 +296,22 @@ export const syncFileAttachments = async (
       const wireBase64 = bytesToBase64(wireBytes);
       if (syncDir.type === 'file') {
         const targetUri = `${syncDir.attachmentsDirUri}${filename}`;
-        const stagedUri = `${targetUri}.mindwtr-staged`;
-
-        const ensureVerifiedStage = async (): Promise<void> => {
-          for (let attempt = 0; attempt < 2; attempt += 1) {
-            const stagedPresence = await getLocalAttachmentPresence(stagedUri);
-            if (stagedPresence === 'unreadable') {
-              throw new Error('File Sync attachment publication stage is unreadable');
-            }
-            if (stagedPresence === 'present') {
-              try {
-                await verifyPublishedGeneration(stagedUri);
-                return;
-              } catch (error) {
-                if (!(error instanceof FileSyncGenerationIntegrityError) || attempt > 0) throw error;
-                await FileSystem.deleteAsync(stagedUri, { idempotent: true });
-                continue;
-              }
-            }
-
+        const wireHash = await computeSha256Hex(wireBytes);
+        if (!wireHash) throw new Error('File Sync attachment stage could not be hashed');
+        let stageSequence = 0;
+        const createVerifiedStage = async (): Promise<string> => {
+          const separator = targetUri.lastIndexOf('/') + 1;
+          const parentUri = targetUri.slice(0, separator);
+          for (let attempt = 0; attempt < 8; attempt += 1) {
+            stageSequence += 1;
+            const stagedUri = `${parentUri}.mindwtr-generation-stage-${Date.now().toString(36)}-${stageSequence}.tmp`;
             try {
               new FileSystem.File(stagedUri).create({ overwrite: false });
             } catch (createError) {
-              if (attempt === 0) continue;
-              throw createError;
+              if (attempt < 7) continue;
+              throw new Error('File Sync attachment publication stage could not be reserved', {
+                cause: createError,
+              });
             }
             try {
               assertAttachmentSyncNotAborted(signal);
@@ -324,7 +319,7 @@ export const syncFileAttachments = async (
                 encoding: FileSystem.EncodingType.Base64,
               });
               await verifyPublishedGeneration(stagedUri);
-              return;
+              return stagedUri;
             } catch (error) {
               await FileSystem.deleteAsync(stagedUri, { idempotent: true }).catch(() => undefined);
               throw error;
@@ -340,7 +335,6 @@ export const syncFileAttachments = async (
         if (initialPresence === 'present') {
           try {
             await verifyPublishedGeneration(targetUri);
-            await FileSystem.deleteAsync(stagedUri, { idempotent: true }).catch(() => undefined);
             recordPublishedGeneration();
             return true;
           } catch (error) {
@@ -348,7 +342,7 @@ export const syncFileAttachments = async (
           }
         }
 
-        await ensureVerifiedStage();
+        const stagedUri = await createVerifiedStage();
         try {
           const currentPresence = await getLocalAttachmentPresence(targetUri);
           if (currentPresence === 'unreadable') {
@@ -362,23 +356,20 @@ export const syncFileAttachments = async (
               return true;
             } catch (error) {
               if (!(error instanceof FileSyncGenerationIntegrityError)) throw error;
-              // The key names exactly this plaintext digest. Removing a corrupt
-              // same-generation object makes interruption recoverable; the
-              // verified stage remains durable until the move succeeds.
-              await FileSystem.deleteAsync(targetUri, { idempotent: true });
             }
           }
 
           assertAttachmentSyncNotAborted(signal);
-          try {
-            new FileSystem.File(stagedUri).move(new FileSystem.File(targetUri));
-          } catch (moveError) {
-            const collisionPresence = await getLocalAttachmentPresence(targetUri);
-            if (collisionPresence !== 'present') throw moveError;
+          const publication = await publishImmutableAttachmentFileGeneration(
+            stagedUri,
+            targetUri,
+            wireHash,
+          );
+          if (publication.status === 'alreadyExists') {
             await verifyPublishedGeneration(targetUri);
-            await FileSystem.deleteAsync(stagedUri, { idempotent: true }).catch(() => undefined);
           }
           await verifyPublishedGeneration(targetUri);
+          await FileSystem.deleteAsync(stagedUri, { idempotent: true }).catch(() => undefined);
         } catch (error) {
           // Keep a verified stage after publication failure so a restart can
           // finish the exact generation without re-reading mutable local bytes.
@@ -389,21 +380,7 @@ export const syncFileAttachments = async (
         const safEntries = await getSafEntriesByName();
         let targetUri = safEntries.get(filename) ?? null;
         if (targetUri) {
-          try {
-            await verifyPublishedGeneration(targetUri);
-          } catch (error) {
-            if (!(error instanceof FileSyncGenerationIntegrityError)) throw error;
-            // SAF exposes no atomic exact-name replace. A hash-qualified name
-            // can only represent these plaintext bytes, so repairing that exact
-            // corrupt generation is safe and makes interrupted writes converge.
-            if (!StorageAccessFramework?.writeAsStringAsync) {
-              throw new Error('SAF attachment writes are unavailable');
-            }
-            await StorageAccessFramework.writeAsStringAsync(targetUri, wireBase64, {
-              encoding: FileSystem.EncodingType.Base64,
-            });
-            await verifyPublishedGeneration(targetUri);
-          }
+          await verifyPublishedGeneration(targetUri);
           recordPublishedGeneration();
           return true;
         }
@@ -435,15 +412,7 @@ export const syncFileAttachments = async (
             invocationOwnedTarget = null;
             const peerTarget = (await refreshSafEntriesByName()).get(filename) ?? null;
             if (peerTarget) {
-              try {
-                await verifyPublishedGeneration(peerTarget);
-              } catch (error) {
-                if (!(error instanceof FileSyncGenerationIntegrityError)) throw error;
-                await StorageAccessFramework.writeAsStringAsync(peerTarget, wireBase64, {
-                  encoding: FileSystem.EncodingType.Base64,
-                });
-                await verifyPublishedGeneration(peerTarget);
-              }
+              await verifyPublishedGeneration(peerTarget);
               recordPublishedGeneration();
               return true;
             }
