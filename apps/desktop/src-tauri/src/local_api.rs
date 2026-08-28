@@ -2655,6 +2655,10 @@ fn sanitize_task_patch_map(patch: &mut Map<String, Value>) -> Result<(), String>
             "attachments" => value.is_null() || valid_attachments(value),
             "relativeStartOffset" => value.is_null() || valid_relative_start_offset(value),
             "recurrence" => value.is_null() || valid_recurrence(value),
+            // Presentational grouping per view (#1090). Keys are view scopes and
+            // values are section ids from the settings catalogue; this engine
+            // never resolves them, so it only checks the shape.
+            "viewSectionIds" => value.is_null() || valid_view_section_ids(value),
             _ => return Err(format!("Unsupported task field: {key}")),
         };
         if !valid {
@@ -2662,6 +2666,13 @@ fn sanitize_task_patch_map(patch: &mut Map<String, Value>) -> Result<(), String>
         }
     }
     Ok(())
+}
+
+fn valid_view_section_ids(value: &Value) -> bool {
+    let Some(map) = value.as_object() else {
+        return false;
+    };
+    map.values().all(|entry| entry.as_str().is_some_and(|id| !id.trim().is_empty()))
 }
 
 fn js_string_length(value: &str) -> usize {
