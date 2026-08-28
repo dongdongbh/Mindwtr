@@ -39,6 +39,13 @@ bool matches_identity(const struct stat& value, const char* expected) {
           + std::to_string(static_cast<unsigned long long>(value.st_ino))) == expected;
 }
 
+constexpr bool rename_noreplace_needs_exact_handle_fallback(int error) {
+  return error == ENOSYS || error == EOPNOTSUPP || error == EINVAL;
+}
+
+static_assert(rename_noreplace_needs_exact_handle_fallback(EINVAL));
+static_assert(!rename_noreplace_needs_exact_handle_fallback(EEXIST));
+
 }  // namespace
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -114,7 +121,7 @@ Java_tech_dongdongbh_mindwtr_attachmentfileinstaller_ExactAttachmentPublisherNat
       target_fd,
       target_leaf.get(),
       RENAME_NOREPLACE);
-  if (result != 0 && (errno == ENOSYS || errno == EOPNOTSUPP)) {
+  if (result != 0 && rename_noreplace_needs_exact_handle_fallback(errno)) {
     const std::string exact_source = "/proc/self/fd/" + std::to_string(source_fd);
     result = linkat(
         AT_FDCWD,
