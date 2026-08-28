@@ -12,7 +12,9 @@ describe('sync folder file-system primitives', () => {
         invoked.length = 0;
         setNativeInvokeTransport(async (command, args) => {
             invoked.push([command, args]);
-            return true as never;
+            return command === 'sync_fs_publish_attachment_generation'
+                ? { status: 'published' } as never
+                : true as never;
         });
     });
 
@@ -28,12 +30,12 @@ describe('sync folder file-system primitives', () => {
         await mkdir('/mnt/rclone/sync/attachments');
         await remove('/mnt/rclone/sync/attachments/a.txt');
         await rename('/mnt/rclone/sync/a.tmp', '/mnt/rclone/sync/a.txt');
-        await publishAttachmentGeneration(
+        await expect(publishAttachmentGeneration(
             '/mnt/rclone/sync/attachments/.mindwtr-attachment-generation-1.tmp',
             '/mnt/rclone/sync/attachments/a.abc.txt',
             3,
             'a'.repeat(64),
-        );
+        )).resolves.toEqual({ status: 'published' });
 
         expect(invoked).toEqual([
             ['sync_fs_exists', { path: '/mnt/rclone/sync/attachments/a.txt' }],

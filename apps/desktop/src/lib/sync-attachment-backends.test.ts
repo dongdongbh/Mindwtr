@@ -205,7 +205,7 @@ describe('desktop sync attachment backends', () => {
         fsMocks.mkdir.mockResolvedValue(undefined);
         fsMocks.stat.mockResolvedValue({ mtime: new Date(1000), size: 3 });
         syncFsMocks.mkdir.mockResolvedValue(undefined);
-        syncFsMocks.publishAttachmentGeneration.mockResolvedValue(undefined);
+        syncFsMocks.publishAttachmentGeneration.mockResolvedValue({ status: 'published' });
         syncFsMocks.rename.mockResolvedValue(undefined);
         syncFsMocks.remove.mockResolvedValue(undefined);
         syncFsMocks.stat.mockResolvedValue({ mtimeMs: 1000, size: DOWNLOAD_BYTES.length });
@@ -1441,6 +1441,42 @@ describe('desktop sync attachment backends', () => {
             expect(result.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
         });
 
+        it.each([
+            ['ordinary', postMergeHelpers],
+            ['activation', activationHelpers],
+        ])('reuses a verified peer winner after a %s publication collision', async (_label, helpers) => {
+            const appData = makePendingData();
+            appData.tasks[0].attachments![0].cloudKey = undefined;
+            const generationKey = `attachments/attachment-1.${BYTES_HASH}.txt`;
+            const generationPath = `/candidate-sync/${generationKey}`;
+            let targetChecks = 0;
+            fsMocks.exists.mockResolvedValue(true);
+            fsMocks.readFile.mockResolvedValue(bytes);
+            fsMocks.stat.mockResolvedValue({ mtime: new Date(1000), size: bytes.length });
+            syncFsMocks.stat.mockResolvedValue({ mtimeMs: 1000, size: bytes.length });
+            syncFsMocks.exists.mockImplementation(async (path: string) => {
+                if (path !== generationPath) return false;
+                targetChecks += 1;
+                return targetChecks > 1;
+            });
+            syncFsMocks.publishAttachmentGeneration.mockResolvedValue({ status: 'alreadyExists' });
+
+            const result = expectFoldedData(await syncFileAttachments(
+                appData,
+                '/candidate-sync',
+                depsFor(),
+                helpers(),
+            ));
+
+            const scratchPath = vi.mocked(fsMocks.open).mock.calls.find(
+                ([, options]) => options?.write === true,
+            )?.[0] as string;
+            expect(syncFsMocks.publishAttachmentGeneration).toHaveBeenCalledTimes(1);
+            expect(syncFsMocks.remove).toHaveBeenCalledWith(scratchPath);
+            expect(syncFsMocks.remove).not.toHaveBeenCalledWith(generationPath);
+            expect(result.tasks[0].attachments?.[0]?.cloudKey).toBe(generationKey);
+        });
+
         it('publishes a losing File Sync candidate under its own generation key', async () => {
             const appData = makePendingData();
             const winningHash = '787c798e39a5bc1910355bae6d0cd87a36b2e10fd0202a83e3bb6b005da83472';
@@ -1478,49 +1514,46 @@ describe('desktop sync attachment backends', () => {
             expect(result.tasks[0].attachments?.[0]?.cloudKey).toBe(candidateKey);
         });
 
-        it('atomically repairs a corrupt same-generation target without touching another generation', async () => {
+        it('fails closed on a corrupt same-generation target without touching any generation', async () => {
             const appData = makePendingData();
             const generationKey = `attachments/attachment-1.${BYTES_HASH}.txt`;
             const generationPath = `/candidate-sync/${generationKey}`;
             const peerHash = '787c798e39a5bc1910355bae6d0cd87a36b2e10fd0202a83e3bb6b005da83472';
             const peerPath = `/candidate-sync/attachments/attachment-1.${peerHash}.txt`;
             fsMocks.exists.mockResolvedValue(true);
-            fsMocks.readFile.mockResolvedValue(bytes);
+            fsMocks.readFile.mockImplementation(async (path: string) => (
+                path === generationPath ? new Uint8Array([81]) : bytes
+            ));
             fsMocks.stat.mockResolvedValue({ mtime: new Date(1000), size: bytes.length });
             syncFsMocks.exists.mockImplementation(async (path: string) => (
                 path === generationPath || path === peerPath
             ));
             appData.tasks[0].attachments![0].cloudKey = generationKey;
 
-            const result = expectFoldedData(await syncFileAttachments(
+            const result = await syncFileAttachments(
                 appData,
                 '/candidate-sync',
                 depsFor(),
                 postMergeHelpers(),
-            ));
+            );
 
-            expect(fsMocks.open).not.toHaveBeenCalledWith(
-                generationPath,
-                expect.objectContaining({ write: true }),
-            );
-            expect(syncFsMocks.publishAttachmentGeneration).toHaveBeenCalledWith(
-                expect.any(String),
-                generationPath,
-                bytes.byteLength,
-                BYTES_HASH,
-            );
+            expect(result).toBe(false);
+            expect(syncFsMocks.publishAttachmentGeneration).not.toHaveBeenCalled();
             expect(syncFsMocks.publishAttachmentGeneration).not.toHaveBeenCalledWith(
                 expect.any(String),
                 peerPath,
                 expect.any(Number),
                 expect.any(String),
             );
+            expect(syncFsMocks.remove).not.toHaveBeenCalledWith(generationPath);
             expect(syncFsMocks.remove).not.toHaveBeenCalledWith(peerPath);
-            expect(result.tasks[0].attachments?.[0]?.cloudKey).toBe(generationKey);
-            expect(result.settings.attachments?.pendingRemoteDeletes).toBeUndefined();
+            expect(appData.tasks[0].attachments?.[0]).toMatchObject({
+                cloudKey: generationKey,
+                pendingContentUpload: true,
+            });
         });
 
-        it('cleans only its owned scratch when native generation publication fails', async () => {
+        it('retains only its owned verified scratch when native publication fails', async () => {
             const appData = makePendingData();
             fsMocks.exists.mockResolvedValue(true);
             fsMocks.readFile.mockResolvedValue(bytes);
@@ -1543,7 +1576,7 @@ describe('desktop sync attachment backends', () => {
             const generationPath = `/candidate-sync/attachments/attachment-1.${BYTES_HASH}.txt`;
             expect(result).toBe(false);
             expect(scratchPath).toMatch(/\.mindwtr-attachment-generation-.*\.tmp$/);
-            expect(syncFsMocks.remove).toHaveBeenCalledWith(scratchPath);
+            expect(syncFsMocks.remove).not.toHaveBeenCalledWith(scratchPath);
             expect(syncFsMocks.remove).not.toHaveBeenCalledWith(generationPath);
             expect(appData.tasks[0].attachments?.[0]).toMatchObject({
                 cloudKey: 'attachments/attachment-1.txt',

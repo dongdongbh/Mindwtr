@@ -109,6 +109,15 @@ const FILE_BACKEND_VALIDATION_CONFIG = {
 };
 const FILE_DOWNLOAD_READ_CHUNK_BYTES = 64 * 1024;
 let fileSyncUploadScratchSequence = 0;
+
+class FileSyncGenerationIntegrityError extends Error {
+    constructor(message: string, cause?: unknown) {
+        super(message);
+        this.name = 'FileSyncGenerationIntegrityError';
+        if (cause !== undefined) (this as Error & { cause?: unknown }).cause = cause;
+    }
+}
+
 const UPLOAD_TIMEOUT_MS = 120_000;
 const WEBDAV_ATTACHMENT_RETRY_OPTIONS = {
     maxAttempts: 5,
@@ -1492,11 +1501,32 @@ export async function syncFileAttachments(
     const publishFileSyncGeneration = async (
         targetPath: string,
         wireData: Uint8Array,
+        expectedPlaintextSha256: string,
     ): Promise<void> => {
         const expectedWireSha256 = await computeSha256Hex(wireData);
         if (!expectedWireSha256) {
             throw new Error('File Sync attachment generation hash is unavailable');
         }
+        const verifyExistingGeneration = async (): Promise<void> => {
+            try {
+                const plaintext = await openAttachmentBytes(await readFileSyncWireData(targetPath));
+                const actualSha256 = await computeSha256Hex(plaintext);
+                if (actualSha256?.toLowerCase() !== expectedPlaintextSha256.toLowerCase()) {
+                    throw new Error('plaintext digest mismatch');
+                }
+            } catch (error) {
+                throw new FileSyncGenerationIntegrityError(
+                    'File Sync attachment generation failed integrity verification',
+                    error,
+                );
+            }
+        };
+
+        if (await syncFsExists(targetPath)) {
+            await verifyExistingGeneration();
+            return;
+        }
+
         fileSyncUploadScratchSequence += 1;
         const random = Math.random().toString(16).slice(2, 10);
         const scratchPath = await join(
@@ -1506,6 +1536,7 @@ export async function syncFileAttachments(
         const target = await open(scratchPath, { write: true, createNew: true });
 
         let closed = false;
+        let readyForPublication = false;
         try {
             const written = await target.write(wireData);
             if (written !== wireData.byteLength) {
@@ -1513,18 +1544,30 @@ export async function syncFileAttachments(
             }
             await target.close();
             closed = true;
-            await syncFsPublishAttachmentGeneration(
-                scratchPath,
-                targetPath,
-                wireData.byteLength,
-                expectedWireSha256,
-            );
+            readyForPublication = true;
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+                const publication = await syncFsPublishAttachmentGeneration(
+                    scratchPath,
+                    targetPath,
+                    wireData.byteLength,
+                    expectedWireSha256,
+                );
+                if (publication.status === 'published') return;
+                if (await syncFsExists(targetPath)) {
+                    await verifyExistingGeneration();
+                    await syncFsRemove(scratchPath);
+                    return;
+                }
+            }
+            throw new Error('File Sync attachment generation collision could not be resolved');
         } catch (error) {
             if (!closed) await target.close().catch(() => undefined);
-            // createNew proves this invocation owns only the scratch. Native
-            // publication either atomically consumed it or left the final
-            // generation untouched, so cleanup can never remove a peer target.
-            await syncFsRemove(scratchPath).catch(() => undefined);
+            // Before native verification the scratch is only a partial write and
+            // cannot help recovery. Once ready, retain it on publication failure;
+            // the device-local publication journal reclaims that exact owned path.
+            if (!readyForPublication) {
+                await syncFsRemove(scratchPath).catch(() => undefined);
+            }
             throw error;
         }
     };
@@ -1594,6 +1637,7 @@ export async function syncFileAttachments(
             await publishFileSyncGeneration(
                 await resolveFileBackendPath(join, baseSyncDir, cloudKey),
                 wireData,
+                snapshot.fileHash,
             );
             attachment.cloudKey = cloudKey;
             attachment.localStatus = 'available';

@@ -20,6 +20,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 use tauri_plugin_fs::FsExt;
 
+use crate::attachment_installer::move_no_replace;
 use crate::config::{
     get_keyring_secret, lock_config_read_modify_write, read_bound_credential, read_config,
     read_dropbox_credential_state, set_keyring_secret, update_dropbox_credential_state,
@@ -6984,7 +6985,7 @@ mod tests {
     }
 
     #[test]
-    fn attachment_generation_publication_replaces_only_the_corrupt_same_hash_target() {
+    fn attachment_generation_publication_never_replaces_an_existing_target() {
         let dir = tempfile::tempdir().expect("generation test dir");
         let expected_bytes = b"verified generation";
         let expected_sha256 = bytes_to_hex(&Sha256::digest(expected_bytes));
@@ -7000,22 +7001,26 @@ mod tests {
         fs::write(&target, b"crash-truncated").expect("seed corrupt prior attempt");
         fs::write(&peer_winner, b"peer winner").expect("seed peer winner");
 
-        publish_file_sync_attachment_generation_with(
+        let outcome = publish_file_sync_attachment_generation_with(
             &scratch,
             &target,
             expected_bytes.len() as u64,
             &expected_sha256,
-            replace_file_sync_attachment_generation_durably,
+            move_no_replace,
             sync_parent_directory_for_durability,
         )
-        .expect("restart should replace the exact poisoned generation");
+        .expect("an existing generation should be reported without mutation");
 
-        assert_eq!(fs::read(&target).expect("published target"), expected_bytes);
+        assert_eq!(
+            outcome,
+            FileSyncAttachmentGenerationPublication::AlreadyExists
+        );
+        assert_eq!(fs::read(&target).expect("existing target"), b"crash-truncated");
         assert_eq!(
             fs::read(&peer_winner).expect("peer winner remains"),
             b"peer winner"
         );
-        assert!(!scratch.exists(), "atomic publication consumes the scratch");
+        assert!(scratch.exists(), "a collision must preserve the owned scratch");
     }
 
     // `File::sync_all` requires a write-capable handle on Windows. Keep this
@@ -14225,21 +14230,11 @@ fn verify_and_flush_file_sync_generation_scratch(
     Ok(())
 }
 
-#[cfg(windows)]
-fn replace_file_sync_attachment_generation_durably(
-    source: &Path,
-    destination: &Path,
-) -> std::io::Result<()> {
-    // MoveFileExW uses REPLACE_EXISTING | WRITE_THROUGH in this existing helper.
-    replace_transition_path_durably(source, destination)
-}
-
-#[cfg(not(windows))]
-fn replace_file_sync_attachment_generation_durably(
-    source: &Path,
-    destination: &Path,
-) -> std::io::Result<()> {
-    fs::rename(source, destination)
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub(crate) enum FileSyncAttachmentGenerationPublication {
+    Published,
+    AlreadyExists,
 }
 
 fn publish_file_sync_attachment_generation_with<Replace, SyncParent>(
@@ -14249,7 +14244,7 @@ fn publish_file_sync_attachment_generation_with<Replace, SyncParent>(
     expected_sha256: &str,
     replace: Replace,
     mut sync_parent: SyncParent,
-) -> Result<(), String>
+) -> Result<FileSyncAttachmentGenerationPublication, String>
 where
     Replace: FnOnce(&Path, &Path) -> std::io::Result<()>,
     SyncParent: FnMut(&Path) -> std::io::Result<()>,
@@ -14274,10 +14269,18 @@ where
     }
 
     verify_and_flush_file_sync_generation_scratch(scratch_path, expected_size, expected_sha256)?;
-    replace(scratch_path, target_path)
-        .map_err(|error| format!("Failed to publish attachment generation: {error}"))?;
+    match replace(scratch_path, target_path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Ok(FileSyncAttachmentGenerationPublication::AlreadyExists);
+        }
+        Err(error) => {
+            return Err(format!("Failed to publish attachment generation: {error}"));
+        }
+    }
     sync_parent(target_path)
-        .map_err(|error| format!("Failed to flush attachment generation directory: {error}"))
+        .map_err(|error| format!("Failed to flush attachment generation directory: {error}"))?;
+    Ok(FileSyncAttachmentGenerationPublication::Published)
 }
 
 #[tauri::command(async)]
@@ -14361,7 +14364,7 @@ pub(crate) fn sync_fs_publish_attachment_generation(
     target_path: String,
     expected_size: u64,
     expected_sha256: String,
-) -> Result<(), String> {
+) -> Result<FileSyncAttachmentGenerationPublication, String> {
     let scratch_path = sync_fs_path(&app, scratch_path)?;
     let target_path = sync_fs_path(&app, target_path)?;
     publish_file_sync_attachment_generation_with(
@@ -14369,7 +14372,7 @@ pub(crate) fn sync_fs_publish_attachment_generation(
         &target_path,
         expected_size,
         &expected_sha256,
-        replace_file_sync_attachment_generation_durably,
+        move_no_replace,
         sync_parent_directory_for_durability,
     )
 }

@@ -26,15 +26,20 @@ export const rename = (from: string, to: string): Promise<void> =>
 
 /**
  * Atomically publishes one already-written immutable attachment generation.
- * Native code streams and verifies the exact scratch bytes, flushes them, then
- * replaces only the hash-qualified final path and persists the directory entry.
+ * Native code verifies and flushes the exact scratch bytes, then moves it only
+ * when the hash-qualified target is absent. A collision leaves both paths intact
+ * so the caller can verify and reuse the peer generation without overwriting it.
  */
+export type AttachmentGenerationPublication =
+    | { status: 'published' }
+    | { status: 'alreadyExists' };
+
 export const publishAttachmentGeneration = (
     scratchPath: string,
     targetPath: string,
     expectedSize: number,
     expectedSha256: string,
-): Promise<void> => invokeNative('sync_fs_publish_attachment_generation', {
+): Promise<AttachmentGenerationPublication> => invokeNative('sync_fs_publish_attachment_generation', {
     scratchPath,
     targetPath,
     expectedSize,

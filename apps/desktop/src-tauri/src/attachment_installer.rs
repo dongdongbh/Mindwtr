@@ -340,7 +340,7 @@ fn path_to_c_string(path: &Path) -> io::Result<CString> {
 }
 
 #[cfg(target_os = "linux")]
-fn move_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
+pub(crate) fn move_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
     let source = path_to_c_string(source)?;
     let destination = path_to_c_string(destination)?;
     // SAFETY: both paths are valid, NUL-terminated C strings retained for the call.
@@ -361,7 +361,7 @@ fn move_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
 }
 
 #[cfg(target_os = "macos")]
-fn move_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
+pub(crate) fn move_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
     let source = path_to_c_string(source)?;
     let destination = path_to_c_string(destination)?;
     // SAFETY: both paths are valid, NUL-terminated C strings retained for the call.
@@ -375,7 +375,7 @@ fn move_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
 }
 
 #[cfg(target_os = "windows")]
-fn move_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
+pub(crate) fn move_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_WRITE_THROUGH};
 
@@ -407,7 +407,7 @@ fn move_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-fn move_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
+pub(crate) fn move_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
     fs::hard_link(source, destination)?;
     fs::remove_file(source)
 }
