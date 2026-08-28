@@ -4508,8 +4508,8 @@ mod tests {
         let helper_call = format!("{helper_name}(");
         assert_eq!(
             source.matches(&helper_call).count(),
-            2,
-            "only the real sync writer and folder probe may call the atomic helper"
+            3,
+            "only the real sync writer, folder probe, and focused test shim may call the atomic helper"
         );
 
         let helper_declaration = format!("fn {helper_name}<");
@@ -4520,7 +4520,12 @@ mod tests {
             .split_once("\nconst SYNC_FOLDER_PROBE_BYTES")
             .expect("end of atomic helper")
             .0;
-        for required in ["File::create(", ".write_all(", ".sync_all(", "fs::rename("] {
+        for required in [
+            ".create_new(true)",
+            ".write_all(",
+            ".sync_all(",
+            "fs::rename(",
+        ] {
             assert!(
                 helper_body.contains(required),
                 "the shared helper must own the atomic write primitive {required}"
@@ -4672,7 +4677,7 @@ mod tests {
             }
             Ok(content)
         };
-        let mut remove_file = |path: &Path| {
+        let mut before_remove = |path: &Path| {
             if failure == Some(ProbeFailureStage::Delete)
                 && path == final_file_for_remove
                 && path.exists()
@@ -4681,11 +4686,7 @@ mod tests {
                 delete_failure_injected = true;
                 return Err("injected delete failure".to_string());
             }
-            match fs::remove_file(path) {
-                Ok(()) => Ok(()),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                Err(error) => Err(error.to_string()),
-            }
+            Ok(())
         };
 
         let result = probe_sync_dir_at_with(
@@ -4694,7 +4695,7 @@ mod tests {
             &final_file,
             &mut before_stage,
             &mut read_back,
-            &mut remove_file,
+            &mut before_remove,
         );
 
         (dir, tmp_file, final_file, result)
@@ -4724,6 +4725,200 @@ mod tests {
         assert!(!final_file.exists(), "probe final file must be removed");
     }
 
+    fn run_atomic_write_test<BeforeStage>(
+        tmp_file: &Path,
+        final_file: &Path,
+        content: &[u8],
+        before_stage: &mut BeforeStage,
+        rename_override: Option<&mut dyn FnMut(&Path, &Path) -> Result<(), String>>,
+    ) -> Result<OwnedAtomicPublication, AtomicWriteError>
+    where
+        BeforeStage: FnMut(AtomicWriteStage) -> Result<(), String>,
+    {
+        atomic_tmp_write_then_rename_with(
+            tmp_file,
+            final_file,
+            content,
+            before_stage,
+            rename_override,
+            false,
+        )
+    }
+
+    #[test]
+    fn atomic_write_refuses_a_preexisting_temp_leaf_without_modifying_it() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let tmp_file = dir.path().join("probe.tmp");
+        let final_file = dir.path().join("probe");
+        fs::write(&tmp_file, b"pre-existing").expect("seed temp leaf");
+        let mut before_stage = |_stage: AtomicWriteStage| Ok(());
+
+        let error = run_atomic_write_test(
+            &tmp_file,
+            &final_file,
+            b"replacement",
+            &mut before_stage,
+            None,
+        )
+        .expect_err("pre-existing temp leaf must be rejected");
+
+        assert_eq!(error.stage, AtomicWriteStage::Create);
+        assert_eq!(fs::read(&tmp_file).expect("temp remains"), b"pre-existing");
+        assert!(!final_file.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn atomic_write_refuses_a_symlink_temp_without_touching_its_target() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let target = dir.path().join("unrelated");
+        let tmp_file = dir.path().join("probe.tmp");
+        let final_file = dir.path().join("probe");
+        fs::write(&target, b"unrelated").expect("seed unrelated file");
+        symlink(&target, &tmp_file).expect("seed temp symlink");
+        let mut before_stage = |_stage: AtomicWriteStage| Ok(());
+
+        let error = run_atomic_write_test(
+            &tmp_file,
+            &final_file,
+            b"replacement",
+            &mut before_stage,
+            None,
+        )
+        .expect_err("symlink temp leaf must be rejected");
+
+        assert_eq!(error.stage, AtomicWriteStage::Create);
+        assert_eq!(fs::read(&target).expect("target remains"), b"unrelated");
+        assert!(fs::symlink_metadata(&tmp_file)
+            .expect("symlink remains")
+            .file_type()
+            .is_symlink());
+    }
+
+    #[test]
+    fn atomic_write_leaves_a_name_swap_replacement_untouched() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let tmp_file = dir.path().join("probe.tmp");
+        let moved_owned_file = dir.path().join("owned-moved-away");
+        let unrelated = dir.path().join("unrelated");
+        let final_file = dir.path().join("probe");
+        fs::write(&unrelated, b"unrelated").expect("seed unrelated file");
+        let mut before_stage = |stage: AtomicWriteStage| {
+            if stage == AtomicWriteStage::Rename {
+                fs::rename(&tmp_file, &moved_owned_file).map_err(|error| error.to_string())?;
+                fs::hard_link(&unrelated, &tmp_file).map_err(|error| error.to_string())?;
+            }
+            Ok(())
+        };
+
+        let error = run_atomic_write_test(
+            &tmp_file,
+            &final_file,
+            b"invocation-owned",
+            &mut before_stage,
+            None,
+        )
+        .expect_err("name-swapped temp leaf must be rejected");
+
+        assert_eq!(error.stage, AtomicWriteStage::Rename);
+        assert_eq!(fs::read(&unrelated).expect("unrelated remains"), b"unrelated");
+        assert_eq!(
+            fs::read(&tmp_file).expect("replacement hardlink remains"),
+            b"unrelated"
+        );
+        assert_eq!(
+            fs::read(&moved_owned_file).expect("owned file remains available"),
+            b"invocation-owned"
+        );
+        assert!(!final_file.exists());
+    }
+
+    #[test]
+    fn atomic_write_does_not_replace_a_preexisting_probe_destination() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let tmp_file = dir.path().join("probe.tmp");
+        let final_file = dir.path().join("probe");
+        fs::write(&final_file, b"pre-existing").expect("seed destination");
+        let mut before_stage = |_stage: AtomicWriteStage| Ok(());
+
+        let error = run_atomic_write_test(
+            &tmp_file,
+            &final_file,
+            b"replacement",
+            &mut before_stage,
+            None,
+        )
+        .expect_err("probe destination must be create-new");
+
+        assert_eq!(error.stage, AtomicWriteStage::Rename);
+        assert_eq!(fs::read(&final_file).expect("destination remains"), b"pre-existing");
+        assert!(!tmp_file.exists(), "owned temp is cleaned up");
+    }
+
+    #[test]
+    fn atomic_write_retains_only_its_owned_temp_for_a_rename_fallback() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let tmp_file = dir.path().join("probe.tmp");
+        let final_file = dir.path().join("probe");
+        let mut before_stage = |_stage: AtomicWriteStage| Ok(());
+        let mut reject_rename = |_from: &Path, _to: &Path| Err("rename refused".to_string());
+
+        let mut error = run_atomic_write_test(
+            &tmp_file,
+            &final_file,
+            b"fallback bytes",
+            &mut before_stage,
+            Some(&mut reject_rename),
+        )
+        .expect_err("rename failure must retain the exact temp for fallback");
+        let publication = error
+            .owned_temp
+            .take()
+            .expect("rename failure retains invocation-owned temp");
+
+        publication.verify_at(&tmp_file).expect("temp identity remains exact");
+        assert_eq!(fs::read(&tmp_file).expect("read temp"), b"fallback bytes");
+        drop(publication);
+        assert!(!tmp_file.exists(), "dropping the owner cleans only its temp");
+    }
+
+    #[test]
+    fn atomic_publication_drop_leaves_a_replacement_leaf_untouched() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let tmp_file = dir.path().join("probe.tmp");
+        let final_file = dir.path().join("probe");
+        let moved_owned_file = dir.path().join("owned-moved-away");
+        let unrelated = dir.path().join("unrelated");
+        fs::write(&unrelated, b"unrelated").expect("seed unrelated file");
+        let mut before_stage = |_stage: AtomicWriteStage| Ok(());
+        let publication = run_atomic_write_test(
+            &tmp_file,
+            &final_file,
+            b"invocation-owned",
+            &mut before_stage,
+            None,
+        )
+        .expect("publish owned leaf");
+
+        let mut swap_before_remove = |path: &Path| {
+            fs::rename(path, &moved_owned_file).map_err(|error| error.to_string())?;
+            fs::hard_link(&unrelated, path).map_err(|error| error.to_string())
+        };
+        let error = publication
+            .remove_with(&final_file, &mut swap_before_remove)
+            .expect_err("cleanup must revalidate after the injected name swap");
+        assert!(error.contains("replaced"));
+        drop(publication);
+
+        assert_eq!(fs::read(&final_file).expect("replacement remains"), b"unrelated");
+        assert_eq!(
+            fs::read(&moved_owned_file).expect("owned node remains available"),
+            b"invocation-owned"
+        );
+    }
+
     #[test]
     #[cfg(unix)]
     fn sync_folder_probe_rejects_a_replaced_root_before_publication() {
@@ -4746,11 +4941,7 @@ mod tests {
             Ok(())
         };
         let mut read_back = |path: &Path| fs::read(path).map_err(|error| error.to_string());
-        let mut remove_file = |path: &Path| match fs::remove_file(path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error.to_string()),
-        };
+        let mut before_remove = |_path: &Path| Ok(());
 
         let error = probe_sync_dir_at_with(
             &sync_dir,
@@ -4758,7 +4949,7 @@ mod tests {
             &final_file,
             &mut before_stage,
             &mut read_back,
-            &mut remove_file,
+            &mut before_remove,
         )
         .expect_err("root replacement must abort the probe");
 
@@ -9539,8 +9730,12 @@ fn sync_parent_directory_for_durability(path: &Path) -> std::io::Result<()> {
 /// reopening the file for write afterwards, which they also refuse.
 fn copy_file_sequentially(source: &Path, destination: &Path) -> std::io::Result<()> {
     let contents = fs::read(source)?;
+    write_bytes_sequentially(&contents, destination)
+}
+
+fn write_bytes_sequentially(contents: &[u8], destination: &Path) -> std::io::Result<()> {
     let mut file = File::create(destination)?;
-    file.write_all(&contents)?;
+    file.write_all(contents)?;
     file.sync_all()
 }
 
@@ -9555,6 +9750,7 @@ enum AtomicWriteStage {
 struct AtomicWriteError {
     stage: AtomicWriteStage,
     detail: String,
+    owned_temp: Option<OwnedAtomicPublication>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -9608,17 +9804,124 @@ fn open_sync_root_no_follow(path: &Path) -> std::io::Result<File> {
             FILE_FLAG_OPEN_REPARSE_POINT,
         };
 
-        let metadata = fs::symlink_metadata(path)?;
-        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        let directory = OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)?;
+        if directory.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "sync root is a reparse point",
             ));
         }
+        return Ok(directory);
+    }
+}
+
+fn open_file_leaf_no_follow(path: &Path) -> std::io::Result<File> {
+    #[cfg(unix)]
+    {
         return OpenOptions::new()
             .read(true)
-            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .custom_flags(libc::O_NOFOLLOW)
             .open(path);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
+        };
+
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)?;
+        if file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "file leaf is a reparse point",
+            ));
+        }
+        return Ok(file);
+    }
+}
+
+fn path_has_identity(path: &Path, expected: NativeFileIdentity) -> bool {
+    open_file_leaf_no_follow(path)
+        .and_then(|file| native_file_identity(&file))
+        .is_ok_and(|actual| actual == expected)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct OwnedAtomicPublication {
+    identity: NativeFileIdentity,
+    path: PathBuf,
+    cleanup_on_drop: bool,
+}
+
+impl OwnedAtomicPublication {
+    fn verify_at(&self, path: &Path) -> Result<(), String> {
+        if path_has_identity(path, self.identity) {
+            Ok(())
+        } else {
+            Err("atomic write leaf was replaced before the operation completed".to_string())
+        }
+    }
+
+    fn read_back_with<ReadBack>(&self, path: &Path, read_back: &mut ReadBack) -> Result<Vec<u8>, String>
+    where
+        ReadBack: FnMut(&Path) -> Result<Vec<u8>, String>,
+    {
+        self.verify_at(path)?;
+        let bytes = read_back(path)?;
+        self.verify_at(path)?;
+        Ok(bytes)
+    }
+
+    fn remove_with<BeforeRemove>(
+        &self,
+        path: &Path,
+        before_remove: &mut BeforeRemove,
+    ) -> Result<(), String>
+    where
+        BeforeRemove: FnMut(&Path) -> Result<(), String>,
+    {
+        if fs::symlink_metadata(path).is_err_and(|error| {
+            error.kind() == std::io::ErrorKind::NotFound
+        }) {
+            return Ok(());
+        }
+        self.verify_at(path)?;
+        let first_result = before_remove(path);
+        if first_result.is_err() && self.verify_at(path).is_ok() {
+            // Keep the stage-specific first error, but make the same one-time
+            // best-effort retry the probe historically promised.
+            if before_remove(path).is_ok() && self.verify_at(path).is_ok() {
+                let _ = fs::remove_file(path);
+            }
+            return first_result;
+        }
+        self.verify_at(path)?;
+        fs::remove_file(path).map_err(|error| error.to_string())
+    }
+
+    fn keep(&mut self) {
+        self.cleanup_on_drop = false;
+    }
+}
+
+impl Drop for OwnedAtomicPublication {
+    fn drop(&mut self) {
+        if self.cleanup_on_drop {
+            remove_if_owned(&self.path, self.identity);
+        }
+    }
+}
+
+fn remove_if_owned(path: &Path, identity: NativeFileIdentity) {
+    if path_has_identity(path, identity) {
+        let _ = fs::remove_file(path);
     }
 }
 
@@ -9671,45 +9974,102 @@ fn atomic_tmp_write_then_rename_with<BeforeStage>(
     content: &[u8],
     before_stage: &mut BeforeStage,
     rename_override: Option<&mut dyn FnMut(&Path, &Path) -> Result<(), String>>,
-) -> Result<(), AtomicWriteError>
+    destination_may_exist: bool,
+) -> Result<OwnedAtomicPublication, AtomicWriteError>
 where
     BeforeStage: FnMut(AtomicWriteStage) -> Result<(), String>,
 {
     before_stage(AtomicWriteStage::Create).map_err(|detail| AtomicWriteError {
         stage: AtomicWriteStage::Create,
         detail,
+        owned_temp: None,
     })?;
-    let mut file = File::create(tmp_file).map_err(|error| AtomicWriteError {
-        stage: AtomicWriteStage::Create,
-        detail: error.to_string(),
-    })?;
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(tmp_file)
+        .map_err(|error| AtomicWriteError {
+            stage: AtomicWriteStage::Create,
+            detail: error.to_string(),
+            owned_temp: None,
+        })?;
+    let identity = match native_file_identity(&file) {
+        Ok(identity) => identity,
+        Err(error) => {
+            return Err(AtomicWriteError {
+                stage: AtomicWriteStage::Create,
+                detail: format!("Could not identify newly-created temp file: {error}"),
+                owned_temp: None,
+            });
+        }
+    };
 
-    before_stage(AtomicWriteStage::WriteAndSync).map_err(|detail| AtomicWriteError {
-        stage: AtomicWriteStage::WriteAndSync,
-        detail,
-    })?;
-    file.write_all(content).map_err(|error| AtomicWriteError {
-        stage: AtomicWriteStage::WriteAndSync,
-        detail: error.to_string(),
-    })?;
-    file.sync_all().map_err(|error| AtomicWriteError {
-        stage: AtomicWriteStage::WriteAndSync,
-        detail: error.to_string(),
-    })?;
+    let write_result = (|| {
+        before_stage(AtomicWriteStage::WriteAndSync)?;
+        file.write_all(content).map_err(|error| error.to_string())?;
+        file.sync_all().map_err(|error| error.to_string())
+    })();
     drop(file);
+    if let Err(detail) = write_result {
+        remove_if_owned(tmp_file, identity);
+        return Err(AtomicWriteError {
+            stage: AtomicWriteStage::WriteAndSync,
+            detail,
+            owned_temp: None,
+        });
+    }
 
-    before_stage(AtomicWriteStage::Rename).map_err(|detail| AtomicWriteError {
-        stage: AtomicWriteStage::Rename,
-        detail,
-    })?;
+    if let Err(detail) = before_stage(AtomicWriteStage::Rename) {
+        remove_if_owned(tmp_file, identity);
+        return Err(AtomicWriteError {
+            stage: AtomicWriteStage::Rename,
+            detail,
+            owned_temp: None,
+        });
+    }
+    if !path_has_identity(tmp_file, identity) {
+        return Err(AtomicWriteError {
+            stage: AtomicWriteStage::Rename,
+            detail: "Atomic write temp file was replaced before publication".to_string(),
+            owned_temp: None,
+        });
+    }
+    if !destination_may_exist && fs::symlink_metadata(destination).is_ok() {
+        remove_if_owned(tmp_file, identity);
+        return Err(AtomicWriteError {
+            stage: AtomicWriteStage::Rename,
+            detail: "Atomic write destination already exists".to_string(),
+            owned_temp: None,
+        });
+    }
     let rename_result = match rename_override {
         Some(rename_file) => rename_file(tmp_file, destination),
         None => fs::rename(tmp_file, destination).map_err(|error| error.to_string()),
     };
-    rename_result.map_err(|detail| AtomicWriteError {
+    if let Err(detail) = rename_result {
+        let owned_temp = path_has_identity(tmp_file, identity).then(|| OwnedAtomicPublication {
+            identity,
+            path: tmp_file.to_path_buf(),
+            cleanup_on_drop: true,
+        });
+        return Err(AtomicWriteError {
+            stage: AtomicWriteStage::Rename,
+            detail,
+            owned_temp,
+        });
+    }
+    let publication = OwnedAtomicPublication {
+        identity,
+        path: destination.to_path_buf(),
+        cleanup_on_drop: true,
+    };
+    publication.verify_at(destination).map_err(|detail| AtomicWriteError {
         stage: AtomicWriteStage::Rename,
         detail,
-    })
+        owned_temp: None,
+    })?;
+    Ok(publication)
 }
 
 const SYNC_FOLDER_PROBE_BYTES: &[u8] = b"mindwtr sync folder probe\n";
@@ -9723,18 +10083,18 @@ fn sync_folder_probe_stage_error(stage: AtomicWriteStage, detail: &str) -> Strin
     format!("{message}: {detail}")
 }
 
-fn probe_sync_dir_at_with<BeforeStage, ReadBack, Remove>(
+fn probe_sync_dir_at_with<BeforeStage, ReadBack, BeforeRemove>(
     sync_dir: &Path,
     tmp_file: &Path,
     final_file: &Path,
     before_stage: &mut BeforeStage,
     read_back: &mut ReadBack,
-    remove_file: &mut Remove,
+    before_remove: &mut BeforeRemove,
 ) -> Result<(), String>
 where
     BeforeStage: FnMut(AtomicWriteStage) -> Result<(), String>,
     ReadBack: FnMut(&Path) -> Result<Vec<u8>, String>,
-    Remove: FnMut(&Path) -> Result<(), String>,
+    BeforeRemove: FnMut(&Path) -> Result<(), String>,
 {
     let root_authority = SyncRootAuthority::retain(sync_dir).map_err(|error| {
         sync_folder_probe_stage_error(AtomicWriteStage::Create, &error)
@@ -9742,10 +10102,6 @@ where
     let sync_lock = match acquire_sync_lock(sync_dir).and_then(require_exclusive_probe_lock) {
         Ok(sync_lock) => sync_lock,
         Err(error) => {
-            if root_authority.revalidate(sync_dir).is_ok() {
-                let _ = remove_file(tmp_file);
-                let _ = remove_file(final_file);
-            }
             return Err(sync_folder_probe_stage_error(
                 AtomicWriteStage::Create,
                 &error,
@@ -9761,19 +10117,20 @@ where
             before_stage(stage)?;
             root_authority.revalidate(sync_dir)
         };
-        atomic_tmp_write_then_rename_with(
+        let publication = atomic_tmp_write_then_rename_with(
             tmp_file,
             final_file,
             SYNC_FOLDER_PROBE_BYTES,
             &mut guarded_before_stage,
             None,
+            false,
         )
         .map_err(|error| sync_folder_probe_stage_error(error.stage, &error.detail))?;
 
         root_authority
             .revalidate(sync_dir)
             .map_err(|error| format!("Wrote a file but could not read it back: {error}"))?;
-        let actual = read_back(final_file)
+        let actual = publication.read_back_with(final_file, read_back)
             .map_err(|error| format!("Wrote a file but could not read it back: {error}"))?;
         if actual != SYNC_FOLDER_PROBE_BYTES {
             return Err(
@@ -9784,16 +10141,13 @@ where
         root_authority
             .revalidate(sync_dir)
             .map_err(|error| format!("Could not remove the test file: {error}"))?;
-        remove_file(final_file)
+        publication.remove_with(final_file, before_remove)
             .map_err(|error| format!("Could not remove the test file: {error}"))
     })();
 
-    // Every stage gets a best-effort cleanup pass. In particular, a failed
-    // delete is retried here before its stage-specific error is returned.
-    if root_authority.revalidate(sync_dir).is_ok() {
-        let _ = remove_file(tmp_file);
-        let _ = remove_file(final_file);
-    }
+    // Failed write stages clean up only the exact temp identity they created.
+    // A failed final delete is retried by the publication owner inside the
+    // successful-write branch above; unowned pre-existing leaves are untouched.
     release_sync_lock(&sync_lock);
     result
 }
@@ -9801,11 +10155,7 @@ where
 fn probe_sync_dir_at(sync_dir: &Path, tmp_file: &Path, final_file: &Path) -> Result<(), String> {
     let mut before_stage = |_stage: AtomicWriteStage| Ok(());
     let mut read_back = |path: &Path| fs::read(path).map_err(|error| error.to_string());
-    let mut remove_file = |path: &Path| match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.to_string()),
-    };
+    let mut before_remove = |_path: &Path| Ok(());
 
     probe_sync_dir_at_with(
         sync_dir,
@@ -9813,7 +10163,7 @@ fn probe_sync_dir_at(sync_dir: &Path, tmp_file: &Path, final_file: &Path) -> Res
         final_file,
         &mut before_stage,
         &mut read_back,
-        &mut remove_file,
+        &mut before_remove,
     )
 }
 
@@ -10573,8 +10923,10 @@ fn write_sync_file_to_dir_with(
             &content,
             &mut before_stage,
             rename_override,
+            true,
         ) {
-            Ok(()) => {
+            Ok(mut publication) => {
+                publication.keep();
                 sync_parent_directory_for_durability(&sync_file)
                     .map_err(|error| format!("Failed to flush sync directory metadata: {error}"))?;
                 Ok(true)
@@ -10582,14 +10934,30 @@ fn write_sync_file_to_dir_with(
             Err(error) if error.stage != AtomicWriteStage::Rename || windows_replacement => {
                 Err(error.detail)
             }
-            Err(error) => {
-                let rename_err = error.detail;
+            Err(mut error) => {
+                let rename_err = std::mem::take(&mut error.detail);
+                let publication = error.owned_temp.take().ok_or_else(|| {
+                    format!(
+                        "Sync write failed: rename error: {rename_err}; the invocation-owned temp file is no longer available"
+                    )
+                })?;
                 log::warn!(
                     "Atomic rename failed ({}), falling back to direct write",
                     rename_err
                 );
-                match copy_file_sequentially(&tmp_file, &sync_file) {
+                publication.verify_at(&tmp_file).map_err(|ownership_error| {
+                    format!(
+                        "Sync write failed: rename error: {rename_err}; temp ownership error: {ownership_error}"
+                    )
+                })?;
+                match write_bytes_sequentially(&content, &sync_file) {
                     Ok(_) => {
+                        let mut remove_owned_temp = |path: &Path| {
+                            let mut before_remove = |_owned_path: &Path| Ok(());
+                            publication
+                                .remove_with(path, &mut before_remove)
+                                .map_err(std::io::Error::other)
+                        };
                         finish_copied_sync_file_durably(
                             &tmp_file,
                             &sync_file,
@@ -10597,7 +10965,7 @@ fn write_sync_file_to_dir_with(
                             // Reopening it for write is the shape a cache-off
                             // VFS mount refuses (#1001).
                             |_| Ok(()),
-                            |path| fs::remove_file(path),
+                            &mut remove_owned_temp,
                             sync_parent_directory_for_durability,
                         )?;
                         Ok(true)
