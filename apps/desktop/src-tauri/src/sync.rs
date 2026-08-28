@@ -5130,6 +5130,78 @@ mod tests {
             .expect("release replacement lease");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn leased_reads_never_return_replacement_root_bytes() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let sync_root = temp.path().join("sync-root");
+        let displaced_root = temp.path().join("displaced-sync-root");
+        let replacement_root = temp.path().join("replacement-sync-root");
+        fs::create_dir(&sync_root).expect("sync root");
+        fs::write(
+            sync_root.join(DATA_FILE_NAME),
+            br#"{"tasks":[{"id":"held-root"}]}"#,
+        )
+        .expect("seed held-root document");
+        let state = FileSyncLeaseState::default();
+        let token =
+            acquire_file_sync_lease_for_dir(&state, &sync_root, "main").expect("cycle lease");
+        let mut observed_ids = Vec::new();
+        let mut observed_version = None;
+
+        let error = with_file_sync_lease(&state, &token, "main", |lease| {
+            fs::rename(&sync_root, &displaced_root).map_err(|error| error.to_string())?;
+            fs::create_dir(&sync_root).map_err(|error| error.to_string())?;
+            fs::write(
+                sync_root.join(DATA_FILE_NAME),
+                br#"{"tasks":[{"id":"replacement-root"}]}"#,
+            )
+            .map_err(|error| error.to_string())?;
+
+            let root = RetainedSyncRoot::new(&lease.sync_dir, &lease._sync_lock);
+            let read =
+                read_sync_file_versioned_from_retained_root_with(&root, SyncFileCrypto::Off)?;
+            observed_ids.push(
+                read.data["tasks"][0]["id"]
+                    .as_str()
+                    .expect("versioned held-root id")
+                    .to_string(),
+            );
+            observed_version = Some((read.fingerprint.clone(), read.source, read.needs_repair));
+            let plain = read_sync_file_from_retained_root_with(&root, SyncFileCrypto::Off)?;
+            observed_ids.push(
+                plain["tasks"][0]["id"]
+                    .as_str()
+                    .expect("plain held-root id")
+                    .to_string(),
+            );
+            Ok(read)
+        })
+        .expect_err("final root validation must suppress the retained read result");
+
+        assert!(
+            error.contains("root authority changed"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(observed_ids, ["held-root", "held-root"]);
+        let (held_fingerprint, source, needs_repair) =
+            observed_version.expect("retained version metadata");
+        assert_eq!(source, "primary");
+        assert!(!needs_repair);
+        let replacement_read =
+            read_sync_file_versioned_from_dir(&sync_root).expect("replacement version");
+        assert_ne!(held_fingerprint, replacement_read.fingerprint);
+        assert_eq!(
+            fs::read_to_string(sync_root.join(DATA_FILE_NAME))
+                .expect("replacement document remains"),
+            r#"{"tasks":[{"id":"replacement-root"}]}"#
+        );
+
+        fs::rename(&sync_root, &replacement_root).expect("preserve replacement root");
+        fs::rename(&displaced_root, &sync_root).expect("restore leased root name");
+        release_file_sync_lease_token(&state, &token, "main").expect("release restored lease");
+    }
+
     #[test]
     fn destroyed_renderer_releases_its_leases_and_allows_reacquisition() {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -15559,10 +15631,10 @@ fn sort_retained_seed_candidates(
     });
 }
 
-fn read_sync_file_from_retained_root_with(
+fn read_sync_file_with_source_from_retained_root_with(
     root: &RetainedSyncRoot<'_>,
     crypto: SyncFileCrypto<'_>,
-) -> Result<Value, String> {
+) -> Result<SyncFileRead, String> {
     let data_base = crypto.data_base();
     let primary = root.sync_dir.join(&data_base);
     let primary_previous = root.sync_dir.join(format!("{data_base}.previous"));
@@ -15576,31 +15648,45 @@ fn read_sync_file_from_retained_root_with(
     });
 
     let seed_suffix = if crypto.is_on() { ".json.enc" } else { ".json" };
-    let read_recovery = || -> Result<Option<Value>, String> {
-        for path in [&primary_previous, &backup, &backup_previous] {
+    let read_recovery = || -> Result<Option<SyncFileRead>, String> {
+        for (path, source) in [
+            (&primary_previous, SyncFileReadSource::PrimaryPrevious),
+            (&backup, SyncFileReadSource::Backup),
+            (&backup_previous, SyncFileReadSource::BackupPrevious),
+        ] {
             if !root.exists(path).map_err(|error| error.to_string())? {
                 continue;
             }
             match read_sync_candidate_from_retained_root(root, path, 2, crypto) {
-                Ok(data) => return Ok(Some(data)),
+                Ok(data) => return Ok(Some(SyncFileRead { data, source })),
                 Err(error) if is_terminal_error(&error) => return Err(error),
                 Err(_) => continue,
             }
         }
         Ok(None)
     };
-    let read_seed_or_legacy = || -> Result<Option<Value>, String> {
+    let read_seed_or_legacy = || -> Result<Option<SyncFileRead>, String> {
         let mut first_error = None;
         if root.exists(&legacy).map_err(|error| error.to_string())? {
             match read_sync_candidate_from_retained_root(root, &legacy, 1, crypto) {
-                Ok(data) => return Ok(Some(data)),
+                Ok(data) => {
+                    return Ok(Some(SyncFileRead {
+                        data,
+                        source: SyncFileReadSource::Legacy,
+                    }))
+                }
                 Err(error) if is_terminal_error(&error) => return Err(error),
                 Err(error) => first_error = Some(error),
             }
         }
         for seed in retained_seed_backup_files(root, seed_suffix)? {
             match read_sync_candidate_from_retained_root(root, &seed, 1, crypto) {
-                Ok(data) => return Ok(Some(data)),
+                Ok(data) => {
+                    return Ok(Some(SyncFileRead {
+                        data,
+                        source: SyncFileReadSource::Seed,
+                    }))
+                }
                 Err(error) if is_terminal_error(&error) => return Err(error),
                 Err(error) => {
                     if first_error.is_none() {
@@ -15665,11 +15751,17 @@ fn read_sync_file_from_retained_root_with(
         if let Some(discovery) = detect_opposite_generation()? {
             return Err(discovery);
         }
-        return Ok(empty_remote_app_data());
+        return Ok(SyncFileRead {
+            data: empty_remote_app_data(),
+            source: SyncFileReadSource::Empty,
+        });
     }
 
     match read_sync_candidate_from_retained_root(root, &primary, 5, crypto) {
-        Ok(data) => Ok(data),
+        Ok(data) => Ok(SyncFileRead {
+            data,
+            source: SyncFileReadSource::Primary,
+        }),
         Err(primary_error) if is_terminal_error(&primary_error) => Err(primary_error),
         Err(primary_error) => {
             if !crypto.is_on() {
@@ -15690,6 +15782,13 @@ fn read_sync_file_from_retained_root_with(
             Err(primary_error)
         }
     }
+}
+
+fn read_sync_file_from_retained_root_with(
+    root: &RetainedSyncRoot<'_>,
+    crypto: SyncFileCrypto<'_>,
+) -> Result<Value, String> {
+    read_sync_file_with_source_from_retained_root_with(root, crypto).map(|result| result.data)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -15994,13 +16093,6 @@ fn read_sync_file_from_dir(sync_dir: &Path) -> Result<serde_json::Value, String>
     read_sync_file_with_source_from_dir(sync_dir).map(|result| result.data)
 }
 
-fn read_sync_file_from_dir_with(
-    sync_dir: &Path,
-    crypto: SyncFileCrypto<'_>,
-) -> Result<serde_json::Value, String> {
-    read_sync_file_with_source_from_dir_with(sync_dir, crypto).map(|result| result.data)
-}
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SyncFileReadResult {
@@ -16024,11 +16116,26 @@ fn read_sync_file_versioned_from_dir(sync_dir: &Path) -> Result<SyncFileReadResu
     read_sync_file_versioned_from_dir_with(sync_dir, SyncFileCrypto::Off)
 }
 
+#[allow(dead_code)] // Pathname reader retained only for focused recovery/crypto tests.
 fn read_sync_file_versioned_from_dir_with(
     sync_dir: &Path,
     crypto: SyncFileCrypto<'_>,
 ) -> Result<SyncFileReadResult, String> {
     let result = read_sync_file_with_source_from_dir_with(sync_dir, crypto)?;
+    let fingerprint = sync_document_fingerprint(&result.data)?;
+    Ok(SyncFileReadResult {
+        data: result.data,
+        fingerprint,
+        source: result.source.as_str(),
+        needs_repair: result.source.needs_repair(),
+    })
+}
+
+fn read_sync_file_versioned_from_retained_root_with(
+    root: &RetainedSyncRoot<'_>,
+    crypto: SyncFileCrypto<'_>,
+) -> Result<SyncFileReadResult, String> {
+    let result = read_sync_file_with_source_from_retained_root_with(root, crypto)?;
     let fingerprint = sync_document_fingerprint(&result.data)?;
     Ok(SyncFileReadResult {
         data: result.data,
@@ -16081,7 +16188,10 @@ fn persist_discovery_and_reduce<T>(
 #[tauri::command(async)]
 pub(crate) fn read_sync_file(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    lease_state: tauri::State<'_, FileSyncLeaseState>,
     path: Option<String>,
+    lease_token: String,
 ) -> Result<serde_json::Value, String> {
     let sync_dir = match path {
         Some(path) => resolve_sync_dir_granting_scope(&app, path)?,
@@ -16090,16 +16200,24 @@ pub(crate) fn read_sync_file(
         }
     };
     let material = resolve_sync_encryption_material(&app)?;
-    persist_discovery_and_reduce(
-        &app,
-        read_sync_file_from_dir_with(&sync_dir, crypto_for(&material)),
-    )
+    let normalized_sync_dir = normalize_lease_sync_dir(&sync_dir);
+    let read = with_file_sync_lease(&lease_state, &lease_token, window.label(), |lease| {
+        if lease.sync_dir != normalized_sync_dir {
+            return Err("File Sync lease does not belong to this sync folder".to_string());
+        }
+        let root = RetainedSyncRoot::new(&lease.sync_dir, &lease._sync_lock);
+        read_sync_file_from_retained_root_with(&root, crypto_for(&material))
+    });
+    persist_discovery_and_reduce(&app, read)
 }
 
 #[tauri::command(async)]
 pub(crate) fn read_sync_file_versioned(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    lease_state: tauri::State<'_, FileSyncLeaseState>,
     path: Option<String>,
+    lease_token: String,
 ) -> Result<SyncFileReadResult, String> {
     let sync_dir = match path {
         Some(path) => resolve_sync_dir_granting_scope(&app, path)?,
@@ -16108,10 +16226,15 @@ pub(crate) fn read_sync_file_versioned(
         }
     };
     let material = resolve_sync_encryption_material(&app)?;
-    persist_discovery_and_reduce(
-        &app,
-        read_sync_file_versioned_from_dir_with(&sync_dir, crypto_for(&material)),
-    )
+    let normalized_sync_dir = normalize_lease_sync_dir(&sync_dir);
+    let read = with_file_sync_lease(&lease_state, &lease_token, window.label(), |lease| {
+        if lease.sync_dir != normalized_sync_dir {
+            return Err("File Sync lease does not belong to this sync folder".to_string());
+        }
+        let root = RetainedSyncRoot::new(&lease.sync_dir, &lease._sync_lock);
+        read_sync_file_versioned_from_retained_root_with(&root, crypto_for(&material))
+    });
+    persist_discovery_and_reduce(&app, read)
 }
 
 #[cfg(test)]

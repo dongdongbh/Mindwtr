@@ -226,9 +226,15 @@ describe('sync-service test utils', () => {
         });
         const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
             if (command === 'get_sync_backend') return 'file';
+            if (command === 'acquire_file_sync_lease') return 'external-resolution-lease';
             if (command === 'read_sync_file') {
+                expect(args?.leaseToken).toBe('external-resolution-lease');
                 events.push('resolution:read-external');
                 return externalData;
+            }
+            if (command === 'release_file_sync_lease') {
+                expect(args?.token).toBe('external-resolution-lease');
+                return undefined;
             }
             if (command === 'save_data') {
                 events.push('resolution:save-external');
@@ -291,12 +297,18 @@ describe('sync-service test utils', () => {
         const externalData = emptyAppData();
         const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
             if (command === 'get_sync_backend') return 'file';
+            if (command === 'acquire_file_sync_lease') return 'external-resolution-lease';
             if (command === 'read_sync_file') {
+                expect(args?.leaseToken).toBe('external-resolution-lease');
                 events.push('resolution:read:start');
                 markExternalReadStarted();
                 await externalReadBarrier;
                 events.push('resolution:read:end');
                 return externalData;
+            }
+            if (command === 'release_file_sync_lease') {
+                expect(args?.token).toBe('external-resolution-lease');
+                return undefined;
             }
             if (command === 'save_data') {
                 events.push('resolution:persist');
@@ -3046,6 +3058,7 @@ describe('SyncService testability hooks', () => {
         const remote = emptyAppData();
         const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
             if (command === 'read_sync_file_versioned') {
+                expect(args?.leaseToken).toBe('cycle-lease');
                 return { data: remote, fingerprint: 'file:v1:sha256=initial' };
             }
             if (command === 'write_sync_file') {

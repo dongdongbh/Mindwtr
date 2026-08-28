@@ -2340,9 +2340,17 @@ export class SyncService {
                 if (!isTauriRuntimeEnv()) {
                     throw new Error('File sync is not available in the web app.');
                 }
-                return invokeSyncNative<FileSyncReadResult>('read_sync_file_versioned', context.usesConfigOverride
-                    ? { path: context.syncPath }
-                    : undefined);
+                if (!context.fileSyncLeaseToken) {
+                    throw new Error('File Sync read requires an active folder lease.');
+                }
+                const args = {
+                    ...(context.usesConfigOverride ? { path: context.syncPath } : {}),
+                    leaseToken: context.fileSyncLeaseToken,
+                };
+                return invokeSyncNative<FileSyncReadResult>(
+                    'read_sync_file_versioned',
+                    args,
+                );
             },
             fileWrite: async (sanitized, expectedFingerprint) => {
                 await SyncService.markSyncWrite(sanitized);
@@ -2570,29 +2578,37 @@ export class SyncService {
 
             return await runSyncDocumentWriteExclusive(async () => {
                 await syncServiceDependencies.flushPendingSave();
-                const externalData = normalizeAppData(await invokeSyncNative<AppData>('read_sync_file'));
-                await persistLocalDataForSync(externalData, { mode: 'exact' });
-                await getStoreState().fetchData({ silent: true });
-                const now = new Date().toISOString();
-                const nextHistory = appendSyncHistory(getStoreState().settings, {
-                    at: now,
-                    status: 'success',
-                    backend: 'file',
-                    type: 'pull',
-                    conflicts: 0,
-                    conflictIds: [],
-                    maxClockSkewMs: 0,
-                    timestampAdjustments: 0,
-                    details: 'external_override',
-                });
-                const persisted = await SyncService.persistSuccessfulSyncStatus('success', now, nextHistory);
-                if (!persisted) {
-                    throw new Error('Failed to persist sync status');
+                const leaseToken = await acquireFileSyncLease();
+                try {
+                    const externalData = normalizeAppData(await invokeSyncNative<AppData>(
+                        'read_sync_file',
+                        { leaseToken },
+                    ));
+                    await persistLocalDataForSync(externalData, { mode: 'exact' });
+                    await getStoreState().fetchData({ silent: true });
+                    const now = new Date().toISOString();
+                    const nextHistory = appendSyncHistory(getStoreState().settings, {
+                        at: now,
+                        status: 'success',
+                        backend: 'file',
+                        type: 'pull',
+                        conflicts: 0,
+                        conflictIds: [],
+                        maxClockSkewMs: 0,
+                        timestampAdjustments: 0,
+                        details: 'external_override',
+                    });
+                    const persisted = await SyncService.persistSuccessfulSyncStatus('success', now, nextHistory);
+                    if (!persisted) {
+                        throw new Error('Failed to persist sync status');
+                    }
+                    if (pendingChange?.incomingHash) {
+                        SyncService.lastObservedHash = pendingChange.incomingHash;
+                    }
+                    return { success: true };
+                } finally {
+                    await releaseFileSyncLease(leaseToken);
                 }
-                if (pendingChange?.incomingHash) {
-                    SyncService.lastObservedHash = pendingChange.incomingHash;
-                }
-                return { success: true };
             });
         } catch (error) {
             SyncService.setPendingExternalSyncChange(pendingChange);
@@ -2609,7 +2625,14 @@ export class SyncService {
         if (!hasSyncFile) return;
 
         try {
-            const syncData = await invokeSyncNative<AppData>('read_sync_file');
+            const leaseToken = await acquireFileSyncLease();
+            const syncData = await (async () => {
+                try {
+                    return await invokeSyncNative<AppData>('read_sync_file', { leaseToken });
+                } finally {
+                    await releaseFileSyncLease(leaseToken);
+                }
+            })();
             const normalized = normalizeAppData(syncData);
             const hash = await hashString(toStableJson(normalized));
             if (hash === SyncService.lastWrittenHash) {
