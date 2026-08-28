@@ -209,6 +209,7 @@ enum AttachmentFileInstallerFaultPoint: Equatable {
   case afterInitialJournal
   case afterExclusiveLink
   case beforeImmutablePublication
+  case beforeImmutablePrivateDirectoryRetirement
 }
 
 final class AttachmentFileInstallerEngine {
@@ -416,6 +417,35 @@ final class AttachmentFileInstallerEngine {
       defer { Darwin.close(publishedDescriptor) }
       guard try self.sha256(descriptor: publishedDescriptor) == expectedStagedSha256 else {
         throw installerError("Published attachment generation failed verification")
+      }
+      try self.faultInjector(.beforeImmutablePrivateDirectoryRetirement)
+      guard
+        try self.directoryIdentity(descriptor: targetDescriptor) == expectedDirectoryIdentity,
+        try self.directoryIdentity(descriptor: privateDescriptor) == expectedPrivateDirectoryIdentity
+      else {
+        throw installerError("Attachment publication directory identity changed before cleanup")
+      }
+      var namedPrivateDirectory = stat()
+      let privateDirectoryName = privateDirectory.lastPathComponent
+      let statResult = privateDirectoryName.withCString { name in
+        Darwin.fstatat(targetDescriptor, name, &namedPrivateDirectory, AT_SYMLINK_NOFOLLOW)
+      }
+      guard
+        statResult == 0,
+        namedPrivateDirectory.st_mode & S_IFMT == S_IFDIR,
+        "\(UInt64(namedPrivateDirectory.st_dev)):\(UInt64(namedPrivateDirectory.st_ino))"
+          == expectedPrivateDirectoryIdentity
+      else {
+        throw installerError("Private attachment publication directory changed before cleanup")
+      }
+      let removeResult = privateDirectoryName.withCString { name in
+        Darwin.unlinkat(targetDescriptor, name, AT_REMOVEDIR)
+      }
+      guard removeResult == 0 else {
+        throw installerError("Could not remove empty private attachment publication directory")
+      }
+      guard Darwin.fsync(targetDescriptor) == 0 else {
+        throw installerError("Could not flush attachment directory after private cleanup")
       }
       return .published
     }

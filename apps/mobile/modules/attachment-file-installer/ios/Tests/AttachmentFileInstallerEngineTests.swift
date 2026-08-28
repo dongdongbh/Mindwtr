@@ -120,6 +120,44 @@ final class AttachmentFileInstallerEngineTests: XCTestCase {
     }
   }
 
+  func testImmutablePublisherPreservesReplacementPrivateDirectoryAtRetirement() throws {
+    try withFixture { fixture in
+      let operationId = String(repeating: "7", count: 32)
+      let target = fixture.target("a.\(digest("candidate")).txt")
+      let prepared = try fixture.engine().prepareImmutableStage(
+        targetInput: target,
+        operationId: operationId
+      )
+      let staged = prepared.stagedUrl
+      let privateDirectory = staged.deletingLastPathComponent()
+      let displacedDirectory = fixture.root.appendingPathComponent(
+        "displaced-private-directory",
+        isDirectory: true
+      )
+      try write("candidate", to: staged)
+      let racing = fixture.engine { point in
+        guard point == .beforeImmutablePrivateDirectoryRetirement else { return }
+        try FileManager.default.moveItem(at: privateDirectory, to: displacedDirectory)
+        try FileManager.default.createDirectory(
+          at: privateDirectory,
+          withIntermediateDirectories: false
+        )
+      }
+
+      XCTAssertThrowsError(try racing.publishImmutable(
+        stagedInput: staged,
+        targetInput: target,
+        expectedStagedSha256: digest("candidate"),
+        expectedStagedIdentity: prepared.stagedIdentity,
+        expectedDirectoryIdentity: prepared.directoryIdentity,
+        expectedPrivateDirectoryIdentity: prepared.privateDirectoryIdentity
+      ))
+      XCTAssertEqual(try contents(target), "candidate")
+      XCTAssertTrue(FileManager.default.fileExists(atPath: privateDirectory.path))
+      XCTAssertTrue(FileManager.default.fileExists(atPath: displacedDirectory.path))
+    }
+  }
+
   func testImmutablePublisherPreservesOwnedStageAndPeerTargetOnCollision() throws {
     try withFixture { fixture in
       let target = fixture.target("a.\(digest("candidate")).txt")
