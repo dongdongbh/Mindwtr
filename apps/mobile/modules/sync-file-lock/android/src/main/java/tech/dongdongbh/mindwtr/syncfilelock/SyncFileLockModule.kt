@@ -130,9 +130,11 @@ private class PrivateFileStableAuthority(
   private val owner: RandomAccessFile,
   private val lock: FileLock,
   private val identity: SyncFileNodeIdentity,
+  private val readPathIdentity: (File, Boolean) -> SyncFileNodeIdentity,
+  private val readDescriptorIdentity: (java.io.FileDescriptor) -> SyncFileNodeIdentity,
 ) : StableSyncAuthority {
   override fun revalidate() {
-    if (pathIdentity(path, false) != identity || descriptorIdentity(owner.fd) != identity) {
+    if (readPathIdentity(path, false) != identity || readDescriptorIdentity(owner.fd) != identity) {
       throw SyncFileLockUnavailableException("$LOCK_IDENTITY_LOST_CODE: private SAF authority changed")
     }
   }
@@ -150,7 +152,11 @@ private class PrivateFileStableAuthority(
   }
 }
 
-internal fun acquirePrivateFileStableAuthority(path: File): StableSyncAuthority {
+internal fun acquirePrivateFileStableAuthority(
+  path: File,
+  readPathIdentity: (File, Boolean) -> SyncFileNodeIdentity = ::pathIdentity,
+  readDescriptorIdentity: (java.io.FileDescriptor) -> SyncFileNodeIdentity = ::descriptorIdentity,
+): StableSyncAuthority {
   path.parentFile?.let { parent ->
     if (!parent.isDirectory && !parent.mkdirs()) {
       throw SyncFileLockUnavailableException("SYNC_FILE_LOCK_UNAVAILABLE: cannot create private authority")
@@ -162,8 +168,8 @@ internal fun acquirePrivateFileStableAuthority(path: File): StableSyncAuthority 
     throw SyncFileLockUnavailableException("SYNC_FILE_LOCK_UNAVAILABLE: cannot open private authority", error)
   }
   val identity = try {
-    val opened = descriptorIdentity(owner.fd)
-    if (pathIdentity(path, false) != opened) {
+    val opened = readDescriptorIdentity(owner.fd)
+    if (readPathIdentity(path, false) != opened) {
       throw SyncFileLockUnavailableException("SYNC_FILE_LOCK_UNAVAILABLE: private authority changed")
     }
     opened
@@ -183,7 +189,14 @@ internal fun acquirePrivateFileStableAuthority(path: File): StableSyncAuthority 
     owner.close()
     throw SyncFileLockUnavailableException("SYNC_FILE_LOCK_BUSY: another File Sync operation is active")
   }
-  return PrivateFileStableAuthority(path, owner, lock, identity).also { it.revalidate() }
+  return PrivateFileStableAuthority(
+    path,
+    owner,
+    lock,
+    identity,
+    readPathIdentity,
+    readDescriptorIdentity,
+  ).also { it.revalidate() }
 }
 
 internal fun selectStableSyncAuthority(
@@ -350,7 +363,8 @@ class SyncFileLockModule : Module() {
       val lockResult = StableRootLockNative.tryLock(descriptor.fd)
       when {
         lockResult == 0 -> Unit
-        lockResult == OsConstants.EAGAIN || lockResult == OsConstants.EWOULDBLOCK -> {
+        // Linux aliases EWOULDBLOCK to EAGAIN; Android exposes only EAGAIN.
+        lockResult == OsConstants.EAGAIN -> {
           throw SyncFileLockUnavailableException("SYNC_FILE_LOCK_BUSY: another File Sync operation is active")
         }
         else -> throw SyncFileLockUnavailableException(

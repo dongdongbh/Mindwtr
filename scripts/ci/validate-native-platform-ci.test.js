@@ -36,6 +36,17 @@ test("native CI generates clean projects and compiles Android and iOS sources", 
   expect(workflow).toContain("Generate Android native project");
   expect(workflow).toMatch(/prebuild \\\n\s+--clean \\\n\s+--platform android/);
   expect(workflow).toContain(":app:compileDebugKotlin");
+  expect(androidJob).toContain("name: Run Android compatibility-lock process regression");
+  expect(androidJob).toContain("file_compat_lock_test.cpp");
+  expect(androidJob).toContain(":sync-file-lock:assembleDebug");
+  expect(androidJob).toContain("name: Verify packaged Android lock JNI symbols");
+  expect(androidJob).toContain("jni/arm64-v8a/libsync-file-lock.so");
+  expect(androidJob).toContain(
+    "Java_tech_dongdongbh_mindwtr_syncfilelock_StableRootLockNative_tryLock",
+  );
+  expect(androidJob).toContain(
+    "Java_tech_dongdongbh_mindwtr_syncfilelock_StableRootLockNative_tryOfdLock",
+  );
   expect(androidJob).toContain("name: Run Android native recovery tests");
   expect(androidJob).toContain(":attachment-file-installer:testDebugUnitTest");
   expect(androidJob).toContain(":sync-file-lock:testDebugUnitTest");
@@ -132,6 +143,14 @@ test("File Sync lock native CI collects stable-authority suites", () => {
     "apps/mobile/modules/sync-file-lock/android/src/main/cpp/stable_root_lock.cpp",
     "utf8",
   );
+  const androidCompatibilityLock = readFileSync(
+    "apps/mobile/modules/sync-file-lock/android/src/main/cpp/file_compat_lock.cpp",
+    "utf8",
+  );
+  const androidCompatibilityLockTest = readFileSync(
+    "apps/mobile/modules/sync-file-lock/android/src/test/cpp/file_compat_lock_test.cpp",
+    "utf8",
+  );
   const swiftPackage = readFileSync(
     "apps/mobile/modules/sync-file-lock/ios/Package.swift",
     "utf8",
@@ -146,6 +165,11 @@ test("File Sync lock native CI collects stable-authority suites", () => {
   expect(androidTests).toContain("replacedLegacyLockCannotCreateSecondCurrentVersionOwner");
   expect(androidStableLock).toContain("flock(fd, LOCK_EX | LOCK_NB)");
   expect(androidStableLock).toContain("flock(fd, LOCK_UN)");
+  expect(androidCompatibilityLock).toContain("F_OFD_SETLK");
+  expect(androidCompatibilityLockTest).toContain("F_SETLK");
+  expect(androidCompatibilityLockTest).toContain("fork()");
+  expect(androidCompatibilityLockTest).toContain("validation_fd = open");
+  expect(androidCompatibilityLockTest).toContain("legacy lock unexpectedly acquired after revalidation");
   expect(swiftPackage).toContain(".testTarget(");
   expect(swiftTests).toContain("testRootAuthorityBlocksReplacementLockOwner");
   expect(swiftTests).toContain("testSymlinkLockFailsClosedWithoutTouchingPeer");

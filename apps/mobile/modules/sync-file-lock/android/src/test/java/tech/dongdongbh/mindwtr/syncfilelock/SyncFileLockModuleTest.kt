@@ -10,6 +10,15 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 class SyncFileLockModuleTest {
+  private fun acquireJvmPrivateFileStableAuthority(path: File): StableSyncAuthority {
+    val stableIdentity = SyncFileNodeIdentity(7, 11)
+    return acquirePrivateFileStableAuthority(
+      path,
+      readPathIdentity = { _, _ -> stableIdentity },
+      readDescriptorIdentity = { stableIdentity },
+    )
+  }
+
   @Test
   fun teardownReleasesEveryHandleAndAllowsReacquisition() {
     val lockPath = Files.createTempFile("mindwtr-lock", ".tmp").toFile()
@@ -154,11 +163,11 @@ class SyncFileLockModuleTest {
       acquirePathRoot = {
         providerDirectoryOpened = true
         fail("SAF must not depend on a provider directory descriptor")
-        acquirePrivateFileStableAuthority(authorityPath)
+        acquireJvmPrivateFileStableAuthority(authorityPath)
       },
       acquirePrivateSaf = {
         privateAuthorityOpened = true
-        acquirePrivateFileStableAuthority(authorityPath)
+        acquireJvmPrivateFileStableAuthority(authorityPath)
       },
     )
 
@@ -173,18 +182,18 @@ class SyncFileLockModuleTest {
     val authorityPath = File(directory, "private-authority.lock")
     val legacyPath = File(directory, ".mindwtr.lock")
     legacyPath.writeText("first")
-    val first = acquirePrivateFileStableAuthority(authorityPath)
+    val first = acquireJvmPrivateFileStableAuthority(authorityPath)
 
     legacyPath.renameTo(File(directory, ".mindwtr.lock.displaced"))
     legacyPath.writeText("replacement")
     try {
-      acquirePrivateFileStableAuthority(authorityPath)
+      acquireJvmPrivateFileStableAuthority(authorityPath)
       fail("stable authority must reject a second owner after legacy replacement")
     } catch (error: SyncFileLockUnavailableException) {
       assertTrue(error.message.orEmpty().contains("BUSY"))
     }
 
     first.close()
-    acquirePrivateFileStableAuthority(authorityPath).close()
+    acquireJvmPrivateFileStableAuthority(authorityPath).close()
   }
 }
