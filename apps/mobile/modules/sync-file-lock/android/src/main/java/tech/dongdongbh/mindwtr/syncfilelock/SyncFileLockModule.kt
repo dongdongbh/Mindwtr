@@ -23,6 +23,7 @@ import java.util.UUID
 private const val LOCK_NAME = ".mindwtr.lock"
 private const val MAX_LOCK_DOCUMENT_CREATE_ATTEMPTS = 3
 private const val LOG_TAG = "SyncFileLock"
+private const val LOCK_IDENTITY_LOST_CODE = "SYNC_FILE_LOCK_IDENTITY_LOST"
 
 internal class SyncFileLockUnavailableException(message: String, cause: Throwable? = null) :
   CodedException(message, cause)
@@ -132,7 +133,7 @@ private class PrivateFileStableAuthority(
 ) : StableSyncAuthority {
   override fun revalidate() {
     if (pathIdentity(path, false) != identity || descriptorIdentity(owner.fd) != identity) {
-      throw SyncFileLockUnavailableException("SYNC_FILE_LOCK_UNAVAILABLE: private SAF authority changed")
+      throw SyncFileLockUnavailableException("$LOCK_IDENTITY_LOST_CODE: private SAF authority changed")
     }
   }
 

@@ -231,7 +231,13 @@ import {
   SyncEncryptionCleanupDeferredError,
 } from './sync-encryption-service';
 import { __resetSecureSecretStoreForTests } from './secure-secret-store';
-import { setSyncFileLockNativeModuleForTests } from './sync-file-lock';
+import {
+  acquireMobileFileSyncLease,
+  revalidateMobileFileSyncLease,
+  releaseMobileFileSyncLease,
+  setSyncFileLockNativeModuleForTests,
+  SyncFileLockIdentityLostError,
+} from './sync-file-lock';
 import { SYNC_BACKEND_KEY, SYNC_ENCRYPTION_STATE_KEY, SYNC_PATH_KEY } from './sync-constants';
 
 // Same node-backed stand-in for react-native-quick-crypto as sync-crypto-native.test.ts
@@ -1135,6 +1141,53 @@ describe('File Sync transitions through core orchestration', () => {
     await expect(getMobileSyncEncryptionStatus()).resolves.toMatchObject({ state: 'enabled' });
     expect(fs.files.has(ENC_URI)).toBe(true);
     expect(fs.files.has(SYNC_URI)).toBe(false);
+  }, 30_000);
+
+  it('rolls back the SAF journal and key end-to-end when release reports private-authority identity loss', async () => {
+    const identityLoss = new Error('SYNC_FILE_LOCK_IDENTITY_LOST: private SAF authority changed');
+    const nativeModule = {
+      acquireAsync: vi.fn(async () => 'saf-lease-token'),
+      revalidateAsync: vi.fn(async () => undefined),
+      releaseAsync: vi.fn(async () => { throw identityLoss; }),
+    };
+    setSyncFileLockNativeModuleForTests(nativeModule, 'android');
+    const lease = await acquireMobileFileSyncLease(SAF_SYNC_URI);
+    const journal = { state: 'off' as const, incompleteTransition: 'enable' as const };
+    const nextState = {
+      state: 'enabled' as const,
+      discoveredSalt: '08'.repeat(16),
+      discoveredParams: FAST_PARAMS,
+    };
+    const remote: SyncEncryptionRemotePort = {
+      list: async () => [],
+      read: async () => ({ bytes: null, version: null }),
+      write: async () => undefined,
+      remove: async () => undefined,
+    };
+
+    await expect(__syncEncryptionServiceTestUtils.runWithRemoteMutationFence(
+      remote,
+      async (_guardedRemote, keyCache, localState) => {
+        await localState.write(journal);
+        await keyCache.setKey(new Uint8Array(32).fill(8));
+        await localState.write(nextState);
+      },
+      () => revalidateMobileFileSyncLease(lease),
+      () => releaseMobileFileSyncLease(lease),
+    )).rejects.toBeInstanceOf(SyncFileLockIdentityLostError);
+
+    expect(nativeModule.acquireAsync).toHaveBeenCalledWith(SAF_SYNC_URI);
+    expect(nativeModule.revalidateAsync).toHaveBeenCalled();
+    expect(nativeModule.releaseAsync).toHaveBeenCalledWith('saf-lease-token');
+    expect(syncEncryptionLocalState.read()).toMatchObject({
+      state: 'off',
+      incompleteTransition: 'enable',
+    });
+    expect(JSON.parse(asyncStorage.get(SYNC_ENCRYPTION_STATE_KEY)!)).toMatchObject({
+      state: 'off',
+      incompleteTransition: 'enable',
+    });
+    await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
   }, 30_000);
 
   it('fails closed when the SAF provider cannot enumerate the transition folder', async () => {

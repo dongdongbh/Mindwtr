@@ -46,7 +46,7 @@ describe('sync-file-lock', () => {
       acquireAsync: vi.fn(async () => 'native-token'),
       revalidateAsync: vi.fn(async () => undefined),
       releaseAsync: vi.fn(async () => {
-        throw new Error('SYNC_FILE_LOCK_UNAVAILABLE: .mindwtr.lock identity changed');
+        throw new Error('SYNC_FILE_LOCK_IDENTITY_LOST: private SAF authority changed');
       }),
     }, 'android');
     const lease = await acquireMobileFileSyncLease('file:///tmp/data.json');

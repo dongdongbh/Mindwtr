@@ -12,6 +12,8 @@ type SyncFileLockNativeModule = {
   releaseAsync(token: string): Promise<void>;
 };
 
+const SYNC_FILE_LOCK_IDENTITY_LOST_CODE = 'SYNC_FILE_LOCK_IDENTITY_LOST';
+
 export type MobileFileSyncLease = {
   token: string;
   native: boolean;
@@ -29,7 +31,8 @@ export class SyncFileLockIdentityLostError extends SyncFileLockUnavailableError 
 }
 
 const isNativeLockIdentityLoss = (error: unknown): boolean =>
-  /SYNC_FILE_LOCK_UNAVAILABLE:[^\n]*(?:identity|root)[^\n]*changed/i.test(String(error ?? ''));
+  String(error ?? '').includes(SYNC_FILE_LOCK_IDENTITY_LOST_CODE)
+  || /SYNC_FILE_LOCK_UNAVAILABLE:[^\n]*(?:identity|root)[^\n]*changed/i.test(String(error ?? ''));
 
 let testModule: SyncFileLockNativeModule | null | undefined;
 let resolvedModule: SyncFileLockNativeModule | null | undefined;
