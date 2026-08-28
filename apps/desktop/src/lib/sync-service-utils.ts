@@ -248,9 +248,13 @@ export const createLocalAttachmentFs = (
     return { readLocalFile, localFilePresence, localFileExists, statLocalFile };
 };
 
+const ATTACHMENT_TEMP_FILE_PREFIX = '.mindwtr-attachment-write-';
+
 const buildTempPath = (relativePath: string): string => {
-    const suffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-    return `${relativePath}.tmp-${suffix}`;
+    const separatorIndex = Math.max(relativePath.lastIndexOf('/'), relativePath.lastIndexOf('\\'));
+    const parent = separatorIndex >= 0 ? relativePath.slice(0, separatorIndex + 1) : '';
+    const suffix = `${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 14).padEnd(12, '0')}`;
+    return `${parent}${ATTACHMENT_TEMP_FILE_PREFIX}${suffix}.tmp`;
 };
 
 export const writeAttachmentFileSafely = async (
@@ -321,5 +325,5 @@ export const resolveFileBackendPath = async (
 };
 
 export const isTempAttachmentFile = (name: string): boolean => {
-    return name.includes('.tmp-') || name.endsWith('.tmp') || name.endsWith('.partial');
+    return /^\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/.test(name);
 };

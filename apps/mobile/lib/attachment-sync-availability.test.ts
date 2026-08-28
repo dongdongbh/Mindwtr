@@ -315,7 +315,7 @@ describe('ensureAttachmentAvailable', () => {
     }));
 
     expect(fileSystemMock.writeAsStringAsync).toHaveBeenCalledWith(
-      expect.stringMatching(/\.mindwtr-download-.*\.staged\.tmp-/),
+      expect.stringMatching(/\/\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/),
       Buffer.from(REMOTE_BYTES).toString('base64'),
       { encoding: 'base64' },
     );
@@ -444,7 +444,7 @@ describe('ensureAttachmentAvailable', () => {
       fileHash: sha256Hex(REMOTE_BYTES),
     });
     expect(fileSystemMock.writeAsStringAsync).toHaveBeenCalledWith(
-      expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-download-.*\.staged\.tmp-/),
+      expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/),
       Buffer.from(REMOTE_BYTES).toString('base64'),
       { encoding: 'base64' }
     );
@@ -810,7 +810,7 @@ describe('ensureAttachmentAvailable', () => {
       localStatus: 'available',
     });
     expect(fileSystemMock.writeAsStringAsync).toHaveBeenCalledWith(
-      expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-download-.*\.staged\.tmp-/),
+      expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/),
       Buffer.from(REMOTE_BYTES).toString('base64'),
       { encoding: 'base64' }
     );

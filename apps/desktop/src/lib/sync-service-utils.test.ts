@@ -172,7 +172,9 @@ describe('writeFileSafelyAbsolute', () => {
 
         expect(files.get(target)).toEqual(new Uint8Array([1, 2, 3]));
         // The first writeFile call landed on a temp path, not the target.
-        expect(writeFile.mock.calls[0]?.[0]).not.toBe(target);
+        expect(writeFile.mock.calls[0]?.[0]).toMatch(
+            /^\/managed\/attachments\/\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/,
+        );
     });
 
     it('a failed temp write leaves the previously-downloaded file completely untouched', async () => {

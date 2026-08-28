@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { type AppData } from '@mindwtr/core';
 
 import {
+    cleanupAttachmentTempFiles,
     cleanupOrphanedAttachments,
     deleteAttachmentFile,
     type AttachmentCleanupDeps,
@@ -59,6 +60,28 @@ const buildDeps = (): AttachmentCleanupDeps => ({
 });
 
 describe('desktop attachment cleanup freshness', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        fsMocks.readDir.mockResolvedValue([]);
+    });
+
+    it('removes only app-owned scratch files and preserves live temp-extension attachments', async () => {
+        const deps = buildDeps();
+        fsMocks.readDir.mockResolvedValue([
+            { isFile: true, name: '4b28a96e-1220-45ce-8a28-641a5b18d936.tmp' },
+            { isFile: true, name: '5488a0f7-0c25-41a9-85db-85d33ef23c81.partial' },
+            { isFile: true, name: '.mindwtr-attachment-write-m7v0x9k2-012345abcdef.tmp' },
+            { isFile: true, name: '.mindwtr-attachment-write-invalid.tmp' },
+        ]);
+
+        await cleanupAttachmentTempFiles(deps);
+
+        expect(fsMocks.remove).toHaveBeenCalledTimes(1);
+        expect(fsMocks.remove).toHaveBeenCalledWith(
+            '/new-profile/attachments/.mindwtr-attachment-write-m7v0x9k2-012345abcdef.tmp',
+        );
+    });
+
     it('clears File Sync cleanup bookkeeping without deleting shared-folder bytes', async () => {
         const deps = buildDeps();
         const cleaned = await cleanupOrphanedAttachments(

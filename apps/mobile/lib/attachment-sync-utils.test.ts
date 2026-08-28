@@ -5,6 +5,7 @@ const fileSystemMock = vi.hoisted(() => ({
   documentDirectory: 'file:///documents/',
   cacheDirectory: 'file:///cache/',
   makeDirectoryAsync: vi.fn(),
+  readDirectoryAsync: vi.fn(),
   getInfoAsync: vi.fn(),
   writeAsStringAsync: vi.fn(),
   moveAsync: vi.fn(),
@@ -30,10 +31,36 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 // full-suite run even though it passed reliably alone.
 // eslint-disable-next-line import/first
 import {
+  cleanupAttachmentTempFiles,
   deleteManagedAttachmentFile,
   getLocalAttachmentPresence,
   writeBytesSafely,
 } from './attachment-sync-utils';
+
+describe('cleanupAttachmentTempFiles', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fileSystemMock.makeDirectoryAsync.mockResolvedValue(undefined);
+    fileSystemMock.deleteAsync.mockResolvedValue(undefined);
+  });
+
+  it('removes only app-owned scratch files and preserves live temp-extension attachments', async () => {
+    fileSystemMock.readDirectoryAsync.mockResolvedValue([
+      '4b28a96e-1220-45ce-8a28-641a5b18d936.tmp',
+      '5488a0f7-0c25-41a9-85db-85d33ef23c81.partial',
+      '.mindwtr-attachment-write-m7v0x9k2-012345abcdef.tmp',
+      '.mindwtr-attachment-write-invalid.tmp',
+    ]);
+
+    await cleanupAttachmentTempFiles();
+
+    expect(fileSystemMock.deleteAsync).toHaveBeenCalledTimes(1);
+    expect(fileSystemMock.deleteAsync).toHaveBeenCalledWith(
+      'file:///documents/attachments/.mindwtr-attachment-write-m7v0x9k2-012345abcdef.tmp',
+      { idempotent: true },
+    );
+  });
+});
 
 describe('getLocalAttachmentPresence', () => {
   beforeEach(() => {
@@ -91,7 +118,7 @@ describe('writeBytesSafely', () => {
     await writeBytesSafely('file://attachments/a1.pdf', new Uint8Array([1, 2, 3]));
 
     const [tempUri] = fileSystemMock.writeAsStringAsync.mock.calls[0] ?? [];
-    expect(tempUri).not.toBe('file://attachments/a1.pdf');
+    expect(tempUri).toMatch(/^file:\/\/attachments\/\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/);
     expect(fileSystemMock.moveAsync).toHaveBeenCalledWith({ from: tempUri, to: 'file://attachments/a1.pdf' });
   });
 

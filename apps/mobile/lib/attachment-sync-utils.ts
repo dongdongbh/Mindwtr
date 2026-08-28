@@ -170,13 +170,17 @@ const hasSafLeafName = (value: string, expected: string): boolean => (
   getSafLeafName(value) === expected
 );
 
+const ATTACHMENT_TEMP_FILE_PREFIX = '.mindwtr-attachment-write-';
+
 const buildTempUri = (targetUri: string): string => {
-  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-  return `${targetUri}.tmp-${suffix}`;
+  const separatorIndex = targetUri.lastIndexOf('/');
+  const parent = separatorIndex >= 0 ? targetUri.slice(0, separatorIndex + 1) : '';
+  const suffix = `${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 14).padEnd(12, '0')}`;
+  return `${parent}${ATTACHMENT_TEMP_FILE_PREFIX}${suffix}.tmp`;
 };
 
 const isTempAttachmentFile = (name: string): boolean => {
-  return name.includes('.tmp-') || name.endsWith('.tmp') || name.endsWith('.partial');
+  return /^\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/.test(name);
 };
 
 export const writeBytesSafely = async (targetUri: string, bytes: Uint8Array): Promise<void> => {

@@ -284,12 +284,12 @@ describe('attachment sync', () => {
     expect(fileSystemMock.copyAsync).toHaveBeenCalledWith(
       expect.objectContaining({
         from: contentUri,
-        to: expect.stringMatching(/^file:\/\/document\/attachments\/att-1\.png\.tmp-/),
+        to: expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/),
       })
     );
     expect(fileSystemMock.moveAsync).toHaveBeenCalledWith(
       expect.objectContaining({
-        from: expect.stringMatching(/^file:\/\/document\/attachments\/att-1\.png\.tmp-/),
+        from: expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/),
         to: 'file://document/attachments/att-1.png',
       })
     );
@@ -322,7 +322,7 @@ describe('attachment sync', () => {
     expect(fileSystemMock.copyAsync).toHaveBeenCalledWith(
       expect.objectContaining({
         from: sourceUri,
-        to: expect.stringMatching(/^file:\/\/document\/attachments\/audio-1\.m4a\.tmp-/),
+        to: expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/),
       })
     );
     expect(fileSystemMock.readAsStringAsync).toHaveBeenCalledWith(
@@ -330,7 +330,7 @@ describe('attachment sync', () => {
       { encoding: 'base64' }
     );
     expect(fileSystemMock.writeAsStringAsync).toHaveBeenCalledWith(
-      expect.stringMatching(/^file:\/\/document\/attachments\/audio-1\.m4a\.tmp-/),
+      expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/),
       'AQID',
       { encoding: 'base64' }
     );
@@ -364,7 +364,7 @@ describe('attachment sync', () => {
     expect(fileSystemMock.copyAsync).toHaveBeenCalledWith(
       expect.objectContaining({
         from: contentUri,
-        to: expect.stringMatching(/^file:\/\/document\/attachments\/att-available\.png\.tmp-/),
+        to: expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/),
       })
     );
   });
@@ -630,7 +630,7 @@ describe('attachment sync', () => {
     expect(fileSystemMock.copyAsync).toHaveBeenCalledWith(
       expect.objectContaining({
         from: legacyContentUri,
-        to: expect.stringMatching(/^file:\/\/document\/attachments\/legacy\.txt\.tmp-/),
+        to: expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/),
       })
     );
     expect(fileSystemMock.StorageAccessFramework.createFileAsync).not.toHaveBeenCalled();
@@ -3985,7 +3985,7 @@ describe('attachment sync', () => {
       // Remote bytes are staged and the exact old local generation is supplied
       // to the native generation-bound installer.
       expect(fileSystemMock.writeAsStringAsync).toHaveBeenCalledWith(
-        expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-download-.*\.staged\.tmp-/),
+        expect.stringMatching(/^file:\/\/document\/attachments\/\.mindwtr-attachment-write-[0-9a-z]+-[0-9a-f]{12}\.tmp$/),
         base64Of(OLD_BYTES),
         { encoding: 'base64' }
       );
