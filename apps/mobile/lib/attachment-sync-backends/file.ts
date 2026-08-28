@@ -315,6 +315,11 @@ export const syncFileAttachments = async (
         if (initialPresence === 'unreadable') {
           throw new Error('File Sync attachment generation is unreadable');
         }
+        if (initialPresence === 'confirmed-not-found') {
+          // Manual removal of the corrupt canonical generation is an explicit
+          // recovery action; do not keep its bounded collision history latched.
+          await clearFileSyncAttachmentPublicationRecovery(targetUri);
+        }
         if (initialPresence === 'present') {
           try {
             await verifyPublishedGeneration(targetUri);

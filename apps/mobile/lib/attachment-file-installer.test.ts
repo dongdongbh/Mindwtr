@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  clearFileSyncAttachmentPublicationRecovery,
   recoverFileSyncAttachmentPublications,
   reserveFileSyncAttachmentPublication,
   retainFileSyncAttachmentPublicationForInvalidTarget,
@@ -170,6 +171,10 @@ describe('installAttachmentFileGeneration', () => {
       .rejects.toThrow('remains corrupt after bounded retries');
     expect(deleteAsync.mock.calls.map(([path]) => path)).toEqual(stages);
     expect(deleteAsync.mock.calls.some(([path]) => path === target)).toBe(false);
+
+    await clearFileSyncAttachmentPublicationRecovery(target);
+    await expect(reserveFileSyncAttachmentPublication(target, downloadHash))
+      .resolves.toMatchObject({ targetPath: target });
   });
 
   it('rejects malformed native hash snapshots', async () => {
