@@ -6235,6 +6235,7 @@ mod tests {
         assert!(!windows_enumerator.contains(
             "std::mem::size_of::<FILE_ID_BOTH_DIR_INFO>()\n                - std::mem::size_of::<u16>()"
         ));
+        assert!(!windows_enumerator.contains(".is_none_or("));
     }
 
     #[test]
@@ -13833,7 +13834,7 @@ fn retained_root_list_names(directory: &File) -> std::io::Result<Vec<OsString>> 
             let fixed = std::mem::offset_of!(FILE_ID_BOTH_DIR_INFO, FileName);
             if offset
                 .checked_add(fixed)
-                .is_none_or(|end| end > buffer_bytes)
+                .map_or(true, |end| end > buffer_bytes)
             {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
