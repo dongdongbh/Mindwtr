@@ -81,8 +81,12 @@ const MAX_FUTURE_EXPIRY_TOLERANCE_MS = 60_000;
 const MAX_RECORD_BYTES = 4_096;
 const DEFAULT_ACQUIRE_ATTEMPTS = 4;
 
-const encoder = new TextEncoder();
-const decoder = new TextDecoder('utf-8', { fatal: true });
+// Constructed per call, not once at module scope: on React Native the global
+// TextDecoder only exists after Expo's winter runtime installs it, which is
+// later than the first import of this module — a module-scope instance threw
+// "Property 'TextDecoder' doesn't exist" before the app could boot.
+const encodeUtf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
+const decodeUtf8 = (bytes: Uint8Array): string => new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 
 const requireServerNow = (snapshot: SyncRemoteMutationFenceSnapshot): number => {
     if (snapshot.serverNowMs === null || !Number.isFinite(snapshot.serverNowMs)) {
@@ -103,7 +107,7 @@ const parseRecord = (bytes: Uint8Array): SyncRemoteMutationFenceRecord => {
     }
     let parsed: unknown;
     try {
-        parsed = JSON.parse(decoder.decode(bytes));
+        parsed = JSON.parse(decodeUtf8(bytes));
     } catch {
         throw new SyncRemoteMutationFenceUnavailableError('Remote sync mutation fence record is malformed');
     }
@@ -126,7 +130,7 @@ const parseRecord = (bytes: Uint8Array): SyncRemoteMutationFenceRecord => {
     return record as SyncRemoteMutationFenceRecord;
 };
 
-const encodeRecord = (record: SyncRemoteMutationFenceRecord): Uint8Array => encoder.encode(JSON.stringify(record));
+const encodeRecord = (record: SyncRemoteMutationFenceRecord): Uint8Array => encodeUtf8(JSON.stringify(record));
 
 const randomLeaseId = (): string => {
     const randomUuid = globalThis.crypto?.randomUUID?.();

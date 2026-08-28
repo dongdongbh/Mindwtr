@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
     acquireSyncRemoteMutationFence,
     SyncRemoteMutationFenceBusyError,
@@ -233,5 +233,21 @@ describe('remote sync mutation fence', () => {
         expect(readCalls).toBe(readsAfterFailure);
         await expect(lease.assertHeld()).rejects.toThrow('timed out');
         await expect(lease.release()).rejects.toThrow('timed out');
+    });
+});
+
+describe('module load', () => {
+    it('loads without a global TextDecoder', async () => {
+        // React Native installs TextDecoder from Expo's winter runtime, which runs
+        // after this module is first imported; a module-scope instance crashed the
+        // Android app before it could boot.
+        const original = globalThis.TextDecoder;
+        delete (globalThis as { TextDecoder?: unknown }).TextDecoder;
+        try {
+            vi.resetModules();
+            await expect(import('./sync-remote-fence')).resolves.toBeDefined();
+        } finally {
+            globalThis.TextDecoder = original;
+        }
     });
 });
