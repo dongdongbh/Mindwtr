@@ -97,11 +97,22 @@ function validateTaskRecurrence(value: Record<string, unknown>): string | null {
     return null;
 }
 
+function validateTaskViewSectionIds(value: Record<string, unknown>): string | null {
+    if (!hasOwnField(value, 'viewSectionIds')) return null;
+    const ids = value.viewSectionIds;
+    if (ids === undefined || ids === null) return null;
+    if (!isRecord(ids)) return 'Invalid task viewSectionIds';
+    return Object.values(ids).every((sectionId) => typeof sectionId === 'string')
+        ? null
+        : 'Invalid task viewSectionIds';
+}
+
 function validateTaskPropValues(value: Record<string, unknown>): string | null {
     return validateTaskRepeatReminderMinutes(value)
         ?? validateTaskTimeSpentMinutes(value)
         ?? validateTaskRelativeStartOffset(value)
-        ?? validateTaskRecurrence(value);
+        ?? validateTaskRecurrence(value)
+        ?? validateTaskViewSectionIds(value);
 }
 
 function validateProjectPropValues(value: Record<string, unknown>): string | null {

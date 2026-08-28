@@ -153,6 +153,45 @@ export function parseProjectNextActionInput(
     return { title: title || input.trim(), props, invalidDateCommands: parsed.invalidDateCommands };
 }
 
+export interface ProcessInboxTitleParseContext {
+    projects?: Project[];
+    areas?: Area[];
+    now?: Date;
+    parseOptions?: QuickAddParseOptions;
+}
+
+/**
+ * Parse an Inbox-processing title with the quick-add grammar, so `@context`,
+ * `#tag`, `!Area`, `+Project`, `%Person`, `/energy:` and the date commands work
+ * while clarifying exactly as they do at capture (#1088). Processing used to
+ * run `parseQuickAddDateCommands` alone, which made it the one editable task
+ * title in the app with its own smaller grammar.
+ *
+ * Two rules keep the clarify workflow in charge of the decision it exists to
+ * make:
+ * - A status token (`/waiting`, `/done`, ...) is consumed and dropped. The
+ *   destination the user picks owns the status, so a stale token typed at
+ *   capture cannot silently overrule the button they just pressed.
+ * - An unknown `+Name` never creates a project. Processing has its own picker
+ *   and a "turn this into a project" step, so the token goes back into the
+ *   title as the text it now is — same rule as the next-action prompt.
+ */
+export function parseProcessInboxTitleInput(
+    input: string,
+    context: ProcessInboxTitleParseContext = {},
+): { title: string; props: Partial<Task>; invalidDateCommands?: string[] } {
+    const { projects, areas, now = new Date(), parseOptions } = context;
+    const parsed = parseQuickAdd(input, projects, now, areas, parseOptions);
+    let title = parsed.title;
+    if (parsed.projectTitle) {
+        const token = /\s/.test(parsed.projectTitle) ? `+"${parsed.projectTitle}"` : `+${parsed.projectTitle}`;
+        title = `${title} ${token}`.trim();
+    }
+    const props: Partial<Task> = { ...parsed.props };
+    delete props.status;
+    return { title, props, invalidDateCommands: parsed.invalidDateCommands };
+}
+
 export interface QuickAddDateCommandsResult {
     title: string;
     props: Pick<Partial<Task>, 'startTime' | 'dueDate' | 'reviewAt'>;
@@ -532,14 +571,18 @@ function isQuickAddTokenEndBoundary(working: string, index: number): boolean {
 }
 
 function pushQuickAddQuotedTokenMatches(working: string, prefix: '@' | '#', matches: QuickAddTokenMatch[]) {
-    const quotedRe = /(?:^|\s)([@#])"((?:\\.|[^"\\])*)"/gu;
+    // Same typographic-quote tolerance as matchQuickAddQuotedName (#849, #1094):
+    // smart punctuation substitutes curly quotes as the user types — macOS even
+    // picks the CLOSING glyph (”) right after @/#, since a symbol precedes it —
+    // so any curly double works as the opener.
+    const quotedRe = /(?:^|\s)([@#])(?:"((?:\\.|[^"\\])*)"|[“”„]([^"“”]*)["“”])/gu;
     for (const match of working.matchAll(quotedRe)) {
         if (match[1] !== prefix) continue;
-        const rawOffset = match[0].indexOf(`${prefix}"`);
+        const rawOffset = match[0].indexOf(prefix);
         if (rawOffset < 0) continue;
         const index = (match.index ?? 0) + rawOffset;
         const raw = match[0].slice(rawOffset);
-        const value = (match[2] ?? '').replace(/\\(["\\])/g, '$1').replace(/\s+/g, ' ').trim();
+        const value = (match[2] ?? match[3] ?? '').replace(/\\(["\\])/g, '$1').replace(/\s+/g, ' ').trim();
         if (!value) continue;
         matches.push({
             token: `${prefix}${restoreEscapes(value)}`,
@@ -597,6 +640,12 @@ function getQuickAddTokenMatches(
         const token = match[0];
         if (token.startsWith(prefix)) {
             const index = match.index ?? 0;
+            // A marker only opens a token at a word start (#1087). Without this
+            // the `@` inside `bob@example.com` became the context `@example` and
+            // tore the address out of the title — and a `#fragment` in a pasted
+            // URL became a tag. Every other matcher here (quoted, known, rich)
+            // already requires this boundary; this one was the outlier.
+            if (!isQuickAddTokenStartBoundary(working, index)) continue;
             matches.push({
                 token: restoreEscapes(token),
                 raw: token,
@@ -668,12 +717,15 @@ function matchQuickAddQuotedName(working: string, marker: '+' | '!' | '%'): { ra
     // the pair), so accept the common quote styles and mixed pairs — a name
     // that parses when pasted must also parse as typed (#849):
     //   "..."  straight doubles, with backslash escapes (canonical form)
-    //   “...”  or mixed “..."  curly/straight doubles
+    //   “...”  or mixed “..."  curly/straight doubles — macOS also produces a
+    //          CLOSING glyph as the opener (”...”), since the marker character
+    //          before the quote reads as "not a word start" to smart
+    //          punctuation (#1094)
     //   „..."  German low-9 opening with any double-quote close
     //   '...'  straight singles
     //   ‘...’  or ’...’  smart singles
     const match = working.match(new RegExp(
-        String.raw`(?:^|\s)${escapedMarker}(?:"((?:\\.|[^"\\])*)"|“([^"”]*)["”]|„([^"“”]*)["“”]|'([^']*)'|[‘’]([^’]*)’)`,
+        String.raw`(?:^|\s)${escapedMarker}(?:"((?:\\.|[^"\\])*)"|[“”]([^"”]*)["”]|„([^"“”]*)["“”]|'([^']*)'|[‘’]([^’]*)’)`,
         'u',
     ));
     if (!match) return null;

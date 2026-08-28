@@ -34,6 +34,23 @@ describe('Process Inbox session', () => {
         expect(queue.map(({ id }) => id)).toEqual(['one']);
     });
 
+    // #1089: an incubated item is Someday with a return date. When that date
+    // arrives it belongs in the clarify pass — the question it was parked with
+    // was "decide this later", and this pass is where deciding happens.
+    it('includes an incubated item once its return date arrives, and not before', () => {
+        const now = new Date('2026-09-10T09:00:00.000Z');
+        const queue = selectProcessInboxCandidates([
+            { id: 'captured', status: 'inbox', title: 'Captured' },
+            { id: 'due', status: 'someday', reviewAt: '2026-09-10', title: 'Mom\'s birthday' },
+            { id: 'later', status: 'someday', reviewAt: '2026-12-01', title: 'Not yet' },
+            { id: 'undated', status: 'someday', title: 'Plain someday' },
+            { id: 'deleted', status: 'someday', reviewAt: '2026-09-01', deletedAt: '2026-09-02', title: 'Gone' },
+            { id: 'waiting-due', status: 'waiting', reviewAt: '2026-09-01', title: 'Chased' },
+        ], () => true, now);
+
+        expect(queue.map(({ id }) => id)).toEqual(['captured', 'due']);
+    });
+
     it('starts at the first candidate and resets task-local navigation', () => {
         const session = startProcessInboxSession(candidates, { entryStep: 'refine' as Step });
 

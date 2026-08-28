@@ -3,7 +3,7 @@ import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { act, render, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TaskItem } from '../components/TaskItem';
-import { Area, Project, Task, configureDateFormatting, safeFormatDate, useTaskStore } from '@mindwtr/core';
+import { Area, Project, Section, Task, configureDateFormatting, safeFormatDate, useTaskStore } from '@mindwtr/core';
 import { LanguageProvider } from '../contexts/language-context';
 import { useUiStore } from '../store/ui-store';
 
@@ -51,6 +51,58 @@ describe('TaskItem', () => {
             </LanguageProvider>
         );
         expect(getByText('Test Task')).toBeInTheDocument();
+    });
+
+    it('shows the task section alongside its project metadata', () => {
+        const project: Project = {
+            id: 'project-launch',
+            title: 'Launch plan',
+            status: 'active',
+            color: '#3b82f6',
+            order: 0,
+            tagIds: [],
+            createdAt: mockTask.createdAt,
+            updatedAt: mockTask.updatedAt,
+        };
+        const section: Section = {
+            id: 'section-backups',
+            projectId: project.id,
+            title: 'Regular Backups implemented',
+            order: 0,
+            createdAt: mockTask.createdAt,
+            updatedAt: mockTask.updatedAt,
+        };
+        const task: Task = {
+            ...mockTask,
+            id: 'task-hosting-options',
+            title: 'Check out options at hosting provider',
+            projectId: project.id,
+            sectionId: section.id,
+        };
+
+        act(() => {
+            useTaskStore.setState((state) => ({
+                ...state,
+                tasks: [task],
+                _allTasks: [task],
+                _tasksById: new Map([[task.id, task]]),
+                projects: [project],
+                _allProjects: [project],
+                _projectsById: new Map([[project.id, project]]),
+                sections: [section],
+                _allSections: [section],
+                _sectionsById: new Map([[section.id, section]]),
+            }));
+        });
+
+        const { getAllByRole, getAllByText } = render(
+            <LanguageProvider>
+                <TaskItem task={task} />
+            </LanguageProvider>
+        );
+
+        expect(getAllByText('Launch plan · Regular Backups implemented')).toHaveLength(2);
+        expect(getAllByRole('button', { name: /Launch plan · Regular Backups implemented/ })).toHaveLength(2);
     });
 
     it('opens the quick action menu after the task details are expanded', async () => {

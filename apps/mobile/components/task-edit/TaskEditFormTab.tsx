@@ -17,11 +17,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { parseRRuleString, tFallback, type Attachment, type Task, type TaskEditorFieldId, type TaskEditorSectionId, type TimeEstimate } from '@mindwtr/core';
+import { parseRRuleString, tFallback, type Attachment, type Task, type TaskEditorFieldId, type TaskEditorSectionId, type TimeEstimate, type ViewSectionDefinition } from '@mindwtr/core';
 import type { TaskDraft } from '@mindwtr/core/task-draft';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { CollapsibleSection } from './CollapsibleSection';
 import type { CopilotPart } from './use-task-edit-copilot';
+import { SomedaySectionPicker } from '../someday-section-picker';
 
 type TaskEditFormTabProps = {
     t: (key: string) => string;
@@ -44,6 +45,10 @@ type TaskEditFormTabProps = {
     timeEstimatesEnabled: boolean;
     renderField: (fieldId: TaskEditorFieldId) => React.ReactNode;
     basicFields: TaskEditorFieldId[];
+    somedaySections?: readonly ViewSectionDefinition[];
+    selectedSomedaySectionId?: string;
+    onSomedaySectionChange?: (sectionId: string | undefined) => void;
+    onCreateSomedaySection?: (title: string) => Promise<string | null>;
     schedulingFields: TaskEditorFieldId[];
     organizationFields: TaskEditorFieldId[];
     detailsFields: TaskEditorFieldId[];
@@ -90,6 +95,10 @@ function TaskEditFormTabComponent({
     timeEstimatesEnabled,
     renderField,
     basicFields,
+    somedaySections = [],
+    selectedSomedaySectionId,
+    onSomedaySectionChange,
+    onCreateSomedaySection,
     schedulingFields,
     organizationFields,
     detailsFields,
@@ -485,6 +494,25 @@ function TaskEditFormTabComponent({
                     {basicFields.map((fieldId) => (
                         <React.Fragment key={fieldId}>{renderField(fieldId)}</React.Fragment>
                     ))}
+
+                    {draft?.status === 'someday' && onSomedaySectionChange && onCreateSomedaySection ? (
+                        <View style={styles.formGroup}>
+                            <Text style={[styles.label, { color: tc.secondaryText }]}>
+                                {tFallback(t, 'viewSections.somedaySection', 'Someday section')}
+                            </Text>
+                            <SomedaySectionPicker
+                                sections={somedaySections}
+                                selectedId={selectedSomedaySectionId}
+                                onSelect={onSomedaySectionChange}
+                                onCreate={onCreateSomedaySection}
+                                t={t}
+                                themeColors={tc}
+                                optionsStyle={styles.statusContainer}
+                                optionStyle={styles.statusChip}
+                                optionTextStyle={styles.statusText}
+                            />
+                        </View>
+                    ) : null}
 
                     {schedulingFields.length > 0 && (
                         <CollapsibleSection

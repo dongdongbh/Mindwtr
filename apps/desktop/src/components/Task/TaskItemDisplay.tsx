@@ -1,5 +1,5 @@
 import { AlertTriangle, Calendar as CalendarIcon, Tag, Trash2, ArrowRight, Repeat, Check, Clock, Timer, Link2, Paperclip, RotateCcw, Copy, MapPin, History, Hourglass, Play, Zap, MoreHorizontal } from 'lucide-react';
-import type { Area, Attachment, Project, RangeSelectionOptions, Task, TaskStatus, RecurrenceRule, RecurrenceStrategy, Language } from '@mindwtr/core';
+import type { Area, Attachment, Project, RangeSelectionOptions, Section, Task, TaskStatus, RecurrenceRule, RecurrenceStrategy, Language } from '@mindwtr/core';
 import { DEFAULT_AREA_COLOR, formatRecurrenceLabel, formatTimeEstimateLabel, formatTimeSpentLabel, getChecklistProgress, getContextColor, getInlineMarkdownPreview, getRecurringTaskPreviewDate, getTaskAgeLabel, getTaskDateCoherenceIssues, getTaskStaleness, getTaskUrgency, hasTimeComponent, isTaskActionable, isTaskFinished, safeFormatDate, resolveTaskTextDirection, tFallback } from '@mindwtr/core';
 import { cn } from '../../lib/utils';
 import { STATUS_PILL_CLASSES } from '../../lib/status-colors';
@@ -48,6 +48,7 @@ interface TaskItemDisplayProps {
     task: Task;
     language: Language;
     project?: Project;
+    section?: Section;
     area?: Area;
     projectColor?: string;
     selectionMode: boolean;
@@ -101,6 +102,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     task,
     language,
     project,
+    section,
     area,
     projectColor,
     selectionMode,
@@ -302,11 +304,12 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     };
     const renderProjectBadge = () => {
         if (!project) return null;
+        const label = section ? `${project.title} · ${section.title}` : project.title;
         if (!onOpenProject) {
             return (
                 <MetadataBadge
                     variant="project"
-                    label={project.title}
+                    label={label}
                     dotColor={projectColor || DEFAULT_AREA_COLOR}
                 />
             );
@@ -318,11 +321,11 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                 onClick={(event) => handleProjectClick(event, project.id)}
                 onKeyDown={(event) => handleProjectKeyDown(event, project.id)}
                 className="inline-flex metadata-badge--interactive"
-                aria-label={`${tFallback(t, 'projects.title', 'Project')}: ${project.title}`}
+                aria-label={`${tFallback(t, 'projects.title', 'Project')}: ${label}`}
             >
                 <MetadataBadge
                     variant="project"
-                    label={project.title}
+                    label={label}
                     dotColor={projectColor || DEFAULT_AREA_COLOR}
                 />
             </span>

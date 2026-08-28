@@ -19,7 +19,7 @@ import {
     safeParseDueDate,
     tFallback,
 } from '@mindwtr/core';
-import type { Area, Language, Project, ProjectSequenceTaskCue, Task } from '@mindwtr/core';
+import type { Area, Language, Project, ProjectSequenceTaskCue, Section, Task } from '@mindwtr/core';
 import type { ThemeColors } from '../../hooks/use-theme-colors';
 import { AppPressable } from '../app-pressable';
 import { FocusStarIcon } from '../FocusStarIcon';
@@ -61,6 +61,7 @@ interface SwipeableTaskItemContentProps {
     onToggleChecklistItem: (index: number) => void;
     onToggleFocus: () => void;
     projects: Project[];
+    sectionById: Map<string, Section>;
     projectDeadlineLabel?: string;
     footerContent?: ReactNode;
     recurrenceLabel?: string;
@@ -107,6 +108,7 @@ export function SwipeableTaskItemContent({
     onToggleChecklistItem,
     onToggleFocus,
     projects,
+    sectionById,
     projectDeadlineLabel,
     footerContent,
     recurrenceLabel,
@@ -118,7 +120,7 @@ export function SwipeableTaskItemContent({
     task,
     tc,
 }: SwipeableTaskItemContentProps) {
-    const { project, projectColor } = useMemo(() => {
+    const { project, projectColor, section } = useMemo(() => {
         const activeProject = task.projectId ? projects.find((item) => item.id === task.projectId) : undefined;
         const projectArea = activeProject?.areaId
             ? areas.find((area) => area.id === activeProject.areaId)
@@ -126,8 +128,9 @@ export function SwipeableTaskItemContent({
         return {
             project: activeProject,
             projectColor: projectArea?.color,
+            section: task.sectionId ? sectionById.get(task.sectionId) : undefined,
         };
-    }, [areas, projects, task.projectId]);
+    }, [areas, projects, sectionById, task.projectId, task.sectionId]);
 
     // Draft text lives here, not in useSwipeableChecklist: it must never reach the
     // pending-checklist flush, so an unsubmitted line is discarded with the row.
@@ -232,13 +235,14 @@ export function SwipeableTaskItemContent({
     };
 
     if (!hideProjectMeta && project) {
+        const projectLabel = section ? `${project.title} · ${section.title}` : project.title;
         addMetaPart(
             renderMetaItem({
                 key: 'project',
                 onPress: canNavigateMeta && onProjectPress ? () => onProjectPress(project.id) : undefined,
                 accessibilityLabel: formatI18nTemplate(
                     tFallback(t, 'task.aria.openProject', 'Open project {name}'),
-                    { name: project.title },
+                    { name: projectLabel },
                 ),
                 children: (
                     <>
@@ -247,7 +251,7 @@ export function SwipeableTaskItemContent({
                             style={[styles.metaText, { color: tc.secondaryText }]}
                             numberOfLines={2}
                         >
-                            {project.title}
+                            {projectLabel}
                         </CompactText>
                     </>
                 ),

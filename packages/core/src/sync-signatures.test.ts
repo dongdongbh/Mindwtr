@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
     chooseDeterministicWinner,
+    canonicalizeStringMapForComparison,
     normalizeAreaForContentComparison,
     normalizeProjectForContentComparison,
     normalizeSectionForContentComparison,
@@ -87,12 +88,34 @@ describe('sync signatures', () => {
         expect(set15).not.toBe(undef);
     });
 
-    it('omits timeSpentMinutes from the task signature when zero, includes it when set', () => {
+  it('omits timeSpentMinutes from the task signature when zero, includes it when set', () => {
         const undef = toComparableSignature(normalizeTaskForContentComparison(task()));
         const zero = toComparableSignature(normalizeTaskForContentComparison(task({ timeSpentMinutes: 0 })));
         const set75 = toComparableSignature(normalizeTaskForContentComparison(task({ timeSpentMinutes: 75 })));
         expect(zero).toBe(undef);
         expect(set75).not.toBe(undef);
+  });
+
+    it('canonicalizes viewSectionIds key order and treats empty or invalid maps as missing', () => {
+        const missing = toComparableSignature(normalizeTaskForContentComparison(task()));
+        const empty = toComparableSignature(normalizeTaskForContentComparison(task({ viewSectionIds: {} })));
+        const invalid = toComparableSignature(normalizeTaskForContentComparison(task({
+            viewSectionIds: { someday: '', waiting: 7 } as unknown as Task['viewSectionIds'],
+        })));
+        const firstOrder = toComparableSignature(normalizeTaskForContentComparison(task({
+            viewSectionIds: { someday: 'books', waiting: 'people' },
+        })));
+        const secondOrder = toComparableSignature(normalizeTaskForContentComparison(task({
+            viewSectionIds: { waiting: 'people', someday: 'books' },
+        })));
+        const canonical = canonicalizeStringMapForComparison({ waiting: 'people', someday: 'books' });
+
+        expect(Object.keys(canonical ?? {})).toEqual(['someday', 'waiting']);
+        expect(canonicalizeStringMapForComparison({ someday: '', waiting: 7 })).toBeUndefined();
+        expect(empty).toBe(missing);
+        expect(invalid).toBe(missing);
+        expect(firstOrder).toBe(secondOrder);
+        expect(firstOrder).not.toBe(missing);
     });
 
     it('ignores unknown legacy task fields in content signatures', () => {

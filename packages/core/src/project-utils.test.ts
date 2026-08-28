@@ -283,6 +283,7 @@ describe('project-utils', () => {
         const archivedProject: Project = { id: 'p6', title: 'Archived', status: 'archived', tagIds: [], areaId: 'a1', createdAt: '', updatedAt: '' };
         const completedProject: Project = { id: 'p7', title: 'Completed', status: 'completed' as Project['status'], tagIds: [], areaId: 'a1', createdAt: '', updatedAt: '' };
         expect(isSelectableProjectForTaskAssignment(projects[0])).toBe(true);
+        expect(isSelectableProjectForTaskAssignment(projects[2])).toBe(true);
         expect(isSelectableProjectForTaskAssignment(projects[4])).toBe(false);
         expect(isSelectableProjectForTaskAssignment(archivedProject)).toBe(false);
         expect(isSelectableProjectForTaskAssignment(completedProject)).toBe(false);

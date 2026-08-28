@@ -21,6 +21,7 @@ export type ProcessInboxWorkflowFields = Partial<Pick<
     | 'startTime'
     | 'dueDate'
     | 'reviewAt'
+    | 'viewSectionIds'
 >>;
 
 /**
@@ -36,6 +37,45 @@ export function resolveProcessInboxContainerFields(
         projectId: projectId || undefined,
         areaId: projectId ? undefined : (areaId || undefined),
     };
+}
+
+function unionTokens(picked: readonly string[] | undefined, parsed: readonly string[]): string[] {
+    return Array.from(new Set([...(picked ?? []), ...parsed]));
+}
+
+/** The half of a parsed processing title that maps onto decision fields. */
+export type ParsedProcessInboxTitleFields = Pick<
+    Partial<Task>,
+    'contexts' | 'tags' | 'assignedTo' | 'energyLevel' | 'projectId' | 'areaId'
+>;
+
+/**
+ * Fold the quick-add tokens parsed out of the processing title into the fields
+ * the decision writes (#1088). Both platforms merge here so the two clarify
+ * UIs cannot disagree about what a typed token does.
+ *
+ * Token lists join what the chips already hold — typing `@phone` adds a
+ * context, it never replaces the ones the user toggled. Single-value tokens
+ * win over the picker, which is the only way an explicit token can act at all.
+ * A parsed project still drops a directly assigned area (#958); a parsed area
+ * leaves an existing project alone, since the project already carries one.
+ */
+export function mergeParsedProcessInboxFields(
+    fields: ProcessInboxWorkflowFields,
+    parsed: ParsedProcessInboxTitleFields,
+): ProcessInboxWorkflowFields {
+    const next: ProcessInboxWorkflowFields = { ...fields };
+    if (parsed.contexts && parsed.contexts.length > 0) next.contexts = unionTokens(fields.contexts, parsed.contexts);
+    if (parsed.tags && parsed.tags.length > 0) next.tags = unionTokens(fields.tags, parsed.tags);
+    if (parsed.assignedTo) next.assignedTo = parsed.assignedTo;
+    if (parsed.energyLevel) next.energyLevel = parsed.energyLevel;
+    if (parsed.projectId || parsed.areaId) {
+        Object.assign(next, resolveProcessInboxContainerFields(
+            parsed.projectId || fields.projectId,
+            parsed.areaId || fields.areaId,
+        ));
+    }
+    return next;
 }
 
 /**
@@ -76,6 +116,37 @@ export type ProcessInboxWorkflowCommitResult<Step extends string> = {
     session: ProcessInboxSession<Step>;
     writeResult: StoreActionResult;
 };
+
+/**
+ * Apply {@link mergeParsedProcessInboxFields} to whichever decision the user
+ * picked. Written out per case so a new event type has to declare what a typed
+ * token means for it instead of inheriting a spread.
+ */
+export function withParsedProcessInboxFields(
+    event: ProcessInboxWorkflowEvent,
+    parsed: ParsedProcessInboxTitleFields,
+): ProcessInboxWorkflowEvent {
+    const merge = (fields: ProcessInboxWorkflowFields = {}) => mergeParsedProcessInboxFields(fields, parsed);
+    switch (event.type) {
+        // Trashing writes nothing, so there is nothing for a token to land on.
+        case 'discard':
+            return event;
+        case 'skip':
+            return { type: 'skip', fields: merge(event.fields) };
+        case 'someday':
+            return { type: 'someday', fields: merge(event.fields) };
+        case 'reference':
+            return { type: 'reference', fields: merge(event.fields) };
+        case 'complete':
+            return { type: 'complete', fields: merge(event.fields) };
+        case 'later':
+            return { type: 'later', fields: merge(event.fields) };
+        case 'next':
+            return { type: 'next', fields: merge(event.fields) };
+        case 'waiting':
+            return { type: 'waiting', fields: merge(event.fields), followUpAt: event.followUpAt };
+    }
+}
 
 function normalizeFields(fields: ProcessInboxWorkflowFields): ProcessInboxWorkflowFields {
     if (!Object.prototype.hasOwnProperty.call(fields, 'assignedTo')) return fields;

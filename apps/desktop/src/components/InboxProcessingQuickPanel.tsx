@@ -1,6 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react';
-import { ArrowRight, BookOpen, CheckCircle, ClipboardList, Clock, Trash2, User, X } from 'lucide-react';
-import { DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimateLabel, safeFormatDate, safeParseDate, tFallback, type Project, type Task, type TaskDraft, type TaskDraftSetter, type TaskPriority, type TimeEstimate,
+import { ArrowRight, BookOpen, CheckCircle, ClipboardList, Clock, Hourglass, Trash2, User, X } from 'lucide-react';
+import { DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimateLabel, safeFormatDate, safeParseDate, setTaskViewSectionId, tFallback, type AppData, type Project, type Task, type TaskDraft, type TaskDraftSetter, type TaskPriority, type TimeEstimate,
     numericTextCollator,
 } from '@mindwtr/core';
 
@@ -14,6 +14,7 @@ import {
 import {
     parseContextsInput,
     parseTagsInput,
+    useProcessingTitleFocus,
     type InboxProcessingOptionLists,
     type InboxProcessingVisibility,
 } from './views/inbox/inbox-processing-utils';
@@ -23,8 +24,9 @@ import { AreaSelector } from './ui/AreaSelector';
 import { ProjectSelector } from './ui/ProjectSelector';
 import { DateField } from './ui/DateField';
 import { QuickDateChips } from './QuickDateChips';
+import { SomedaySectionSelector } from './ui/SomedaySectionSelector';
 
-type QuickActionabilityChoice = 'actionable' | 'later' | 'trash' | 'someday' | 'reference';
+type QuickActionabilityChoice = 'actionable' | 'later' | 'trash' | 'someday' | 'reference' | 'incubate';
 type QuickTwoMinuteChoice = 'yes' | 'no';
 type QuickExecutionChoice = 'defer' | 'delegate';
 
@@ -37,9 +39,12 @@ export type InboxProcessingQuickPanelProps = {
     setField: TaskDraftSetter;
     visibility: InboxProcessingVisibility;
     options: InboxProcessingOptionLists;
+    settings?: AppData['settings'];
     processingMode: 'guided' | 'quick';
     onModeChange: (mode: 'guided' | 'quick') => void;
     onSkip: () => void;
+    /** This item reached the pass from Someday, not the Inbox (#1089). */
+    isReturningItem: boolean;
     onClose: () => void;
     actionabilityChoice: QuickActionabilityChoice;
     setActionabilityChoice: (value: QuickActionabilityChoice) => void;
@@ -55,6 +60,7 @@ export type InboxProcessingQuickPanelProps = {
     setDelegateFollowUp: (value: string) => void;
     onSendDelegateRequest: () => void;
     onCreatePerson: (name: string) => void | Promise<void>;
+    onCreateSomedaySection: (title: string) => Promise<string | null>;
     toggleContext: (ctx: string) => void;
     toggleTag: (tag: string) => void;
     convertToProject: boolean;
@@ -105,9 +111,11 @@ export function InboxProcessingQuickPanel({
     setField,
     visibility,
     options,
+    settings,
     processingMode,
     onModeChange,
     onSkip,
+    isReturningItem,
     onClose,
     actionabilityChoice,
     setActionabilityChoice,
@@ -123,6 +131,7 @@ export function InboxProcessingQuickPanel({
     setDelegateFollowUp,
     onSendDelegateRequest,
     onCreatePerson,
+    onCreateSomedaySection,
     toggleContext,
     toggleTag,
     convertToProject,
@@ -160,6 +169,7 @@ export function InboxProcessingQuickPanel({
     // The body keeps its own names for the draft fields: one alias block beats
     // rewriting every reference (and re-growing the prop list to do it).
     const processingTitle = draft.title;
+    const titleInputRef = useProcessingTitleFocus(processingTask?.id);
     const processingDescription = draft.description;
     const contextsDraft = draft.contexts;
     const tagsDraft = draft.tags;
@@ -181,20 +191,95 @@ export function InboxProcessingQuickPanel({
     const setSelectedTimeEstimate = (value: TimeEstimate | undefined) => setField('timeEstimate', value ?? '');
     const setSelectedProjectId = (value: string | null) => setField('projectId', value ?? '');
     const setSelectedAreaId = (value: string | null) => setField('areaId', value ?? '');
+    const somedaySections = settings?.gtd?.viewSections?.someday ?? [];
+    const somedaySectionField = (
+        <div className="space-y-1">
+            <label className="text-[11px] text-muted-foreground font-medium">
+                {tFallback(t, 'viewSections.somedaySection', 'Someday section')}
+            </label>
+            <SomedaySectionSelector
+                sections={somedaySections}
+                value={draft.viewSectionIds?.someday}
+                onChange={(sectionId) => setField(
+                    'viewSectionIds',
+                    setTaskViewSectionId(draft.viewSectionIds, 'someday', sectionId),
+                )}
+                onCreateSection={onCreateSomedaySection}
+                t={t}
+                className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+            />
+        </div>
+    );
 
     const showActionFields = actionabilityChoice === 'actionable';
     const showLaterFields = actionabilityChoice === 'later';
+    const showIncubateFields = actionabilityChoice === 'incubate';
     const showDecisionFields = showActionFields && twoMinuteChoice === 'no';
     const showDelegationFields = showDecisionFields && executionChoice === 'delegate';
     const showNextActionFields = showDecisionFields && executionChoice === 'defer';
     const showReferenceOrganizationFields = actionabilityChoice === 'reference';
-    const laterLabel = tFallback(t, 'process.later', 'Later');
-    const laterHint = tFallback(t, 'process.laterHint', 'Set a start date and move this to Next.');
+    const showDeferredOrganizationFields = actionabilityChoice === 'someday'
+        || actionabilityChoice === 'incubate';
+    const laterLabel = tFallback(t, 'process.later', 'Start later');
+    const laterHint = tFallback(t, 'process.laterHint', 'Set a start date and move this to Next Actions.');
+    const incubateLabel = tFallback(t, 'process.incubate', 'Incubate');
+    const incubateHint = tFallback(t, 'process.incubateHint', 'Park this without deciding. It comes back to clarify on the date you choose.');
     const compareLabels = (left: string, right: string) =>
         numericTextCollator.compare(left, right);
     const sortedProjects = [...projects].sort((a, b) => compareLabels(a.title, b.title));
     const projectFilterAreaId = selectedAreaId || undefined;
     const filteredProjects = filterProjectsBySelectedArea(sortedProjects, projectFilterAreaId);
+    const organizationContainerFields = showAreaField || showProjectField ? (
+        <div className="space-y-3">
+            {!selectedProjectId && showAreaField ? (
+                <div className="space-y-1">
+                    <label className="text-[11px] text-muted-foreground font-medium">{t('taskEdit.areaLabel')}</label>
+                    <AreaSelector
+                        areas={areas}
+                        value={selectedAreaId ?? ''}
+                        onChange={(value) => setSelectedAreaId(value || null)}
+                        placeholder={t('projects.noArea')}
+                        noAreaLabel={t('projects.noArea')}
+                        searchPlaceholder={t('areas.search')}
+                        noMatchesLabel={t('common.noMatches')}
+                        controlClassName="rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
+                        menuClassName="text-sm"
+                    />
+                </div>
+            ) : null}
+            {showProjectField ? (
+                <div className="space-y-1">
+                    <label className="text-[11px] text-muted-foreground font-medium">{t('taskEdit.projectLabel')}</label>
+                    <ProjectSelector
+                        projects={filteredProjects}
+                        allProjects={sortedProjects}
+                        value={selectedProjectId ?? ''}
+                        onChange={(value) => {
+                            const nextProjectId = value || null;
+                            setSelectedProjectId(nextProjectId);
+                            if (nextProjectId) setSelectedAreaId(null);
+                        }}
+                        onCreateProject={async (title) => {
+                            const created = await addProject(
+                                title,
+                                DEFAULT_PROJECT_COLOR,
+                                projectFilterAreaId ? { areaId: projectFilterAreaId } : undefined,
+                            );
+                            return created?.id ?? null;
+                        }}
+                        placeholder={t('process.project')}
+                        noProjectLabel={t('process.noProject')}
+                        searchPlaceholder={t('projects.search')}
+                        noMatchesLabel={t('common.noMatches')}
+                        emptyLabel={projectFilterAreaId ? t('projects.noProjectsInArea') : undefined}
+                        createProjectLabel={t('projects.create')}
+                        controlClassName="rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
+                        menuClassName="text-sm"
+                    />
+                </div>
+            ) : null}
+        </div>
+    ) : null;
     const organizationTokenFields = showContextsField || showTagsField ? (
         <div className="grid gap-3 md:grid-cols-2">
             {showContextsField ? (
@@ -367,6 +452,16 @@ export function InboxProcessingQuickPanel({
 
             <div className="px-6 py-5 space-y-5">
                 <div className="space-y-1">
+                    {isReturningItem && (
+                        <div className="flex flex-col items-center gap-1 pb-1">
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-status-someday/10 px-2.5 py-1 text-[11px] font-medium text-status-someday">
+                                <Hourglass className="h-3 w-3" /> {tFallback(t, 'process.returningItem', 'Back to clarify')}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                                {tFallback(t, 'process.returningItemHint', 'You incubated this. Decide what it is now.')}
+                            </span>
+                        </div>
+                    )}
                     <p className="text-center font-medium text-base leading-snug">
                         {processingTitle || processingTask.title}
                     </p>
@@ -379,6 +474,7 @@ export function InboxProcessingQuickPanel({
                     <div className="space-y-1">
                         <label className="text-[11px] text-muted-foreground font-medium">{t('taskEdit.titleLabel')}</label>
                         <input
+                            ref={titleInputRef}
                             aria-label={t('taskEdit.titleLabel')}
                             value={processingTitle}
                             onChange={(event) => setProcessingTitle(event.target.value)}
@@ -456,6 +552,19 @@ export function InboxProcessingQuickPanel({
                             <Clock className="w-3.5 h-3.5 inline mr-1.5" />
                             {t('process.someday')}
                         </button>
+                        <button
+                            type="button"
+                            onClick={() => setActionabilityChoice('incubate')}
+                            className={cn(
+                                'rounded-lg px-3 py-2 text-xs font-medium transition-colors border',
+                                actionabilityChoice === 'incubate'
+                                    ? 'bg-status-someday/15 text-status-someday border-status-someday/40'
+                                    : 'bg-muted/40 border-border hover:bg-muted/70'
+                            )}
+                        >
+                            <Hourglass className="w-3.5 h-3.5 inline mr-1.5" />
+                            {incubateLabel}
+                        </button>
                         {showReferenceOption ? (
                             <button
                                 type="button"
@@ -486,9 +595,30 @@ export function InboxProcessingQuickPanel({
                     </div>
                 ) : null}
 
+                {showIncubateFields ? (
+                    <div className="space-y-3 rounded-lg border border-status-someday/20 bg-status-someday/5 p-3">
+                        <div className="text-xs text-muted-foreground">{incubateHint}</div>
+                        <InboxProcessingScheduleFields
+                            t={t}
+                            fields={scheduleFields}
+                            visibleFieldKeys={['review']}
+                            variant="quick"
+                        />
+                    </div>
+                ) : null}
+
                 {showReferenceOrganizationFields && organizationTokenFields ? (
                     <div className="rounded-lg border border-status-reference/20 bg-status-reference/5 p-3">
                         {organizationTokenFields}
+                    </div>
+                ) : null}
+
+                {showDeferredOrganizationFields && (organizationContainerFields || somedaySectionField) ? (
+                    <div className="rounded-lg border border-status-someday/20 bg-status-someday/5 p-3">
+                        <div className="space-y-3">
+                            {organizationContainerFields}
+                            {somedaySectionField}
+                        </div>
                     </div>
                 ) : null}
 
@@ -681,59 +811,7 @@ export function InboxProcessingQuickPanel({
                                     />
                                 </div>
                             </div>
-                        ) : (
-                            <div className="space-y-3">
-                                {!selectedProjectId && showAreaField ? (
-                                    <div className="space-y-1">
-                                        <label className="text-[11px] text-muted-foreground font-medium">{t('taskEdit.areaLabel')}</label>
-                                        <AreaSelector
-                                            areas={areas}
-                                            value={selectedAreaId ?? ''}
-                                            onChange={(value) => setSelectedAreaId(value || null)}
-                                            placeholder={t('projects.noArea')}
-                                            noAreaLabel={t('projects.noArea')}
-                                            searchPlaceholder={t('areas.search')}
-                                            noMatchesLabel={t('common.noMatches')}
-                                            controlClassName="rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
-                                            menuClassName="text-sm"
-                                        />
-                                    </div>
-                                ) : null}
-                                {showProjectField ? (
-                                    <div className="space-y-1">
-                                        <label className="text-[11px] text-muted-foreground font-medium">{t('taskEdit.projectLabel')}</label>
-                                        <ProjectSelector
-                                            projects={filteredProjects}
-                                            allProjects={sortedProjects}
-                                            value={selectedProjectId ?? ''}
-                                            onChange={(value) => {
-                                                const nextProjectId = value || null;
-                                                setSelectedProjectId(nextProjectId);
-                                                if (nextProjectId) {
-                                                    setSelectedAreaId(null);
-                                                }
-                                            }}
-                                            onCreateProject={async (title) => {
-                                                const created = await addProject(
-                                                    title,
-                                                    DEFAULT_PROJECT_COLOR,
-                                                    projectFilterAreaId ? { areaId: projectFilterAreaId } : undefined,
-                                                );
-                                                return created?.id ?? null;
-                                            }}
-                                            placeholder={t('process.project')}
-                                            noProjectLabel={t('process.noProject')}
-                                            searchPlaceholder={t('projects.search')}
-                                            noMatchesLabel={t('common.noMatches')}
-                                            emptyLabel={projectFilterAreaId ? t('projects.noProjectsInArea') : undefined}
-                                            createProjectLabel={t('projects.create')}
-                                            controlClassName="rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
-                                            menuClassName="text-sm"
-                                        />
-                                    </div>
-                                ) : null}
-                            </div>
-                        )}
+                        ) : organizationContainerFields}
 
                         {organizationTokenFields}
 

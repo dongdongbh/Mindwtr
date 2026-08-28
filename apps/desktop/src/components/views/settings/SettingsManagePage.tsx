@@ -3,7 +3,7 @@ import { DndContext, type DragEndEvent, closestCenter, useSensor, useSensors, Po
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, ExternalLink } from 'lucide-react';
-import { DEFAULT_AREA_COLOR, formatI18nTemplate, getPersonNameKey, translateWithFallback, useTaskStore, type Area, type Person,
+import { DEFAULT_AREA_COLOR, formatI18nTemplate, getPersonNameKey, sortViewSectionDefinitions, translateWithFallback, useTaskStore, type Area, type Person, type ViewSectionDefinition,
     baseTextCollator,
 } from '@mindwtr/core';
 import { AreaColorPicker } from '../projects/AreaColorPicker';
@@ -103,6 +103,66 @@ function SortableAreaRow({
             <button
                 type="button"
                 onClick={() => onDelete(area.id)}
+                className="text-destructive hover:bg-destructive/10 h-8 w-8 rounded-md transition-colors flex items-center justify-center shrink-0"
+                title={translate('common.delete')}
+            >
+                <Trash2 className="w-4 h-4" />
+            </button>
+        </div>
+    );
+}
+
+function SortableViewSectionRow({
+    section,
+    onDelete,
+    onUpdateTitle,
+    translate,
+}: {
+    section: ViewSectionDefinition;
+    onDelete: (id: string) => void;
+    onUpdateTitle: (id: string, title: string) => void;
+    translate: (key: string) => string;
+}) {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: section.id });
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.6 : 1,
+    };
+    const commitTitle = (raw: string) => {
+        const title = raw.trim();
+        if (!title || title === section.title) return;
+        onUpdateTitle(section.id, title);
+    };
+
+    return (
+        <div ref={setNodeRef} style={style} className="flex items-center gap-2">
+            <button
+                type="button"
+                {...attributes}
+                {...listeners}
+                className="h-8 w-8 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center shrink-0"
+                title={translate('projects.reorderSections')}
+            >
+                <GripVertical className="w-4 h-4" />
+            </button>
+            <input
+                key={`${section.id}-${section.title}`}
+                defaultValue={section.title}
+                aria-label={translateWithFallback(translate, 'viewSections.nameHint', 'Section name')}
+                onBlur={(event) => commitTitle(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        commitTitle(event.currentTarget.value);
+                        event.currentTarget.blur();
+                    }
+                }}
+                className="flex-1 bg-muted/50 border border-border rounded px-2 py-1 text-sm min-w-0"
+            />
+            <button
+                type="button"
+                onClick={() => onDelete(section.id)}
                 className="text-destructive hover:bg-destructive/10 h-8 w-8 rounded-md transition-colors flex items-center justify-center shrink-0"
                 title={translate('common.delete')}
             >
@@ -364,6 +424,7 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
     const areas = useTaskStore((s) => s.areas);
     const people = useTaskStore((s) => s.people);
     const tasks = useTaskStore((s) => s.tasks);
+    const settings = useTaskStore((s) => s.settings);
     const addArea = useTaskStore((s) => s.addArea);
     const updateArea = useTaskStore((s) => s.updateArea);
     const deleteArea = useTaskStore((s) => s.deleteArea);
@@ -376,6 +437,7 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
     const updatePerson = useTaskStore((s) => s.updatePerson);
     const renamePerson = useTaskStore((s) => s.renamePerson);
     const deletePerson = useTaskStore((s) => s.deletePerson);
+    const updateSettings = useTaskStore((s) => s.updateSettings);
     const getDerivedState = useTaskStore((s) => s.getDerivedState);
 
     const { allContexts, allTags } = getDerivedState();
@@ -383,6 +445,7 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
     // Sort areas by order
     const sortedAreas = [...areas].sort((a, b) => a.order - b.order);
     const sortedPeople = [...people].sort((a, b) => baseTextCollator.compare(a.name, b.name));
+    const somedaySections = sortViewSectionDefinitions(settings?.gtd?.viewSections?.someday);
     const assignedTaskCountByPerson = new Map<string, number>();
     tasks.forEach((task) => {
         if (task.deletedAt) return;
@@ -399,6 +462,30 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
     const [isCreatingPerson, setIsCreatingPerson] = useState(false);
 
     const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+    const persistSomedaySections = useCallback((nextSections: ViewSectionDefinition[]) => {
+        void updateSettings({
+            gtd: {
+                ...(settings?.gtd ?? {}),
+                viewSections: {
+                    ...(settings?.gtd?.viewSections ?? {}),
+                    someday: nextSections,
+                },
+            },
+        }).catch((error) => reportError('Failed to update Someday sections from Settings', error));
+    }, [settings?.gtd, updateSettings]);
+
+    const handleViewSectionDragEnd = useCallback((event: DragEndEvent) => {
+        const { active, over } = event;
+        if (!over || active.id === over.id) return;
+        const oldIndex = somedaySections.findIndex((section) => section.id === active.id);
+        const newIndex = somedaySections.findIndex((section) => section.id === over.id);
+        if (oldIndex === -1 || newIndex === -1) return;
+        const reordered = [...somedaySections];
+        const [moved] = reordered.splice(oldIndex, 1);
+        reordered.splice(newIndex, 0, moved);
+        persistSomedaySections(reordered.map((section, order) => ({ ...section, order })));
+    }, [persistSomedaySections, somedaySections]);
 
     const handleCreateArea = useCallback(async () => {
         const name = newAreaName.trim();
@@ -445,10 +532,15 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
     const resolveText = (key: string, fallback: string) => {
         return translateWithFallback(translate, key, fallback);
     };
-    const confirmDelete = useCallback(async (messageKey: string, fallback: string, onConfirm: () => void) => {
+    const confirmDelete = useCallback(async (
+        messageKey: string,
+        fallback: string,
+        onConfirm: () => void,
+        params: Record<string, string> = {},
+    ) => {
         const confirmed = await requestConfirmation({
             title: resolveText('common.delete', 'Delete'),
-            description: formatI18nTemplate(resolveText(messageKey, fallback), {}),
+            description: formatI18nTemplate(resolveText(messageKey, fallback), params),
             confirmLabel: resolveText('common.delete', 'Delete'),
             cancelLabel: resolveText('common.cancel', 'Cancel'),
         });
@@ -585,6 +677,45 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
                         </button>
                     </div>
                 </div>
+            </ManageSection>
+
+            {/* Someday sections */}
+            <ManageSection
+                settingsKey="manageSomedaySections"
+                title={resolveText('viewSections.somedaySections', 'Someday sections')}
+                count={somedaySections.length}
+            >
+                {somedaySections.length === 0 && (
+                    <div className="text-sm text-muted-foreground py-2">
+                        {resolveText('viewSections.manageHint', 'Organize ideas without changing their projects or project sections.')}
+                    </div>
+                )}
+                {somedaySections.length > 0 && (
+                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleViewSectionDragEnd}>
+                        <SortableContext items={somedaySections.map((section) => section.id)} strategy={verticalListSortingStrategy}>
+                            {somedaySections.map((section) => (
+                                <SortableViewSectionRow
+                                    key={section.id}
+                                    section={section}
+                                    onDelete={(id) => {
+                                        const section = somedaySections.find((candidate) => candidate.id === id);
+                                        if (!section) return;
+                                        void confirmDelete(
+                                            'settings.deleteNamed',
+                                            'Delete "{{name}}"?',
+                                            () => persistSomedaySections(somedaySections.filter((candidate) => candidate.id !== id)),
+                                            { name: section.title },
+                                        );
+                                    }}
+                                    onUpdateTitle={(id, title) => persistSomedaySections(somedaySections.map((candidate) => (
+                                        candidate.id === id ? { ...candidate, title } : candidate
+                                    )))}
+                                    translate={translate}
+                                />
+                            ))}
+                        </SortableContext>
+                    </DndContext>
+                )}
             </ManageSection>
 
             {/* Contexts */}

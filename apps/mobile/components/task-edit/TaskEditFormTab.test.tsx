@@ -164,6 +164,52 @@ describe('TaskEditFormTab keyboard handling', () => {
     });
   });
 
+  it('creates and assigns a Someday section from a Someday draft', async () => {
+    const onSomedaySectionChange = vi.fn();
+    const onCreateSomedaySection = vi.fn().mockResolvedValue('career');
+    const somedayDraft = createTaskDraft({
+      id: 'someday-task',
+      title: 'Read DDIA',
+      status: 'someday',
+      tags: [],
+      contexts: [],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <TaskEditFormTab
+          {...baseProps}
+          draft={somedayDraft}
+          somedaySections={[{ id: 'books', title: 'Books to read', order: 0 }]}
+          onSomedaySectionChange={onSomedaySectionChange}
+          onCreateSomedaySection={onCreateSomedaySection}
+        />
+      );
+    });
+
+    act(() => {
+      tree.root.findByProps({ accessibilityLabel: 'Books to read' }).props.onPress();
+    });
+    expect(onSomedaySectionChange).toHaveBeenCalledWith('books');
+
+    act(() => {
+      tree.root.findByProps({ accessibilityLabel: '+ New section…' }).props.onPress();
+    });
+    act(() => {
+      tree.root.findByProps({ accessibilityLabel: 'Section name' }).props.onChangeText('Career ideas');
+    });
+    await act(async () => {
+      tree.root.findByProps({ accessibilityLabel: 'common.save' }).props.onPress();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onCreateSomedaySection).toHaveBeenCalledWith('Career ideas');
+    expect(onSomedaySectionChange).toHaveBeenCalledWith('career');
+  });
+
   it('does not render collapsible sections that have no fields', () => {
     const renderField = vi.fn((fieldId: string) => React.createElement('Field', { fieldId }));
 

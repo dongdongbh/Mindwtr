@@ -740,15 +740,18 @@ export function AgendaView() {
                 || startsToday;
         });
         const scheduleIds = new Set(schedule.map((task) => task.id));
+        const reviewDue = reviewDueCandidates.filter((task) => (
+            !task.isFocusedToday && !scheduleIds.has(task.id)
+        ));
+        const reviewDueIds = new Set(reviewDue.map((task) => task.id));
         const nextActions = filteredActiveTasks.filter((task) => {
             if (task.status !== 'next' || task.isFocusedToday) return false;
             if (isSequentialBlocked(task)) return false;
-            return !scheduleIds.has(task.id);
+            return !scheduleIds.has(task.id) && !reviewDueIds.has(task.id);
         });
         const projectDeadlineBoosts = effectiveFocusSortBy === DEFAULT_FOCUS_SORT_BY
             ? getProjectDeadlineBoosts(nextActions, projects, { now })
             : new Map<string, ProjectDeadlineBoost>();
-        const reviewDue = reviewDueCandidates.filter(t => !t.isFocusedToday);
         const scheduleSortTime = (task: Task) => {
             const due = safeParseDueDate(task.dueDate)?.getTime();
             const start = safeParseDate(task.startTime)?.getTime();
@@ -827,7 +830,7 @@ export function AgendaView() {
     ), [resolveText, sections.projectDeadlineBoosts]);
     const { top3Tasks, remainingCount } = useMemo(() => {
         const byId = new Map<string, Task>();
-        [...sections.schedule, ...sections.nextActions, ...sections.reviewDue].forEach((task) => {
+        [...sections.schedule, ...sections.reviewDue, ...sections.nextActions].forEach((task) => {
             if (!byId.has(task.id)) {
                 byId.set(task.id, task);
             }
@@ -846,9 +849,9 @@ export function AgendaView() {
         if (top3Only) return [...focusedTasks, ...top3Tasks];
         const visible = [...focusedTasks];
         if (expandedSections.schedule) visible.push(...sections.schedule);
+        if (expandedSections.reviewDue) visible.push(...sections.reviewDue);
         if (expandedSections.nextActions) visible.push(...visibleNextActions);
         if (expandedSections.upcoming) visible.push(...sections.upcoming);
-        if (expandedSections.reviewDue) visible.push(...sections.reviewDue);
         return visible;
     }, [
         expandedSections,
@@ -933,8 +936,8 @@ export function AgendaView() {
         const ordered = [
             ...focusedTasks,
             ...sections.schedule,
-            ...sections.nextActions,
             ...sections.reviewDue,
+            ...sections.nextActions,
         ];
         const byId = new Map<string, Task>();
         ordered.forEach((task) => {
@@ -1239,6 +1242,25 @@ export function AgendaView() {
                             </AgendaCollapsibleSection>
                         )}
 
+                        {sections.reviewDue.length > 0 && (
+                            <AgendaCollapsibleSection
+                                title={tFallback(t, 'agenda.reviewDue', 'Review Due')}
+                                icon={Clock}
+                                color="text-status-someday"
+                                count={sections.reviewDue.length}
+                                expanded={expandedSections.reviewDue}
+                                onToggle={() => toggleSection('reviewDue')}
+                                controlsId="agenda-section-reviewDue"
+                            >
+                                <AgendaTaskList
+                                    tasks={sections.reviewDue}
+                                    buildFocusToggle={buildFocusToggle}
+                                    showListDetails={showListDetails}
+                                    highlightTaskId={highlightTaskId}
+                                />
+                            </AgendaCollapsibleSection>
+                        )}
+
                         {effectiveNextGroupBy === 'none' ? (
                             sections.nextActions.length > 0 && (
                                 <AgendaCollapsibleSection
@@ -1315,25 +1337,6 @@ export function AgendaView() {
                                     tasks={sections.upcoming}
                                     buildFocusToggle={buildUpcomingFocusToggle}
                                     getAppearsAtLabel={getUpcomingAppearsAtLabel}
-                                    showListDetails={showListDetails}
-                                    highlightTaskId={highlightTaskId}
-                                />
-                            </AgendaCollapsibleSection>
-                        )}
-
-                        {sections.reviewDue.length > 0 && (
-                            <AgendaCollapsibleSection
-                                title={tFallback(t, 'agenda.reviewDue', 'Review Due')}
-                                icon={Clock}
-                                color="text-status-someday"
-                                count={sections.reviewDue.length}
-                                expanded={expandedSections.reviewDue}
-                                onToggle={() => toggleSection('reviewDue')}
-                                controlsId="agenda-section-reviewDue"
-                            >
-                                <AgendaTaskList
-                                    tasks={sections.reviewDue}
-                                    buildFocusToggle={buildFocusToggle}
                                     showListDetails={showListDetails}
                                     highlightTaskId={highlightTaskId}
                                 />

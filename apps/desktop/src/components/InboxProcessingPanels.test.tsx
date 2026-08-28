@@ -98,6 +98,7 @@ function QuickPanelHarness(overrides: Partial<InboxProcessingQuickPanelProps> = 
             processingMode="quick"
             onModeChange={noop}
             onSkip={noop}
+            isReturningItem={false}
             onClose={noop}
             actionabilityChoice="actionable"
             setActionabilityChoice={noop}
@@ -113,6 +114,7 @@ function QuickPanelHarness(overrides: Partial<InboxProcessingQuickPanelProps> = 
             setDelegateFollowUp={noop}
             onSendDelegateRequest={noop}
             onCreatePerson={noop}
+            onCreateSomedaySection={noop as InboxProcessingQuickPanelProps['onCreateSomedaySection']}
             toggleContext={noop}
             toggleTag={noop}
             convertToProject={false}
@@ -152,6 +154,8 @@ function WizardHarness({ processingStep = 'refine' as ProcessingStep, ...overrid
             handleSkip={noop}
             handleNotActionable={noop}
             handleLater={noop}
+            handleIncubate={noop}
+            isReturningItem={false}
             handleActionable={noop}
             showDoneNowShortcut={false}
             handleProjectCheckNo={noop}
@@ -168,7 +172,9 @@ function WizardHarness({ processingStep = 'refine' as ProcessingStep, ...overrid
             handleSendDelegateRequest={noop}
             handleConfirmWaiting={noop}
             handleConfirmReference={noop}
+            handleConfirmSomeday={noop}
             onCreatePerson={noop}
+            onCreateSomedaySection={noop as InboxProcessingWizardProps['onCreateSomedaySection']}
             customContext=""
             setCustomContext={noop}
             addCustomContext={noop}
@@ -240,6 +246,26 @@ describe('InboxProcessingQuickPanel draft editing', () => {
         fireEvent.click(getByRole('button', { name: 'priority.high' }));
         expect(getByRole('button', { name: 'priority.high' })).not.toHaveClass('bg-primary');
     });
+
+    it('offers Area and Project controls before filing a Someday item', () => {
+        const { getByText } = render(
+            <QuickPanelHarness actionabilityChoice="someday" />,
+        );
+
+        expect(getByText('taskEdit.areaLabel')).toBeInTheDocument();
+        expect(getByText('taskEdit.projectLabel')).toBeInTheDocument();
+        expect(getByText('+ New section…')).toBeInTheDocument();
+    });
+
+    it('offers the same Area and Project controls before incubating an item', () => {
+        const { getByText } = render(
+            <QuickPanelHarness actionabilityChoice="incubate" />,
+        );
+
+        expect(getByText('taskEdit.areaLabel')).toBeInTheDocument();
+        expect(getByText('taskEdit.projectLabel')).toBeInTheDocument();
+        expect(getByText('+ New section…')).toBeInTheDocument();
+    });
 });
 
 describe('InboxProcessingWizard draft editing', () => {
@@ -263,5 +289,31 @@ describe('InboxProcessingWizard draft editing', () => {
 
         fireEvent.click(getByRole('button', { name: 'priority.urgent' }));
         expect(getByRole('button', { name: 'priority.urgent' })).toHaveClass('bg-primary');
+    });
+
+    it('offers Area and Project controls before confirming Someday', () => {
+        const handleConfirmSomeday = vi.fn();
+        const { getByRole, getByText } = render(
+            <WizardHarness processingStep="someday" handleConfirmSomeday={handleConfirmSomeday} />,
+        );
+
+        expect(getByText('taskEdit.areaLabel')).toBeInTheDocument();
+        expect(getByText('taskEdit.projectLabel')).toBeInTheDocument();
+        expect(getByText('+ New section…')).toBeInTheDocument();
+        fireEvent.click(getByRole('button', { name: 'process.someday' }));
+        expect(handleConfirmSomeday).toHaveBeenCalledTimes(1);
+    });
+
+    it('offers Area and Project controls before confirming Incubate', () => {
+        const { getByRole, getByText } = render(
+            <WizardHarness processingStep="actionable" />,
+        );
+
+        fireEvent.click(getByRole('button', { name: 'inbox.no' }));
+        fireEvent.click(getByRole('button', { name: 'Incubate' }));
+
+        expect(getByText('taskEdit.areaLabel')).toBeInTheDocument();
+        expect(getByText('taskEdit.projectLabel')).toBeInTheDocument();
+        expect(getByText('+ New section…')).toBeInTheDocument();
     });
 });

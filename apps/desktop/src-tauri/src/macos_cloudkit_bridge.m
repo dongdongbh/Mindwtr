@@ -185,6 +185,7 @@ static const MWFieldSpec kTaskFields[] = {
     {"location",       "location",        MWFieldKindString},
     {"projectId",      "projectId",       MWFieldKindString},
     {"sectionId",      "sectionId",       MWFieldKindString},
+    {"viewSectionIds", "viewSectionIds",  MWFieldKindJsonString},
     {"areaId",         "areaId",          MWFieldKindString},
     {"isFocusedToday", "isFocusedToday",  MWFieldKindBool},
     {"timeEstimate",   "timeEstimate",    MWFieldKindString},

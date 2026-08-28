@@ -25,6 +25,7 @@ const { addTask, updateTask, restoreTask, undoTaskCompletion, showToast, getChec
     restoreTask: vi.fn(),
     projects: [] as any[],
     _allProjects: [] as any[],
+    _sectionsById: new Map<string, any>(),
     areas: [] as any[],
     settings: { features: {}, appearance: {} },
     getDerivedState: () => ({ focusedCount: 0 }),
@@ -233,6 +234,7 @@ describe('SwipeableTaskItem', () => {
     translate.overrides = {};
     storeState.projects = [];
     storeState._allProjects = [];
+    storeState._sectionsById = new Map();
     storeState.areas = [];
     storeState.settings = { features: {}, appearance: {} };
     storeState.tasks = [];
@@ -934,6 +936,9 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     storeState.projects = [
       { id: 'project-1', title: 'Mindwtr', areaId: undefined },
     ];
+    storeState._sectionsById = new Map([
+      ['section-1', { id: 'section-1', projectId: 'project-1', title: 'Release checklist' }],
+    ]);
 
     let tree!: renderer.ReactTestRenderer;
     renderer.act(() => {
@@ -944,6 +949,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
             title: 'Plan release',
             status: 'inbox',
             projectId: 'project-1',
+            sectionId: 'section-1',
             contexts: ['@work'],
             tags: ['#urgent'],
             createdAt: '2026-01-01T00:00:00.000Z',
@@ -968,9 +974,13 @@ it('can keep the focus star without adding a redundant focus outline', () => {
       );
     });
 
-    const projectButton = tree.root.find((node) => node.props.accessibilityLabel === 'Open project Mindwtr');
+    const projectButton = tree.root.find((node) => (
+      node.props.accessibilityLabel === 'Open project Mindwtr · Release checklist'
+    ));
     const contextButton = tree.root.find((node) => node.props.accessibilityLabel === 'Open context @work');
     const tagButton = tree.root.find((node) => node.props.accessibilityLabel === 'Open tag #urgent');
+
+    expect(hasText(tree, 'Mindwtr · Release checklist')).toBe(true);
 
     renderer.act(() => {
       projectButton.props.onPress({ stopPropagation: vi.fn() });

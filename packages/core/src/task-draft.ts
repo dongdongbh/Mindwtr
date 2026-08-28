@@ -9,6 +9,7 @@ import {
     getRecurrenceRRuleValue,
     parseRRuleString,
 } from './recurrence';
+import { canonicalizeStringMapForComparison } from './sync-signatures';
 import type {
     Attachment,
     Recurrence,
@@ -38,6 +39,7 @@ export type TaskDraft = {
     relativeStartOffset: Task['relativeStartOffset'];
     projectId: string;
     sectionId: string;
+    viewSectionIds: Task['viewSectionIds'];
     areaId: string;
     completedAt: string;
     status: TaskStatus;
@@ -112,6 +114,14 @@ const TASK_DRAFT_FIELDS: { [K in TaskDraftField]: FieldSpec<K> } = {
     },
     projectId: { fromTask: (task) => task.projectId || '' },
     sectionId: { fromTask: (task) => task.sectionId || '' },
+    viewSectionIds: {
+        fromTask: (task) => task.viewSectionIds,
+        isDirty: (value, task) => (
+            (value === undefined) !== (task.viewSectionIds === undefined)
+            || JSON.stringify(canonicalizeStringMapForComparison(value) ?? {})
+                !== JSON.stringify(canonicalizeStringMapForComparison(task.viewSectionIds) ?? {})
+        ),
+    },
     areaId: { fromTask: (task) => task.areaId || '' },
     completedAt: {
         fromTask: (task) => task.completedAt || '',
@@ -286,6 +296,7 @@ export function taskDraftToUpdatePatch(
         // Container exclusivity: a project home clears the direct area, and a
         // section is only valid inside its project.
         sectionId: resolvedProjectId ? (draft.sectionId || undefined) : undefined,
+        viewSectionIds: draft.viewSectionIds,
         areaId: resolvedProjectId ? undefined : (draft.areaId || undefined),
         contexts: splitTokens(draft.contexts, 'contexts'),
         tags: splitTokens(draft.tags, 'tags'),
