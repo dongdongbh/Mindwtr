@@ -40,12 +40,13 @@ use crate::sync_crypto::{
     SyncKeyMaterial, KEY_LEN, SALT_LEN, SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
 };
 use crate::sync_encryption::{
-    begin_sync_encryption_transition, bytes_to_hex, clear_encryption_state,
-    encrypted_artifact_name, hex_to_bytes, is_encryption_enabled, is_terminal_error,
-    mark_remote_encrypted_no_key, mark_remote_plaintext, persist_enabled_material,
-    plaintext_artifact_name, resolve_key_material, terminal_error, TRANSITION_CHANGE_PASSPHRASE,
-    TRANSITION_DISABLE, TRANSITION_ENABLE, SYNC_ENCRYPTION_REMOTE_ENCRYPTED,
-    SYNC_ENCRYPTION_REMOTE_PLAINTEXT,
+    begin_sync_encryption_transition, bytes_to_hex, clear_encryption_state_with_fence,
+    encrypted_artifact_name, hex_to_bytes,
+    is_encryption_enabled, is_terminal_error, mark_remote_encrypted_no_key,
+    mark_remote_plaintext, persist_enabled_material_with_fence,
+    plaintext_artifact_name, resolve_key_material, terminal_error,
+    TRANSITION_CHANGE_PASSPHRASE, TRANSITION_DISABLE, TRANSITION_ENABLE,
+    SYNC_ENCRYPTION_REMOTE_ENCRYPTED, SYNC_ENCRYPTION_REMOTE_PLAINTEXT,
 };
 #[cfg(target_os = "macos")]
 use crate::{
@@ -4470,6 +4471,47 @@ mod tests {
         release_sync_lock(&first);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn replaced_lock_inode_cannot_create_a_second_current_version_owner() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let first = acquire_sync_lock(dir.path()).expect("first lock");
+        let lock_path = dir.path().join(".mindwtr.lock");
+        let displaced = dir.path().join(".mindwtr.lock.displaced");
+        fs::rename(&lock_path, &displaced).expect("displace locked inode");
+        fs::write(&lock_path, b"replacement").expect("create replacement inode");
+
+        assert!(revalidate_sync_lock(&first, dir.path())
+            .expect_err("first owner must detect replacement")
+            .contains("lock identity changed"));
+        assert_eq!(
+            acquire_sync_lock(dir.path()).expect_err(
+                "the retained sync-root authority must block the replacement inode owner"
+            ),
+            "Sync lock held by another process"
+        );
+
+        release_sync_lock(&first);
+        drop(first);
+        let next = acquire_sync_lock(dir.path()).expect("replacement owner after release");
+        release_sync_lock(&next);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_lock_file_is_never_an_authority() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let peer = dir.path().join("peer-lock");
+        fs::write(&peer, b"peer").expect("peer lock");
+        symlink(&peer, dir.path().join(".mindwtr.lock")).expect("lock symlink");
+
+        let error = acquire_sync_lock(dir.path()).expect_err("symlink must fail closed");
+        assert!(error.contains("Failed to open sync lock"));
+        assert_eq!(fs::read(peer).expect("peer remains"), b"peer");
+    }
+
     #[test]
     fn unsupported_flock_is_not_treated_as_contention_or_a_safe_lock() {
         // ENOSYS/EOPNOTSUPP from flock is an unavailable safety capability,
@@ -4551,13 +4593,22 @@ mod tests {
 
         let error = with_file_sync_lease(&state, &token, "main", |_| Ok(()))
             .expect_err("replaced root must invalidate the held lease");
-        assert!(error.contains("root directory changed"));
+        assert!(error.contains("root authority changed"), "unexpected error: {error}");
         assert_eq!(
             fs::read(replacement_marker).expect("replacement untouched"),
             b"replacement"
         );
 
-        release_file_sync_lease_token(&state, &token, "main").expect("release cycle lease");
+        let release_error = release_file_sync_lease_token(&state, &token, "main")
+            .expect_err("release must report the replaced root after dropping the authority");
+        assert!(
+            release_error.contains("root authority changed"),
+            "unexpected release error: {release_error}"
+        );
+        let replacement = acquire_file_sync_lease_for_dir(&state, &sync_root, "replacement")
+            .expect("replacement root must become lockable after the old authority is dropped");
+        release_file_sync_lease_token(&state, &replacement, "replacement")
+            .expect("release replacement lease");
     }
 
     #[test]
@@ -5116,7 +5167,7 @@ mod tests {
                     .map_err(|error| error.to_string())?;
                 Ok(())
             },
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .expect_err("a peer document generation must fail its fixed-generation CAS");
 
@@ -5239,7 +5290,7 @@ mod tests {
                 journal_started.set(true);
                 Ok(())
             },
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .expect_err("a foreign generation must fail the read-only preflight");
 
@@ -5955,7 +6006,7 @@ mod tests {
             dir.path(),
             "first pass",
             || Err("journal blocked enable".to_string()),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .expect_err("journal failure must abort enable");
         assert_eq!(error, "journal blocked enable");
@@ -5971,7 +6022,7 @@ mod tests {
             dir.path(),
             &material.key,
             || Err("journal blocked disable".to_string()),
-            require_managed_sync_document_generations,
+            |_, generation| require_managed_sync_document_generations(generation),
         )
         .expect_err("journal failure must abort disable");
         assert_eq!(error, "journal blocked disable");
@@ -5984,12 +6035,49 @@ mod tests {
             &material.key,
             "second pass",
             || Err("journal blocked rotation".to_string()),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .expect_err("journal failure must abort rotation");
         assert_eq!(error, "journal blocked rotation");
         assert_eq!(fs::read(dir.path().join("data.json.enc")).expect("rotated after"), encrypted);
         assert_eq!(fs::read(&attachment_path).expect("attachment after"), encrypted_attachment);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lock_replacement_during_enable_blocks_final_key_commit_and_second_owner() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        seed_transition_folder(dir.path());
+        let journal_pending = Cell::new(false);
+        let persisted = Cell::new(false);
+
+        let error = enable_sync_encryption_in_dir_with(
+            dir.path(),
+            "first pass",
+            || {
+                journal_pending.set(true);
+                let lock_path = dir.path().join(".mindwtr.lock");
+                fs::rename(&lock_path, dir.path().join(".mindwtr.lock.displaced"))
+                    .map_err(|error| error.to_string())?;
+                fs::write(&lock_path, b"replacement").map_err(|error| error.to_string())?;
+                assert_eq!(
+                    acquire_sync_lock(dir.path()).expect_err(
+                        "the retained root authority must still exclude a second owner"
+                    ),
+                    "Sync lock held by another process"
+                );
+                Ok(())
+            },
+            |_, _, _| {
+                persisted.set(true);
+                Ok(())
+            },
+        )
+        .expect_err("replaced compatibility lock must abort finalization");
+
+        assert!(error.contains("lock identity changed"), "unexpected error: {error}");
+        assert!(journal_pending.get(), "restart recovery must remain explicit");
+        assert!(!persisted.get(), "enabled key/state must not commit");
     }
 
     #[test]
@@ -6013,7 +6101,7 @@ mod tests {
                 journal_pending.set(true);
                 Ok(())
             },
-            |next, generation| {
+            |_, next, generation| {
                 finalize_enabled_file_generation_with(
                     generation,
                     next,
@@ -6057,7 +6145,7 @@ mod tests {
                 journal_pending.set(true);
                 Ok(())
             },
-            |next, generation| {
+            |_, next, generation| {
                 let peer = encrypt_sync_artifact(
                     br#"{"tasks":[{"id":"peer"}]}"#,
                     next,
@@ -6106,7 +6194,7 @@ mod tests {
                 journal_started.set(true);
                 Ok(())
             },
-            |_, _| {
+            |_, _, _| {
                 persisted.set(true);
                 Ok(())
             },
@@ -6131,7 +6219,7 @@ mod tests {
             dir.path(),
             "first pass",
             || Ok(()),
-            |material, generation| {
+            |_, material, generation| {
                 finalize_enabled_file_generation_with(
                     generation,
                     material,
@@ -6164,7 +6252,7 @@ mod tests {
             &first.key,
             "second pass",
             || Ok(()),
-            |material, generation| {
+            |_, material, generation| {
                 finalize_enabled_file_generation_with(
                     generation,
                     material,
@@ -6195,7 +6283,7 @@ mod tests {
             dir.path(),
             &material.key,
             || Ok(()),
-            |generation| {
+            |_, generation| {
                 fs::remove_file(&attachment).map_err(|error| error.to_string())?;
                 require_managed_sync_document_generations(generation)?;
                 persisted.set(true);
@@ -6220,7 +6308,7 @@ mod tests {
             dir.path(),
             "first pass",
             || Ok(()),
-            |material, generation| {
+            |_, material, generation| {
                 finalize_enabled_file_generation_with(
                     generation,
                     material,
@@ -6262,7 +6350,7 @@ mod tests {
             &first.key,
             "second pass",
             || Ok(()),
-            |material, generation| {
+            |_, material, generation| {
                 finalize_enabled_file_generation_with(
                     generation,
                     material,
@@ -6296,7 +6384,7 @@ mod tests {
             dir.path(),
             &material.key,
             || Ok(()),
-            |generation| {
+            |_, generation| {
                 fs::remove_file(&recovery).map_err(|error| error.to_string())?;
                 require_managed_sync_document_generations(generation)?;
                 persisted.set(true);
@@ -6327,7 +6415,7 @@ mod tests {
                 journal_pending.set(true);
                 Ok(())
             },
-            |generation| {
+            |_, generation| {
                 fs::write(&backup_path, peer).map_err(|error| error.to_string())?;
                 require_managed_sync_document_generations(generation)?;
                 persisted.set(true);
@@ -6355,7 +6443,7 @@ mod tests {
             dir.path(),
             "first pass",
             || Ok(()),
-            |next, generation| {
+            |_, next, generation| {
                 let peer = encrypt_sync_artifact(br#"{"tasks":[{"id":"peer"}]}"#, next)
                     .map_err(|error| terminal_error(error))?;
                 finalize_enabled_file_generation_with(
@@ -6395,7 +6483,7 @@ mod tests {
                 fs::write(&peer_path, peer).map_err(|error| error.to_string())?;
                 Ok(())
             },
-            |next, generation| {
+            |_, next, generation| {
                 finalize_enabled_file_generation_with(
                     generation,
                     next,
@@ -6442,7 +6530,7 @@ mod tests {
                 journal_started.set(true);
                 Ok(())
             },
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .expect_err("an unknown generation must fail the read-only preflight");
 
@@ -6479,7 +6567,7 @@ mod tests {
                 journal_started.set(true);
                 Ok(())
             },
-            require_managed_sync_document_generations,
+            |_, generation| require_managed_sync_document_generations(generation),
         )
         .expect_err("a foreign generation must fail the read-only preflight");
 
@@ -10449,7 +10537,7 @@ mod tests {
                 barrier.wait();
                 Ok(())
             },
-            |_| {
+            |_, _| {
                 persisted.set(true);
                 Ok(())
             },
@@ -10485,7 +10573,7 @@ mod tests {
             dir.path(),
             "correct horse",
             || fs::write(&changed_path, &peer).map_err(|error| error.to_string()),
-            |_| {
+            |_, _| {
                 persisted.set(true);
                 Ok(())
             },
@@ -10954,9 +11042,52 @@ fn is_icloud_path(path: &Path) -> bool {
 
 const SYNC_FILE_WRITE_CONFLICT: &str = "SYNC_FILE_WRITE_CONFLICT";
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SyncLockIdentity {
+    device_id: u64,
+    file_id: u64,
+}
+
 #[derive(Debug)]
 struct SyncFileLock {
+    sync_root: File,
+    sync_root_identity: SyncLockIdentity,
     file: File,
+    file_identity: SyncLockIdentity,
+    #[cfg(target_os = "windows")]
+    _root_semaphore: WindowsSyncRootSemaphore,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug)]
+struct WindowsSyncRootSemaphore {
+    handle: windows_sys::Win32::Foundation::HANDLE,
+}
+
+#[cfg(target_os = "windows")]
+// The handle is an owned kernel object and is only released while the enclosing
+// File Sync lease is exclusively borrowed or dropped.
+unsafe impl Send for WindowsSyncRootSemaphore {}
+
+#[cfg(target_os = "windows")]
+impl Drop for WindowsSyncRootSemaphore {
+    fn drop(&mut self) {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::ReleaseSemaphore;
+
+        // A semaphore is deliberately used instead of a named mutex: Windows
+        // mutexes are recursive and thread-affine, so two renderer commands on
+        // one runtime thread could both enter and a different drop thread could
+        // not release ownership. The count-one semaphore is process-crossing,
+        // non-recursive, and may be released from the drop thread.
+        if unsafe { ReleaseSemaphore(self.handle, 1, std::ptr::null_mut()) } == 0 {
+            log::warn!(
+                "Failed to release stable File Sync root authority: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+        unsafe { CloseHandle(self.handle) };
+    }
 }
 
 #[derive(Debug)]
@@ -11000,6 +11131,125 @@ fn sync_lock_error_message(error: &std::io::Error) -> String {
     }
 }
 
+#[cfg(unix)]
+fn sync_lock_identity(file: &File, require_directory: bool) -> Result<SyncLockIdentity, String> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("Failed to identify File Sync lease authority: {error}"))?;
+    let kind_ok = if require_directory {
+        metadata.file_type().is_dir()
+    } else {
+        metadata.file_type().is_file()
+    };
+    if !kind_ok || metadata.file_type().is_symlink() {
+        return Err("File Sync lease authority is not an exact regular node".to_string());
+    }
+    Ok(SyncLockIdentity {
+        device_id: metadata.dev(),
+        file_id: metadata.ino(),
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn sync_lock_identity(file: &File, require_directory: bool) -> Result<SyncLockIdentity, String> {
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY,
+        FILE_ATTRIBUTE_REPARSE_POINT,
+    };
+
+    let mut information = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: `file` owns a live handle and the output structure is writable.
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) } == 0 {
+        return Err(format!(
+            "Failed to identify File Sync lease authority: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let is_directory = information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0;
+    if is_directory != require_directory
+        || information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    {
+        return Err("File Sync lease authority is a reparse point or unexpected node".to_string());
+    }
+    Ok(SyncLockIdentity {
+        device_id: u64::from(information.dwVolumeSerialNumber),
+        file_id: (u64::from(information.nFileIndexHigh) << 32)
+            | u64::from(information.nFileIndexLow),
+    })
+}
+
+#[cfg(not(any(unix, target_os = "windows")))]
+fn sync_lock_identity(_file: &File, _require_directory: bool) -> Result<SyncLockIdentity, String> {
+    Err("Stable File Sync lease authority is unavailable on this platform".to_string())
+}
+
+fn open_sync_root_authority(sync_dir: &Path) -> Result<File, String> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        };
+        options.custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let file = options
+        .open(sync_dir)
+        .map_err(|error| format!("Failed to open stable File Sync root authority: {error}"))?;
+    sync_lock_identity(&file, true)?;
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn acquire_sync_root_authority(root: &File, _identity: &SyncLockIdentity) -> Result<(), String> {
+    root.try_lock_exclusive().map_err(|error| sync_lock_error_message(&error))
+}
+
+#[cfg(target_os = "windows")]
+fn acquire_sync_root_authority(
+    _root: &File,
+    identity: &SyncLockIdentity,
+) -> Result<WindowsSyncRootSemaphore, String> {
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::{CreateSemaphoreW, WaitForSingleObject};
+
+    let name = format!(
+        "Local\\Mindwtr.FileSync.{:016x}.{:016x}",
+        identity.device_id, identity.file_id
+    );
+    let wide = name.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
+    // SAFETY: the name is NUL-terminated and remains alive through the call.
+    let handle = unsafe { CreateSemaphoreW(std::ptr::null(), 1, 1, wide.as_ptr()) };
+    if handle.is_null() {
+        return Err(format!(
+            "Failed to create stable File Sync root authority: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    // SAFETY: `handle` is a live semaphore handle owned by this function.
+    match unsafe { WaitForSingleObject(handle, 0) } {
+        WAIT_OBJECT_0 => Ok(WindowsSyncRootSemaphore { handle }),
+        WAIT_TIMEOUT => {
+            unsafe { CloseHandle(handle) };
+            Err("Sync lock held by another process".to_string())
+        }
+        _ => {
+            let error = std::io::Error::last_os_error();
+            unsafe { CloseHandle(handle) };
+            Err(format!("Failed to acquire stable File Sync root authority: {error}"))
+        }
+    }
+}
+
 /// Taking the lock needs no write access — `flock` accepts a read-only
 /// descriptor and `LockFileEx` accepts a `GENERIC_READ` handle — so ask for it
 /// only when the file has to be created. Write-opening an *existing* file is
@@ -11012,10 +11262,33 @@ fn open_sync_lock_file(lock_path: &Path, writable: bool) -> std::io::Result<File
     if writable {
         options.write(true).create(true);
     }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
     options.open(lock_path)
 }
 
 fn acquire_sync_lock(sync_dir: &Path) -> Result<SyncFileLock, String> {
+    // Current versions use the retained root inode/kernel identity as the
+    // unreplaceable authority. The named lock file remains locked second so an
+    // older cooperating client still serializes with us. A malicious same-UID
+    // process that can replace an already-open root is outside this boundary;
+    // every pathname identity is nevertheless revalidated before finalization.
+    let sync_root = open_sync_root_authority(sync_dir)?;
+    let sync_root_identity = sync_lock_identity(&sync_root, true)?;
+    #[cfg(unix)]
+    acquire_sync_root_authority(&sync_root, &sync_root_identity)?;
+    #[cfg(target_os = "windows")]
+    let root_semaphore = acquire_sync_root_authority(&sync_root, &sync_root_identity)?;
+
     let lock_path = sync_dir.join(".mindwtr.lock");
     let file = open_sync_lock_file(&lock_path, false)
         // Any refusal of the read-only open — a lock file that does not exist
@@ -11024,8 +11297,20 @@ fn acquire_sync_lock(sync_dir: &Path) -> Result<SyncFileLock, String> {
         // only grows.
         .or_else(|_| open_sync_lock_file(&lock_path, true))
         .map_err(|error| format!("Failed to open sync lock: {error}"))?;
+    let file_identity = sync_lock_identity(&file, false)?;
     let read_only_error = match file.try_lock_exclusive() {
-        Ok(()) => return Ok(SyncFileLock { file }),
+        Ok(()) => {
+            let lock = SyncFileLock {
+                sync_root,
+                sync_root_identity,
+                file,
+                file_identity,
+                #[cfg(target_os = "windows")]
+                _root_semaphore: root_semaphore,
+            };
+            revalidate_sync_lock(&lock, sync_dir)?;
+            return Ok(lock);
+        }
         Err(error) if is_sync_lock_contention(&error) => {
             return Err(sync_lock_error_message(&error))
         }
@@ -11040,15 +11325,48 @@ fn acquire_sync_lock(sync_dir: &Path) -> Result<SyncFileLock, String> {
     );
     let file = open_sync_lock_file(&lock_path, true)
         .map_err(|error| format!("Failed to open sync lock: {error}"))?;
+    let file_identity = sync_lock_identity(&file, false)?;
     match file.try_lock_exclusive() {
-        Ok(()) => Ok(SyncFileLock { file }),
+        Ok(()) => {
+            let lock = SyncFileLock {
+                sync_root,
+                sync_root_identity,
+                file,
+                file_identity,
+                #[cfg(target_os = "windows")]
+                _root_semaphore: root_semaphore,
+            };
+            revalidate_sync_lock(&lock, sync_dir)?;
+            Ok(lock)
+        }
         Err(error) => Err(sync_lock_error_message(&error)),
     }
+}
+
+fn revalidate_sync_lock(sync_lock: &SyncFileLock, sync_dir: &Path) -> Result<(), String> {
+    let root = open_sync_root_authority(sync_dir)?;
+    if sync_lock_identity(&root, true)? != sync_lock.sync_root_identity
+        || sync_lock_identity(&sync_lock.sync_root, true)? != sync_lock.sync_root_identity
+    {
+        return Err("File Sync root authority changed while the lease was held".to_string());
+    }
+    let named = open_sync_lock_file(&sync_dir.join(".mindwtr.lock"), false)
+        .map_err(|error| format!("Failed to revalidate sync lock: {error}"))?;
+    if sync_lock_identity(&named, false)? != sync_lock.file_identity
+        || sync_lock_identity(&sync_lock.file, false)? != sync_lock.file_identity
+    {
+        return Err("File Sync lock identity changed while the lease was held".to_string());
+    }
+    Ok(())
 }
 
 fn release_sync_lock(sync_lock: &SyncFileLock) {
     if let Err(error) = FileExt::unlock(&sync_lock.file) {
         log::warn!("Failed to release sync file lock: {error}");
+    }
+    #[cfg(unix)]
+    if let Err(error) = FileExt::unlock(&sync_lock.sync_root) {
+        log::warn!("Failed to release stable File Sync root authority: {error}");
     }
 }
 
@@ -11115,8 +11433,15 @@ where
     if lease.owner_window_label != owner_window_label {
         return Err("File Sync lease belongs to a different renderer window".to_string());
     }
+    revalidate_sync_lock(&lease._sync_lock, &lease.sync_dir)?;
     lease.publication_root.revalidate_root()?;
-    operation(lease)
+    let result = operation(lease);
+    let final_lock_validation = revalidate_sync_lock(&lease._sync_lock, &lease.sync_dir);
+    match (result, final_lock_validation) {
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(value), Ok(())) => Ok(value),
+    }
 }
 
 fn release_file_sync_lease_token(
@@ -11138,8 +11463,9 @@ fn release_file_sync_lease_token(
         .remove(token)
         .ok_or_else(|| "Unknown or already released File Sync lease".to_string())?;
     drop(leases);
+    let validation = revalidate_sync_lock(&lease._sync_lock, &lease.sync_dir);
     release_sync_lock(&lease._sync_lock);
-    Ok(())
+    validation
 }
 
 /// Release only leases whose renderer window has been destroyed. A live
@@ -11164,10 +11490,17 @@ pub(crate) fn release_file_sync_leases_for_window(
         .collect::<Vec<_>>();
     drop(leases);
     let released = owned_leases.len();
+    let mut first_error = None;
     for lease in owned_leases {
+        if let Err(error) = revalidate_sync_lock(&lease._sync_lock, &lease.sync_dir) {
+            first_error.get_or_insert(error);
+        }
         release_sync_lock(&lease._sync_lock);
     }
-    Ok(released)
+    match first_error {
+        Some(error) => Err(error),
+        None => Ok(released),
+    }
 }
 
 #[tauri::command(async)]
@@ -13591,7 +13924,7 @@ fn enable_sync_encryption_in_dir(
         sync_dir,
         passphrase,
         || Ok(()),
-        |material, generation| {
+        |_lock, material, generation| {
             finalize_enabled_file_generation_with(
                 generation,
                 material,
@@ -13611,6 +13944,7 @@ fn enable_sync_encryption_in_dir_with<BeforeMutation, Finalize>(
 where
     BeforeMutation: FnOnce() -> Result<(), String>,
     Finalize: FnOnce(
+        &SyncFileLock,
         &SyncKeyMaterial,
         &ManagedSyncDocumentGenerations,
     ) -> Result<(), String>,
@@ -13725,7 +14059,8 @@ where
             set_expected_managed_sync_document_generation(&mut generation, path, None)?;
         }
         require_no_managed_plaintext_document_generations(&generation)?;
-        finalize(&material, &generation)?;
+        revalidate_sync_lock(&lock, sync_dir)?;
+        finalize(&lock, &material, &generation)?;
         Ok(material)
     })();
     release_sync_lock(&lock);
@@ -13738,7 +14073,7 @@ fn disable_sync_encryption_in_dir(sync_dir: &Path, key: &[u8; KEY_LEN]) -> Resul
         sync_dir,
         key,
         || Ok(()),
-        require_managed_sync_document_generations,
+        |_lock, generation| require_managed_sync_document_generations(generation),
     )
 }
 
@@ -13750,7 +14085,7 @@ fn disable_sync_encryption_in_dir_with<BeforeMutation, Finalize>(
 ) -> Result<(), String>
 where
     BeforeMutation: FnOnce() -> Result<(), String>,
-    Finalize: FnOnce(&ManagedSyncDocumentGenerations) -> Result<(), String>,
+    Finalize: FnOnce(&SyncFileLock, &ManagedSyncDocumentGenerations) -> Result<(), String>,
 {
     let lock = acquire_sync_lock(sync_dir)?;
     let result = (|| -> Result<(), String> {
@@ -13834,7 +14169,8 @@ where
             )?;
             set_expected_managed_sync_document_generation(&mut generation, path, None)?;
         }
-        finalize(&generation)?;
+        revalidate_sync_lock(&lock, sync_dir)?;
+        finalize(&lock, &generation)?;
         Ok(())
     })();
     release_sync_lock(&lock);
@@ -13852,7 +14188,7 @@ fn change_sync_encryption_passphrase_in_dir(
         old_key,
         next_passphrase,
         || Ok(()),
-        |material, generation| {
+        |_lock, material, generation| {
             finalize_enabled_file_generation_with(
                 generation,
                 material,
@@ -13873,6 +14209,7 @@ fn change_sync_encryption_passphrase_in_dir_with<BeforeMutation, Finalize>(
 where
     BeforeMutation: FnOnce() -> Result<(), String>,
     Finalize: FnOnce(
+        &SyncFileLock,
         &SyncKeyMaterial,
         &ManagedSyncDocumentGenerations,
     ) -> Result<(), String>,
@@ -13965,7 +14302,8 @@ where
             )?;
         }
         require_no_managed_plaintext_document_generations(&generation)?;
-        finalize(&next, &generation)?;
+        revalidate_sync_lock(&lock, sync_dir)?;
+        finalize(&lock, &next, &generation)?;
         Ok(())
     })();
     release_sync_lock(&lock);
@@ -14003,12 +14341,16 @@ pub(crate) fn enable_sync_encryption(
         &sync_dir,
         &passphrase,
         || begin_sync_encryption_transition(&app, TRANSITION_ENABLE),
-        |material, generation| {
+        |lock, material, generation| {
             finalize_enabled_file_generation_with(
                 generation,
                 material,
-                || Ok(()),
-                |verified| persist_enabled_material(&app, verified),
+                || revalidate_sync_lock(lock, &sync_dir),
+                |verified| {
+                    persist_enabled_material_with_fence(&app, verified, || {
+                        revalidate_sync_lock(lock, &sync_dir)
+                    })
+                },
             )
         },
     )?;
@@ -14026,9 +14368,12 @@ pub(crate) fn disable_sync_encryption(
         &sync_dir,
         &key,
         || begin_sync_encryption_transition(&app, TRANSITION_DISABLE),
-        |generation| {
+        |lock, generation| {
+            revalidate_sync_lock(lock, &sync_dir)?;
             require_managed_sync_document_generations(generation)?;
-            clear_encryption_state(&app)
+            clear_encryption_state_with_fence(&app, || {
+                revalidate_sync_lock(lock, &sync_dir)
+            })
         },
     )
 }
@@ -14046,12 +14391,16 @@ pub(crate) fn change_sync_encryption_passphrase(
         &old_key,
         &next_passphrase,
         || begin_sync_encryption_transition(&app, TRANSITION_CHANGE_PASSPHRASE),
-        |material, generation| {
+        |lock, material, generation| {
             finalize_enabled_file_generation_with(
                 generation,
                 material,
-                || Ok(()),
-                |verified| persist_enabled_material(&app, verified),
+                || revalidate_sync_lock(lock, &sync_dir),
+                |verified| {
+                    persist_enabled_material_with_fence(&app, verified, || {
+                        revalidate_sync_lock(lock, &sync_dir)
+                    })
+                },
             )
         },
     )?;
@@ -14110,7 +14459,7 @@ fn provide_sync_encryption_passphrase_in_dir_with<BeforeFinalize, Persist>(
 ) -> Result<String, String>
 where
     BeforeFinalize: FnOnce() -> Result<(), String>,
-    Persist: FnOnce(&SyncKeyMaterial) -> Result<(), String>,
+    Persist: FnOnce(&SyncFileLock, &SyncKeyMaterial) -> Result<(), String>,
 {
     // Passphrase verification is a read-modify-persist operation over the remote folder's
     // exact generation. Hold the same lock as ordinary File Sync and transitions from the
@@ -14133,8 +14482,11 @@ where
                 finalize_enabled_file_generation_with(
                     &generation,
                     &material,
-                    before_finalize,
-                    persist,
+                    || {
+                        before_finalize()?;
+                        revalidate_sync_lock(&lock, sync_dir)
+                    },
+                    |verified| persist(&lock, verified),
                 )?;
                 Ok("ok".to_string())
             }
@@ -14158,7 +14510,11 @@ pub(crate) fn provide_sync_encryption_passphrase(
         &sync_dir,
         &passphrase,
         || Ok(()),
-        |verified| persist_enabled_material(&app, verified),
+        |lock, verified| {
+            persist_enabled_material_with_fence(&app, verified, || {
+                revalidate_sync_lock(lock, &sync_dir)
+            })
+        },
     )
 }
 

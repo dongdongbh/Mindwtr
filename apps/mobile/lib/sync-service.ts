@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { AppData, acquireSyncRemoteMutationFence, assertWebdavStrongEtagSupport, createDropboxSyncRemoteMutationFencePort, createSyncOrchestrator, createWebdavSyncRemoteMutationFencePort, runSerializedSyncDocumentOperation, runSharedSyncCycle, useTaskStore, webdavGetSyncDocument, webdavHeadFile, webdavPutSyncDocument, syncEncryptedArtifactName, markRemoteEncryptionDiscovered, markRemotePlaintextDiscovered, SyncEncryptionRemoteConflictError, SyncEncryptionRemotePlaintextError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, SyncEncryptionTransitionIncompleteError, SyncRemoteWriteConflict, type SyncKeyMaterial, cloudGetJson, cloudHeadJson, cloudPutJson, flushPendingSave, performSyncCycle, withRetry, isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeStrongWebdavEtag, normalizeWebdavUrl, normalizeCloudUrl, createSyncBackendIO, buildFastSyncScope, hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, getInMemoryAppDataSnapshot, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, isDropboxUnauthorizedError, parseFastSyncState, serializeFastSyncState, summarizeTaskLifecycleCounts, decodeUriSafe, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES, SYNC_FILE_NAME, SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type Attachment, type CloudProvider, type FastSyncState, type SyncBackendContext, type SyncBackendIO, type SyncRunDiagnosticEvent, type SyncRunNotifier, type SyncRunPlatformHooks, type SyncRunResult, type SyncRunStorage, type SyncTransport } from '@mindwtr/core';
+import { AppData, acquireSyncRemoteMutationFence, assertWebdavStrongEtagSupport, createDropboxSyncRemoteMutationFencePort, createSyncOrchestrator, createWebdavSyncRemoteMutationFencePort, runSerializedSyncDocumentOperation, runSharedSyncCycle, useTaskStore, webdavGetSyncDocument, webdavHeadFile, webdavPutSyncDocument, syncEncryptedArtifactName, markRemoteEncryptionDiscovered, markRemotePlaintextDiscovered, SyncEncryptionRemoteConflictError, SyncEncryptionRemotePlaintextError, SyncEncryptionRemoteVersionUnavailableError, SyncEncryptionTerminalError, SyncEncryptionTransitionIncompleteError, SyncFileLockUnavailableError, SyncRemoteWriteConflict, type SyncKeyMaterial, cloudGetJson, cloudHeadJson, cloudPutJson, flushPendingSave, performSyncCycle, withRetry, isRetryableError, isRetryableWebdavReadError, isWebdavInvalidJsonError, normalizeStrongWebdavEtag, normalizeWebdavUrl, normalizeCloudUrl, createSyncBackendIO, buildFastSyncScope, hasPendingSyncSideEffects, injectExternalCalendars as injectExternalCalendarsForSync, persistExternalCalendars as persistExternalCalendarsForSync, getInMemoryAppDataSnapshot, createAbortableFetch, normalizeCloudProvider as normalizeCoreCloudProvider, isDropboxUnauthorizedError, parseFastSyncState, serializeFastSyncState, summarizeTaskLifecycleCounts, decodeUriSafe, buildSyncPayloadTraceExtra, isSyncPayloadTraceEnabled, SYNC_TRACE_EVENT_MESSAGES, SYNC_FILE_NAME, SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS, CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_SELF_HOSTED, type Attachment, type CloudProvider, type FastSyncState, type SyncBackendContext, type SyncBackendIO, type SyncRunDiagnosticEvent, type SyncRunNotifier, type SyncRunPlatformHooks, type SyncRunResult, type SyncRunStorage, type SyncTransport } from '@mindwtr/core';
 import { mobileStorage } from './storage-adapter';
 import { logInfo, logSyncError, logWarn, sanitizeLogMessage } from './app-log';
 import { readSyncFileVersioned, resolveSyncFileUri, writeSyncFile } from './storage-file';
@@ -79,7 +79,11 @@ const isSyncEncryptionError = (error: unknown): boolean =>
   || error instanceof SyncEncryptionTransitionIncompleteError;
 import { getMobileCloudRequestOptions, getMobileWebDavRequestOptions } from './webdav-request-options';
 import { ensureWebdavCapabilityProof } from './webdav-capability-proof';
-import { acquireMobileFileSyncLease, releaseMobileFileSyncLease } from './sync-file-lock';
+import {
+  acquireMobileFileSyncLease,
+  revalidateMobileFileSyncLease,
+  releaseMobileFileSyncLease,
+} from './sync-file-lock';
 
 const DEFAULT_SYNC_TIMEOUT_MS = 30_000;
 const WEBDAV_RETRY_OPTIONS = { maxAttempts: 5, baseDelayMs: 2000, maxDelayMs: 30_000 };
@@ -565,6 +569,12 @@ class MobileSyncRun {
    *  every seam below then behaves byte-for-byte as it did before the feature. */
   private encryptionMaterial: SyncKeyMaterial | null = null;
 
+  private async assertFileSyncLeaseHeld(): Promise<void> {
+    if (this.backend !== 'file') return;
+    if (!this.fileSyncLease) throw new SyncFileLockUnavailableError();
+    await revalidateMobileFileSyncLease(this.fileSyncLease);
+  }
+
   constructor(
     backend: SyncBackend,
     request: MobileSyncRequest | undefined,
@@ -921,8 +931,16 @@ class MobileSyncRun {
   private createStorage(): SyncRunStorage {
     return {
       readPersistedLocal: async () => mergeLocalSyncStatus(await mobileStorage.getData()),
-      persistLocal: (data) => mobileStorage.saveData(data),
-      persistSyncStatus: (updates) => applyLocalSyncStatus(updates),
+      persistLocal: async (data) => {
+        await this.assertFileSyncLeaseHeld();
+        await mobileStorage.saveData(data);
+        await this.assertFileSyncLeaseHeld();
+      },
+      persistSyncStatus: async (updates) => {
+        await this.assertFileSyncLeaseHeld();
+        await applyLocalSyncStatus(updates);
+        await this.assertFileSyncLeaseHeld();
+      },
       readFastSyncState: (scope) => readFastSyncState(scope),
       writeFastSyncState: (state) => writeFastSyncState(state),
       injectExternalCalendars: (data) => injectExternalCalendars(data),
@@ -1494,13 +1512,16 @@ class MobileSyncRun {
       fileRead: async () => {
         const fileSyncPath = this.fileSyncPath;
         if (!fileSyncPath) throw new Error('No sync folder configured');
+        await this.assertFileSyncLeaseHeld();
         // The `material` key is added only when encryption is on, so the off-state call
         // is argument-for-argument what it was before this feature (invariant #1).
         try {
-          return await readSyncFileVersioned(fileSyncPath, {
+          const result = await readSyncFileVersioned(fileSyncPath, {
             bookmark: this.fileSyncBookmark,
             ...(this.encryptionMaterial ? { material: this.encryptionMaterial } : {}),
           });
+          await this.assertFileSyncLeaseHeld();
+          return result;
         } catch (error) {
           if (error instanceof SyncEncryptionNoKeyError) this.markCandidateEncryptedRemoteProven();
           throw error;
@@ -1512,12 +1533,14 @@ class MobileSyncRun {
         if (!expectedFingerprint) {
           throw new Error('File Sync document version is unavailable; refusing an unconditional write');
         }
+        await this.assertFileSyncLeaseHeld();
         try {
           await writeSyncFile(fileSyncPath, sanitized, {
             bookmark: this.fileSyncBookmark,
             expectedFingerprint,
             ...(this.encryptionMaterial ? { material: this.encryptionMaterial } : {}),
           });
+          await this.assertFileSyncLeaseHeld();
         } catch (error) {
           if (error instanceof SyncEncryptionRemoteConflictError) {
             throw new SyncRemoteWriteConflict();
@@ -1614,16 +1637,21 @@ class MobileSyncRun {
         assertRemoteMutationFenceHeld: helpers.assertRemoteMutationFenceHeld,
         ...(this.encryptionMaterial ? { material: this.encryptionMaterial } : {}),
       }),
-      syncFileAttachments: async (data, helpers) => syncFileAttachments(
-        data,
-        this.fileSyncPath!,
-        this.requestAbortController.signal,
-        {
-          activationProbe: helpers.activationProbe,
-          phase: helpers.phase,
-          ...(this.encryptionMaterial ? { material: this.encryptionMaterial } : {}),
-        }
-      ),
+      syncFileAttachments: async (data, helpers) => {
+        await this.assertFileSyncLeaseHeld();
+        const result = await syncFileAttachments(
+          data,
+          this.fileSyncPath!,
+          this.requestAbortController.signal,
+          {
+            activationProbe: helpers.activationProbe,
+            phase: helpers.phase,
+            ...(this.encryptionMaterial ? { material: this.encryptionMaterial } : {}),
+          },
+        );
+        await this.assertFileSyncLeaseHeld();
+        return result;
+      },
     };
   }
 

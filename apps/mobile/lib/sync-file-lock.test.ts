@@ -7,8 +7,10 @@ vi.mock('expo-modules-core', () => ({
 
 import {
   acquireMobileFileSyncLease,
+  revalidateMobileFileSyncLease,
   releaseMobileFileSyncLease,
   setSyncFileLockNativeModuleForTests,
+  SyncFileLockIdentityLostError,
 } from './sync-file-lock';
 
 afterEach(() => {
@@ -25,6 +27,7 @@ describe('sync-file-lock', () => {
   it('retains and releases the opaque native token for SAF and path providers', async () => {
     const nativeModule = {
       acquireAsync: vi.fn(async () => 'native-token'),
+      revalidateAsync: vi.fn(async () => undefined),
       releaseAsync: vi.fn(async () => undefined),
     };
     setSyncFileLockNativeModuleForTests(nativeModule, 'android');
@@ -32,13 +35,30 @@ describe('sync-file-lock', () => {
 
     expect(lease).toEqual({ token: 'native-token', native: true });
     expect(nativeModule.acquireAsync).toHaveBeenCalledWith('content://provider/tree/root/document/root/data.json');
+    await revalidateMobileFileSyncLease(lease);
+    expect(nativeModule.revalidateAsync).toHaveBeenCalledWith('native-token');
     await releaseMobileFileSyncLease(lease);
     expect(nativeModule.releaseAsync).toHaveBeenCalledWith('native-token');
+  });
+
+  it('distinguishes release-time lock identity loss from ordinary cleanup failure', async () => {
+    setSyncFileLockNativeModuleForTests({
+      acquireAsync: vi.fn(async () => 'native-token'),
+      revalidateAsync: vi.fn(async () => undefined),
+      releaseAsync: vi.fn(async () => {
+        throw new Error('SYNC_FILE_LOCK_UNAVAILABLE: .mindwtr.lock identity changed');
+      }),
+    }, 'android');
+    const lease = await acquireMobileFileSyncLease('file:///tmp/data.json');
+
+    await expect(releaseMobileFileSyncLease(lease))
+      .rejects.toBeInstanceOf(SyncFileLockIdentityLostError);
   });
 
   it('rejects missing native tokens instead of silently running unlocked', async () => {
     setSyncFileLockNativeModuleForTests({
       acquireAsync: vi.fn(async () => ''),
+      revalidateAsync: vi.fn(async () => undefined),
       releaseAsync: vi.fn(async () => undefined),
     }, 'android');
     await expect(acquireMobileFileSyncLease('file:///tmp/data.json'))
@@ -54,6 +74,7 @@ describe('sync-file-lock', () => {
   ])('normalizes the native %s sentinel before it reaches orchestration', async (message, ExpectedError) => {
     setSyncFileLockNativeModuleForTests({
       acquireAsync: vi.fn(async () => { throw new Error(message); }),
+      revalidateAsync: vi.fn(async () => undefined),
       releaseAsync: vi.fn(async () => undefined),
     }, 'android');
 
@@ -61,8 +82,14 @@ describe('sync-file-lock', () => {
       .rejects.toBeInstanceOf(ExpectedError);
   });
 
-  it('keeps the non-Android process lease exclusive and rejects stale releases', async () => {
+  it('fails closed when iOS native stable locking is unavailable', async () => {
     setSyncFileLockNativeModuleForTests(null, 'ios');
+    await expect(acquireMobileFileSyncLease('file:///tmp/data.json'))
+      .rejects.toBeInstanceOf(SyncFileLockUnavailableError);
+  });
+
+  it('keeps the non-native process lease exclusive and rejects stale releases', async () => {
+    setSyncFileLockNativeModuleForTests(null, 'web');
     const lease = await acquireMobileFileSyncLease('file:///tmp/data.json');
     await expect(acquireMobileFileSyncLease('file:///tmp/data.json'))
       .rejects.toBeInstanceOf(SyncFileLockBusyError);

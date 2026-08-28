@@ -537,6 +537,88 @@ pub(crate) fn persist_enabled_material(
     )
 }
 
+#[derive(Clone)]
+enum KeyringMaterialSnapshot {
+    Accessible(Option<String>),
+    Unavailable,
+}
+
+#[derive(Clone)]
+struct SyncEncryptionMaterialSnapshot {
+    state: Option<SyncEncryptionLocalState>,
+    keyring: KeyringMaterialSnapshot,
+}
+
+fn capture_sync_encryption_material_snapshot(
+    app: &tauri::AppHandle,
+) -> Result<SyncEncryptionMaterialSnapshot, String> {
+    let state = read_local_state(app)?;
+    let keyring = match crate::config::get_keyring_secret(app, KEYRING_SYNC_ENCRYPTION_KEY) {
+        Ok(value) => KeyringMaterialSnapshot::Accessible(value),
+        Err(_) => KeyringMaterialSnapshot::Unavailable,
+    };
+    Ok(SyncEncryptionMaterialSnapshot { state, keyring })
+}
+
+fn restore_sync_encryption_material_snapshot(
+    app: &tauri::AppHandle,
+    snapshot: &SyncEncryptionMaterialSnapshot,
+) -> Result<(), String> {
+    // The sidecar/journal is the durable recovery authority. Restore it before
+    // the independent keyring domain so a crash always leaves the retry marker.
+    write_local_state(app, snapshot.state.as_ref())?;
+    if let KeyringMaterialSnapshot::Accessible(value) = &snapshot.keyring {
+        crate::config::set_keyring_secret(app, KEYRING_SYNC_ENCRYPTION_KEY, value.clone())
+            .map_err(|error| format!("Failed to restore sync encryption key after lock loss: {error}"))?;
+    }
+    Ok(())
+}
+
+fn commit_encryption_material_with_fence<Validate, Commit, Rollback>(
+    mut validate: Validate,
+    commit: Commit,
+    rollback: Rollback,
+) -> Result<(), String>
+where
+    Validate: FnMut() -> Result<(), String>,
+    Commit: FnOnce() -> Result<(), String>,
+    Rollback: FnOnce() -> Result<(), String>,
+{
+    validate()?;
+    let commit_result = commit();
+    let final_validation = if commit_result.is_ok() {
+        validate()
+    } else {
+        Ok(())
+    };
+    match (commit_result, final_validation) {
+        (Ok(()), Ok(())) => Ok(()),
+        (commit_result, final_validation) => {
+            let primary = commit_result.err().or_else(|| final_validation.err())
+                .expect("one material commit result must have failed");
+            match rollback() {
+                Ok(()) => Err(primary),
+                Err(rollback_error) => Err(format!(
+                    "{primary}; failed to roll back sync encryption material: {rollback_error}"
+                )),
+            }
+        }
+    }
+}
+
+pub(crate) fn persist_enabled_material_with_fence(
+    app: &tauri::AppHandle,
+    material: &SyncKeyMaterial,
+    validate: impl FnMut() -> Result<(), String>,
+) -> Result<(), String> {
+    let snapshot = capture_sync_encryption_material_snapshot(app)?;
+    commit_encryption_material_with_fence(
+        validate,
+        || persist_enabled_material(app, material),
+        || restore_sync_encryption_material_snapshot(app, &snapshot),
+    )
+}
+
 /// Mirrors core's `markRemoteEncryptionDiscovered`: never downgrades a keyed device whose
 /// salt matches the discovery, and persists immediately so the state survives a restart
 /// without needing the user to acknowledge anything first. A keyed device under a DIFFERENT
@@ -599,6 +681,18 @@ where
 
 pub(crate) fn clear_encryption_state(app: &tauri::AppHandle) -> Result<(), String> {
     clear_encryption_state_with(|| write_local_state(app, None), || clear_cached_key(app))
+}
+
+pub(crate) fn clear_encryption_state_with_fence(
+    app: &tauri::AppHandle,
+    validate: impl FnMut() -> Result<(), String>,
+) -> Result<(), String> {
+    let snapshot = capture_sync_encryption_material_snapshot(app)?;
+    commit_encryption_material_with_fence(
+        validate,
+        || clear_encryption_state(app),
+        || restore_sync_encryption_material_snapshot(app, &snapshot),
+    )
 }
 
 #[derive(Debug, Serialize)]
@@ -926,6 +1020,52 @@ mod tests {
 
         assert_eq!(error, "directory flush failed");
         assert_eq!(&*events.borrow(), &["remove", "sync-parent"]);
+    }
+
+    #[test]
+    fn lock_loss_after_material_commit_runs_compensation_before_returning() {
+        let events = std::cell::RefCell::new(Vec::new());
+        let validations = std::cell::Cell::new(0usize);
+
+        let error = commit_encryption_material_with_fence(
+            || {
+                validations.set(validations.get() + 1);
+                events.borrow_mut().push("validate");
+                if validations.get() == 2 {
+                    Err("lock identity changed".to_string())
+                } else {
+                    Ok(())
+                }
+            },
+            || {
+                events.borrow_mut().push("commit");
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("rollback-state-then-key");
+                Ok(())
+            },
+        )
+        .expect_err("post-commit lock loss must fail and compensate");
+
+        assert_eq!(error, "lock identity changed");
+        assert_eq!(
+            &*events.borrow(),
+            &["validate", "commit", "validate", "rollback-state-then-key"]
+        );
+    }
+
+    #[test]
+    fn failed_material_commit_is_compensated_and_reports_rollback_failure() {
+        let error = commit_encryption_material_with_fence(
+            || Ok(()),
+            || Err("state persistence failed".to_string()),
+            || Err("key restoration failed".to_string()),
+        )
+        .expect_err("a partial commit with failed compensation must be explicit");
+
+        assert!(error.contains("state persistence failed"));
+        assert!(error.contains("key restoration failed"));
     }
 
     #[test]

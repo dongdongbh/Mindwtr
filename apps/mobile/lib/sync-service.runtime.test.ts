@@ -104,6 +104,7 @@ const logMocks = vi.hoisted(() => ({
 
 const fileSyncLockMocks = vi.hoisted(() => ({
   acquireMobileFileSyncLease: vi.fn(),
+  revalidateMobileFileSyncLease: vi.fn(),
   releaseMobileFileSyncLease: vi.fn(),
 }));
 
@@ -235,6 +236,7 @@ vi.mock('./app-log', () => ({
 
 vi.mock('./sync-file-lock', () => ({
   acquireMobileFileSyncLease: fileSyncLockMocks.acquireMobileFileSyncLease,
+  revalidateMobileFileSyncLease: fileSyncLockMocks.revalidateMobileFileSyncLease,
   releaseMobileFileSyncLease: fileSyncLockMocks.releaseMobileFileSyncLease,
 }));
 
@@ -327,6 +329,7 @@ describe('mobile sync-service runtime', () => {
     attachmentSyncMocks.cleanupAttachmentTempFiles.mockResolvedValue(undefined);
     attachmentSyncMocks.hasPendingAttachmentSyncWork.mockResolvedValue(false);
     fileSyncLockMocks.acquireMobileFileSyncLease.mockResolvedValue({ token: 'file-cycle-lease', native: true });
+    fileSyncLockMocks.revalidateMobileFileSyncLease.mockResolvedValue(undefined);
     fileSyncLockMocks.releaseMobileFileSyncLease.mockResolvedValue(undefined);
 
     externalCalendarMocks.getExternalCalendars.mockResolvedValue([]);

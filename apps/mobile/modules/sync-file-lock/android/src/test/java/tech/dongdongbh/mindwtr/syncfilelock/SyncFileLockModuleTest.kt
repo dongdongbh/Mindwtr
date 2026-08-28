@@ -1,5 +1,6 @@
 package tech.dongdongbh.mindwtr.syncfilelock
 
+import java.io.File
 import java.io.RandomAccessFile
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
@@ -140,5 +141,50 @@ class SyncFileLockModuleTest {
       assertTrue(error.message.orEmpty().contains("ambiguous"))
     }
     assertTrue(!deleted)
+  }
+
+  @Test
+  fun safUsesPrivateStableAuthorityWithoutOpeningProviderDirectory() {
+    var providerDirectoryOpened = false
+    var privateAuthorityOpened = false
+    val authorityPath = Files.createTempFile("mindwtr-private-saf", ".lock").toFile()
+
+    val authority = selectStableSyncAuthority(
+      saf = true,
+      acquirePathRoot = {
+        providerDirectoryOpened = true
+        fail("SAF must not depend on a provider directory descriptor")
+        acquirePrivateFileStableAuthority(authorityPath)
+      },
+      acquirePrivateSaf = {
+        privateAuthorityOpened = true
+        acquirePrivateFileStableAuthority(authorityPath)
+      },
+    )
+
+    assertTrue(privateAuthorityOpened)
+    assertTrue(!providerDirectoryOpened)
+    authority.close()
+  }
+
+  @Test
+  fun replacedLegacyLockCannotCreateSecondCurrentVersionOwner() {
+    val directory = Files.createTempDirectory("mindwtr-stable-authority").toFile()
+    val authorityPath = File(directory, "private-authority.lock")
+    val legacyPath = File(directory, ".mindwtr.lock")
+    legacyPath.writeText("first")
+    val first = acquirePrivateFileStableAuthority(authorityPath)
+
+    legacyPath.renameTo(File(directory, ".mindwtr.lock.displaced"))
+    legacyPath.writeText("replacement")
+    try {
+      acquirePrivateFileStableAuthority(authorityPath)
+      fail("stable authority must reject a second owner after legacy replacement")
+    } catch (error: SyncFileLockUnavailableException) {
+      assertTrue(error.message.orEmpty().contains("BUSY"))
+    }
+
+    first.close()
+    acquirePrivateFileStableAuthority(authorityPath).close()
   }
 }

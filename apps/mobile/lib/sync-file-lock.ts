@@ -8,6 +8,7 @@ import {
 
 type SyncFileLockNativeModule = {
   acquireAsync(uri: string): Promise<string>;
+  revalidateAsync(token: string): Promise<void>;
   releaseAsync(token: string): Promise<void>;
 };
 
@@ -15,6 +16,20 @@ export type MobileFileSyncLease = {
   token: string;
   native: boolean;
 };
+
+/** Release consumed the native token but its final pathname/inode check proved
+ * the compatibility lock was replaced. Callers that have just committed local
+ * encryption material must compensate, unlike an ordinary close failure. */
+export class SyncFileLockIdentityLostError extends SyncFileLockUnavailableError {
+  constructor(cause: unknown) {
+    super('Safe File Sync locking was lost because the lock identity changed.');
+    this.name = 'SyncFileLockIdentityLostError';
+    (this as Error & { cause?: unknown }).cause = cause;
+  }
+}
+
+const isNativeLockIdentityLoss = (error: unknown): boolean =>
+  /SYNC_FILE_LOCK_UNAVAILABLE:[^\n]*(?:identity|root)[^\n]*changed/i.test(String(error ?? ''));
 
 let testModule: SyncFileLockNativeModule | null | undefined;
 let resolvedModule: SyncFileLockNativeModule | null | undefined;
@@ -34,16 +49,14 @@ const getModule = (): SyncFileLockNativeModule | null => {
 };
 
 /**
- * Android holds a FileChannel lock on the exact persistent `.mindwtr.lock`
- * document shared by path and SAF providers. Other mobile platforms have no
- * second native File Sync writer today; their existing process-wide serialized
- * document queue is represented by this fail-closed token. Cross-device and
- * non-advisory providers remain protected by document CAS and transition final
- * inventory validation rather than pretending an advisory lock is distributed.
+ * Android and iOS hold an unreplaceable platform authority first, then the
+ * exact persistent `.mindwtr.lock` for old-client compatibility. Cross-device
+ * and non-advisory providers remain protected by document CAS and transition
+ * final inventory validation rather than pretending a kernel lock is distributed.
  */
 export const acquireMobileFileSyncLease = async (syncFileUri: string): Promise<MobileFileSyncLease> => {
   const platform = testPlatform ?? Platform.OS;
-  if (platform === 'android') {
+  if (platform === 'android' || platform === 'ios') {
     const nativeModule = getModule();
     if (!nativeModule) {
       throw new SyncFileLockUnavailableError();
@@ -68,6 +81,20 @@ export const acquireMobileFileSyncLease = async (syncFileUri: string): Promise<M
   return { token: fallbackLeaseToken, native: false };
 };
 
+export const revalidateMobileFileSyncLease = async (lease: MobileFileSyncLease): Promise<void> => {
+  if (lease.native) {
+    const nativeModule = getModule();
+    if (!nativeModule) throw new SyncFileLockUnavailableError();
+    try {
+      await nativeModule.revalidateAsync(lease.token);
+    } catch (error) {
+      throw normalizeSyncFileLockError(error);
+    }
+    return;
+  }
+  if (fallbackLeaseToken !== lease.token) throw new SyncFileLockUnavailableError();
+};
+
 export const releaseMobileFileSyncLease = async (lease: MobileFileSyncLease): Promise<void> => {
   if (lease.native) {
     const nativeModule = getModule();
@@ -77,6 +104,7 @@ export const releaseMobileFileSyncLease = async (lease: MobileFileSyncLease): Pr
     try {
       await nativeModule.releaseAsync(lease.token);
     } catch (error) {
+      if (isNativeLockIdentityLoss(error)) throw new SyncFileLockIdentityLostError(error);
       throw normalizeSyncFileLockError(error);
     }
     return;

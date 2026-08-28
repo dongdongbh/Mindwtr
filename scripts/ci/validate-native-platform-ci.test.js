@@ -49,6 +49,10 @@ test("native CI generates clean projects and compiles Android and iOS sources", 
   expect(iosJob).toContain(
     "swift test --package-path apps/mobile/modules/attachment-file-installer/ios",
   );
+  expect(iosJob).toContain("name: Run File Sync stable-lock Swift tests");
+  expect(iosJob).toContain(
+    "swift test --package-path apps/mobile/modules/sync-file-lock/ios",
+  );
   expect(iosJob).toContain("name: Run CloudKit attachment error classifier tests");
   expect(iosJob).toContain(
     "swift test --package-path apps/mobile/modules/cloudkit-sync",
@@ -113,6 +117,34 @@ test("attachment installer native CI collects the recovery suites", () => {
   expect(cloudKitSwiftTests).toContain("testClassifiesMindwtrRecordAndAssetAbsenceAsTerminal");
   expect(cloudKitSwiftTests).toContain("testClassifiesCloudKitUnknownItemAsTerminal");
   expect(cloudKitSwiftTests).toContain("testPreservesTransientAndUnrelatedErrors");
+});
+
+test("File Sync lock native CI collects stable-authority suites", () => {
+  const androidTests = readFileSync(
+    "apps/mobile/modules/sync-file-lock/android/src/test/java/tech/dongdongbh/mindwtr/syncfilelock/SyncFileLockModuleTest.kt",
+    "utf8",
+  );
+  const androidStableLock = readFileSync(
+    "apps/mobile/modules/sync-file-lock/android/src/main/cpp/stable_root_lock.cpp",
+    "utf8",
+  );
+  const swiftPackage = readFileSync(
+    "apps/mobile/modules/sync-file-lock/ios/Package.swift",
+    "utf8",
+  );
+  const swiftTests = readFileSync(
+    "apps/mobile/modules/sync-file-lock/ios/Tests/SyncFileLockEngineTests.swift",
+    "utf8",
+  );
+
+  expect(androidTests.match(/^\s*@Test$/gm)).toHaveLength(7);
+  expect(androidTests).toContain("safUsesPrivateStableAuthorityWithoutOpeningProviderDirectory");
+  expect(androidTests).toContain("replacedLegacyLockCannotCreateSecondCurrentVersionOwner");
+  expect(androidStableLock).toContain("flock(fd, LOCK_EX | LOCK_NB)");
+  expect(androidStableLock).toContain("flock(fd, LOCK_UN)");
+  expect(swiftPackage).toContain(".testTarget(");
+  expect(swiftTests).toContain("testRootAuthorityBlocksReplacementLockOwner");
+  expect(swiftTests).toContain("testSymlinkLockFailsClosedWithoutTouchingPeer");
 });
 
 test("desktop Rust pull requests check and test the native library on Windows", () => {

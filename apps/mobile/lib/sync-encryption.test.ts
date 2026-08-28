@@ -29,6 +29,21 @@ const fs = vi.hoisted(() => {
   return { files, nonTruncating, toBytes, write };
 });
 
+const attachmentInstallerNative = vi.hoisted(() => ({
+  cleanupImmutableStageAsync: vi.fn(async (stagedPath: string) => {
+    if (!fs.files.has(stagedPath)) return { status: 'missing' };
+    fs.files.delete(stagedPath);
+    return { status: 'removed' };
+  }),
+}));
+
+vi.mock('expo-modules-core', () => ({
+  requireNativeModule: vi.fn((name: string) => {
+    if (name === 'AttachmentFileInstaller') return attachmentInstallerNative;
+    throw new Error(`native module unavailable: ${name}`);
+  }),
+}));
+
 const dirOf = (uri: string) => uri.slice(0, uri.lastIndexOf('/'));
 const leafOf = (uri: string) => uri.slice(uri.lastIndexOf('/') + 1);
 const childUrisOf = (dir: string): string[] => {
@@ -261,6 +276,12 @@ beforeEach(async () => {
   __resetSyncEncryptionStateForTests();
   __resetSecureSecretStoreForTests();
   setSyncCryptoNativeModuleForTests(nodeQuickCrypto);
+  attachmentInstallerNative.cleanupImmutableStageAsync.mockReset();
+  attachmentInstallerNative.cleanupImmutableStageAsync.mockImplementation(async (stagedPath: string) => {
+    if (!fs.files.has(stagedPath)) return { status: 'missing' };
+    fs.files.delete(stagedPath);
+    return { status: 'removed' };
+  });
   material = await deriveSyncKeyMaterial(
     PASSPHRASE, new Uint8Array(16).fill(7), FAST_PARAMS, mobileSyncCryptoPrimitives,
   );
@@ -802,6 +823,96 @@ describe('remote mutation fence lifecycle', () => {
   });
 
   it.each(['enable', 'change-passphrase', 'disable'] as const)(
+    'preserves the %s recovery journal and predecessor key when the File lock is replaced at finalization',
+    async (transition) => {
+      const previousState = transition === 'enable'
+        ? null
+        : {
+          state: 'enabled' as const,
+          discoveredSalt: '07'.repeat(16),
+          discoveredParams: FAST_PARAMS,
+        };
+      const previousKey = transition === 'enable' ? null : material.key;
+      const journal = {
+        ...(previousState ?? { state: 'off' as const }),
+        incompleteTransition: transition,
+      };
+      const finalState = transition === 'disable'
+        ? null
+        : {
+          state: 'enabled' as const,
+          discoveredSalt: '08'.repeat(16),
+          discoveredParams: FAST_PARAMS,
+        };
+      const nextKey = transition === 'disable' ? null : new Uint8Array(32).fill(8);
+      await syncEncryptionLocalState.write(previousState);
+      await flushSyncEncryptionLocalState();
+      if (previousKey) await syncEncryptionKeyCache.setKey(previousKey);
+      else await syncEncryptionKeyCache.clearKey();
+      let validations = 0;
+
+      const remote: SyncEncryptionRemotePort = {
+        list: async () => [],
+        read: async () => ({ bytes: null, version: null }),
+        write: async () => undefined,
+        remove: async () => undefined,
+      };
+      const error = new Error('SYNC_FILE_LOCK_UNAVAILABLE: lock identity changed');
+      await expect(__syncEncryptionServiceTestUtils.runWithRemoteMutationFence(
+        remote,
+        async (_guardedRemote, keyCache, localState) => {
+          await localState.write(journal);
+          if (nextKey) await keyCache.setKey(nextKey);
+          else await keyCache.clearKey();
+          await localState.write(finalState);
+        },
+        async () => {
+          validations += 1;
+          if (validations >= 4) throw error;
+        },
+      )).rejects.toBe(error);
+
+      expect(syncEncryptionLocalState.read()).toEqual(journal);
+      expect(JSON.parse(asyncStorage.get(SYNC_ENCRYPTION_STATE_KEY)!)).toEqual(journal);
+      await expect(syncEncryptionKeyCache.getKey()).resolves.toEqual(previousKey);
+    },
+  );
+
+  it('rolls back enabled material when native release detects a last-gap lock replacement', async () => {
+    const journal = {
+      state: 'off' as const,
+      incompleteTransition: 'enable' as const,
+    };
+    const nextState = {
+      state: 'enabled' as const,
+      discoveredSalt: '08'.repeat(16),
+      discoveredParams: FAST_PARAMS,
+    };
+    const remote: SyncEncryptionRemotePort = {
+      list: async () => [],
+      read: async () => ({ bytes: null, version: null }),
+      write: async () => undefined,
+      remove: async () => undefined,
+    };
+    const releaseError = new Error('SYNC_FILE_LOCK_UNAVAILABLE: lock identity changed during release');
+
+    await expect(__syncEncryptionServiceTestUtils.runWithRemoteMutationFence(
+      remote,
+      async (_guardedRemote, keyCache, localState) => {
+        await localState.write(journal);
+        await keyCache.setKey(new Uint8Array(32).fill(8));
+        await localState.write(nextState);
+      },
+      async () => undefined,
+      async () => { throw releaseError; },
+    )).rejects.toBe(releaseError);
+
+    expect(syncEncryptionLocalState.read()).toEqual(journal);
+    expect(JSON.parse(asyncStorage.get(SYNC_ENCRYPTION_STATE_KEY)!)).toEqual(journal);
+    await expect(syncEncryptionKeyCache.getKey()).resolves.toBeNull();
+  });
+
+  it.each(['enable', 'change-passphrase', 'disable'] as const)(
     'restores a durable %s journal before the matching key after post-final fence loss, then retries after restart',
     async (transition) => {
     const previousState = transition === 'enable'
@@ -951,8 +1062,8 @@ describe('File Sync transitions through core orchestration', () => {
       invalidTargetAttempts: 0,
       state: 'reserved',
     }]));
-    const fileSystem = await import('./file-system');
-    vi.mocked(fileSystem.deleteAsync).mockRejectedValueOnce(new Error('scratch removal denied'));
+    attachmentInstallerNative.cleanupImmutableStageAsync
+      .mockRejectedValueOnce(new Error('scratch removal denied'));
 
     await expect(enableSyncEncryption(PASSPHRASE)).rejects.toThrow('scratch removal denied');
 
@@ -986,6 +1097,7 @@ describe('File Sync transitions through core orchestration', () => {
     const cleanupError = new Error('native lock release failed');
     setSyncFileLockNativeModuleForTests({
       acquireAsync: vi.fn(async () => 'lease-token'),
+      revalidateAsync: vi.fn(async () => undefined),
       releaseAsync: vi.fn(async () => { throw cleanupError; }),
     }, 'android');
     seedPlaintextFolder();
@@ -1004,6 +1116,7 @@ describe('File Sync transitions through core orchestration', () => {
     const cleanupError = new Error('native lock release failed');
     setSyncFileLockNativeModuleForTests({
       acquireAsync: vi.fn(async () => 'lease-token'),
+      revalidateAsync: vi.fn(async () => undefined),
       releaseAsync: vi.fn(async () => { throw cleanupError; }),
     }, 'android');
     seedPlaintextFolder();

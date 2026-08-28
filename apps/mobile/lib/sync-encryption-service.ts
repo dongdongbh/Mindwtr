@@ -36,6 +36,7 @@ import {
     webdavPutFileVersioned,
     SyncCryptoUnsupportedError,
     SyncEncryptionTerminalError,
+    SyncFileLockUnavailableError,
     type AppData,
     type SyncEncryptionRemoteEntry,
     type SyncEncryptionRemoteInventory,
@@ -72,7 +73,9 @@ import {
 import { recoverFileSyncAttachmentPublications } from './attachment-file-installer';
 import {
     acquireMobileFileSyncLease,
+    revalidateMobileFileSyncLease,
     releaseMobileFileSyncLease,
+    SyncFileLockIdentityLostError,
     type MobileFileSyncLease,
 } from './sync-file-lock';
 import { getMobileWebDavRequestOptions } from './webdav-request-options';
@@ -339,12 +342,101 @@ const runWithRemoteMutationFence = async <T>(
     guardedKeyCache: SyncEncryptionKeyCachePort,
     guardedLocalState: SyncEncryptionLocalStatePort,
   ) => Promise<T>,
+  assertLocalFileFenceHeld?: () => Promise<void>,
+  releaseLocalFileFence?: () => Promise<void>,
 ): Promise<T> => {
   const acquire = (remote as TransitionRemotePort).acquireRemoteMutationFence;
   if (!acquire) {
-    const result = await operation(remote, syncEncryptionKeyCache, syncEncryptionLocalState);
-    await flushSyncEncryptionLocalState();
-    return result;
+    if (!assertLocalFileFenceHeld) {
+      const result = await operation(remote, syncEncryptionKeyCache, syncEncryptionLocalState);
+      await flushSyncEncryptionLocalState();
+      return result;
+    }
+    const previousState = syncEncryptionLocalState.read();
+    const previousKey = await syncEncryptionKeyCache.getKey();
+    let localMaterialTouched = false;
+    let stateBeforeFinalCommit = previousState;
+    const assertHeld = () => assertLocalFileFenceHeld();
+    const guardedRemote: SyncEncryptionRemotePort = {
+      ...remote,
+      list: async () => {
+        await assertHeld();
+        return remote.list();
+      },
+      captureInventory: remote.captureInventory
+        ? async (recoveryPassphrase) => {
+          await assertHeld();
+          return remote.captureInventory!(recoveryPassphrase);
+        }
+        : undefined,
+      read: async (name) => {
+        await assertHeld();
+        return remote.read(name);
+      },
+      write: async (name, bytes, expectedVersion) => {
+        await assertHeld();
+        await remote.write(name, bytes, expectedVersion);
+      },
+      remove: async (name, expectedVersion) => {
+        await assertHeld();
+        await remote.remove(name, expectedVersion);
+      },
+    };
+    const guardedKeyCache: SyncEncryptionKeyCachePort = {
+      getKey: () => syncEncryptionKeyCache.getKey(),
+      setKey: async (key) => {
+        await assertHeld();
+        localMaterialTouched = true;
+        await syncEncryptionKeyCache.setKey(key);
+      },
+      clearKey: async () => {
+        await assertHeld();
+        localMaterialTouched = true;
+        await syncEncryptionKeyCache.clearKey();
+      },
+    };
+    const guardedLocalState: SyncEncryptionLocalStatePort = {
+      read: () => syncEncryptionLocalState.read(),
+      write: async (state) => {
+        await assertHeld();
+        localMaterialTouched = true;
+        if (state?.incompleteTransition) {
+          stateBeforeFinalCommit = state;
+        } else {
+          stateBeforeFinalCommit = syncEncryptionLocalState.read();
+        }
+        await syncEncryptionLocalState.write(state);
+      },
+    };
+    try {
+      const result = await operation(guardedRemote, guardedKeyCache, guardedLocalState);
+      await assertHeld();
+      await flushSyncEncryptionLocalState();
+      await assertHeld();
+      // Native release performs the final lock-path identity validation before
+      // dropping the stable authority. Keep it inside the material transaction:
+      // a legacy peer that replaces `.mindwtr.lock` in the last await gap must
+      // restore the recovery journal/key instead of leaving enabled state behind.
+      await releaseLocalFileFence?.();
+      return result;
+    } catch (primaryError) {
+      if (!localMaterialTouched) throw primaryError;
+      try {
+        // The retained stable authority remains held even when the compatibility
+        // lock path was replaced. Restore the durable journal/state before the
+        // independent SecureStore domain, then surface the lock loss.
+        await syncEncryptionLocalState.write(stateBeforeFinalCommit);
+        await flushSyncEncryptionLocalState();
+        if (previousKey) await syncEncryptionKeyCache.setKey(previousKey);
+        else await syncEncryptionKeyCache.clearKey();
+      } catch (rollbackError) {
+        const failure = new Error('Failed to roll back sync encryption material after File Sync lock loss');
+        (failure as Error & { cause?: unknown; rollbackError?: unknown }).cause = primaryError;
+        (failure as Error & { rollbackError?: unknown }).rollbackError = rollbackError;
+        throw failure;
+      }
+      throw primaryError;
+    }
   }
 
   const lease = await acquire();
@@ -677,26 +769,57 @@ const requireTransitionTarget = async (appData: AppData | null): Promise<Extract
 
 const runWithFileTransitionLease = async <T>(
     target: Extract<BackendTarget, { kind: 'remote' }>,
-    operation: (port: SyncEncryptionRemotePort) => Promise<T>,
+    operation: (
+      port: SyncEncryptionRemotePort,
+      releaseFence?: () => Promise<void>,
+    ) => Promise<T>,
 ): Promise<T> => {
     if (!target.fileSyncLease) return operation(target.port);
+    let leaseSettled = false;
+    let releaseCleanupError: unknown;
+    const releaseFence = async (): Promise<void> => {
+      if (leaseSettled) throw new SyncFileLockUnavailableError();
+      // The native module consumes the token before validating and closing, so
+      // an error still means this lease cannot be released a second time.
+      leaseSettled = true;
+      try {
+        await releaseMobileFileSyncLease(target.fileSyncLease!);
+      } catch (error) {
+        if (error instanceof SyncFileLockIdentityLostError) throw error;
+        releaseCleanupError = error;
+      }
+    };
     let result: T;
     try {
-        result = await operation(target.port);
+        result = await operation(target.port, releaseFence);
     } catch (primaryError) {
-        try {
-            await releaseMobileFileSyncLease(target.fileSyncLease);
-        } catch (cleanupError) {
-            if (primaryError instanceof Error) {
-                (primaryError as Error & { cleanupError?: unknown }).cleanupError = cleanupError;
+        if (!leaseSettled) {
+            try {
+                await releaseFence();
+            } catch (cleanupError) {
+                if (primaryError instanceof Error) {
+                    (primaryError as Error & { cleanupError?: unknown }).cleanupError = cleanupError;
+                }
             }
+        }
+        if (releaseCleanupError && primaryError instanceof Error) {
+          (primaryError as Error & { cleanupError?: unknown }).cleanupError = releaseCleanupError;
         }
         throw primaryError;
     }
+    if (leaseSettled) {
+      if (releaseCleanupError) {
+        throw new SyncEncryptionCleanupDeferredError(result, releaseCleanupError, 0, 'file-lock');
+      }
+      return result;
+    }
     try {
-        await releaseMobileFileSyncLease(target.fileSyncLease);
+        await releaseFence();
     } catch (cleanupError) {
         throw new SyncEncryptionCleanupDeferredError(result, cleanupError, 0, 'file-lock');
+    }
+    if (releaseCleanupError) {
+      throw new SyncEncryptionCleanupDeferredError(result, releaseCleanupError, 0, 'file-lock');
     }
     return result;
 };
@@ -752,7 +875,7 @@ export const enableSyncEncryption = async (
     if (target.kind !== 'remote') {
         throw new Error('Sync encryption is only available for File Sync, WebDAV and Dropbox.');
     }
-    await runWithFileTransitionLease(target, (port) =>
+    await runWithFileTransitionLease(target, (port, releaseFence) =>
       runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
         runEnableSyncEncryptionOverRemote(
           passphrase,
@@ -761,7 +884,9 @@ export const enableSyncEncryption = async (
           localState,
           options.onProgress,
           mobileSyncCryptoPrimitives,
-        )));
+        ), target.fileSyncLease
+          ? () => revalidateMobileFileSyncLease(target.fileSyncLease!)
+          : undefined, releaseFence));
 });
 
 export const disableSyncEncryption = async (
@@ -777,7 +902,7 @@ export const disableSyncEncryption = async (
     if (target.kind !== 'remote') {
         throw new Error('Sync encryption is only available for File Sync, WebDAV and Dropbox.');
     }
-    await runWithFileTransitionLease(target, (port) =>
+    await runWithFileTransitionLease(target, (port, releaseFence) =>
       runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
         runDisableSyncEncryptionOverRemote(
           guardedRemote,
@@ -785,7 +910,9 @@ export const disableSyncEncryption = async (
           localState,
           options.onProgress,
           mobileSyncCryptoPrimitives,
-        )));
+        ), target.fileSyncLease
+          ? () => revalidateMobileFileSyncLease(target.fileSyncLease!)
+          : undefined, releaseFence));
 });
 
 export const changeSyncEncryptionPassphrase = async (
@@ -795,7 +922,7 @@ export const changeSyncEncryptionPassphrase = async (
 ): Promise<void> => runSerializedSyncDocumentOperation(async () => {
     await loadSyncEncryptionLocalState();
     const target = await requireTransitionTarget(options.appData ?? null);
-    await runWithFileTransitionLease(target, (port) =>
+    await runWithFileTransitionLease(target, (port, releaseFence) =>
       runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
         runChangeSyncEncryptionPassphraseOverRemote(
           current,
@@ -805,12 +932,16 @@ export const changeSyncEncryptionPassphrase = async (
           localState,
           options.onProgress,
           mobileSyncCryptoPrimitives,
-        )));
+        ), target.fileSyncLease
+          ? () => revalidateMobileFileSyncLease(target.fileSyncLease!)
+          : undefined, releaseFence));
 });
 
 const runProvidePassphraseOverRemote = async (
   passphrase: string,
   port: SyncEncryptionRemotePort,
+  assertLocalFileFenceHeld?: () => Promise<void>,
+  releaseLocalFileFence?: () => Promise<void>,
 ): Promise<'ok' | 'wrong-passphrase'> => {
   return runWithRemoteMutationFence(port, (guardedRemote, keyCache, localState) =>
     runProvideSyncEncryptionPassphraseOverRemote(
@@ -820,7 +951,7 @@ const runProvidePassphraseOverRemote = async (
         keyCache,
         localState,
         mobileSyncCryptoPrimitives,
-    ));
+    ), assertLocalFileFenceHeld, releaseLocalFileFence);
 };
 
 export const provideSyncEncryptionPassphrase = async (
@@ -828,7 +959,14 @@ export const provideSyncEncryptionPassphrase = async (
 ): Promise<'ok' | 'wrong-passphrase'> => runSerializedSyncDocumentOperation(async () => {
     await loadSyncEncryptionLocalState();
     const target = await requireTransitionTarget(null);
-    return runWithFileTransitionLease(target, (port) => runProvidePassphraseOverRemote(passphrase, port));
+    return runWithFileTransitionLease(target, (port, releaseFence) => runProvidePassphraseOverRemote(
+      passphrase,
+      port,
+      target.fileSyncLease
+        ? () => revalidateMobileFileSyncLease(target.fileSyncLease!)
+        : undefined,
+      releaseFence,
+    ));
 });
 
 /** "Not now". Re-affirms the persisted no-key state; automatic and background sync stay

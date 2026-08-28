@@ -350,6 +350,9 @@ jobs:
       - name: Run attachment installer Swift recovery tests
         run: swift test --package-path apps/mobile/modules/attachment-file-installer/ios
 
+      - name: Run File Sync stable-lock Swift tests
+        run: swift test --package-path apps/mobile/modules/sync-file-lock/ios
+
       - name: Run CloudKit attachment error classifier tests
         run: swift test --package-path apps/mobile/modules/cloudkit-sync
 
