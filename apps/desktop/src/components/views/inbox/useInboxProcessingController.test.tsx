@@ -390,6 +390,97 @@ describe('useInboxProcessingController draft writes', () => {
     });
 });
 
+describe('useInboxProcessingController project conversion persistence', () => {
+    const tasks = [makeTask('one')];
+    const project = { id: 'p1', title: 'Plan Launch', status: 'active' } as Project;
+
+    const renderController = (
+        addTask: ReturnType<typeof vi.fn>,
+        updateTask: ReturnType<typeof vi.fn>,
+    ) => renderHook(() => {
+        const [isProcessing, setIsProcessing] = useState(true);
+        return useInboxProcessingController({
+            t: (key) => key,
+            tasks,
+            projects: [project],
+            areas: [],
+            settings: {},
+            addProject: async () => project,
+            addTask,
+            updateTask,
+            deleteTask: async () => ({ success: true }),
+            allContexts: [],
+            allTags: [],
+            isProcessing,
+            setIsProcessing,
+        });
+    });
+
+    const prepareConversion = async (
+        result: ReturnType<typeof renderController>['result'],
+        extras: string[],
+    ) => {
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+        act(() => {
+            result.current.wizardProps.setConvertToProject(true);
+            result.current.wizardProps.setProjectTitleDraft('Plan Launch');
+            result.current.wizardProps.setNextActionDraft('Draft launch brief');
+            result.current.wizardProps.setExtraActionDrafts(extras);
+        });
+    };
+
+    it('creates all extra actions before moving the original Inbox task', async () => {
+        const addTask = vi.fn(async () => ({ success: true }));
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderController(addTask, updateTask);
+        await prepareConversion(result, ['Book venue']);
+
+        await act(async () => {
+            await result.current.wizardProps.handleConvertToProject();
+        });
+
+        expect(addTask).toHaveBeenCalledWith('Book venue', { status: 'inbox', projectId: 'p1' });
+        expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+            title: 'Draft launch brief',
+            status: 'next',
+            projectId: 'p1',
+        }));
+        expect(addTask.mock.invocationCallOrder[0]).toBeLessThan(updateTask.mock.invocationCallOrder[0]);
+    });
+
+    it('retries only uncommitted extra actions and does not advance after a partial failure', async () => {
+        const addTask = vi.fn()
+            .mockResolvedValueOnce({ success: true })
+            .mockResolvedValueOnce({ success: false, error: 'Offline' })
+            .mockResolvedValueOnce({ success: true });
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderController(addTask, updateTask);
+        await prepareConversion(result, ['Book venue', 'Send invitations']);
+
+        await act(async () => {
+            await result.current.wizardProps.handleConvertToProject();
+        });
+
+        expect(addTask.mock.calls.map(([title]) => title)).toEqual(['Book venue', 'Send invitations']);
+        expect(updateTask).not.toHaveBeenCalled();
+        expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        expect(result.current.wizardProps.extraActionDrafts).toEqual(['Send invitations']);
+
+        await act(async () => {
+            await result.current.wizardProps.handleConvertToProject();
+        });
+
+        expect(addTask.mock.calls.map(([title]) => title)).toEqual([
+            'Book venue',
+            'Send invitations',
+            'Send invitations',
+        ]);
+        expect(updateTask).toHaveBeenCalledTimes(1);
+    });
+});
+
 // #1088: the clarify title used to run a date-only parser, so it was the one
 // editable task title in the app with a smaller grammar than quick add.
 describe('useInboxProcessingController title grammar', () => {

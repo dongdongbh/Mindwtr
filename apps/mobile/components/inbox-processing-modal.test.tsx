@@ -1216,6 +1216,86 @@ describe('InboxProcessingModal', () => {
       status: 'inbox',
       projectId: 'project-created',
     });
+    expect(addTask.mock.invocationCallOrder[0]).toBeLessThan(updateTask.mock.invocationCallOrder[0]);
+  });
+
+  it('retries only uncommitted project actions before moving the original Inbox task', async () => {
+    addProject.mockResolvedValue({
+      id: 'project-created',
+      title: 'Plan Launch',
+      color: '#3b82f6',
+      status: 'active',
+      order: 0,
+      tagIds: [],
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+    });
+    addTask
+      .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce({ success: false, error: 'Offline' })
+      .mockResolvedValueOnce({ success: true });
+    const onClose = vi.fn();
+    let tree: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={onClose} />);
+    });
+
+    const root = tree!.root;
+    walkToProjectConversion(root);
+    act(() => {
+      root.findByProps({ accessibilityLabel: 'projects.title' }).props.onChangeText('Plan Launch');
+      findPressableWithText(root, 'process.addAnotherAction').props.onPress();
+    });
+    act(() => {
+      findPressableWithText(root, 'process.addAnotherAction').props.onPress();
+    });
+
+    const findActionInputs = () => root.findAll((node) => (
+      typeof node.type === 'string'
+      && node.props.accessibilityLabel === 'process.nextAction'
+      && typeof node.props.onChangeText === 'function'
+    ));
+    act(() => {
+      findActionInputs()[0].props.onChangeText('Draft launch brief');
+    });
+    act(() => {
+      findActionInputs()[1].props.onChangeText('Book venue');
+    });
+    act(() => {
+      findActionInputs()[2].props.onChangeText('Send invitations');
+    });
+
+    await act(async () => {
+      findPressableWithText(root, 'process.createProject').props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(addTask.mock.calls.map(([title]) => title)).toEqual(['Book venue', 'Send invitations']);
+    expect(updateTask).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(findActionInputs().map((input) => input.props.value)).toEqual([
+      'Draft launch brief',
+      'Send invitations',
+    ]);
+
+    await act(async () => {
+      findPressableWithText(root, 'process.createProject').props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(addTask.mock.calls.map(([title]) => title)).toEqual([
+      'Book venue',
+      'Send invitations',
+      'Send invitations',
+    ]);
+    expect(updateTask).toHaveBeenCalledTimes(1);
+    expect(updateTask).toHaveBeenCalledWith('inbox-1', expect.objectContaining({
+      title: 'Draft launch brief',
+      status: 'next',
+      projectId: 'project-created',
+    }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('suggests existing contexts and tags while typing without a prefix', () => {

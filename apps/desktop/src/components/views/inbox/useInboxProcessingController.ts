@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
     advanceProcessInboxSession,
     addBreadcrumb,
@@ -86,6 +86,7 @@ export function useInboxProcessingController({
     setIsProcessing,
 }: UseInboxProcessingControllerParams): UseInboxProcessingControllerResult {
     const showToast = useUiStore((state) => state.showToast);
+    const projectConversionInFlightRef = useRef(false);
     const people = useTaskStore((state) => state.people);
     const addPerson = useTaskStore((state) => state.addPerson);
     const personOptions = useMemo(() => getPersonOptionNames(people, tasks), [people, tasks]);
@@ -715,7 +716,7 @@ export function useInboxProcessingController({
     ]);
 
     const handleConvertToProject = useCallback(async () => {
-        if (!processingTask) return;
+        if (!processingTask || projectConversionInFlightRef.current) return;
         const projectTitle = projectTitleDraft.trim() || draft.title.trim();
         const nextAction = nextActionDraft.trim();
         if (!projectTitle) return;
@@ -723,6 +724,7 @@ export function useInboxProcessingController({
             alert(t('process.nextActionRequired'));
             return;
         }
+        projectConversionInFlightRef.current = true;
         try {
             const existing = projects.find((project) => project.title.toLowerCase() === projectTitle.toLowerCase());
             const project = existing ?? await addProject(
@@ -731,32 +733,41 @@ export function useInboxProcessingController({
                 showAreaField && draft.areaId ? { areaId: draft.areaId } : undefined,
             );
             if (!project) return;
+
+            // Extra actions are independent durable writes. Commit and remove
+            // each one before moving the original Inbox task, so a failure can
+            // be retried without losing or duplicating actions already saved.
+            const extraActions = extraActionDrafts
+                .map((draftValue) => ({ draftValue, title: draftValue.trim() }))
+                .filter(({ title }) => Boolean(title));
+            for (const { draftValue, title } of extraActions) {
+                const result = await addTask(title, { status: 'inbox', projectId: project.id });
+                if (!result.success) {
+                    showToast(result.error || t('task.addFailed'), 'error');
+                    return;
+                }
+                setExtraActionDrafts((currentDrafts) => {
+                    const committedIndex = currentDrafts.indexOf(draftValue);
+                    return committedIndex < 0
+                        ? currentDrafts
+                        : currentDrafts.filter((_, index) => index !== committedIndex);
+                });
+            }
+
             const applied = await applyWorkflowDecision({ type: 'next' }, {
                 fields: { projectId: project.id },
                 titleInput: nextAction,
                 fallbackTitle: processingTask.title,
                 advance: false,
             });
-            if (applied) {
-                // The converted capture becomes the project's clarified next
-                // action. Extra actions typed at the split step are raw
-                // captures, so they return to the Inbox (project attached)
-                // for their own clarify pass — same semantics as a quick-add
-                // with a +Project token (#827).
-                const extraActions = extraActionDrafts.map((title) => title.trim()).filter(Boolean);
-                for (const title of extraActions) {
-                    const result = await addTask(title, { status: 'inbox', projectId: project.id });
-                    if (!result.success) {
-                        showToast(result.error || t('task.addFailed'), 'error');
-                        return;
-                    }
-                }
-                setExtraActionDrafts([]);
-                processNext();
-            }
+            if (!applied) return;
+            setExtraActionDrafts([]);
+            processNext();
         } catch (error) {
             reportError('Failed to create project from inbox processing', error);
             showToast(tFallback(t, 'projects.createFailed', 'Failed to create project'), 'error');
+        } finally {
+            projectConversionInFlightRef.current = false;
         }
     }, [
         addProject,
