@@ -140,6 +140,10 @@ test("File Sync lock native CI collects stable-authority suites", () => {
     "apps/mobile/modules/sync-file-lock/ios/Tests/SyncFileLockEngineTests.swift",
     "utf8",
   );
+  const swiftEngine = readFileSync(
+    "apps/mobile/modules/sync-file-lock/ios/SyncFileLockModule.swift",
+    "utf8",
+  );
 
   expect(androidTests.match(/^\s*@Test$/gm)).toHaveLength(7);
   expect(androidTests).toContain("safUsesPrivateStableAuthorityWithoutOpeningProviderDirectory");
@@ -147,6 +151,10 @@ test("File Sync lock native CI collects stable-authority suites", () => {
   expect(androidStableLock).toContain("flock(fd, LOCK_EX | LOCK_NB)");
   expect(androidStableLock).toContain("flock(fd, LOCK_UN)");
   expect(swiftPackage).toContain(".testTarget(");
+  expect(swiftEngine).toContain("private var destroyed = false");
+  expect(swiftEngine).toContain("guard !destroyed else");
+  expect(swiftTests).toContain("testDrainRejectsAcquireCompletingAfterTeardown");
+  expect(swiftTests).toContain("reachedRegistration");
   expect(swiftTests).toContain("testRootAuthorityBlocksReplacementLockOwner");
   expect(swiftTests).toContain("testSymlinkLockFailsClosedWithoutTouchingPeer");
 });
