@@ -254,6 +254,7 @@ test("desktop Rust pull requests check and test the native library on Windows", 
   expect(windowsJob).toContain(
     "uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable",
   );
+  expect(windowsJob).toContain("RUSTFLAGS: -C target-feature=-crt-static");
   expect(windowsJob).toContain(
     "run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml",
   );

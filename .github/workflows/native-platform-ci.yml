@@ -182,6 +182,12 @@ jobs:
     runs-on: windows-latest
     name: Windows Rust check and tests
     timeout-minutes: 35
+    env:
+      # Packaged Windows builds keep the repo-wide static CRT setting, but
+      # cargo test links whisper-rs-sys objects that use the dynamic CRT.
+      # Match the proven Windows native-test job in ci.yml so the linker does
+      # not leave unresolved __imp_* CRT symbols.
+      RUSTFLAGS: -C target-feature=-crt-static
     steps:
       - name: Checkout code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
