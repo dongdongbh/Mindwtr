@@ -1594,7 +1594,7 @@ export const jaOverrides: Record<string, string> = {
         'viewSections.somedaySections': 'いつか・たぶんのセクション',
         'viewSections.somedaySection': 'いつか・たぶんのセクション',
         'viewSections.noSection': 'セクションなし',
-        'viewSections.add': 'セクションを追加',
+        'viewSections.add': '新しいセクション…',
         'viewSections.rename': 'セクション名を変更',
         'viewSections.manageHint': 'プロジェクトやプロジェクト内のセクションを変えずにアイデアを整理します。',
         'viewSections.nameHint': 'セクション名',

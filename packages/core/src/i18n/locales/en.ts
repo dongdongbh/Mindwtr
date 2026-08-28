@@ -1589,7 +1589,7 @@ export const en: Record<string, string> = {
         'viewSections.somedaySections': 'Someday sections',
         'viewSections.somedaySection': 'Someday section',
         'viewSections.noSection': 'No section',
-        'viewSections.add': 'Add section',
+        'viewSections.add': 'New section…',
         'viewSections.rename': 'Rename section',
         'viewSections.manageHint': 'Organize ideas without changing their projects or project sections.',
         'viewSections.nameHint': 'Section name',

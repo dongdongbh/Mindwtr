@@ -400,7 +400,7 @@ describe('ListView', () => {
     });
   });
 
-  it('renders orphaned Someday assignments under No section and deletes only the heading catalogue', async () => {
+  it('renders orphaned Someday assignments under No section without an inline admin panel', () => {
     const known = makeTask('known-section', {
       title: 'Read DDIA',
       status: 'someday',
@@ -413,7 +413,6 @@ describe('ListView', () => {
     });
     const orphanBeforeRender = JSON.stringify(orphan);
     const updateTask = vi.fn(async () => ({ success: true }));
-    const updateSettings = vi.fn(async () => undefined);
     useTaskStore.setState({
       _allTasks: [known, orphan],
       _allProjects: [],
@@ -425,7 +424,6 @@ describe('ListView', () => {
           },
         },
       },
-      updateSettings,
       updateTask,
     });
     useUiStore.setState((state) => ({
@@ -435,20 +433,13 @@ describe('ListView', () => {
 
     const view = renderListView('someday', 'Someday');
 
-    expect(view.getAllByText('Books to read').length).toBeGreaterThanOrEqual(2);
+    expect(view.getAllByText('Books to read')).toHaveLength(1);
+    expect(view.queryByText('Someday sections')).not.toBeInTheDocument();
     expect(view.getByText('No section')).toBeInTheDocument();
     expect(view.getByText('Learn pottery')).toBeInTheDocument();
     expect(JSON.stringify(orphan)).toBe(orphanBeforeRender);
     expect(updateTask).not.toHaveBeenCalled();
 
-    fireEvent.click(view.getByRole('button', { name: 'Delete: Books to read' }));
-    await waitFor(() => {
-      expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
-        gtd: expect.objectContaining({
-          viewSections: expect.objectContaining({ someday: [] }),
-        }),
-      }));
-    });
     expect(updateTask).not.toHaveBeenCalled();
     expect(orphan.viewSectionIds?.someday).toBe('heading-from-another-device');
   });

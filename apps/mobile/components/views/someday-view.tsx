@@ -16,18 +16,16 @@ import { getBulkMoveStatusOptions } from '../task-list/TaskListBulkBar';
 import { useTaskListSelection } from '../use-task-list-selection';
 import { TaskListView } from '../task-list-view';
 import { DeferredProjectsSection, selectDeferredProjects } from './deferred-projects-section';
-import { SomedaySectionManager } from './someday-section-manager';
 
 
 
 export function SomedayView() {
-  const { tasks, projects, settings, updateTask, updateProject, updateSettings, deleteTask, restoreTask, batchMoveTasks, batchDeleteTasks, batchUpdateTasks, highlightTaskId, setHighlightTask } = useTaskStore((state) => ({
+  const { tasks, projects, settings, updateTask, updateProject, deleteTask, restoreTask, batchMoveTasks, batchDeleteTasks, batchUpdateTasks, highlightTaskId, setHighlightTask } = useTaskStore((state) => ({
     tasks: state.tasks,
     projects: state.projects,
     settings: state.settings,
     updateTask: state.updateTask,
     updateProject: state.updateProject,
-    updateSettings: state.updateSettings,
     deleteTask: state.deleteTask,
     restoreTask: state.restoreTask,
     batchMoveTasks: state.batchMoveTasks,
@@ -79,16 +77,6 @@ export function SomedayView() {
     ),
     [somedaySections, somedayTasks, t],
   );
-  const handleSectionsChange = (definitions: typeof somedaySections) => updateSettings({
-    gtd: {
-      ...settings?.gtd,
-      viewSections: {
-        ...settings?.gtd?.viewSections,
-        someday: definitions,
-      },
-    },
-  });
-
   const selection = useTaskListSelection({
     batchDeleteTasks,
     batchMoveTasks,
@@ -167,12 +155,6 @@ export function SomedayView() {
               t={t}
               onActivateProject={handleActivateProject}
               onOpenProject={handleOpenProject}
-            />
-            <SomedaySectionManager
-              definitions={somedaySections}
-              onChange={handleSectionsChange}
-              t={t}
-              themeColors={tc}
             />
           </View>
         )}

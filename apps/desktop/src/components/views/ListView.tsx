@@ -21,7 +21,6 @@ import { buildProjectOrderMap,
     shallow,
     shouldShowTaskForStart,
     sortTasksBy,
-    sortViewSectionDefinitions,
     TaskPriority,
     TimeEstimate,
     resolveI18nText,
@@ -222,7 +221,6 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
     const queryCacheRef = useRef<Map<string, Task[]>>(new Map());
     const [selectedWaitingPerson, setSelectedWaitingPerson] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
-    const [viewSectionPrompt, setViewSectionPrompt] = useState<{ mode: 'create' | 'rename'; id?: string } | null>(null);
     const addInputRef = useRef<HTMLInputElement>(null);
     const listScrollRef = useRef<HTMLDivElement>(null);
     const { collapsedGroups, setCollapsedGroups } = useCollapsedGroupsViewState(
@@ -633,51 +631,6 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                 showToast(tFallback(t, 'projects.reactivateFailed', 'Failed to reactivate project'), 'error');
             });
     }, [showToast, t, updateProject]);
-    const somedayViewSections = useMemo(
-        () => sortViewSectionDefinitions(settings?.gtd?.viewSections?.someday),
-        [settings?.gtd?.viewSections?.someday],
-    );
-    const persistSomedayViewSections = useCallback((nextSections: typeof somedayViewSections) => (
-        updateSettings({
-            gtd: {
-                ...(settings?.gtd ?? {}),
-                viewSections: {
-                    ...(settings?.gtd?.viewSections ?? {}),
-                    someday: nextSections,
-                },
-            },
-        }).catch((error) => {
-            reportError('Failed to update Someday sections', error);
-            showToast(tFallback(t, 'viewSections.updateFailed', 'Failed to update Someday sections'), 'error');
-        })
-    ), [settings?.gtd?.viewSections, showToast, t, updateSettings]);
-    const handleConfirmViewSectionPrompt = useCallback((titleValue: string) => {
-        const title = titleValue.trim();
-        const prompt = viewSectionPrompt;
-        setViewSectionPrompt(null);
-        if (!title || !prompt) return;
-        if (prompt.mode === 'rename' && prompt.id) {
-            void persistSomedayViewSections(somedayViewSections.map((section) => (
-                section.id === prompt.id ? { ...section, title } : section
-            )));
-            return;
-        }
-        const id = globalThis.crypto?.randomUUID?.()
-            ?? `someday-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        const maxOrder = somedayViewSections.reduce(
-            (max, section) => Number.isFinite(section.order) ? Math.max(max, section.order) : max,
-            -1,
-        );
-        void persistSomedayViewSections([
-            ...somedayViewSections,
-            { id, title, order: maxOrder + 1 },
-        ]);
-    }, [persistSomedayViewSections, somedayViewSections, viewSectionPrompt]);
-    const handleDeleteViewSection = useCallback((sectionId: string) => {
-        // Catalogue-only write: tasks retain the stored id and resolve to No section.
-        void persistSomedayViewSections(somedayViewSections.filter((section) => section.id !== sectionId));
-    }, [persistSomedayViewSections, somedayViewSections]);
-
     const virtualRowCount = groupedVirtualRows?.length ?? filteredTasks.length;
     const shouldVirtualize = virtualRowCount > LIST_VIRTUALIZATION_THRESHOLD;
     const rowVirtualizer = useVirtualizer({
@@ -1142,53 +1095,6 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
                         </div>
                     )}
 
-                    {statusFilter === 'someday' && !isProcessing && (
-                        <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
-                            <div className="flex items-center justify-between gap-3">
-                                <div>
-                                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                                        {tFallback(t, 'viewSections.somedaySections', 'Someday sections')}
-                                    </div>
-                                    <div className="mt-1 text-xs text-muted-foreground">
-                                        {tFallback(t, 'viewSections.manageHint', 'Group ideas without changing their project or project section.')}
-                                    </div>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => setViewSectionPrompt({ mode: 'create' })}
-                                    className="rounded border border-border bg-background px-2.5 py-1.5 text-xs text-foreground hover:bg-muted/60"
-                                >
-                                    {tFallback(t, 'viewSections.add', 'Add section')}
-                                </button>
-                            </div>
-                            {somedayViewSections.length > 0 && (
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                    {somedayViewSections.map((section) => (
-                                        <div key={section.id} className="flex items-center gap-1 rounded border border-border bg-background px-2 py-1">
-                                            <span className="text-xs font-medium text-foreground">{section.title}</span>
-                                            <button
-                                                type="button"
-                                                aria-label={`${tFallback(t, 'viewSections.rename', 'Rename section')}: ${section.title}`}
-                                                onClick={() => setViewSectionPrompt({ mode: 'rename', id: section.id })}
-                                                className="rounded px-1 text-[11px] text-muted-foreground hover:text-foreground"
-                                            >
-                                                {tFallback(t, 'common.rename', 'Rename')}
-                                            </button>
-                                            <button
-                                                type="button"
-                                                aria-label={`${t('common.delete')}: ${section.title}`}
-                                                onClick={() => handleDeleteViewSection(section.id)}
-                                                className="rounded px-1 text-[11px] text-destructive hover:bg-destructive/10"
-                                            >
-                                                {t('common.delete')}
-                                            </button>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    )}
-
                     <InboxProcessor
                         t={t}
                         isInbox={isInbox}
@@ -1404,21 +1310,6 @@ export const ListView = memo(function ListView({ title, statusFilter }: ListView
             onClose={closeMindSweep}
             t={t}
             addTask={addTask}
-        />
-        <PromptModal
-            isOpen={viewSectionPrompt !== null}
-            title={viewSectionPrompt?.mode === 'rename'
-                ? tFallback(t, 'viewSections.rename', 'Rename Someday section')
-                : tFallback(t, 'viewSections.add', 'Add Someday section')}
-            description={tFallback(t, 'viewSections.nameHint', 'Give this group a short, reviewable name.')}
-            placeholder={tFallback(t, 'viewSections.namePlaceholder', 'Books to read')}
-            defaultValue={viewSectionPrompt?.mode === 'rename'
-                ? somedayViewSections.find((section) => section.id === viewSectionPrompt.id)?.title ?? ''
-                : ''}
-            confirmLabel={t('common.save')}
-            cancelLabel={t('common.cancel')}
-            onCancel={() => setViewSectionPrompt(null)}
-            onConfirm={handleConfirmViewSectionPrompt}
         />
         <PromptModal
             isOpen={tagPromptOpen}

@@ -38,6 +38,8 @@ const showToast = vi.fn();
 const dismissToast = vi.fn();
 const translate = (key: string) => ({
   'taskEdit.dateOnly': 'Date only',
+  'viewSections.add': 'New section…',
+  'viewSections.nameHint': 'Section name',
 }[key] ?? key);
 const mockSettings = { gtd: { inboxProcessing: {} }, ai: {} } as any;
 const baseInboxTask = {
@@ -98,7 +100,7 @@ const storeState = {
   restoreTask,
   addProject,
   addTask,
-  updateSettings: vi.fn(async () => {}),
+  updateSettings: vi.fn(async (_settings: any) => {}),
 };
 const originalPlatformOs = Platform.OS;
 
@@ -303,6 +305,7 @@ vi.mock('../lib/ai-config', () => ({
 }));
 
 vi.mock('../lib/app-log', () => ({
+  logError: vi.fn(),
   logWarn: vi.fn(),
 }));
 
@@ -343,6 +346,7 @@ describe('InboxProcessingModal', () => {
     clarifyTask.mockClear();
     showToast.mockClear();
     dismissToast.mockClear();
+    storeState.updateSettings.mockClear();
   });
 
   afterEach(() => {
@@ -2095,15 +2099,43 @@ describe('InboxProcessingModal', () => {
     it.each([
       ['guided', null],
       ['quick', 'quick'],
-    ] as const)('files Someday directly when organization fields are hidden in %s mode', async (_mode, storedMode) => {
+    ] as const)('still offers Someday-section assignment when organization fields are hidden in %s mode', async (_mode, storedMode) => {
       asyncStorageMock.getItem.mockResolvedValue(storedMode);
       mockSettings.gtd.taskEditor = { hidden: ['area', 'project'] };
       const root = await openFlow();
 
       await pressAsync(root, 'inbox.someday');
 
+      expect(updateTask).not.toHaveBeenCalled();
+      expect(findNodesWithText(root, '+ New section…').length).toBeGreaterThan(0);
+      await pressAsync(root, 'File it');
       expect(updateTask).toHaveBeenCalledTimes(1);
       expect(updateTask.mock.calls[0][1]).toMatchObject({ status: 'someday' });
+    });
+
+    it('creates and assigns a Someday section without leaving Inbox Processing', async () => {
+      const root = await openFlow();
+
+      await pressAsync(root, 'inbox.someday');
+      await pressAsync(root, '+ New section…');
+      act(() => {
+        root.findByProps({ accessibilityLabel: 'Section name' }).props.onChangeText('Career ideas');
+      });
+      await act(async () => {
+        root.findByProps({ accessibilityLabel: 'common.save' }).props.onPress();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(storeState.updateSettings).toHaveBeenCalledTimes(1);
+      const created = storeState.updateSettings.mock.calls[0][0].gtd.viewSections.someday[0];
+      expect(created).toMatchObject({ title: 'Career ideas', order: 0 });
+
+      await pressAsync(root, 'File it');
+      expect(updateTask.mock.calls[0][1]).toMatchObject({
+        status: 'someday',
+        viewSectionIds: { someday: created.id },
+      });
     });
 
     it('files Reference straight from the first question', async () => {

@@ -1556,7 +1556,7 @@ export const svOverrides: Record<string, string> = {
         'viewSections.somedaySections': 'Någon gång-sektioner',
         'viewSections.somedaySection': 'Någon gång-sektion',
         'viewSections.noSection': 'Ingen sektion',
-        'viewSections.add': 'Lägg till sektion',
+        'viewSections.add': 'Ny sektion…',
         'viewSections.rename': 'Byt namn på sektion',
         'viewSections.manageHint': 'Ordna idéer utan att ändra deras projekt eller projektsektioner.',
         'viewSections.nameHint': 'Sektionsnamn',

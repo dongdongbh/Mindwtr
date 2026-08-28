@@ -9,6 +9,7 @@ import {
     DEFAULT_AREA_COLOR,
     formatI18nTemplate,
     getPersonNameKey,
+    sortViewSectionDefinitions,
     type Area,
     type Person,
     useTaskStore,
@@ -21,12 +22,14 @@ import { CompactText } from '@/components/compact-text';
 import { useSettingsLocalization, useSettingsScrollContent } from './settings.hooks';
 import { SettingsTopBar } from './settings.shell';
 import { styles } from './settings.styles';
+import { SomedaySectionManager } from '../views/someday-section-manager';
 
-type ManageSectionKey = 'areas' | 'people' | 'contexts' | 'tags';
+type ManageSectionKey = 'areas' | 'people' | 'somedaySections' | 'contexts' | 'tags';
 const MANAGE_OPEN_SECTIONS_STORAGE_KEY = 'mindwtr:settings:manage:openSections';
 const DEFAULT_OPEN_SECTIONS: Record<ManageSectionKey, boolean> = {
     areas: false,
     people: false,
+    somedaySections: false,
     contexts: false,
     tags: false,
 };
@@ -52,6 +55,7 @@ const normalizeOpenSections = (value: unknown): Record<ManageSectionKey, boolean
     return {
         areas: record.areas === true,
         people: record.people === true,
+        somedaySections: record.somedaySections === true,
         contexts: record.contexts === true,
         tags: record.tags === true,
     };
@@ -123,6 +127,10 @@ export function ManageSettingsScreen() {
     const sortedPeople = useMemo(
         () => [...people].sort((a, b) => baseTextCollator.compare(a.name, b.name)),
         [people],
+    );
+    const somedaySections = useMemo(
+        () => sortViewSectionDefinitions(settings.gtd?.viewSections?.someday),
+        [settings.gtd?.viewSections?.someday],
     );
     const assignedTaskCountByPerson = useMemo(() => {
         const counts = new Map<string, number>();
@@ -531,6 +539,51 @@ export function ManageSettingsScreen() {
                         <AreaRow key={area.id} area={area} />
                     ))}
                     <NewAreaRow />
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                    testID="manage-section-toggle-someday-sections"
+                    title={resolveText('viewSections.somedaySections', 'Someday sections')}
+                    count={somedaySections.length}
+                    open={openSections.somedaySections}
+                    onToggle={() => setOpenSections((current) => ({ ...current, somedaySections: !current.somedaySections }))}
+                    tc={tc}
+                >
+                    {somedaySections.length === 0 ? (
+                        <View style={styles.settingRow}>
+                            <Text style={[styles.settingDescription, { color: tc.secondaryText }]}>
+                                {resolveText('viewSections.manageHint', 'Organize ideas without changing their projects or project sections.')}
+                            </Text>
+                        </View>
+                    ) : (
+                        <SomedaySectionManager
+                            definitions={somedaySections}
+                            onDelete={(id) => {
+                                const section = somedaySections.find((candidate) => candidate.id === id);
+                                if (!section) return;
+                                confirmDelete(section.title, () => void updateSettings({
+                                    gtd: {
+                                        ...(settings.gtd ?? {}),
+                                        viewSections: {
+                                            ...(settings.gtd?.viewSections ?? {}),
+                                            someday: somedaySections.filter((candidate) => candidate.id !== id),
+                                        },
+                                    },
+                                }));
+                            }}
+                            onChange={(definitions) => updateSettings({
+                                gtd: {
+                                    ...(settings.gtd ?? {}),
+                                    viewSections: {
+                                        ...(settings.gtd?.viewSections ?? {}),
+                                        someday: definitions,
+                                    },
+                                },
+                            })}
+                            t={t}
+                            themeColors={tc}
+                        />
+                    )}
                 </CollapsibleSection>
 
                 <CollapsibleSection

@@ -114,6 +114,7 @@ function QuickPanelHarness(overrides: Partial<InboxProcessingQuickPanelProps> = 
             setDelegateFollowUp={noop}
             onSendDelegateRequest={noop}
             onCreatePerson={noop}
+            onCreateSomedaySection={noop as InboxProcessingQuickPanelProps['onCreateSomedaySection']}
             toggleContext={noop}
             toggleTag={noop}
             convertToProject={false}
@@ -173,6 +174,7 @@ function WizardHarness({ processingStep = 'refine' as ProcessingStep, ...overrid
             handleConfirmReference={noop}
             handleConfirmSomeday={noop}
             onCreatePerson={noop}
+            onCreateSomedaySection={noop as InboxProcessingWizardProps['onCreateSomedaySection']}
             customContext=""
             setCustomContext={noop}
             addCustomContext={noop}
@@ -252,6 +254,7 @@ describe('InboxProcessingQuickPanel draft editing', () => {
 
         expect(getByText('taskEdit.areaLabel')).toBeInTheDocument();
         expect(getByText('taskEdit.projectLabel')).toBeInTheDocument();
+        expect(getByText('+ New section…')).toBeInTheDocument();
     });
 
     it('offers the same Area and Project controls before incubating an item', () => {
@@ -261,6 +264,7 @@ describe('InboxProcessingQuickPanel draft editing', () => {
 
         expect(getByText('taskEdit.areaLabel')).toBeInTheDocument();
         expect(getByText('taskEdit.projectLabel')).toBeInTheDocument();
+        expect(getByText('+ New section…')).toBeInTheDocument();
     });
 });
 
@@ -295,6 +299,7 @@ describe('InboxProcessingWizard draft editing', () => {
 
         expect(getByText('taskEdit.areaLabel')).toBeInTheDocument();
         expect(getByText('taskEdit.projectLabel')).toBeInTheDocument();
+        expect(getByText('+ New section…')).toBeInTheDocument();
         fireEvent.click(getByRole('button', { name: 'process.someday' }));
         expect(handleConfirmSomeday).toHaveBeenCalledTimes(1);
     });
@@ -309,5 +314,6 @@ describe('InboxProcessingWizard draft editing', () => {
 
         expect(getByText('taskEdit.areaLabel')).toBeInTheDocument();
         expect(getByText('taskEdit.projectLabel')).toBeInTheDocument();
+        expect(getByText('+ New section…')).toBeInTheDocument();
     });
 });

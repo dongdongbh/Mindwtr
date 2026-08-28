@@ -104,6 +104,7 @@ function TaskEditModalInner({
         addSection,
         addArea,
         addPerson,
+        updateSettings,
         deleteTask,
         restoreTask,
         allContexts = [],
@@ -126,6 +127,7 @@ function TaskEditModalInner({
             addSection: state.addSection,
             addArea: state.addArea,
             addPerson: state.addPerson,
+            updateSettings: state.updateSettings,
             deleteTask: state.deleteTask,
             restoreTask: state.restoreTask,
             allContexts: derived.allContexts,
@@ -403,6 +405,37 @@ function TaskEditModalInner({
             setTaskViewSectionId(taskEditDraft?.draft.viewSectionIds, 'someday', sectionId),
         );
     }, [setDraftField, taskEditDraft?.draft.viewSectionIds]);
+    const handleCreateSomedaySection = useCallback(async (title: string) => {
+        const trimmed = title.trim();
+        if (!trimmed) return null;
+        const currentSections = sortViewSectionDefinitions(settings.gtd?.viewSections?.someday);
+        const existing = currentSections.find((section) => section.title.toLowerCase() === trimmed.toLowerCase());
+        if (existing) return existing.id;
+        const id = `someday-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        const maxOrder = currentSections.reduce(
+            (maximum, section) => Number.isFinite(section.order) ? Math.max(maximum, section.order) : maximum,
+            -1,
+        );
+        try {
+            await updateSettings({
+                gtd: {
+                    ...(settings.gtd ?? {}),
+                    viewSections: {
+                        ...(settings.gtd?.viewSections ?? {}),
+                        someday: [...currentSections, { id, title: trimmed, order: maxOrder + 1 }],
+                    },
+                },
+            });
+            return id;
+        } catch {
+            showToast({
+                title: tFallback(t, 'common.error', 'Error'),
+                message: tFallback(t, 'viewSections.updateFailed', 'Could not update Someday sections.'),
+                tone: 'error',
+            });
+            return null;
+        }
+    }, [settings.gtd, showToast, t, updateSettings]);
 
     const editedTaskProjectId = taskEditDraft?.draft.projectId;
     const editedTaskSectionId = taskEditDraft?.draft.sectionId;
@@ -989,6 +1022,7 @@ function TaskEditModalInner({
                                 somedaySections={somedaySections}
                                 selectedSomedaySectionId={selectedSomedaySectionId}
                                 onSomedaySectionChange={handleSomedaySectionChange}
+                                onCreateSomedaySection={handleCreateSomedaySection}
                                 schedulingFields={schedulingFields}
                                 organizationFields={organizationFields}
                                 detailsFields={detailsFields}

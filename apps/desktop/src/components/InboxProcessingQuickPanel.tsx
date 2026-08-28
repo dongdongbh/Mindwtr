@@ -1,6 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react';
 import { ArrowRight, BookOpen, CheckCircle, ClipboardList, Clock, Hourglass, Trash2, User, X } from 'lucide-react';
-import { DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimateLabel, resolveTaskViewSection, safeFormatDate, safeParseDate, setTaskViewSectionId, sortViewSectionDefinitions, tFallback, type AppData, type Project, type Task, type TaskDraft, type TaskDraftSetter, type TaskPriority, type TimeEstimate,
+import { DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimateLabel, safeFormatDate, safeParseDate, setTaskViewSectionId, tFallback, type AppData, type Project, type Task, type TaskDraft, type TaskDraftSetter, type TaskPriority, type TimeEstimate,
     numericTextCollator,
 } from '@mindwtr/core';
 
@@ -24,6 +24,7 @@ import { AreaSelector } from './ui/AreaSelector';
 import { ProjectSelector } from './ui/ProjectSelector';
 import { DateField } from './ui/DateField';
 import { QuickDateChips } from './QuickDateChips';
+import { SomedaySectionSelector } from './ui/SomedaySectionSelector';
 
 type QuickActionabilityChoice = 'actionable' | 'later' | 'trash' | 'someday' | 'reference' | 'incubate';
 type QuickTwoMinuteChoice = 'yes' | 'no';
@@ -59,6 +60,7 @@ export type InboxProcessingQuickPanelProps = {
     setDelegateFollowUp: (value: string) => void;
     onSendDelegateRequest: () => void;
     onCreatePerson: (name: string) => void | Promise<void>;
+    onCreateSomedaySection: (title: string) => Promise<string | null>;
     toggleContext: (ctx: string) => void;
     toggleTag: (tag: string) => void;
     convertToProject: boolean;
@@ -129,6 +131,7 @@ export function InboxProcessingQuickPanel({
     setDelegateFollowUp,
     onSendDelegateRequest,
     onCreatePerson,
+    onCreateSomedaySection,
     toggleContext,
     toggleTag,
     convertToProject,
@@ -188,29 +191,25 @@ export function InboxProcessingQuickPanel({
     const setSelectedTimeEstimate = (value: TimeEstimate | undefined) => setField('timeEstimate', value ?? '');
     const setSelectedProjectId = (value: string | null) => setField('projectId', value ?? '');
     const setSelectedAreaId = (value: string | null) => setField('areaId', value ?? '');
-    const somedaySections = sortViewSectionDefinitions(settings?.gtd?.viewSections?.someday ?? []);
-    const selectedSomedaySection = resolveTaskViewSection(draft, 'someday', somedaySections);
-    const somedaySectionField = somedaySections.length > 0 ? (
+    const somedaySections = settings?.gtd?.viewSections?.someday ?? [];
+    const somedaySectionField = (
         <div className="space-y-1">
             <label className="text-[11px] text-muted-foreground font-medium">
                 {tFallback(t, 'viewSections.somedaySection', 'Someday section')}
             </label>
-            <select
-                aria-label={tFallback(t, 'viewSections.somedaySection', 'Someday section')}
-                value={selectedSomedaySection?.id ?? ''}
-                onChange={(event) => setField(
+            <SomedaySectionSelector
+                sections={somedaySections}
+                value={draft.viewSectionIds?.someday}
+                onChange={(sectionId) => setField(
                     'viewSectionIds',
-                    setTaskViewSectionId(draft.viewSectionIds, 'someday', event.target.value || undefined),
+                    setTaskViewSectionId(draft.viewSectionIds, 'someday', sectionId),
                 )}
+                onCreateSection={onCreateSomedaySection}
+                t={t}
                 className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-            >
-                <option value="">{tFallback(t, 'viewSections.noSection', 'No section')}</option>
-                {somedaySections.map((section) => (
-                    <option key={section.id} value={section.id}>{section.title}</option>
-                ))}
-            </select>
+            />
         </div>
-    ) : null;
+    );
 
     const showActionFields = actionabilityChoice === 'actionable';
     const showLaterFields = actionabilityChoice === 'later';

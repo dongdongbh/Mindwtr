@@ -12,6 +12,7 @@ import {
     parseProcessInboxTitleInput,
     resolveProcessInboxContainerFields,
     setTaskViewSectionId,
+    sortViewSectionDefinitions,
     skipCurrentProcessInboxTask,
     startProcessInboxSession,
     tFallback,
@@ -87,6 +88,7 @@ export function useInboxProcessingController({
     const showToast = useUiStore((state) => state.showToast);
     const people = useTaskStore((state) => state.people);
     const addPerson = useTaskStore((state) => state.addPerson);
+    const updateSettings = useTaskStore((state) => state.updateSettings);
     const personOptions = useMemo(() => getPersonOptionNames(people, tasks), [people, tasks]);
     const {
         processingMode,
@@ -162,7 +164,7 @@ export function useInboxProcessingController({
         areas,
         settings,
     });
-    const { showAreaField, showContextsField, showProjectField, showTagsField } = visibility;
+    const { showAreaField, showContextsField, showTagsField } = visibility;
     // One options bag for every parse in this flow, from the same builder the
     // capture surfaces use — a hand-rolled bag is how surfaces drift apart.
     const quickAddParseOptions = useMemo(
@@ -398,11 +400,7 @@ export function useInboxProcessingController({
             await applyWorkflowEvent({ type: 'reference', fields: buildSelectionFields() });
             return;
         }
-        if (processingMode === 'guided' && (
-            showProjectField
-            || showAreaField
-            || (settings?.gtd?.viewSections?.someday?.length ?? 0) > 0
-        )) {
+        if (processingMode === 'guided') {
             goToStep('someday');
             return;
         }
@@ -413,10 +411,7 @@ export function useInboxProcessingController({
         goToStep,
         processingMode,
         processingTask,
-        settings?.gtd?.viewSections?.someday?.length,
-        showAreaField,
         showContextsField,
-        showProjectField,
         showTagsField,
     ]);
 
@@ -818,6 +813,36 @@ export function useInboxProcessingController({
         await addPerson(trimmed);
     }, [addPerson]);
 
+    const handleCreateSomedaySection = useCallback(async (title: string) => {
+        const trimmed = title.trim();
+        if (!trimmed) return null;
+        const currentSections = sortViewSectionDefinitions(settings?.gtd?.viewSections?.someday);
+        const existing = currentSections.find((section) => section.title.toLowerCase() === trimmed.toLowerCase());
+        if (existing) return existing.id;
+        const id = globalThis.crypto?.randomUUID?.()
+            ?? `someday-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const maxOrder = currentSections.reduce(
+            (maximum, section) => Number.isFinite(section.order) ? Math.max(maximum, section.order) : maximum,
+            -1,
+        );
+        try {
+            await updateSettings({
+                gtd: {
+                    ...(settings?.gtd ?? {}),
+                    viewSections: {
+                        ...(settings?.gtd?.viewSections ?? {}),
+                        someday: [...currentSections, { id, title: trimmed, order: maxOrder + 1 }],
+                    },
+                },
+            });
+            return id;
+        } catch (error) {
+            reportError('Failed to create Someday section during Inbox Processing', error);
+            showToast(tFallback(t, 'viewSections.updateFailed', 'Could not update Someday sections.'), 'error');
+            return null;
+        }
+    }, [settings?.gtd, showToast, t, updateSettings]);
+
     const handleQuickSubmit = useCallback(async () => {
         handleScheduleTimeCommit();
         handleDueTimeCommit();
@@ -916,6 +941,7 @@ export function useInboxProcessingController({
             setDelegateFollowUp,
             onSendDelegateRequest: handleSendDelegateRequest,
             onCreatePerson: handleCreatePerson,
+            onCreateSomedaySection: handleCreateSomedaySection,
             toggleContext,
             toggleTag,
             convertToProject,
@@ -967,6 +993,7 @@ export function useInboxProcessingController({
         handleConfirmReference,
         handleConfirmSomeday,
         onCreatePerson: handleCreatePerson,
+        onCreateSomedaySection: handleCreateSomedaySection,
         customContext,
         setCustomContext,
         addCustomContext,

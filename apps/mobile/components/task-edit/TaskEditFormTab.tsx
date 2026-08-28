@@ -22,6 +22,7 @@ import type { TaskDraft } from '@mindwtr/core/task-draft';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { CollapsibleSection } from './CollapsibleSection';
 import type { CopilotPart } from './use-task-edit-copilot';
+import { SomedaySectionPicker } from '../someday-section-picker';
 
 type TaskEditFormTabProps = {
     t: (key: string) => string;
@@ -47,6 +48,7 @@ type TaskEditFormTabProps = {
     somedaySections?: readonly ViewSectionDefinition[];
     selectedSomedaySectionId?: string;
     onSomedaySectionChange?: (sectionId: string | undefined) => void;
+    onCreateSomedaySection?: (title: string) => Promise<string | null>;
     schedulingFields: TaskEditorFieldId[];
     organizationFields: TaskEditorFieldId[];
     detailsFields: TaskEditorFieldId[];
@@ -96,6 +98,7 @@ function TaskEditFormTabComponent({
     somedaySections = [],
     selectedSomedaySectionId,
     onSomedaySectionChange,
+    onCreateSomedaySection,
     schedulingFields,
     organizationFields,
     detailsFields,
@@ -492,37 +495,22 @@ function TaskEditFormTabComponent({
                         <React.Fragment key={fieldId}>{renderField(fieldId)}</React.Fragment>
                     ))}
 
-                    {draft?.status === 'someday' && somedaySections.length > 0 && onSomedaySectionChange ? (
+                    {draft?.status === 'someday' && onSomedaySectionChange && onCreateSomedaySection ? (
                         <View style={styles.formGroup}>
                             <Text style={[styles.label, { color: tc.secondaryText }]}>
                                 {tFallback(t, 'viewSections.somedaySection', 'Someday section')}
                             </Text>
-                            <View style={styles.statusContainer}>
-                                {[{ id: '', title: tFallback(t, 'viewSections.noSection', 'No section') }, ...somedaySections]
-                                    .map((section) => {
-                                        const selected = (selectedSomedaySectionId ?? '') === section.id;
-                                        return (
-                                            <TouchableOpacity
-                                                key={section.id || 'no-section'}
-                                                accessibilityRole="button"
-                                                accessibilityLabel={section.title}
-                                                accessibilityState={{ selected }}
-                                                onPress={() => onSomedaySectionChange(section.id || undefined)}
-                                                style={[
-                                                    styles.statusChip,
-                                                    {
-                                                        backgroundColor: selected ? tc.tint : tc.filterBg,
-                                                        borderColor: selected ? tc.tint : tc.border,
-                                                    },
-                                                ]}
-                                            >
-                                                <Text style={[styles.statusText, { color: selected ? tc.onTint : tc.text }]}>
-                                                    {section.title}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        );
-                                    })}
-                            </View>
+                            <SomedaySectionPicker
+                                sections={somedaySections}
+                                selectedId={selectedSomedaySectionId}
+                                onSelect={onSomedaySectionChange}
+                                onCreate={onCreateSomedaySection}
+                                t={t}
+                                themeColors={tc}
+                                optionsStyle={styles.statusContainer}
+                                optionStyle={styles.statusChip}
+                                optionTextStyle={styles.statusText}
+                            />
                         </View>
                     ) : null}
 

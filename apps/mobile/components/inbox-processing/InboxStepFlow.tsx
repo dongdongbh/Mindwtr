@@ -34,6 +34,7 @@ import { InboxOrganizationSection } from './InboxOrganizationSection';
 import { InboxProjectSection } from './InboxProjectSection';
 import { InboxSchedulingSection } from './InboxSchedulingSection';
 import { InboxCaptureCard } from './InboxCaptureCard';
+import { SomedaySectionPicker } from '../someday-section-picker';
 import type { InboxProcessingMode } from '@/lib/view-state/inbox-processing-mode';
 import type { useInboxProcessingController } from './useInboxProcessingController';
 
@@ -375,51 +376,27 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
     />
   );
 
-  const renderSomedaySection = () => controller.somedaySections.length > 0 ? (
+  const renderSomedaySection = () => (
     <View style={styles.stepChoiceSection}>
       <Text style={[styles.stepHint, { color: tc.secondaryText }]}>
         {tFallback(t, 'viewSections.somedaySection', 'Someday section')}
       </Text>
-      <View style={styles.stepSecondaryRow}>
-        {[
-          { id: '', title: tFallback(t, 'viewSections.noSection', 'No section') },
-          ...controller.somedaySections,
-        ].map((section) => {
-          const selected = controller.somedaySections.some(
-            (candidate) => candidate.id === controller.selectedSomedaySectionId,
-          )
-            ? controller.selectedSomedaySectionId === section.id
-            : section.id === '';
-          return (
-            <TouchableOpacity
-              key={section.id || 'no-section'}
-              accessibilityRole="button"
-              accessibilityState={{ selected }}
-              onPress={() => controller.setSelectedSomedaySectionId(section.id || undefined)}
-              style={[
-                styles.stepSecondaryButton,
-                {
-                  backgroundColor: selected ? tc.tint : tc.cardBg,
-                  borderColor: selected ? tc.tint : tc.border,
-                },
-              ]}
-            >
-              <Text style={[styles.stepSecondaryText, { color: selected ? tc.onTint : tc.text }]}>
-                {section.title}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+      <SomedaySectionPicker
+        sections={controller.somedaySections}
+        selectedId={controller.selectedSomedaySectionId}
+        onSelect={controller.setSelectedSomedaySectionId}
+        onCreate={controller.createSomedaySection}
+        t={t}
+        themeColors={tc}
+        optionsStyle={styles.stepSecondaryRow}
+        optionStyle={styles.stepSecondaryButton}
+        optionTextStyle={styles.stepSecondaryText}
+      />
     </View>
-  ) : null;
+  );
 
   const chooseSomeday = () => {
-    if (controller.showProjectSection || controller.somedaySections.length > 0) {
-      setActionabilityChoice('someday');
-      return;
-    }
-    void commit('someday', () => handleNotActionable('someday'));
+    setActionabilityChoice('someday');
   };
 
   const renderStep = () => {

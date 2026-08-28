@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { ArrowRight, BookOpen, Check, CheckCircle, ChevronLeft, ClipboardList, Clock, Hourglass, Loader2, Sparkles, Trash2, User, X } from 'lucide-react';
-import { DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimateLabel, resolveTaskViewSection, safeFormatDate, safeParseDate, setTaskViewSectionId, sortViewSectionDefinitions, tFallback, type AppData, type Area, type Project, type Task, type TaskDraft, type TaskDraftSetter, type TaskPriority, type TimeEstimate,
+import { DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimateLabel, safeFormatDate, safeParseDate, setTaskViewSectionId, tFallback, type AppData, type Area, type Project, type Task, type TaskDraft, type TaskDraftSetter, type TaskPriority, type TimeEstimate,
     numericTextCollator,
 } from '@mindwtr/core';
 
@@ -26,6 +26,7 @@ import { AreaSelector } from './ui/AreaSelector';
 import { ProjectSelector } from './ui/ProjectSelector';
 import { DateField } from './ui/DateField';
 import { QuickDateChips } from './QuickDateChips';
+import { SomedaySectionSelector } from './ui/SomedaySectionSelector';
 
 export type ProcessingStep = 'refine' | 'actionable' | 'projectcheck' | 'twomin' | 'decide' | 'context' | 'reference' | 'someday' | 'project' | 'delegate';
 
@@ -69,6 +70,7 @@ export type InboxProcessingWizardProps = {
     handleConfirmReference: () => void;
     handleConfirmSomeday: () => void;
     onCreatePerson: (name: string) => void | Promise<void>;
+    onCreateSomedaySection: (title: string) => Promise<string | null>;
     customContext: string;
     setCustomContext: (value: string) => void;
     addCustomContext: (value?: string) => void;
@@ -143,6 +145,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     handleConfirmReference,
     handleConfirmSomeday,
     onCreatePerson,
+    onCreateSomedaySection,
     customContext,
     setCustomContext,
     addCustomContext,
@@ -218,29 +221,25 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     const setSelectedTimeEstimate = (value: TimeEstimate | undefined) => setField('timeEstimate', value ?? '');
     const setSelectedProjectId = (value: string | null) => setField('projectId', value ?? '');
     const setSelectedAreaId = (value: string | null) => setField('areaId', value ?? '');
-    const somedaySections = sortViewSectionDefinitions(settings?.gtd?.viewSections?.someday ?? []);
-    const selectedSomedaySection = resolveTaskViewSection(draft, 'someday', somedaySections);
-    const somedaySectionField = somedaySections.length > 0 ? (
+    const somedaySections = settings?.gtd?.viewSections?.someday ?? [];
+    const somedaySectionField = (
         <div className="space-y-1">
             <label className="text-xs text-muted-foreground font-medium">
                 {tFallback(t, 'viewSections.somedaySection', 'Someday section')}
             </label>
-            <select
-                aria-label={tFallback(t, 'viewSections.somedaySection', 'Someday section')}
-                value={selectedSomedaySection?.id ?? ''}
-                onChange={(event) => setField(
+            <SomedaySectionSelector
+                sections={somedaySections}
+                value={draft.viewSectionIds?.someday}
+                onChange={(sectionId) => setField(
                     'viewSectionIds',
-                    setTaskViewSectionId(draft.viewSectionIds, 'someday', event.target.value || undefined),
+                    setTaskViewSectionId(draft.viewSectionIds, 'someday', sectionId),
                 )}
+                onCreateSection={onCreateSomedaySection}
+                t={t}
                 className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-            >
-                <option value="">{tFallback(t, 'viewSections.noSection', 'No section')}</option>
-                {somedaySections.map((section) => (
-                    <option key={section.id} value={section.id}>{section.title}</option>
-                ))}
-            </select>
+            />
         </div>
-    ) : null;
+    );
 
     // The same clarify action the task editor offers, on the task being
     // processed (#1022). Copilot stays off: the wizard makes no background AI

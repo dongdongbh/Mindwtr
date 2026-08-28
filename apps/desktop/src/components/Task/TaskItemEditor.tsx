@@ -4,7 +4,6 @@ import {
     filterProjectsBySelectedArea,
     resolveAutoTextDirection,
     setTaskViewSectionId,
-    sortViewSectionDefinitions,
     tFallback,
     type Area,
     type Project,
@@ -19,6 +18,7 @@ import {
 import { AreaSelector } from '../ui/AreaSelector';
 import { ProjectSelector } from '../ui/ProjectSelector';
 import { SectionSelector } from '../ui/SectionSelector';
+import { SomedaySectionSelector } from '../ui/SomedaySectionSelector';
 import { TaskInput, type TaskInputAcceptedSuggestion } from './TaskInput';
 import { cn } from '../../lib/utils';
 import { QUICK_ADD_FIELD_TOKENS, QuickAddTokenBadge, taskEditorLabelClassName } from './task-editor-label';
@@ -43,6 +43,7 @@ interface TaskItemEditorProps {
     onCreateProject: (title: string, areaId?: string) => Promise<string | null>;
     onCreateArea?: (name: string) => Promise<string | null>;
     onCreateSection?: (title: string) => Promise<string | null>;
+    onCreateSomedaySection: (title: string) => Promise<string | null>;
     organizerFields: TaskEditorFieldId[];
     basicFieldsBeforeOrganizers: TaskEditorFieldId[];
     basicFieldsAfterOrganizers: TaskEditorFieldId[];
@@ -107,6 +108,7 @@ export function TaskItemEditor({
     onCreateProject,
     onCreateArea,
     onCreateSection,
+    onCreateSomedaySection,
     organizerFields,
     basicFieldsBeforeOrganizers,
     basicFieldsAfterOrganizers,
@@ -161,10 +163,6 @@ export function TaskItemEditor({
         numericTextCollator.compare(left, right);
     const sortedProjects = [...projects].sort((a, b) => compareLabels(a.title, b.title));
     const sortedAreas = [...areas].sort((a, b) => compareLabels(a.name, b.name));
-    const sortedSomedaySections = sortViewSectionDefinitions(somedaySections);
-    const selectedSomedaySectionId = sortedSomedaySections.some((section) => section.id === editViewSectionIds?.someday)
-        ? editViewSectionIds?.someday ?? ''
-        : '';
     const projectFilterAreaId = editAreaId || undefined;
     const filteredProjects = filterProjectsBySelectedArea(sortedProjects, projectFilterAreaId);
     const [schedulingOpen, setSchedulingOpen] = useState(sectionOpenDefaults.scheduling);
@@ -439,21 +437,18 @@ export function TaskItemEditor({
                     <label className={taskEditorLabelClassName} htmlFor="task-edit-someday-section">
                         {tFallback(t, 'viewSections.somedaySection', 'Someday section')}
                     </label>
-                    <select
+                    <SomedaySectionSelector
                         id="task-edit-someday-section"
-                        aria-label={tFallback(t, 'viewSections.somedaySection', 'Someday section')}
-                        value={selectedSomedaySectionId}
-                        onChange={(event) => setField(
+                        sections={somedaySections}
+                        value={editViewSectionIds?.someday}
+                        onChange={(sectionId) => setField(
                             'viewSectionIds',
-                            setTaskViewSectionId(editViewSectionIds, 'someday', event.target.value || undefined),
+                            setTaskViewSectionId(editViewSectionIds, 'someday', sectionId),
                         )}
+                        onCreateSection={onCreateSomedaySection}
+                        t={t}
                         className="w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-                    >
-                        <option value="">{tFallback(t, 'viewSections.noSection', 'No section')}</option>
-                        {sortedSomedaySections.map((section) => (
-                            <option key={section.id} value={section.id}>{section.title}</option>
-                        ))}
-                    </select>
+                    />
                 </div>
             )}
             {basicFieldsAfterOrganizers.length > 0 && (

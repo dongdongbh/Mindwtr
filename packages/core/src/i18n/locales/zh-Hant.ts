@@ -1453,7 +1453,7 @@ export const zhHant: Record<string, string> = {
         'viewSections.somedaySections': '將來/也許分區',
         'viewSections.somedaySection': '將來/也許分區',
         'viewSections.noSection': '無分區',
-        'viewSections.add': '新增分區',
+        'viewSections.add': '新增分區…',
         'viewSections.rename': '重新命名分區',
         'viewSections.manageHint': '整理想法，而不更改其專案或專案分區。',
         'viewSections.nameHint': '分區名稱',

@@ -1556,7 +1556,7 @@ export const faOverrides: Record<string, string> = {
         'viewSections.somedaySections': 'بخش‌های یک روزی/شاید',
         'viewSections.somedaySection': 'بخش یک روزی/شاید',
         'viewSections.noSection': 'بدون بخش',
-        'viewSections.add': 'افزودن بخش',
+        'viewSections.add': 'بخش جدید…',
         'viewSections.rename': 'تغییر نام بخش',
         'viewSections.manageHint': 'ایده‌ها را بدون تغییر پروژه یا بخش پروژه‌شان مرتب کنید.',
         'viewSections.nameHint': 'نام بخش',
