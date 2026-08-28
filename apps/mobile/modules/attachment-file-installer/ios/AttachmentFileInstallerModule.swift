@@ -28,6 +28,11 @@ enum AttachmentInstallOutcome {
   case conflict(preservedUrl: URL)
 }
 
+enum ImmutableAttachmentPublishOutcome {
+  case published
+  case alreadyExists
+}
+
 struct AttachmentFileHashSnapshot {
   let sha256: String
   let size: UInt64
@@ -268,6 +273,82 @@ final class AttachmentFileInstallerEngine {
         )
       }
     }
+  }
+
+  /** File Sync create-no-replace publication without putting the managed-local
+   * installer's journal/candidate/quarantine artifacts in the shared folder.
+   * Exact scratch ownership and restart recovery are device-local in JS. */
+  func publishImmutable(
+    stagedInput: URL,
+    targetInput: URL,
+    expectedStagedSha256: String
+  ) throws -> ImmutableAttachmentPublishOutcome {
+    guard isSha256(expectedStagedSha256) else {
+      throw installerError("Expected staged attachment SHA-256 is invalid")
+    }
+    try ensureDirectory(targetRoot)
+    try requireDirectory(targetRoot, label: "File Sync attachment directory")
+    try rejectSymlinkInput(stagedInput, label: "staged attachment")
+    try rejectSymlinkInput(targetInput, label: "target attachment")
+    let staged = Self.canonical(stagedInput)
+    let target = Self.canonical(targetInput)
+    try validateTargetPath(target)
+    try validateSourcePath(staged)
+    guard staged != target else {
+      throw installerError("Immutable attachment stage and target must differ")
+    }
+
+    return try withExclusiveLock(targetRoot.appendingPathComponent(installerLockName)) {
+      try self.requireDirectory(self.targetRoot, label: "File Sync attachment directory")
+      try self.rejectSymlinkInput(stagedInput, label: "staged attachment")
+      try self.rejectSymlinkInput(targetInput, label: "target attachment")
+      guard Self.canonical(stagedInput) == staged, Self.canonical(targetInput) == target else {
+        throw installerError("Immutable attachment path changed during validation")
+      }
+      try self.requireRegularFile(staged, label: "staged attachment")
+      let before = try self.publicationIdentity(staged)
+      let digest = try self.sha256(staged)
+      let after = try self.publicationIdentity(staged)
+      guard before == after, digest == expectedStagedSha256 else {
+        throw installerError("Staged attachment changed before native publication")
+      }
+      guard try self.nodeKind(target) == .missing else { return .alreadyExists }
+      guard try self.moveExclusive(from: staged, to: target) else { return .alreadyExists }
+      try self.syncDirectory(self.targetRoot)
+      guard
+        try self.nodeKind(target) == .regularFile,
+        try self.sha256(target) == expectedStagedSha256
+      else {
+        throw installerError("Published attachment generation failed verification")
+      }
+      return .published
+    }
+  }
+
+  private struct PublicationIdentity: Equatable {
+    let device: UInt64
+    let inode: UInt64
+    let size: Int64
+    let modifiedSeconds: Int64
+    let modifiedNanoseconds: Int64
+    let changedSeconds: Int64
+    let changedNanoseconds: Int64
+  }
+
+  private func publicationIdentity(_ file: URL) throws -> PublicationIdentity {
+    var value = stat()
+    guard Darwin.lstat(file.path, &value) == 0, value.st_mode & S_IFMT == S_IFREG else {
+      throw installerError("Attachment path is not a regular file")
+    }
+    return PublicationIdentity(
+      device: UInt64(value.st_dev),
+      inode: UInt64(value.st_ino),
+      size: Int64(value.st_size),
+      modifiedSeconds: Int64(value.st_mtimespec.tv_sec),
+      modifiedNanoseconds: Int64(value.st_mtimespec.tv_nsec),
+      changedSeconds: Int64(value.st_ctimespec.tv_sec),
+      changedNanoseconds: Int64(value.st_ctimespec.tv_nsec)
+    )
   }
 
   private func installWhenAbsent(
@@ -989,19 +1070,18 @@ public final class AttachmentFileInstallerModule: Module {
       let outcome = try AttachmentFileInstallerEngine(
         targetRoot: targetRoot,
         sourceRoots: [targetRoot]
-      ).install(
+      ).publishImmutable(
         stagedInput: staged,
         targetInput: target,
-        expected: .absent,
-        expectedDownloadSha256: try Self.parseSha256(
+        expectedStagedSha256: try Self.parseSha256(
           expectedStagedSha256,
           label: "Expected staged attachment"
         )
       )
       switch outcome {
-      case .installed:
+      case .published:
         return ["status": "published"]
-      case .conflict:
+      case .alreadyExists:
         return ["status": "alreadyExists"]
       }
     }

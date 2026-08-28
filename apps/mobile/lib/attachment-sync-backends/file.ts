@@ -35,8 +35,14 @@ import {
   writeBytesSafely,
 } from '../attachment-sync-utils';
 import {
+  abandonFileSyncAttachmentPublication,
+  clearFileSyncAttachmentPublicationRecovery,
+  completeFileSyncAttachmentPublication,
   hashAttachmentFileGeneration,
   publishImmutableAttachmentFileGeneration,
+  recoverFileSyncAttachmentPublications,
+  reserveFileSyncAttachmentPublication,
+  retainFileSyncAttachmentPublicationForInvalidTarget,
 } from '../attachment-file-installer';
 import {
   assertAttachmentSyncNotAborted,
@@ -72,6 +78,13 @@ export const syncFileAttachments = async (
   assertAttachmentSyncNotAborted(signal);
   const syncDir = await resolveFileSyncDir(syncPath);
   if (!syncDir) return false;
+
+  // The folder lease is already held by the sync cycle. Recover only exact
+  // scratch paths durably reserved by this device; never infer ownership by
+  // scanning the shared attachments directory.
+  if (syncDir.type === 'file') {
+    await recoverFileSyncAttachmentPublications(syncDir.attachmentsDirUri);
+  }
 
   assertAttachmentSyncNotAborted(signal);
   const attachmentsDir = await getAttachmentsDir();
@@ -298,36 +311,6 @@ export const syncFileAttachments = async (
         const targetUri = `${syncDir.attachmentsDirUri}${filename}`;
         const wireHash = await computeSha256Hex(wireBytes);
         if (!wireHash) throw new Error('File Sync attachment stage could not be hashed');
-        let stageSequence = 0;
-        const createVerifiedStage = async (): Promise<string> => {
-          const separator = targetUri.lastIndexOf('/') + 1;
-          const parentUri = targetUri.slice(0, separator);
-          for (let attempt = 0; attempt < 8; attempt += 1) {
-            stageSequence += 1;
-            const stagedUri = `${parentUri}.mindwtr-generation-stage-${Date.now().toString(36)}-${stageSequence}.tmp`;
-            try {
-              new FileSystem.File(stagedUri).create({ overwrite: false });
-            } catch (createError) {
-              if (attempt < 7) continue;
-              throw new Error('File Sync attachment publication stage could not be reserved', {
-                cause: createError,
-              });
-            }
-            try {
-              assertAttachmentSyncNotAborted(signal);
-              await FileSystem.writeAsStringAsync(stagedUri, wireBase64, {
-                encoding: FileSystem.EncodingType.Base64,
-              });
-              await verifyPublishedGeneration(stagedUri);
-              return stagedUri;
-            } catch (error) {
-              await FileSystem.deleteAsync(stagedUri, { idempotent: true }).catch(() => undefined);
-              throw error;
-            }
-          }
-          throw new Error('File Sync attachment publication stage could not be reserved');
-        };
-
         const initialPresence = await getLocalAttachmentPresence(targetUri);
         if (initialPresence === 'unreadable') {
           throw new Error('File Sync attachment generation is unreadable');
@@ -335,6 +318,7 @@ export const syncFileAttachments = async (
         if (initialPresence === 'present') {
           try {
             await verifyPublishedGeneration(targetUri);
+            await clearFileSyncAttachmentPublicationRecovery(targetUri);
             recordPublishedGeneration();
             return true;
           } catch (error) {
@@ -342,7 +326,19 @@ export const syncFileAttachments = async (
           }
         }
 
-        const stagedUri = await createVerifiedStage();
+        const reservation = await reserveFileSyncAttachmentPublication(targetUri, wireHash);
+        const stagedUri = reservation.stagedPath;
+        try {
+          new FileSystem.File(stagedUri).create({ overwrite: false });
+          assertAttachmentSyncNotAborted(signal);
+          await FileSystem.writeAsStringAsync(stagedUri, wireBase64, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          await verifyPublishedGeneration(stagedUri);
+        } catch (error) {
+          await abandonFileSyncAttachmentPublication(reservation).catch(() => undefined);
+          throw error;
+        }
         try {
           const currentPresence = await getLocalAttachmentPresence(targetUri);
           if (currentPresence === 'unreadable') {
@@ -351,7 +347,7 @@ export const syncFileAttachments = async (
           if (currentPresence === 'present') {
             try {
               await verifyPublishedGeneration(targetUri);
-              await FileSystem.deleteAsync(stagedUri, { idempotent: true }).catch(() => undefined);
+              await completeFileSyncAttachmentPublication(reservation);
               recordPublishedGeneration();
               return true;
             } catch (error) {
@@ -366,13 +362,28 @@ export const syncFileAttachments = async (
             wireHash,
           );
           if (publication.status === 'alreadyExists') {
-            await verifyPublishedGeneration(targetUri);
+            try {
+              await verifyPublishedGeneration(targetUri);
+            } catch (error) {
+              if (error instanceof FileSyncGenerationIntegrityError) {
+                await retainFileSyncAttachmentPublicationForInvalidTarget(reservation);
+              }
+              throw error;
+            }
           }
-          await verifyPublishedGeneration(targetUri);
-          await FileSystem.deleteAsync(stagedUri, { idempotent: true }).catch(() => undefined);
+          try {
+            await verifyPublishedGeneration(targetUri);
+          } catch (error) {
+            if (error instanceof FileSyncGenerationIntegrityError) {
+              await retainFileSyncAttachmentPublicationForInvalidTarget(reservation);
+            }
+            throw error;
+          }
+          await completeFileSyncAttachmentPublication(reservation);
         } catch (error) {
-          // Keep a verified stage after publication failure so a restart can
-          // finish the exact generation without re-reading mutable local bytes.
+          // A durable exact-path reservation owns the verified stage. The next
+          // locked cycle removes it before retry; corrupt canonical collisions
+          // also retain a bounded device-local attempt count.
           throw error;
         }
       } else {

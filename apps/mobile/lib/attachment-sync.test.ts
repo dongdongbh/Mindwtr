@@ -72,9 +72,15 @@ const modernFileSystemMock = vi.hoisted(() => {
 });
 
 const attachmentFileInstallerMock = vi.hoisted(() => ({
+  abandonFileSyncAttachmentPublication: vi.fn(),
+  clearFileSyncAttachmentPublicationRecovery: vi.fn(),
+  completeFileSyncAttachmentPublication: vi.fn(),
   hashAttachmentFileGeneration: vi.fn(),
   installAttachmentFileGeneration: vi.fn(),
   publishImmutableAttachmentFileGeneration: vi.fn(),
+  recoverFileSyncAttachmentPublications: vi.fn(),
+  reserveFileSyncAttachmentPublication: vi.fn(),
+  retainFileSyncAttachmentPublicationForInvalidTarget: vi.fn(),
 }));
 
 vi.mock('expo-file-system', () => ({
@@ -258,6 +264,19 @@ describe('attachment sync', () => {
     attachmentFileInstallerMock.installAttachmentFileGeneration.mockResolvedValue({ status: 'installed' });
     attachmentFileInstallerMock.publishImmutableAttachmentFileGeneration.mockResolvedValue({
       status: 'published',
+    });
+    attachmentFileInstallerMock.abandonFileSyncAttachmentPublication.mockResolvedValue(undefined);
+    attachmentFileInstallerMock.clearFileSyncAttachmentPublicationRecovery.mockResolvedValue(undefined);
+    attachmentFileInstallerMock.completeFileSyncAttachmentPublication.mockResolvedValue(undefined);
+    attachmentFileInstallerMock.recoverFileSyncAttachmentPublications.mockResolvedValue(undefined);
+    attachmentFileInstallerMock.retainFileSyncAttachmentPublicationForInvalidTarget.mockResolvedValue(undefined);
+    attachmentFileInstallerMock.reserveFileSyncAttachmentPublication.mockImplementation(async (targetPath: string) => {
+      const parentPath = targetPath.slice(0, targetPath.lastIndexOf('/') + 1);
+      return {
+        operationId: 'test-reservation',
+        stagedPath: `${parentPath}.mindwtr-generation-stage-test-reservation.tmp`,
+        targetPath,
+      };
     });
   });
 
@@ -1137,6 +1156,15 @@ describe('attachment sync', () => {
         .find((uri) => uri.includes('.mindwtr-generation-stage-'));
       expect(stageUri).toBeTruthy();
       expect(stageUri && remoteFiles.get(stageUri)).toBe(base64Of(H1_BYTES));
+      expect(attachmentFileInstallerMock.recoverFileSyncAttachmentPublications)
+        .toHaveBeenCalledWith('file://sync/attachments/');
+      expect(attachmentFileInstallerMock.reserveFileSyncAttachmentPublication)
+        .toHaveBeenCalledWith(h1Uri, expect.stringMatching(/^[a-f0-9]{64}$/));
+      expect(
+        attachmentFileInstallerMock.reserveFileSyncAttachmentPublication.mock.invocationCallOrder[0],
+      ).toBeLessThan(modernFileSystemMock.create.mock.invocationCallOrder[0]);
+      expect(attachmentFileInstallerMock.retainFileSyncAttachmentPublicationForInvalidTarget)
+        .toHaveBeenCalledWith(expect.objectContaining({ stagedPath: stageUri, targetPath: h1Uri }));
       expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(h1Uri, expect.anything());
       expect(fileSystemMock.deleteAsync).not.toHaveBeenCalledWith(h2Uri, expect.anything());
     });

@@ -1,23 +1,41 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  recoverFileSyncAttachmentPublications,
+  reserveFileSyncAttachmentPublication,
+  retainFileSyncAttachmentPublicationForInvalidTarget,
   hashAttachmentFileGeneration,
   installAttachmentFileGeneration,
   publishImmutableAttachmentFileGeneration,
 } from './attachment-file-installer';
 
-const { hashAsync, installAsync, publishImmutableAsync, requireNativeModule } = vi.hoisted(() => ({
+const { deleteAsync, hashAsync, installAsync, publishImmutableAsync, requireNativeModule, storage } = vi.hoisted(() => ({
+  deleteAsync: vi.fn(),
   hashAsync: vi.fn(),
   installAsync: vi.fn(),
   publishImmutableAsync: vi.fn(),
   requireNativeModule: vi.fn(() => ({ hashAsync, installAsync, publishImmutableAsync })),
+  storage: new Map<string, string>(),
 }));
 const downloadHash = 'd'.repeat(64);
 
 vi.mock('expo-modules-core', () => ({
   requireNativeModule,
 }));
+vi.mock('./file-system', () => ({
+  deleteAsync,
+}));
+vi.mock('@react-native-async-storage/async-storage', () => ({
+  default: {
+    getItem: vi.fn(async (key: string) => storage.get(key) ?? null),
+    setItem: vi.fn(async (key: string, value: string) => { storage.set(key, value); }),
+    removeItem: vi.fn(async (key: string) => { storage.delete(key); }),
+  },
+}));
 describe('installAttachmentFileGeneration', () => {
   beforeEach(() => {
+    storage.clear();
+    deleteAsync.mockReset();
+    deleteAsync.mockResolvedValue(undefined);
     installAsync.mockReset();
     hashAsync.mockReset();
     publishImmutableAsync.mockReset();
@@ -111,6 +129,47 @@ describe('installAttachmentFileGeneration', () => {
       'file:///sync/attachments/a.hash.txt',
       downloadHash,
     );
+  });
+
+  it('records exact shared-folder scratch ownership before the caller creates it', async () => {
+    const target = `file:///sync/attachments/a.${downloadHash}.txt`;
+
+    const reservation = await reserveFileSyncAttachmentPublication(target, downloadHash);
+
+    expect(reservation.targetPath).toBe(target);
+    expect(reservation.stagedPath).toBe(
+      `file:///sync/attachments/.mindwtr-generation-stage-${reservation.operationId}.tmp`,
+    );
+    expect(deleteAsync).not.toHaveBeenCalled();
+    expect([...storage.values()].join('')).toContain(reservation.stagedPath);
+  });
+
+  it('recovers only the exact device-owned scratch after a process dies before native handoff', async () => {
+    const target = `file:///sync/attachments/a.${downloadHash}.txt`;
+    const reservation = await reserveFileSyncAttachmentPublication(target, downloadHash);
+
+    await recoverFileSyncAttachmentPublications('file:///sync/attachments/');
+
+    expect(deleteAsync).toHaveBeenCalledTimes(1);
+    expect(deleteAsync).toHaveBeenCalledWith(reservation.stagedPath, { idempotent: true });
+    expect(deleteAsync).not.toHaveBeenCalledWith(target, expect.anything());
+    expect(storage.size).toBe(0);
+  });
+
+  it('bounds repeated corrupt canonical collisions without accumulating shared scratches', async () => {
+    const target = `file:///sync/attachments/a.${downloadHash}.txt`;
+    const stages: string[] = [];
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const reservation = await reserveFileSyncAttachmentPublication(target, downloadHash);
+      stages.push(reservation.stagedPath);
+      await retainFileSyncAttachmentPublicationForInvalidTarget(reservation);
+      await recoverFileSyncAttachmentPublications('file:///sync/attachments/');
+    }
+
+    await expect(reserveFileSyncAttachmentPublication(target, downloadHash))
+      .rejects.toThrow('remains corrupt after bounded retries');
+    expect(deleteAsync.mock.calls.map(([path]) => path)).toEqual(stages);
+    expect(deleteAsync.mock.calls.some(([path]) => path === target)).toBe(false);
   });
 
   it('rejects malformed native hash snapshots', async () => {

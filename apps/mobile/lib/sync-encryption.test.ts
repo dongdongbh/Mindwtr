@@ -936,6 +936,52 @@ describe('File Sync transitions through core orchestration', () => {
     fs.files.set(`${SYNC_DIR}/attachments/a1.png`, new Uint8Array([9, 8, 7, 6]));
   };
 
+  it('aborts before transition inventory when an exact reserved publication scratch cannot recover', async () => {
+    seedPlaintextFolder();
+    const targetPath = `${SYNC_DIR}/attachments/a1.${'a'.repeat(64)}.png`;
+    const operationId = 'crashed-publication';
+    const stagedPath = `${SYNC_DIR}/attachments/.mindwtr-generation-stage-${operationId}.tmp`;
+    fs.files.set(stagedPath, new Uint8Array([1, 2, 3]));
+    asyncStorage.set('@mindwtr/file-sync-publication-reservations-v1', JSON.stringify([{
+      version: 1,
+      operationId,
+      stagedPath,
+      targetPath,
+      expectedStagedSha256: 'b'.repeat(64),
+      invalidTargetAttempts: 0,
+      state: 'reserved',
+    }]));
+    const fileSystem = await import('./file-system');
+    vi.mocked(fileSystem.deleteAsync).mockRejectedValueOnce(new Error('scratch removal denied'));
+
+    await expect(enableSyncEncryption(PASSPHRASE)).rejects.toThrow('scratch removal denied');
+
+    expect(fs.files.has(stagedPath)).toBe(true);
+    expect(fs.files.has(SYNC_URI)).toBe(true);
+    expect(fs.files.has(ENC_URI)).toBe(false);
+    expect(syncEncryptionLocalState.read()).toBeNull();
+  }, 30_000);
+
+  it.each([
+    ['path', SYNC_URI, `${SYNC_DIR}/attachments/.mindwtr-install-${'c'.repeat(64)}.journal`],
+    ['SAF', SAF_SYNC_URI, `content://provider/tree/root/document/root/attachments/.mindwtr-install-${'d'.repeat(64)}.candidate`],
+  ])('fails closed before writes when %s contains a retained native publication artifact', async (
+    _posture,
+    syncUri,
+    retainedArtifact,
+  ) => {
+    fs.files.set(syncUri, new TextEncoder().encode(JSON.stringify(appData('before'))));
+    fs.files.set(retainedArtifact, new Uint8Array([1, 2, 3]));
+    const port = await createFileSyncEncryptionRemotePort(syncUri);
+
+    await expect(port!.captureInventory!()).rejects.toThrow(
+      'publication recovery must finish before encryption transition',
+    );
+
+    expect(fs.files.get(retainedArtifact)).toEqual(new Uint8Array([1, 2, 3]));
+    expect([...fs.files.keys()].some((uri) => uri.includes('.mindwtr-et-'))).toBe(false);
+  });
+
   it('preserves a primary transition failure when releasing the File Sync lease also fails', async () => {
     const cleanupError = new Error('native lock release failed');
     setSyncFileLockNativeModuleForTests({

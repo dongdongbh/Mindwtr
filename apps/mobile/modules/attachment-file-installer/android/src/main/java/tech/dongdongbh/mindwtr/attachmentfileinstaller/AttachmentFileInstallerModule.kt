@@ -263,19 +263,17 @@ class AttachmentFileInstallerModule : Module() {
             "Immutable attachment stage and target must share a directory",
           )
         }
-        val outcome = AttachmentFileInstallerCore(
+        val outcome = ImmutableAttachmentFilePublisherCore(
           targetRoot = targetRoot,
-          sourceRoots = listOf(targetRoot),
           ops = AndroidAttachmentInstallerFileOps(),
-        ).install(
-          stagedInput = staged,
-          targetInput = target,
-          expected = ExpectedAttachmentGeneration.Absent,
-          expectedDownloadSha256 = parseSha256(expectedStagedSha256, "Expected staged attachment"),
+        ).publish(
+          staged,
+          target,
+          parseSha256(expectedStagedSha256, "Expected staged attachment"),
         )
         when (outcome) {
-          is AttachmentInstallOutcome.Installed -> mapOf("status" to "published")
-          is AttachmentInstallOutcome.Conflict -> mapOf("status" to "alreadyExists")
+          ImmutableAttachmentPublishOutcome.PUBLISHED -> mapOf("status" to "published")
+          ImmutableAttachmentPublishOutcome.ALREADY_EXISTS -> mapOf("status" to "alreadyExists")
         }
       } catch (error: AttachmentFileInstallerException) {
         throw error

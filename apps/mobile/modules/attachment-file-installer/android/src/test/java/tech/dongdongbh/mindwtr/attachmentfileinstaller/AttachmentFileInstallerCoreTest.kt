@@ -558,6 +558,32 @@ class AttachmentFileInstallerCoreTest {
     }
   }
 
+  @Test
+  fun immutablePublisherCreatesNoSharedInstallerRecoveryArtifacts() = withFixture { fixture ->
+    val staged = fixture.target(".mindwtr-generation-stage-owned.tmp").apply { writeText("candidate") }
+    val target = fixture.target("a.${hash("candidate")}.txt")
+
+    val outcome = fixture.publisher(ops).publish(staged, target, hash("candidate"))
+
+    assertEquals(ImmutableAttachmentPublishOutcome.PUBLISHED, outcome)
+    assertEquals("candidate", target.readText())
+    assertFalse(staged.exists())
+    assertTrue(fixture.internalArtifacts().isEmpty())
+  }
+
+  @Test
+  fun immutablePublisherPreservesOwnedStageAndPeerTargetOnCollision() = withFixture { fixture ->
+    val staged = fixture.target(".mindwtr-generation-stage-owned.tmp").apply { writeText("candidate") }
+    val target = fixture.target("a.${hash("candidate")}.txt").apply { writeText("peer-corruption") }
+
+    val outcome = fixture.publisher(ops).publish(staged, target, hash("candidate"))
+
+    assertEquals(ImmutableAttachmentPublishOutcome.ALREADY_EXISTS, outcome)
+    assertEquals("candidate", staged.readText())
+    assertEquals("peer-corruption", target.readText())
+    assertTrue(fixture.internalArtifacts().isEmpty())
+  }
+
   private fun assertFailsWithMessage(expected: String, action: () -> Unit) {
     try {
       action()
@@ -592,6 +618,11 @@ class AttachmentFileInstallerCoreTest {
     )
 
     fun hasher(ops: AttachmentInstallerFileOps) = AttachmentFileHasherCore(
+      targetRoot = attachments,
+      ops = ops,
+    )
+
+    fun publisher(ops: AttachmentInstallerFileOps) = ImmutableAttachmentFilePublisherCore(
       targetRoot = attachments,
       ops = ops,
     )

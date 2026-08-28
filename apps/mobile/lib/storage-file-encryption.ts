@@ -508,6 +508,8 @@ const DESKTOP_RECOVERY_ENTRY_PREFIX = '.mindwtr-desktop-recovery-entry-';
 // display-name limits. The timestamp/counter/random tuple remains collision-resistant
 // without inheriting user-controlled leaf length.
 const TRANSITION_SCRATCH_MARKER = '.mindwtr-et-';
+const ATTACHMENT_INSTALLER_LOCK_NAME = '.mindwtr-attachment-installer.lock';
+const ATTACHMENT_INSTALLER_RECOVERY_ARTIFACT = /^\.mindwtr-install-[a-f0-9]{64}\.(?:journal|candidate|quarantine)$/;
 let transitionScratchCounter = 0;
 
 export type FileSyncTransitionMutationPoint = 'before-quarantine' | 'before-install' | 'before-remove-commit';
@@ -627,6 +629,11 @@ export const createFileSyncEncryptionRemotePort = async (
         const entries: SyncEncryptionRemoteEntry[] = [];
         desktopRecoveryLocations.clear();
         for (const [name, uri] of documents.entries) {
+            if (ATTACHMENT_INSTALLER_RECOVERY_ARTIFACT.test(name)) {
+                throw new SyncEncryptionRemoteConflictError(
+                    'File Sync attachment publication recovery must finish before encryption transition',
+                );
+            }
             if (isDesktopTransitionRecoveryDir(name)) {
                 await collectDesktopRecoveryDirectory(uri);
             } else if (isTransitionScratchName(name)) {
@@ -636,6 +643,12 @@ export const createFileSyncEncryptionRemotePort = async (
         if (attachments) {
             await attachments.refresh();
             for (const [name, uri] of attachments.entries) {
+                if (name === ATTACHMENT_INSTALLER_LOCK_NAME) continue;
+                if (ATTACHMENT_INSTALLER_RECOVERY_ARTIFACT.test(name)) {
+                    throw new SyncEncryptionRemoteConflictError(
+                        'File Sync attachment publication recovery must finish before encryption transition',
+                    );
+                }
                 if (isDesktopTransitionRecoveryDir(name)) {
                     await collectDesktopRecoveryDirectory(uri);
                     continue;

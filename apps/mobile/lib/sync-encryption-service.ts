@@ -65,7 +65,11 @@ import {
     loadWebDavConfig,
     runDropboxAuthorized,
 } from './attachment-sync-utils';
-import { createFileSyncEncryptionRemotePort } from './storage-file-encryption';
+import {
+    createFileSyncEncryptionRemotePort,
+    resolveFileSyncEncryptionTarget,
+} from './storage-file-encryption';
+import { recoverFileSyncAttachmentPublications } from './attachment-file-installer';
 import {
     acquireMobileFileSyncLease,
     releaseMobileFileSyncLease,
@@ -634,6 +638,12 @@ const resolveTransitionTarget = async (appData: AppData | null): Promise<Backend
         // captured before it owned the same folder lock as ordinary sync.
         const fileSyncLease = await acquireMobileFileSyncLease(syncPath);
         try {
+            const fileTarget = await resolveFileSyncEncryptionTarget(syncPath);
+            if (fileTarget?.attachmentsDirUri?.startsWith('file://')) {
+                // Abort before the transition snapshots or mutates any artifact
+                // unless every exact scratch reserved by this device is gone.
+                await recoverFileSyncAttachmentPublications(fileTarget.attachmentsDirUri);
+            }
             const port = await createFileSyncEncryptionRemotePort(syncPath);
             if (!port) throw new Error('Unable to open the sync folder');
             return { kind: 'remote', port, fileSyncLease };

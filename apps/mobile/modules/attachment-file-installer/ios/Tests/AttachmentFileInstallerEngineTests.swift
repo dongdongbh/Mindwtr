@@ -67,6 +67,45 @@ final class AttachmentFileInstallerEngineTests: XCTestCase {
     }
   }
 
+  func testImmutablePublisherCreatesNoSharedInstallerRecoveryArtifacts() throws {
+    try withFixture { fixture in
+      let staged = fixture.target(".mindwtr-generation-stage-owned.tmp")
+      let target = fixture.target("a.\(digest("candidate")).txt")
+      try write("candidate", to: staged)
+
+      let outcome = try fixture.engine().publishImmutable(
+        stagedInput: staged,
+        targetInput: target,
+        expectedStagedSha256: digest("candidate")
+      )
+
+      guard case .published = outcome else { return XCTFail("Expected published outcome") }
+      XCTAssertEqual(try contents(target), "candidate")
+      XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
+      XCTAssertTrue(try fixture.internalArtifacts().isEmpty)
+    }
+  }
+
+  func testImmutablePublisherPreservesOwnedStageAndPeerTargetOnCollision() throws {
+    try withFixture { fixture in
+      let staged = fixture.target(".mindwtr-generation-stage-owned.tmp")
+      let target = fixture.target("a.\(digest("candidate")).txt")
+      try write("candidate", to: staged)
+      try write("peer-corruption", to: target)
+
+      let outcome = try fixture.engine().publishImmutable(
+        stagedInput: staged,
+        targetInput: target,
+        expectedStagedSha256: digest("candidate")
+      )
+
+      guard case .alreadyExists = outcome else { return XCTFail("Expected already-exists outcome") }
+      XCTAssertEqual(try contents(staged), "candidate")
+      XCTAssertEqual(try contents(target), "peer-corruption")
+      XCTAssertTrue(try fixture.internalArtifacts().isEmpty)
+    }
+  }
+
   func testPresentGenerationReplacesOnlyMatchingTargetAndPreservesIt() throws {
     try withFixture { fixture in
       let staged = try fixture.stage("new generation")

@@ -43,6 +43,11 @@ internal data class AttachmentFileHashSnapshot(
   val modificationTimeMs: Double,
 )
 
+internal enum class ImmutableAttachmentPublishOutcome {
+  PUBLISHED,
+  ALREADY_EXISTS,
+}
+
 internal interface AttachmentInstallerFileOps {
   fun canonical(file: File): File
   fun ensureDirectory(directory: File)
@@ -116,6 +121,72 @@ internal class AttachmentFileHasherCore(
   private fun rejectSymlink(file: File) {
     if (ops.nodeKind(file) == InstallerNodeKind.SYMLINK) {
       throw AttachmentInstallerFailure("Attachment path is a symbolic link")
+    }
+  }
+}
+
+/** Create-no-replace publication for a File Sync generation already staged in
+ * the target directory. Unlike the managed-local installer, this path creates
+ * no journal/candidate/quarantine artifacts in the shared sync folder: exact
+ * scratch ownership and restart recovery live in device-local JS storage. */
+internal class ImmutableAttachmentFilePublisherCore(
+  targetRoot: File,
+  private val ops: AttachmentInstallerFileOps,
+) {
+  private val targetRoot = ops.canonical(targetRoot)
+
+  fun publish(stagedInput: File, targetInput: File, expectedStagedSha256: String): ImmutableAttachmentPublishOutcome {
+    if (!SHA256_HEX_PATTERN.matches(expectedStagedSha256)) {
+      throw AttachmentInstallerFailure("Expected staged attachment SHA-256 is invalid")
+    }
+    val stagedAbsolute = stagedInput.absoluteFile
+    val targetAbsolute = targetInput.absoluteFile
+    rejectSymlink(stagedAbsolute, "staged attachment")
+    rejectSymlink(targetAbsolute, "target attachment")
+    val staged = ops.canonical(stagedAbsolute)
+    val target = ops.canonical(targetAbsolute)
+    if (staged.parentFile != targetRoot || target.parentFile != targetRoot || staged == target) {
+      throw AttachmentInstallerFailure("Immutable attachment paths must be distinct children of the target directory")
+    }
+    return ops.withExclusiveLock(File(targetRoot, INSTALLER_LOCK_NAME)) {
+      requireDirectory()
+      rejectSymlink(stagedAbsolute, "staged attachment")
+      rejectSymlink(targetAbsolute, "target attachment")
+      if (ops.canonical(stagedAbsolute) != staged || ops.canonical(targetAbsolute) != target) {
+        throw AttachmentInstallerFailure("Immutable attachment path changed during validation")
+      }
+      if (ops.nodeKind(staged) != InstallerNodeKind.REGULAR_FILE) {
+        throw AttachmentInstallerFailure("Immutable attachment stage is not a regular file")
+      }
+      val before = ops.fileIdentity(staged)
+      val stagedSha256 = ops.sha256(staged)
+      val after = ops.fileIdentity(staged)
+      if (before != after || stagedSha256 != expectedStagedSha256) {
+        throw AttachmentInstallerFailure("Staged attachment changed before native publication")
+      }
+      if (ops.nodeKind(target) != InstallerNodeKind.MISSING) {
+        return@withExclusiveLock ImmutableAttachmentPublishOutcome.ALREADY_EXISTS
+      }
+      if (!ops.moveExclusive(staged, target)) {
+        return@withExclusiveLock ImmutableAttachmentPublishOutcome.ALREADY_EXISTS
+      }
+      ops.syncDirectory(targetRoot)
+      if (ops.nodeKind(target) != InstallerNodeKind.REGULAR_FILE || ops.sha256(target) != expectedStagedSha256) {
+        throw AttachmentInstallerFailure("Published attachment generation failed verification")
+      }
+      ImmutableAttachmentPublishOutcome.PUBLISHED
+    }
+  }
+
+  private fun requireDirectory() {
+    if (ops.nodeKind(targetRoot) != InstallerNodeKind.DIRECTORY) {
+      throw AttachmentInstallerFailure("File Sync attachment directory is unavailable")
+    }
+  }
+
+  private fun rejectSymlink(file: File, label: String) {
+    if (ops.nodeKind(file) == InstallerNodeKind.SYMLINK) {
+      throw AttachmentInstallerFailure("$label is a symbolic link")
     }
   }
 }
