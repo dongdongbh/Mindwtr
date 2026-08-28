@@ -20,11 +20,12 @@ import { reconcilePomodoroSnapshot, usePomodoroStore } from '../store/pomodoro-s
  * Deliberately not gated on the Task reminders setting: that switch governs
  * date-driven reminders, it is off on every fresh install, and gating on it
  * meant the completion alert of a timer the user had just started silently
- * never fired (#528). Enabling the Pomodoro feature and pressing Start is the
- * consent; the OS notification permission is still the outer gate.
+ * never fired (#528). The opt-out now lives with the feature, in Pomodoro
+ * settings, and defaults on; the OS notification permission is the outer gate.
  */
 export function usePomodoroAlerts(): void {
     const pomodoroEnabled = useTaskStore((state) => resolveFeatureFlags(state.settings).pomodoro);
+    const completionAlertEnabled = useTaskStore((state) => state.settings.gtd?.pomodoro?.completionAlert !== false);
     const autoStartBreaks = useTaskStore((state) => state.settings.gtd?.pomodoro?.autoStartBreaks === true);
     const autoStartFocus = useTaskStore((state) => state.settings.gtd?.pomodoro?.autoStartFocus === true);
     const isRunning = usePomodoroStore((state) => state.snapshot.timerState.isRunning);
@@ -58,7 +59,7 @@ export function usePomodoroAlerts(): void {
         // event after hydration. Its minutes are credited silently on purpose, so
         // the sound, notification and taskbar flash stay silent with them (#528).
         if (previous === undefined) return;
-        if (!lastEvent || lastEvent === previous) return;
+        if (!lastEvent || lastEvent === previous || !completionAlertEnabled) return;
         const message = lastEvent === 'focus-finished'
             ? translateWithFallback(t, 'pomodoro.focusComplete', 'Focus session complete. Take a short break.')
             : translateWithFallback(t, 'pomodoro.breakComplete', 'Break complete. Ready for the next focus session.');
@@ -66,5 +67,5 @@ export function usePomodoroAlerts(): void {
             translateWithFallback(t, 'pomodoro.title', 'Pomodoro Focus'),
             message
         );
-    }, [hasHydrated, lastEvent, t]);
+    }, [completionAlertEnabled, hasHydrated, lastEvent, t]);
 }

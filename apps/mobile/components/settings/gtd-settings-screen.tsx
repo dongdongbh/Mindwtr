@@ -134,6 +134,9 @@ export function GtdSettingsScreen({
     const pomodoroLinkTask = settings.gtd?.pomodoro?.linkTask === true;
     const pomodoroAutoStartBreaks = settings.gtd?.pomodoro?.autoStartBreaks === true;
     const pomodoroAutoStartFocus = settings.gtd?.pomodoro?.autoStartFocus === true;
+    // Defaults on: the alert is the point of the timer, and an off-by-default
+    // switch is what made #528 read as broken.
+    const pomodoroCompletionAlert = settings.gtd?.pomodoro?.completionAlert !== false;
     const [pomodoroFocusDraft, setPomodoroFocusDraft] = useState(String(pomodoroCustomDurations.focusMinutes));
     const [pomodoroBreakDraft, setPomodoroBreakDraft] = useState(String(pomodoroCustomDurations.breakMinutes));
     const [defaultScheduleTimeDraft, setDefaultScheduleTimeDraft] = useState(defaultScheduleTime);
@@ -342,6 +345,12 @@ export function GtdSettingsScreen({
     const pomodoroAutoStartFocusDesc = pomodoroAutoStartFocusDescRaw === 'settings.pomodoroAutoStartFocusDesc'
         ? tr('settings.gtdMobile.startTheNextFocusSessionAutomaticallyWhenABreakEnds')
         : pomodoroAutoStartFocusDescRaw;
+    const pomodoroCompletionAlertLabel = tFallback(t, 'settings.pomodoroCompletionAlert', 'Session-end alert');
+    const pomodoroCompletionAlertDesc = tFallback(
+        t,
+        'settings.pomodoroCompletionAlertDesc',
+        'Play a sound and show a notification when a focus session or break ends.'
+    );
     const defaultScheduleTimeLabel = tFallback(t, 'settings.defaultScheduleTime', tr('settings.gtdMobile.defaultScheduleTime'));
     const defaultScheduleTimeDesc = tFallback(
         t,
@@ -680,6 +689,13 @@ export function GtdSettingsScreen({
                                     { autoStartFocus: value },
                                     { showAutoStartNotice: value && !pomodoroAutoStartFocus }
                                 )}
+                            />
+                            <SettingToggleRow
+                                divider
+                                label={pomodoroCompletionAlertLabel}
+                                description={pomodoroCompletionAlertDesc}
+                                value={pomodoroCompletionAlert}
+                                onChange={(value) => updatePomodoroSettings({ completionAlert: value })}
                             />
                         </View>
                     )}

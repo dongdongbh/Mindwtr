@@ -190,6 +190,8 @@ export const SETTINGS_LABEL_KEYS = [
     'pomodoroAutoStartBreaksDesc',
     'pomodoroAutoStartFocus',
     'pomodoroAutoStartFocusDesc',
+    'pomodoroCompletionAlert',
+    'pomodoroCompletionAlertDesc',
     'notifications',
     'notificationsDesc',
     'notificationsEnable',

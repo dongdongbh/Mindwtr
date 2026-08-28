@@ -2349,6 +2349,8 @@ export const en: Record<string, string> = {
         'settings.pomodoroAutoStartBreaksDesc': 'Start the break timer automatically when a focus session ends.',
         'settings.pomodoroAutoStartFocus': 'Auto-start focus',
         'settings.pomodoroAutoStartFocusDesc': 'Start the next focus session automatically when a break ends.',
+        'settings.pomodoroCompletionAlert': 'Session-end alert',
+        'settings.pomodoroCompletionAlertDesc': 'Play a sound and show a notification when a focus session or break ends.',
         'settings.aiUsageTitle': 'Where and how to use AI',
         'settings.aiUsageClarify': 'Clarify: open a task, click the ✨ sparkle button in its editor, and choose Clarify to turn a vague task into a clear next action.',
         'settings.aiUsageBreakdown': 'Break down: in that same ✨ menu, choose Break down to split a task or project into concrete steps.',

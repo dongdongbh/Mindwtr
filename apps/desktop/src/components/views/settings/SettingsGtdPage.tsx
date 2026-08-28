@@ -134,6 +134,8 @@ type Labels = {
     pomodoroAutoStartBreaksDesc: string;
     pomodoroAutoStartFocus: string;
     pomodoroAutoStartFocusDesc: string;
+    pomodoroCompletionAlert: string;
+    pomodoroCompletionAlertDesc: string;
     weeklyReviewConfig: string;
     weeklyReviewConfigDesc: string;
     weeklyReviewIncludeContextsStep: string;
@@ -248,6 +250,9 @@ export function SettingsGtdPage({
     const pomodoroLinkTask = safeSettings.gtd?.pomodoro?.linkTask === true;
     const pomodoroAutoStartBreaks = safeSettings.gtd?.pomodoro?.autoStartBreaks === true;
     const pomodoroAutoStartFocus = safeSettings.gtd?.pomodoro?.autoStartFocus === true;
+    // Defaults on: the alert is the point of the timer, and an off-by-default
+    // switch is what made #528 read as broken.
+    const pomodoroCompletionAlert = safeSettings.gtd?.pomodoro?.completionAlert !== false;
     const [pomodoroFocusDraft, setPomodoroFocusDraft] = useState(String(pomodoroCustomDurations.focusMinutes));
     const [pomodoroBreakDraft, setPomodoroBreakDraft] = useState(String(pomodoroCustomDurations.breakMinutes));
     const [defaultScheduleTimeDraft, setDefaultScheduleTimeDraft] = useState(defaultScheduleTime);
@@ -724,6 +729,13 @@ export function SettingsGtdPage({
                                         { autoStartFocus: !pomodoroAutoStartFocus },
                                         { showAutoStartNotice: !pomodoroAutoStartFocus }
                                     )}
+                                />
+                            </SettingRow>
+                            <SettingRow padded settingsKey="pomodoroCompletionAlert" title={t.pomodoroCompletionAlert} description={t.pomodoroCompletionAlertDesc}>
+                                <Switch
+                                    aria-label={t.pomodoroCompletionAlert}
+                                    checked={pomodoroCompletionAlert}
+                                    onCheckedChange={() => updatePomodoroSettings({ completionAlert: !pomodoroCompletionAlert })}
                                 />
                             </SettingRow>
                         </div>

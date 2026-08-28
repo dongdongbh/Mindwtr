@@ -2281,6 +2281,8 @@ export const zhHant: Record<string, string> = {
         'settings.pomodoroAutoStartBreaksDesc': '当专注阶段结束时，自动开始休息计时。',
         'settings.pomodoroAutoStartFocus': '自动开始专注',
         'settings.pomodoroAutoStartFocusDesc': '当休息阶段结束时，自动开始下一轮专注计时。',
+        'settings.pomodoroCompletionAlert': '結束提醒',
+        'settings.pomodoroCompletionAlertDesc': '專注或休息階段結束時播放提示音並顯示通知。',
         'settings.aiUsageTitle': 'AI 在哪里用、怎么用',
         'settings.aiUsageClarify': '澄清：打开任务，点击编辑器中的 ✨ 星标按钮，选择“澄清”，把含糊的任务改写为明确的下一步行动。',
         'settings.aiUsageBreakdown': '拆解：在同一个 ✨ 菜单中，选择“拆解”，把任务或项目拆分为具体步骤。',

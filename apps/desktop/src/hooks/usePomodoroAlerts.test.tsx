@@ -108,6 +108,23 @@ describe('usePomodoroAlerts', () => {
         expect(sendAlert).toHaveBeenCalledTimes(1);
     });
 
+    it('stays quiet when the session-end alert is switched off', () => {
+        useTaskStore.setState({
+            settings: { features: { pomodoro: true }, gtd: { pomodoro: { completionAlert: false } } },
+        });
+        startRunningPhase('focus', 2);
+        render(<LanguageProvider><Harness /></LanguageProvider>);
+
+        act(() => {
+            usePomodoroStore.setState({ hasHydrated: true });
+        });
+        act(() => {
+            vi.advanceTimersByTime(3000);
+        });
+
+        expect(sendAlert).not.toHaveBeenCalled();
+    });
+
     it('alerts while task reminders are off', () => {
         // Task reminders are off on every fresh install, and the completion alert
         // used to be gated on them, so a timer the user started never alerted (#528).

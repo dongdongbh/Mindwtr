@@ -2309,6 +2309,8 @@ export const svOverrides: Record<string, string> = {
         'settings.pomodoroAutoStartBreaksDesc': 'Starta pausens timer automatiskt när ett fokuspass avslutas.',
         'settings.pomodoroAutoStartFocus': 'Starta fokus automatiskt',
         'settings.pomodoroAutoStartFocusDesc': 'Starta nästa fokuspass automatiskt när en paus avslutas.',
+        'settings.pomodoroCompletionAlert': 'Avisering vid passets slut',
+        'settings.pomodoroCompletionAlertDesc': 'Spela upp ett ljud och visa en avisering när ett fokuspass eller en paus tar slut.',
         'settings.aiUsageTitle': 'Var och hur du använder AI',
         'settings.aiUsageClarify': 'Förtydliga: öppna en uppgift, klicka på ✨-knappen i dess redigerare, och välj Förtydliga för att göra en vag uppgift till ett tydligt nästa steg.',
         'settings.aiUsageBreakdown': 'Dela upp: i samma ✨-meny, välj Dela upp för att dela en uppgift eller ett projekt i konkreta steg.',

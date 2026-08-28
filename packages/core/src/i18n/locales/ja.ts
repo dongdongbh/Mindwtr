@@ -2353,6 +2353,8 @@ export const jaOverrides: Record<string, string> = {
         'settings.pomodoroAutoStartBreaksDesc': '集中セッションが終わったら、休憩のタイマーを自動で開始します。',
         'settings.pomodoroAutoStartFocus': '集中を自動で開始',
         'settings.pomodoroAutoStartFocusDesc': '休憩が終わったら、次の集中セッションを自動で開始します。',
+        'settings.pomodoroCompletionAlert': 'セッション終了の通知',
+        'settings.pomodoroCompletionAlertDesc': '集中セッションまたは休憩が終わったときに音を鳴らして通知を表示します。',
         'settings.aiUsageTitle': 'AI をどこでどう使うか',
         'settings.aiUsageClarify': '見極める：タスクを開き、エディタの ✨ ボタンから「AI で見極める」を選ぶと、あいまいなタスクをはっきりした次のアクションに書き換えます。',
         'settings.aiUsageBreakdown': '分解する：同じ ✨ メニューから「AI で分解する」を選ぶと、タスクやプロジェクトを具体的な手順に分けます。',

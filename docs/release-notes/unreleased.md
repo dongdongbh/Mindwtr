@@ -6,7 +6,7 @@ Changes collected after `v1.2.1` and before the next version tag.
 
 ## Full Change List
 
-- The Pomodoro timer now sounds its end-of-session alert without needing Task reminders turned on. Task reminders are off by default, so on a new install the focus and break alerts never fired. (#528)
+- The Pomodoro timer now sounds its end-of-session alert without needing Task reminders turned on. Task reminders are off by default, so on a new install the focus and break alerts never fired. To work in silence, turn off the new **Session-end alert** switch in Settings → GTD → Pomodoro timer. (#528)
 - WebDAV sync now checks that the server returns strong ETags and enforces conditional writes before using it. Existing WebDAV setups are checked on their first sync after updating; an incompatible server stops with a compatibility error instead of risking one device overwriting another device's changes.
 - File Sync keeps immutable attachment generations in the shared folder when you remove an attachment. This protects bytes that a lagging device may still reference, but the folder can grow over time. To reclaim space, back up the folder and let every device finish syncing before you remove generation files you have verified are obsolete.
 - File Sync now checks a selected folder with the same atomic write used by sync before saving it, and Settings can test the folder again on demand. (#1095)

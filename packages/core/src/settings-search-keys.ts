@@ -61,6 +61,7 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
         { key: 'pomodoroLinkTask', section: 'features' },
         { key: 'pomodoroAutoStartBreaks', section: 'features' },
         { key: 'pomodoroAutoStartFocus', section: 'features' },
+        { key: 'pomodoroCompletionAlert', section: 'features' },
         'timeEstimatePresets',
         'captureDefault',
         { key: 'defaultArea', section: 'captureDefault' },

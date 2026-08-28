@@ -396,6 +396,9 @@ export interface GtdSettings {
         linkTask?: boolean;
         autoStartBreaks?: boolean;
         autoStartFocus?: boolean;
+        /** Sound and notify when a phase ends. Defaults ON: a timer nobody hears
+         *  is not a timer, and defaulting this off would reproduce #528. */
+        completionAlert?: boolean;
     };
 }
 

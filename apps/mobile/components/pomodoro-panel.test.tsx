@@ -237,6 +237,29 @@ describe('PomodoroPanel', () => {
     tree.unmount();
   });
 
+  it('cancels the completion alarm when the session-end alert is switched off', async () => {
+    const { cancelMobilePomodoroCompletionNotification, scheduleMobilePomodoroCompletionNotification } =
+      await import('../lib/notification-service');
+    vi.mocked(cancelMobilePomodoroCompletionNotification).mockClear();
+    vi.mocked(scheduleMobilePomodoroCompletionNotification).mockClear();
+    storeState.settings = { notificationsEnabled: true, gtd: { pomodoro: { completionAlert: false } } };
+
+    mockStorage({
+      '@mindwtr_pomodoro_state': JSON.stringify({
+        durations: { focusMinutes: 25, breakMinutes: 5 },
+        timerState: { phase: 'focus', remainingSeconds: 600, isRunning: true, completedFocusSessions: 0 },
+        phaseEndsAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      }),
+    });
+
+    const tree = await renderPanel();
+
+    expect(scheduleMobilePomodoroCompletionNotification).not.toHaveBeenCalled();
+    expect(cancelMobilePomodoroCompletionNotification).toHaveBeenCalledWith('completion-alert-off');
+
+    tree.unmount();
+  });
+
   it('renders the phase as read-only status and names the next switch action', async () => {
     const tree = await renderPanel();
 

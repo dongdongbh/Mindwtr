@@ -2310,6 +2310,8 @@ export const faOverrides: Record<string, string> = {
         'settings.pomodoroAutoStartBreaksDesc': 'وقتی یک جلسه تمرکز پایان یابد، تایمر استراحت را به‌طور خودکار شروع کن.',
         'settings.pomodoroAutoStartFocus': 'شروع خودکار تمرکز',
         'settings.pomodoroAutoStartFocusDesc': 'وقتی استراحت پایان یابد، جلسه تمرکز بعدی را به‌طور خودکار شروع کن.',
+        'settings.pomodoroCompletionAlert': 'هشدار پایان جلسه',
+        'settings.pomodoroCompletionAlertDesc': 'وقتی جلسه تمرکز یا استراحت پایان می‌یابد، صدا پخش کن و اعلان نشان بده.',
         'settings.aiUsageTitle': 'کجا و چگونه از هوش مصنوعی استفاده کنیم',
         'settings.aiUsageClarify': 'شفاف‌سازی: یک کار را باز کنید، در ویرایشگرش روی دکمه ✨ کلیک کنید و شفاف‌سازی را انتخاب کنید تا یک کار مبهم به اقدام بعدی روشن تبدیل شود.',
         'settings.aiUsageBreakdown': 'تجزیه: در همان منوی ✨، تجزیه را انتخاب کنید تا یک کار یا پروژه به قدم‌های مشخص تقسیم شود.',
