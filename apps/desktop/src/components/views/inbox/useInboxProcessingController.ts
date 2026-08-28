@@ -13,7 +13,6 @@ import {
     parseProcessInboxTitleInput,
     prepareProcessInboxDecision,
     setTaskViewSectionId,
-    sortViewSectionDefinitions,
     startProcessInboxSession,
     tFallback,
     useTaskStore,
@@ -42,6 +41,7 @@ import {
     type InboxProcessingOptionLists,
 } from './inbox-processing-utils';
 import { useInboxProcessingState } from './useInboxProcessingState';
+import { createSomedaySection } from '../../../lib/someday-section-actions';
 
 /** Organization picks a finished session must not hand to the next one. */
 const CLEARED_ON_SESSION_END = ['contexts', 'tags', 'energyLevel', 'assignedTo', 'priority', 'timeEstimate'] as const;
@@ -88,7 +88,6 @@ export function useInboxProcessingController({
     const showToast = useUiStore((state) => state.showToast);
     const people = useTaskStore((state) => state.people);
     const addPerson = useTaskStore((state) => state.addPerson);
-    const updateSettings = useTaskStore((state) => state.updateSettings);
     const personOptions = useMemo(() => getPersonOptionNames(people, tasks), [people, tasks]);
     const {
         processInboxPlan,
@@ -792,34 +791,14 @@ export function useInboxProcessingController({
     }, [addPerson]);
 
     const handleCreateSomedaySection = useCallback(async (title: string) => {
-        const trimmed = title.trim();
-        if (!trimmed) return null;
-        const currentSections = sortViewSectionDefinitions(settings?.gtd?.viewSections?.someday);
-        const existing = currentSections.find((section) => section.title.toLowerCase() === trimmed.toLowerCase());
-        if (existing) return existing.id;
-        const id = globalThis.crypto?.randomUUID?.()
-            ?? `someday-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        const maxOrder = currentSections.reduce(
-            (maximum, section) => Number.isFinite(section.order) ? Math.max(maximum, section.order) : maximum,
-            -1,
-        );
         try {
-            await updateSettings({
-                gtd: {
-                    ...(settings?.gtd ?? {}),
-                    viewSections: {
-                        ...(settings?.gtd?.viewSections ?? {}),
-                        someday: [...currentSections, { id, title: trimmed, order: maxOrder + 1 }],
-                    },
-                },
-            });
-            return id;
+            return await createSomedaySection(title);
         } catch (error) {
             reportError('Failed to create Someday section during Inbox Processing', error);
             showToast(tFallback(t, 'viewSections.updateFailed', 'Could not update Someday sections.'), 'error');
             return null;
         }
-    }, [settings?.gtd, showToast, t, updateSettings]);
+    }, [showToast, t]);
 
     const handleQuickSubmit = useCallback(async () => {
         handleScheduleTimeCommit();

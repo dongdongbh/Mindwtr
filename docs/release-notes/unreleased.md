@@ -6,6 +6,7 @@ Changes collected after `v1.2.1` and before the next version tag.
 
 ## Full Change List
 
+- Creating the first Someday section now groups the Someday list by those sections automatically, while later grouping choices stay yours. (#1090)
 - Focus now surfaces Review Due above Next Actions on desktop and mobile, and each task appears in only its highest-priority section: Schedule, then Review Due, then Next Actions. (#1092)
 - Tasks assigned to a project section now show that section beside the project name in task metadata on desktop and mobile, so their project context stays specific outside the project view. (#1091)
 - Desktop Someday/Maybe keeps whole Someday projects as project rows, matching mobile, while their child tasks stay out of the Someday task list. (#1090)

@@ -60,6 +60,7 @@ import { useVisibleTaskContext } from '@/hooks/use-visible-tasks';
 import { getAssignedToSuggestions, rankTokenSuggestions } from '../task-metadata-suggestions';
 import { buildAIConfig, isAIKeyRequired, loadAIKey } from '../../lib/ai-config';
 import { logWarn } from '../../lib/app-log';
+import { createSomedaySection as persistSomedaySection } from '../../lib/someday-section-actions';
 import {
   getActionFailureMessage,
   getUnknownErrorMessage,
@@ -115,7 +116,7 @@ export function useInboxProcessingController({
   visible,
   onClose,
 }: InboxProcessingControllerParams) {
-  const { tasks, projects, areas, people, settings, updateTask, updateSettings, deleteTask, restoreTask, addProject, addTask } = useTaskStore();
+  const { tasks, projects, areas, people, settings, updateTask, deleteTask, restoreTask, addProject, addTask } = useTaskStore();
   const { t, language } = useLanguage();
   const { showToast } = useToast();
   const router = useRouter();
@@ -211,26 +212,8 @@ export function useInboxProcessingController({
     [settings?.gtd?.viewSections?.someday],
   );
   const createSomedaySection = useCallback(async (title: string) => {
-    const trimmed = title.trim();
-    if (!trimmed) return null;
-    const existing = somedaySections.find((section) => section.title.toLowerCase() === trimmed.toLowerCase());
-    if (existing) return existing.id;
-    const id = `someday-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const maxOrder = somedaySections.reduce(
-      (maximum, section) => Number.isFinite(section.order) ? Math.max(maximum, section.order) : maximum,
-      -1,
-    );
     try {
-      await updateSettings({
-        gtd: {
-          ...(settings?.gtd ?? {}),
-          viewSections: {
-            ...(settings?.gtd?.viewSections ?? {}),
-            someday: [...somedaySections, { id, title: trimmed, order: maxOrder + 1 }],
-          },
-        },
-      });
-      return id;
+      return await persistSomedaySection(title);
     } catch {
       showToast({
         title: tFallback(t, 'common.error', 'Error'),
@@ -239,7 +222,7 @@ export function useInboxProcessingController({
       });
       return null;
     }
-  }, [settings?.gtd, showToast, somedaySections, t, updateSettings]);
+  }, [showToast, t]);
   const timeEstimateOptions = useMemo<TimeEstimate[]>(() => {
     const savedPresets = settings?.gtd?.timeEstimatePresets ?? [];
     const normalizedPresets = MOBILE_TIME_ESTIMATE_OPTIONS.filter((value) => savedPresets.includes(value));
