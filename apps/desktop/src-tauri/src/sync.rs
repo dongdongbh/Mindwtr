@@ -6996,18 +6996,18 @@ mod tests {
 
         #[cfg(target_os = "windows")]
         {
-            use windows_sys::Win32::Storage::FileSystem::FILE_RENAME_INFO;
+            use windows_sys::Wdk::Storage::FileSystem::FILE_RENAME_INFORMATION;
 
             assert!(
-                std::mem::offset_of!(FILE_RENAME_INFO, FileName)
-                    < std::mem::size_of::<FILE_RENAME_INFO>(),
+                std::mem::offset_of!(FILE_RENAME_INFORMATION, FileName)
+                    < std::mem::size_of::<FILE_RENAME_INFORMATION>(),
                 "the full fixed rename record includes padding beyond the name field offset"
             );
         }
     }
 
     #[test]
-    fn windows_retained_rename_buffer_includes_the_full_fixed_record() {
+    fn windows_retained_rename_uses_the_native_handle_api() {
         let source = include_str!("sync.rs").replace("\r\n", "\n");
         let windows_rename = source
             .split_once("#[cfg(target_os = \"windows\")]\nfn retained_root_rename")
@@ -7017,12 +7017,13 @@ mod tests {
             .expect("end of retained-root rename implementations")
             .0;
 
-        assert!(windows_rename.contains(
-            "let fixed = std::mem::size_of::<FILE_RENAME_INFO>();"
-        ));
-        assert!(!windows_rename.contains(
-            "let fixed = std::mem::offset_of!(FILE_RENAME_INFO, FileName);"
-        ));
+        assert!(
+            windows_rename.contains("let fixed = std::mem::size_of::<FILE_RENAME_INFORMATION>();")
+        );
+        assert!(windows_rename.contains("NtSetInformationFile("));
+        assert!(windows_rename.contains("FileRenameInformation"));
+        assert!(windows_rename.contains("RtlNtStatusToDosError(status)"));
+        assert!(!windows_rename.contains("SetFileInformationByHandle("));
         assert!(windows_rename.contains("(*information).FileName.as_mut_ptr()"));
     }
 
@@ -14593,17 +14594,19 @@ fn retained_root_rename(
 ) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt as _;
     use std::os::windows::io::AsRawHandle as _;
-    use windows_sys::Win32::Storage::FileSystem::{
-        FileRenameInfo, SetFileInformationByHandle, FILE_RENAME_INFO,
+    use windows_sys::Wdk::Storage::FileSystem::{
+        FileRenameInformation, NtSetInformationFile, FILE_RENAME_INFORMATION,
     };
+    use windows_sys::Win32::Foundation::RtlNtStatusToDosError;
+    use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
     let source = retained_root_open(directory, source, true, false, false)?;
     let target = destination.encode_wide().collect::<Vec<_>>();
-    // SetFileInformationByHandle requires the variable-length record to retain
-    // the complete fixed FILE_RENAME_INFO, including its x64 trailing padding.
+    // NtSetInformationFile consumes the native variable-length record while
+    // preserving the retained RootDirectory-relative namespace operation.
     // FileNameLength still describes only the UTF-16 payload copied at the
     // FileName field below.
-    let fixed = std::mem::size_of::<FILE_RENAME_INFO>();
+    let fixed = std::mem::size_of::<FILE_RENAME_INFORMATION>();
     let target_bytes = target
         .len()
         .checked_mul(std::mem::size_of::<u16>())
@@ -14632,11 +14635,12 @@ fn retained_root_rename(
         )
     })?;
     let words = buffer_bytes.div_ceil(std::mem::size_of::<usize>());
-    // `FILE_RENAME_INFO` has pointer alignment; a byte vector does not promise
-    // enough alignment for the typed header even though system allocators often
-    // happen to provide it.
+    // `FILE_RENAME_INFORMATION` has pointer alignment; a byte vector does not
+    // promise enough alignment for the typed header even though system allocators
+    // often happen to provide it.
     let mut buffer = vec![0_usize; words];
-    let information = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    let information = buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
+    let mut status_block = IO_STATUS_BLOCK::default();
     before_mutation()?;
     unsafe {
         (*information).Anonymous.ReplaceIfExists = replace;
@@ -14647,14 +14651,17 @@ fn retained_root_rename(
             (*information).FileName.as_mut_ptr(),
             target.len(),
         );
-        if SetFileInformationByHandle(
+        let status = NtSetInformationFile(
             source.as_raw_handle(),
-            FileRenameInfo,
+            &mut status_block,
             information.cast(),
             information_bytes,
-        ) == 0
-        {
-            return Err(std::io::Error::last_os_error());
+            FileRenameInformation,
+        );
+        if status < 0 {
+            return Err(std::io::Error::from_raw_os_error(
+                RtlNtStatusToDosError(status) as i32,
+            ));
         }
     }
     Ok(())
