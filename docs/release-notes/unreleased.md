@@ -138,3 +138,4 @@ Changes collected after `v1.2.1` and before the next version tag.
 - Desktop: consecutive time blocks in the calendar's day and week grids now leave a small seam between them, so back-to-back tasks read as separate items instead of one solid block.
 - Flatpak: the in-app feedback form (Settings → About) now works in the Flathub build; it used to say feedback wasn't available and point at GitHub instead.
 - Mobile: Focus gains the same "Hide details" toggle desktop already has — collapse every row to just its title, hiding the description preview and metadata line. Device-local, remembered per device, and on by default.
+- Today's Focus limit can now be set to 1 on desktop and mobile, for people who want a single task to define the day.

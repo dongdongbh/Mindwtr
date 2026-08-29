@@ -519,7 +519,7 @@ export const createTaskActions = ({ set, get, getStorage, debouncedSave, trackIm
             const focusTaskLimit = normalizeFocusTaskLimit(currentState.settings.gtd?.focusTaskLimit);
             const focusedCount = currentState.getDerivedState().focusedCount;
             if (focusedCount >= focusTaskLimit) {
-                const message = `Maximum of ${focusTaskLimit} focused tasks allowed`;
+                const message = `Focus limit of ${focusTaskLimit} reached`;
                 set({ error: message });
                 return actionFail(message);
             }

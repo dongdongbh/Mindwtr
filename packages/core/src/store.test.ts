@@ -924,12 +924,12 @@ describe('TaskStore', () => {
 
         const fourthResult = await updateTask(taskIds[3], { isFocusedToday: true });
 
-        expect(fourthResult).toEqual({ success: false, error: 'Maximum of 3 focused tasks allowed' });
+        expect(fourthResult).toEqual({ success: false, error: 'Focus limit of 3 reached' });
         const focusedTasks = useTaskStore.getState()._allTasks.filter((task) => task.isFocusedToday === true && !task.deletedAt);
         expect(focusedTasks).toHaveLength(3);
         expect(focusedTasks.map((task) => task.id)).toEqual(taskIds.slice(0, 3));
         expect(useTaskStore.getState()._allTasks.find((task) => task.id === taskIds[3])?.isFocusedToday).not.toBe(true);
-        expect(useTaskStore.getState().error).toBe('Maximum of 3 focused tasks allowed');
+        expect(useTaskStore.getState().error).toBe('Focus limit of 3 reached');
         expect(mockStorage.saveData).not.toHaveBeenCalled();
     });
 
@@ -1000,7 +1000,7 @@ describe('TaskStore', () => {
         }
         const sixthResult = await updateTask(taskIds[5], { isFocusedToday: true });
 
-        expect(sixthResult).toEqual({ success: false, error: 'Maximum of 5 focused tasks allowed' });
+        expect(sixthResult).toEqual({ success: false, error: 'Focus limit of 5 reached' });
         expect(useTaskStore.getState().getDerivedState().focusedCount).toBe(5);
     });
 

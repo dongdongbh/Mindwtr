@@ -44,7 +44,7 @@ const storeState: MockStoreState = {
 };
 
 vi.mock('@mindwtr/core', () => ({
-  FOCUS_TASK_LIMIT_OPTIONS: [3, 5, 10],
+  FOCUS_TASK_LIMIT_OPTIONS: [1, 3, 5, 10],
   getDefaultTaskAreaMode: (settings: AppData['settings']) => {
     const mode = settings?.gtd?.defaultAreaMode;
     if (mode === 'none' || mode === 'fixed' || mode === 'active') return mode;
@@ -297,7 +297,7 @@ describe('GtdSettingsScreen task editor layout', () => {
       tree = renderer.create(<GtdSettingsScreen onNavigate={vi.fn()} screen="gtd" />);
     });
 
-    const focusLimitButtons = [3, 5, 10].map((option) => {
+    const focusLimitButtons = [1, 3, 5, 10].map((option) => {
       const button = tree.root.findAllByType(TouchableOpacity).find((candidate) => (
         candidate.findAllByType(Text).some((textNode) => textNode.props.children === option)
       ));
@@ -311,6 +311,28 @@ describe('GtdSettingsScreen task editor layout', () => {
       expect(flattenedStyle.minWidth).toBe(0);
       expect(flattenedStyle.flexGrow).toBe(1);
     });
+  });
+
+  it('persists a focus limit of 1 when selected', () => {
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tree = renderer.create(<GtdSettingsScreen onNavigate={vi.fn()} screen="gtd" />);
+    });
+
+    const oneButton = tree.root.findAllByType(TouchableOpacity).find((candidate) => (
+      candidate.findAllByType(Text).some((textNode) => textNode.props.children === 1)
+    ));
+    expect(oneButton).toBeTruthy();
+
+    renderer.act(() => {
+      oneButton?.props.onPress();
+    });
+
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      gtd: expect.objectContaining({
+        focusTaskLimit: 1,
+      }),
+    }));
   });
 
   it('saves the default project flow mode from GTD settings', () => {

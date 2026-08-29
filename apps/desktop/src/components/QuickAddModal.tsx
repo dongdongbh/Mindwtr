@@ -232,7 +232,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     const addFocusLabel = tFallback(t, 'agenda.addToFocus', "Add to today's focus");
     const removeFocusLabel = tFallback(t, 'agenda.removeFromFocus', 'Remove from focus');
     const focusLimitLabel = formatFocusTaskLimitText(
-        tFallback(t, 'agenda.maxFocusItems', 'Max {{count}} focus items'),
+        tFallback(t, 'agenda.maxFocusItems', 'Max {{count}} focus item(s)'),
         focusTaskLimit,
     );
     const focusLabel = focusNewTask

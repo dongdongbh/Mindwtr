@@ -204,7 +204,7 @@ describe('AgendaView', () => {
         fireEvent.click(getByRole('button', { name: /^Filters$/i }));
         fireEvent.change(getByPlaceholderText('Search...'), { target: { value: 'Visible candidate' } });
 
-        expect(getByRole('button', { name: 'Max 5 focus items' })).toBeDisabled();
+        expect(getByRole('button', { name: 'Max 5 focus item(s)' })).toBeDisabled();
     });
 
     it('ends the page with the shared end gap on its scrolled content (#977)', () => {

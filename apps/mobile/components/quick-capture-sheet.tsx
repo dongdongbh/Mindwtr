@@ -258,7 +258,7 @@ export function QuickCaptureSheet({
   const focusTaskLimit = normalizeFocusTaskLimit(settings?.gtd?.focusTaskLimit);
   const canFocusNewTask = focusNewTask || canStarNewCapture({ focusedCount: getDerivedState().focusedCount, focusTaskLimit });
   const focusNewTaskDisabledReason = formatFocusTaskLimitText(
-    tFallback(t, 'agenda.maxFocusItems', 'Max {{count}} focus items'),
+    tFallback(t, 'agenda.maxFocusItems', 'Max {{count}} focus item(s)'),
     focusTaskLimit,
   );
 

@@ -1,7 +1,7 @@
 export const DEFAULT_FOCUS_TASK_LIMIT = 3;
 export const MIN_FOCUS_TASK_LIMIT = 1;
 export const MAX_FOCUS_TASK_LIMIT = 10;
-export const FOCUS_TASK_LIMIT_OPTIONS = [3, 5, 10] as const;
+export const FOCUS_TASK_LIMIT_OPTIONS = [1, 3, 5, 10] as const;
 
 export const normalizeFocusTaskLimit = (value: unknown): number => {
     const numeric = typeof value === 'number' ? value : Number(value);

@@ -1507,7 +1507,7 @@ export const svOverrides: Record<string, string> = {
         'agenda.focusHint': 'Klicka på stjärnan på valfri uppgift nedan för att lägga till den i dagens fokus (max {{count}}).',
         'agenda.addToFocus': 'Lägg till i dagens fokus',
         'agenda.removeFromFocus': 'Ta bort från fokus',
-        'agenda.maxFocusItems': 'Max {{count}} fokusposter',
+        'agenda.maxFocusItems': 'Max {{count}} fokuspost(er)',
         'projects.addToFocus': 'Lägg till i fokus',
         'projects.removeFromFocus': 'Ta bort från fokus',
         'projects.maxFocusedProjects': 'Max 5 projekt i fokus',
