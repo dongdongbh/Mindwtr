@@ -702,6 +702,44 @@ describe('AgendaView', () => {
         expect(document.getElementById('agenda-section-upcoming')).toBeNull();
     });
 
+    it('keeps a task due today with a start on another day in Upcoming only, not Today', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 1, 28, 12, 0, 0, 0));
+        const now = new Date();
+        const dueToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 18, 0, 0, 0).toISOString();
+        const startTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 9, 0, 0, 0).toISOString();
+        const deferredDueTodayTask: Task = {
+            id: 'due-today-start-tomorrow',
+            title: 'Due today but starts tomorrow',
+            status: 'next',
+            dueDate: dueToday,
+            startTime: startTomorrow,
+            tags: [],
+            contexts: [],
+            createdAt: nowIso,
+            updatedAt: nowIso,
+        };
+
+        useTaskStore.setState({
+            tasks: [deferredDueTodayTask],
+            _allTasks: [deferredDueTodayTask],
+            projects: [],
+            _allProjects: [],
+            areas: [],
+            _allAreas: [],
+            settings: {},
+            highlightTaskId: null,
+        });
+
+        const { getByText, queryByRole } = renderAgenda();
+
+        const upcomingSection = document.getElementById('agenda-section-upcoming');
+        expect(upcomingSection).not.toBeNull();
+        expect(upcomingSection).toContainElement(getByText('Due today but starts tomorrow'));
+        expect(document.getElementById('agenda-section-schedule')).toBeNull();
+        expect(queryByRole('heading', { name: /^today$/i })).not.toBeInTheDocument();
+    });
+
     it('always hides future-start next actions without a visibility control', () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date('2026-02-28T12:00:00.000Z'));

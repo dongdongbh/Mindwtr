@@ -382,11 +382,22 @@ export default function FocusScreen() {
   // Today/schedule membership is decided at day granularity (a later-today
   // start belongs there, by its time), so it draws from baseActiveTasks rather
   // than the time-granularity activeTasks pool — with the same user criteria
-  // filteredActiveTasks applies.
-  const scheduleCandidates = useMemo(() => (
-    applyFilter(baseActiveTasks, selections.criteria, { projects, tokenMatchMode: 'all' })
-  ), [
+  // filteredActiveTasks applies. A task deferred to another day must still be
+  // excluded here (day-granularity), or a dueDate<=today row with a
+  // future-day start would double up in both Today and Upcoming.
+  const scheduleCandidates = useMemo(() => {
+    // Day granularity only cares which calendar day it is, not the clock
+    // time, so this does not need futureStartTick (unlike activeTasks above).
+    void localDayKey;
+    const now = new Date();
+    return applyFilter(
+      baseActiveTasks.filter((task) => shouldShowTaskForStart(task, { now })),
+      selections.criteria,
+      { projects, tokenMatchMode: 'all' },
+    );
+  }, [
     baseActiveTasks,
+    localDayKey,
     selections.criteria,
     projects,
   ]);
@@ -855,13 +866,29 @@ export default function FocusScreen() {
       ? getProjectDeadlineBoosts(nextItems, projects, { now })
       : new Map<string, ProjectDeadlineBoost>();
 
+    // Mirrors desktop's scheduleSortTime (AgendaView.tsx): the earlier of due
+    // and start, so a 09:00 start sorts ahead of a 17:00 due date.
+    const scheduleSortTime = (task: Task) => {
+      const due = safeParseDueDate(task.dueDate)?.getTime();
+      const start = safeParseDate(task.startTime)?.getTime();
+      if (typeof due === 'number' && typeof start === 'number') return Math.min(due, start);
+      if (typeof due === 'number') return due;
+      if (typeof start === 'number') return start;
+      return Number.POSITIVE_INFINITY;
+    };
+    const sortedScheduleItems = [...scheduleItems].sort((a, b) => {
+      const timeDiff = scheduleSortTime(a) - scheduleSortTime(b);
+      if (timeDiff !== 0) return timeDiff;
+      return a.title.localeCompare(b.title);
+    });
+
     return {
       // Default sort honours the manual Today's Focus order (focusOrder); an
       // explicit non-default sort wins and hides the reorder affordance.
       focusedTasks: effectiveFocusSortBy === DEFAULT_FOCUS_SORT_BY
         ? sortTasksByFocusOrder(allFocusedTasks)
         : sortBySavedPerspective(allFocusedTasks),
-      schedule: effectiveFocusSortBy === DEFAULT_FOCUS_SORT_BY ? scheduleItems : sortBySavedPerspective(scheduleItems),
+      schedule: effectiveFocusSortBy === DEFAULT_FOCUS_SORT_BY ? sortedScheduleItems : sortBySavedPerspective(scheduleItems),
       nextActions: effectiveFocusSortBy === DEFAULT_FOCUS_SORT_BY
         ? sortFocusNextActions(nextItems, {
           now,

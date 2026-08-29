@@ -1250,6 +1250,74 @@ describe('FocusScreen', () => {
     vi.useRealTimers();
   });
 
+  it('keeps a task due today with a start on another day in Upcoming only, not Today', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 3, 5, 12, 0, 0, 0));
+    storeState.tasks = [
+      makeTask('due-today-start-tomorrow', {
+        title: 'Due today but starts tomorrow',
+        dueDate: '2026-04-05',
+        startTime: '2026-04-06',
+      }),
+      // Without a second task landing in another section, hasTasks (based on
+      // schedule/nextActions/reviewDue only, not upcoming) hides the whole
+      // list — a pre-existing gap out of this fix's scope. Keep this row so
+      // the assertion below tests the schedule-pool fix, not that gap.
+      makeTask('plain-next', { title: 'Plain next' }),
+    ];
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<FocusScreen />);
+    });
+
+    const sections = tree.root.findByType(SectionList).props.sections as {
+      title: string;
+      data: { type: string; task?: Task }[];
+    }[];
+    const idsIn = (title: string) => sections
+      .find((section) => section.title === title)?.data
+      .map((item) => item.task?.id)
+      .filter(Boolean) ?? [];
+
+    expect(idsIn('Today')).toEqual([]);
+    expect(idsIn('Next Actions')).toEqual(['plain-next']);
+    expect(idsIn('Upcoming')).toEqual(['due-today-start-tomorrow']);
+    vi.useRealTimers();
+  });
+
+  it('sorts Today rows by the earliest due/start time under the default Focus sort', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 3, 5, 6, 0, 0, 0));
+    storeState.tasks = [
+      makeTask('ten-oclock', {
+        title: 'Ten oclock start',
+        startTime: new Date(2026, 3, 5, 10, 0, 0, 0).toISOString(),
+      }),
+      makeTask('nine-oclock', {
+        title: 'Nine oclock start',
+        startTime: new Date(2026, 3, 5, 9, 0, 0, 0).toISOString(),
+      }),
+    ];
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<FocusScreen />);
+    });
+
+    const sections = tree.root.findByType(SectionList).props.sections as {
+      title: string;
+      data: { type: string; task?: Task }[];
+    }[];
+    const idsIn = (title: string) => sections
+      .find((section) => section.title === title)?.data
+      .map((item) => item.task?.id)
+      .filter(Boolean) ?? [];
+
+    expect(idsIn('Today')).toEqual(['nine-oclock', 'ten-oclock']);
+    vi.useRealTimers();
+  });
+
   it('shows the status badge on review-due rows but keeps it hidden on next actions', () => {
     storeState.tasks = [
       makeTask('plain-next', { title: 'Plain next' }),

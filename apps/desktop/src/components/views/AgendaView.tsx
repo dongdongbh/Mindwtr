@@ -536,9 +536,15 @@ export function AgendaView() {
         // Today/schedule membership is decided at day granularity (a later-today
         // start belongs there, by its time), so it draws from baseActiveTasks
         // rather than the time-granularity activeTasks pool — with the same
-        // user criteria/search filteredActiveTasks applies.
-        const scheduleBase = applyFilter(baseActiveTasks, effectiveFilterCriteria, { projects, now, tokenMatchMode: 'all' })
-            .filter((task) => matchesSearchQuery(task.title));
+        // user criteria/search filteredActiveTasks applies. A task deferred to
+        // another day must still be excluded here (day-granularity), or a
+        // dueDate<=today row with a future-day start would double up in both
+        // Today and Upcoming.
+        const scheduleBase = applyFilter(
+            baseActiveTasks.filter((task) => shouldShowTaskForStart(task, { now })),
+            effectiveFilterCriteria,
+            { projects, now, tokenMatchMode: 'all' },
+        ).filter((task) => matchesSearchQuery(task.title));
         const reviewDueBase = baseActiveTasks
             .filter((task) => {
                 if (!shouldShowTaskForStart(task, { now, granularity: 'time' })) return false;

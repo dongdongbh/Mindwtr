@@ -634,6 +634,54 @@ describe('TaskItemDisplay', () => {
         expect(getByText(`Completed: ${completionLabel}`)).toBeInTheDocument();
     });
 
+    it('shows the start chip in the compact-details-off fallback row for a timed start, not a date-only start', () => {
+        const timedStartTask: Task = {
+            ...baseTask,
+            title: 'Timed start task',
+            status: 'next',
+            startTime: '2026-05-12T17:00:00.000Z',
+        };
+        const startLabel = safeFormatDate(timedStartTask.startTime, 'Pp');
+
+        const renderTask = (task: Task) => render(
+            <LanguageProvider>
+                <TaskItemDisplay
+                    task={task}
+                    language="en"
+                    selectionMode={false}
+                    isViewOpen={false}
+                    actions={{
+                        onToggleView: vi.fn(),
+                        onEdit: vi.fn(),
+                        onDelete: vi.fn(),
+                        onDuplicate: vi.fn(),
+                        onStatusChange: vi.fn(),
+                        openAttachment: vi.fn(),
+                    }}
+                    visibleAttachments={[]}
+                    recurrenceRule=""
+                    recurrenceStrategy="strict"
+                    prioritiesEnabled={false}
+                    timeEstimatesEnabled={false}
+                    isStagnant={false}
+                    showQuickDone={false}
+                    compactMetaEnabled={false}
+                    readOnly={false}
+                    t={(key: string) => key}
+                />
+            </LanguageProvider>
+        );
+
+        const timed = renderTask(timedStartTask);
+        expect(timed.getByText(startLabel)).toBeInTheDocument();
+        timed.unmount();
+
+        const dateOnlyStartTask: Task = { ...timedStartTask, id: 'task-2', startTime: '2026-05-12' };
+        expect(hasTimeComponent(dateOnlyStartTask.startTime)).toBe(false);
+        const dateOnly = renderTask(dateOnlyStartTask);
+        expect(dateOnly.queryByText(safeFormatDate(dateOnlyStartTask.startTime, 'P'))).not.toBeInTheDocument();
+    });
+
     it('keeps board overlay tags in the metadata row instead of the absolute action controls', () => {
         const taggedTask: Task = {
             ...baseTask,

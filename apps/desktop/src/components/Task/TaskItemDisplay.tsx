@@ -186,6 +186,12 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
     const dateIssueLabel = getTaskDateCoherenceIssues(task).some((issue) => issue.code === 'start_after_due')
         ? tFallback(t, 'task.dateIssue.startAfterDue', 'Starts after due date')
         : '';
+    // A timed start (e.g. "starts 17:00") is the row's whole reason for being
+    // in Focus's Today today, so the details-off fallback row keeps it even
+    // though the rest of the start/due metadata is hidden. A date-only start
+    // carries no information the fallback row's date context doesn't already
+    // give, so it stays out.
+    const hasTimedStart = Boolean(task.startTime && hasTimeComponent(task.startTime));
     const hasMetadata = Boolean(
         (showProjectBadgeInMetadata && project)
         || area
@@ -772,7 +778,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                         dense ? "mt-0.5" : "mt-1",
                         (overlayDragHandle || overlayQuickDone) && "pl-12"
                     ))}
-                    {!showCompactMeta && !isViewOpen && (completionLabel || projectDeadlineLabel || appearsAtLabel) && (
+                    {!showCompactMeta && !isViewOpen && (completionLabel || projectDeadlineLabel || appearsAtLabel || hasTimedStart) && (
                         <div className={cn(
                             "flex flex-wrap items-center gap-2 text-xs text-muted-foreground",
                             dense ? "mt-0.5" : "mt-1",
@@ -783,6 +789,13 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                                 "show list details" off along with the completion timestamp. */}
                             {renderAppearsAtMetadataBadge()}
                             {renderProjectDeadlineMetadataBadge()}
+                            {hasTimedStart && (
+                                <MetadataBadge
+                                    variant="info"
+                                    icon={ArrowRight}
+                                    label={safeFormatDate(task.startTime, 'Pp')}
+                                />
+                            )}
                         </div>
                     )}
 
