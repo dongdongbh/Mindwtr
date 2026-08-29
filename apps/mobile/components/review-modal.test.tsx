@@ -67,6 +67,14 @@ const storeState = {
     addTask: vi.fn(),
 };
 
+const mockLookBack = {
+    completedCount: 0,
+    projectsMovedCount: 0,
+    estimatedTaskCount: 0,
+    estimatedMinutes: 0,
+    trackedMinutes: 0,
+};
+
 vi.mock('react-native', async () => {
     const actual = await vi.importActual<any>('react-native');
     return {
@@ -123,6 +131,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => ({
     safeFormatDate: vi.fn(() => '2026-03-15'),
     safeParseDate: vi.fn((value?: string) => (value ? new Date(value) : null)),
     safeParseDueDate: vi.fn(() => null),
+    formatTimeSpentLabel: (await importOriginal<typeof import('@mindwtr/core')>()).formatTimeSpentLabel,
     // Weekly Review candidate/bucket derivation moved to core (review-buckets
     // refactor); these fakes mirror the real functions closely enough for
     // this file's fixtures, composed from the primitives already mocked above.
@@ -167,6 +176,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => ({
                 projectsWithoutNextAction: projectEntries.filter((entry: any) => !entry.hasNextAction).length,
                 staleWaitingCount: 0,
             },
+            lookBack: { ...mockLookBack },
             contextGroups: Array.from(contextGroupsByName.entries()).map(([context, contextTasks]) => ({ context, tasks: contextTasks })),
             calendarItems: [],
         };
@@ -341,6 +351,13 @@ describe('ReviewModal', () => {
         storeState.tasks = defaultTasks.map((task) => ({ ...task }));
         storeState.projects = defaultProjects.map((project) => ({ ...project }));
         storeState.settings = { ...defaultSettings };
+        Object.assign(mockLookBack, {
+            completedCount: 0,
+            projectsMovedCount: 0,
+            estimatedTaskCount: 0,
+            estimatedMinutes: 0,
+            trackedMinutes: 0,
+        });
         mockStorageGetItem.mockReset().mockResolvedValue(null);
         mockStorageRemoveItem.mockReset().mockResolvedValue(undefined);
         mockStorageSetItem.mockReset().mockResolvedValue(undefined);
@@ -547,6 +564,72 @@ describe('ReviewModal', () => {
         expect(hasText('Review Complete!')).toBe(true);
         expect(hasText('Inbox')).toBe(true);
         expect(hasText('Calendar')).toBe(true);
+        expect(hasText('This week')).toBe(false);
+    });
+
+    it('shows this week\'s completion, project, estimate, and tracked totals', async () => {
+        storeState.tasks = [];
+        storeState.projects = [];
+        storeState.settings = {
+            ...defaultSettings,
+            features: { timeEstimates: true, pomodoro: true },
+            gtd: {
+                weeklyReview: { includeContextStep: false },
+                pomodoro: { linkTask: true },
+            },
+        } as typeof storeState.settings;
+        Object.assign(mockLookBack, {
+            completedCount: 2,
+            projectsMovedCount: 1,
+            estimatedTaskCount: 1,
+            estimatedMinutes: 60,
+            trackedMinutes: 45,
+        });
+        let tree!: ReturnType<typeof create>;
+
+        await act(async () => {
+            tree = create(<ReviewModal visible onClose={vi.fn()} />);
+        });
+
+        const hasText = (text: string) =>
+            tree.root.findAll((node) => flattenText(node.props?.children).includes(text)).length > 0;
+        expect(hasText('This week')).toBe(true);
+        expect(hasText('2 action(s) completed this week')).toBe(true);
+        expect(hasText('1 project(s) moved forward')).toBe(true);
+        expect(hasText('1 completed task(s) had an estimate')).toBe(true);
+        expect(hasText('Estimated: 1h')).toBe(true);
+        expect(hasText('Tracked on those tasks: 45m')).toBe(true);
+    });
+
+    it('keeps estimate lines hidden until time estimates are enabled', async () => {
+        storeState.tasks = [];
+        storeState.projects = [];
+        storeState.settings = {
+            ...defaultSettings,
+            features: { timeEstimates: false, pomodoro: true },
+            gtd: {
+                weeklyReview: { includeContextStep: false },
+                pomodoro: { linkTask: true },
+            },
+        } as typeof storeState.settings;
+        Object.assign(mockLookBack, {
+            completedCount: 1,
+            estimatedTaskCount: 1,
+            estimatedMinutes: 60,
+            trackedMinutes: 45,
+        });
+        let tree!: ReturnType<typeof create>;
+
+        await act(async () => {
+            tree = create(<ReviewModal visible onClose={vi.fn()} />);
+        });
+
+        const hasText = (text: string) =>
+            tree.root.findAll((node) => flattenText(node.props?.children).includes(text)).length > 0;
+        expect(hasText('1 action(s) completed this week')).toBe(true);
+        expect(hasText('1 completed task(s) had an estimate')).toBe(false);
+        expect(hasText('Estimated: 1h')).toBe(false);
+        expect(hasText('Tracked on those tasks: 45m')).toBe(false);
     });
 
     it('parses the project-step prompt and Save & edit opens the created task in the editor', async () => {

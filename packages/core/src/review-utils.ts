@@ -2,8 +2,9 @@ import { addDays, format } from 'date-fns';
 
 import type { ReviewSnapshotItem } from './ai/types';
 import type { ExternalCalendarEvent } from './ics';
-import type { Area, Project, Task, TaskSortBy } from './types';
+import type { AppSettings, Area, Project, Task, TaskSortBy } from './types';
 import { getWeekStartsOnIndex, hasTimeComponent, isDueForReview, safeParseDate, safeParseDueDate } from './date';
+import { timeEstimateToMinutes } from './calendar-scheduling';
 import {
     isTaskVisibleInArea,
     type AreaFilterSelection,
@@ -12,6 +13,7 @@ import {
 import { isTaskInActiveProject } from './project-utils';
 import { getSequentialFirstTaskIds, isSequentialChainStatus, shouldShowTaskForStart, sortTasksBy } from './task-utils';
 import { isTaskActionable } from './task-status';
+import { normalizeTimeSpentMinutes } from './time-spent';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -101,11 +103,20 @@ export type WeeklyReviewProjectEntry = {
     nextActionState: ProjectNextActionState;
 };
 
+export type WeeklyReviewLookBack = {
+    completedCount: number;
+    projectsMovedCount: number;
+    estimatedTaskCount: number;
+    estimatedMinutes: number;
+    trackedMinutes: number;
+};
+
 type WeeklyReviewDerivation = {
     inbox: Task[];
     projectEntries: WeeklyReviewProjectEntry[];
     staleItems: ReviewSnapshotItem[];
     summary: WeeklyReviewSummary;
+    lookBack: WeeklyReviewLookBack;
 };
 
 function deriveWeeklyReview(
@@ -113,14 +124,45 @@ function deriveWeeklyReview(
     projects: Project[],
     staleThresholdDays: number,
     now: Date,
+    weekStart?: AppSettings['weekStart'],
 ): WeeklyReviewDerivation {
     const projectMap = new Map(projects.map((project) => [project.id, project]));
     const activeProjects = projects.filter((project) => project.status === 'active' && !project.deletedAt);
     const projectTasksById = new Map(activeProjects.map((project) => [project.id, [] as Task[]]));
     const inbox: Task[] = [];
     const staleItems: ReviewSnapshotItem[] = [];
+    const lookBack: WeeklyReviewLookBack = {
+        completedCount: 0,
+        projectsMovedCount: 0,
+        estimatedTaskCount: 0,
+        estimatedMinutes: 0,
+        trackedMinutes: 0,
+    };
+    const movedProjectIds = new Set<string>();
+    const reviewWindowStart = getLocalReviewWindowStart(now, 'weekly', weekStart);
+    const reviewWindowEnd = now.getTime();
 
     tasks.forEach((task) => {
+        const completedAt = task.status === 'done' && !task.deletedAt
+            ? safeParseDate(task.completedAt)
+            : null;
+        if (
+            completedAt
+            && completedAt.getTime() >= reviewWindowStart
+            && completedAt.getTime() <= reviewWindowEnd
+        ) {
+            lookBack.completedCount += 1;
+            const completedProject = task.projectId ? projectMap.get(task.projectId) : undefined;
+            if (task.projectId && completedProject && !completedProject.deletedAt) {
+                movedProjectIds.add(task.projectId);
+            }
+            if (task.timeEstimate) {
+                lookBack.estimatedTaskCount += 1;
+                lookBack.estimatedMinutes += timeEstimateToMinutes(task.timeEstimate);
+                lookBack.trackedMinutes += normalizeTimeSpentMinutes(task.timeSpentMinutes) ?? 0;
+            }
+        }
+
         const belongsToActiveProject = isTaskInActiveProject(task, projectMap);
         if (!task.deletedAt && belongsToActiveProject && task.status === 'inbox') {
             inbox.push(task);
@@ -190,8 +232,9 @@ function deriveWeeklyReview(
         projectsWithoutNextAction: projectEntries.filter((entry) => entry.nextActionState === 'none').length,
         staleWaitingCount: staleItems.filter((item) => item.status === 'waiting').length,
     };
+    lookBack.projectsMovedCount = movedProjectIds.size;
 
-    return { inbox, projectEntries, staleItems, summary };
+    return { inbox, projectEntries, staleItems, summary, lookBack };
 }
 
 /**
@@ -233,6 +276,7 @@ export function getStaleItems(
 
 export type ReviewBucketOptions = {
     now?: Date;
+    weekStart?: AppSettings['weekStart'];
     showFutureStarts?: boolean;
     sortBy?: TaskSortBy;
     /**
@@ -374,6 +418,7 @@ export type WeeklyReviewBuckets = {
     projectEntries: WeeklyReviewProjectEntry[];
     staleItems: ReviewSnapshotItem[];
     summary: WeeklyReviewSummary;
+    lookBack: WeeklyReviewLookBack;
     contextGroups: ContextReviewGroup[];
     calendarItems: CalendarReviewEntry[];
 };
@@ -389,7 +434,7 @@ export function getWeeklyReviewBuckets(
     opts: ReviewBucketOptions = {},
 ): WeeklyReviewBuckets {
     const now = opts.now ?? new Date();
-    const weekly = deriveWeeklyReview(tasks, projects, 14, now);
+    const weekly = deriveWeeklyReview(tasks, projects, 14, now, opts.weekStart);
     const projectMap = new Map(projects.map((project) => [project.id, project]));
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const upcomingEnd = new Date(startOfToday);
@@ -446,6 +491,7 @@ export function getWeeklyReviewBuckets(
         projectEntries: weekly.projectEntries,
         staleItems: weekly.staleItems,
         summary: weekly.summary,
+        lookBack: weekly.lookBack,
         contextGroups,
         calendarItems,
     };

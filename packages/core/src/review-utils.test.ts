@@ -315,6 +315,106 @@ describe('getDailyReviewBuckets', () => {
 describe('getWeeklyReviewBuckets', () => {
     const weeklyNow = new Date(2026, 2, 1);
 
+    it('derives the completed-task look-back from the configured review-week window', () => {
+        const reviewNow = new Date(2026, 2, 4, 12, 0, 0);
+        const mondayStart = new Date(2026, 2, 2, 0, 0, 0).toISOString();
+        const activeProject = createProject({ id: 'project-active' });
+        const secondProject = createProject({ id: 'project-second' });
+        const deletedProject = createProject({ id: 'project-deleted', deletedAt: mondayStart });
+        const tasks = [
+            createTask({
+                id: 'at-window-start',
+                status: 'done',
+                completedAt: mondayStart,
+                projectId: activeProject.id,
+                timeEstimate: '1hr',
+                timeSpentMinutes: 75,
+            }),
+            createTask({
+                id: 'estimated-second-project',
+                status: 'done',
+                completedAt: new Date(2026, 2, 3, 9, 0, 0).toISOString(),
+                projectId: secondProject.id,
+                timeEstimate: '30min',
+                timeSpentMinutes: 15,
+            }),
+            createTask({
+                id: 'without-estimate',
+                status: 'done',
+                completedAt: new Date(2026, 2, 3, 10, 0, 0).toISOString(),
+                projectId: activeProject.id,
+                timeSpentMinutes: 999,
+            }),
+            createTask({
+                id: 'deleted-project-completion',
+                status: 'done',
+                completedAt: new Date(2026, 2, 3, 11, 0, 0).toISOString(),
+                projectId: deletedProject.id,
+            }),
+            createTask({
+                id: 'before-window',
+                status: 'done',
+                completedAt: new Date(2026, 2, 1, 23, 59, 59).toISOString(),
+                projectId: activeProject.id,
+                timeEstimate: '4hr',
+                timeSpentMinutes: 240,
+            }),
+            createTask({
+                id: 'after-now',
+                status: 'done',
+                completedAt: new Date(2026, 2, 4, 12, 0, 1).toISOString(),
+                projectId: activeProject.id,
+                timeEstimate: '4hr',
+                timeSpentMinutes: 240,
+            }),
+            createTask({
+                id: 'deleted-task',
+                status: 'done',
+                completedAt: new Date(2026, 2, 3, 12, 0, 0).toISOString(),
+                deletedAt: new Date(2026, 2, 3, 13, 0, 0).toISOString(),
+                projectId: activeProject.id,
+                timeEstimate: '4hr',
+                timeSpentMinutes: 240,
+            }),
+            createTask({
+                id: 'not-done',
+                status: 'next',
+                completedAt: new Date(2026, 2, 3, 12, 0, 0).toISOString(),
+                projectId: activeProject.id,
+            }),
+        ];
+
+        const buckets = getWeeklyReviewBuckets(tasks, [activeProject, secondProject, deletedProject], {
+            now: reviewNow,
+            weekStart: 'monday',
+        });
+
+        expect(buckets.lookBack).toEqual({
+            completedCount: 4,
+            projectsMovedCount: 2,
+            estimatedTaskCount: 2,
+            estimatedMinutes: 90,
+            trackedMinutes: 90,
+        });
+    });
+
+    it('respects Sunday versus Monday when deriving this week\'s completions', () => {
+        const reviewNow = new Date(2026, 2, 4, 12, 0, 0);
+        const sundayCompletion = createTask({
+            status: 'done',
+            completedAt: new Date(2026, 2, 1, 12, 0, 0).toISOString(),
+        });
+
+        expect(getWeeklyReviewBuckets([sundayCompletion], [], {
+            now: reviewNow,
+            weekStart: 'monday',
+        }).lookBack.completedCount).toBe(0);
+        expect(getWeeklyReviewBuckets([sundayCompletion], [], {
+            now: reviewNow,
+            weekStart: 'sunday',
+        }).lookBack.completedCount).toBe(1);
+    });
+
     it('returns due-first project entries with live tasks and next-action health', () => {
         const activeProject = createProject({ id: 'p-active', status: 'active' });
         const dueProject = createProject({ id: 'p-due', status: 'active', reviewAt: '2026-02-01' });

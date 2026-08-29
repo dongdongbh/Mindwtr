@@ -23,6 +23,12 @@ vi.mock('../../../contexts/language-context', () => ({
             'review.complete': 'Review Complete!',
             'review.completeDesc': 'Nice work this week.',
             'review.summaryInboxEmpty': 'Inbox is empty.',
+            'review.weekHeading': 'This week',
+            'review.weekCompletedCount': '{{count}} action(s) completed this week',
+            'review.weekProjectsMovedCount': '{{count}} project(s) moved forward',
+            'review.weekEstimatedTasksCount': '{{count}} completed task(s) had an estimate',
+            'review.weekEstimatedTotal': 'Estimated: {{duration}}',
+            'review.weekTrackedTotal': 'Tracked on those tasks: {{duration}}',
             'review.finish': 'Finish',
             'review.step': 'Step',
             'review.of': 'of',
@@ -96,6 +102,86 @@ describe('WeeklyReviewGuideModal', () => {
         render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
 
         expect(screen.getByRole('heading', { level: 2, name: 'Review Complete!' })).toBeInTheDocument();
+        expect(screen.queryByText('This week')).not.toBeInTheDocument();
+    });
+
+    it('shows this week\'s completion, project, estimate, and tracked totals', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 2, 4, 12, 0, 0));
+        useTaskStore.setState({
+            _allTasks: [
+                makeTask({
+                    id: 'done-with-estimate',
+                    status: 'done',
+                    completedAt: new Date(2026, 2, 3, 9, 0, 0).toISOString(),
+                    projectId: 'archived-project',
+                    timeEstimate: '1hr',
+                    timeSpentMinutes: 45,
+                }),
+                makeTask({
+                    id: 'done-without-estimate',
+                    status: 'done',
+                    completedAt: new Date(2026, 2, 3, 10, 0, 0).toISOString(),
+                    projectId: 'archived-project',
+                }),
+            ],
+            _allProjects: [{
+                id: 'archived-project',
+                title: 'Archived project',
+                status: 'archived',
+                color: '#3B82F6',
+                order: 0,
+                tagIds: [],
+                createdAt: now,
+                updatedAt: now,
+            }],
+            settings: {
+                weekStart: 'monday',
+                features: { timeEstimates: true, pomodoro: true },
+                gtd: {
+                    weeklyReview: { includeContextStep: true },
+                    pomodoro: { linkTask: true },
+                },
+            },
+        });
+
+        render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
+
+        expect(screen.getByText('This week')).toBeInTheDocument();
+        expect(screen.getByText('2 action(s) completed this week')).toBeInTheDocument();
+        expect(screen.getByText('1 project(s) moved forward')).toBeInTheDocument();
+        expect(screen.getByText('1 completed task(s) had an estimate')).toBeInTheDocument();
+        expect(screen.getByText('Estimated: 1h')).toBeInTheDocument();
+        expect(screen.getByText('Tracked on those tasks: 45m')).toBeInTheDocument();
+    });
+
+    it('keeps estimate lines hidden until time estimates are enabled', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 2, 4, 12, 0, 0));
+        useTaskStore.setState({
+            _allTasks: [makeTask({
+                id: 'done-with-hidden-estimate',
+                status: 'done',
+                completedAt: new Date(2026, 2, 3, 9, 0, 0).toISOString(),
+                timeEstimate: '1hr',
+                timeSpentMinutes: 45,
+            })],
+            settings: {
+                weekStart: 'monday',
+                features: { timeEstimates: false, pomodoro: true },
+                gtd: {
+                    weeklyReview: { includeContextStep: true },
+                    pomodoro: { linkTask: true },
+                },
+            },
+        });
+
+        render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
+
+        expect(screen.getByText('1 action(s) completed this week')).toBeInTheDocument();
+        expect(screen.queryByText('1 completed task(s) had an estimate')).not.toBeInTheDocument();
+        expect(screen.queryByText('Estimated: 1h')).not.toBeInTheDocument();
+        expect(screen.queryByText('Tracked on those tasks: 45m')).not.toBeInTheDocument();
     });
 
     it('opens on the inbox step when there is an inbox task to process', () => {

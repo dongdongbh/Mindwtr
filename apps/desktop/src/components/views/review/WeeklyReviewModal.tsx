@@ -6,6 +6,7 @@ import {
     DEFAULT_AREA_COLOR,
     filterReviewSuggestionsToKnownIds,
     formatI18nTemplate,
+    formatTimeSpentLabel,
     getExternalCalendarDaySummaries,
     getUsedTaskTokens,
     getWeeklyReviewBuckets,
@@ -127,8 +128,8 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     // One core derivation owns every Weekly Review candidate, project-health,
     // stale-item, and completion-summary decision.
     const weeklyBuckets = useMemo(
-        () => getWeeklyReviewBuckets(tasks, projects),
-        [tasks, projects],
+        () => getWeeklyReviewBuckets(tasks, projects, { weekStart: settings?.weekStart }),
+        [projects, settings?.weekStart, tasks],
     );
     const staleItems = weeklyBuckets.staleItems;
     const staleItemTitleMap = useMemo(() => {
@@ -170,6 +171,15 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
         [externalCalendarEvents],
     );
     const reviewSummary = weeklyBuckets.summary;
+    const reviewLookBack = weeklyBuckets.lookBack;
+    const estimatedDuration = formatTimeSpentLabel(reviewLookBack.estimatedMinutes);
+    const trackedDuration = formatTimeSpentLabel(reviewLookBack.trackedMinutes);
+    const showEstimateLookBack = reviewLookBack.estimatedTaskCount > 0
+        && settings?.features?.timeEstimates === true;
+    const showTrackedLookBack = showEstimateLookBack
+        && trackedDuration !== null
+        && settings?.features?.pomodoro === true
+        && settings?.gtd?.pomodoro?.linkTask === true;
 
     const stepFlags = useMemo(() => buildReviewSteps(weeklyBuckets, {
         kind: 'weekly',
@@ -957,6 +967,43 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                             {t('review.completeDesc')}
                         </p>
                         <div className="mx-auto max-w-lg text-left rounded-lg border border-border bg-muted/30 p-4 space-y-2.5">
+                            {reviewLookBack.completedCount > 0 && (
+                                <div className="space-y-2.5 border-b border-border pb-2.5">
+                                    <p className="text-sm font-semibold text-muted-foreground">
+                                        {t('review.weekHeading')}
+                                    </p>
+                                    <SummaryRow
+                                        good
+                                        text={formatI18nTemplate(t('review.weekCompletedCount'), { count: reviewLookBack.completedCount })}
+                                    />
+                                    {reviewLookBack.projectsMovedCount > 0 && (
+                                        <SummaryRow
+                                            good
+                                            text={formatI18nTemplate(t('review.weekProjectsMovedCount'), { count: reviewLookBack.projectsMovedCount })}
+                                        />
+                                    )}
+                                    {showEstimateLookBack && (
+                                        <>
+                                            <SummaryRow
+                                                good
+                                                text={formatI18nTemplate(t('review.weekEstimatedTasksCount'), { count: reviewLookBack.estimatedTaskCount })}
+                                            />
+                                            {estimatedDuration && (
+                                                <SummaryRow
+                                                    good
+                                                    text={formatI18nTemplate(t('review.weekEstimatedTotal'), { duration: estimatedDuration })}
+                                                />
+                                            )}
+                                            {showTrackedLookBack && (
+                                                <SummaryRow
+                                                    good
+                                                    text={formatI18nTemplate(t('review.weekTrackedTotal'), { duration: trackedDuration })}
+                                                />
+                                            )}
+                                        </>
+                                    )}
+                                </div>
+                            )}
                             <SummaryRow
                                 good={reviewSummary.inboxCount === 0}
                                 text={reviewSummary.inboxCount === 0

@@ -62,6 +62,12 @@ type ReviewLabelKey =
     | 'summaryProjectsOk'
     | 'summaryProjectsMissing'
     | 'summaryWaitingStale'
+    | 'weekHeading'
+    | 'weekCompletedCount'
+    | 'weekProjectsMovedCount'
+    | 'weekEstimatedTasksCount'
+    | 'weekEstimatedTotal'
+    | 'weekTrackedTotal'
     | 'finish'
     | 'next'
     | 'back'
@@ -139,6 +145,12 @@ const defaultReviewLabels: ReviewLabels = {
     summaryProjectsOk: 'Every active project has a next action',
     summaryProjectsMissing: '{{count}} project(s) have no next action',
     summaryWaitingStale: '{{count}} waiting item(s) untouched for more than two weeks',
+    weekHeading: 'This week',
+    weekCompletedCount: '{{count}} action(s) completed this week',
+    weekProjectsMovedCount: '{{count}} project(s) moved forward',
+    weekEstimatedTasksCount: '{{count}} completed task(s) had an estimate',
+    weekEstimatedTotal: 'Estimated: {{duration}}',
+    weekTrackedTotal: 'Tracked on those tasks: {{duration}}',
     finish: 'Finish',
     next: 'Next',
     back: 'Back',
@@ -213,6 +225,12 @@ const reviewLabelTranslationKeys: Record<ReviewLabelKey, string> = {
     summaryProjectsOk: 'review.summaryProjectsOk',
     summaryProjectsMissing: 'review.summaryProjectsMissing',
     summaryWaitingStale: 'review.summaryWaitingStale',
+    weekHeading: 'review.weekHeading',
+    weekCompletedCount: 'review.weekCompletedCount',
+    weekProjectsMovedCount: 'review.weekProjectsMovedCount',
+    weekEstimatedTasksCount: 'review.weekEstimatedTasksCount',
+    weekEstimatedTotal: 'review.weekEstimatedTotal',
+    weekTrackedTotal: 'review.weekTrackedTotal',
     finish: 'review.finish',
     next: 'review.next',
     back: 'review.back',

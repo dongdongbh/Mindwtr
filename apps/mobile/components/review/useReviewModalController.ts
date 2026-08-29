@@ -5,6 +5,7 @@ import {
     buildReviewSteps,
     createAIProvider,
     filterReviewSuggestionsToKnownIds,
+    formatTimeSpentLabel,
     getExternalCalendarDaySummaries,
     getWeeklyReviewBuckets,
     parseProjectNextActionInput,
@@ -317,11 +318,20 @@ export function useReviewModalController({
     // Core owns the complete Weekly Review model; mobile only decorates the
     // shared project entries with a theme-aware color for rendering.
     const weeklyBuckets = useMemo(
-        () => getWeeklyReviewBuckets(tasks, projects),
-        [tasks, projects],
+        () => getWeeklyReviewBuckets(tasks, projects, { weekStart: settings?.weekStart }),
+        [projects, settings?.weekStart, tasks],
     );
     const staleItems = weeklyBuckets.staleItems;
     const reviewSummary = weeklyBuckets.summary;
+    const reviewLookBack = weeklyBuckets.lookBack;
+    const estimatedLookBackDuration = formatTimeSpentLabel(reviewLookBack.estimatedMinutes);
+    const trackedLookBackDuration = formatTimeSpentLabel(reviewLookBack.trackedMinutes);
+    const showEstimateLookBack = reviewLookBack.estimatedTaskCount > 0
+        && settings?.features?.timeEstimates === true;
+    const showTrackedLookBack = showEstimateLookBack
+        && trackedLookBackDuration !== null
+        && settings?.features?.pomodoro === true
+        && settings?.gtd?.pomodoro?.linkTask === true;
     const staleItemTitleMap = useMemo(() => staleItems.reduce((acc, item) => {
         acc[item.id] = item.title;
         return acc;
@@ -563,6 +573,8 @@ export function useReviewModalController({
         projectReviewEntries,
         projectTaskPrompt,
         projectTaskTitle,
+        estimatedLookBackDuration,
+        reviewLookBack,
         reviewSummary,
         runAiAnalysis,
         safeStepIndex,
@@ -570,6 +582,8 @@ export function useReviewModalController({
         scheduledWaitingTasks,
         setProjectTaskTitle,
         showEditModal,
+        showEstimateLookBack,
+        showTrackedLookBack,
         somedayTasks,
         staleItemTitleMap,
         staleProjectItems,
@@ -581,6 +595,7 @@ export function useReviewModalController({
         toggleExpandedProject,
         toggleExternalDayExpanded,
         toggleSuggestion,
+        trackedLookBackDuration,
         visibleSomedayTasks,
         visibleWaitingTasks,
         waitingTasks,

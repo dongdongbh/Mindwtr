@@ -6,6 +6,7 @@ Changes collected after `v1.2.1` and before the next version tag.
 
 ## Full Change List
 
+- Weekly Review's final step now shows a short "This week" look-back: actions completed, projects moved forward, and estimated vs tracked time on completed tasks when estimates are on; lines with nothing to report stay hidden.
 - Focus's **Today** section now also lists next tasks that start later the same day, on desktop and mobile — sorted in with the rest of today's schedule, by their time. A task set to start at 5:00 PM used to be hidden from Next Actions until then and was too early for Upcoming, so it sat in neither section. Upcoming goes back to listing only tasks deferred to another day, and a Today row like this shows its start time until it arrives, so it still reads as later rather than doable now.
 - Mobile Focus no longer shows the empty-state illustration when the only rows are in Upcoming.
 

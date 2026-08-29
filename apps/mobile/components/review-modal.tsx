@@ -72,6 +72,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         expandedContextGroups,
         expandedExternalDays,
         expandedProject,
+        estimatedLookBackDuration,
         externalCalendarError,
         externalCalendarLoading,
         externalCalendarReviewItems,
@@ -95,6 +96,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         projectReviewEntries,
         projectTaskPrompt,
         projectTaskTitle,
+        reviewLookBack,
         reviewSummary,
         runAiAnalysis,
         staleProjectItems,
@@ -104,6 +106,8 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         scheduledWaitingTasks,
         setProjectTaskTitle,
         showEditModal,
+        showEstimateLookBack,
+        showTrackedLookBack,
         somedayTasks,
         staleItemTitleMap,
         steps,
@@ -113,6 +117,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         toggleExpandedProject,
         toggleExternalDayExpanded,
         toggleSuggestion,
+        trackedLookBackDuration,
         visibleSomedayTasks,
         visibleWaitingTasks,
         waitingTasks,
@@ -817,6 +822,37 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                             {labels.completeDesc}
                         </Text>
                         <View style={{ alignSelf: 'stretch', borderWidth: 1, borderColor: tc.border, borderRadius: 10, padding: 14, gap: 10, marginBottom: 16 }}>
+                            {reviewLookBack.completedCount > 0 && (
+                                <View style={{ gap: 10, borderBottomWidth: 1, borderBottomColor: tc.border, paddingBottom: 10 }}>
+                                    <Text style={{ color: tc.secondaryText, fontSize: 14, fontWeight: '600' }}>
+                                        {labels.weekHeading}
+                                    </Text>
+                                    {renderSummaryRow(
+                                        true,
+                                        formatI18nTemplate(labels.weekCompletedCount, { count: reviewLookBack.completedCount }),
+                                    )}
+                                    {reviewLookBack.projectsMovedCount > 0 && renderSummaryRow(
+                                        true,
+                                        formatI18nTemplate(labels.weekProjectsMovedCount, { count: reviewLookBack.projectsMovedCount }),
+                                    )}
+                                    {showEstimateLookBack && (
+                                        <>
+                                            {renderSummaryRow(
+                                                true,
+                                                formatI18nTemplate(labels.weekEstimatedTasksCount, { count: reviewLookBack.estimatedTaskCount }),
+                                            )}
+                                            {estimatedLookBackDuration && renderSummaryRow(
+                                                true,
+                                                formatI18nTemplate(labels.weekEstimatedTotal, { duration: estimatedLookBackDuration }),
+                                            )}
+                                            {showTrackedLookBack && renderSummaryRow(
+                                                true,
+                                                formatI18nTemplate(labels.weekTrackedTotal, { duration: trackedLookBackDuration }),
+                                            )}
+                                        </>
+                                    )}
+                                </View>
+                            )}
                             {renderSummaryRow(
                                 reviewSummary.inboxCount === 0,
                                 reviewSummary.inboxCount === 0
