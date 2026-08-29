@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
+import { probeWebdavSyncCompatibility, webdavGetSyncDocument } from '@mindwtr/core';
 
 vi.mock('../lib/app-log', () => ({
     logWarn: vi.fn(),
@@ -83,5 +84,116 @@ describe('URL Polyfill Shim', () => {
         expect(params.get('bar')).toBe('2');
         expect(params.has('foo')).toBe(true);
         expect(params.has('baz')).toBe(false);
+    });
+
+    test('fallback URL serializes pathname mutations used by WebDAV probes', async () => {
+        const OriginalURL = globalThis.URL;
+        const OriginalURLSearchParams = globalThis.URLSearchParams;
+
+        try {
+            vi.resetModules();
+            globalThis.URL = undefined as unknown as typeof URL;
+
+            const fallbackModule = await import('./url-polyfill');
+            const documentUrl = 'https://example.com/dav/data.json';
+            const probeUrl = new fallbackModule.URL!(documentUrl);
+            probeUrl.pathname = `${probeUrl.pathname}.mindwtr-etag-probe-test`;
+
+            expect(probeUrl.toString()).toBe(
+                'https://example.com/dav/data.json.mindwtr-etag-probe-test',
+            );
+        } finally {
+            globalThis.URL = OriginalURL;
+            globalThis.URLSearchParams = OriginalURLSearchParams;
+            vi.resetModules();
+        }
+    });
+
+    test('fallback URL keeps the WebDAV capability probe off data.json', async () => {
+        const OriginalURL = globalThis.URL;
+        const OriginalURLSearchParams = globalThis.URLSearchParams;
+
+        try {
+            vi.resetModules();
+            globalThis.URL = undefined as unknown as typeof URL;
+            await import('./url-polyfill');
+
+            const documentUrl = 'https://example.com/dav/data.json';
+            const files = new Map<string, { bytes: Uint8Array; version: number }>();
+            const staleAfterDelete = new Map<string, { bytes: Uint8Array; version: number }>();
+            const responseBody = (bytes: Uint8Array): ArrayBuffer => {
+                const body = new ArrayBuffer(bytes.byteLength);
+                new Uint8Array(body).set(bytes);
+                return body;
+            };
+            const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = String(input);
+                const method = init?.method ?? 'GET';
+                const headers = new Headers(init?.headers);
+                const current = files.get(url);
+
+                if (method === 'GET') {
+                    const stale = staleAfterDelete.get(url);
+                    if (stale) {
+                        staleAfterDelete.delete(url);
+                        return new Response(responseBody(stale.bytes), {
+                            status: 200,
+                            headers: { etag: `"v${stale.version}"` },
+                        });
+                    }
+                    if (!current) return new Response(null, { status: 404 });
+                    return new Response(responseBody(current.bytes), {
+                        status: 200,
+                        headers: { etag: `"v${current.version}"` },
+                    });
+                }
+
+                if (method === 'PUT') {
+                    if (current && headers.get('if-none-match') === '*') {
+                        return new Response(null, { status: 412 });
+                    }
+                    const ifMatch = headers.get('if-match');
+                    if (ifMatch && (!current || ifMatch !== `"v${current.version}"`)) {
+                        return new Response(null, { status: 412 });
+                    }
+                    const body = init?.body;
+                    if (!(body instanceof Uint8Array)) throw new Error('expected byte probe body');
+                    files.set(url, {
+                        bytes: new Uint8Array(body),
+                        version: (current?.version ?? 0) + 1,
+                    });
+                    return new Response(null, { status: current ? 204 : 201 });
+                }
+
+                if (method === 'DELETE') {
+                    const ifMatch = headers.get('if-match');
+                    if (!current || ifMatch !== `"v${current.version}"`) {
+                        return new Response(null, { status: 412 });
+                    }
+                    staleAfterDelete.set(url, current);
+                    files.delete(url);
+                    return new Response(null, { status: 204 });
+                }
+
+                throw new Error(`unexpected ${method}`);
+            }) as unknown as typeof fetch;
+
+            await probeWebdavSyncCompatibility(
+                documentUrl,
+                { fetcher },
+                { requireStrongEtag: true },
+            );
+
+            await expect(webdavGetSyncDocument(documentUrl, { fetcher })).resolves.toEqual({
+                state: 'data',
+                data: null,
+                exists: false,
+                strongEtag: null,
+            });
+        } finally {
+            globalThis.URL = OriginalURL;
+            globalThis.URLSearchParams = OriginalURLSearchParams;
+            vi.resetModules();
+        }
     });
 });
