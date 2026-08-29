@@ -8,6 +8,10 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
+// Each test spawns a child process and waits up to 5s on it, which is exactly
+// bun's default per-test timeout; CI hit 5000.93ms. Give the whole test headroom.
+const CROSS_PROCESS_TEST_TIMEOUT_MS = 20_000;
+
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const waitForPath = async (path: string, timeoutMs = 5_000): Promise<void> => {
@@ -77,7 +81,7 @@ describe('MCP cross-process database write lock', () => {
       for (const child of children) child.kill('SIGKILL');
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, CROSS_PROCESS_TEST_TIMEOUT_MS);
 
   test('rejects an MCP snapshot after a desktop-style process changes the database', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mindwtr-mcp-cas-'));
@@ -140,5 +144,5 @@ describe('MCP cross-process database write lock', () => {
       worker.kill('SIGKILL');
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, CROSS_PROCESS_TEST_TIMEOUT_MS);
 });
