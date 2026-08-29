@@ -28,7 +28,7 @@ declare module 'bun:test' {
   }
 
   export const describe: (name: string, callback: TestCallback) => void;
-  export const test: (name: string, callback: TestCallback) => void;
+  export const test: (name: string, callback: TestCallback, timeoutMs?: number) => void;
   export const beforeAll: (callback: TestCallback) => void;
   export const afterAll: (callback: TestCallback) => void;
   export const afterEach: (callback: TestCallback) => void;
