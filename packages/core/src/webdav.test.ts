@@ -737,6 +737,85 @@ describe('versioned WebDAV transition byte operations', () => {
     });
 
     it.each([
+        'mindwtr strong-etag capability probe v1',
+        'mindwtr strong-etag capability probe v2',
+        'mindwtr stale conditional-write probe',
+    ])('conditionally removes stale Android probe residue from data.json before probing %s', async (residue) => {
+        const documentUrl = 'https://example.com/dav/data.json';
+        const capability = createWebdavCapabilityFetcher(documentUrl);
+        let documentBody: string | null = residue;
+        const requests: { method: string; url: string; headers: Headers }[] = [];
+        const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input);
+            const method = init?.method ?? 'GET';
+            const headers = new Headers(init?.headers);
+            requests.push({ method, url, headers });
+            if (url === documentUrl && method === 'GET' && documentBody !== null) {
+                return new Response(documentBody, {
+                    status: 200,
+                    headers: { etag: '"document-v1"' },
+                });
+            }
+            if (url === documentUrl && method === 'DELETE') {
+                expect(headers.get('if-match')).toBe('"document-v1"');
+                documentBody = null;
+                return new Response(null, { status: 204 });
+            }
+            return capability.fetcher(input, init);
+        }) as unknown as typeof fetch;
+
+        await expect(probeWebdavSyncCompatibility(
+            documentUrl,
+            { fetcher },
+            { requireStrongEtag: true },
+        )).resolves.toBe('strong-etag');
+
+        expect(documentBody).toBeNull();
+        expect(requests.slice(0, 2).map(({ method, url }) => ({ method, url }))).toEqual([
+            { method: 'GET', url: documentUrl },
+            { method: 'DELETE', url: documentUrl },
+        ]);
+        expect(capability.getProbeUrl()).toContain('data.json.mindwtr-etag-probe-');
+    });
+
+    it('does not delete a near-match or another invalid data.json body', async () => {
+        const requests: string[] = [];
+        const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+            const method = init?.method ?? 'GET';
+            requests.push(method);
+            if (method !== 'GET') return new Response(null, { status: 500 });
+            return new Response('mindwtr strong-etag capability probe v2\n', {
+                status: 200,
+                headers: { etag: '"document-v1"' },
+            });
+        }) as unknown as typeof fetch;
+
+        await expect(probeWebdavSyncCompatibility(
+            'https://example.com/dav/data.json',
+            { fetcher },
+            { requireStrongEtag: true },
+        )).rejects.toThrow('WebDAV GET failed: invalid JSON');
+        expect(requests).toEqual(['GET']);
+    });
+
+    it('does not remove exact probe residue without a strong generation', async () => {
+        const requests: string[] = [];
+        const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+            const method = init?.method ?? 'GET';
+            requests.push(method);
+            if (method !== 'GET') return new Response(null, { status: 500 });
+            return new Response('mindwtr strong-etag capability probe v2', { status: 200 });
+        }) as unknown as typeof fetch;
+
+        await expect(probeWebdavSyncCompatibility(
+            'https://example.com/dav/data.json',
+            { fetcher },
+            { requireStrongEtag: true },
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+        expect(requests).toEqual(['GET']);
+    });
+
+    it.each([
         ['missing', null],
         ['weak', 'W/"legacy-v1"'],
     ])('rejects an existing document with a %s ETag when encryption requires a strong version', async (_case, etag) => {

@@ -964,6 +964,15 @@ const webdavStrongEtagProbeUrl = (documentUrl: string): string => {
     return `${documentPath}.mindwtr-etag-probe-${probeId}${suffix}`;
 };
 
+const WEBDAV_CONDITIONAL_PROBE_PAYLOADS = {
+    initial: 'mindwtr strong-etag capability probe v1',
+    replacement: 'mindwtr strong-etag capability probe v2',
+    stale: 'mindwtr stale conditional-write probe',
+} as const;
+const WEBDAV_CONDITIONAL_PROBE_PAYLOAD_SET = new Set<string>(
+    Object.values(WEBDAV_CONDITIONAL_PROBE_PAYLOADS),
+);
+
 const requireWebdavConditionalConflict = async (
     operation: () => Promise<void>,
     capability: string,
@@ -985,14 +994,35 @@ const webdavProbeBytesEqual = (left: Uint8Array | null, right: Uint8Array): bool
     return true;
 };
 
+const removeAccidentalWebdavProbeResidue = async (
+    documentUrl: string,
+    current: { bytes: Uint8Array | null; version: string | null },
+    options: WebDavOptions,
+): Promise<boolean> => {
+    if (
+        !current.bytes
+        || !WEBDAV_CONDITIONAL_PROBE_PAYLOAD_SET.has(new TextDecoder().decode(current.bytes))
+    ) {
+        return false;
+    }
+    if (!current.version) {
+        throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV capability-probe residue');
+    }
+    // A short-lived Android URL fallback regression could serialize the unique probe URL
+    // back to data.json. Remove only our three byte-exact probe bodies, and only against
+    // the generation read with those bytes, so a concurrent repair wins instead.
+    await webdavDeleteFileVersioned(documentUrl, current.version, options);
+    return true;
+};
+
 const assertWebdavConditionalWriteSupport = async (
     documentUrl: string,
     options: WebDavOptions,
 ): Promise<void> => {
     const probeUrl = webdavStrongEtagProbeUrl(documentUrl);
-    const initialBytes = new TextEncoder().encode('mindwtr strong-etag capability probe v1');
-    const replacementBytes = new TextEncoder().encode('mindwtr strong-etag capability probe v2');
-    const staleBytes = new TextEncoder().encode('mindwtr stale conditional-write probe');
+    const initialBytes = new TextEncoder().encode(WEBDAV_CONDITIONAL_PROBE_PAYLOADS.initial);
+    const replacementBytes = new TextEncoder().encode(WEBDAV_CONDITIONAL_PROBE_PAYLOADS.replacement);
+    const staleBytes = new TextEncoder().encode(WEBDAV_CONDITIONAL_PROBE_PAYLOADS.stale);
     let created = false;
     let hasSafeProbeVersion = false;
 
@@ -1100,6 +1130,11 @@ export async function probeWebdavSyncCompatibility(
         await assertWebdavConditionalWriteSupport(documentUrl, documentOptions);
         return 'strong-etag';
     }
+    if (await removeAccidentalWebdavProbeResidue(documentUrl, current, documentOptions)) {
+        if (!policy.requireStrongEtag) return 'legacy-plaintext';
+        await assertWebdavConditionalWriteSupport(documentUrl, documentOptions);
+        return 'strong-etag';
+    }
     parseOptionalWebdavJson(new TextDecoder().decode(current.bytes));
     if (!current.version) {
         if (policy.requireStrongEtag) {
@@ -1124,6 +1159,10 @@ export async function assertWebdavStrongEtagSupport(
         maxBytes: options.maxBytes ?? MAX_SYNC_DOCUMENT_BYTES,
     };
     const current = await webdavGetFileVersioned(documentUrl, documentOptions);
+    if (await removeAccidentalWebdavProbeResidue(documentUrl, current, documentOptions)) {
+        await assertWebdavConditionalWriteSupport(documentUrl, documentOptions);
+        return;
+    }
     if (current.bytes !== null) {
         if (!current.version) throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV data.json');
         // Preserve the previous Test Connection contract: the exact GET that proves a
