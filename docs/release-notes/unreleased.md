@@ -6,7 +6,8 @@ Changes collected after `v1.2.1` and before the next version tag.
 
 ## Full Change List
 
-- Focus's **Today** section now also lists next tasks that start later the same day, on desktop and mobile — sorted in with the rest of today's schedule, by their time. A task set to start at 5:00 PM used to be hidden from Next Actions until then and was too early for Upcoming, so it sat in neither section. Upcoming goes back to listing only tasks deferred to another day.
+- Focus's **Today** section now also lists next tasks that start later the same day, on desktop and mobile — sorted in with the rest of today's schedule, by their time. A task set to start at 5:00 PM used to be hidden from Next Actions until then and was too early for Upcoming, so it sat in neither section. Upcoming goes back to listing only tasks deferred to another day, and a Today row like this shows its start time until it arrives, so it still reads as later rather than doable now.
+- Mobile Focus no longer shows the empty-state illustration when the only rows are in Upcoming.
 
 - Desktop task lists now have an **Export CSV** button that exports exactly what the list is showing — the current status list plus any area, search, context, tag, priority, energy and time filters — instead of the whole database. Collapsed groups are still included, since folding a group only hides it. (#1096)
 - Quick add accepts `/reference`, so a scrap of information you want to keep can be filed straight to Reference from the capture box on desktop and mobile — no capture-then-move round trip. It combines with `+Project`, `!Area`, `@context` and `#tag` like the other status tokens, and processing the inbox still ignores it so the destination you pick there wins. (#1093)

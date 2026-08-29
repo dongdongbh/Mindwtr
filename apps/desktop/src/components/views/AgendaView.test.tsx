@@ -702,6 +702,50 @@ describe('AgendaView', () => {
         expect(document.getElementById('agenda-section-upcoming')).toBeNull();
     });
 
+    it('shows the appears-at time on a pending Today row until its start time arrives, star enabled', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 1, 28, 12, 0, 0, 0));
+        const laterToday: Task = {
+            id: 'later-today-next',
+            title: 'Later today next task',
+            status: 'next',
+            startTime: new Date(2026, 1, 28, 17, 0, 0, 0).toISOString(),
+            tags: [],
+            contexts: [],
+            createdAt: nowIso,
+            updatedAt: nowIso,
+        };
+
+        useTaskStore.setState({
+            tasks: [laterToday],
+            _allTasks: [laterToday],
+            projects: [],
+            _allProjects: [],
+            areas: [],
+            _allAreas: [],
+            settings: {},
+            highlightTaskId: null,
+        });
+
+        const { getByText, getByLabelText, queryByText } = renderAgenda();
+
+        const scheduleSection = document.getElementById('agenda-section-schedule');
+        expect(scheduleSection).not.toBeNull();
+        const appearsAtLabel = safeFormatDate(new Date(2026, 1, 28, 17, 0, 0, 0), 'p');
+        expect(scheduleSection).toContainElement(getByText(appearsAtLabel));
+        // Planning the 17:00 task for today is legitimate, so the star must not
+        // pick up Upcoming's disabled-for-deferred gating.
+        const star = getByLabelText("Add to today's focus");
+        expect(scheduleSection).toContainElement(star);
+        expect(star).toBeEnabled();
+
+        act(() => {
+            vi.advanceTimersByTime(5 * 60 * 60 * 1000 + 1000); // past 17:00
+        });
+
+        expect(queryByText(appearsAtLabel)).not.toBeInTheDocument();
+    });
+
     it('keeps a task due today with a start on another day in Upcoming only, not Today', () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date(2026, 1, 28, 12, 0, 0, 0));

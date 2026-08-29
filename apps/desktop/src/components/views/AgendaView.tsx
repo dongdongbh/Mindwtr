@@ -523,7 +523,7 @@ export function AgendaView() {
     const saveFilterDefaultName = getSavedFilterDefaultName(activeFilterChips, resolveText('savedFilters.defaultName', 'Focus filter'));
 
     const {
-        filteredActiveTasks, scheduleCandidates, reviewDueCandidates, upcomingCandidates, upcomingAppearsAtById,
+        filteredActiveTasks, scheduleCandidates, reviewDueCandidates, upcomingCandidates, upcomingAppearsAtById, scheduleAppearsAtById,
     } = useMemo(() => {
         void localDayKey;
         // Next Actions and Review due hide a later-today start until its time
@@ -563,6 +563,14 @@ export function AgendaView() {
             { projects, now, tokenMatchMode: 'all' },
         );
         const upcomingEntries = getUpcomingDeferredTasks(upcomingBase, { now });
+        // A Today row whose timed start hasn't arrived yet gets the same
+        // appears-at treatment as Upcoming, formatted as a time (it's today) so
+        // it drops the moment the start passes — hence the futureStartTick dep.
+        const scheduleAppearsAtById = new Map(
+            scheduleBase
+                .filter((task) => !shouldShowTaskForStart(task, { now, granularity: 'time' }))
+                .map((task) => [task.id, safeFormatDate(task.startTime, 'p')]),
+        );
         return {
             filteredActiveTasks: filtered,
             scheduleCandidates: scheduleBase,
@@ -573,11 +581,16 @@ export function AgendaView() {
             upcomingAppearsAtById: new Map(upcomingEntries.map((entry) => (
                 [entry.task.id, safeFormatDate(entry.appearsAt, 'P')]
             ))),
+            scheduleAppearsAtById,
         };
     }, [activeTasks, baseActiveTasks, effectiveFilterCriteria, futureStartTick, localDayKey, matchesSearchQuery, projects]);
     const getUpcomingAppearsAtLabel = useCallback(
         (taskId: string) => upcomingAppearsAtById.get(taskId),
         [upcomingAppearsAtById],
+    );
+    const getScheduleAppearsAtLabel = useCallback(
+        (taskId: string) => scheduleAppearsAtById.get(taskId),
+        [scheduleAppearsAtById],
     );
 
     const reviewDueProjects = useMemo(() => {
@@ -1256,6 +1269,7 @@ export function AgendaView() {
                                 <AgendaTaskList
                                     tasks={sections.schedule}
                                     buildFocusToggle={buildFocusToggle}
+                                    getAppearsAtLabel={getScheduleAppearsAtLabel}
                                     showListDetails={showListDetails}
                                     highlightTaskId={highlightTaskId}
                                 />

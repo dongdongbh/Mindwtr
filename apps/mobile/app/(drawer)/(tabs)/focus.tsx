@@ -916,6 +916,24 @@ export default function FocusScreen() {
     sortBySavedPerspective,
     upcomingCandidates,
   ]);
+  // A Today row whose timed start hasn't arrived yet gets the same appears-at
+  // footer as Upcoming, formatted as a time (it's today) so it drops the
+  // moment the start passes — hence the futureStartTick dep, unlike schedule
+  // itself which is day-granularity only.
+  const schedulePendingFooters = useMemo(() => {
+    void futureStartTick;
+    const now = new Date();
+    const byTaskId = new Map<string, React.ReactNode>();
+    for (const task of schedule) {
+      if (shouldShowTaskForStart(task, { now, granularity: 'time' })) continue;
+      byTaskId.set(task.id, (
+        <Text style={[styles.upcomingAppearsAt, { color: tc.secondaryText }]}>
+          {safeFormatDate(task.startTime, 'p')}
+        </Text>
+      ));
+    }
+    return byTaskId;
+  }, [futureStartTick, schedule, tc.secondaryText]);
   const reviewDueProjects = useMemo(() => {
     void localDayKey;
     const now = new Date();
@@ -1226,7 +1244,7 @@ export default function FocusScreen() {
       offset: FOCUS_ESTIMATED_TASK_HEIGHT * index,
     };
   }, [focusItemLayouts]);
-  const hasTasks = focusedTasks.length > 0 || schedule.length > 0 || nextActions.length > 0 || reviewDue.length > 0 || reviewDueProjects.length > 0;
+  const hasTasks = focusedTasks.length > 0 || schedule.length > 0 || nextActions.length > 0 || upcoming.length > 0 || reviewDue.length > 0 || reviewDueProjects.length > 0;
   const activeFilterCount = selections.activeCount;
   // Criteria an applied saved filter carries that no picker can express; they
   // are removed from the saved filter itself rather than from the selections.
@@ -1454,7 +1472,13 @@ export default function FocusScreen() {
           hideStatusBadge={section.type !== 'reviewDue'}
           hideDetails={!showDetails}
           projectDeadlineLabel={projectDeadlineLabel}
-          footerContent={section.type === 'upcoming' ? upcomingAppearsAtFooters.get(item.task.id) : undefined}
+          footerContent={
+            section.type === 'upcoming'
+              ? upcomingAppearsAtFooters.get(item.task.id)
+              : section.type === 'schedule'
+                ? schedulePendingFooters.get(item.task.id)
+                : undefined
+          }
           onLongPressAction={longPressAction}
           onLongPressActionLabel={longPressActionLabel}
           onProjectPress={openProjectScreen}

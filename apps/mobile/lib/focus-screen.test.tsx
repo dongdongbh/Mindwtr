@@ -711,6 +711,26 @@ describe('FocusScreen', () => {
     expect(tree.root.findByProps({ children: 'All clear' })).toBeTruthy();
   });
 
+  it('renders the Upcoming section instead of the empty state when it is the only Focus content', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 3, 1, 12, 0, 0, 0));
+    storeState.tasks = [
+      makeTask('starts-tomorrow', { title: 'Starts tomorrow', startTime: '2026-04-02' }),
+    ];
+
+    let tree!: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<FocusScreen />);
+    });
+
+    findButtonByLabel(tree, 'Upcoming');
+    expect(tree.root.findAllByType(SwipeableTaskItem).map((node) => node.props.task.id))
+      .toEqual(['starts-tomorrow']);
+    expect(() => tree.root.findByProps({ children: 'All clear' })).toThrow();
+    vi.useRealTimers();
+  });
+
   it('collapses the Next Actions section without showing the empty state', () => {
     let tree!: ReturnType<typeof create>;
 
@@ -1247,6 +1267,36 @@ describe('FocusScreen', () => {
     expect(idsIn('Today')).toEqual(['later-today-next']);
     expect(idsIn('Next Actions')).toEqual([]);
     expect(idsIn('Upcoming')).toEqual([]);
+    vi.useRealTimers();
+  });
+
+  it('shows the pending footer on a Today row until its start time arrives, star enabled', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 3, 5, 12, 0, 0, 0));
+    storeState.tasks = [
+      makeTask('later-today-next', {
+        title: 'Later today next task',
+        startTime: new Date(2026, 3, 5, 17, 0, 0, 0).toISOString(),
+      }),
+    ];
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<FocusScreen />);
+    });
+
+    const findRow = () => tree.root.findAllByType(SwipeableTaskItem)
+      .find((node) => node.props.task.id === 'later-today-next');
+    // Planning the 17:00 task for today is legitimate, so the star must not
+    // pick up Upcoming's disabled-for-deferred gating.
+    expect(findRow()?.props.focusToggleDisabledLabel).toBeUndefined();
+    expect(findRow()?.props.footerContent).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(5 * 60 * 60 * 1000 + 1000); // past 17:00
+    });
+
+    expect(findRow()?.props.footerContent).toBeUndefined();
     vi.useRealTimers();
   });
 
