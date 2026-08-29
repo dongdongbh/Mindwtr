@@ -98,6 +98,7 @@ export default function AppLayout() {
       <Stack.Screen name="reference" options={{ title: t('nav.reference') }} />
       <Stack.Screen name="done" options={{ title: t('nav.done') }} />
       <Stack.Screen name="projects-screen" options={{ title: t('projects.title') }} />
+      <Stack.Screen name="canvas-kit-spike" options={{ title: 'Canvas Kit spike' }} />
       <Stack.Screen name="archived" options={{ title: t('archived.title') }} />
       <Stack.Screen name="trash" options={{ title: t('trash.title') }} />
       <Stack.Screen
