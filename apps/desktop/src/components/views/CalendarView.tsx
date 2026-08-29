@@ -859,7 +859,9 @@ export function CalendarView() {
                                             {layoutTimedItems(day).map((item) => {
                                                 const timeLabel = `${safeFormatDate(item.start, 'p')}-${safeFormatDate(item.end, 'p')}`;
                                                 const commonStyle = {
-                                                    height: item.height,
+                                                    // 2px seam so back-to-back blocks read as separate
+                                                    // items instead of one slab (layout floors at 24px).
+                                                    height: item.height - 2,
                                                     left: `calc(${item.leftPercent}% + 3px)`,
                                                     top: item.top,
                                                     width: `calc(${item.widthPercent}% - 6px)`,

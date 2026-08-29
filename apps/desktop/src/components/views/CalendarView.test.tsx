@@ -807,6 +807,22 @@ describe('CalendarView', () => {
         expect(screen.getByText('Timed start')).toBeInTheDocument();
     });
 
+    it('leaves a seam between back-to-back timed blocks in the week grid', async () => {
+        window.history.replaceState(null, '', '/?calendarView=week&calendarDate=2026-04-03');
+        storeMocks.taskStoreState.tasks = [
+            makeTask({ id: 'task-first', title: 'First hour', startTime: '2026-04-03T09:00:00', timeEstimate: '1hr' }),
+            makeTask({ id: 'task-second', title: 'Second hour', startTime: '2026-04-03T10:00:00', timeEstimate: '1hr' }),
+        ];
+
+        renderCalendar();
+        await flushCalendarEffects();
+
+        // A 60-minute block spans one hour row (56px) minus a 2px seam, so the
+        // next block's top edge never touches it.
+        expect(screen.getByTitle(/^First hour /)).toHaveStyle({ height: '54px' });
+        expect(screen.getByTitle(/^Second hour /)).toHaveStyle({ height: '54px' });
+    });
+
     it('reveals done and archived tasks on their completion date only while the toggle is on (#955)', async () => {
         const openTask = makeTask({
             id: 'task-open',
