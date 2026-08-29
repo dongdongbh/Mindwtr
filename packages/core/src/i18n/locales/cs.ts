@@ -1032,7 +1032,7 @@ export const csOverrides: Record<string, string> = {
         'settings.syncPreferencesDesc': 'Zvolte, která nastavení se mají synchronizovat mezi zařízeními.',
         'settings.syncPreferenceAppearance': 'Vzhled (motiv, stáří úkolů, rychlý přístup)',
         'settings.syncPreferenceLanguage': 'Jazyk a formát data/času',
-        'settings.syncPreferenceGtd': 'Výchozí plánování',
+  'settings.syncPreferenceGtd': 'Nastavení a výchozí hodnoty GTD',
         'settings.syncPreferenceExternalCalendars': 'URL externích kalendářů',
         'settings.syncPreferenceAi': 'Nastavení AI (modely, poskytovatelé)',
         'settings.syncPreferenceAiHint': 'API klíče a cesty k lokálním modelům se nikdy nesynchronizují.',

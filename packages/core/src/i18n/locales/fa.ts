@@ -1093,7 +1093,7 @@ export const faOverrides: Record<string, string> = {
         'settings.syncPreferencesDesc': 'انتخاب کنید کدام تنظیمات در دستگاه‌ها همگام بمانند.',
         'settings.syncPreferenceAppearance': 'ظاهر (تم، سن کار، دسترسی سریع)',
         'settings.syncPreferenceLanguage': 'زبان و قالب تاریخ/ساعت',
-        'settings.syncPreferenceGtd': 'پیش‌فرض‌های زمان‌بندی',
+  'settings.syncPreferenceGtd': 'تنظیمات و پیش‌فرض‌های GTD',
         'settings.syncPreferenceExternalCalendars': 'آدرس‌های تقویم خارجی',
         'settings.syncPreferenceAi': 'تنظیمات هوش مصنوعی (مدل‌ها، ارائه‌دهندگان)',
         'settings.syncPreferenceAiHint': 'کلیدهای API و مسیرهای مدل محلی هرگز همگام نمی‌شوند.',

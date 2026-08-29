@@ -107,4 +107,24 @@ describe('SyncStatusSection', () => {
         expect(historyEntry).toHaveTextContent('Info: uploaded 2 records');
         expect(queryByText(/Backend:|Type:|Details:/)).not.toBeInTheDocument();
     });
+
+    it('shows GTD settings sync enabled by default and preserves an explicit opt-out', () => {
+        const onUpdateSyncPreferences = vi.fn();
+        const defaultRender = renderStatus(new Date().toISOString(), {
+            onUpdateSyncPreferences,
+        });
+
+        fireEvent.click(defaultRender.getByRole('button', { name: /syncPreferences/ }));
+        const defaultGtdSwitch = defaultRender.getByRole('switch', { name: 'syncPreferenceGtd' });
+        expect(defaultGtdSwitch).toBeChecked();
+        fireEvent.click(defaultGtdSwitch);
+        expect(onUpdateSyncPreferences).toHaveBeenCalledWith({ gtd: false });
+        defaultRender.unmount();
+
+        const optedOutRender = renderStatus(new Date().toISOString(), {
+            syncPreferences: { gtd: false },
+        });
+        fireEvent.click(optedOutRender.getByRole('button', { name: /syncPreferences/ }));
+        expect(optedOutRender.getByRole('switch', { name: 'syncPreferenceGtd' })).not.toBeChecked();
+    });
 });

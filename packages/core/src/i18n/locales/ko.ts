@@ -1075,7 +1075,7 @@ export const koOverrides: Record<string, string> = {
         'settings.syncPreferencesDesc': '여러 기기에서 동기화 상태를 유지할 기본 설정을 선택하세요.',
         'settings.syncPreferenceAppearance': '외관(테마, 할 일 기간, 빠른 접근)',
         'settings.syncPreferenceLanguage': '언어 및 날짜 형식',
-        'settings.syncPreferenceGtd': '일정 기본값',
+  'settings.syncPreferenceGtd': 'GTD 설정 및 기본값',
         'settings.syncPreferenceExternalCalendars': '외부 캘린더 URL',
         'settings.syncPreferenceAi': 'AI 설정(모델, 제공자)',
         'settings.syncPreferenceAiHint': 'API 키와 로컬 모델 경로는 동기화되지 않습니다.',

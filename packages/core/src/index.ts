@@ -14,6 +14,7 @@
 // toStableJson. This preserves the public name without duplicating its implementation.
 
 export * from './types';
+export { isSettingsSyncGroupEnabled } from './settings-options';
 export * from './async-utils';
 export * from './storage';
 export * from './range-selection';

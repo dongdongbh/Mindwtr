@@ -5,6 +5,7 @@ import { Alert, Platform, ScrollView, Text, TouchableOpacity, View } from 'react
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
+    isSettingsSyncGroupEnabled,
     listMergeConflictSamples,
     summarizeMergeStats,
     translateWithFallback,
@@ -125,7 +126,7 @@ function SyncSettingsView({
     const syncPreferences = settings.syncPreferences ?? {};
     const syncAppearanceEnabled = syncPreferences.appearance === true;
     const syncLanguageEnabled = syncPreferences.language === true;
-    const syncGtdEnabled = syncPreferences.gtd === true;
+    const syncGtdEnabled = isSettingsSyncGroupEnabled(syncPreferences, 'gtd');
     const syncSavedFiltersEnabled = syncPreferences.savedFilters === true;
     const syncExternalCalendarsEnabled = syncPreferences.externalCalendars === true;
     const syncAiEnabled = syncPreferences.ai === true;

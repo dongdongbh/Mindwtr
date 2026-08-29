@@ -24,6 +24,7 @@ import {
     withTimeout,
 } from './store-helpers';
 import { SYNC_STATUS_BOOKKEEPING_SETTINGS_KEYS } from './sync-helpers';
+import { getGtdSyncSnapshot } from './settings-options';
 import { DEFAULT_TOMBSTONE_RETENTION_DAYS, purgeExpiredTombstones } from './sync-tombstones';
 import { buildLoadContext, runAutoArchive, runLoadMigrations } from './store-load-migrations';
 import { createSeedGettingStartedAction } from './getting-started-seed';
@@ -515,36 +516,14 @@ export const createSettingsActions = ({
                 markSyncUpdated('appearance');
             }
 
-            const defaultScheduleTimeUpdate = updates.gtd
-                ? Object.prototype.hasOwnProperty.call(updates.gtd, 'defaultScheduleTime')
-                : false;
-            const defaultAreaIdUpdate = updates.gtd
-                ? Object.prototype.hasOwnProperty.call(updates.gtd, 'defaultAreaId')
-                : false;
-            const defaultAreaModeUpdate = updates.gtd
-                ? Object.prototype.hasOwnProperty.call(updates.gtd, 'defaultAreaMode')
-                : false;
-            const focusTaskLimitUpdate = updates.gtd
-                ? Object.prototype.hasOwnProperty.call(updates.gtd, 'focusTaskLimit')
-                : false;
-            const focusGroupByUpdate = updates.gtd
-                ? Object.prototype.hasOwnProperty.call(updates.gtd, 'focusGroupBy')
-                : false;
-            const defaultProjectFlowModeUpdate = updates.gtd
-                ? Object.prototype.hasOwnProperty.call(updates.gtd, 'defaultProjectFlowMode')
-                : false;
-            const naturalLanguageDatesUpdate = updates.gtd
-                ? Object.prototype.hasOwnProperty.call(updates.gtd, 'naturalLanguageDates')
-                : false;
-            const taskEditorUpdate = updates.gtd
-                ? Object.prototype.hasOwnProperty.call(updates.gtd, 'taskEditor')
-                : false;
-
             if ('language' in updates || 'weekStart' in updates || 'dateFormat' in updates || 'timeFormat' in updates) {
                 markSyncUpdated('language');
             }
 
-            if (defaultScheduleTimeUpdate || defaultAreaIdUpdate || defaultAreaModeUpdate || focusTaskLimitUpdate || focusGroupByUpdate || defaultProjectFlowModeUpdate || naturalLanguageDatesUpdate || taskEditorUpdate) {
+            if (settingsValueChanged(
+                getGtdSyncSnapshot(deviceState.settings),
+                getGtdSyncSnapshot(nextSettings),
+            )) {
                 markSyncUpdated('gtd');
             }
 

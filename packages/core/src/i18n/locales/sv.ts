@@ -1093,7 +1093,7 @@ export const svOverrides: Record<string, string> = {
         'settings.syncPreferencesDesc': 'Välj vilka inställningar som synkas mellan enheter.',
         'settings.syncPreferenceAppearance': 'Utseende (tema, uppgiftsålder, snabbåtkomst)',
         'settings.syncPreferenceLanguage': 'Språk och datum-/tidsformat',
-        'settings.syncPreferenceGtd': 'Schemaläggningsstandarder',
+  'settings.syncPreferenceGtd': 'GTD-inställningar och standardvärden',
         'settings.syncPreferenceExternalCalendars': 'URL:er för externa kalendrar',
         'settings.syncPreferenceAi': 'AI-inställningar (modeller, leverantörer)',
         'settings.syncPreferenceAiHint': 'API-nycklar och lokala modellsökvägar synkas aldrig.',

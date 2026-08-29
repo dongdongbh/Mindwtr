@@ -2,7 +2,10 @@ import type { AiSettings, AppData, GtdSettings, SavedFilter, SettingsSyncGroup, 
 import {
     AI_PROVIDER_VALUE_SET,
     AI_REASONING_EFFORT_VALUE_SET,
+    GTD_SYNCED_APP_SETTINGS_FIELD_KEYS,
+    GTD_SYNCED_FEATURE_FIELD_KEYS,
     GTD_SYNCED_FIELD_KEYS,
+    GTD_SYNCED_INBOX_PROCESSING_FIELD_KEYS,
     SETTINGS_DEFAULT_PROJECT_FLOW_MODE_VALUE_SET,
     SETTINGS_DEFAULT_TASK_AREA_MODE_VALUE_SET,
     SETTINGS_DENSITY_VALUE_SET,
@@ -17,7 +20,8 @@ import {
     STT_FIELD_STRATEGY_VALUE_SET,
     STT_MODE_VALUE_SET,
     STT_PROVIDER_VALUE_SET,
-    type GtdSyncedFieldKey,
+    getGtdSyncSnapshot,
+    type GtdSyncSnapshot,
 } from './settings-options';
 import { isNonEmptyString, isObjectRecord, isValidTimestamp } from './sync-normalization';
 import { MAX_FOCUS_TASK_LIMIT, MIN_FOCUS_TASK_LIMIT, normalizeFocusTaskLimit } from './focus-utils';
@@ -298,6 +302,29 @@ const sanitizeAiSettings = (
     return sanitizeAiForSync(next, fallback);
 };
 
+const sanitizeBooleanRecord = (
+    value: unknown,
+    fallback: unknown,
+    booleanKeys: readonly string[],
+): Record<string, unknown> | undefined => {
+    if (value === undefined) return undefined;
+    if (!isObjectRecord(value)) {
+        return isObjectRecord(fallback) ? cloneSettingValue(fallback) : undefined;
+    }
+    const next = { ...value };
+    const fallbackRecord = isObjectRecord(fallback) ? fallback : {};
+    for (const key of booleanKeys) {
+        if (!(key in next) || typeof next[key] === 'boolean') continue;
+        const fallbackValue = fallbackRecord[key];
+        if (typeof fallbackValue === 'boolean') {
+            next[key] = fallbackValue;
+        } else {
+            delete next[key];
+        }
+    }
+    return next;
+};
+
 export const sanitizeMergedSettingsForSync = (
     merged: AppData['settings'],
     localSettings: AppData['settings']
@@ -395,6 +422,158 @@ export const sanitizeMergedSettingsForSync = (
     if (next.gtd !== undefined && !isObjectRecord(next.gtd)) {
         next.gtd = localSettings.gtd ? cloneSettingValue(localSettings.gtd) : undefined;
     } else if (next.gtd) {
+        const restoreGtdField = (key: keyof GtdSettings) => {
+            const fallbackValue = localSettings.gtd?.[key];
+            const nextGtd = next.gtd as Record<string, unknown>;
+            if (fallbackValue === undefined) {
+                delete nextGtd[key];
+            } else {
+                nextGtd[key] = cloneSettingValue(fallbackValue);
+            }
+        };
+
+        if (next.gtd.timeEstimatePresets !== undefined) {
+            const rawPresets = next.gtd.timeEstimatePresets as unknown;
+            if (!Array.isArray(rawPresets)) {
+                restoreGtdField('timeEstimatePresets');
+            } else {
+                const stringPresets = rawPresets.filter(
+                    (value): value is string => typeof value === 'string' && value.length > 0,
+                );
+                if (stringPresets.length === 0 && rawPresets.length > 0) {
+                    restoreGtdField('timeEstimatePresets');
+                } else {
+                    next.gtd = {
+                        ...next.gtd,
+                        timeEstimatePresets: stringPresets as GtdSettings['timeEstimatePresets'],
+                    };
+                }
+            }
+        }
+
+        if (
+            next.gtd.autoArchiveDays !== undefined
+            && (
+                typeof next.gtd.autoArchiveDays !== 'number'
+                || !Number.isFinite(next.gtd.autoArchiveDays)
+                || next.gtd.autoArchiveDays < 0
+            )
+        ) {
+            restoreGtdField('autoArchiveDays');
+        }
+
+        if (
+            next.gtd.defaultCaptureMethod !== undefined
+            && next.gtd.defaultCaptureMethod !== 'text'
+            && next.gtd.defaultCaptureMethod !== 'audio'
+        ) {
+            restoreGtdField('defaultCaptureMethod');
+        }
+
+        for (const key of ['saveAudioAttachments', 'naturalLanguageDates'] as const) {
+            if (next.gtd[key] !== undefined && typeof next.gtd[key] !== 'boolean') {
+                restoreGtdField(key);
+            }
+        }
+
+        if (next.gtd.inboxProcessing !== undefined) {
+            const sanitizedInboxProcessing = sanitizeBooleanRecord(
+                next.gtd.inboxProcessing,
+                localSettings.gtd?.inboxProcessing,
+                GTD_SYNCED_INBOX_PROCESSING_FIELD_KEYS,
+            );
+            if (sanitizedInboxProcessing) {
+                const mode = sanitizedInboxProcessing.defaultMode;
+                if (mode !== undefined && mode !== 'guided' && mode !== 'quick') {
+                    const fallbackMode = localSettings.gtd?.inboxProcessing?.defaultMode;
+                    if (fallbackMode) {
+                        sanitizedInboxProcessing.defaultMode = fallbackMode;
+                    } else {
+                        delete sanitizedInboxProcessing.defaultMode;
+                    }
+                }
+                next.gtd = {
+                    ...next.gtd,
+                    inboxProcessing: sanitizedInboxProcessing as GtdSettings['inboxProcessing'],
+                };
+            } else {
+                restoreGtdField('inboxProcessing');
+            }
+        }
+
+        if (next.gtd.weeklyReview !== undefined) {
+            const sanitizedWeeklyReview = sanitizeBooleanRecord(
+                next.gtd.weeklyReview,
+                localSettings.gtd?.weeklyReview,
+                ['includeContextStep'],
+            );
+            if (sanitizedWeeklyReview) {
+                next.gtd = {
+                    ...next.gtd,
+                    weeklyReview: sanitizedWeeklyReview as GtdSettings['weeklyReview'],
+                };
+            } else {
+                restoreGtdField('weeklyReview');
+            }
+        }
+
+        if (next.gtd.dailyReview !== undefined) {
+            const sanitizedDailyReview = sanitizeBooleanRecord(
+                next.gtd.dailyReview,
+                localSettings.gtd?.dailyReview,
+                ['includeFocusStep'],
+            );
+            if (sanitizedDailyReview) {
+                next.gtd = {
+                    ...next.gtd,
+                    dailyReview: sanitizedDailyReview as GtdSettings['dailyReview'],
+                };
+            } else {
+                restoreGtdField('dailyReview');
+            }
+        }
+
+        if (next.gtd.pomodoro !== undefined) {
+            const sanitizedPomodoro = sanitizeBooleanRecord(
+                next.gtd.pomodoro,
+                localSettings.gtd?.pomodoro,
+                ['linkTask', 'autoStartBreaks', 'autoStartFocus', 'completionAlert'],
+            );
+            if (!sanitizedPomodoro) {
+                restoreGtdField('pomodoro');
+            } else {
+                const rawDurations = sanitizedPomodoro.customDurations;
+                if (rawDurations !== undefined) {
+                    if (!isObjectRecord(rawDurations)) {
+                        const fallbackDurations = localSettings.gtd?.pomodoro?.customDurations;
+                        if (fallbackDurations) {
+                            sanitizedPomodoro.customDurations = cloneSettingValue(fallbackDurations);
+                        } else {
+                            delete sanitizedPomodoro.customDurations;
+                        }
+                    } else {
+                        const nextDurations = { ...rawDurations };
+                        const fallbackDurations = localSettings.gtd?.pomodoro?.customDurations;
+                        for (const key of ['focusMinutes', 'breakMinutes'] as const) {
+                            const duration = nextDurations[key];
+                            if (typeof duration === 'number' && Number.isFinite(duration)) {
+                                nextDurations[key] = Math.max(1, Math.min(180, Math.round(duration)));
+                            } else if (fallbackDurations?.[key] !== undefined) {
+                                nextDurations[key] = fallbackDurations[key];
+                            } else {
+                                delete nextDurations[key];
+                            }
+                        }
+                        sanitizedPomodoro.customDurations = nextDurations;
+                    }
+                }
+                next.gtd = {
+                    ...next.gtd,
+                    pomodoro: sanitizedPomodoro as GtdSettings['pomodoro'],
+                };
+            }
+        }
+
         if (next.gtd.focusTaskLimit !== undefined) {
             const rawLimit = next.gtd.focusTaskLimit;
             if (typeof rawLimit !== 'number' || !Number.isFinite(rawLimit) || rawLimit < MIN_FOCUS_TASK_LIMIT || rawLimit > MAX_FOCUS_TASK_LIMIT) {
@@ -498,6 +677,34 @@ export const sanitizeMergedSettingsForSync = (
         }
     }
 
+    for (const key of GTD_SYNCED_APP_SETTINGS_FIELD_KEYS) {
+        const value = next[key];
+        if (value === undefined || typeof value === 'boolean') continue;
+        const fallbackValue = localSettings[key];
+        if (typeof fallbackValue === 'boolean') {
+            (next as Record<string, unknown>)[key] = fallbackValue;
+        } else {
+            delete (next as Record<string, unknown>)[key];
+        }
+    }
+
+    if (next.features !== undefined && !isObjectRecord(next.features)) {
+        next.features = localSettings.features ? cloneSettingValue(localSettings.features) : undefined;
+    } else if (next.features) {
+        const nextFeatures = { ...next.features } as Record<string, unknown>;
+        for (const key of GTD_SYNCED_FEATURE_FIELD_KEYS) {
+            const value = nextFeatures[key];
+            if (value === undefined || typeof value === 'boolean') continue;
+            const fallbackValue = localSettings.features?.[key];
+            if (typeof fallbackValue === 'boolean') {
+                nextFeatures[key] = fallbackValue;
+            } else {
+                delete nextFeatures[key];
+            }
+        }
+        next.features = nextFeatures;
+    }
+
     next.syncPreferences = sanitizeSyncPreferences(next.syncPreferences, localSettings.syncPreferences);
     next.syncPreferencesUpdatedAt = sanitizeSyncPreferencesUpdatedAt(
         next.syncPreferencesUpdatedAt,
@@ -543,17 +750,6 @@ export const mergeSettingsForSync = (
         if (isSameValue(localValue, incomingValue)) return cloneSettingValue(localValue);
         return cloneSettingValue(incomingWins ? incomingValue : localValue);
     };
-    // Picks the synced subset of gtd fields, driven by GTD_SYNCED_FIELD_KEYS
-    // (settings-options.ts) — the single source of truth shared with the
-    // upload allowlist in sanitizeSettingsForRemote (sync-helpers.ts). Add new
-    // synced gtd fields there, not here.
-    const pickGtdSyncedFields = (gtd: GtdSettings | undefined): Pick<GtdSettings, GtdSyncedFieldKey> => {
-        const picked: Pick<GtdSettings, GtdSyncedFieldKey> = {};
-        for (const key of GTD_SYNCED_FIELD_KEYS) {
-            (picked as Record<GtdSyncedFieldKey, unknown>)[key] = gtd?.[key];
-        }
-        return picked;
-    };
     const mergeRecordFields = <T extends Record<string, unknown>>(localValue: T, incomingValue: T, incomingWins: boolean): T => {
         const mergedValue: Record<string, unknown> = {};
         const localRecord = (localValue ?? {}) as Record<string, unknown>;
@@ -563,6 +759,52 @@ export const mergeSettingsForSync = (
             mergedValue[fieldKey] = chooseGroupFieldValue(localRecord[fieldKey], incomingRecord[fieldKey], incomingWins);
         }
         return mergedValue as T;
+    };
+    const mergeGtdSyncGroupValue = (
+        localValue: GtdSyncSnapshot,
+        incomingValue: GtdSyncSnapshot,
+        incomingWins: boolean,
+    ): GtdSyncSnapshot => {
+        const mergedGtd = mergeRecordFields(
+            (localValue.gtd ?? {}) as Record<string, unknown>,
+            (incomingValue.gtd ?? {}) as Record<string, unknown>,
+            incomingWins,
+        );
+        const mergedInboxProcessing = mergeRecordFields(
+            (localValue.gtd?.inboxProcessing ?? {}) as Record<string, unknown>,
+            (incomingValue.gtd?.inboxProcessing ?? {}) as Record<string, unknown>,
+            incomingWins,
+        );
+        if (Object.keys(mergedInboxProcessing).length > 0) {
+            mergedGtd.inboxProcessing = mergedInboxProcessing;
+        } else {
+            delete mergedGtd.inboxProcessing;
+        }
+
+        const mergedFeatures = mergeRecordFields(
+            (localValue.features ?? {}) as Record<string, unknown>,
+            (incomingValue.features ?? {}) as Record<string, unknown>,
+            incomingWins,
+        );
+        const value: GtdSyncSnapshot = {
+            quickAddAutoClean: chooseGroupFieldValue(
+                localValue.quickAddAutoClean,
+                incomingValue.quickAddAutoClean,
+                incomingWins,
+            ),
+            markdownEditorAssist: chooseGroupFieldValue(
+                localValue.markdownEditorAssist,
+                incomingValue.markdownEditorAssist,
+                incomingWins,
+            ),
+        };
+        if (Object.keys(mergedGtd).length > 0) {
+            value.gtd = mergedGtd as NonNullable<GtdSyncSnapshot['gtd']>;
+        }
+        if (Object.keys(mergedFeatures).length > 0) {
+            value.features = mergedFeatures as NonNullable<GtdSyncSnapshot['features']>;
+        }
+        return value;
     };
     type AppearanceSyncValue = {
         theme: AppData['settings']['theme'];
@@ -650,18 +892,36 @@ export const mergeSettingsForSync = (
 
     mergeGroup(
         'gtd',
-        pickGtdSyncedFields(localSettings.gtd),
-        pickGtdSyncedFields(incomingSettings.gtd),
+        getGtdSyncSnapshot(localSettings),
+        getGtdSyncSnapshot(incomingSettings),
         (value) => {
             const nextGtd = { ...(merged.gtd ?? {}) } as Record<string, unknown>;
             for (const key of GTD_SYNCED_FIELD_KEYS) {
-                const fieldValue = value[key];
+                const fieldValue = value.gtd?.[key];
                 if (fieldValue === undefined) {
                     delete nextGtd[key];
                 } else {
                     nextGtd[key] = fieldValue;
                 }
             }
+
+            const nextInboxProcessing = isObjectRecord(nextGtd.inboxProcessing)
+                ? { ...nextGtd.inboxProcessing }
+                : {};
+            for (const key of GTD_SYNCED_INBOX_PROCESSING_FIELD_KEYS) {
+                const fieldValue = value.gtd?.inboxProcessing?.[key];
+                if (fieldValue === undefined) {
+                    delete nextInboxProcessing[key];
+                } else {
+                    nextInboxProcessing[key] = fieldValue;
+                }
+            }
+            if (Object.keys(nextInboxProcessing).length > 0) {
+                nextGtd.inboxProcessing = nextInboxProcessing;
+            } else {
+                delete nextGtd.inboxProcessing;
+            }
+
             if (Object.keys(nextGtd).length === 0) {
                 if (merged.gtd) {
                     delete merged.gtd;
@@ -669,8 +929,33 @@ export const mergeSettingsForSync = (
             } else {
                 merged.gtd = nextGtd as GtdSettings;
             }
+
+            const mergedRecord = merged as Record<string, unknown>;
+            for (const key of GTD_SYNCED_APP_SETTINGS_FIELD_KEYS) {
+                const fieldValue = value[key];
+                if (fieldValue === undefined) {
+                    delete mergedRecord[key];
+                } else {
+                    mergedRecord[key] = fieldValue;
+                }
+            }
+
+            const nextFeatures = isObjectRecord(merged.features) ? { ...merged.features } : {};
+            for (const key of GTD_SYNCED_FEATURE_FIELD_KEYS) {
+                const fieldValue = value.features?.[key];
+                if (fieldValue === undefined) {
+                    delete nextFeatures[key];
+                } else {
+                    nextFeatures[key] = fieldValue;
+                }
+            }
+            if (Object.keys(nextFeatures).length > 0) {
+                merged.features = nextFeatures;
+            } else if (merged.features) {
+                delete merged.features;
+            }
         },
-        (localValue, incomingValue, incomingWins) => mergeRecordFields(localValue, incomingValue, incomingWins)
+        mergeGtdSyncGroupValue,
     );
 
     mergeGroup(

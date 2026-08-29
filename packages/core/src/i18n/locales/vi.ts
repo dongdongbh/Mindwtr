@@ -1061,7 +1061,7 @@ export const viOverrides: Record<string, string> = {
         'settings.syncPreferencesDesc': 'Chọn cài đặt nào được đồng bộ trên các thiết bị.',
         'settings.syncPreferenceAppearance': 'Giao diện (chủ đề, tuổi nhiệm vụ, truy cập nhanh)',
         'settings.syncPreferenceLanguage': 'Ngôn ngữ & định dạng ngày/giờ',
-        'settings.syncPreferenceGtd': 'Mặc định lên lịch',
+  'settings.syncPreferenceGtd': 'Cài đặt và mặc định GTD',
         'settings.syncPreferenceExternalCalendars': 'URL lịch bên ngoài',
         'settings.syncPreferenceAi': 'Cài đặt AI (mô hình, nhà cung cấp)',
         'settings.syncPreferenceAiHint': 'Khóa API và đường dẫn mô hình cục bộ không bao giờ được đồng bộ.',

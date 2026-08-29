@@ -972,7 +972,7 @@ export const frOverrides: Record<string, string> = {
         'settings.syncPreferencesDesc': 'Choisissez les préférences qui restent synchronisées sur tous les appareils.',
         'settings.syncPreferenceAppearance': 'Apparence (thème, âge des tâches, accès rapide)',
         'settings.syncPreferenceLanguage': 'Langue et format d’heure/date',
-        'settings.syncPreferenceGtd': 'Préférences GTD (planification, focus, disposition de l’éditeur)',
+  'settings.syncPreferenceGtd': 'Paramètres et valeurs par défaut GTD',
         'settings.syncPreferenceExternalCalendars': 'URL de calendriers externes',
         'settings.syncPreferenceAi': 'Paramètres de l’IA (modèles, fournisseurs)',
         'settings.syncPreferenceAiHint': 'Les clés API et les chemins de modèle locaux ne sont jamais synchronisés.',

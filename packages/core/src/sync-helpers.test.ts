@@ -19,6 +19,9 @@ import type { AppData, Attachment, GtdSettings } from './types';
 // to drive the allowlist-drift guard test below without hardcoding the field
 // list a second time.
 const GTD_SYNCED_FIELD_SAMPLE_VALUES: Record<GtdSyncedFieldKey, GtdSettings[GtdSyncedFieldKey]> = {
+    timeEstimatePresets: ['15min', '1hr'],
+    autoArchiveDays: 14,
+    defaultCaptureMethod: 'audio',
     defaultScheduleTime: '09:30',
     defaultAreaMode: 'fixed',
     defaultAreaId: 'area-1',
@@ -34,6 +37,16 @@ const GTD_SYNCED_FIELD_SAMPLE_VALUES: Record<GtdSyncedFieldKey, GtdSettings[GtdS
     },
     viewSections: {
         someday: [{ id: 'books', title: 'Books to read', order: 0 }],
+    },
+    saveAudioAttachments: false,
+    weeklyReview: { includeContextStep: false },
+    dailyReview: { includeFocusStep: false },
+    pomodoro: {
+        customDurations: { focusMinutes: 50, breakMinutes: 10 },
+        linkTask: true,
+        autoStartBreaks: true,
+        autoStartFocus: false,
+        completionAlert: false,
     },
 };
 
@@ -332,8 +345,8 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
         expect(sanitized.settings.diagnostics).toBeUndefined();
         expect(sanitized.settings.analytics).toBeUndefined();
         expect(sanitized.settings.network).toBeUndefined();
-        expect(sanitized.settings.gtd).toBeUndefined();
-        expect(sanitized.settings.features).toBeUndefined();
+        expect(sanitized.settings.gtd).toEqual({ autoArchiveDays: 7 });
+        expect(sanitized.settings.features).toEqual({ priorities: true });
         expect(sanitized.settings.taskSortBy).toBeUndefined();
         expect(sanitized.settings.sidebarCollapsed).toBeUndefined();
     });
@@ -364,9 +377,130 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
             focusTaskLimit: 5,
             focusGroupBy: 'project',
             defaultProjectFlowMode: 'sequential',
+            inboxProcessing: { scheduleEnabled: true },
         });
         expect(sanitized.settings.language).toBe('en');
         expect(sanitized.settings.timeFormat).toBe('24h');
+    });
+
+    it('syncs GTD and capture settings by default while omitting device-local presentation state', () => {
+        const data = createData([]);
+        data.settings = {
+            gtd: {
+                timeEstimatePresets: ['15min', '1hr'],
+                autoArchiveDays: 14,
+                defaultCaptureMethod: 'audio',
+                saveAudioAttachments: false,
+                inboxProcessing: {
+                    defaultMode: 'quick',
+                    twoMinuteEnabled: false,
+                    twoMinuteFirst: true,
+                    projectFirst: true,
+                    contextStepEnabled: false,
+                    scheduleEnabled: true,
+                    referenceEnabled: true,
+                },
+                weeklyReview: { includeContextStep: false },
+                dailyReview: { includeFocusStep: false },
+                pomodoro: {
+                    customDurations: { focusMinutes: 50, breakMinutes: 10 },
+                    linkTask: true,
+                    autoStartBreaks: true,
+                    autoStartFocus: false,
+                    completionAlert: false,
+                },
+            },
+            quickAddAutoClean: true,
+            markdownEditorAssist: false,
+            features: {
+                priorities: false,
+                timeEstimates: true,
+                pomodoro: true,
+            },
+        };
+
+        const sanitized = sanitizeAppDataForRemote(data);
+
+        expect(sanitized.settings.gtd).toEqual({
+            timeEstimatePresets: ['15min', '1hr'],
+            autoArchiveDays: 14,
+            defaultCaptureMethod: 'audio',
+            saveAudioAttachments: false,
+            inboxProcessing: {
+                twoMinuteEnabled: false,
+                twoMinuteFirst: true,
+                projectFirst: true,
+                contextStepEnabled: false,
+                scheduleEnabled: true,
+                referenceEnabled: true,
+            },
+            weeklyReview: { includeContextStep: false },
+            dailyReview: { includeFocusStep: false },
+            pomodoro: {
+                customDurations: { focusMinutes: 50, breakMinutes: 10 },
+                linkTask: true,
+                autoStartBreaks: true,
+                autoStartFocus: false,
+                completionAlert: false,
+            },
+        });
+        expect(sanitized.settings.quickAddAutoClean).toBe(true);
+        expect(sanitized.settings.markdownEditorAssist).toBe(false);
+        expect(sanitized.settings.features).toEqual({
+            priorities: false,
+            timeEstimates: true,
+            pomodoro: true,
+        });
+    });
+
+    it('keeps the expanded GTD group local after an explicit opt-out', () => {
+        const data = createData([]);
+        data.settings = {
+            syncPreferences: { gtd: false },
+            gtd: {
+                defaultCaptureMethod: 'audio',
+                weeklyReview: { includeContextStep: false },
+            },
+            quickAddAutoClean: true,
+            markdownEditorAssist: false,
+            features: { pomodoro: true },
+        };
+
+        const sanitized = sanitizeAppDataForRemote(data);
+
+        expect(sanitized.settings.gtd).toBeUndefined();
+        expect(sanitized.settings.quickAddAutoClean).toBeUndefined();
+        expect(sanitized.settings.markdownEditorAssist).toBeUndefined();
+        expect(sanitized.settings.features).toBeUndefined();
+    });
+
+    it('converges the expanded GTD payload across peers without dropping explicit values', () => {
+        const source = createData([]);
+        source.settings = {
+            gtd: {
+                defaultCaptureMethod: 'audio',
+                inboxProcessing: { twoMinuteEnabled: false, scheduleEnabled: true },
+                weeklyReview: { includeContextStep: false },
+            },
+            quickAddAutoClean: true,
+            features: { pomodoro: true },
+            syncPreferencesUpdatedAt: { gtd: '2026-08-29T12:00:00.000Z' },
+        };
+        const firstPayload = sanitizeAppDataForRemote(source);
+        const peerSettings: AppData['settings'] = {
+            gtd: {
+                inboxProcessing: { defaultMode: 'quick', twoMinuteEnabled: true },
+            },
+            syncPreferencesUpdatedAt: { gtd: '2026-08-28T12:00:00.000Z' },
+        };
+
+        const mergedPeerSettings = mergeSettingsForSync(peerSettings, firstPayload.settings);
+        const peer = createData([]);
+        peer.settings = mergedPeerSettings;
+        const secondPayload = sanitizeAppDataForRemote(peer);
+
+        expect(secondPayload.settings).toEqual(firstPayload.settings);
+        expect(mergedPeerSettings.gtd?.inboxProcessing?.defaultMode).toBe('quick');
     });
 
     it('uploads a default area that is the only GTD preference set (#default-area-sync)', () => {
@@ -384,10 +518,10 @@ describe('sync-helpers sanitizeAppDataForRemote', () => {
         });
     });
 
-    it('does not include the default schedule time with only synced date/time preferences', () => {
+    it('does not include the default schedule time after GTD sync is explicitly disabled', () => {
         const data = createData([]);
         data.settings = {
-            syncPreferences: { language: true },
+            syncPreferences: { language: true, gtd: false },
             gtd: {
                 defaultScheduleTime: '09:30',
             },

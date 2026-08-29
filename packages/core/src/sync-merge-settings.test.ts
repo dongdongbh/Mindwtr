@@ -175,6 +175,136 @@ describe('mergeSettingsForSync > gtd.taskEditor', () => {
     });
 });
 
+describe('mergeSettingsForSync > expanded GTD settings', () => {
+    it('merges capture, workflow, review, and feature preferences while preserving device-local inbox mode', () => {
+        const local: Settings = {
+            gtd: {
+                inboxProcessing: {
+                    defaultMode: 'quick',
+                    twoMinuteEnabled: true,
+                },
+            },
+            features: { priorities: true },
+            syncPreferencesUpdatedAt: { gtd: OLDER },
+        };
+        const incoming: Settings = {
+            gtd: {
+                defaultCaptureMethod: 'audio',
+                saveAudioAttachments: false,
+                inboxProcessing: {
+                    defaultMode: 'guided',
+                    scheduleEnabled: true,
+                },
+                weeklyReview: { includeContextStep: false },
+                dailyReview: { includeFocusStep: false },
+            },
+            quickAddAutoClean: true,
+            markdownEditorAssist: false,
+            features: { pomodoro: true },
+            syncPreferencesUpdatedAt: { gtd: NEWER },
+        };
+
+        const merged = mergeSettingsForSync(local, incoming);
+
+        expect(merged.gtd).toMatchObject({
+            defaultCaptureMethod: 'audio',
+            saveAudioAttachments: false,
+            inboxProcessing: {
+                defaultMode: 'quick',
+                twoMinuteEnabled: true,
+                scheduleEnabled: true,
+            },
+            weeklyReview: { includeContextStep: false },
+            dailyReview: { includeFocusStep: false },
+        });
+        expect(merged.quickAddAutoClean).toBe(true);
+        expect(merged.markdownEditorAssist).toBe(false);
+        expect(merged.features).toEqual({ priorities: true, pomodoro: true });
+    });
+
+    it('preserves new explicit fields when an older peer omits them', () => {
+        const local: Settings = {
+            gtd: {
+                defaultCaptureMethod: 'audio',
+                weeklyReview: { includeContextStep: false },
+            },
+            quickAddAutoClean: true,
+            features: { pomodoro: true },
+            syncPreferencesUpdatedAt: { gtd: OLDER },
+        };
+        const incoming: Settings = {
+            gtd: { defaultScheduleTime: '09:00' },
+            syncPreferencesUpdatedAt: { gtd: NEWER },
+        };
+
+        const merged = mergeSettingsForSync(local, incoming);
+
+        expect(merged.gtd?.defaultCaptureMethod).toBe('audio');
+        expect(merged.gtd?.weeklyReview).toEqual({ includeContextStep: false });
+        expect(merged.quickAddAutoClean).toBe(true);
+        expect(merged.features?.pomodoro).toBe(true);
+        expect(merged.gtd?.defaultScheduleTime).toBe('09:00');
+    });
+
+    it('rejects malformed expanded GTD values from a newer remote payload', () => {
+        const local: Settings = {
+            gtd: {
+                timeEstimatePresets: ['15min'],
+                autoArchiveDays: 7,
+                defaultCaptureMethod: 'text',
+                saveAudioAttachments: true,
+                inboxProcessing: { scheduleEnabled: false },
+                weeklyReview: { includeContextStep: true },
+                dailyReview: { includeFocusStep: true },
+                pomodoro: {
+                    customDurations: { focusMinutes: 25, breakMinutes: 5 },
+                    linkTask: false,
+                },
+            },
+            quickAddAutoClean: false,
+            markdownEditorAssist: true,
+            features: { pomodoro: false },
+            syncPreferencesUpdatedAt: { gtd: OLDER },
+        };
+        const incoming: Settings = {
+            gtd: {
+                timeEstimatePresets: 'many' as never,
+                autoArchiveDays: -5,
+                defaultCaptureMethod: 'camera' as never,
+                saveAudioAttachments: 'yes' as never,
+                inboxProcessing: { scheduleEnabled: 'yes' as never },
+                weeklyReview: 'sometimes' as never,
+                dailyReview: { includeFocusStep: 'yes' as never },
+                pomodoro: {
+                    customDurations: { focusMinutes: Number.NaN, breakMinutes: 999 },
+                    linkTask: 'yes' as never,
+                },
+            },
+            quickAddAutoClean: 'yes' as never,
+            markdownEditorAssist: 1 as never,
+            features: { pomodoro: 'yes' as never },
+            syncPreferencesUpdatedAt: { gtd: NEWER },
+        };
+
+        const merged = mergeSettingsForSync(local, incoming);
+
+        expect(merged.gtd?.timeEstimatePresets).toEqual(['15min']);
+        expect(merged.gtd?.autoArchiveDays).toBe(7);
+        expect(merged.gtd?.defaultCaptureMethod).toBe('text');
+        expect(merged.gtd?.saveAudioAttachments).toBe(true);
+        expect(merged.gtd?.inboxProcessing?.scheduleEnabled).toBe(false);
+        expect(merged.gtd?.weeklyReview).toEqual({ includeContextStep: true });
+        expect(merged.gtd?.dailyReview).toEqual({ includeFocusStep: true });
+        expect(merged.gtd?.pomodoro).toEqual({
+            customDurations: { focusMinutes: 25, breakMinutes: 180 },
+            linkTask: false,
+        });
+        expect(merged.quickAddAutoClean).toBe(false);
+        expect(merged.markdownEditorAssist).toBe(true);
+        expect(merged.features?.pomodoro).toBe(false);
+    });
+});
+
 describe('sanitizeMergedSettingsForSync > gtd.taskEditor shape guard', () => {
     it('falls back to the local layout when the incoming value is not an object', () => {
         const local: Settings = { gtd: { taskEditor: { hidden: ['location'] } } };

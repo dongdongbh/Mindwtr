@@ -1124,7 +1124,7 @@ export const jaOverrides: Record<string, string> = {
         'settings.syncPreferencesDesc': 'どの設定を端末間でそろえるかを選べます。',
         'settings.syncPreferenceAppearance': '外観（テーマ、タスクの経過日数、クイックアクセス）',
         'settings.syncPreferenceLanguage': '言語と日付・時刻の形式',
-        'settings.syncPreferenceGtd': 'GTDの初期値（日程・フォーカス・エディタレイアウト）',
+  'settings.syncPreferenceGtd': 'GTDの設定と初期値',
         'settings.syncPreferenceExternalCalendars': '外部カレンダーの URL',
         'settings.syncPreferenceAi': 'AI の設定（モデル、プロバイダ）',
         'settings.syncPreferenceAiHint': 'API キーとローカルモデルのパスは、同期されることはありません。',

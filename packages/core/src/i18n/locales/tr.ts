@@ -808,7 +808,7 @@ export const trOverrides: Record<string, string> = {
         'settings.syncPreferencesDesc': 'Cihazlar arasında hangi tercihlerin senkronize kalacağını seçin.',
         'settings.syncPreferenceAppearance': 'Görünüm (tema)',
         'settings.syncPreferenceLanguage': 'Dil ve tarih biçimi',
-        'settings.syncPreferenceGtd': 'Planlama varsayılanları',
+  'settings.syncPreferenceGtd': 'GTD ayarları ve varsayılanları',
         'settings.syncPreferenceExternalCalendars': 'Harici takvim URL\'leri',
         'settings.syncPreferenceAi': 'Yapay zeka ayarları (modeller, sağlayıcılar)',
         'settings.syncPreferenceAiHint': 'API anahtarları ve yerel model yolları hiçbir zaman senkronize edilmez.',

@@ -795,7 +795,7 @@ export const plOverrides: Record<string, string> = {
         'settings.syncPreferencesDesc': 'Wybierz, które ustawienia mają pozostawać zsynchronizowane między urządzeniami.',
         'settings.syncPreferenceAppearance': 'Wygląd (motyw)',
         'settings.syncPreferenceLanguage': 'Język i format daty',
-        'settings.syncPreferenceGtd': 'Domyślne planowania',
+  'settings.syncPreferenceGtd': 'Ustawienia i wartości domyślne GTD',
         'settings.syncPreferenceExternalCalendars': 'Adresy URL kalendarzy zewnętrznych',
         'settings.syncPreferenceAi': 'Ustawienia AI (modele, dostawcy)',
         'settings.syncPreferenceAiHint': 'Klucze API i lokalne ścieżki modeli nigdy nie są synchronizowane.',

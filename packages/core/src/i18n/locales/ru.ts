@@ -799,7 +799,7 @@ export const ruOverrides: Record<string, string> = {
         'settings.syncPreferencesDesc': 'Выберите, какие настройки будут синхронизироваться на разных устройствах.',
         'settings.syncPreferenceAppearance': 'Внешний вид (тема)',
         'settings.syncPreferenceLanguage': 'Язык и формат даты',
-        'settings.syncPreferenceGtd': 'Параметры планирования по умолчанию',
+  'settings.syncPreferenceGtd': 'Настройки и значения GTD по умолчанию',
         'settings.syncPreferenceExternalCalendars': 'URL-адреса внешнего календаря',
         'settings.syncPreferenceAi': 'Настройки AI (модели, провайдеры)',
         'settings.syncPreferenceAiHint': 'Ключи API и пути к локальной модели никогда не синхронизируются.',

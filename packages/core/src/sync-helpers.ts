@@ -1,6 +1,6 @@
-import type { AppData, Attachment, GtdSettings } from './types';
+import type { AppData, Attachment } from './types';
 import { normalizeSavedFilters } from './saved-filters';
-import { GTD_SYNCED_FIELD_KEYS, type GtdSyncedFieldKey } from './settings-options';
+import { getGtdSyncSnapshot, isSettingsSyncGroupEnabled } from './settings-options';
 import { normalizeRevision } from './sync-revision';
 import { SYNC_FILE_NAME } from './sync-service-utils';
 import {
@@ -184,24 +184,12 @@ const sanitizeSettingsForRemote = (settings: AppData['settings']): AppData['sett
         next.timeFormat = settings.timeFormat;
     }
 
-    if (prefs.gtd === true && settings.gtd) {
-        // Driven by GTD_SYNCED_FIELD_KEYS (settings-options.ts) — the single
-        // source of truth shared with the gtd mergeGroup in
-        // mergeSettingsForSync (sync-merge-settings.ts). A field missing from
-        // that list silently never leaves the device (naturalLanguageDates
-        // bug); add new synced gtd fields there, not here.
-        const gtd = settings.gtd;
-        const hasSyncedGtdField = GTD_SYNCED_FIELD_KEYS.some((key) => gtd[key] !== undefined);
-        if (hasSyncedGtdField) {
-            const nextGtd: Pick<GtdSettings, GtdSyncedFieldKey> = {};
-            for (const key of GTD_SYNCED_FIELD_KEYS) {
-                const value = gtd[key];
-                if (value !== undefined) {
-                    (nextGtd as Record<GtdSyncedFieldKey, unknown>)[key] = value;
-                }
-            }
-            next.gtd = nextGtd;
-        }
+    if (isSettingsSyncGroupEnabled(prefs, 'gtd')) {
+        const gtdSnapshot = getGtdSyncSnapshot(settings);
+        next.gtd = gtdSnapshot.gtd;
+        next.quickAddAutoClean = gtdSnapshot.quickAddAutoClean;
+        next.markdownEditorAssist = gtdSnapshot.markdownEditorAssist;
+        next.features = gtdSnapshot.features;
     }
 
     if (prefs.savedFilters === true) {

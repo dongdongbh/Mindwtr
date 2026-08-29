@@ -798,7 +798,7 @@ export const hiOverrides: Record<string, string> = {
         'settings.syncPreferencesDesc': 'चुनें कि कौन सी प्राथमिकताएँ सभी डिवाइसों में समन्वयित रहें।',
         'settings.syncPreferenceAppearance': 'उपस्थिति (विषय)',
         'settings.syncPreferenceLanguage': 'भाषा एवं दिनांक प्रारूप',
-        'settings.syncPreferenceGtd': 'शेड्यूलिंग डिफ़ॉल्ट',
+  'settings.syncPreferenceGtd': 'GTD सेटिंग्स और डिफ़ॉल्ट',
         'settings.syncPreferenceExternalCalendars': 'बाहरी कैलेंडर यूआरएल',
         'settings.syncPreferenceAi': 'एआई सेटिंग्स (मॉडल, प्रदाता)',
         'settings.syncPreferenceAiHint': 'एपीआई कुंजियाँ और स्थानीय मॉडल पथ कभी भी समन्वयित नहीं होते हैं।',

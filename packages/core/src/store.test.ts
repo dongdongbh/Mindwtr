@@ -1367,6 +1367,34 @@ describe('TaskStore', () => {
         expect(useTaskStore.getState().settings.syncPreferencesUpdatedAt?.gtd).toBe('2026-07-16T12:00:00.000Z');
     });
 
+    it('stamps the GTD sync time when expanded GTD and capture settings change', async () => {
+        vi.setSystemTime(new Date('2026-08-29T12:00:00.000Z'));
+        useTaskStore.setState({ settings: { deviceId: 'device-a' } });
+
+        await useTaskStore.getState().updateSettings({
+            gtd: {
+                defaultCaptureMethod: 'audio',
+                weeklyReview: { includeContextStep: false },
+            },
+            quickAddAutoClean: true,
+            markdownEditorAssist: false,
+            features: { pomodoro: true },
+        });
+
+        expect(useTaskStore.getState().settings.syncPreferencesUpdatedAt?.gtd).toBe('2026-08-29T12:00:00.000Z');
+    });
+
+    it('does not stamp the GTD sync time for the device-local inbox presentation mode alone', async () => {
+        vi.setSystemTime(new Date('2026-08-29T12:00:00.000Z'));
+        useTaskStore.setState({ settings: { deviceId: 'device-a' } });
+
+        await useTaskStore.getState().updateSettings({
+            gtd: { inboxProcessing: { defaultMode: 'quick' } },
+        });
+
+        expect(useTaskStore.getState().settings.syncPreferencesUpdatedAt?.gtd).toBeUndefined();
+    });
+
     it('prefers the renamed tag when deduplicating normalized tag collisions', async () => {
         const { addProject, addTask, renameTag } = useTaskStore.getState();
 

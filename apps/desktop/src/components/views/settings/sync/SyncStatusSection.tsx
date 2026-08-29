@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { listMergeConflictSamples, safeFormatDate, summarizeMergeStats, useTaskStore } from '@mindwtr/core';
+import {
+    isSettingsSyncGroupEnabled,
+    listMergeConflictSamples,
+    safeFormatDate,
+    summarizeMergeStats,
+    useTaskStore,
+} from '@mindwtr/core';
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { useConfirmDialog } from '../../../../hooks/useConfirmDialog';
 import { cn } from '../../../../lib/utils';
@@ -159,7 +165,7 @@ export function SyncStatusSection({
         void onRestoreSnapshot(snapshot);
     };
     const renderSyncToggle = (key: keyof SyncPreferences, label: string, hint?: string) => {
-        const checked = syncPrefs[key] === true;
+        const checked = isSettingsSyncGroupEnabled(syncPrefs, key);
         return (
             // Which categories sync is one control per SyncPreferences field, not
             // a setting people search for by name, so these rows stay unindexed.

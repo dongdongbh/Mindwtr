@@ -1,6 +1,13 @@
 import { SUPPORTED_LANGUAGES } from './i18n/i18n-constants';
 import type { AIProviderId, AIReasoningEffort } from './ai/types';
-import type { AiSettings, AppearanceSettings, AppData, GtdSettings } from './types';
+import type {
+    AiSettings,
+    AppearanceSettings,
+    AppData,
+    GtdSettings,
+    SettingsSyncGroup,
+    SettingsSyncPreferences,
+} from './types';
 
 type ThemeValue = NonNullable<AppData['settings']['theme']>;
 type LanguageValue = NonNullable<AppData['settings']['language']>;
@@ -172,13 +179,23 @@ export const STT_MODE_VALUE_SET = new Set<SpeechToTextModeValue>(STT_MODE_VALUES
 export const STT_FIELD_STRATEGY_VALUES = Object.keys(STT_FIELD_STRATEGY_VALUE_FLAGS) as SpeechToTextFieldStrategyValue[];
 export const STT_FIELD_STRATEGY_VALUE_SET = new Set<SpeechToTextFieldStrategyValue>(STT_FIELD_STRATEGY_VALUES);
 
-// Single source of truth for which `settings.gtd` fields sync when
-// syncPreferences.gtd is enabled. Both the upload allowlist
-// (sanitizeSettingsForRemote in sync-helpers.ts) and the merge group
-// (mergeSettingsForSync's gtd mergeGroup in sync-merge-settings.ts) derive
-// from this list — a field missing here silently never leaves the device
-// (the naturalLanguageDates bug, #742-era allowlist drift).
+// GTD settings sync by default. An explicit false remains authoritative so a
+// device can keep these preferences local without a migration writing default
+// values into the document and winning over an existing choice.
+export const isSettingsSyncGroupEnabled = (
+    preferences: SettingsSyncPreferences | undefined,
+    group: SettingsSyncGroup,
+): boolean => preferences?.[group] ?? (group === 'gtd');
+
+// Single source of truth for which `settings.gtd` fields sync. Nested Inbox
+// processing fields are handled separately below because defaultMode is a
+// device-local presentation choice. Upload, merge, and timestamp stamping all
+// derive from these lists to prevent allowlist drift.
 export const GTD_SYNCED_FIELD_KEYS = [
+    'timeEstimatePresets',
+    'taskEditor',
+    'autoArchiveDays',
+    'defaultCaptureMethod',
     'defaultScheduleTime',
     'defaultAreaMode',
     'defaultAreaId',
@@ -186,8 +203,94 @@ export const GTD_SYNCED_FIELD_KEYS = [
     'focusGroupBy',
     'defaultProjectFlowMode',
     'naturalLanguageDates',
-    'taskEditor',
     'viewSections',
+    'saveAudioAttachments',
+    'weeklyReview',
+    'dailyReview',
+    'pomodoro',
 ] as const satisfies readonly (keyof GtdSettings)[];
 
 export type GtdSyncedFieldKey = (typeof GTD_SYNCED_FIELD_KEYS)[number];
+
+type InboxProcessingSettings = NonNullable<GtdSettings['inboxProcessing']>;
+export const GTD_SYNCED_INBOX_PROCESSING_FIELD_KEYS = [
+    'twoMinuteEnabled',
+    'twoMinuteFirst',
+    'projectFirst',
+    'contextStepEnabled',
+    'scheduleEnabled',
+    'referenceEnabled',
+] as const satisfies readonly (keyof InboxProcessingSettings)[];
+
+export type GtdSyncedInboxProcessingFieldKey = (typeof GTD_SYNCED_INBOX_PROCESSING_FIELD_KEYS)[number];
+export type GtdSyncedInboxProcessingSettings = Pick<InboxProcessingSettings, GtdSyncedInboxProcessingFieldKey>;
+export type GtdSyncedSettings = Pick<GtdSettings, GtdSyncedFieldKey> & {
+    inboxProcessing?: GtdSyncedInboxProcessingSettings;
+};
+
+export const GTD_SYNCED_APP_SETTINGS_FIELD_KEYS = [
+    'quickAddAutoClean',
+    'markdownEditorAssist',
+] as const satisfies readonly (keyof AppData['settings'])[];
+
+export type GtdSyncedAppSettingsFieldKey = (typeof GTD_SYNCED_APP_SETTINGS_FIELD_KEYS)[number];
+
+type FeatureSettings = NonNullable<AppData['settings']['features']>;
+export const GTD_SYNCED_FEATURE_FIELD_KEYS = [
+    'priorities',
+    'timeEstimates',
+    'pomodoro',
+] as const satisfies readonly (keyof FeatureSettings)[];
+
+export type GtdSyncedFeatureFieldKey = (typeof GTD_SYNCED_FEATURE_FIELD_KEYS)[number];
+export type GtdSyncedFeatureSettings = Pick<FeatureSettings, GtdSyncedFeatureFieldKey>;
+
+export type GtdSyncSnapshot = Pick<AppData['settings'], GtdSyncedAppSettingsFieldKey> & {
+    gtd?: GtdSyncedSettings;
+    features?: GtdSyncedFeatureSettings;
+};
+
+export const getGtdSyncSnapshot = (settings: AppData['settings']): GtdSyncSnapshot => {
+    const snapshot: GtdSyncSnapshot = {};
+    const gtd: GtdSyncedSettings = {};
+    for (const key of GTD_SYNCED_FIELD_KEYS) {
+        const value = settings.gtd?.[key];
+        if (value !== undefined) {
+            (gtd as Record<GtdSyncedFieldKey, unknown>)[key] = value;
+        }
+    }
+
+    const inboxProcessing: GtdSyncedInboxProcessingSettings = {};
+    for (const key of GTD_SYNCED_INBOX_PROCESSING_FIELD_KEYS) {
+        const value = settings.gtd?.inboxProcessing?.[key];
+        if (value !== undefined) {
+            (inboxProcessing as Record<GtdSyncedInboxProcessingFieldKey, unknown>)[key] = value;
+        }
+    }
+    if (Object.keys(inboxProcessing).length > 0) {
+        gtd.inboxProcessing = inboxProcessing;
+    }
+    if (Object.keys(gtd).length > 0) {
+        snapshot.gtd = gtd;
+    }
+
+    for (const key of GTD_SYNCED_APP_SETTINGS_FIELD_KEYS) {
+        const value = settings[key];
+        if (value !== undefined) {
+            (snapshot as Record<GtdSyncedAppSettingsFieldKey, unknown>)[key] = value;
+        }
+    }
+
+    const features: GtdSyncedFeatureSettings = {};
+    for (const key of GTD_SYNCED_FEATURE_FIELD_KEYS) {
+        const value = settings.features?.[key];
+        if (value !== undefined) {
+            (features as Record<GtdSyncedFeatureFieldKey, unknown>)[key] = value;
+        }
+    }
+    if (Object.keys(features).length > 0) {
+        snapshot.features = features;
+    }
+
+    return snapshot;
+};
