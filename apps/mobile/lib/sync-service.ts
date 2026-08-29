@@ -1111,6 +1111,8 @@ class MobileSyncRun {
               password: webdavConfig.password,
               timeoutMs: 10_000,
               fetcher: this.fetchWithAbort,
+            }, {
+              requireStrongEtag: !legacyWebdavPostureAllowed,
             });
             if (compatibility === 'legacy-plaintext' && !legacyWebdavPostureAllowed) {
               throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV data.json');

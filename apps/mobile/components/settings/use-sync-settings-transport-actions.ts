@@ -92,14 +92,21 @@ const reconcileBackgroundSyncRegistration = () => {
     void syncMobileBackgroundSyncRegistration().catch(logSettingsError);
 };
 
-const assertLegacyWebdavAllowedForCurrentEncryptionPosture = async (
-    compatibility: 'strong-etag' | 'legacy-plaintext',
-): Promise<void> => {
-    if (compatibility !== 'legacy-plaintext') return;
+const probeWebdavCompatibilityForCurrentEncryptionPosture = async (
+    documentUrl: string,
+    options: Parameters<typeof probeWebdavSyncCompatibility>[1],
+): Promise<'strong-etag' | 'legacy-plaintext'> => {
     const status = await getMobileSyncEncryptionStatus();
-    if (status.state !== 'off' || status.incompleteTransition) {
+    const requireStrongEtag = status.state !== 'off' || Boolean(status.incompleteTransition);
+    const compatibility = await probeWebdavSyncCompatibility(
+        documentUrl,
+        options,
+        { requireStrongEtag },
+    );
+    if (compatibility === 'legacy-plaintext' && requireStrongEtag) {
         throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV data.json');
     }
+    return compatibility;
 };
 
 const persistSyncConfigItem = (key: string, value: string, afterSave?: () => void) => {
@@ -812,7 +819,7 @@ export function useSyncSettingsTransportActions({
             );
             if (needsActivationProbe) {
                 if (configOverride.backend === 'webdav' && configOverride.webdav) {
-                    const compatibility = await probeWebdavSyncCompatibility(
+                    const compatibility = await probeWebdavCompatibilityForCurrentEncryptionPosture(
                         normalizeWebdavUrl(configOverride.webdav.url),
                         {
                         ...getMobileWebDavRequestOptions(configOverride.webdav.allowInsecureHttp),
@@ -821,7 +828,6 @@ export function useSyncSettingsTransportActions({
                         timeoutMs: 10_000,
                         },
                     );
-                    await assertLegacyWebdavAllowedForCurrentEncryptionPosture(compatibility);
                     if (compatibility === 'strong-etag') {
                         await rememberWebdavCapabilityProof(configOverride.webdav);
                     }
@@ -1165,13 +1171,12 @@ export function useSyncSettingsTransportActions({
                 if (!validateSyncHttpUrl(trimmedWebDavUrl, effectiveWebdav.allowInsecureHttp, 'WebDAV')) {
                     return;
                 }
-                const compatibility = await probeWebdavSyncCompatibility(normalizeWebdavUrl(trimmedWebDavUrl), {
+                const compatibility = await probeWebdavCompatibilityForCurrentEncryptionPosture(normalizeWebdavUrl(trimmedWebDavUrl), {
                     ...getMobileWebDavRequestOptions(effectiveWebdav.allowInsecureHttp),
                     username: effectiveWebdav.username.trim(),
                     password: effectiveWebdav.password,
                     timeoutMs: 10_000,
                 });
-                await assertLegacyWebdavAllowedForCurrentEncryptionPosture(compatibility);
                 if (compatibility === 'strong-etag') {
                     await rememberWebdavCapabilityProof(effectiveWebdav);
                 }

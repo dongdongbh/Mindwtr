@@ -721,6 +721,42 @@ describe('versioned WebDAV transition byte operations', () => {
         expect(requests).toEqual(['GET']);
     });
 
+    it('proves conditional writes when encryption requires strong ETags and data.json is absent', async () => {
+        const documentUrl = 'https://example.com/dav/data.json';
+        const { fetcher, requests } = createWebdavCapabilityFetcher(documentUrl);
+
+        await expect(probeWebdavSyncCompatibility(
+            documentUrl,
+            { fetcher },
+            { requireStrongEtag: true },
+        )).resolves.toBe('strong-etag');
+
+        expect(requests.map(({ method }) => method)).toEqual([
+            'GET', 'PUT', 'GET', 'PUT', 'PUT', 'GET', 'PUT', 'DELETE', 'GET', 'DELETE',
+        ]);
+    });
+
+    it.each([
+        ['missing', null],
+        ['weak', 'W/"legacy-v1"'],
+    ])('rejects an existing document with a %s ETag when encryption requires a strong version', async (_case, etag) => {
+        const requests: string[] = [];
+        const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+            requests.push(init?.method ?? 'GET');
+            return new Response('{"tasks":[]}', {
+                status: 200,
+                headers: etag ? { etag } : undefined,
+            });
+        }) as unknown as typeof fetch;
+
+        await expect(probeWebdavSyncCompatibility(
+            'https://example.com/dav/data.json',
+            { fetcher },
+            { requireStrongEtag: true },
+        )).rejects.toBeInstanceOf(SyncEncryptionRemoteVersionUnavailableError);
+        expect(requests).toEqual(['GET']);
+    });
+
     it('does not downgrade a strong-ETag server that fails conditional-write enforcement', async () => {
         const documentUrl = 'https://example.com/dav/data.json';
         const { fetcher } = createWebdavCapabilityFetcher(documentUrl, {

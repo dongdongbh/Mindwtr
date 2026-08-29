@@ -1076,22 +1076,36 @@ const assertWebdavConditionalWriteSupport = async (
 
 export type WebdavSyncCompatibility = 'strong-etag' | 'legacy-plaintext';
 
+export type WebdavSyncCompatibilityPolicy = {
+    requireStrongEtag?: boolean;
+};
+
 /** Validates the ordinary plaintext endpoint and reports whether it supports the full
- * generation contract. Legacy mode is observational only: it does not issue an
- * unconditional probe write, and callers must not cache it because provider capability
- * can improve later. */
+ * generation contract. Legacy mode is observational only. When encryption requires
+ * strong ETags, an absent data.json runs the unique conditional-write probe instead of
+ * being mistaken for a legacy server; existing unversioned bytes still fail before any write. */
 export async function probeWebdavSyncCompatibility(
     documentUrl: string,
     options: WebDavOptions = {},
+    policy: WebdavSyncCompatibilityPolicy = {},
 ): Promise<WebdavSyncCompatibility> {
     const documentOptions = {
         ...options,
         maxBytes: options.maxBytes ?? MAX_SYNC_DOCUMENT_BYTES,
     };
     const current = await webdavGetFileVersioned(documentUrl, documentOptions);
-    if (current.bytes === null) return 'legacy-plaintext';
+    if (current.bytes === null) {
+        if (!policy.requireStrongEtag) return 'legacy-plaintext';
+        await assertWebdavConditionalWriteSupport(documentUrl, documentOptions);
+        return 'strong-etag';
+    }
     parseOptionalWebdavJson(new TextDecoder().decode(current.bytes));
-    if (!current.version) return 'legacy-plaintext';
+    if (!current.version) {
+        if (policy.requireStrongEtag) {
+            throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV data.json');
+        }
+        return 'legacy-plaintext';
+    }
     await assertWebdavConditionalWriteSupport(documentUrl, documentOptions);
     return 'strong-etag';
 }

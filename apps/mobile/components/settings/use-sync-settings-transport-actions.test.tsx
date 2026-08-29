@@ -474,6 +474,7 @@ describe('useSyncSettingsTransportActions', () => {
                 timeoutMs: 10_000,
                 username: 'alice',
             }),
+            { requireStrongEtag: false },
         );
         expect(mocked.probeWebdavSyncCompatibility.mock.calls[0][1])
             .not.toMatchObject({ allowInsecureHttp: true });
@@ -526,6 +527,11 @@ describe('useSyncSettingsTransportActions', () => {
             'settings.syncMobile.connectionFailed',
             'settings.syncEncryptionErrorBackendIncompatible',
             5200,
+        );
+        expect(mocked.probeWebdavSyncCompatibility).toHaveBeenCalledWith(
+            expect.any(String),
+            expect.any(Object),
+            { requireStrongEtag: true },
         );
         expect(mocked.showToast).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
     });

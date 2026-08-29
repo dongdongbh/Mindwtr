@@ -433,6 +433,7 @@ describe('mobile sync-service runtime', () => {
     expect(coreMocks.probeWebdavSyncCompatibility).toHaveBeenCalledWith(
       'https://sync.example.com/data.json',
       expect.objectContaining({ username: 'user', password: 'pass' }),
+      { requireStrongEtag: false },
     );
     expect(coreMocks.webdavGetSyncDocument).not.toHaveBeenCalled();
     expect(coreMocks.webdavPutSyncDocument).not.toHaveBeenCalled();

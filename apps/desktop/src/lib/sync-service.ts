@@ -1637,6 +1637,8 @@ export class SyncService {
                 password,
                 timeoutMs: 10_000,
                 fetcher: fetcher ?? fetch,
+            }, {
+                requireStrongEtag: !allowLegacyPlaintext,
             });
             if (compatibility === 'legacy-plaintext' && !allowLegacyPlaintext) {
                 throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV data.json');
