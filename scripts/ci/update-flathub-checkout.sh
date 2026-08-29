@@ -15,6 +15,7 @@ default_analytics_heartbeat_url="https://analytics.mindwtr.app/"
 analytics_heartbeat_url="${ANALYTICS_HEARTBEAT_URL:-${default_analytics_heartbeat_url}}"
 analytics_release_version="${VITE_ANALYTICS_RELEASE_VERSION:-${ref}}"
 dropbox_app_key="${VITE_DROPBOX_APP_KEY:-}"
+feedback_endpoint_url="${VITE_FEEDBACK_ENDPOINT_URL:-}"
 manifest_only="${MINDWTR_FLATHUB_MANIFEST_ONLY:-0}"
 
 manifest_path="${flathub_dir}/tech.dongdongbh.mindwtr.yml"
@@ -83,7 +84,7 @@ else
   upstream_commit="${ref}"
 fi
 
-python3 - "${manifest_path}" "${upstream_commit}" "${analytics_heartbeat_url}" "${analytics_release_version}" "${dropbox_app_key}" <<'PY'
+python3 - "${manifest_path}" "${upstream_commit}" "${analytics_heartbeat_url}" "${analytics_release_version}" "${dropbox_app_key}" "${feedback_endpoint_url}" <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -93,6 +94,7 @@ commit = sys.argv[2]
 heartbeat_url = sys.argv[3]
 release_version = sys.argv[4]
 dropbox_app_key = sys.argv[5]
+feedback_endpoint_url = sys.argv[6]
 text = manifest_path.read_text()
 updated, count = re.subn(
     r'(^\s*commit:\s*)([0-9a-f]{7,40})(\s*$)',
@@ -311,6 +313,12 @@ if dropbox_app_key:
     set_env_value('VITE_DROPBOX_APP_KEY', dropbox_app_key)
 else:
     remove_env_value('VITE_DROPBOX_APP_KEY')
+# The in-app feedback form is disabled at build time without this URL; the
+# release workflows export it, so forward it like the Dropbox key.
+if feedback_endpoint_url:
+    set_env_value('VITE_FEEDBACK_ENDPOINT_URL', feedback_endpoint_url)
+else:
+    remove_env_value('VITE_FEEDBACK_ENDPOINT_URL')
 
 lines[env_line_index + 1:block_end_index] = [
     f"{' ' * entry_indent}- {name}={env_values[name]}"

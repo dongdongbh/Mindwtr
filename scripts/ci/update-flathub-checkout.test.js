@@ -41,6 +41,7 @@ const runFixture = (fixtureName) => {
       ANALYTICS_HEARTBEAT_URL: "https://analytics.fixture/",
       VITE_ANALYTICS_RELEASE_VERSION: "1.2.5",
       VITE_DROPBOX_APP_KEY: "fixture-key",
+      VITE_FEEDBACK_ENDPOINT_URL: "https://feedback.fixture/",
     },
   });
   return { manifest, result };
@@ -62,6 +63,7 @@ test("updates an unpatched Flathub manifest fixture", () => {
   expect(updated).toContain("- VITE_ANALYTICS_HEARTBEAT_URL=https://analytics.fixture/");
   expect(updated).toContain("- VITE_ANALYTICS_RELEASE_VERSION=1.2.5");
   expect(updated).toContain("- VITE_DROPBOX_APP_KEY=fixture-key");
+  expect(updated).toContain("- VITE_FEEDBACK_ENDPOINT_URL=https://feedback.fixture/");
 });
 
 test("is idempotent after the workspace repair block has been patched", () => {
@@ -78,6 +80,7 @@ test("is idempotent after the workspace repair block has been patched", () => {
       ANALYTICS_HEARTBEAT_URL: "https://analytics.fixture/",
       VITE_ANALYTICS_RELEASE_VERSION: "1.2.5",
       VITE_DROPBOX_APP_KEY: "fixture-key",
+      VITE_FEEDBACK_ENDPOINT_URL: "https://feedback.fixture/",
     },
   });
 
