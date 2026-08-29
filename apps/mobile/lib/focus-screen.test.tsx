@@ -1160,6 +1160,36 @@ describe('FocusScreen', () => {
     expect(allTaskIds).toEqual(['scheduled-review-next', 'review-next', 'plain-next']);
   });
 
+  it('shows a next task with a timed start later today in Today, not Next Actions or Upcoming', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 3, 5, 12, 0, 0, 0));
+    storeState.tasks = [
+      makeTask('later-today-next', {
+        title: 'Later today next task',
+        startTime: new Date(2026, 3, 5, 17, 0, 0, 0).toISOString(),
+      }),
+    ];
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<FocusScreen />);
+    });
+
+    const sections = tree.root.findByType(SectionList).props.sections as {
+      title: string;
+      data: { type: string; task?: Task }[];
+    }[];
+    const idsIn = (title: string) => sections
+      .find((section) => section.title === title)?.data
+      .map((item) => item.task?.id)
+      .filter(Boolean) ?? [];
+
+    expect(idsIn('Today')).toEqual(['later-today-next']);
+    expect(idsIn('Next Actions')).toEqual([]);
+    expect(idsIn('Upcoming')).toEqual([]);
+    vi.useRealTimers();
+  });
+
   it('shows the status badge on review-due rows but keeps it hidden on next actions', () => {
     storeState.tasks = [
       makeTask('plain-next', { title: 'Plain next' }),

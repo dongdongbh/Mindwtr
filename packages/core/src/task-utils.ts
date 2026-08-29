@@ -457,12 +457,12 @@ export type UpcomingDeferredTask = {
 export const UPCOMING_DEFERRED_WINDOW_DAYS = 7;
 
 /**
- * The Focus "Upcoming" preview (#1061): next-status tasks the start/recurrence
- * deferral currently hides but which surface within the window, sorted by the
- * date they will appear. Derives the date via getTaskDeferUntil — the same
- * derivation isTaskFutureStart uses — so the preview cannot disagree with the
- * actual reveal. Includes tasks that start later *today*, which are hidden
- * until their time arrives and so belong here rather than nowhere.
+ * The Focus "Upcoming" preview (#1061): next-status tasks deferred to another
+ * day, sorted by the date they will appear. Derives the date via
+ * getTaskDeferUntil — the same derivation isTaskFutureStart uses — so the
+ * preview cannot disagree with the actual reveal. A start later *today*
+ * belongs to the Today section instead (it is today's business, just later),
+ * so it is excluded here even though Next Actions hides it until its time.
  */
 export function getUpcomingDeferredTasks(
     tasks: readonly Task[],
@@ -484,15 +484,11 @@ export function getUpcomingDeferredTasks(
         if (task.status !== 'next') continue;
         const deferUntil = getTaskDeferUntil(task);
         if (!deferUntil || deferUntil > windowEnd) continue;
-        // Membership is exactly "hidden right now", asked of the same predicate
-        // Focus filters Next Actions with. The bound used to be "later than
-        // today", which left a start *time* later today in neither section — it
-        // is hidden from Next Actions by time granularity and was too early for
-        // Upcoming — so it could not be seen, and therefore could not be starred
-        // for today either. Asking the predicate instead of comparing dates also
-        // keeps a recurring task due later today out: that one is already
-        // visible, so it must not be listed twice.
-        if (shouldShowTaskForStart(task, { now, granularity: 'time' })) continue;
+        // Membership is "deferred to another day" — the same end-of-today
+        // bound isTaskFutureStart uses. This also keeps a recurring task due
+        // later today out: that one has no start, so isTaskFutureStart is
+        // false for it and it stays visible in Next Actions, not listed here.
+        if (!isTaskFutureStart(task, now)) continue;
         upcoming.push({ task, appearsAt: deferUntil });
     }
     return upcoming.sort((a, b) => (

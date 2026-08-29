@@ -522,13 +522,22 @@ export function AgendaView() {
         + (activeSavedFilterId && filterSelections.activeCount === 0 && effectiveFocusSortBy === DEFAULT_FOCUS_SORT_BY ? 1 : 0);
     const saveFilterDefaultName = getSavedFilterDefaultName(activeFilterChips, resolveText('savedFilters.defaultName', 'Focus filter'));
 
-    const { filteredActiveTasks, reviewDueCandidates, upcomingCandidates, upcomingAppearsAtById } = useMemo(() => {
+    const {
+        filteredActiveTasks, scheduleCandidates, reviewDueCandidates, upcomingCandidates, upcomingAppearsAtById,
+    } = useMemo(() => {
         void localDayKey;
-        // Upcoming now lists tasks that start later today, so a row has to leave
-        // it the moment its start arrives rather than at midnight.
+        // Next Actions and Review due hide a later-today start until its time
+        // arrives, so their pools have to leave a row the moment that time hits
+        // rather than waiting for midnight.
         void futureStartTick;
         const now = new Date();
         const filtered = applyFilter(activeTasks, effectiveFilterCriteria, { projects, now, tokenMatchMode: 'all' })
+            .filter((task) => matchesSearchQuery(task.title));
+        // Today/schedule membership is decided at day granularity (a later-today
+        // start belongs there, by its time), so it draws from baseActiveTasks
+        // rather than the time-granularity activeTasks pool — with the same
+        // user criteria/search filteredActiveTasks applies.
+        const scheduleBase = applyFilter(baseActiveTasks, effectiveFilterCriteria, { projects, now, tokenMatchMode: 'all' })
             .filter((task) => matchesSearchQuery(task.title));
         const reviewDueBase = baseActiveTasks
             .filter((task) => {
@@ -550,6 +559,7 @@ export function AgendaView() {
         const upcomingEntries = getUpcomingDeferredTasks(upcomingBase, { now });
         return {
             filteredActiveTasks: filtered,
+            scheduleCandidates: scheduleBase,
             reviewDueCandidates: reviewDue,
             upcomingCandidates: upcomingEntries.map((entry) => entry.task),
             // Showing the date is the whole point of the section, so it rides the
@@ -728,7 +738,7 @@ export function AgendaView() {
             if (!sequentialProjectIds.has(task.projectId)) return false;
             return !sequentialFirstTasks.has(task.id);
         };
-        const schedule = filteredActiveTasks.filter((task) => {
+        const schedule = scheduleCandidates.filter((task) => {
             if (task.isFocusedToday) return false;
             if (task.status !== 'next') return false;
             if (isSequentialBlocked(task)) return false;
@@ -801,6 +811,7 @@ export function AgendaView() {
         prioritiesEnabled,
         projects,
         reviewDueCandidates,
+        scheduleCandidates,
         sequentialProjectIds,
         sequentialWithinSectionProjectIds,
         sortBySavedPerspective,
@@ -907,19 +918,13 @@ export function AgendaView() {
         };
     }, [focusTaskLimit, focusedCount, handleToggleFocus, t]);
 
-    // A row deferred to another day can only ever refuse the star — the cap-only
-    // render gate above would show an enabled "Add to Focus" whose sole outcome
-    // is a toast. Disabled-with-the-reason instead, matching how the project
-    // Order row states an unavailable action rather than hiding it.
-    //
-    // A row that starts later *today* is different, and is why the section lists
-    // it at all: starring it is exactly what the user wants, the store allows it
-    // (focus eligibility asks shouldShowTaskForStart at day granularity), and the
-    // star survives to resurface the task in Today's Focus at its start time.
+    // Every Upcoming row is deferred by construction, so the star can only ever
+    // refuse — the cap-only render gate above would show an enabled "Add to Focus"
+    // whose sole outcome is a toast. Disabled-with-the-reason instead, matching
+    // how the project Order row states an unavailable action rather than hiding it.
     const buildUpcomingFocusToggle = useCallback((task: Task) => {
         const toggle = buildFocusToggle(task);
         if (toggle.isFocused) return toggle;
-        if (shouldShowTaskForStart(task, { now: new Date() })) return toggle;
         const deferredText = getFocusStarBlockedText(t, { blockedReason: 'deferred' }, focusTaskLimit)
             ?? toggle.title;
         return { ...toggle, canToggle: false, title: deferredText, ariaLabel: deferredText };

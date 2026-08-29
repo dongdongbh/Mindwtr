@@ -366,6 +366,17 @@ export default function FocusScreen() {
     selections.criteria,
     projects,
   ]);
+  // Today/schedule membership is decided at day granularity (a later-today
+  // start belongs there, by its time), so it draws from baseActiveTasks rather
+  // than the time-granularity activeTasks pool — with the same user criteria
+  // filteredActiveTasks applies.
+  const scheduleCandidates = useMemo(() => (
+    applyFilter(baseActiveTasks, selections.criteria, { projects, tokenMatchMode: 'all' })
+  ), [
+    baseActiveTasks,
+    selections.criteria,
+    projects,
+  ]);
   // Today's Focus shows every starred task the focus cap counts. It must not
   // inherit the pool's area-visibility or start-time hiding: the star buttons
   // enforce the store-wide count, so a starred task hidden by those rules
@@ -381,13 +392,10 @@ export default function FocusScreen() {
   // The Upcoming preview draws from baseActiveTasks: the deferral filter that
   // produced activeTasks is exactly what hides these rows today (#1061).
   // Starred tasks are excluded — they render in Today's Focus regardless of
-  // deferral, and one task must not appear in both sections.
-  // futureStartTick, not just the day key: the section now lists tasks that
-  // start later today, so a row has to leave it the moment its start arrives
-  // rather than at midnight.
+  // deferral, and one task must not appear in both sections. Membership is
+  // day-based (another-day deferrals only), so this doesn't need futureStartTick.
   const upcomingEntries = useMemo(() => {
     void localDayKey;
-    void futureStartTick;
     const now = new Date();
     return getUpcomingDeferredTasks(
       applyFilter(
@@ -397,7 +405,7 @@ export default function FocusScreen() {
       ),
       { now },
     );
-  }, [baseActiveTasks, futureStartTick, localDayKey, projects, selections.criteria]);
+  }, [baseActiveTasks, localDayKey, projects, selections.criteria]);
   const upcomingCandidates = useMemo(
     () => upcomingEntries.map((entry) => entry.task),
     [upcomingEntries],
@@ -781,6 +789,7 @@ export default function FocusScreen() {
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
     const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
     const { otherTasks: nonFocusedTasks } = splitFocusedTasks(filteredActiveTasks);
+    const { otherTasks: nonFocusedScheduleTasks } = splitFocusedTasks(scheduleCandidates);
     const allFocusedTasks = focusedPool;
     const sequentialFirstTaskIds = getFocusSequentialFirstTaskIds(baseActiveTasks, sequentialProjectIds, {
       now,
@@ -793,7 +802,7 @@ export default function FocusScreen() {
       return !sequentialFirstTaskIds.has(task.id);
     };
 
-    const scheduleItems = nonFocusedTasks.filter((task) => {
+    const scheduleItems = nonFocusedScheduleTasks.filter((task) => {
       if (task.status !== 'next') return false;
       if (isSequentialBlocked(task)) return false;
       const due = safeParseDueDate(task.dueDate);
@@ -855,6 +864,7 @@ export default function FocusScreen() {
     localDayKey,
     prioritiesEnabled,
     projects,
+    scheduleCandidates,
     sequentialProjectIds,
     sequentialWithinSectionProjectIds,
     sortBySavedPerspective,
@@ -1378,15 +1388,9 @@ export default function FocusScreen() {
           actions={rowActions}
           isHighlighted={item.task.id === highlightTaskId}
           showFocusToggle
-          // A row deferred to another day could only ever refuse the star, so
-          // disabled with the reason beats a tap that just toasts. A row that
-          // starts later today is star-eligible and is why the section lists it:
-          // the star survives to resurface it in Today's Focus at its start time.
-          focusToggleDisabledLabel={
-            section.type === 'upcoming' && !shouldShowTaskForStart(item.task, { now: new Date() })
-              ? upcomingFocusBlockedLabel
-              : undefined
-          }
+          // Every Upcoming row is deferred by construction, so the star could only
+          // ever refuse — disabled with the reason beats a tap that just toasts.
+          focusToggleDisabledLabel={section.type === 'upcoming' ? upcomingFocusBlockedLabel : undefined}
           showFocusHighlight={section.type !== 'focus'}
           hideStatusBadge={section.type !== 'reviewDue'}
           projectDeadlineLabel={projectDeadlineLabel}

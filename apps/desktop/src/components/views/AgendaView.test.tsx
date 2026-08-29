@@ -669,6 +669,39 @@ describe('AgendaView', () => {
         expect(queryByRole('heading', { name: /next actions/i })).not.toBeInTheDocument();
     });
 
+    it('shows a next task with a timed start later today in Today, not Next Actions or Upcoming', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(2026, 1, 28, 12, 0, 0, 0));
+        const laterToday: Task = {
+            id: 'later-today-next',
+            title: 'Later today next task',
+            status: 'next',
+            startTime: new Date(2026, 1, 28, 17, 0, 0, 0).toISOString(),
+            tags: [],
+            contexts: [],
+            createdAt: nowIso,
+            updatedAt: nowIso,
+        };
+
+        useTaskStore.setState({
+            tasks: [laterToday],
+            _allTasks: [laterToday],
+            projects: [],
+            _allProjects: [],
+            areas: [],
+            _allAreas: [],
+            settings: {},
+            highlightTaskId: null,
+        });
+
+        const { getByRole, getByText, queryByRole } = renderAgenda();
+
+        expect(getByRole('heading', { name: /today/i })).toBeInTheDocument();
+        expect(document.getElementById('agenda-section-schedule')).toContainElement(getByText('Later today next task'));
+        expect(queryByRole('heading', { name: /next actions/i })).not.toBeInTheDocument();
+        expect(document.getElementById('agenda-section-upcoming')).toBeNull();
+    });
+
     it('always hides future-start next actions without a visibility control', () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date('2026-02-28T12:00:00.000Z'));

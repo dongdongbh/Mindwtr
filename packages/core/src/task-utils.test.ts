@@ -1082,17 +1082,14 @@ describe('task-utils', () => {
             expect(upcoming[1]?.appearsAt.getTime()).toBe(new Date(2026, 3, 10).getTime());
         });
 
-        it('previews a task that starts later today, which Next Actions is still hiding', () => {
-            // Hidden from Next Actions by time granularity and previously too
-            // early for Upcoming, so it appeared in neither and could not be
-            // starred for today (dashboard feedback, 1.2.5-rc.1).
+        it('leaves out a task that starts later today — that belongs to the Today section, not Upcoming', () => {
+            // Hidden from Next Actions by time granularity, but it is still
+            // today's business (GTD's hard landscape for the day) — the Today
+            // section lists it by its time instead.
             const laterToday = makeTask({ id: 'later-today', startTime: '2026-04-05T15:00' });
             const alreadyStarted = makeTask({ id: 'already', startTime: '2026-04-05T09:00' });
 
-            const upcoming = getUpcomingDeferredTasks([laterToday, alreadyStarted], { now });
-
-            expect(upcoming.map((entry) => entry.task.id)).toEqual(['later-today']);
-            expect(upcoming[0]?.appearsAt.getTime()).toBe(new Date(2026, 3, 5, 15, 0).getTime());
+            expect(getUpcomingDeferredTasks([laterToday, alreadyStarted], { now })).toEqual([]);
         });
 
         it('leaves out a recurring task due later today, which Next Actions already shows', () => {
