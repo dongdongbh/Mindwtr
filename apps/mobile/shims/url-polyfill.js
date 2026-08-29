@@ -80,19 +80,16 @@ class FallbackURLSearchParams {
 class FallbackURL {
     constructor(url, base) {
         const href = base ? new FallbackURL(base).href + String(url || '') : String(url || '');
-        const match = href.match(/^(?:([a-z0-9.+-]+:))?(?:(\/\/[^\/?#]*))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?/i);
+        this.href = href;
+        const match = href.match(/^(?:([a-z0-9.+-]+:))?(?:\/\/[^\/?#]*)?([^?#]*)(?:\?([^#]*))?(?:#(.*))?/i);
         this.protocol = match ? (match[1] || '') : '';
-        this._authority = match ? (match[2] || '') : '';
-        this.pathname = match ? (match[3] || '/') : '/';
-        this.search = match && match[4] ? '?' + match[4] : '';
-        this.hash = match && match[5] ? '#' + match[5] : '';
+        this.pathname = match ? (match[2] || '/') : '/';
+        this.search = match && match[3] ? '?' + match[3] : '';
+        this.hash = match && match[4] ? '#' + match[4] : '';
         this.searchParams = new FallbackURLSearchParams(this.search);
     }
-    get href() {
-        return this.toString();
-    }
     toString() {
-        return `${this.protocol}${this._authority}${this.pathname}${this.search}${this.hash}`;
+        return this.href;
     }
     /**
      * Non-standard implementation: returns empty string instead of throwing or creating a blob URL.

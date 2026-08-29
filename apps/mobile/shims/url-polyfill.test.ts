@@ -86,7 +86,7 @@ describe('URL Polyfill Shim', () => {
         expect(params.has('baz')).toBe(false);
     });
 
-    test('fallback URL serializes pathname mutations used by WebDAV probes', async () => {
+    test('fallback URL keeps href writable for navigation libraries', async () => {
         const OriginalURL = globalThis.URL;
         const OriginalURLSearchParams = globalThis.URLSearchParams;
 
@@ -95,13 +95,10 @@ describe('URL Polyfill Shim', () => {
             globalThis.URL = undefined as unknown as typeof URL;
 
             const fallbackModule = await import('./url-polyfill');
-            const documentUrl = 'https://example.com/dav/data.json';
-            const probeUrl = new fallbackModule.URL!(documentUrl);
-            probeUrl.pathname = `${probeUrl.pathname}.mindwtr-etag-probe-test`;
+            const routeUrl = new fallbackModule.URL!('mindwtr:///focus');
+            routeUrl.href = 'mindwtr:///inbox';
 
-            expect(probeUrl.toString()).toBe(
-                'https://example.com/dav/data.json.mindwtr-etag-probe-test',
-            );
+            expect(routeUrl.toString()).toBe('mindwtr:///inbox');
         } finally {
             globalThis.URL = OriginalURL;
             globalThis.URLSearchParams = OriginalURLSearchParams;
@@ -126,7 +123,7 @@ describe('URL Polyfill Shim', () => {
                 new Uint8Array(body).set(bytes);
                 return body;
             };
-            const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+            const fetcherMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
                 const url = String(input);
                 const method = init?.method ?? 'GET';
                 const headers = new Headers(init?.headers);
@@ -176,13 +173,22 @@ describe('URL Polyfill Shim', () => {
                 }
 
                 throw new Error(`unexpected ${method}`);
-            }) as unknown as typeof fetch;
+            });
+            const fetcher = fetcherMock as unknown as typeof fetch;
 
             await probeWebdavSyncCompatibility(
                 documentUrl,
                 { fetcher },
                 { requireStrongEtag: true },
             );
+
+            const mutationUrls = fetcherMock.mock.calls
+                .filter(([, init]) => init?.method === 'PUT' || init?.method === 'DELETE')
+                .map(([input]) => String(input));
+            expect(mutationUrls).not.toHaveLength(0);
+            expect(mutationUrls.every((url) => (
+                /^https:\/\/example\.com\/dav\/data\.json\.mindwtr-etag-probe-[^?#]+$/.test(url)
+            ))).toBe(true);
 
             await expect(webdavGetSyncDocument(documentUrl, { fetcher })).resolves.toEqual({
                 state: 'data',

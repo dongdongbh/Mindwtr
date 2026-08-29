@@ -957,10 +957,11 @@ export async function webdavGetFileVersioned(
 }
 
 const webdavStrongEtagProbeUrl = (documentUrl: string): string => {
-    const parsed = new URL(documentUrl);
     const probeId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-    parsed.pathname = `${parsed.pathname}.mindwtr-etag-probe-${probeId}`;
-    return parsed.toString();
+    const suffixStart = documentUrl.search(/[?#]/);
+    const documentPath = suffixStart === -1 ? documentUrl : documentUrl.slice(0, suffixStart);
+    const suffix = suffixStart === -1 ? '' : documentUrl.slice(suffixStart);
+    return `${documentPath}.mindwtr-etag-probe-${probeId}${suffix}`;
 };
 
 const requireWebdavConditionalConflict = async (
