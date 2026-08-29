@@ -1137,6 +1137,51 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     expect(renderedText).not.toContain('](');
   });
 
+  it('renders title-only with hideDetails, hiding the description preview and metadata parts', () => {
+    const renderRow = (hideDetails: boolean) => {
+      let tree!: renderer.ReactTestRenderer;
+      renderer.act(() => {
+        tree = renderer.create(
+          <SwipeableTaskItem
+            task={{
+              id: 'task-1',
+              title: 'Client call',
+              description: 'Prep the deck',
+              status: 'next',
+              startTime: '2026-05-12T08:30:00.000Z',
+              createdAt: '2026-01-01T00:00:00.000Z',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+            } as any}
+            isDark={false}
+            tc={{
+              taskItemBg: '#111111',
+              border: '#222222',
+              text: '#ffffff',
+              secondaryText: '#999999',
+              tint: '#3b82f6',
+              warning: '#f59e0b',
+            } as any}
+            onPress={vi.fn()}
+            onStatusChange={vi.fn()}
+            onDelete={vi.fn()}
+            hideDetails={hideDetails}
+          />
+        );
+      });
+      return tree;
+    };
+
+    const shown = renderRow(false);
+    expect(hasText(shown, 'Client call')).toBe(true);
+    expect(hasText(shown, 'Prep the deck')).toBe(true);
+    expect(hasText(shown, 'Start: May 12, 2026, 8:30 AM')).toBe(true);
+
+    const hidden = renderRow(true);
+    expect(hasText(hidden, 'Client call')).toBe(true);
+    expect(hasText(hidden, 'Prep the deck')).toBe(false);
+    expect(hasText(hidden, 'Start: May 12, 2026, 8:30 AM')).toBe(false);
+  });
+
   it('shows the completion date and time for completed tasks', () => {
     let tree!: renderer.ReactTestRenderer;
     renderer.act(() => {

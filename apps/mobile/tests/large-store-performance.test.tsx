@@ -348,6 +348,7 @@ vi.mock('lucide-react-native', () => {
     Copy: Icon,
     Folder: Icon,
     GripVertical: Icon,
+    List: Icon,
     MoreHorizontal: Icon,
     SlidersHorizontal: Icon,
     Star: Icon,

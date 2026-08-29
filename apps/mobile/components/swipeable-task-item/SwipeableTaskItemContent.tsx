@@ -39,6 +39,8 @@ interface SwipeableTaskItemContentProps {
     hideContexts: boolean;
     hideProjectMeta: boolean;
     hideStatusBadge: boolean;
+    /** Title-only row: suppress the description preview and metadata parts row. */
+    hideDetails: boolean;
     /** Render the status control as a compact icon button (no status-name label) for single-status lists */
     statusBadgeAsIcon: boolean;
     isDark: boolean;
@@ -87,6 +89,7 @@ export function SwipeableTaskItemContent({
     hideContexts,
     hideProjectMeta,
     hideStatusBadge,
+    hideDetails,
     statusBadgeAsIcon,
     isDark,
     isHighlighted,
@@ -538,7 +541,7 @@ export function SwipeableTaskItemContent({
                         </Pressable>
                     )}
                 </View>
-                {descriptionPreview ? (
+                {!hideDetails && descriptionPreview ? (
                     <MarkdownInlineText
                         markdown={descriptionPreview}
                         tc={tc}
@@ -547,7 +550,7 @@ export function SwipeableTaskItemContent({
                         numberOfLines={1}
                     />
                 ) : null}
-                {metaParts.length > 0 && (
+                {!hideDetails && metaParts.length > 0 && (
                     <View style={styles.inlineMeta}>
                         {metaParts}
                     </View>

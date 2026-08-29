@@ -788,6 +788,7 @@ describe('FocusScreen', () => {
     expect(asyncStorageMock.setItem).toHaveBeenCalledWith(
       'mindwtr:view:focus:v1',
       JSON.stringify({
+        showDetails: true,
         expandedSections: {
           focus: true,
           schedule: true,
@@ -799,6 +800,65 @@ describe('FocusScreen', () => {
         },
       })
     );
+  });
+
+  it('hydrates showDetails to shown when the persisted blob lacks the field', async () => {
+    const deferred = createDeferred<string | null>();
+    asyncStorageMock.getItem.mockReturnValue(deferred.promise);
+
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<FocusScreen />);
+    });
+
+    await act(async () => {
+      deferred.resolve(JSON.stringify({
+        expandedSections: { nextActions: false },
+      }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const detailsButton = tree.root.find((node) =>
+      node.props.accessibilityLabel === 'Hide details' && typeof node.props.onPress === 'function'
+    );
+    expect(detailsButton).toBeTruthy();
+  });
+
+  it('flips showDetails from the header toggle and persists it in the view-state blob', () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<FocusScreen />);
+    });
+
+    const detailsButton = tree.root.find((node) =>
+      node.props.accessibilityLabel === 'Hide details' && typeof node.props.onPress === 'function'
+    );
+
+    act(() => {
+      detailsButton.props.onPress();
+    });
+
+    expect(asyncStorageMock.setItem).toHaveBeenCalledWith(
+      'mindwtr:view:focus:v1',
+      JSON.stringify({
+        showDetails: false,
+        expandedSections: {
+          focus: true,
+          schedule: true,
+          next: true,
+          nextActions: true,
+          upcoming: true,
+          reviewDue: true,
+          reviewProjects: true,
+        },
+      })
+    );
+
+    const flippedButton = tree.root.find((node) =>
+      node.props.accessibilityLabel === 'Show details' && typeof node.props.onPress === 'function'
+    );
+    expect(flippedButton).toBeTruthy();
   });
 
   it('previews deferred and recurring tasks surfacing within a week under Upcoming (#1061)', () => {

@@ -19,7 +19,7 @@ import {
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams } from 'expo-router';
-import { BookmarkPlus, Folder, GripVertical, SlidersHorizontal, X } from 'lucide-react-native';
+import { BookmarkPlus, Folder, GripVertical, List, SlidersHorizontal, X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DraggableFlatList, {
   ScaleDecorator,
@@ -203,7 +203,18 @@ const readPersistedFocusExpandedSections = (raw: string | null): Partial<FocusEx
   }
 };
 
-const serializeFocusViewState = (expandedSections: FocusExpandedSections): string => JSON.stringify({
+const readPersistedFocusShowDetails = (raw: string | null): boolean | null => {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { showDetails?: unknown };
+    return typeof parsed.showDetails === 'boolean' ? parsed.showDetails : null;
+  } catch {
+    return null;
+  }
+};
+
+const serializeFocusViewState = (expandedSections: FocusExpandedSections, showDetails: boolean): string => JSON.stringify({
+  showDetails,
   expandedSections: {
     focus: expandedSections.focus,
     schedule: expandedSections.schedule,
@@ -253,8 +264,10 @@ export default function FocusScreen() {
   const saveFilterKeyboardInset = useAndroidKeyboardInset(filtersVisible && saveFilterDialogVisible);
   const [saveFilterName, setSaveFilterName] = useState('');
   const [expandedSections, setExpandedSections] = useState(DEFAULT_EXPANDED_SECTIONS);
+  const [showDetails, setShowDetails] = useState(true);
   const [focusViewStateHydrated, setFocusViewStateHydrated] = useState(false);
   const didToggleSectionRef = useRef(false);
+  const didToggleDetailsRef = useRef(false);
   const lastOpenedFromNotificationRef = useRef<string | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const focusReorderPositionRef = useRef<number | null>(null);
@@ -720,6 +733,12 @@ export default function FocusScreen() {
               ...current,
               ...persistedExpandedSections,
             }));
+          }
+        }
+        if (!didToggleDetailsRef.current) {
+          const persistedShowDetails = readPersistedFocusShowDetails(raw);
+          if (persistedShowDetails !== null) {
+            setShowDetails(persistedShowDetails);
           }
         }
         setFocusViewStateHydrated(true);
@@ -1251,10 +1270,23 @@ export default function FocusScreen() {
         ...current,
         [sectionType]: !current[sectionType],
       };
-      AsyncStorage.setItem(FOCUS_VIEW_STATE_STORAGE_KEY, serializeFocusViewState(next)).catch(() => {});
+      AsyncStorage.setItem(FOCUS_VIEW_STATE_STORAGE_KEY, serializeFocusViewState(next, showDetails)).catch(() => {});
       return next;
     });
-  }, []);
+  }, [showDetails]);
+  const toggleShowDetails = useCallback(() => {
+    didToggleDetailsRef.current = true;
+    setShowDetails((current) => {
+      const next = !current;
+      AsyncStorage.setItem(FOCUS_VIEW_STATE_STORAGE_KEY, serializeFocusViewState(expandedSections, next)).catch(() => {});
+      // Measured row heights key on task.rev only, not on the details flag, so a
+      // toggle must invalidate them itself or stale frames make Android's scroll
+      // corrections oscillate (#826) — same reset the pull-refresh effect uses.
+      focusItemHeightsRef.current = {};
+      setFocusLayoutVersion((prev) => prev + 1);
+      return next;
+    });
+  }, [expandedSections]);
   const renderFilterChip = useCallback((
     label: string,
     selected: boolean,
@@ -1393,6 +1425,7 @@ export default function FocusScreen() {
           focusToggleDisabledLabel={section.type === 'upcoming' ? upcomingFocusBlockedLabel : undefined}
           showFocusHighlight={section.type !== 'focus'}
           hideStatusBadge={section.type !== 'reviewDue'}
+          hideDetails={!showDetails}
           projectDeadlineLabel={projectDeadlineLabel}
           footerContent={section.type === 'upcoming' ? upcomingAppearsAtFooters.get(item.task.id) : undefined}
           onLongPressAction={longPressAction}
@@ -1592,6 +1625,21 @@ export default function FocusScreen() {
                 </Text>
               </View>
               <View style={styles.headerActions}>
+                <Pressable
+                  accessibilityLabel={showDetails
+                    ? resolveText('list.hideDetails', 'Hide details')
+                    : resolveText('list.showDetails', 'Show details')}
+                  accessibilityRole="button"
+                  onPress={toggleShowDetails}
+                  style={({ pressed }) => [
+                    styles.filterButton,
+                    {
+                      opacity: pressed ? 0.78 : 1,
+                    },
+                  ]}
+                >
+                  <List size={20} color={showDetails ? tc.tint : tc.secondaryText} />
+                </Pressable>
                 <Pressable
                   accessibilityLabel={resolveText('filters.label', 'Filters')}
                   accessibilityRole="button"

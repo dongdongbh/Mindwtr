@@ -86,6 +86,8 @@ export interface SwipeableTaskItemProps {
     interactionDisabled?: boolean;
     hideChecklistProgress?: boolean;
     hideProjectMeta?: boolean;
+    /** Title-only row: suppress the description preview and metadata parts row. */
+    hideDetails?: boolean;
     onProjectPress?: (projectId: string) => void;
     onContextPress?: (context: string) => void;
     onTagPress?: (tag: string) => void;
@@ -242,6 +244,7 @@ function SwipeableTaskItemInner({
     interactionDisabled = false,
     hideChecklistProgress = false,
     hideProjectMeta = false,
+    hideDetails = false,
     onProjectPress,
     onContextPress,
     onTagPress,
@@ -666,6 +669,7 @@ function SwipeableTaskItemInner({
             hideContexts={hideContexts}
             hideProjectMeta={hideProjectMeta}
             hideStatusBadge={hideStatusBadge}
+            hideDetails={hideDetails}
             statusBadgeAsIcon={statusBadgeAsIcon}
             isDark={isDark}
             isHighlighted={isHighlighted}

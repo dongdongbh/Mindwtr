@@ -207,6 +207,7 @@ vi.mock('lucide-react-native', () => {
     'LayoutGrid',
     'LayoutList',
     'Lightbulb',
+    'List',
     'ListChecks',
     'ListOrdered',
     'ListTodo',
