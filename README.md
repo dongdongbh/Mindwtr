@@ -107,11 +107,12 @@ If you know GTD: that is Capture, Clarify, Organize, Engage, and Reflect, end to
 
 **Don't show me a cockpit when I just want to ride a bike.**
 
-Mindwtr is simple by default and powerful when you need it:
+Mindwtr is simple by default, powerful when you need it, and forgiving when life gets messy:
 
 - Advanced options stay hidden until they matter.
 - Fewer fields, fewer knobs, fewer distractions.
 - Clarity beats clutter: we say no to feature creep.
+- Come back after two weeks away and you get a manageable next step, not a guilt trip. No streaks, no productivity scores.
 
 ## Features
 
